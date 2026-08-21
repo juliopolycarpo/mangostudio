@@ -4,11 +4,11 @@ O MangoStudio segue uma arquitetura modular inspirada em DDD distribuída em tr�
 
 ## Mapa Dos Workspaces
 
-| Workspace       | Papel                            | Stack                                                    |
-| --------------- | -------------------------------- | -------------------------------------------------------- |
-| `apps/api`      | Servidor de API backend          | Elysia, Better Auth, Kysely + SQLite                     |
-| `apps/frontend` | SPA do navegador                 | React 19, Vite 8, TanStack Router/Query, Tailwind CSS v4 |
-| `apps/shared`   | Contratos agnósticos a framework | Tipos TypeScript, schemas TypeBox, dicionários i18n      |
+| Workspace       | Papel                            | Stack                                                                      |
+| --------------- | -------------------------------- | -------------------------------------------------------------------------- |
+| `apps/api`      | Servidor de API backend          | Elysia, Better Auth, Kysely + SQLite                                       |
+| `apps/frontend` | SPA do navegador                 | React 19, TanStack Router/Query, Tailwind CSS v4, bundle via `Bun.build()` |
+| `apps/shared`   | Contratos agnósticos a framework | Tipos TypeScript, schemas TypeBox, dicionários i18n                        |
 
 ## Arquitetura Dos Módulos Da API
 

@@ -112,7 +112,7 @@ This runs Biome, dprint, circular dependency checks, and TypeScript type-checkin
 bun run build
 ```
 
-This builds the frontend with Vite by default. Use `bun run build --binary` for standalone binaries.
+This builds the frontend with `Bun.build()` (`apps/frontend/build.ts`) by default. Use `bun run build --binary` for standalone binaries.
 
 ## Commit Guidelines
 

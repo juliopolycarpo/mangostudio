@@ -171,8 +171,7 @@ is needed.
 
 The CI check lane still keeps its separate `.mango/artifacts/tsbuildinfo/` cache
 because shared TypeScript build-info files are deliberately not Turbo task
-outputs. Vite optimizer caches also remain separate because they are dependency
-optimizer state, not task outputs.
+outputs.
 
 ### Future Work
 

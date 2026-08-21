@@ -5,7 +5,7 @@ description: >
   write-scope, trusted-main restore keys, and step-summary diagnostics.
 inputs:
   family:
-    description: Cache family key segment, e.g. bun, turbo, vite, playwright.
+    description: Cache family key segment, e.g. bun, turbo, playwright.
     required: true
   path:
     description: Newline-separated paths to cache.

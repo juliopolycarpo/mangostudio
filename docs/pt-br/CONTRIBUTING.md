@@ -95,7 +95,7 @@ Executa Biome, dprint, verificação de dependências circulares e verificação
 bun run build
 ```
 
-Gera o build do frontend com Vite por padrão. Use `bun run build --binary` para binários standalone.
+Gera o build do frontend com `Bun.build()` (`apps/frontend/build.ts`) por padrão. Use `bun run build --binary` para binários standalone.
 
 ## Diretrizes de Commit
 

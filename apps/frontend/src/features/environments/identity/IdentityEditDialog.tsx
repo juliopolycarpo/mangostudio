@@ -41,7 +41,7 @@ function useFilePreviewUrl(file: File | null): string | null {
   const [url, setUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    // Absent under jsdom, where there is nothing to preview anyway.
+    // Absent in the test DOM, where there is nothing to preview anyway.
     if (!file || typeof URL.createObjectURL !== 'function') {
       setUrl(null);
       return;

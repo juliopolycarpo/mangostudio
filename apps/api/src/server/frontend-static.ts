@@ -59,7 +59,7 @@ function serveIndexFile(indexPath: string, cacheControl?: string): Response {
  * routes and mounted plugins keep matching first; the SPA shell only lands
  * on paths nothing else claimed.
  *
- * Vite content-hashes `/assets/*`, so those are immutable; index.html must
+ * The bundler content-hashes `/assets/*`, so those are immutable; index.html must
  * revalidate so browsers pick up new bundles after an upgrade instead of
  * serving a stale cached shell.
  */

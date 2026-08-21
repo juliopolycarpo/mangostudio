@@ -165,12 +165,11 @@ jobs:
             "${SHARD}" "${status}" "$(( $(date +%s) - start ))" > shard-meta.json
           exit "${status}"
 
-      # Neither runner's unhandled errors reach its JUnit report: Vitest's
-      # reporter writes errors="0" unconditionally, and Bun's "# Unhandled error
+      # Unhandled errors never reach the JUnit report: Bun's "# Unhandled error
       # between tests" block leaves failures="0" with no failing case while the
-      # run exits 1. Both classes are documented in docs/reference/testing.md and
-      # exist only in the log, so extract them here, while the log is still local
-      # to the shard that produced it.
+      # run exits 1. Documented in docs/reference/testing.md and only visible in
+      # the log, so extract them here, while the log is still local to the shard
+      # that produced it.
       - name: Extract unhandled errors
         if: ${{ !cancelled() }}
         run: bun ./scripts/qa-gate/unhandled-errors.ts coverage-run.log > unhandled-errors.json
