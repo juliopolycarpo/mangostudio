@@ -88,11 +88,11 @@ bundled into more than one chunk.
 
 `apps/api/src/server/frontend-static.ts` picks one of three modes at boot:
 
-| Mode      | When                                       | Behaviour                                       |
-| --------- | ------------------------------------------ | ----------------------------------------------- |
-| Embedded  | the binary registered an embedded manifest | one explicit `GET` per embedded asset           |
-| Directory | `dist/index.html` exists on disk           | explicit `GET`s + `@elysia/static` on `/assets` |
-| API-only  | neither                                    | a plain 404 for non-`/api` paths                |
+| Mode      | When                                       | Behaviour                                                                               |
+| --------- | ------------------------------------------ | --------------------------------------------------------------------------------------- |
+| Embedded  | the binary registered an embedded manifest | one explicit `GET` per embedded asset                                                   |
+| Directory | `dist/index.html` exists on disk           | `@elysia/static` on `/assets`, everything else resolved per request in the SPA fallback |
+| API-only  | neither                                    | a plain 404 for non-`/api` paths                                                        |
 
 Two shapes there are deliberate and must survive any change:
 
@@ -101,21 +101,30 @@ Two shapes there are deliberate and must survive any change:
   mounted prefixed instance alike. Literal routes and `.get('/*')` wildcards are unaffected,
   which is why `/images/*` and `/uploads/*` kept working and Better Auth (mounted as
   `.all('/*')` in `routes/auth.ts`) did not: sign-in, sign-up and get-session answered 404
-  while `/api/auth/ok` worked. So both modes register assets one route at a time, and the
-  directory mode scopes `@elysia/static` to `prefix: '/assets'` rather than `'/'` (the plugin
-  mounts `${prefix}/*` unless `alwaysStatic` is on, and that keys off
+  while `/api/auth/ok` worked. So the embedded mode registers assets one route at a time, and
+  the directory mode scopes `@elysia/static` to `prefix: '/assets'` rather than `'/'` (the
+  plugin mounts `${prefix}/*` unless `alwaysStatic` is on, and that keys off
   `NODE_ENV === 'production'`, which nothing here sets). `/assets` stays dynamic because a dev
   rebuild renames every bundle file.
 - **The SPA fallback returns a `Response`**, built from `Bun.file(indexPath)`, never an
   imported `HTMLBundle`. An `HTMLBundle` returned from an error handler gets JSON-serialized.
 
+The directory mode resolves unhashed files (favicon, icons, manifest, build-info) inside that
+same fallback, per request. Enumerating them into routes at boot looked safe — the names are
+fixed — but the *set* is not: the dev watcher rebuilds on every save, so a file added to
+`public/` afterwards had no route, fell through to the fallback and came back as `index.html`
+at 200 `text/html`. `isSpaRoute()` therefore stops claiming root-level paths that carry a file
+extension, so a missing one is a 404 instead of an HTML document handed to an `<img>`. The
+rule is anchored to a single segment: `/library/my-skill.md` is a real SPA deep link.
+
 `app.handle()` resolves both correctly, so an in-process test cannot see either failure. The
 `over a listening server` suite in `apps/api/tests/unit/server/frontend-static.test.ts` binds
 a real port; extend it rather than adding another `handle()`-driven case.
 
-Embedded `/assets/*` is immutable (`max-age=31536000`) because its filenames are
-content-hashed; `index.html` must revalidate so an upgraded install stops serving a stale
-shell. The directory mode leaves the static plugin's own `max-age=86400` in place.
+`/assets/*` is immutable (`max-age=31536000`) in both modes because its filenames are
+content-hashed; unhashed root files get `max-age=86400` with an ETag, matching what the static
+plugin used to add for them. `index.html` is `no-cache`, so an upgraded install stops serving a
+stale shell.
 
 ## The standalone binary
 

@@ -3,7 +3,7 @@
  * Extracted from the server entrypoint so it can be reused and tested.
  */
 
-import { existsSync, readdirSync, type Stats, statSync } from 'node:fs';
+import { existsSync, realpathSync, type Stats, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { staticPlugin } from '@elysia/static';
 import { NotFound } from 'elysia';
@@ -172,34 +172,81 @@ async function serveUnhashedFile(filePath: string, request: Request): Promise<Re
     // nothing to revalidate against and no ETag to derive.
     return new Response(file, { headers: { 'Cache-Control': UNHASHED_CACHE_CONTROL } });
   }
+  return serveStattedFile(filePath, stats, request);
+}
+
+/**
+ * An unhashed file whose stat the caller already has: ETag, 304 short-circuit,
+ * body. Split out so the filesystem branch can answer from `setFrontendFallback`,
+ * whose contract is synchronous — it has a `statSync` result in hand from
+ * `resolveUnhashedFile` and does not need to re-stat through `BunFile`.
+ */
+function serveStattedFile(filePath: string, stats: Stats, request: Request): Response {
   const etag = `"${stats.size.toString(16)}-${Math.trunc(stats.mtimeMs).toString(16)}"`;
   const headers = { 'Cache-Control': UNHASHED_CACHE_CONTROL, ETag: etag };
   if (matchesEtag(request.headers.get('if-none-match'), etag)) {
     return new Response(null, { status: 304, headers });
   }
-  return new Response(file, { headers });
+  return new Response(Bun.file(filePath), { headers });
 }
 
 /**
- * Files the build emits outside `assets/`, as URL paths.
+ * The absolute path of an unhashed file `pathname` names inside `frontendDir`,
+ * or null when the request does not name one that exists.
  *
- * Their names are fixed (favicon, icons, manifest, build-info), so enumerating
- * once at boot is safe — unlike the hashed bundle output, whose filenames change
- * on every rebuild and therefore has to stay behind a dynamic route.
+ * This replaced a boot-time enumeration of `dist/`. Enumerating once looked
+ * safe — the names outside `assets/` are fixed (favicon, icons, manifest,
+ * build-info) — but the *set* is not: `bun run dev` rebuilds on every save, so
+ * a file added to `public/` after boot had no route, fell through to the SPA
+ * fallback, and was answered with `index.html` at 200 `text/html`. Resolving
+ * per request is what `/assets/*` already does, and for the same reason.
+ *
+ * Only the last segment's extension makes a path a candidate, and the file has
+ * to exist: that keeps SPA deep links whose final segment happens to be dotted
+ * (`/library/my-skill.md`) falling through to the shell as they do today.
  */
-function unhashedAssetPaths(frontendDir: string): string[] {
-  return (
-    readdirSync(frontendDir, { recursive: true, encoding: 'utf8' })
-      // index.html is served by the explicit GET / route and the SPA fallback.
-      // Filtered before the stat so the hashed bulk of dist/ is never stat'ed.
-      .filter((entry) => entry !== 'index.html' && !entry.startsWith(`${HASHED_ASSET_DIR}${sep}`))
-      // `statFile`, not `statSync`: a dangling symlink or an entry removed
-      // between the readdir and the stat would otherwise throw out of
-      // `registerFrontend()` and stop the server from booting at all.
-      .filter((entry) => statFile(join(frontendDir, entry))?.isFile() === true)
-      // Recursive readdir yields platform separators; URL paths always use '/'.
-      .map((entry) => entry.split(sep).join('/'))
-  );
+function resolveUnhashedFile(
+  frontendDir: string,
+  pathname: string
+): { filePath: string; stats: Stats } | null {
+  if (!pathname.startsWith('/') || !/\.[A-Za-z0-9]+$/.test(pathname)) return null;
+  // index.html is the shell. It is served by the explicit GET / route and by
+  // the SPA fallback, with revalidation headers this path would not apply.
+  if (pathname === '/index.html') return null;
+
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    // A malformed percent-escape is not a file name.
+    return null;
+  }
+  // Checked *after* decoding: `new URL()` normalises literal `..` segments away
+  // but leaves `%2e%2e` and `%2f` encoded, so the traversal attempt only becomes
+  // visible here. A NUL truncates the path at the syscall boundary.
+  const segments = decoded.slice(1).split('/');
+  if (segments.some((s) => s === '' || s === '.' || s === '..' || /[\\\0]/.test(s))) return null;
+
+  const filePath = join(frontendDir, ...segments);
+  // Defence in depth behind the segment check: a symlink inside dist/ could
+  // still resolve outward, and only a realpath comparison catches that.
+  const real = realpathSyncSafe(filePath);
+  const root = realpathSyncSafe(frontendDir);
+  if (!real || !root || !real.startsWith(root + sep)) return null;
+
+  // `statFile`, not `statSync`: a dangling symlink or a file removed between
+  // the resolve and the stat must answer 404, not throw out of the handler.
+  const stats = statFile(real);
+  return stats?.isFile() === true ? { filePath: real, stats } : null;
+}
+
+/** `realpathSync`, or null when the path cannot be resolved. */
+function realpathSyncSafe(path: string): string | null {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -238,11 +285,6 @@ function registerSpa(app: App, frontendDir: string): void {
   // that GET / always returns index.html.
   app.get('/', serveIndex);
 
-  for (const urlPath of unhashedAssetPaths(frontendDir)) {
-    const filePath = join(frontendDir, urlPath);
-    app.get(`/${urlPath}`, ({ request }) => serveUnhashedFile(filePath, request));
-  }
-
   if (existsSync(assetsDir)) {
     // A year, not the plugin's 86400 default: these filenames carry a content
     // hash, so a changed file is a different URL and the old one can never go
@@ -261,6 +303,12 @@ function registerSpa(app: App, frontendDir: string): void {
   setFrontendFallback((request) => {
     if (request.method !== 'GET') return undefined;
     const { pathname } = new URL(request.url);
+    // Unhashed files resolve here rather than through routes pinned at boot, so
+    // a `public/` file added while the dev watcher is running is served instead
+    // of being answered with the SPA shell. A root-level file that does not
+    // exist falls past `isSpaRoute` to `frontendNotFound`, which is a 404.
+    const resolved = resolveUnhashedFile(frontendDir, pathname);
+    if (resolved) return serveStattedFile(resolved.filePath, resolved.stats, request);
     return isSpaRoute(pathname) ? serveIndex() : undefined;
   });
 }

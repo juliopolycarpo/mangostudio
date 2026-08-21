@@ -415,6 +415,81 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
       await server.stop();
     }
   });
+
+  test('serves a root file added to public/ after startup', async () => {
+    const server = await startFilesystemServer();
+    try {
+      // The dev watcher rebuilds on every save, so the set of unhashed root
+      // files changes while the server is up. Enumerating it once at boot meant
+      // a new `public/` file had no route, fell through to the SPA fallback,
+      // and came back as index.html at 200 text/html — an HTML document handed
+      // to an <img> or <link>, failing with nothing in the server log.
+      writeFileSync(join(server.frontendDir, 'logo.svg'), UPLOAD_BYTES);
+
+      const response = await server.get('/logo.svg');
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe(UPLOAD_BYTES);
+      expect(response.headers.get('content-type')).not.toBe('text/html');
+      expect(response.headers.get('cache-control')).toBe('public, max-age=86400');
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('404s a root file that does not exist instead of serving the shell', async () => {
+    const server = await startFilesystemServer();
+    try {
+      const response = await server.get('/never-built.svg');
+
+      // The failure this replaces was silent: a 200 HTML shell. A 404 is the
+      // one answer a browser and a maintainer can both act on.
+      expect(response.status).toBe(404);
+      expect(await response.text()).not.toBe(INDEX_HTML);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('still serves the shell for a deep link whose last segment is dotted', async () => {
+    const server = await startFilesystemServer();
+    try {
+      // `/library/$resourceKey` accepts a dotted key, so a nested dotted path is
+      // a real SPA route. Only root-level file requests are taken away from the
+      // shell; claiming every dotted path would 404 routes that work today.
+      const response = await server.get('/library/my-skill.md');
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe(INDEX_HTML);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('refuses to resolve a path that escapes the frontend directory', async () => {
+    const server = await startFilesystemServer();
+    try {
+      // Unhashed files now resolve from the URL per request, so traversal is a
+      // live concern rather than a theoretical one.
+      //
+      // Measured on Bun 1.4.0, the URL parser handles the two encodings
+      // differently: `/%2e%2e/x` is decoded *and* normalised to `/x` before a
+      // handler sees it, but `/..%2fx` arrives verbatim. So the second form is
+      // the one that actually reaches the resolver and the one this pins — the
+      // resolver has to decode before it can reject, because the `..` is not
+      // visible until then.
+      const outside = join(server.frontendDir, '..', 'escaped-secret.txt');
+      writeFileSync(outside, 'secret');
+      // `rmSync(..., { recursive: true, force: true })` in afterEach removes a
+      // plain file just as happily as a directory.
+      temporaryDirs.push(outside);
+
+      const response = await server.get('/..%2fescaped-secret.txt');
+      expect(response.status).toBe(404);
+      expect(await response.text()).not.toBe('secret');
+    } finally {
+      await server.stop();
+    }
+  });
 });
 
 describe('registerFrontend without embedded assets', () => {

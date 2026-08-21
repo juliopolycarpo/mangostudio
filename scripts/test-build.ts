@@ -678,6 +678,31 @@ async function smokeTest(): Promise<void> {
       pass('/assets/fake.js → 404 (SPA fallback bypassed)');
     }
 
+    // A root-level file that is not in the embedded manifest → 404, not the
+    // shell. The binary's asset set is fixed at compile time, so a request for
+    // one that is not there can only be a stale reference — answering it with a
+    // 200 text/html document makes the <img> or <link> fail with no server-side
+    // error at all. Only this harness runs the compiled binary, so this is the
+    // one place the embedded branch's fallback rule is exercised.
+    {
+      const res = await fetch(`http://127.0.0.1:${PORT}/never-embedded.svg`);
+      if (res.status !== 404) fail(`/never-embedded.svg should return 404, got ${res.status}`);
+      if (res.headers.get('content-type')?.includes('text/html'))
+        fail('/never-embedded.svg returned text/html — the SPA shell answered a missing asset');
+      pass('/never-embedded.svg → 404 (missing root asset is not the shell)');
+    }
+
+    // ...while a genuine deep link still gets the shell. The pair is the point:
+    // the rule above must take root-level *files* away from the fallback without
+    // taking client-side routes with them.
+    {
+      const res = await fetch(`http://127.0.0.1:${PORT}/settings/agents`);
+      if (res.status !== 200) fail(`/settings/agents should return 200, got ${res.status}`);
+      if (!res.headers.get('content-type')?.includes('text/html'))
+        fail('/settings/agents did not return the SPA shell');
+      pass('/settings/agents → 200 HTML (SPA deep link still served)');
+    }
+
     // /api/auth/get-session → NOT 404, NOT HTML
     // Verifies that the SPA onError handler does NOT intercept auth GET routes.
     // Better Auth may return text/plain or application/json depending on session

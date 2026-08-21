@@ -68,4 +68,25 @@ describe('SPA onError NOT_FOUND guard', () => {
     expect(isSpaRoute('/settings')).toBe(true);
     expect(isSpaRoute('/index.html')).toBe(true);
   });
+
+  test('root-level file requests are NOT served as SPA', () => {
+    // Every unhashed file the build emits has this shape, because public/ is
+    // flat. If one of these is missing, the honest answer is 404 — handing an
+    // <img> or <link> a 200 text/html shell fails silently, with no server
+    // error and nothing in the log to point at the real cause.
+    expect(isSpaRoute('/favicon.ico')).toBe(false);
+    expect(isSpaRoute('/site.webmanifest')).toBe(false);
+    expect(isSpaRoute('/apple-touch-icon.png')).toBe(false);
+    expect(isSpaRoute('/logo.svg')).toBe(false);
+  });
+
+  test('dotted paths that are not root-level files ARE still served as SPA', () => {
+    // The rule is anchored to a single segment on purpose. `$resourceKey`
+    // accepts a dotted key, so a nested dotted path is a live SPA route and
+    // claiming every dot for the filesystem would 404 links that work today.
+    expect(isSpaRoute('/library/my-skill.md')).toBe(true);
+    expect(isSpaRoute('/settings/providers/openai.com')).toBe(true);
+    // No extension, so not a file request even at the root.
+    expect(isSpaRoute('/some.page/nested')).toBe(true);
+  });
 });

@@ -421,6 +421,25 @@ handler that hands `Bun.file` to a `Response` needs an existence check first —
 is reached through `registerSpa`'s `serveIndex` and through the SPA fallback, so the guard
 belongs on the shared closure, not on the route.
 
+**T40 — Bun's URL parser normalises `%2e%2e` away but passes `..%2f` through verbatim.**
+Measured 2026-08-21 on 1.4.0, against `new URL(req.url).pathname` inside a `Bun.serve` handler:
+
+| request         | `pathname` a handler sees |
+| --------------- | ------------------------- |
+| `/%2e%2e/x.txt` | `/x.txt`                  |
+| `/../x.txt`     | `/x.txt`                  |
+| `/sub/../x.txt` | `/x.txt`                  |
+| `/..%2fx.txt`   | `/..%2fx.txt`             |
+
+So any handler that resolves a filesystem path from a URL has to `decodeURIComponent` **and
+then** re-check the segments — the `..` in the last row is invisible until after the decode,
+and it is the only one of the four that still reaches the handler. The trap for a test author
+is the mirror image: a traversal case written with `%2e%2e` is **vacuous**, because the parser
+already neutralised it before any code under test ran. `frontend-static.ts`'s
+`resolveUnhashedFile` decodes, rejects `.`/`..`/empty/backslash/NUL segments, and then confirms
+containment with a `realpathSync` prefix comparison so a symlink inside `dist/` cannot resolve
+outward either.
+
 ## Test migration mechanics
 
 Everything below is what the 004 spike actually needed across its eleven files. Where a row
