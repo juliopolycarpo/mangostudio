@@ -678,6 +678,26 @@ async function smokeTest(): Promise<void> {
       pass('/assets/fake.js → 404 (SPA fallback bypassed)');
     }
 
+    // /config.js → 200, and empty by default. This is the seam that lets the
+    // published frontend-dist tarball be repointed at another API without a
+    // rebuild; inside the binary it must stay empty, because that is what keeps
+    // the one-binary premise intact — an empty apiUrl falls through to
+    // window.location.origin, which is the origin this binary just served from.
+    {
+      const res = await fetch(`http://127.0.0.1:${PORT}/config.js`);
+      if (res.status !== 200) fail(`/config.js returned ${res.status} (runtime config not served)`);
+      const body = await res.text();
+      if (!body.includes('__MANGO_CONFIG__')) fail('/config.js does not define __MANGO_CONFIG__');
+      if (!/apiUrl:\s*""/.test(body))
+        fail('/config.js ships a non-empty apiUrl — the binary must default to same-origin');
+      // Deployer-editable, so it must revalidate rather than sit in a cache for
+      // a day after someone corrects a wrong URL.
+      const cacheControl = res.headers.get('cache-control');
+      if (cacheControl !== 'no-cache')
+        fail(`/config.js cache-control is "${cacheControl}", expected no-cache`);
+      pass('/config.js → 200, empty apiUrl, no-cache');
+    }
+
     // A root-level file that is not in the embedded manifest → 404, not the
     // shell. The binary's asset set is fixed at compile time, so a request for
     // one that is not there can only be a stale reference — answering it with a

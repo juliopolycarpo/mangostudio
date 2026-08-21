@@ -39,6 +39,14 @@ delete process.env.MANGO_API_URL;
 delete process.env.VITE_API_URL;
 
 /**
+ * The runtime half of the same override. `/config.js` is a real script tag in a
+ * served bundle, but nothing loads it here, so anything left on `window` came
+ * from a test that set it — and it outranks the build-time value, so a leak
+ * would repoint every later file in the same module graph.
+ */
+delete (globalThis as { window?: Window }).window?.__MANGO_CONFIG__;
+
+/**
  * The frontend suite never talks to a real server, so `fetch` starts out unable
  * to.
  *

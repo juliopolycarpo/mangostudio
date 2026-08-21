@@ -43,11 +43,18 @@ Useful environment variables:
 | `ALLOWED_ORIGINS`    | Comma-separated browser origins allowed when the frontend is served elsewhere |
 
 `ALLOWED_ORIGINS` is only half of a split deployment. It tells this API which origin to accept
-requests from; the bundle also has to be told where the API is, which is `MANGO_API_URL` — a
-**build-time** variable, so a split deployment requires building the frontend yourself. No
-released binary or npm package can be repointed after the fact: they are all built with it
-unset, and the branch that reads it is then eliminated from the bundle. See
-`docs/architecture/frontend-build.md`.
+requests from; the bundle also has to be told where the API is. Unpack
+`mangostudio-<version>-frontend-dist.tar.gz` and edit `config.js` beside `index.html`:
+
+```js
+window.__MANGO_CONFIG__ = { apiUrl: 'https://api.example.com' };
+```
+
+No rebuild is needed — the file is read at page load, and it outranks anything baked in at
+build time. Leave `apiUrl` empty (the shipped default) to use the origin the page was served
+from, which is what a single-origin install and the standalone binary both want.
+`MANGO_API_URL` sets the same value at build time, for anyone building the bundle themselves.
+See `docs/architecture/frontend-build.md`.
 
 Compose example:
 

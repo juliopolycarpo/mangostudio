@@ -28,13 +28,31 @@ A split deployment — the bundle on a CDN or a separate web server, this API so
 is still supported, and it is what the `MANGO_API_URL` build-time override exists for. Nothing
 can derive that origin, so it is named explicitly:
 
-**It requires building the frontend yourself.** `MANGO_API_URL` is consumed by `Bun.build()`'s
-`define`, so it is baked into the bundle at build time; released artifacts are all built with
-it unset, and the branch that reads it is then dead-code-eliminated out of the shipped bundle.
-There is no runtime equivalent and cannot be a useful one — in this topology the API does not
-serve the shell, so it has nothing to inject a value into. `VITE_API_URL` is accepted as a
-deprecated alias for one release and warns at build time; it is named after a bundler this
-repo no longer uses.
+There are two layers, and the runtime one wins:
+
+| Layer                                            | Where                                          | Who it is for                                         |
+| ------------------------------------------------ | ---------------------------------------------- | ----------------------------------------------------- |
+| `window.__MANGO_CONFIG__.apiUrl` in `/config.js` | emitted unhashed into `dist/`, edited in place | anyone deploying the prebuilt `frontend-dist` tarball |
+| `MANGO_API_URL`                                  | `Bun.build()` `define`, baked in               | anyone building the bundle themselves                 |
+
+`/config.js` exists because the build-time variable cannot help the artifact we actually
+publish. `mangostudio-<version>-frontend-dist.tar.gz` is built with `MANGO_API_URL` unset, so
+the branch reading it is dead-code-eliminated and the bundle's only answer is
+`window.location.origin` — serve it from a CDN and every request goes to the CDN instead of
+the API. Editing `config.js` repoints it with no rebuild.
+
+It ships with `apiUrl: ""`, which falls through to `window.location.origin`. That is what keeps
+the standalone binary unchanged: it embeds the same empty file and stays same-origin, so the
+one-binary deployment needs no configuration and no CORS entry.
+
+`build.ts` stitches `/config.js` in as a **classic** script ahead of the module bundle. That
+ordering is the guarantee that `window.__MANGO_CONFIG__` is populated before any bundle code
+evaluates — a classic script without `defer`/`async` runs where the parser meets it, while
+module scripts are deferred. Keep it classic. The API serves it `no-cache` rather than the
+`max-age=86400` other unhashed files get, because it is the one file a deployer edits.
+
+`VITE_API_URL` is accepted as a deprecated alias of `MANGO_API_URL` for one release and warns
+at build time; it is named after a bundler this repo no longer uses.
 
 ```toml
 [server]

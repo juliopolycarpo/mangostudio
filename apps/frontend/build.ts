@@ -219,12 +219,49 @@ async function writeHtml(result: Awaited<ReturnType<typeof Bun.build>>): Promise
 
   const tags = [
     css ? `<link rel="stylesheet" crossorigin href="${distUrl(css.path)}" />` : null,
+    // A *classic* script, and it must stay classic: a classic script without
+    // `defer`/`async` runs the moment the parser reaches it, while module
+    // scripts are deferred by default. That ordering is the whole guarantee —
+    // `window.__MANGO_CONFIG__` is populated before any bundle code evaluates.
+    // Deliberately unhashed so a deployer can edit it in place.
+    `<script src="${RUNTIME_CONFIG_URL}"></script>`,
     `<script type="module" crossorigin src="${distUrl(entry.path)}"></script>`,
   ].filter((tag) => tag !== null);
 
   const html = template.replace(SOURCE_SCRIPT_TAG, tags.join('\n    '));
   assertAbsoluteAssetUrls(html);
   await writeFile(join(DIST, 'index.html'), html);
+  await writeRuntimeConfig();
+}
+
+/** URL of the deployer-editable runtime config, relative to `publicPath`. */
+const RUNTIME_CONFIG_URL = '/config.js';
+
+/**
+ * Writes the runtime config the published `frontend-dist` tarball can be
+ * repointed with, without a rebuild.
+ *
+ * `MANGO_API_URL` is a `define`, so it is fixed when the bundle is compiled —
+ * which is fine for someone building their own, and useless for someone serving
+ * the tarball we ship. That artifact is built with the variable unset, so its
+ * only answer is `window.location.origin`: serve it from a CDN and every request
+ * goes to the CDN instead of the API.
+ *
+ * Shipping an empty config gives that deployment a seam. It is written on every
+ * build, including into the standalone binary, where it stays empty and the
+ * same-origin path is exactly what it was before.
+ */
+async function writeRuntimeConfig(): Promise<void> {
+  const contents = [
+    '// Runtime configuration for a deployment that serves this bundle from a',
+    '// different origin than the API. Edit apiUrl in place — no rebuild needed.',
+    '// Leave it empty to use the origin this page was served from.',
+    '//',
+    '// Example: window.__MANGO_CONFIG__ = { apiUrl: "https://api.example.com" };',
+    'window.__MANGO_CONFIG__ = { apiUrl: "" };',
+    '',
+  ].join('\n');
+  await writeFile(join(DIST, RUNTIME_CONFIG_URL.slice(1)), contents);
 }
 
 /** `/tmp/x/dist/assets/main-abc.js` -> `/assets/main-abc.js`, matching publicPath. */

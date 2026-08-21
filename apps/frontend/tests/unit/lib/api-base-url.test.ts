@@ -9,10 +9,58 @@ function setApiUrl(value: string) {
   process.env.MANGO_API_URL = value;
 }
 
+/** The runtime layer `/config.js` populates in a served bundle. */
+function setRuntimeApiUrl(value: string) {
+  window.__MANGO_CONFIG__ = { apiUrl: value };
+}
+
 afterEach(() => {
   // Assigning `undefined` would leave the string "undefined" behind, which the
   // module reads as an explicit base URL.
   delete process.env.MANGO_API_URL;
+  delete window.__MANGO_CONFIG__;
+});
+
+describe('getApiBaseUrl runtime config', () => {
+  it('prefers window.__MANGO_CONFIG__ over the build-time value', async () => {
+    // The published frontend-dist tarball is compiled with MANGO_API_URL unset
+    // and cannot be rebuilt by whoever deploys it, so the editable runtime file
+    // has to win — otherwise there is no way to repoint that artifact at all.
+    setApiUrl('http://baked-in:9000');
+    setRuntimeApiUrl('https://runtime.example.com');
+    const { getApiBaseUrl } = await import('@/lib/api-base-url');
+
+    expect(getApiBaseUrl()).toBe('https://runtime.example.com');
+  });
+
+  it('trims trailing slashes from the runtime value', async () => {
+    setRuntimeApiUrl('https://runtime.example.com///');
+    const { getApiBaseUrl } = await import('@/lib/api-base-url');
+
+    expect(getApiBaseUrl()).toBe('https://runtime.example.com');
+  });
+
+  it('falls through when config.js is present but apiUrl is empty', async () => {
+    // The shipped default. An empty string must not count as "configured", or
+    // every same-origin install would resolve to '' and request nothing.
+    window.__MANGO_CONFIG__ = { apiUrl: '' };
+    const { getApiBaseUrl } = await import('@/lib/api-base-url');
+
+    expect(getApiBaseUrl()).toBe(window.location.origin);
+  });
+
+  it('falls through when config.js was removed from the deployment', async () => {
+    const { getApiBaseUrl } = await import('@/lib/api-base-url');
+
+    expect(getApiBaseUrl()).toBe(window.location.origin);
+  });
+
+  it('derives the websocket scheme from the runtime value', async () => {
+    setRuntimeApiUrl('https://runtime.example.com');
+    const { getWebSocketBaseUrl } = await import('@/lib/api-base-url');
+
+    expect(getWebSocketBaseUrl()).toBe('wss://runtime.example.com');
+  });
 });
 
 describe('getApiBaseUrl', () => {

@@ -144,6 +144,20 @@ const SHELL_CACHE_CONTROL = 'no-cache';
  */
 const UNHASHED_CACHE_CONTROL = 'public, max-age=86400';
 
+/**
+ * `/config.js` is the one unhashed file a deployer is expected to *edit*, so it
+ * revalidates instead of sitting in a browser cache for a day. It carries the
+ * runtime API base URL for a split deployment; a day-long cache would mean an
+ * operator fixes a wrong URL and clients keep using the old one with nothing to
+ * point at. It is a few hundred bytes, so revalidating costs a 304.
+ */
+const RUNTIME_CONFIG_PATH = '/config.js';
+
+/** Cache directive for an unhashed file, given the URL path it was requested at. */
+function unhashedCacheControl(urlPath: string): string {
+  return urlPath === RUNTIME_CONFIG_PATH ? SHELL_CACHE_CONTROL : UNHASHED_CACHE_CONTROL;
+}
+
 /** `statSync`, or null when the entry is gone or unreadable. */
 function statFile(path: string): Stats | null {
   try {
@@ -190,7 +204,9 @@ async function serveUnhashedFile(filePath: string, request: Request): Promise<Re
     if (!(await file.exists())) return new Response(null, { status: 404 });
     // Embedded: the content cannot change within one binary, so there is
     // nothing to revalidate against and no ETag to derive.
-    return new Response(file, { headers: { 'Cache-Control': UNHASHED_CACHE_CONTROL } });
+    return new Response(file, {
+      headers: { 'Cache-Control': unhashedCacheControl(new URL(request.url).pathname) },
+    });
   }
   return serveStattedFile(filePath, stats, request);
 }
@@ -203,7 +219,10 @@ async function serveUnhashedFile(filePath: string, request: Request): Promise<Re
  */
 function serveStattedFile(filePath: string, stats: Stats, request: Request): Response {
   const etag = `"${stats.size.toString(16)}-${Math.trunc(stats.mtimeMs).toString(16)}"`;
-  const headers = { 'Cache-Control': UNHASHED_CACHE_CONTROL, ETag: etag };
+  const headers = {
+    'Cache-Control': unhashedCacheControl(new URL(request.url).pathname),
+    ETag: etag,
+  };
   if (matchesEtag(request.headers.get('if-none-match'), etag)) {
     return new Response(null, { status: 304, headers });
   }

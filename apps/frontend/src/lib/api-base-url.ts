@@ -1,16 +1,37 @@
+declare global {
+  interface Window {
+    /**
+     * Set by `/config.js`, which `build.ts` emits unhashed and which a deployer
+     * edits in place. Optional because nothing guarantees the file is present:
+     * a deployment may have removed it, and `bun test` has no such script.
+     */
+    __MANGO_CONFIG__?: { apiUrl?: string };
+  }
+}
+
 /**
  * Resolves the API base URL for the current runtime environment.
  *
  * Priority:
- * 1. Explicit MANGO_API_URL set in the build environment — for split deployments
- * 2. Browser origin (window.location.origin) — for same-origin / standalone binary
- * 3. Fallback for non-browser environments (unit tests, SSR)
+ * 1. `window.__MANGO_CONFIG__.apiUrl` from `/config.js` — editable after the
+ *    build, which is the only option a prebuilt `frontend-dist` tarball has
+ * 2. Explicit MANGO_API_URL baked in at build time — for a bundle you build
+ * 3. Browser origin (window.location.origin) — same-origin / standalone binary
+ * 4. Fallback for non-browser environments (unit tests, SSR)
  *
- * This is a *build-time* override, so it only reaches a bundle you build
- * yourself. Every released artifact is compiled with it unset, which means the
- * branch below is dead-code-eliminated out of the shipped bundle entirely.
+ * Runtime first, because it is the layer that can still be changed when the
+ * build-time one is already wrong: the binary and the published tarball are
+ * both compiled with `MANGO_API_URL` unset, so a deployer serving the tarball
+ * from a CDN has no other way to point it at the API.
  */
 export function getApiBaseUrl(): string {
+  // `/config.js` is a classic script stitched in ahead of the module bundle, so
+  // it has always run by the time this does. Optional-chained anyway: a
+  // deployment that deleted the file, or a unit test with no DOM, must fall
+  // through rather than throw.
+  const runtime = globalThis.window?.__MANGO_CONFIG__?.apiUrl;
+  if (runtime) return runtime.replace(/\/+$/, '');
+
   // Replaced at build time by the `define` in build.ts (empty string when the
   // variable is unset), so the bundle carries a literal and never a `process`
   // reference. Must stay a bare `process.env` member read: `define` and the
