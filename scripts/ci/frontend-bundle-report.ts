@@ -53,18 +53,28 @@ export interface BundleReport {
   readonly files: readonly BundleFile[];
 }
 
-/** Shortest hash-like suffix a bundler appends; Vite and Bun both emit 8. */
-const MIN_HASH_LENGTH = 8;
+/**
+ * Hash length both bundlers emit, measured 2026-08-20: Vite/rollup writes 8
+ * base64url chars (`index-Bqugzlgv.js`, `json-qhed-kSA.js`), Bun writes 8
+ * lowercase base36 (`entry-htt6v99t.js`).
+ */
+const HASH_LENGTH = 8;
 
 /**
  * Strips a trailing content hash from a bundled filename.
  *
- * Both Vite and Bun emit base64url-ish hashes, which may themselves contain a
- * '-' (`php-Th-NmKLT.js`), so a leftmost regex over `-[A-Za-z0-9_-]{8,}` is
- * wrong: it would collapse `markdown-parser-MlRw1Qxl.js` to `markdown.js` and
- * hide a real chunk. Instead take the *rightmost* '-' whose suffix is long
- * enough to be a hash, and require it to look like one — a name segment that is
- * all lowercase letters (`chat-messages.js`) is a name, not a hash.
+ * Both bundlers' hashes can contain a '-' (`php-Th-NmKLT.js`), so a leftmost
+ * regex over `-[A-Za-z0-9_-]{8,}` is wrong: it would collapse
+ * `markdown-parser-MlRw1Qxl.js` to `markdown.js` and hide a real chunk. Instead
+ * take the *rightmost* '-' whose suffix could be a hash.
+ *
+ * A suffix of exactly `HASH_LENGTH` is taken as a hash with no further test.
+ * That over-strips a chunk whose last name segment happens to be 8 characters
+ * (`chat-messages.js` → `chat.js`), which is the cheaper mistake: it is
+ * deterministic and applies to baseline and current alike, so the row still
+ * matches. Requiring a digit or mixed case instead would reject roughly 4% of
+ * Bun's all-lowercase base36 hashes at random, and every rejected file reports
+ * as both added and removed on a build that changed nothing.
  */
 export function stripContentHash(path: string): string {
   const slash = path.lastIndexOf('/');
@@ -78,7 +88,7 @@ export function stripContentHash(path: string): string {
 
   for (let cut = stem.lastIndexOf('-'); cut > 0; cut = stem.lastIndexOf('-', cut - 1)) {
     const candidate = stem.slice(cut + 1);
-    if (candidate.length < MIN_HASH_LENGTH) continue;
+    if (candidate.length < HASH_LENGTH) continue;
     if (!isHashLike(candidate)) break;
     return `${dir}${stem.slice(0, cut)}${extension}`;
   }
@@ -87,6 +97,9 @@ export function stripContentHash(path: string): string {
 
 function isHashLike(candidate: string): boolean {
   if (!/^[A-Za-z0-9_-]+$/.test(candidate)) return false;
+  if (candidate.length === HASH_LENGTH) return true;
+  // Longer than any hash seen, so it needs to look like one: `apple-touch-icon.png`
+  // ends in a 10-character segment that is plainly a name.
   return /\d/.test(candidate) || (/[a-z]/.test(candidate) && /[A-Z]/.test(candidate));
 }
 
@@ -112,8 +125,9 @@ export async function measureBundle(
       path,
       key: stripContentHash(path),
       rawBytes: bytes.byteLength,
-      // Default level, matching scripts/qa-gate/collect/bundle.ts so the two
-      // reports' totals stay comparable.
+      // Default level, so a per-file number here matches the one the QA gate's
+      // collector reports. The totals do not match it: this walks every file in
+      // dist/, the collector counts only .js/.css/.html.
       gzipBytes: Bun.gzipSync(bytes).byteLength,
     });
   }
@@ -228,6 +242,12 @@ if (import.meta.main) {
   const distDir = flagValue(argv, '--dist') ?? DEFAULT_DIST_DIR;
   const baselinePath = flagValue(argv, '--baseline');
   const outPath = flagValue(argv, '--out');
+
+  // The JSON report describes one build; the diff lives only in the table. Rather
+  // than emit JSON that silently ignored a baseline the caller asked for, say so.
+  if (baselinePath && argv.includes('--json')) {
+    throw new Error('--json reports a single build; drop --baseline or drop --json.');
+  }
 
   const report = await measureBundle(distDir, {
     builder: flagValue(argv, '--builder') ?? 'vite',

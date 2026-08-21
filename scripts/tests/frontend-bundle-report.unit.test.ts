@@ -39,6 +39,15 @@ describe('stripContentHash', () => {
     expect(stripContentHash('assets/index-BsVw1vtW.css')).toBe('assets/index.css');
   });
 
+  test("drops Bun's all-lowercase base36 hash, not just Vite's base64url one", () => {
+    // Measured from Bun.build: 8 lowercase base36 chars. ~4% of them contain no
+    // digit at all, so a "must look random" test would reject them at random and
+    // report an unchanged file as both added and removed.
+    expect(stripContentHash('assets/entry-htt6v99t.js')).toBe('assets/entry.js');
+    expect(stripContentHash('assets/style-tkc6pwra.css')).toBe('assets/style.css');
+    expect(stripContentHash('assets/chunk-abcdefgh.js')).toBe('assets/chunk.js');
+  });
+
   test('keeps a multi-segment chunk name intact', () => {
     // A leftmost `-[A-Za-z0-9_-]{8,}` match would collapse this to
     // `assets/markdown.js` and hide the parser chunk behind the language one.
@@ -54,12 +63,22 @@ describe('stripContentHash', () => {
     expect(stripContentHash('assets/php-Th-NmKLT.js')).toBe('assets/php.js');
   });
 
-  test('leaves a name that merely looks long alone', () => {
-    // 'messages' is 8 chars but all lowercase with no digit — a word, not a hash.
-    expect(stripContentHash('assets/chat-messages.js')).toBe('assets/chat-messages.js');
+  test('leaves an unhashed file alone', () => {
     expect(stripContentHash('index.html')).toBe('index.html');
     expect(stripContentHash('favicon.ico')).toBe('favicon.ico');
+    expect(stripContentHash('site.webmanifest')).toBe('site.webmanifest');
+    // Nothing long enough to be a hash.
     expect(stripContentHash('assets/go-abc.js')).toBe('assets/go-abc.js');
+    // 'touch-icon' is longer than any hash either bundler emits, and reads as a
+    // name rather than one, so the scan stops instead of yielding 'apple.png'.
+    expect(stripContentHash('apple-touch-icon.png')).toBe('apple-touch-icon.png');
+  });
+
+  test('over-strips an 8-character name segment, symmetrically', () => {
+    // The accepted cost of taking every 8-character suffix as a hash. Both sides
+    // of a diff strip it the same way, so the row still matches; only the label
+    // is short. The alternative — random phantom churn — is worse.
+    expect(stripContentHash('assets/chat-messages.js')).toBe('assets/chat.js');
   });
 
   test('keeps a compound extension whole', () => {

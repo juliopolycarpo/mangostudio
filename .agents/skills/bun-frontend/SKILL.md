@@ -127,6 +127,13 @@ undefined for Vite-generated HTML` inside a compiled binary. The fix is a **modu
 not a runtime `if` — the shape `embedded-frontend.ts` already uses, where only the generated
 binary entry populates the registry.
 
+**T14 — both bundlers emit an 8-character content hash, but not the same alphabet.**
+Vite/rollup writes base64url (`index-Bqugzlgv.js`, and it can contain a `-`:
+`json-qhed-kSA.js`); `Bun.build()` writes lowercase base36 (`entry-htt6v99t.js`). Roughly 4%
+of Bun's hashes contain no digit at all, so anything that tries to recognize a hash by "it
+looks random" misfires at random. `scripts/ci/frontend-bundle-report.ts` keys on suffix length
+instead, for that reason.
+
 ## Test migration mechanics
 
 | Vitest                        | `bun test`                                           |
