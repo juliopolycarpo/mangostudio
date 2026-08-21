@@ -6,18 +6,9 @@ name: CI
 # validation is local (`bun run check && bun run test`) or a manual
 # workflow_dispatch of this workflow.
 
-# TEMPORARY — remove `refactor/bun-frontend` below once that branch merges.
-# The Bun frontend migration ships as a stack of PRs into a long-lived branch
-# rather than into main, so without this entry every one of them would land
-# unvalidated and the umbrella PR would only find out afterwards. Scoped to
-# `pull_request` on purpose: pushes to the branch are not a CI signal, and
-# adding them would double-run every stacked PR.
-#
-# Deliberately not extended: codeql, dependency-review and release-dry-run stay
-# main-only. They gate the eventual merge to main, which the umbrella PR gets.
 on:
   pull_request:
-    branches: [main, refactor/bun-frontend]
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
