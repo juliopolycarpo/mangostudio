@@ -80,6 +80,12 @@ jobs:
           MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
           WORKSPACE: ${{ matrix.workspace }}
         run: |
+          # `set -o pipefail` is load-bearing, not boilerplate: a step without an
+          # explicit `shell:` runs under `bash -e {0}`, which does NOT set it, so
+          # the pipeline's status would be `tee`'s and a failing suite would
+          # report success — no notification, and the log upload below (gated on
+          # `outcome != success`) would never run.
+          set -o pipefail
           echo "::notice::Reproduce with: (cd apps/${WORKSPACE} && bun test --timeout 15000 --parallel=1 --randomize --seed=${SEED})"
           bun test --timeout 15000 --parallel=1 --randomize --seed="${SEED}" 2>&1 | tee run.log
 
