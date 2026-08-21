@@ -42,12 +42,25 @@ export interface ShardSummary {
   readonly unhandledErrors: UnhandledErrors;
 }
 
+// `readJson` casts whatever parsed, so a `shard-meta.json` that is valid JSON
+// of the wrong shape reaches here with `exitCode: undefined`. Read naively,
+// `find(meta => meta.exitCode !== 0)?.exitCode ?? 0` matches that shard *and*
+// then folds it back to 0 — a green suite — while also shadowing any later
+// shard's real failure. `durationSeconds` degrades to NaN the same way. Both
+// are normalised here, mirroring the `isShardSummary` guard one step
+// downstream in collect-test-metrics.ts.
+const exitCodeOf = (meta: Partial<ShardMeta> | null): number =>
+  Number.isFinite(meta?.exitCode) ? (meta as ShardMeta).exitCode : 1;
+
+const durationOf = (meta: Partial<ShardMeta> | null): number =>
+  Number.isFinite(meta?.durationSeconds) ? (meta as ShardMeta).durationSeconds : 0;
+
 /** Fold per-shard run metadata into the single pair the QA fragment reports. */
 export const summarizeShardMeta = (
   metas: readonly ShardMeta[]
 ): Pick<ShardSummary, 'exitCode' | 'durationSeconds'> => ({
-  exitCode: metas.find((meta) => meta.exitCode !== 0)?.exitCode ?? 0,
-  durationSeconds: metas.reduce((max, meta) => Math.max(max, meta.durationSeconds), 0),
+  exitCode: metas.map(exitCodeOf).find((code) => code !== 0) ?? 0,
+  durationSeconds: metas.reduce((max, meta) => Math.max(max, durationOf(meta)), 0),
 });
 
 const readJson = async <T>(path: string, fallback: T): Promise<T> => {

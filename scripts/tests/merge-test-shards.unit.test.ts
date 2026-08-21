@@ -3,7 +3,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { listShardDirs, mergeTestShards, summarizeShardMeta } from '../ci/merge-test-shards';
+import {
+  listShardDirs,
+  mergeTestShards,
+  type ShardMeta,
+  summarizeShardMeta,
+} from '../ci/merge-test-shards';
 import { SHARDED_LCOV_PATHS, VITEST_BLOB_DIR } from '../lib/test-lanes';
 import { parseLcovSummary } from '../qa-gate/parse-lcov';
 
@@ -73,6 +78,30 @@ describe('summarizeShardMeta', () => {
         { shard: 3, exitCode: 0, durationSeconds: 80 },
       ])
     ).toEqual({ exitCode: 7, durationSeconds: 80 });
+  });
+
+  // `shard-meta.json` is read with a cast, not a schema, so valid JSON of the
+  // wrong shape arrives with `exitCode: undefined`. Read naively that matches
+  // the "failed" predicate and then folds back to 0 — a green suite over a
+  // shard that reported nothing — and shadows shard 2's real failure.
+  it('treats an unparseable exit code as failed instead of green', () => {
+    expect(
+      summarizeShardMeta([
+        {} as unknown as ShardMeta,
+        { shard: 2, exitCode: 5, durationSeconds: 20 },
+      ])
+    ).toEqual({ exitCode: 1, durationSeconds: 20 });
+  });
+
+  // Same shape from the other side: Math.max with an absent duration is NaN,
+  // which serializes as null and renders as a suite with no wall clock.
+  it('ignores an absent duration rather than reporting NaN', () => {
+    expect(
+      summarizeShardMeta([
+        { shard: 1, exitCode: 0 } as unknown as ShardMeta,
+        { shard: 2, exitCode: 0, durationSeconds: 20 },
+      ]).durationSeconds
+    ).toBe(20);
   });
 
   // Duration is the lane's wall clock, not its CPU time: the shards run
@@ -185,12 +214,12 @@ describe('mergeTestShards', () => {
     const shards = await makeTemp();
     const output = await makeTemp();
     await writeShards(shards, [{ name: 'test-shard-1', lcovLines: [[1, 1]] }]);
-    expect(mergeTestShards(shards, output)).rejects.toThrow(/No Vitest blob reports/);
+    await expect(mergeTestShards(shards, output)).rejects.toThrow(/No Vitest blob reports/);
   });
 
   it('fails loudly when there are no shards at all', async () => {
     const shards = await makeTemp();
-    expect(mergeTestShards(shards, await makeTemp())).rejects.toThrow(/No shard directories/);
+    await expect(mergeTestShards(shards, await makeTemp())).rejects.toThrow(/No shard directories/);
   });
 
   // A shard job that dies before "Upload shard results" runs (runner OOM, a
@@ -207,7 +236,9 @@ describe('mergeTestShards', () => {
         meta: { shard: 1, exitCode: 0, durationSeconds: 30 },
       },
     ]);
-    expect(mergeTestShards(shards, output, 8)).rejects.toThrow(/Expected 8 shard directories/);
+    await expect(mergeTestShards(shards, output, 8)).rejects.toThrow(
+      /Expected 8 shard directories/
+    );
   });
 
   it('accepts a full shard set when an expected count is given', async () => {
