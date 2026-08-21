@@ -27,7 +27,7 @@ afterEach(async () => {
 });
 
 describe('readJsonCoverageSummary', () => {
-  it('reads the total bucket from a Vitest json-summary report', async () => {
+  it('reads the total bucket from an istanbul json-summary report', async () => {
     const path = await writeJsonSummary(makeSummary(82));
 
     const summary = await readJsonCoverageSummary(path);

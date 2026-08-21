@@ -37,7 +37,7 @@ export interface DependencyStats {
   readonly lockedPackages: number;
 }
 
-/** One error headline parsed from a Vitest or Bun log, with its originated-in file when present. */
+/** One error headline parsed from a test-run log or JUnit report, with its originated-in file when present. */
 export interface TestErrorHeadline {
   readonly message: string;
   readonly originatedIn: string | null;
@@ -49,18 +49,18 @@ export interface TestErrorHeadline {
  *
  * Failure fields are omitted on a green run so stored baselines and the
  * rendered report stay unchanged. `parseMiss` is set when the process exited
- * non-zero and no Vitest/Bun failure signal could be parsed, never as zeros.
+ * non-zero and no failure signal could be parsed, never as zeros.
  */
 export type TestSuiteStats = {
   readonly exitCode: number | null;
   readonly durationSeconds: number | null;
   readonly passed: number;
   readonly root: number;
-  /** Vitest `Tests N failed` plus Bun `N fail`. */
+  /** JUnit failing `<testcase>` count (Bun `N fail`). */
   readonly failed?: number;
-  /** Vitest `Test Files N failed`. */
+  /** Distinct files owning a failing `<testcase>`. */
   readonly failedFiles?: number;
-  /** Vitest `Errors N errors` plus Bun `N error(s)`. */
+  /** Bun's `N error(s)` summary line — unhandled errors between tests. */
   readonly errors?: number;
   readonly headlines?: readonly TestErrorHeadline[];
   readonly parseMiss?: boolean;

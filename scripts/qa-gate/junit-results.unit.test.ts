@@ -3,11 +3,13 @@ import { join } from 'node:path';
 import { laneById, TEST_LANES } from '../lib/test-lanes';
 import { buildTestSuiteStats, type LaneResult, parseJunitXml } from './junit-results';
 
-// Both fixtures are real reporter output, not hand-written XML: the two
-// runners disagree on attribute names, self-closing style, and where the file
-// lives, and a hand-written fixture would quietly agree with the parser.
+// Both fixtures are real reporter output, not hand-written XML — a
+// hand-written fixture would quietly agree with the parser.
 //   junit-bun.xml    bun test --reporter=junit --reporter-outfile=…
-//   junit-vitest.xml vitest run --reporter=junit --outputFile=…
+//   junit-vitest.xml captured from the retired Vitest lane's JUnit reporter;
+//                    kept because it covers the other JUnit dialect (classname
+//                    origins, never-self-closing cases) an external producer
+//                    can still emit.
 const fixture = (name: string): Promise<string> =>
   Bun.file(join(import.meta.dir, 'testing/fixtures', `${name}.xml`)).text();
 
@@ -70,7 +72,7 @@ describe('parseJunitXml', () => {
   });
 
   it('counts nothing for a report with no cases', () => {
-    const empty = '<?xml version="1.0"?>\n<testsuites name="vitest tests" tests="0"></testsuites>';
+    const empty = '<?xml version="1.0"?>\n<testsuites name="bun test" tests="0"></testsuites>';
     expect(parseJunitXml(empty)).toMatchObject({ tests: 0, passed: 0, failed: 0, skipped: 0 });
   });
 
@@ -132,7 +134,7 @@ describe('buildTestSuiteStats', () => {
   // The green-counts-plus-Errors-N class: JUnit says everything passed and the
   // run still failed. Without the log-derived errors this would report
   // parseMiss and lose the headline that names the leak.
-  it('treats Vitest unhandled errors as a failure signal on green counts', () => {
+  it('treats log-parsed unhandled errors as a failure signal on green counts', () => {
     const stats = buildTestSuiteStats(
       green,
       {
