@@ -52,8 +52,7 @@
       "type": "bun",
       "request": "launch",
       "name": "Frontend: Debug Current Test",
-      "program": "${workspaceFolder}/apps/frontend/node_modules/.bin/vitest",
-      "args": ["--run", "${relativeFile}"],
+      "runtimeArgs": ["test", "--tsconfig-override=./tsconfig.test.json", "${file}"],
       "cwd": "${workspaceFolder}/apps/frontend"
     },
     {
