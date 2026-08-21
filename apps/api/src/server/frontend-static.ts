@@ -175,7 +175,11 @@ function unhashedAssetPaths(frontendDir: string): string[] {
  */
 function registerSpa(app: App, frontendDir: string): void {
   const indexPath = join(frontendDir, 'index.html');
-  const serveIndex = () => serveIndexFile(indexPath);
+  // `no-cache`, matching the embedded branch. Without an explicit directive the
+  // browser applies its own heuristic freshness to the shell, and every build
+  // renames the hashed bundles it points at — so a cached shell after a rebuild
+  // or an upgrade requests scripts that no longer exist and renders blank.
+  const serveIndex = () => serveIndexFile(indexPath, 'no-cache');
   const assetsDir = join(frontendDir, HASHED_ASSET_DIR);
 
   // Registered before the plugin: the static plugin may register GET / with an

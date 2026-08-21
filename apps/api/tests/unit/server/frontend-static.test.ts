@@ -173,16 +173,17 @@ describe('registerFrontend from the filesystem', () => {
     return (path: string) => app.handle(new Request(`http://localhost${path}`));
   }
 
-  test('serves index.html at / with no cache header', async () => {
+  test('serves index.html at / with no-cache', async () => {
     const get = await buildFilesystemApp();
     const response = await get('/');
 
-    // The explicit `GET /` registered ahead of staticPlugin. Unlike the
-    // embedded path it sets no Cache-Control, so the shell is revalidated by
-    // the browser's default heuristics rather than by an explicit directive.
+    // The explicit `GET /` registered ahead of staticPlugin, with the same
+    // directive as the embedded path: every build renames the hashed bundles
+    // the shell points at, so a heuristically cached shell would ask for
+    // scripts that no longer exist and render a blank page.
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('text/html');
-    expect(response.headers.get('cache-control')).toBeNull();
+    expect(response.headers.get('cache-control')).toBe('no-cache');
     expect(await response.text()).toBe(INDEX_HTML);
   });
 
