@@ -496,7 +496,7 @@ describe('frontend.port deprecation warning', () => {
   });
 
   function deprecationWarnings(): string[] {
-    return warnings.filter((line) => line.includes('frontend.port is deprecated'));
+    return warnings.filter((line) => line.includes('[frontend] settings are deprecated'));
   }
 
   test('warns once per process when config.toml sets frontend.port', () => {
@@ -506,8 +506,16 @@ describe('frontend.port deprecation warning', () => {
     loadConfig(TMP_TOML);
 
     expect(deprecationWarnings()).toEqual([
-      '[config] frontend.port is deprecated and ignored; the frontend is served by the API on 3001.',
+      '[config] The [frontend] settings are deprecated and ignored; the frontend is served by the API on 3001.',
     ]);
+  });
+
+  test('warns when config.toml sets only frontend.host', () => {
+    writeFileSync(TMP_TOML, '[server]\nport = 3001\n[frontend]\nhost = "myapp.example.com"\n');
+
+    loadConfig(TMP_TOML);
+
+    expect(deprecationWarnings()).toHaveLength(1);
   });
 
   test('warns when FRONTEND_PORT is set in the environment', () => {

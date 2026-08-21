@@ -398,15 +398,16 @@ export function resetSecretEnvTracking(): void {
 let warnedFrontendPortDeprecated = false;
 
 /**
- * Reports `frontend.port` / `FRONTEND_PORT` once per process, and only when the
- * user actually set one of them — the resolved config cannot answer "was it
- * set?", because the field still carries its Vite-era default.
+ * Reports `frontend.host` / `frontend.port` / `FRONTEND_PORT` once per
+ * process, and only when the user actually set one of them — the resolved
+ * config cannot answer "was it set?", because the fields still carry their
+ * Vite-era defaults.
  */
 function warnFrontendPortDeprecated(serverPort: number): void {
   if (warnedFrontendPortDeprecated) return;
   warnedFrontendPortDeprecated = true;
   console.warn(
-    `[config] frontend.port is deprecated and ignored; the frontend is served by the API on ${serverPort}.`
+    `[config] The [frontend] settings are deprecated and ignored; the frontend is served by the API on ${serverPort}.`
   );
 }
 
@@ -730,8 +731,9 @@ export function loadConfig(overridePath?: string): MangoConfig {
     try {
       const content = readFileSync(tomlPath, 'utf8');
       const parsed = parseToml(content) as Record<string, unknown>;
-      frontendPortInToml =
-        (parsed.frontend as Record<string, unknown> | undefined)?.port !== undefined;
+      // Either key: host is as deprecated (and as ignored) as port.
+      const frontendTable = parsed.frontend as Record<string, unknown> | undefined;
+      frontendPortInToml = frontendTable?.port !== undefined || frontendTable?.host !== undefined;
       applyToml(cfg, parsed);
     } catch (err) {
       console.warn(`[config] Failed to parse ${tomlPath}:`, err);
