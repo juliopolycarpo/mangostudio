@@ -91,11 +91,26 @@ describe('gate result evaluation', () => {
 describe('ci.yml trigger and concurrency policy', () => {
   const workflow = readText('.github/workflows/ci.yml');
 
+  /**
+   * Temporary, for the Bun frontend migration. That branch takes a stack of PRs
+   * targeting it rather than main, and without an entry here every one of them
+   * lands with no CI at all — check, test, build, browser-smoke and distribution
+   * all skip, and only the labeler and the ownership router report.
+   *
+   * Delete this constant and the branch in `ci.yml` together once the branch
+   * merges. Spelling it out rather than loosening the assertion is deliberate:
+   * a *second* exception has to come here and be justified, instead of quietly
+   * widening into a branch allowlist.
+   */
+  const TEMPORARY_PR_BRANCH = 'refactor/bun-frontend';
+
   test('runs only for PRs to main, pushes to main, and manual dispatch', () => {
     const onBlock = extractOnBlock(workflow);
 
     expect(sectionKeys(onBlock)).toEqual(['pull_request', 'push', 'workflow_dispatch']);
-    expect(onBlock).toContain('pull_request:\n    branches: [main]');
+    expect(onBlock).toContain(`pull_request:\n    branches: [main, ${TEMPORARY_PR_BRANCH}]`);
+    // Pushes stay main-only even for the temporary branch: its PRs are the
+    // signal, and a push trigger would double-run every stacked PR.
     expect(onBlock).toContain('push:\n    branches: [main]');
     // No branch-prefix allowlist: development branches get CI via their PR.
     expect(onBlock).not.toContain('/**');
