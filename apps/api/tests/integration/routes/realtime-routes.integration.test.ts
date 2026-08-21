@@ -289,10 +289,10 @@ describe('realtime WebSocket origins and liveness', () => {
     }
   });
 
-  it('accepts configured, public-auth, and absent origins but rejects other browser origins', async () => {
+  it('accepts configured and absent origins but rejects other browser origins', async () => {
     const { httpUrl, wsUrl } = startServer();
     const user = await signUp(httpUrl);
-    const acceptedOrigins = ['http://localhost:5173', 'http://localhost:3001'];
+    const acceptedOrigins = ['http://localhost:3001', 'http://127.0.0.1:3001'];
 
     for (const origin of acceptedOrigins) {
       const client = connect(wsUrl, { Cookie: user.cookie, Origin: origin });
@@ -304,17 +304,18 @@ describe('realtime WebSocket origins and liveness', () => {
     await diagnosticClient.opened;
     expect(await diagnosticClient.nextMessage()).toEqual({ type: 'ready' });
 
-    const rejectedClient = connect(wsUrl, {
-      Cookie: user.cookie,
-      Origin: 'https://attacker.example',
-    });
-    await rejectedClient.opened;
-    expect(await rejectedClient.nextMessage()).toEqual({
-      type: 'error',
-      error: 'Origin is not allowed',
-      code: ERROR_CODES.PERMISSION_DENIED,
-    });
-    expect((await rejectedClient.closed).code).toBe(REALTIME_CLOSE_CODES.FORBIDDEN);
+    // `http://localhost:5173` is in the rejected set on purpose: the Vite dev
+    // server that owned it is gone, and the API serves the frontend itself.
+    for (const origin of ['https://attacker.example', 'http://localhost:5173']) {
+      const rejectedClient = connect(wsUrl, { Cookie: user.cookie, Origin: origin });
+      await rejectedClient.opened;
+      expect(await rejectedClient.nextMessage()).toEqual({
+        type: 'error',
+        error: 'Origin is not allowed',
+        code: ERROR_CODES.PERMISSION_DENIED,
+      });
+      expect((await rejectedClient.closed).code).toBe(REALTIME_CLOSE_CODES.FORBIDDEN);
+    }
   });
 
   it('responds to application-level ping messages', async () => {

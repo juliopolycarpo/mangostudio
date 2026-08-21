@@ -16,8 +16,11 @@ from the shape the binary ships: proxy timeouts, WebSocket upgrade handling, and
 behaviour all existed only in dev. Serving the bundle from Elysia collapses the two into one
 topology, so a deep link, a WebSocket, and a `/uploads/*` fetch behave the same everywhere.
 
-Consequence: the frontend is same-origin with the API, so the CORS origin list and
-`FRONTEND_PORT` / `frontend.port` stop carrying weight.
+Consequence: the frontend is same-origin with the API. The CORS origin list is now the
+server's own origin only — `http://localhost:<port>`, `http://127.0.0.1:<port>`, and
+`http://<server.host>:<port>` when the bind host is neither of those. `FRONTEND_PORT` and
+`frontend.port` are deprecated: both still parse, so an existing `~/.mango/config.toml` or
+`.env` keeps booting, but they drive nothing and setting either logs one warning at startup.
 
 ## Development
 

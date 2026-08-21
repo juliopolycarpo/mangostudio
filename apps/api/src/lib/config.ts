@@ -44,6 +44,11 @@ export interface MangoConfig {
      */
     publicUrl: string;
   };
+  /**
+   * @deprecated The API serves the frontend itself, so there is no second
+   * origin to allow. Still parsed so an existing config.toml keeps booting,
+   * but nothing reads these values.
+   */
   frontend: {
     host: string;
     port: number;
@@ -112,7 +117,7 @@ export interface MangoConfig {
      */
     wslExecutable: string;
   };
-  /** Computed CORS origins derived from frontend host/port. */
+  /** Computed CORS origins derived from the server host/port. */
   corsOrigins: string[];
   /** Path to the config.toml that was loaded (for TOML-based services). */
   configFilePath: string;
@@ -174,6 +179,7 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   PUBLIC_URL: (cfg, v) => {
     cfg.server.publicUrl = v;
   },
+  // Deprecated and ignored; still parsed so an existing .env keeps booting.
   FRONTEND_PORT: (cfg, v) => {
     cfg.frontend.port = Number(v) || cfg.frontend.port;
   },
@@ -388,6 +394,27 @@ export function resetSecretEnvTracking(): void {
   loadedSecretEnvKeys = new Set();
 }
 
+/** Whether this process already reported the frontend.port deprecation. */
+let warnedFrontendPortDeprecated = false;
+
+/**
+ * Reports `frontend.port` / `FRONTEND_PORT` once per process, and only when the
+ * user actually set one of them — the resolved config cannot answer "was it
+ * set?", because the field still carries its Vite-era default.
+ */
+function warnFrontendPortDeprecated(serverPort: number): void {
+  if (warnedFrontendPortDeprecated) return;
+  warnedFrontendPortDeprecated = true;
+  console.warn(
+    `[config] frontend.port is deprecated and ignored; the frontend is served by the API on ${serverPort}.`
+  );
+}
+
+/** Clears the once-per-process deprecation latch (for tests). */
+export function resetFrontendPortDeprecationWarning(): void {
+  warnedFrontendPortDeprecated = false;
+}
+
 /** Deep-clones the default config. */
 function cloneDefaults(): MangoConfig {
   return {
@@ -600,22 +627,8 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
     cfg.secretStore.unsafeFileFallbackDir = resolveUserPath(cfg.secretStore.unsafeFileFallbackDir);
   }
 
-  // CORS origins from frontend host/port (include +1 for Vite port bumping)
-  const fHost = cfg.frontend.host;
-  const fPort = cfg.frontend.port;
-  cfg.corsOrigins = [
-    `http://localhost:${fPort}`,
-    `http://127.0.0.1:${fPort}`,
-    `http://localhost:${fPort + 1}`,
-    `http://127.0.0.1:${fPort + 1}`,
-  ];
-  // Add explicit frontend host if it differs from localhost
-  if (fHost !== 'localhost' && fHost !== '127.0.0.1') {
-    cfg.corsOrigins.push(`http://${fHost}:${fPort}`);
-    cfg.corsOrigins.push(`http://${fHost}:${fPort + 1}`);
-  }
-
-  // Include the server's own origin for same-origin deployments (standalone binary).
+  // The server's own origin is the only one the app uses: the API process serves
+  // the frontend, so there is no second origin to allow.
   //
   // In standalone mode the runner scripts (run.sh / run.bat) launch the binary with
   // API_PORT set to whatever port the user chose. The binary reads that value via
@@ -623,15 +636,13 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
   // computeDerived() runs — so sPort below is already the final resolved port,
   // regardless of whether it came from config.toml, .env, or API_PORT.
   //
-  // The frontend is served by the API process itself at that same origin.
-  // The browser therefore sends Origin: http://<host>:<sPort> on CORS preflight
-  // requests (e.g. POST with JSON body). Both the Elysia CORS middleware and
-  // Better Auth trustedOrigins validate against corsOrigins, so this origin must
-  // be present or same-origin requests from the binary-served frontend are rejected.
+  // The browser sends Origin: http://<host>:<sPort> on CORS preflight requests
+  // (e.g. POST with JSON body). Both the Elysia CORS middleware and Better Auth
+  // trustedOrigins validate against corsOrigins, so this origin must be present
+  // or same-origin requests from the served frontend are rejected.
   const sHost = cfg.server.host;
   const sPort = cfg.server.port;
-  cfg.corsOrigins.push(`http://localhost:${sPort}`);
-  cfg.corsOrigins.push(`http://127.0.0.1:${sPort}`);
+  cfg.corsOrigins = [`http://localhost:${sPort}`, `http://127.0.0.1:${sPort}`];
   if (sHost !== 'localhost' && sHost !== '127.0.0.1') {
     cfg.corsOrigins.push(`http://${sHost}:${sPort}`);
   }
@@ -711,6 +722,7 @@ export function loadConfig(overridePath?: string): MangoConfig {
   }
 
   const cfg = cloneDefaults();
+  let frontendPortInToml = false;
 
   // 1. Determine and read config.toml
   const tomlPath = overridePath ?? resolveConfigTomlPath();
@@ -718,6 +730,8 @@ export function loadConfig(overridePath?: string): MangoConfig {
     try {
       const content = readFileSync(tomlPath, 'utf8');
       const parsed = parseToml(content) as Record<string, unknown>;
+      frontendPortInToml =
+        (parsed.frontend as Record<string, unknown> | undefined)?.port !== undefined;
       applyToml(cfg, parsed);
     } catch (err) {
       console.warn(`[config] Failed to parse ${tomlPath}:`, err);
@@ -734,6 +748,13 @@ export function loadConfig(overridePath?: string): MangoConfig {
 
   // 4. Compute derived values
   computeDerived(cfg, tomlPath);
+
+  // 5. Report a setting that still parses but no longer does anything. Asked
+  // of the sources rather than of cfg, which cannot distinguish an explicit
+  // 5173 from the default one.
+  if (frontendPortInToml || envOverrides.FRONTEND_PORT || process.env.FRONTEND_PORT) {
+    warnFrontendPortDeprecated(cfg.server.port);
+  }
 
   return cfg;
 }

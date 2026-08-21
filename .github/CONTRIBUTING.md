@@ -34,7 +34,7 @@ cp .mango/.env.example ~/.mango/.env
 ## Development Workflow
 
 ```bash
-# Start all dev servers (API on :3001, frontend on :5173)
+# Start the dev server (API and frontend together on :3001)
 bun run dev
 
 # Or start each workspace individually

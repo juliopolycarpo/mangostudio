@@ -11,7 +11,7 @@ import { ROOT_DIR } from './config';
 export const NODE_ENV_READ_ALLOWLIST = [
   {
     path: 'apps/api/src/lib/config.ts',
-    line: 645,
+    line: 656,
     reason:
       'selects the isolated test config path; moving this seam risks clobbering a real user file',
   },
