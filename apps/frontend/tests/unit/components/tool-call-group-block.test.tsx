@@ -1,5 +1,5 @@
+import { beforeEach, describe, expect, it, jest } from 'bun:test';
 import { fireEvent, screen, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolCallGroupBlock } from '@/features/chat/components/ToolCallGroupBlock';
 import type { ToolCallEntry } from '@/features/chat/components/tool-call-grouping';
 import { render } from '../../support/harness/render';
@@ -18,7 +18,7 @@ function entry(overrides: Partial<ToolCallEntry> = {}): ToolCallEntry {
 
 describe('ToolCallGroupBlock', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it('summarizes the run with the label, first path, and remaining count', () => {

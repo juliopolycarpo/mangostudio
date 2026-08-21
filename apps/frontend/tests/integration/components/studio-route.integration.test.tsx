@@ -2,30 +2,39 @@
  * Integration tests for the Studio placeholder route.
  */
 
+import { describe, expect, it, mock } from 'bun:test';
 import { screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import { StudioPage } from '../../../src/routes/_authenticated/studio';
 import { render } from '../../support/harness/render';
 
-vi.mock('@tanstack/react-router', async () => {
-  const actual = await vi.importActual('@tanstack/react-router');
-  return {
-    ...actual,
-    Link: ({
-      to,
-      children,
-      ...props
-    }: {
-      to: string;
-      children: React.ReactNode;
-      [key: string]: unknown;
-    }) => (
-      <a href={to} {...props}>
-        {children}
-      </a>
-    ),
-  };
-});
+// The `bun test` shape of vitest's `vi.mock(…, async () => ({ ...await
+// vi.importActual(…) }))`: the real namespace is imported first, spread into
+// the replacement, and the module under test is imported afterwards so it binds
+// to the mock rather than to the original.
+//
+// `mock.module` mutates a module graph that `bun test` shares across files and
+// survives `mock.restore()`, so this lane runs under `--isolate`. Without it,
+// every later file in the run would get this `Link` too.
+const actual = await import('@tanstack/react-router');
+
+function LinkStub({
+  to,
+  children,
+  ...props
+}: {
+  to: string;
+  children: React.ReactNode;
+  [key: string]: unknown;
+}) {
+  return (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  );
+}
+
+mock.module('@tanstack/react-router', () => ({ ...actual, Link: LinkStub }));
+
+const { StudioPage } = await import('../../../src/routes/_authenticated/studio');
 
 describe('Studio Route — Integration', () => {
   it('renders the studio title', () => {

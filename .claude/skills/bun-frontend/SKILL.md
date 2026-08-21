@@ -218,28 +218,80 @@ binds port 0 and asserts a stand-in `.all('/*')` stays reachable, with a `.get('
 so it cannot pass for the wrong reason. **Any new frontend-serving branch needs a test that
 binds a real port**; `handle()` is blind to this whole class.
 
+**T25 — `Bun.build()` honours `tsconfig.json` `paths`, so a test alias there ships.** Measured
+2026-08-21: with `"motion/react": ["./sub/stub.ts"]` in the tsconfig at the build's cwd, the
+stub's marker string appears in the bundled output, `success: true`, no warning. `Bun.build()`
+has no `tsconfig` option to opt out of. So T8's aliases cannot live in
+`apps/frontend/tsconfig.json`; they live in `tsconfig.test.json` and reach `bun test` through
+the global `--tsconfig-override` flag. Three things about that flag:
+
+- **`bunfig.toml`'s `[test] tsconfig = "…"` is accepted and silently ignored.** With the key
+  set, `motion/react` resolved to the real package (383 exports); with the flag, to the stub
+  (2). A run that "passes" against the wrong module looks identical.
+- **`paths` does not merge through `extends`** (ordinary TS semantics), so `tsconfig.test.json`
+  restates `@/*`. `tests/unit/bun-lane-harness.test.ts` fails if the two drift.
+- Every invocation prints `Internal error: directory mismatch for directory "…"` to stderr —
+  once per process, so 1 serial and N+1 under `--parallel=N`. Cosmetic Bun bug; exit code and
+  results are unaffected.
+
+**T26 — the frontend lane must not be able to reach the network.** happy-dom is registered at
+`http://localhost:3001/`, which is where the API really listens in dev, so a relative request
+no scenario answered opens a real socket. Measured: a nine-file run printed `connect
+ECONNREFUSED 127.0.0.1:3001` attributed to two files that issue no requests at all — the
+connection outlived the file that started it and Bun blamed whichever file was running. Green
+counts, an error block, a stack pointing at the wrong test. `bun.setup.ts` installs a `fetch`
+that rejects immediately and names the unanswered request, and reinstates it in `afterEach`.
+
+**T27 — Bun 1.4.0 has no async timer advance, and dropping a queued callback wedges React
+Query.** `jest.advanceTimersByTimeAsync` and `runAllTimersAsync` are `undefined`;
+`advanceTimersByTime` exists and throws `Fake timers are not active` when they are not.
+`Date.now()` does move with the fake clock. The trap: React Query schedules every cache
+notification through `notifyManager`'s live `setTimeout(callback, 0)`
+(`query-core/timeoutManager.js:73`), and whatever is still queued is discarded at
+`useRealTimers()` — after which the manager never delivers again. Measured: one fake-timer
+test made the *next* test in `use-settings-realtime.test.ts` time out at 5s while both passed
+alone. `support/harness/timers.ts` wraps all three calls; use it rather than `jest` directly.
+
+**T28 — `mockReset()` means opposite things in the two runners.** Vitest restores the
+implementation `vi.fn(impl)` was given; jest and `bun test` strip it, so the mock starts
+returning `undefined`. `create-fetch-scenario.restore()` used it, and under `bun test` that
+turned every test after the first in a file into a failed request (measured: 10 of 13 in
+`tool-settings-page`). `mockClear()` is the one that means the same thing in both.
+
 ## Test migration mechanics
 
-| Vitest                        | `bun test`                                           |
-| ----------------------------- | ---------------------------------------------------- |
-| `import { vi } from 'vitest'` | `import { jest, mock } from 'bun:test'`              |
-| `vi.fn()` / `vi.spyOn`        | `jest.fn()` / `spyOn` from `bun:test`                |
-| `vi.mock('@/x', factory)`     | `mock.module('@/x', factory)` — see the leak warning |
-| `vi.useFakeTimers()`          | `jest.useFakeTimers()`                               |
-| `resolve.alias`               | `tsconfig.json` `paths` (T8)                         |
-| `globals: true`               | explicit imports from `bun:test`                     |
-| `environment: 'jsdom'`        | happy-dom via the two-file preload (T6)              |
-| `setupFiles`                  | `bunfig.toml` `[test] preload`                       |
+Everything below is what the 004 spike actually needed across its eleven files. Where a row
+says "harness", the wrapper is in `apps/frontend/tests/support/` and exists for a measured
+reason — use it rather than the raw call.
 
-**`mock.module` is not undone by `mock.restore()`.** `bun test` shares one module graph across
-files, so a leftover module mock breaks *other* files — measured in this repo at 8 failures in
-4 unrelated suites from one new file. Re-mocking with the real namespace does not fully recover
-module-level state either. Prefer, in order: resolver-level aliasing (T8), substitution through
-production's own seams, then `mock.module` as a last resort. `--isolate` mitigates this; it
-does not license it.
+| Vitest                             | `bun test`                                                              |
+| ---------------------------------- | ----------------------------------------------------------------------- |
+| `import { vi } from 'vitest'`      | `import { jest, mock, spyOn } from 'bun:test'`                          |
+| `vi.fn()` / `vi.spyOn`             | `jest.fn()` / `spyOn` from `bun:test`                                   |
+| `vi.mocked(x)`                     | no equivalent — keep the `jest.fn()` handle the factory returned        |
+| `vi.mock('@/x', factory)`          | `mock.module` + `await import()` of the module under test, **after** it |
+| `vi.hoisted(() => …)`              | a plain `const` above the `mock.module` call; nothing is hoisted        |
+| `vi.useFakeTimers()`               | `useFakeTimers()` from `support/harness/timers` (T27)                   |
+| `vi.useRealTimers()`               | `await restoreRealTimers()` from the same module (T27)                  |
+| `vi.advanceTimersByTimeAsync(n)`   | `await advanceTimersByTimeAsync(n)` — Bun has no async advance (T27)    |
+| `vi.waitFor(fn)`                   | `waitFor` from `@testing-library/react`                                 |
+| `vi.stubGlobal(k, v)`              | `globalThis[k] = v`, restored by hand — no `unstubAllGlobals` exists    |
+| `expect(m).toHaveBeenCalledOnce()` | `toHaveBeenCalledTimes(1)` — the matcher runs but `bun-types` omits it  |
+| `resolve.alias`                    | `tsconfig.test.json` `paths` + `--tsconfig-override` (T8, **T25**)      |
+| `globals: true`                    | explicit imports from `bun:test`                                        |
+| `environment: 'jsdom'`             | happy-dom via the two-file preload (T6)                                 |
+| `setupFiles`                       | `bunfig.toml` `[test] preload`                                          |
 
-`apps/frontend/tests/support/setup/vitest.setup.ts` carries a *global* `vi.mock('@/lib/auth-client')`.
-That one needs a non-`mock.module` home before the bulk migration, not a mechanical translation.
+**`mock.module` is not undone by `mock.restore()`, and it does cross files.** Measured on Bun
+1.4.0 with a two-file fixture: file A mocks `./real.ts`, file B imports it and sees `MOCKED`
+under the default runner and under `--parallel --no-isolate`, and `REAL` under `--isolate`.
+So `--isolate` is load-bearing for this lane, not a precaution. Prefer, in order:
+resolver-level aliasing (T8), substitution through production's own seams, then `mock.module`.
+
+`vitest.setup.ts`'s global `vi.mock('@/lib/auth-client')` did **not** get a mechanical
+translation: it is a `tsconfig.test.json` `paths` entry pointing at
+`tests/support/setup/auth-client-stub.ts`, whose `setTestSession()` seam replaces the four
+per-file re-mocks. `bun.setup.ts` resets it in `afterEach`.
 
 ## Parity gate
 

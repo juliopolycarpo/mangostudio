@@ -2,10 +2,15 @@
  * Unit tests for ToolSettingsPage component.
  */
 
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolSettingsPage } from '../../../src/features/settings/tools/components/ToolSettingsPage';
-import { act, fireEvent, render, screen } from '../../support/harness/render';
+import { act, fireEvent, render, screen, waitFor } from '../../support/harness/render';
+import {
+  advanceTimersByTimeAsync,
+  restoreRealTimers,
+  useFakeTimers,
+} from '../../support/harness/timers';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const TOOLS_RESPONSE = {
@@ -53,14 +58,14 @@ const TOOLS_RESPONSE = {
 
 describe('ToolSettingsPage', () => {
   const fetchScenario = createFetchScenario();
-  const setMaxToolIterations = vi.fn();
+  const setMaxToolIterations = jest.fn();
 
   beforeEach(() => {
     fetchScenario.install();
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
+  afterEach(async () => {
+    await restoreRealTimers();
     fetchScenario.restore();
   });
 
@@ -207,7 +212,7 @@ describe('ToolSettingsPage', () => {
     const checkbox = screen.getAllByRole('checkbox')[0];
     await user.click(checkbox);
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const putCalls = fetchScenario.fetchMock.mock.calls.filter((call: unknown[]) => {
         const input = call[0];
         const init = call[1] as RequestInit | undefined;
@@ -238,7 +243,7 @@ describe('ToolSettingsPage', () => {
     const originalWindow = window;
     let rejectToolUpdate: ((reason?: unknown) => void) | undefined;
 
-    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const method = input instanceof Request ? input.method : init?.method;
       const url = input instanceof Request ? input.url : String(input);
       const path = new URL(url, 'http://localhost').pathname;
@@ -260,20 +265,23 @@ describe('ToolSettingsPage', () => {
       return Promise.reject(new Error(`Unhandled request: ${method ?? 'GET'} ${path}`));
     });
 
-    vi.stubGlobal('fetch', fetchMock);
+    // `vi.stubGlobal` has no `bun test` equivalent; the original is captured and
+    // put back by hand below.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
     const { unmount } = render(
       <ToolSettingsPage maxToolIterations={10} setMaxToolIterations={setMaxToolIterations} />
     );
 
     await screen.findByText('Current date and time');
 
-    vi.useFakeTimers();
+    useFakeTimers();
     fireEvent.change(screen.getByDisplayValue('UTC'), {
       target: { value: 'Europe/Lisbon' },
     });
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(350);
+      await advanceTimersByTimeAsync(350);
     });
 
     if (!rejectToolUpdate) throw new Error('Expected autosave PUT request');
@@ -281,13 +289,16 @@ describe('ToolSettingsPage', () => {
     unmount();
 
     try {
-      vi.stubGlobal('window', undefined);
+      // The point of the test: the autosave rejection handler must survive a
+      // teardown that has already taken `window` away.
+      (globalThis as { window?: Window }).window = undefined;
       rejectToolUpdate(new Error('save failed'));
       for (let index = 0; index < 5; index += 1) {
         await Promise.resolve();
       }
     } finally {
-      vi.stubGlobal('window', originalWindow);
+      (globalThis as { window?: Window }).window = originalWindow;
+      globalThis.fetch = originalFetch;
     }
 
     expect(fetchMock).toHaveBeenCalledWith(

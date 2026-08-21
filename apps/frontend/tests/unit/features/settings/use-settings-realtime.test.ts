@@ -1,35 +1,44 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { useQuery } from '@tanstack/react-query';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   markAppSettingsLocalWrite,
   resetAppSettingsLocalWriteWindow,
 } from '@/features/settings/app/local-write-window';
-import { useSettingsRealtimeInvalidation } from '@/features/settings/hooks/use-settings-realtime';
 import type { RealtimeTopicListener } from '@/lib/realtime/realtime-client';
 import { act, renderHook, waitFor } from '../../../support/harness/render';
+import {
+  advanceTimersByTimeAsync,
+  restoreRealTimers,
+  useFakeTimers,
+} from '../../../support/harness/timers';
+import { setTestSession } from '../../../support/setup/auth-client-stub';
 
-const mocks = vi.hoisted(() => ({
-  bindRealtimeClientToUser: vi.fn(),
-  subscribe: vi.fn(),
-}));
+// `vi.hoisted` exists because `vi.mock` is hoisted above the file's own
+// statements. `mock.module` is not hoisted, so a plain const declared before
+// the call is enough.
+const mocks = {
+  bindRealtimeClientToUser: jest.fn(),
+  subscribe: jest.fn(),
+};
 
-vi.mock('@/lib/auth-client', () => ({
-  authClient: {
-    useSession: () => ({ data: { user: { id: 'user-test' } } }),
-  },
-}));
-
-vi.mock('@/lib/realtime/realtime-client', () => ({
+mock.module('@/lib/realtime/realtime-client', () => ({
   bindRealtimeClientToUser: mocks.bindRealtimeClientToUser,
   getRealtimeClient: () => ({ subscribe: mocks.subscribe }),
 }));
 
+// Static imports are evaluated before any statement above runs, so the hook has
+// to come in afterwards or it binds the real realtime client. The signed-in
+// session it reads comes from the aliased auth-client stub, set in `beforeEach`.
+const { useSettingsRealtimeInvalidation } = await import(
+  '@/features/settings/hooks/use-settings-realtime'
+);
+
 /** Mounts one query per settings section so each family is observably stale. */
 function mountSettingsSections() {
   const refetch = {
-    app: vi.fn().mockResolvedValue({ thinkingEnabled: false }),
-    provider: vi.fn().mockResolvedValue({ providers: [] }),
-    tool: vi.fn().mockResolvedValue({ tools: [] }),
+    app: jest.fn().mockResolvedValue({ thinkingEnabled: false }),
+    provider: jest.fn().mockResolvedValue({ providers: [] }),
+    tool: jest.fn().mockResolvedValue({ tools: [] }),
   };
 
   const view = renderHook(() => {
@@ -59,10 +68,13 @@ function mountSettingsSections() {
 
 describe('useSettingsRealtimeInvalidation', () => {
   let listener: RealtimeTopicListener;
-  let release: ReturnType<typeof vi.fn>;
+  let release: ReturnType<typeof jest.fn>;
 
   beforeEach(() => {
-    release = vi.fn();
+    // The hook reads the session; the aliased stub reports signed out unless a
+    // test says otherwise, and `bun.setup.ts` resets it after each one.
+    setTestSession({ user: { id: 'user-test' } });
+    release = jest.fn();
     mocks.subscribe.mockImplementation((_: string, nextListener: RealtimeTopicListener) => {
       listener = nextListener;
       return release;
@@ -74,7 +86,7 @@ describe('useSettingsRealtimeInvalidation', () => {
   it('invalidates only the signaled section and unsubscribes on unmount', async () => {
     const { refetch, unmount } = mountSettingsSections();
 
-    expect(mocks.subscribe).toHaveBeenCalledOnce();
+    expect(mocks.subscribe).toHaveBeenCalledTimes(1);
     expect(mocks.subscribe).toHaveBeenCalledWith('settings', expect.any(Function));
 
     await act(async () => {
@@ -84,12 +96,12 @@ describe('useSettingsRealtimeInvalidation', () => {
       });
     });
 
-    await waitFor(() => expect(refetch.provider).toHaveBeenCalledOnce());
+    await waitFor(() => expect(refetch.provider).toHaveBeenCalledTimes(1));
     expect(refetch.app).not.toHaveBeenCalled();
     expect(refetch.tool).not.toHaveBeenCalled();
 
     unmount();
-    expect(release).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledTimes(1);
   });
 
   it('refreshes every section on a subscription acknowledgement', async () => {
@@ -99,9 +111,9 @@ describe('useSettingsRealtimeInvalidation', () => {
       await listener({ type: 'subscribed' });
     });
 
-    await waitFor(() => expect(refetch.app).toHaveBeenCalledOnce());
-    expect(refetch.provider).toHaveBeenCalledOnce();
-    expect(refetch.tool).toHaveBeenCalledOnce();
+    await waitFor(() => expect(refetch.app).toHaveBeenCalledTimes(1));
+    expect(refetch.provider).toHaveBeenCalledTimes(1);
+    expect(refetch.tool).toHaveBeenCalledTimes(1);
   });
 
   it('refreshes every section when an event carries no scopes', async () => {
@@ -114,9 +126,9 @@ describe('useSettingsRealtimeInvalidation', () => {
       });
     });
 
-    await waitFor(() => expect(refetch.app).toHaveBeenCalledOnce());
-    expect(refetch.provider).toHaveBeenCalledOnce();
-    expect(refetch.tool).toHaveBeenCalledOnce();
+    await waitFor(() => expect(refetch.app).toHaveBeenCalledTimes(1));
+    expect(refetch.provider).toHaveBeenCalledTimes(1);
+    expect(refetch.tool).toHaveBeenCalledTimes(1);
   });
 
   it('ignores an app echo while this tab is mid-write, but keeps other sections live', async () => {
@@ -130,12 +142,12 @@ describe('useSettingsRealtimeInvalidation', () => {
       });
     });
 
-    await waitFor(() => expect(refetch.provider).toHaveBeenCalledOnce());
+    await waitFor(() => expect(refetch.provider).toHaveBeenCalledTimes(1));
     expect(refetch.app).not.toHaveBeenCalled();
   });
 
   it('defers only the app half of a subscription acknowledgement mid-write', async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     try {
       const { refetch } = mountSettingsSections();
       markAppSettingsLocalWrite();
@@ -145,27 +157,27 @@ describe('useSettingsRealtimeInvalidation', () => {
       });
 
       // Sections this tab is not writing have nothing to lose.
-      expect(refetch.provider).toHaveBeenCalledOnce();
-      expect(refetch.tool).toHaveBeenCalledOnce();
+      expect(refetch.provider).toHaveBeenCalledTimes(1);
+      expect(refetch.tool).toHaveBeenCalledTimes(1);
       // Refetching app now would replace the cache `saveSettings` builds its
       // next value from, so the following keystroke would carry the server's
       // older object into the pending PUT.
       expect(refetch.app).not.toHaveBeenCalled();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(2_100);
+        await advanceTimersByTimeAsync(2_100);
       });
 
       // Deferred, never dropped: the ack stands in for events lost while the
       // socket was down and nothing replays it.
-      expect(refetch.app).toHaveBeenCalledOnce();
+      expect(refetch.app).toHaveBeenCalledTimes(1);
     } finally {
-      vi.useRealTimers();
+      await restoreRealTimers();
     }
   });
 
   it('re-applies a dropped app event once the local write window closes', async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     try {
       const { refetch } = mountSettingsSections();
       markAppSettingsLocalWrite();
@@ -182,17 +194,17 @@ describe('useSettingsRealtimeInvalidation', () => {
       // The event may have come from another tab, and nothing republishes it —
       // suppression has to be a delay, not a discard.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(2_100);
+        await advanceTimersByTimeAsync(2_100);
       });
 
-      expect(refetch.app).toHaveBeenCalledOnce();
+      expect(refetch.app).toHaveBeenCalledTimes(1);
     } finally {
-      vi.useRealTimers();
+      await restoreRealTimers();
     }
   });
 
   it('holds a dropped app event back while edits keep reopening the window', async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     try {
       const { refetch } = mountSettingsSections();
       markAppSettingsLocalWrite();
@@ -208,7 +220,7 @@ describe('useSettingsRealtimeInvalidation', () => {
       // refresh can fire, so it must re-arm rather than refetch mid-keystroke.
       for (let i = 0; i < 4; i += 1) {
         await act(async () => {
-          await vi.advanceTimersByTimeAsync(1_500);
+          await advanceTimersByTimeAsync(1_500);
         });
         markAppSettingsLocalWrite();
       }
@@ -216,17 +228,17 @@ describe('useSettingsRealtimeInvalidation', () => {
       expect(refetch.app).not.toHaveBeenCalled();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(2_100);
+        await advanceTimersByTimeAsync(2_100);
       });
 
-      expect(refetch.app).toHaveBeenCalledOnce();
+      expect(refetch.app).toHaveBeenCalledTimes(1);
     } finally {
-      vi.useRealTimers();
+      await restoreRealTimers();
     }
   });
 
   it('cancels a deferred app refresh when the section unmounts', async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     try {
       const { refetch, unmount } = mountSettingsSections();
       markAppSettingsLocalWrite();
@@ -241,12 +253,12 @@ describe('useSettingsRealtimeInvalidation', () => {
       unmount();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(2_100);
+        await advanceTimersByTimeAsync(2_100);
       });
 
       expect(refetch.app).not.toHaveBeenCalled();
     } finally {
-      vi.useRealTimers();
+      await restoreRealTimers();
     }
   });
 
@@ -262,6 +274,6 @@ describe('useSettingsRealtimeInvalidation', () => {
       });
     });
 
-    await waitFor(() => expect(refetch.app).toHaveBeenCalledOnce());
+    await waitFor(() => expect(refetch.app).toHaveBeenCalledTimes(1));
   });
 });

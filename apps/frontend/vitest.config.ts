@@ -1,7 +1,27 @@
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
+
+/**
+ * Files that have already moved to `bun test`, read back off the script that
+ * runs them.
+ *
+ * Both lanes are live during the migration, and a file listed in neither runs
+ * nowhere while a file listed in both runs twice — neither shows up as a
+ * failure. Deriving the exclusion from `test:unit:bun` makes the package script
+ * the single source of truth, so moving a file across lanes is one edit.
+ * `tests/vitest-lane.test.ts` fails if this derivation stops finding anything.
+ */
+export function bunLaneFiles(): string[] {
+  const manifest = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')) as {
+    scripts: Record<string, string>;
+  };
+  return manifest.scripts['test:unit:bun']
+    .split(/\s+/)
+    .filter((arg) => /^tests\/.+\.tsx?$/.test(arg));
+}
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -21,8 +41,7 @@ export default defineConfig({
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     exclude: [
       'tests/support/**',
-      'tests/unit/lib/utils.test.ts',
-      'tests/unit/utils/model-utils.test.ts',
+      ...bunLaneFiles(),
       '**/node_modules/**',
       '**/dist/**',
       '**/*.config.*',

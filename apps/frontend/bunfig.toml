@@ -1,3 +1,8 @@
 [test]
 coverageReporter = ["lcov"]
 coverageDir = "../../.mango/artifacts/coverage/frontend/bun"
+# Two files, in this order, and not one: `GlobalRegistrator.register()` has to
+# run before anything imports `@testing-library/dom`, or `screen` initializes
+# against a `document` that does not exist yet and every query then fails
+# without pointing at the cause.
+preload = ["./tests/support/setup/dom-setup.ts", "./tests/support/setup/bun.setup.ts"]
