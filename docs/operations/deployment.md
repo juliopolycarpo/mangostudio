@@ -42,6 +42,13 @@ Useful environment variables:
 | `TRUST_PROXY`        | Set to `true` only behind a header-overwriting proxy                          |
 | `ALLOWED_ORIGINS`    | Comma-separated browser origins allowed when the frontend is served elsewhere |
 
+`ALLOWED_ORIGINS` is only half of a split deployment. It tells this API which origin to accept
+requests from; the bundle also has to be told where the API is, which is `MANGO_API_URL` — a
+**build-time** variable, so a split deployment requires building the frontend yourself. No
+released binary or npm package can be repointed after the fact: they are all built with it
+unset, and the branch that reads it is then eliminated from the bundle. See
+`docs/architecture/frontend-build.md`.
+
 Compose example:
 
 ```yaml

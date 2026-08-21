@@ -384,10 +384,17 @@ both fail: an **unset** variable survives into the bundle as the verbatim expres
 unreachable — the guard stays in the bundle, evaluates false in a browser, and **discards the
 literal that `env` just inlined**. The unit test passes either way because `bun test` has a
 real `process`. The working shape is the T36 mechanism:
-`define: { 'process.env.VITE_API_URL': JSON.stringify(process.env.VITE_API_URL ?? '') }`
-(always defined, `''` when unset) plus a bare `process.env.VITE_API_URL` read in
+`define: { 'process.env.MANGO_API_URL': JSON.stringify(resolveApiUrlOverride()) }`
+(always defined, `''` when unset) plus a bare `process.env.MANGO_API_URL` read in
 `api-base-url.ts`. Verify by grepping the built bundle for the literal **and confirming no
 `typeof process` adjacent to it**, then a headless render.
+
+Renamed from `VITE_API_URL` on 2026-08-21 — it was named after a bundler this repo no longer
+has, and the prefix sends readers hunting for a `vite.config.ts` that does not exist.
+`build.ts`'s `resolveApiUrlOverride()` still accepts the old name for one release and warns.
+Note what the *unset* case looks like in a shipped bundle: the minifier drops the whole
+`if (explicit)` branch, so grepping a release artifact for the variable finds nothing at all —
+that absence is correct, not evidence the define regressed.
 
 **T38 — `BunFile.stat()` returns `undefined` for a file embedded in a compiled binary, and it
 is not a promise.** Measured 2026-08-21 on the pinned 1.4.0 with `bun build --compile` over an

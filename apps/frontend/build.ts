@@ -98,6 +98,32 @@ function routeTreeIsCurrent(): boolean {
  *   +78 kB gzip on the eager payload, plus React's dev-mode runtime checks).
  *   Vite inlined `'production'`; this define restores that.
  */
+/**
+ * The split-deployment API base URL, from `MANGO_API_URL` or the deprecated
+ * `VITE_API_URL` alias.
+ *
+ * The old name outlived the bundler it was named after — nothing in this repo
+ * has used Vite since the migration, and a `VITE_` prefix sends the next reader
+ * looking for a `vite.config.ts` that does not exist. The alias stays for one
+ * release so an existing build script keeps working, and says so out loud when
+ * it is the one that supplied the value.
+ */
+function resolveApiUrlOverride(): string {
+  const current = process.env.MANGO_API_URL;
+  if (current) return current;
+
+  const deprecated = process.env.VITE_API_URL;
+  if (deprecated) {
+    console.warn(
+      '[build] VITE_API_URL is deprecated and will be removed in a future release; rename it to MANGO_API_URL.'
+    );
+    return deprecated;
+  }
+  // Always a string: an unset variable would otherwise survive the define as a
+  // bare `process` reference and throw a ReferenceError in the browser.
+  return '';
+}
+
 async function buildFrontend(options: BuildFrontendOptions = {}): Promise<void> {
   const production = !options.dev;
   // Only the dev loop skips: a production build must be byte-identical to one
@@ -127,12 +153,12 @@ async function buildFrontend(options: BuildFrontendOptions = {}): Promise<void> 
       'process.env.NODE_ENV': JSON.stringify(production ? 'production' : 'development'),
       // The split-deployment override read by src/lib/api-base-url.ts, always
       // defined (empty string when unset) so the bundle never contains a bare
-      // `process` reference. A define, not `env: 'VITE_*'`: the env option
+      // `process` reference. A define, not `env: 'MANGO_*'`: the env option
       // rewrites the member read but leaves any surrounding
       // `typeof process` guard to evaluate false in a browser and discard the
       // inlined value, and an unset variable survives verbatim — both
       // measured on 1.4.0.
-      'process.env.VITE_API_URL': JSON.stringify(process.env.VITE_API_URL ?? ''),
+      'process.env.MANGO_API_URL': JSON.stringify(resolveApiUrlOverride()),
     },
     metafile: true,
     // Auto-memoization. `@vitejs/plugin-react` did not run it, so this is a

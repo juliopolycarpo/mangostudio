@@ -6,31 +6,31 @@ import { afterEach, describe, expect, it } from 'bun:test';
  * and the module never has to be re-evaluated.
  */
 function setApiUrl(value: string) {
-  process.env.VITE_API_URL = value;
+  process.env.MANGO_API_URL = value;
 }
 
 afterEach(() => {
   // Assigning `undefined` would leave the string "undefined" behind, which the
   // module reads as an explicit base URL.
-  delete process.env.VITE_API_URL;
+  delete process.env.MANGO_API_URL;
 });
 
 describe('getApiBaseUrl', () => {
-  it('prefers explicit VITE_API_URL when set', async () => {
+  it('prefers explicit MANGO_API_URL when set', async () => {
     setApiUrl('http://custom-api:9000');
     const { getApiBaseUrl } = await import('@/lib/api-base-url');
 
     expect(getApiBaseUrl()).toBe('http://custom-api:9000');
   });
 
-  it('trims trailing slashes from explicit VITE_API_URL', async () => {
+  it('trims trailing slashes from explicit MANGO_API_URL', async () => {
     setApiUrl('http://example.com///');
     const { getApiBaseUrl } = await import('@/lib/api-base-url');
 
     expect(getApiBaseUrl()).toBe('http://example.com');
   });
 
-  it('falls back to window.location.origin when VITE_API_URL is not set', async () => {
+  it('falls back to window.location.origin when MANGO_API_URL is not set', async () => {
     const { getApiBaseUrl } = await import('@/lib/api-base-url');
 
     // happy-dom registers the suite at http://localhost:3001
@@ -82,7 +82,7 @@ describe('getWebSocketBaseUrl', () => {
     expect(getWebSocketBaseUrl()).toBe('localhost:3001');
   });
 
-  it('derives the scheme from the browser origin when VITE_API_URL is not set', async () => {
+  it('derives the scheme from the browser origin when MANGO_API_URL is not set', async () => {
     const { getWebSocketBaseUrl } = await import('@/lib/api-base-url');
 
     // happy-dom serves the suite over http, so the origin maps to a ws:// base

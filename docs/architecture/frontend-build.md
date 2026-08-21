@@ -25,8 +25,16 @@ server's own origin — `http://localhost:<port>`, `http://127.0.0.1:<port>`, an
 ## Serving the bundle from another origin
 
 A split deployment — the bundle on a CDN or a separate web server, this API somewhere else —
-is still supported, and it is what the `VITE_API_URL` build-time override exists for. Nothing
+is still supported, and it is what the `MANGO_API_URL` build-time override exists for. Nothing
 can derive that origin, so it is named explicitly:
+
+**It requires building the frontend yourself.** `MANGO_API_URL` is consumed by `Bun.build()`'s
+`define`, so it is baked into the bundle at build time; released artifacts are all built with
+it unset, and the branch that reads it is then dead-code-eliminated out of the shipped bundle.
+There is no runtime equivalent and cannot be a useful one — in this topology the API does not
+serve the shell, so it has nothing to inject a value into. `VITE_API_URL` is accepted as a
+deprecated alias for one release and warns at build time; it is named after a bundler this
+repo no longer uses.
 
 ```toml
 [server]

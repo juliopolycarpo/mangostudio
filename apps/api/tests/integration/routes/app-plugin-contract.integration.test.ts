@@ -108,7 +108,7 @@ describe('CORS policy', () => {
     expect(response.headers.get('vary')).toContain('Origin');
   });
 
-  // The split deployment `VITE_API_URL` exists for: the bundle is served from
+  // The split deployment `MANGO_API_URL` exists for: the bundle is served from
   // another origin, and `server.allowedOrigins` is the only thing that can tell
   // this API about it. The test environment sets that key, so an accepted
   // foreign origin here is evidence the setting reaches the CORS middleware.

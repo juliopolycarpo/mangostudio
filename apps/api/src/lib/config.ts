@@ -45,7 +45,7 @@ export interface MangoConfig {
     publicUrl: string;
     /**
      * Extra browser origins allowed to call this API, for the split deployment
-     * the `VITE_API_URL` build-time override exists for: the frontend bundle is
+     * the `MANGO_API_URL` build-time override exists for: the frontend bundle is
      * served from one origin and this API answers on another. Added to the
      * server's own origins rather than replacing them, so a same-origin install
      * keeps working. Empty means same-origin only.
@@ -719,7 +719,7 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
   // so this origin must be present or same-origin requests from the served
   // frontend are rejected.
   //
-  // A split deployment — the bundle built with VITE_API_URL and served from
+  // A split deployment — the bundle built with MANGO_API_URL and served from
   // somewhere else — has no origin here to derive, so the user names it:
   // `server.allowedOrigins` in config.toml, or ALLOWED_ORIGINS in the
   // environment. Those are unioned in rather than replacing the defaults, so

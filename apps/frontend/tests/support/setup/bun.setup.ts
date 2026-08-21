@@ -21,16 +21,21 @@ import { resetTestSession } from './auth-client-stub';
 expect.extend(matchers);
 
 /**
- * `src/lib/api-base-url.ts` reads `process.env.VITE_API_URL` as a bare member
+ * `src/lib/api-base-url.ts` reads `process.env.MANGO_API_URL` as a bare member
  * access, which the bundler replaces with a literal — but under `bun test`
  * nothing bundles, so the read hits the real environment. A developer or CI
  * machine that exports the variable would silently repoint every request away
  * from the happy-dom origin, past every `createFetchScenario()` key and into
  * `unreachableFetch` below.
  *
- * Unset here so the suite always starts from the same base URL. The tests that
- * cover the variable set and delete it themselves, per test.
+ * Both names are unset: the deprecated `VITE_API_URL` alias is resolved in
+ * `build.ts` rather than here, but a machine that still exports it would repoint
+ * a real build, and leaving it set while the suite runs invites the confusion of
+ * a passing test beside a differently-configured build.
+ *
+ * The tests that cover the variable set and delete it themselves, per test.
  */
+delete process.env.MANGO_API_URL;
 delete process.env.VITE_API_URL;
 
 /**
