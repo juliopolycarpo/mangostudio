@@ -3,6 +3,11 @@ import type { AppSettings, AppSettingsPutBody } from '@mangostudio/shared/app-se
 import { DEFAULT_APP_SETTINGS, MAX_TOOL_ITERATIONS_MAX } from '@mangostudio/shared/app-settings';
 import { en } from '@mangostudio/shared/i18n';
 import { act, renderHook, screen, waitFor } from '../../support/harness/render';
+import {
+  advanceTimersByTimeAsync,
+  restoreRealTimers,
+  useFakeTimers,
+} from '../../support/harness/timers';
 
 // No Bun equivalent for `vi.mocked` — the `jest.fn()` handles created here are
 // what the factory below hands back, so keep them instead.
@@ -345,6 +350,14 @@ describe('useGlobalSettings', () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
+    // Fake timers only from here: the initial load above needs real ones, and
+    // the gap between keystrokes has to be shorter than the 300ms debounce by
+    // construction rather than by luck. With real timers this slept 40ms four
+    // times, and a stall past 300ms anywhere in the burst fires an early PUT —
+    // measured once in seven full-lane runs, where the assertion then read
+    // "dr" instead of "draft".
+    useFakeTimers();
+
     // Separate acts, so each keystroke commits its own render. The debounce has
     // to survive those re-renders: a timer keyed on the unstable `useMutation`
     // result would be flushed by the effect cleanup on every one of them.
@@ -352,10 +365,13 @@ describe('useGlobalSettings', () => {
       act(() => {
         result.current.setTextSystemPrompt(value);
       });
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 40));
-      });
+      await advanceTimersByTimeAsync(40);
     }
+
+    expect(mockPut).not.toHaveBeenCalled();
+
+    await advanceTimersByTimeAsync(300);
+    await restoreRealTimers();
 
     await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
     expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
