@@ -4,8 +4,8 @@
  * `text` fallback, and raw-markdown extraction used by the copy action.
  */
 
+import { describe, expect, it } from 'bun:test';
 import type { Message, MessagePart } from '@mangostudio/shared';
-import { describe, expect, it } from 'vitest';
 import {
   extractRawMarkdown,
   isImageInteraction,

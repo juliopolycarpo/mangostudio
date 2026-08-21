@@ -9,8 +9,8 @@
  * to pt-BR alone would render an English string to a Portuguese user.
  */
 
+import { describe, expect, it } from 'bun:test';
 import { en, type Messages, ptBR } from '@mangostudio/shared/i18n';
-import { describe, expect, it } from 'vitest';
 import { revertedMessage, uncheckpointedWarning } from '@/features/chat/lib/uncheckpointed-copy';
 
 const locales: ReadonlyArray<[string, Messages['chat']['fileCheckpoints']]> = [

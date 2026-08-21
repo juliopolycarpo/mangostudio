@@ -1,5 +1,5 @@
+import { describe, expect, it, spyOn } from 'bun:test';
 import { QueryClient } from '@tanstack/react-query';
-import { describe, expect, it, vi } from 'vitest';
 import { registerCapabilityInvalidationSources } from '../../../../src/features/chat/hooks/capability-invalidation';
 import { chatCapabilitiesQueryOptions } from '../../../../src/features/chat/hooks/use-chat-capabilities';
 import { chatKeys } from '../../../../src/features/chat/queries';
@@ -100,7 +100,7 @@ describe('capability invalidation registry', () => {
   it('coalesces a burst of source updates into one capability invalidation', async () => {
     const queryClient = new QueryClient();
     const unregister = registerCapabilityInvalidationSources(queryClient);
-    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+    const invalidateQueries = spyOn(queryClient, 'invalidateQueries');
 
     queryClient.setQueryData(toolSettingsKeys.list(), { tools: [] });
     queryClient.setQueryData(skillSettingsKeys.list(), { skills: [] });

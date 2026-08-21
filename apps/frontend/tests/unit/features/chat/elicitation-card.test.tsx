@@ -5,18 +5,25 @@
  * of showing the generic submit error.
  */
 
+import { describe, expect, it, jest, mock } from 'bun:test';
 import type { MessagePart } from '@mangostudio/shared';
-import { describe, expect, it, vi } from 'vitest';
-import { ElicitationCard } from '../../../../src/features/chat/components/ElicitationCard';
-import { McpElicitationGoneError } from '../../../../src/services/mcp-elicitation-service';
 import { fireEvent, render, screen, waitFor } from '../../../support/harness/render';
 
-const { respondMock } = vi.hoisted(() => ({ respondMock: vi.fn() }));
+const respondMock = jest.fn();
 
-vi.mock('../../../../src/services/mcp-elicitation-service', async (importOriginal) => ({
-  ...(await importOriginal<object>()),
+// Import the real namespace, register the mock over it, then import the
+// subject — `mock.module` is not hoisted and static imports are.
+const actualService = await import('../../../../src/services/mcp-elicitation-service');
+
+mock.module('../../../../src/services/mcp-elicitation-service', () => ({
+  ...actualService,
   respondMcpElicitation: respondMock,
 }));
+
+const { McpElicitationGoneError } = actualService;
+const { ElicitationCard } = await import(
+  '../../../../src/features/chat/components/ElicitationCard'
+);
 
 type ElicitationPart = Extract<MessagePart, { type: 'mcp_elicitation' }>;
 

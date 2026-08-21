@@ -5,20 +5,29 @@
  * UserMessageBubble is mocked with a render recorder to assert that behavior.
  */
 
+import { describe, expect, it, mock } from 'bun:test';
 import type { Message } from '@mangostudio/shared';
 import { useCallback } from 'react';
-import { describe, expect, it, vi } from 'vitest';
-import { ChatMessageRow } from '../../../../src/features/chat/components/ChatMessageRow';
 import { render } from '../../../support/harness/render';
 
-const { renders } = vi.hoisted(() => ({ renders: [] as string[] }));
+// `vi.hoisted` existed because `vi.mock` is hoisted above the file's own
+// statements. `mock.module` is not hoisted, so a plain const is enough.
+const renders: string[] = [];
 
-vi.mock('../../../../src/features/chat/components/UserMessageBubble', () => ({
-  UserMessageBubble: ({ msg }: { msg: Message }) => {
-    renders.push(msg.id);
-    return <div data-testid={`bubble-${msg.id}`}>{msg.id}</div>;
-  },
+// Declared at module level rather than inline in the factory: biome's
+// `noComponentHookFactories` rejects a component defined inside a function.
+function UserMessageBubbleStub({ msg }: { msg: Message }) {
+  renders.push(msg.id);
+  return <div data-testid={`bubble-${msg.id}`}>{msg.id}</div>;
+}
+
+mock.module('../../../../src/features/chat/components/UserMessageBubble', () => ({
+  UserMessageBubble: UserMessageBubbleStub,
 }));
+
+// Below the mock, never as a static import: those are evaluated first and the
+// row would bind the real bubble.
+const { ChatMessageRow } = await import('../../../../src/features/chat/components/ChatMessageRow');
 
 function makeMessage(id: string, overrides: Partial<Message> = {}): Message {
   return {

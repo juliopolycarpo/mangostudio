@@ -4,9 +4,9 @@
  * decision is made, not only in the result afterwards.
  */
 
+import { describe, expect, it, jest } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
 import { screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
 import { RevertFileChangesDialog } from '@/features/chat/components/RevertFileChangesDialog';
 import { render } from '../../../support/harness/render';
 
@@ -17,8 +17,8 @@ function renderDialog(uncheckpointedSources?: ReadonlyArray<'shell' | 'mcp'>) {
     <RevertFileChangesDialog
       isReverting={false}
       uncheckpointedSources={uncheckpointedSources}
-      onConfirm={vi.fn()}
-      onCancel={vi.fn()}
+      onConfirm={jest.fn()}
+      onCancel={jest.fn()}
     />
   );
 }

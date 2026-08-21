@@ -4,9 +4,9 @@
  * pinned panel live without a refetch round-trip.
  */
 
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { TodoList } from '@mangostudio/shared/todos';
 import { useQueryClient } from '@tanstack/react-query';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { setChatTodos, useChatTodos } from '../../../../src/features/chat/hooks/use-chat-todos';
 import { act, renderHook, waitFor } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
