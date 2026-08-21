@@ -17,7 +17,7 @@ import {
   useTestMcpServer,
 } from '../../../src/features/settings/mcp/hooks/use-mcp-servers';
 import { mcpServerKeys } from '../../../src/features/settings/mcp/queries';
-import { act, renderHook, waitFor } from '../../support/harness/render';
+import { act, flushAsyncRender, renderHook, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const SERVER: McpServer = {
@@ -99,9 +99,7 @@ describe('MCP server hooks', () => {
     // The query cache's capability-invalidation subscriber reacts on a
     // queued microtask behind the mutation settling — drain it here so it
     // does not fire, unwrapped in `act`, during the next test.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    await flushAsyncRender();
   });
 
   it('invalidates capability projections after applying a portable import', async () => {

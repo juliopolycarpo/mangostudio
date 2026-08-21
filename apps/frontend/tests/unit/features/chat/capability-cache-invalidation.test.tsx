@@ -24,7 +24,7 @@ import { skillSettingsKeys } from '../../../../src/features/settings/skills/quer
 import { useUpdateToolSetting } from '../../../../src/features/settings/tools/hooks/use-tool-settings';
 import { toolSettingsKeys } from '../../../../src/features/settings/tools/queries';
 import { useGlobalSettings } from '../../../../src/hooks/use-global-settings';
-import { act, renderHook, waitFor } from '../../../support/harness/render';
+import { act, flushAsyncRender, renderHook, waitFor } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 
 const CAPABILITIES_KEY: readonly unknown[] = chatCapabilitiesQueryOptions({
@@ -46,11 +46,7 @@ function seedCapabilityProjection(queryClient: ReturnType<typeof useQueryClient>
  * test body — four "update to TestComponent … not wrapped in act(...)" blocks
  * that never appear when this file runs alone.
  */
-async function drainCapabilityInvalidation() {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
-}
+const drainCapabilityInvalidation = flushAsyncRender;
 
 async function seedSourceThenProjection(
   queryClient: ReturnType<typeof useQueryClient>,

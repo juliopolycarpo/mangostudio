@@ -8,7 +8,7 @@ import type { Chat } from '@mangostudio/shared';
 import { createMockChat } from '@mangostudio/shared/test-utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type * as ApiClient from '../../../src/lib/api-client';
-import { act, renderHook, waitFor } from '../../support/harness/render';
+import { act, flushAsyncRender, renderHook, waitFor } from '../../support/harness/render';
 
 const EXISTING_CHAT: Chat = createMockChat({
   id: 'chat-existing',
@@ -54,11 +54,7 @@ function fail(message: string) {
  * microtask behind a mutation settling — finish inside `act`, not leaking
  * into the next test.
  */
-async function drainCapabilityInvalidation() {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
-}
+const drainCapabilityInvalidation = flushAsyncRender;
 
 describe('useCreateChatMutation', () => {
   beforeEach(() => {

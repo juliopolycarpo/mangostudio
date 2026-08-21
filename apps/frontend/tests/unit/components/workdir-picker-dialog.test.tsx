@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import userEvent from '@testing-library/user-event';
 import { WorkdirPickerDialog } from '../../../src/features/workspace/WorkdirPickerDialog';
-import { act, fireEvent, render, screen, waitFor } from '../../support/harness/render';
+import {
+  act,
+  fireEvent,
+  flushAsyncRender,
+  render,
+  screen,
+  waitFor,
+} from '../../support/harness/render';
 
 /**
  * Lets the last browse request the dialog fired finish inside `act`.
@@ -10,11 +17,7 @@ import { act, fireEvent, render, screen, waitFor } from '../../support/harness/r
  * test body ends — which leaves its state update outside `act` and prints an
  * "update was not wrapped in act(...)" block on a green test.
  */
-async function settlePendingBrowse() {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
-}
+const settlePendingBrowse = flushAsyncRender;
 
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
