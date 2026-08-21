@@ -650,6 +650,27 @@ async function smokeTest(): Promise<void> {
       pass('/index.html → 200 HTML');
     }
 
+    // /favicon.ico → 200, and not the SPA shell.
+    //
+    // index.html references four unhashed root assets (favicon, two icons, the
+    // manifest) and the binary serves them through routes that used to derive
+    // an ETag from `Bun.file().stat().catch(…)`. For an embedded file `stat()`
+    // returns `undefined` synchronously rather than a promise, so `.catch` on
+    // it is itself a TypeError thrown out of the handler and the binary
+    // answered 500 with Bun's own HTML error page. Nothing else in the suite
+    // can see that: the unit fixtures point at real temp files, which stat
+    // fine, and only this script runs the compiled binary.
+    {
+      const res = await fetch(`http://127.0.0.1:${PORT}/favicon.ico`);
+      if (res.status !== 200)
+        fail(`/favicon.ico returned ${res.status} (embedded asset not served)`);
+      const ct = res.headers.get('content-type') ?? '';
+      if (ct.includes('text/html'))
+        fail(`/favicon.ico returned text/html — the SPA fallback answered instead of the asset`);
+      if ((await res.arrayBuffer()).byteLength === 0) fail('/favicon.ico returned an empty body');
+      pass('/favicon.ico → 200 (embedded unhashed asset)');
+    }
+
     // /assets/fake.js → 404 (must NOT be intercepted by SPA fallback)
     {
       const res = await fetch(`http://127.0.0.1:${PORT}/assets/fake.js`);

@@ -133,6 +133,25 @@ function statFile(path: string): Stats | null {
   }
 }
 
+/**
+ * `BunFile.stat()`, or null when there is nothing to stat.
+ *
+ * Measured on the pinned Bun 1.4.0: for a file embedded in a compiled binary
+ * `stat()` returns `undefined` — not a rejected promise, not a promise at all —
+ * so `file.stat().catch(…)` throws `undefined is not an object` synchronously
+ * out of the handler and the binary answers 500 with Bun's own error page. A
+ * missing file on disk is the other shape: `stat()` rejects with ENOENT. Both
+ * have to be caught here, and neither can be told apart from the other by the
+ * result alone — `exists()` is what separates "embedded, no inode" from "gone".
+ */
+async function statBunFile(file: Bun.BunFile): Promise<Stats | null> {
+  try {
+    return ((await file.stat()) as Stats | undefined) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function serveUnhashedFile(filePath: string, request: Request): Promise<Response> {
   // The routes below are enumerated once at boot, but the file behind one can
   // disappear afterwards: `build.ts` removes `dist/` before every rebuild, so a
@@ -140,8 +159,19 @@ async function serveUnhashedFile(filePath: string, request: Request): Promise<Re
   // nothing — would otherwise throw ENOENT out of the handler and answer 500.
   // A file that is not there is a 404, the same answer the static plugin gave.
   const file = Bun.file(filePath);
-  const stats = await file.stat().catch(() => null);
-  if (!stats) return new Response(null, { status: 404 });
+  // No stat means one of two things, and they are not the same answer: the
+  // file is gone (disk, ENOENT), or it is embedded in a compiled binary, where
+  // the bytes are there and there is simply no inode behind them. `exists()`
+  // is what separates them. Answering 404 for both — or letting `stat()`'s
+  // undefined return throw — broke every unhashed root asset the shipped
+  // binary serves, and all four are referenced by index.html. See statBunFile.
+  const stats = await statBunFile(file);
+  if (!stats) {
+    if (!(await file.exists())) return new Response(null, { status: 404 });
+    // Embedded: the content cannot change within one binary, so there is
+    // nothing to revalidate against and no ETag to derive.
+    return new Response(file, { headers: { 'Cache-Control': UNHASHED_CACHE_CONTROL } });
+  }
   const etag = `"${stats.size.toString(16)}-${Math.trunc(stats.mtimeMs).toString(16)}"`;
   const headers = { 'Cache-Control': UNHASHED_CACHE_CONTROL, ETag: etag };
   if (matchesEtag(request.headers.get('if-none-match'), etag)) {
