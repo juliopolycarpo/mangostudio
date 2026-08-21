@@ -28,8 +28,12 @@
       "ignoreBinaries": ["mkfifo"]
     },
     "apps/frontend": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "tests/support/setup/motion-react-stub.tsx"],
-      "project": ["src/**/*.{ts,tsx}", "src/**/*.css", "tests/**/*.{ts,tsx}", "*.config.ts"]
+      "entry": [
+        "src/main.tsx",
+        "tests/**/*.test.{ts,tsx}",
+        "tests/support/setup/motion-react-stub.tsx"
+      ],
+      "project": ["src/**/*.{ts,tsx}", "src/**/*.css", "tests/**/*.{ts,tsx}"]
     },
     "apps/shared": {
       "entry": ["tests/**/*.test.ts"],

@@ -1,3 +1,5 @@
+import { jest } from 'bun:test';
+
 export type FetchScenarioKey = `${string} ${string}`;
 
 interface FetchScenarioResponse {
@@ -10,11 +12,12 @@ type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Pro
 
 /**
  * The mock surface the scenario exposes, spelled out rather than inferred from
- * a runner's `vi.fn` / `jest.fn` return type.
+ * `jest.fn`'s return type.
  *
- * Naming it here is what lets one helper serve both test lanes: `bun test` and
- * Vitest each supply their own factory (below), and both runners' `expect`
- * recognizes their own mock for `toHaveBeenCalledTimes` / `toHaveBeenCalledWith`.
+ * The declared interface is what 37 test files' type inference hangs off, and
+ * `settings-page-secret.integration.test.tsx` names it explicitly — keep it
+ * narrower than `Mock` so a scenario can only be driven through the calls the
+ * helper actually supports.
  */
 export interface FetchScenarioMock {
   (input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
@@ -23,23 +26,6 @@ export interface FetchScenarioMock {
   mockImplementation(implementation: FetchImplementation): unknown;
   mockResolvedValue(value: Response): unknown;
   getMockImplementation(): FetchImplementation | undefined;
-}
-
-export type FetchScenarioMockFactory = (implementation: FetchImplementation) => FetchScenarioMock;
-
-let mockFactory: FetchScenarioMockFactory | undefined;
-
-/**
- * Installs the active runner's mock factory.
- *
- * Called once per test file from the lane's setup: `bun.setup.ts` passes
- * `jest.fn`, `vitest.setup.ts` passes `vi.fn`. Keeping the choice out of this
- * module is what keeps `vitest` out of the `bun test` module graph — importing
- * it here would work, but it would put the whole Vitest runtime behind 37 test
- * files that no longer use it.
- */
-export function setFetchMockFactory(factory: FetchScenarioMockFactory): void {
-  mockFactory = factory;
 }
 
 function getRequestUrl(input: RequestInfo | URL): URL {
@@ -79,15 +65,12 @@ function getRequestMethod(input: RequestInfo | URL, init?: RequestInit): string 
  * @returns Helpers to register mocked responses and install a global fetch mock.
  */
 export function createFetchScenario() {
-  if (!mockFactory) {
-    throw new Error(
-      'createFetchScenario() ran before setFetchMockFactory(). The test lane setup did not load — check `[test] preload` in bunfig.toml, or `setupFiles` in vitest.config.ts.'
-    );
-  }
-
   const originalFetch = globalThis.fetch;
   const responses = new Map<FetchScenarioKey, FetchScenarioResponse>();
-  const fetchMock = mockFactory((input: RequestInfo | URL, init?: RequestInit) => {
+  // `jest.fn` is generic over the implementation it wraps, so it satisfies the
+  // declared surface structurally but not nominally. `FetchScenarioMock` is
+  // what the scenario's consumers are held to.
+  const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const method = getRequestMethod(input, init);
     const url = getRequestUrl(input);
     const key = `${method} ${url.pathname}${url.search}` as FetchScenarioKey;
@@ -112,7 +95,7 @@ export function createFetchScenario() {
         },
       })
     );
-  });
+  }) as unknown as FetchScenarioMock;
 
   return {
     fetchMock,
@@ -133,9 +116,8 @@ export function createFetchScenario() {
      * Installs the scenario fetch mock on globalThis.
      */
     install() {
-      // Assigned directly rather than through `vi.stubGlobal`, which does not
-      // exist under `bun test`. Both lanes restore the captured original in
-      // `restore()`, so nothing depends on a runner-managed unstub.
+      // Assigned directly — `bun test` has no runner-managed global stubbing,
+      // so `restore()` puts back the captured original itself.
       globalThis.fetch = fetchMock as unknown as typeof fetch;
       return this;
     },
@@ -145,10 +127,10 @@ export function createFetchScenario() {
      */
     restore() {
       responses.clear();
-      // `mockClear`, not `mockReset`: the two runners disagree about what reset
-      // means. Vitest puts back the implementation `vi.fn(impl)` was given;
-      // jest and `bun test` strip it, so the second test in a file would get a
-      // `fetch` that returns `undefined` and every request after it fails.
+      // `mockClear`, not `mockReset`: under `bun test` a reset strips the
+      // implementation `jest.fn(impl)` was given, so the second test in a file
+      // would get a `fetch` that returns `undefined` and every request after
+      // it fails.
       fetchMock.mockClear();
       globalThis.fetch = originalFetch;
     },

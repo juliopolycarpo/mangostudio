@@ -1,29 +1,23 @@
 /**
- * The `bun test` counterpart to `vitest.setup.ts`: jest-dom matchers, the mock
- * factory the fetch scenario needs, DOM observer stubs, and per-test cleanup.
+ * The suite-wide `bun test` setup: jest-dom matchers, DOM observer stubs, and
+ * per-test cleanup.
  *
  * Loaded as the second `[test] preload` entry, after `dom-setup.ts` has put
  * `document` on `globalThis`. Everything that touches the DOM belongs here,
  * not there.
  *
- * The global `@/lib/auth-client` stub that `vitest.setup.ts` installs with
- * `vi.mock` is not here either: it is a `tsconfig.test.json` `paths` entry
- * pointing at `auth-client-stub.ts`, so it stays resolver-level instead of
- * mutating a module graph that `bun test` shares across files.
+ * The global `@/lib/auth-client` stub is not here either: it is a
+ * `tsconfig.test.json` `paths` entry pointing at `auth-client-stub.ts`, so it
+ * stays resolver-level instead of mutating a module graph that `bun test`
+ * shares across files.
  */
 
-import { afterEach, expect, jest } from 'bun:test';
+import { afterEach, expect } from 'bun:test';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { cleanup } from '@testing-library/react';
-import { type FetchScenarioMockFactory, setFetchMockFactory } from '../mocks/create-fetch-scenario';
 import { resetTestSession } from './auth-client-stub';
 
 expect.extend(matchers);
-
-// `jest.fn` is generic over the implementation it wraps, so it satisfies the
-// factory structurally but not nominally. The declared surface in
-// `create-fetch-scenario.ts` is what both lanes are held to.
-setFetchMockFactory(jest.fn as unknown as FetchScenarioMockFactory);
 
 /**
  * The frontend suite never talks to a real server, so `fetch` starts out unable
@@ -102,8 +96,8 @@ globalThis.ResizeObserver = ResizeObserverMock;
 globalThis.IntersectionObserver =
   IntersectionObserverMock as unknown as typeof IntersectionObserver;
 
-// Vitest's `globals: true` installs `cleanup` for us; `bun test` does not, and
-// without it a second render in the same file finds the first one's DOM.
+// `bun test` never auto-registers testing-library's `cleanup`; without it a
+// second render in the same file finds the first one's DOM.
 afterEach(() => {
   cleanup();
   resetTestSession();

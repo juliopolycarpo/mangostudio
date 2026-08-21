@@ -147,12 +147,10 @@ describe('bun lane coverage', () => {
     expect(importers).toEqual([]);
   });
 
-  it('keeps the Vitest lane matching nothing', () => {
-    // Left at its default, `include` collects all 167 files a second time and
-    // every one of them fails on `import … from 'bun:test'`.
-    const config = readFileSync(join(WORKSPACE_ROOT, 'vitest.config.ts'), 'utf8');
-
-    expect(config).toContain('include: []');
+  it('keeps the Vitest lane deleted', () => {
+    // A reintroduced `vitest.config.ts` at its default `include` would collect
+    // every file a second time and fail each one on `import … from 'bun:test'`.
+    expect(existsSync(join(WORKSPACE_ROOT, 'vitest.config.ts'))).toBe(false);
   });
 
   it('runs the setup files bunfig.toml preloads, in the documented order', () => {
