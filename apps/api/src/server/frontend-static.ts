@@ -8,6 +8,7 @@ import { join, sep } from 'node:path';
 import { staticPlugin } from '@elysia/static';
 import { NotFound } from 'elysia';
 import type { App } from '../app';
+import { matchesEtag } from '../lib/http-cache';
 import { isSpaRoute } from '../lib/spa-guard';
 import { type EmbeddedFrontendFiles, getEmbeddedFrontend } from './embedded-frontend';
 import { frontendNotFound, setFrontendFallback } from './frontend-fallback';
@@ -71,7 +72,7 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
     return;
   }
 
-  const serveEmbeddedIndex = () => serveIndexFile(indexPath, 'no-cache');
+  const serveEmbeddedIndex = () => serveIndexFile(indexPath, SHELL_CACHE_CONTROL);
 
   app.get('/', serveEmbeddedIndex);
 
@@ -81,8 +82,8 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
       continue;
     }
     const filePath = files[urlPath];
-    if (urlPath.startsWith('/assets/')) {
-      const headers = { 'Cache-Control': 'public, max-age=31536000, immutable' };
+    if (urlPath.startsWith(`/${HASHED_ASSET_DIR}/`)) {
+      const headers = { 'Cache-Control': HASHED_CACHE_CONTROL };
       app.get(urlPath, () => new Response(Bun.file(filePath), { headers }));
       continue;
     }
@@ -101,6 +102,19 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
 const HASHED_ASSET_DIR = 'assets';
 
 /**
+ * The cache policy, stated once for both the embedded and the disk branch.
+ *
+ * Hashed `assets/` filenames carry a content hash, so a changed file is a
+ * different URL and the old one can never go stale: a year, `immutable`. The
+ * SPA shell is the opposite — every build renames the bundles it points at, so
+ * it must revalidate on every use or a cached shell requests scripts that no
+ * longer exist and renders blank.
+ */
+const HASHED_MAX_AGE = 31_536_000;
+const HASHED_CACHE_CONTROL = `public, max-age=${HASHED_MAX_AGE}, immutable`;
+const SHELL_CACHE_CONTROL = 'no-cache';
+
+/**
  * Unhashed root files (favicon, icons, manifest, build-info) previously sat
  * behind `staticPlugin({ prefix: '/' })`, which served them with its defaults:
  * `Cache-Control: public, max-age=86400`, an ETag and a 304 short-circuit.
@@ -109,9 +123,6 @@ const HASHED_ASSET_DIR = 'assets';
  * rebuild that replaces the file invalidates the cached copy.
  */
 const UNHASHED_CACHE_CONTROL = 'public, max-age=86400';
-
-/** One year, for the content-hashed `assets/` output whose URL changes with it. */
-const HASHED_MAX_AGE = 31_536_000;
 
 /** `statSync`, or null when the entry is gone or unreadable. */
 function statFile(path: string): Stats | null {
@@ -122,20 +133,21 @@ function statFile(path: string): Stats | null {
   }
 }
 
-function serveUnhashedFile(filePath: string, request: Request): Response {
+async function serveUnhashedFile(filePath: string, request: Request): Promise<Response> {
   // The routes below are enumerated once at boot, but the file behind one can
   // disappear afterwards: `build.ts` removes `dist/` before every rebuild, so a
   // request that lands in that window — or after a rebuild that failed and left
   // nothing — would otherwise throw ENOENT out of the handler and answer 500.
   // A file that is not there is a 404, the same answer the static plugin gave.
-  const stats = statFile(filePath);
+  const file = Bun.file(filePath);
+  const stats = await file.stat().catch(() => null);
   if (!stats) return new Response(null, { status: 404 });
   const etag = `"${stats.size.toString(16)}-${Math.trunc(stats.mtimeMs).toString(16)}"`;
   const headers = { 'Cache-Control': UNHASHED_CACHE_CONTROL, ETag: etag };
-  if (request.headers.get('If-None-Match') === etag) {
+  if (matchesEtag(request.headers.get('if-none-match'), etag)) {
     return new Response(null, { status: 304, headers });
   }
-  return new Response(Bun.file(filePath), { headers });
+  return new Response(file, { headers });
 }
 
 /**
@@ -148,12 +160,13 @@ function serveUnhashedFile(filePath: string, request: Request): Response {
 function unhashedAssetPaths(frontendDir: string): string[] {
   return (
     readdirSync(frontendDir, { recursive: true, encoding: 'utf8' })
+      // index.html is served by the explicit GET / route and the SPA fallback.
+      // Filtered before the stat so the hashed bulk of dist/ is never stat'ed.
+      .filter((entry) => entry !== 'index.html' && !entry.startsWith(`${HASHED_ASSET_DIR}${sep}`))
       // `statFile`, not `statSync`: a dangling symlink or an entry removed
       // between the readdir and the stat would otherwise throw out of
       // `registerFrontend()` and stop the server from booting at all.
       .filter((entry) => statFile(join(frontendDir, entry))?.isFile() === true)
-      // index.html is served by the explicit GET / route and the SPA fallback.
-      .filter((entry) => entry !== 'index.html' && !entry.startsWith(`${HASHED_ASSET_DIR}${sep}`))
       // Recursive readdir yields platform separators; URL paths always use '/'.
       .map((entry) => entry.split(sep).join('/'))
   );
@@ -178,11 +191,7 @@ function unhashedAssetPaths(frontendDir: string): string[] {
  */
 function registerSpa(app: App, frontendDir: string): void {
   const indexPath = join(frontendDir, 'index.html');
-  // `no-cache`, matching the embedded branch. Without an explicit directive the
-  // browser applies its own heuristic freshness to the shell, and every build
-  // renames the hashed bundles it points at — so a cached shell after a rebuild
-  // or an upgrade requests scripts that no longer exist and renders blank.
-  const serveIndex = () => serveIndexFile(indexPath, 'no-cache');
+  const serveIndex = () => serveIndexFile(indexPath, SHELL_CACHE_CONTROL);
   const assetsDir = join(frontendDir, HASHED_ASSET_DIR);
 
   // Registered before the plugin: the static plugin may register GET / with an
