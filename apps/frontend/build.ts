@@ -11,6 +11,7 @@
  * Usage: bun ./build.ts [--dev]
  */
 
+import { readdirSync, statSync, utimesSync } from 'node:fs';
 import { cp, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,7 +25,7 @@ const HTML_TEMPLATE = join(ROOT, 'index.html');
 /** The `<script>` tag `index.html` carries in source, replaced by the built one. */
 const SOURCE_SCRIPT_TAG = '<script type="module" src="./src/main.tsx"></script>';
 
-export interface BuildFrontendOptions {
+interface BuildFrontendOptions {
   /** Skip minify and the React Compiler pass. Halves build time for the dev loop. */
   readonly dev?: boolean;
 }
@@ -52,6 +53,31 @@ async function generateRouteTree(): Promise<void> {
 }
 
 /**
+ * True when `src/routeTree.gen.ts` is newer than everything that feeds it, so
+ * the dev rebuild loop can skip the `tsr generate` spawn — measured at ~1.1s
+ * of a ~3s dev rebuild, paid on every save anywhere under `src/`.
+ *
+ * Directory mtimes are compared on purpose: deleting or renaming a route file
+ * bumps no surviving file's mtime, only its parent directory's, so a file-only
+ * scan would keep serving the deleted route.
+ */
+function routeTreeIsCurrent(): boolean {
+  const routesDir = join(ROOT, 'src', 'routes');
+  try {
+    const generated = statSync(join(ROOT, 'src', 'routeTree.gen.ts')).mtimeMs;
+    const inputs = readdirSync(routesDir, { recursive: true, encoding: 'utf8' }).reduce(
+      (newest, entry) => Math.max(newest, statSync(join(routesDir, entry)).mtimeMs),
+      Math.max(statSync(routesDir).mtimeMs, statSync(join(ROOT, 'tsr.config.json')).mtimeMs)
+    );
+    return generated >= inputs;
+  } catch {
+    // A missing or mid-removal entry means the answer is unknowable — say
+    // stale and let the generator settle it.
+    return false;
+  }
+}
+
+/**
  * Build the app and write `dist/`.
  *
  * Two things here are load-bearing and look optional:
@@ -72,9 +98,21 @@ async function generateRouteTree(): Promise<void> {
  *   +78 kB gzip on the eager payload, plus React's dev-mode runtime checks).
  *   Vite inlined `'production'`; this define restores that.
  */
-export async function buildFrontend(options: BuildFrontendOptions = {}): Promise<void> {
+async function buildFrontend(options: BuildFrontendOptions = {}): Promise<void> {
   const production = !options.dev;
-  await generateRouteTree();
+  // Only the dev loop skips: a production build must be byte-identical to one
+  // from a clean checkout, whatever the mtimes say.
+  if (production || !routeTreeIsCurrent()) {
+    await generateRouteTree();
+    if (!production) {
+      // `tsr generate` leaves the file untouched when the tree is unchanged,
+      // which would otherwise disarm the mtime comparison for good after any
+      // edit under `src/routes` — restamp so the next rebuild measures
+      // against this run. Content is untouched; only the timestamp moves.
+      const now = new Date();
+      utimesSync(join(ROOT, 'src', 'routeTree.gen.ts'), now, now);
+    }
+  }
   await rm(DIST, { recursive: true, force: true });
 
   const result = await Bun.build({
@@ -185,8 +223,8 @@ function assertAbsoluteAssetUrls(html: string): void {
   }
 }
 
-/** Files in `dist/`, relative and '/'-separated. // Usage: await listDist() */
-export async function listDist(): Promise<string[]> {
+/** Files in `dist/`, relative and '/'-separated. */
+async function listDist(): Promise<string[]> {
   const entries = await readdir(DIST, { recursive: true, withFileTypes: true });
   return entries
     .filter((entry) => entry.isFile())
