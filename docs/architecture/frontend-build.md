@@ -75,21 +75,34 @@ a rebuild is not reported as wholesale churn.
 
 `apps/api/src/server/frontend-static.ts` picks one of three modes at boot:
 
-| Mode      | When                                       | Behaviour                             |
-| --------- | ------------------------------------------ | ------------------------------------- |
-| Embedded  | the binary registered an embedded manifest | one explicit `GET` per embedded asset |
-| Directory | `dist/index.html` exists on disk           | `@elysia/static` over the directory   |
-| API-only  | neither                                    | a plain 404 for non-`/api` paths      |
+| Mode      | When                                       | Behaviour                                       |
+| --------- | ------------------------------------------ | ----------------------------------------------- |
+| Embedded  | the binary registered an embedded manifest | one explicit `GET` per embedded asset           |
+| Directory | `dist/index.html` exists on disk           | explicit `GET`s + `@elysia/static` on `/assets` |
+| API-only  | neither                                    | a plain 404 for non-`/api` paths                |
 
 Two shapes there are deliberate and must survive any change:
 
-- **No root wildcard.** A root `app.get('/*')` would shadow mounted handlers — Better Auth's
-  `/api/auth/*` most visibly — so embedded assets are registered one route at a time.
+- **No root wildcard.** A root `GET /*` shadows every `.all('/*')` route once `.listen()`
+  promotes routes into Bun's native table — at the root, inside a `.group()` and inside a
+  mounted prefixed instance alike. Literal routes and `.get('/*')` wildcards are unaffected,
+  which is why `/images/*` and `/uploads/*` kept working and Better Auth (mounted as
+  `.all('/*')` in `routes/auth.ts`) did not: sign-in, sign-up and get-session answered 404
+  while `/api/auth/ok` worked. So both modes register assets one route at a time, and the
+  directory mode scopes `@elysia/static` to `prefix: '/assets'` rather than `'/'` (the plugin
+  mounts `${prefix}/*` unless `alwaysStatic` is on, and that keys off
+  `NODE_ENV === 'production'`, which nothing here sets). `/assets` stays dynamic because a dev
+  rebuild renames every bundle file.
 - **The SPA fallback returns a `Response`**, built from `Bun.file(indexPath)`, never an
   imported `HTMLBundle`. An `HTMLBundle` returned from an error handler gets JSON-serialized.
 
-`/assets/*` is immutable (`max-age=31536000`) because its filenames are content-hashed;
-`index.html` must revalidate so an upgraded install stops serving a stale shell.
+`app.handle()` resolves both correctly, so an in-process test cannot see either failure. The
+`over a listening server` suite in `apps/api/tests/unit/server/frontend-static.test.ts` binds
+a real port; extend it rather than adding another `handle()`-driven case.
+
+Embedded `/assets/*` is immutable (`max-age=31536000`) because its filenames are
+content-hashed; `index.html` must revalidate so an upgraded install stops serving a stale
+shell. The directory mode leaves the static plugin's own `max-age=86400` in place.
 
 ## The standalone binary
 

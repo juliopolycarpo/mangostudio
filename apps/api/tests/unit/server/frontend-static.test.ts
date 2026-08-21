@@ -140,11 +140,12 @@ describe('registerFrontend with embedded assets', () => {
 describe('registerFrontend from the filesystem', () => {
   /**
    * The source/`npm install` path, where assets come off disk instead of the
-   * embedded manifest. It is the branch carrying the documented
-   * `@elysia/static` `ignorePatterns` workaround, so its precedence is pinned
-   * separately from the embedded one: a plugin swap that fixes the underlying
-   * inverted-comparison bug must keep every outcome below identical before the
-   * workaround can be removed.
+   * embedded manifest. Its precedence is pinned separately from the embedded
+   * one, so a plugin swap has to keep every outcome below identical.
+   *
+   * These drive the app with `app.handle()`, which resolves routes differently
+   * from a listening server — see the `.listen()` suite below for the class of
+   * bug that is invisible here.
    */
   async function buildFilesystemApp(): Promise<(path: string) => Promise<Response>> {
     const frontendDir = mkdtempSync(join(tmpdir(), 'fs-frontend-'));
@@ -240,6 +241,117 @@ describe('registerFrontend from the filesystem', () => {
       const response = await get(path);
       expect(response.status).toBe(200);
       expect(await response.text()).toBe(INDEX_HTML);
+    }
+  });
+});
+
+describe('registerFrontend from the filesystem, over a listening server', () => {
+  /**
+   * `app.handle()` and `app.listen()` do not resolve routes the same way, and
+   * only the second one is what a browser talks to. Elysia promotes routes into
+   * Bun's native table on `.listen()`, and there a root `GET /*` outranks
+   * `.all('/*')` wildcards anywhere in the app — at the root, inside a `.group()`
+   * and inside a mounted prefixed instance alike — while leaving both literal
+   * routes and `.get('/*')` wildcards matching.
+   *
+   * `staticPlugin({ prefix: '/' })` used to register exactly that (it only skips
+   * the wildcard when `alwaysStatic` is on, which keys off
+   * `NODE_ENV === 'production'` — never set in this repo). Better Auth is
+   * mounted as `.all('/*')` in `routes/auth.ts`, so every path under
+   * `/api/auth/` except the literal `/ok` answered 404 on a real server while
+   * every `handle()`-driven test stayed green. Hence a suite that binds a port.
+   */
+  const SHADOWED_SHAPE = '/api/auth';
+  const SURVIVING_SHAPE = '/images';
+
+  async function startFilesystemServer(): Promise<{
+    get: (path: string) => Promise<Response>;
+    frontendDir: string;
+    stop: () => Promise<void>;
+  }> {
+    const frontendDir = mkdtempSync(join(tmpdir(), 'listen-frontend-'));
+    mkdirSync(join(frontendDir, 'assets'), { recursive: true });
+    writeFileSync(join(frontendDir, 'index.html'), INDEX_HTML);
+    writeFileSync(join(frontendDir, 'favicon.ico'), UPLOAD_BYTES);
+    writeFileSync(join(frontendDir, 'assets', 'index-AbCd1234.js'), ASSET_JS);
+    temporaryDirs.push(frontendDir);
+
+    // Stand-ins for the real routes, so the assertion is about routing
+    // precedence rather than about Better Auth or the image store. The method
+    // is the load-bearing part: `.all` is the shape that broke, `.get` is the
+    // control that never did, so the guard cannot pass for the wrong reason.
+    const app = new Elysia().error(NotFound, ({ request }) => frontendNotFound(request));
+    app.all(`${SHADOWED_SHAPE}/*`, ({ path }) => `wildcard:${path}`);
+    app.get(`${SURVIVING_SHAPE}/*`, ({ path }) => `wildcard:${path}`);
+    registerFrontend(app as unknown as App, frontendDir);
+    await app.modules;
+
+    app.listen({ hostname: '127.0.0.1', port: 0, reusePort: false });
+    const origin = `http://127.0.0.1:${app.server?.port}`;
+    return {
+      get: (path: string) => fetch(`${origin}${path}`),
+      frontendDir,
+      stop: async () => {
+        await app.stop();
+      },
+    };
+  }
+
+  test('leaves every other wildcard route reachable', async () => {
+    const server = await startFilesystemServer();
+    try {
+      for (const prefix of [SHADOWED_SHAPE, SURVIVING_SHAPE]) {
+        const path = `${prefix}/get-session`;
+        const response = await server.get(path);
+
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe(`wildcard:${path}`);
+      }
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves the shell, a root file, and a hashed asset', async () => {
+    const server = await startFilesystemServer();
+    try {
+      for (const path of ['/', '/settings/agents']) {
+        const response = await server.get(path);
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe(INDEX_HTML);
+      }
+
+      // Unhashed root files get their own route; without one they would fall
+      // through to the SPA shell and hand an <html> document to a <link> tag.
+      const icon = await server.get('/favicon.ico');
+      expect(icon.status).toBe(200);
+      expect(await icon.text()).toBe(UPLOAD_BYTES);
+
+      const asset = await server.get('/assets/index-AbCd1234.js');
+      expect(asset.status).toBe(200);
+      expect(await asset.text()).toBe(ASSET_JS);
+
+      const missing = await server.get('/assets/missing.js');
+      expect(missing.status).toBe(404);
+      expect(await missing.text()).not.toBe(INDEX_HTML);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves an asset written after startup', async () => {
+    const server = await startFilesystemServer();
+    try {
+      // Every rebuild renames the bundle, so `/assets/*` has to resolve from
+      // disk per request. Pinning routes at boot would make the dev server
+      // serve a 404 for the very bundle its own watcher just produced.
+      writeFileSync(join(server.frontendDir, 'assets', 'index-Rebuilt1.js'), ASSET_JS);
+
+      const response = await server.get('/assets/index-Rebuilt1.js');
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe(ASSET_JS);
+    } finally {
+      await server.stop();
     }
   });
 });

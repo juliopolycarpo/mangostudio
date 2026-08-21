@@ -189,6 +189,35 @@ than the SPA shell. An earlier iteration hand-rolled `Bun.serve({ routes, websoc
 plus `app.server = server` and Elysia's undocumented `buildGlobalWSHandler()`; that is only
 required when passing an HTML bundle through `routes`, which T20 rules out.
 
+> "Not the SPA shell" was the wrong assertion to check. `/api/auth/*` was answering a JSON
+> 404 — its own content-type, and still broken. See T24.
+
+**T24 — `staticPlugin({ prefix: '/' })` registers `GET /*`, and on `.listen()` that outranks
+every `.all('/*')` route in the app.** `alwaysStatic` keys off `NODE_ENV === 'production'`,
+which nothing in this repo sets, so `@elysia/static@2.0.0-beta.2` always takes the branch at
+`dist/index.js:66` that mounts the catch-all. Once Elysia promotes routes into Bun's native
+table, that root wildcard swallows every `.all('/*')` — at the root, inside a `.group()` and
+inside a mounted prefixed instance alike. **The method is the discriminator, not the nesting:**
+measured on the pre-fix code, `.all('/x/*')` was shadowed at all three depths while
+`.get('/y/*')` was reached at all three. So Better Auth (mounted `.all('/*')` in
+`routes/auth.ts`) 404'd every path but the literal `/ok`, and `/images/*` + `/uploads/*` —
+both `.get` — were never affected. Verify with a real file before claiming a `.get` wildcard
+is broken; a missing file 404s either way and proves nothing.
+
+**`app.handle()` resolves the same request correctly**, which is why nothing caught it: every
+route integration test drives `handle()`, `static-routes.integration.test.ts` only exercises
+the pure `isSpaRoute()`, and `test-build.ts` runs the binary, which takes the
+`registerEmbeddedSpa` branch (explicit per-file routes, no wildcard — its doc comment has
+warned about exactly this since #454). The bug predates this migration; serving the frontend
+from the API in dev is what made it user-visible.
+
+Fix in `registerSpa`: narrow the plugin to `prefix: '/assets'` (hashed filenames change on
+every rebuild, so they must stay behind a dynamic route) and register one explicit route per
+unhashed root file. Guard test: `frontend-static.test.ts` → "over a listening server", which
+binds port 0 and asserts a stand-in `.all('/*')` stays reachable, with a `.get('/*')` control
+so it cannot pass for the wrong reason. **Any new frontend-serving branch needs a test that
+binds a real port**; `handle()` is blind to this whole class.
+
 ## Test migration mechanics
 
 | Vitest                        | `bun test`                                           |
