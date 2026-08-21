@@ -1,5 +1,5 @@
+import { describe, expect, it } from 'bun:test';
 import type { Connector } from '@mangostudio/shared';
-import { describe, expect, it } from 'vitest';
 import {
   detectUsageAlerts,
   EMPTY_USAGE_ALERT_STATE,

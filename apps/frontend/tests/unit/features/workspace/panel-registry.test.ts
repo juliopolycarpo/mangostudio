@@ -1,5 +1,5 @@
+import { describe, expect, it } from 'bun:test';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
-import { describe, expect, it } from 'vitest';
 import {
   getAvailableWorkspacePanels,
   WORKSPACE_PANEL_REGISTRY,
