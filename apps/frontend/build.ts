@@ -123,7 +123,10 @@ export async function buildFrontend(options: BuildFrontendOptions = {}): Promise
   await writeHtml(result);
   // Next to dist/, not inside it: the binary build embeds every file dist/
   // contains, and the metafile is a build diagnostic (the bundle report's
-  // duplicate-module check reads it), not shipped payload.
+  // duplicate-module check reads it), not shipped payload. Sitting outside
+  // dist/ also puts it outside the `dist/**` glob, so it is declared as a
+  // second `build` output in turbo.json — otherwise a cache hit restores dist/
+  // and leaves whatever metafile happens to be on disk describing it.
   await writeFile(join(ROOT, 'dist-metafile.json'), JSON.stringify(result.metafile));
 }
 

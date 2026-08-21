@@ -38,8 +38,14 @@ describe('build script', () => {
 
     for (const turboConfig of [apiTurbo, frontendTurbo]) {
       expect(turboConfig).toContain('"extends": ["//"]');
-      expect(turboConfig).toContain('"outputs": ["dist/**"]');
+      expect(turboConfig).toContain('"dist/**"');
     }
+
+    // The frontend build writes its metafile beside dist/ rather than inside
+    // it, which also puts it outside the `dist/**` glob: without a second
+    // declared output a cache hit restores the bundle and leaves a metafile
+    // from some other build sitting next to it.
+    expect(frontendTurbo).toContain('"dist-metafile.json"');
   });
 
   test('delegates workspace builds to one filtered Turbo command', () => {
