@@ -40,16 +40,15 @@ import {
   registerProvider,
 } from '../../../../src/services/providers/core/provider-registry';
 import type { AgentEvent, AIProvider } from '../../../../src/services/providers/types';
-import { getRuntimeClient } from '../../../../src/services/runtime-client';
 import { isShellAvailable } from '../../../../src/services/tools/builtin/_shell-exec';
 import { registerTools } from '../../../../src/services/tools/register-tools';
 import {
   type ChatFixture,
   insertTestChat,
   insertTestConnector,
-  insertTestUser,
   type UserFixture,
 } from '../../../support/factories';
+import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
 
 const hasBash = isShellAvailable('bash');
 const MODEL_ID = 'delegated-checkpoints-model';
@@ -154,24 +153,12 @@ async function enableShellForUser(userId: string): Promise<void> {
   });
 }
 
-/**
- * One user, and one Local runtime connection, for the whole file.
- *
- * Every test here reaches the filesystem through the Local runtime, and the
- * manager keys connections by `(userId, environmentId)` — so a fresh user per
- * test meant a fresh in-process runtime host per test, plus the single-owner
- * attestation churn of closing and reopening one each time. That churn is real
- * logic, and it is covered directly in the connection-manager unit tests; what
- * it bought here was making every test in the file depend on a connect none of
- * them assert anything about. Connecting once in setup also means a connect
- * that goes wrong fails the file loudly, once, instead of timing out each test
- * in turn with the cause thrown away.
- */
+// One user, and one Local runtime connection, for the whole file — the
+// helper's doc comment carries the rationale.
 let user: UserFixture;
 
 beforeAll(async () => {
-  user = await insertTestUser();
-  await getRuntimeClient(user.id);
+  user = await insertUserWithLocalRuntime();
 });
 
 beforeEach(async () => {
