@@ -65,10 +65,8 @@ describe('Test workflow shard matrix', () => {
   test('only the first shard writes the shared turbo cache', () => {
     // All eight resolve the same primary key; letting each save turns seven
     // post-job steps into "cache already exists" warnings that read as a fault.
-    // The frontend job restores the same key and must not save either.
     const saves = [...extractJobBlock(workflow, 'shard').matchAll(/mode: .*matrix\.shard == 1/g)];
     expect(saves).toHaveLength(1);
-    expect(extractJobBlock(workflow, 'frontend')).toContain('mode: restore\n');
   });
 });
 
@@ -82,6 +80,16 @@ describe('Test workflow frontend job', () => {
     // (test-lanes.unit.test.ts); this pins the workflow half.
     expect(frontend).toContain('bun run test --coverage --only=frontend');
     expect(frontend).not.toContain('--shard');
+  });
+
+  test('restores no turbo cache, because nothing it runs can hit one', () => {
+    // `--only=frontend` skips the root scripts lane, and `//#test:scripts` is
+    // the one task turbo caches; the `test:coverage` this job does run is
+    // `cache: false` with no `dependsOn`. A restore here only ever downloaded
+    // and extracted the shards' archive in front of an uncached run — a real
+    // cost, and one that reads like working cache reuse in the job log.
+    expect(frontend).not.toContain('family: turbo');
+    expect(frontend).not.toContain('.turbo/cache');
   });
 
   test('uploads the same artifact shape as a shard, dot-directories included', () => {

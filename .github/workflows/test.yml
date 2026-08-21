@@ -241,27 +241,11 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - id: toolchain
-        name: Resolve test cache toolchains
-        run: |
-          set -euo pipefail
-          turbo="$(bun run turbo:version | tail -n 1)"
-          if [ -z "${turbo}" ]; then
-            echo "::error::turbo version probe returned an empty value"
-            exit 1
-          fi
-          echo "turbo=${turbo}" >> "$GITHUB_OUTPUT"
-
-      # Restore-only: shard 1 owns the save for this key, and a second saver
-      # would only produce "cache already exists" warnings.
-      - uses: ./.github/actions/cache-scoped
-        with:
-          family: turbo
-          path: .turbo/cache
-          validity: test-bun-${{ steps.setup.outputs.bun-version }}-turbo-${{ steps.toolchain.outputs.turbo }}-${{ hashFiles('turbo.jsonc', 'package.json', 'apps/*/package.json', 'packages/*/package.json') }}
-          restore-prefix: test-
-          mode: restore
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+      # No turbo cache here, deliberately: nothing this job runs can hit one.
+      # `--only=frontend` leaves out the root scripts lane, which is the single
+      # cached task (`//#test:scripts`), and the `test:coverage` task it does
+      # run is `cache: false` with no `dependsOn`. Restoring the shards' archive
+      # was pure download and extract in front of an uncached run.
 
       # The same pinned key the shards restore. Here `--timings` is not a
       # partition input (nothing splits this lane); it balances the four
