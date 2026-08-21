@@ -346,7 +346,9 @@ jobs:
       # and merging the remainder would read as a green run over a partial set.
       - name: Merge shard coverage and run metadata
         id: merge
-        run: bun ./scripts/ci/merge-test-shards.ts shards "$((SHARD_COUNT + 1))" > shard-summary.json
+        # Plain shard count: the script adds one directory per unsharded lane
+        # from the test-lane registry itself.
+        run: bun ./scripts/ci/merge-test-shards.ts shards "$SHARD_COUNT" > shard-summary.json
 
       # Reassembles next run's timings, and fails this run if the eight shards
       # claimed the same file — which means they read different timings and did

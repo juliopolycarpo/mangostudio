@@ -114,11 +114,12 @@ describe('Test workflow merge job', () => {
     expect(merge).toContain('pattern: test-shard-*');
   });
 
-  test('expects the shard count plus the frontend job', () => {
+  test('passes the plain shard count to the merge', () => {
     // A job that dies before uploading leaves its directory missing, not
     // empty; without the count the merge would report a green run over a
-    // partial artifact set.
-    expect(merge).toContain('merge-test-shards.ts shards "$((SHARD_COUNT + 1))"');
+    // partial artifact set. The script itself adds one directory per
+    // unsharded lane from the registry, so the workflow passes the raw count.
+    expect(merge).toContain('merge-test-shards.ts shards "$SHARD_COUNT"');
   });
 
   test('the coverage diagnostics upload keeps dot-directories', () => {

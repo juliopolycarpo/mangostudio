@@ -18,13 +18,13 @@
 // JUnit reports are not merged here: scripts/qa-gate/junit-results.ts reads
 // them straight out of the shard directories, so nothing has to move.
 //
-// Usage: bun ./scripts/ci/merge-test-shards.ts <shards-dir> [expected-shard-count] > shard-summary.json
+// Usage: bun ./scripts/ci/merge-test-shards.ts <shards-dir> [shard-count] > shard-summary.json
 
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
-import { SHARDED_LCOV_PATHS } from '../lib/test-lanes';
+import { SHARDED_LCOV_PATHS, TEST_LANES } from '../lib/test-lanes';
 import { mergeLcovFiles } from '../qa-gate/merge-lcov-shards';
 import { mergeUnhandledErrors, type UnhandledErrors } from '../qa-gate/unhandled-errors';
 
@@ -107,9 +107,10 @@ export const mergeTestShards = async (
   // an incomplete file set.
   if (expectedShards !== undefined && shardDirs.length !== expectedShards) {
     throw new Error(
-      `Expected ${expectedShards} test-job directories under ${shardsRoot} (the shards plus the ` +
-        `frontend job), found ${shardDirs.length}. A job likely failed before its upload step ran; ` +
-        'merging a partial set would report incomplete coverage and test counts as a green run.'
+      `Expected ${expectedShards} test-job directories under ${shardsRoot} (the numbered shards ` +
+        `plus one job per unsharded lane), found ${shardDirs.length}. A job likely failed before ` +
+        'its upload step ran; merging a partial set would report incomplete coverage and test ' +
+        'counts as a green run.'
     );
   }
 
@@ -145,18 +146,24 @@ export const mergeTestShards = async (
   return { shards: shardDirs.length, ...summarizeShardMeta(metas), unhandledErrors };
 };
 
+// Each unsharded lane runs whole in its own CI job and uploads its own
+// `test-shard-<id>` directory, so the expected directory count is derived here
+// from the registry rather than restated as arithmetic in the workflow — a new
+// `sharded: false` lane changes it without a YAML edit to forget.
+const unshardedJobCount = TEST_LANES.filter((lane) => !lane.sharded).length;
+
 if (import.meta.main) {
-  const [, , shardsRoot, expectedShardsArg] = process.argv;
+  const [, , shardsRoot, shardCountArg] = process.argv;
   if (!shardsRoot) {
     process.stderr.write(
-      'Usage: bun ./scripts/ci/merge-test-shards.ts <shards-dir> [expected-shard-count] > shard-summary.json\n'
+      'Usage: bun ./scripts/ci/merge-test-shards.ts <shards-dir> [shard-count] > shard-summary.json\n'
     );
     process.exit(1);
   }
   const summary = await mergeTestShards(
     shardsRoot,
     ROOT_DIR,
-    expectedShardsArg ? Number(expectedShardsArg) : undefined
+    shardCountArg ? Number(shardCountArg) + unshardedJobCount : undefined
   );
   process.stderr.write(
     `Merged ${summary.shards} shard(s): exit ${summary.exitCode}, slowest ${summary.durationSeconds}s\n`
