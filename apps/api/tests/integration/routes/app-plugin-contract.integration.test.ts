@@ -89,14 +89,14 @@ describe('CORS policy', () => {
       new Request('http://localhost/api/health', {
         method: 'OPTIONS',
         headers: {
-          Origin: 'http://localhost:5173',
+          Origin: 'http://localhost:3001',
           'Access-Control-Request-Method': 'POST',
           'Access-Control-Request-Headers': 'content-type',
         },
       })
     );
 
-    expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:5173');
+    expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:3001');
     expect(response.headers.get('access-control-allow-credentials')).toBe('true');
     expect(response.headers.get('access-control-allow-methods')).toBe(
       'GET, POST, PUT, DELETE, OPTIONS'
@@ -121,6 +121,22 @@ describe('CORS policy', () => {
     // Absence is the refusal: a browser only releases a credentialed response
     // when the origin is echoed back. `allow-credentials` alone grants nothing,
     // so the assertion that matters is that the echo is missing.
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('withholds it from the retired Vite dev-server origin too', async () => {
+    // :5173 was allowed while Vite served the frontend on its own origin. The
+    // API serves it now, so that origin is as untrusted as any other.
+    const response = await app.handle(
+      new Request('http://localhost/api/health', {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'http://localhost:5173',
+          'Access-Control-Request-Method': 'POST',
+        },
+      })
+    );
+
     expect(response.headers.get('access-control-allow-origin')).toBeNull();
   });
 });

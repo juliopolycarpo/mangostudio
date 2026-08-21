@@ -19,6 +19,7 @@ import {
   loadConfigForTest,
   parseBooleanFlag,
   resetConfig,
+  resetFrontendPortDeprecationWarning,
   TEST_MANAGED_CONFIG_DIR,
 } from '../../../src/lib/config';
 
@@ -41,6 +42,7 @@ const WATCHED_ENV_KEYS = [
   'MANGO_ENV_LTS_REFRESH',
   'MANGO_ENV_INSTALLS_ENABLED',
   'MANGO_CONTAINER',
+  'FRONTEND_PORT',
 ];
 
 function saveEnv(): Record<string, string | undefined> {
@@ -452,12 +454,85 @@ describe('corsOrigins includes server origin for same-origin deployments', () =>
     expect(cfg.corsOrigins).toContain('http://api.internal:4000');
   });
 
-  test('frontend origins are still present alongside server origin', () => {
+  test('a configured frontend port contributes no origin of its own', () => {
     writeFileSync(TMP_TOML, '[server]\nport = 3001\n[frontend]\nport = 5173\n');
 
     const cfg = loadConfig(TMP_TOML);
 
-    expect(cfg.corsOrigins).toContain('http://localhost:5173');
-    expect(cfg.corsOrigins).toContain('http://localhost:3001');
+    // The API serves the frontend, so the only origins are the server's own.
+    expect(cfg.corsOrigins).toEqual([
+      'http://localhost:3001',
+      'http://127.0.0.1:3001',
+      'http://0.0.0.0:3001',
+    ]);
+  });
+});
+
+describe('frontend.port deprecation warning', () => {
+  let savedEnv: Record<string, string | undefined>;
+  let warnings: string[];
+  let originalWarn: typeof console.warn;
+
+  beforeEach(() => {
+    mkdirSync(TMP_DIR, { recursive: true });
+    savedEnv = saveEnv();
+    for (const k of WATCHED_ENV_KEYS) delete process.env[k];
+    resetConfig();
+    // The latch is process-wide, so another test file may already have tripped it.
+    resetFrontendPortDeprecationWarning();
+    warnings = [];
+    originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(' '));
+    };
+  });
+
+  afterEach(() => {
+    console.warn = originalWarn;
+    resetConfig();
+    resetFrontendPortDeprecationWarning();
+    restoreEnv(savedEnv);
+    rmSync(TMP_DIR, { recursive: true, force: true });
+  });
+
+  function deprecationWarnings(): string[] {
+    return warnings.filter((line) => line.includes('frontend.port is deprecated'));
+  }
+
+  test('warns once per process when config.toml sets frontend.port', () => {
+    writeFileSync(TMP_TOML, '[server]\nport = 3001\n[frontend]\nport = 5173\n');
+
+    loadConfig(TMP_TOML);
+    loadConfig(TMP_TOML);
+
+    expect(deprecationWarnings()).toEqual([
+      '[config] frontend.port is deprecated and ignored; the frontend is served by the API on 3001.',
+    ]);
+  });
+
+  test('warns when FRONTEND_PORT is set in the environment', () => {
+    process.env.FRONTEND_PORT = '5173';
+
+    loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(deprecationWarnings()).toHaveLength(1);
+  });
+
+  test('reports the resolved server port, not the deprecated one', () => {
+    process.env.FRONTEND_PORT = '5173';
+    process.env.API_PORT = '13077';
+
+    loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(deprecationWarnings()[0]).toContain('served by the API on 13077.');
+  });
+
+  test('stays silent when neither source sets it', () => {
+    writeFileSync(TMP_TOML, '[server]\nport = 3001\n');
+
+    loadConfig(TMP_TOML);
+    loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(deprecationWarnings()).toEqual([]);
   });
 });

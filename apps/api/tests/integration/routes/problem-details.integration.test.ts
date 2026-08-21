@@ -146,7 +146,7 @@ describe('negotiation through the assembled app', () => {
     // differently-cased keys on the same header record.
     const response = await app.handle(
       new Request('http://localhost/api/chats', {
-        headers: { accept: PROBLEM_JSON_ACCEPT, origin: 'http://localhost:5173' },
+        headers: { accept: PROBLEM_JSON_ACCEPT, origin: 'http://localhost:3001' },
       })
     );
 
