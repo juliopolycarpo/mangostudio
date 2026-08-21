@@ -2,14 +2,18 @@
  * Resolves the API base URL for the current runtime environment.
  *
  * Priority:
- * 1. Explicit VITE_API_URL (via .env.production) — for split deployments
+ * 1. Explicit VITE_API_URL set in the build environment — for split deployments
  * 2. Browser origin (window.location.origin) — for same-origin / standalone binary
  * 3. Fallback for non-browser environments (unit tests, SSR)
  */
 export function getApiBaseUrl(): string {
-  // Optional chaining: Vite always defines import.meta.env, Bun's dev bundler
-  // does not unless [serve.static] env inlining is configured for this key.
-  const explicit = import.meta.env?.VITE_API_URL;
+  // `env: 'VITE_*'` in build.ts inlines `process.env.VITE_API_URL` when the
+  // variable is set at build time — it does not touch `import.meta.env`
+  // member reads, so this must be spelled as a `process.env` access. When the
+  // variable is unset the expression survives into the bundle verbatim, and
+  // the `typeof` guard is what keeps a browser from evaluating a bare
+  // `process` it does not have.
+  const explicit = typeof process !== 'undefined' ? process.env.VITE_API_URL : undefined;
   if (explicit) return explicit.replace(/\/+$/, '');
 
   if (typeof window !== 'undefined' && window.location?.origin) {

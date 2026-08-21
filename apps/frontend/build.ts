@@ -81,6 +81,12 @@ export async function buildFrontend(options: BuildFrontendOptions = {}): Promise
     sourcemap: 'none',
     publicPath: '/',
     define: { 'process.env.NODE_ENV': JSON.stringify(production ? 'production' : 'development') },
+    // Inlines `process.env.VITE_API_URL` (the split-deployment override read by
+    // src/lib/api-base-url.ts) when set at build time. It only rewrites
+    // `process.env.*` member reads, never `import.meta.env.*`, and an unset
+    // variable is left as the verbatim expression rather than `undefined` —
+    // both measured on 1.4.0; api-base-url.ts carries the matching guard.
+    env: 'VITE_*',
     metafile: true,
     // Auto-memoization. `@vitejs/plugin-react` did not run it, so this is a
     // behavior change rather than parity, and nothing in the test suite covers

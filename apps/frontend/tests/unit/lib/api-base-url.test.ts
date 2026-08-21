@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
 /**
- * `vi.stubEnv` / `vi.unstubAllEnvs` have no `bun test` equivalent, and neither
- * does `vi.resetModules()`. Neither is needed: `import.meta.env` is backed by
- * `process.env` under Bun, and `getApiBaseUrl()` reads the key on every call
- * rather than at module scope — so setting the variable is enough and the
- * module never has to be re-evaluated.
+ * No env-stubbing helper needed: `getApiBaseUrl()` reads `process.env` on
+ * every call rather than at module scope, so setting the variable is enough
+ * and the module never has to be re-evaluated.
  */
 function setApiUrl(value: string) {
   process.env.VITE_API_URL = value;
