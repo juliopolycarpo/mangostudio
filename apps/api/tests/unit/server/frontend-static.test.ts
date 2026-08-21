@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { staticPlugin } from '@elysia/static';
@@ -197,6 +197,38 @@ describe('registerFrontend from the filesystem', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('public, max-age=31536000');
     expect(await response.text()).toBe(ASSET_JS);
+  });
+
+  test('404s an unhashed file that disappeared after boot', async () => {
+    const frontendDir = mkdtempSync(join(tmpdir(), 'fs-frontend-'));
+    temporaryDirs.push(frontendDir);
+    writeFileSync(join(frontendDir, 'index.html'), INDEX_HTML);
+    writeFileSync(join(frontendDir, 'favicon.ico'), UPLOAD_BYTES);
+
+    const app = new Elysia().error(NotFound, ({ request }) => frontendNotFound(request));
+    registerFrontend(app as unknown as App, frontendDir);
+    await app.modules;
+    const get = (path: string) => app.handle(new Request(`http://localhost${path}`));
+
+    expect((await get('/favicon.ico')).status).toBe(200);
+
+    // The route was enumerated at boot, but `build.ts` removes `dist/` before
+    // every rebuild and the dev watcher rebuilds on every save. A request in
+    // that window used to throw ENOENT out of the handler and answer 500.
+    rmSync(join(frontendDir, 'favicon.ico'));
+    expect((await get('/favicon.ico')).status).toBe(404);
+  });
+
+  test('boots past a dist entry that cannot be stat-ed', () => {
+    const frontendDir = mkdtempSync(join(tmpdir(), 'fs-frontend-'));
+    temporaryDirs.push(frontendDir);
+    writeFileSync(join(frontendDir, 'index.html'), INDEX_HTML);
+    symlinkSync(join(frontendDir, 'never-written.txt'), join(frontendDir, 'dangling.txt'));
+
+    // Enumerating the directory is boot work, so a throw here does not degrade
+    // to the API-only branch — it stops the server from starting at all.
+    const app = new Elysia();
+    expect(() => registerFrontend(app as unknown as App, frontendDir)).not.toThrow();
   });
 
   test('serves a real upload and 404s a missing one without the SPA shell', async () => {
