@@ -62,7 +62,12 @@ function newestMtime(directory: string): number {
  */
 function distIsCurrent(): boolean {
   const built = newestMtime(DIST_DIR);
-  return built > 0 && built >= newestMtime(WATCH_DIR);
+  const source = newestMtime(WATCH_DIR);
+  // A failed source scan (newestMtime's catch returns 0, e.g. a file deleted
+  // mid-scan) must read as "stale", not as "0 is older than anything built":
+  // failing toward a rebuild costs seconds, the other direction serves an old
+  // bundle while claiming it is up to date.
+  return built > 0 && source > 0 && built >= source;
 }
 
 /**
@@ -90,6 +95,27 @@ export async function registerDevFrontend(): Promise<void> {
 
   let pending: ReturnType<typeof setTimeout> | null = null;
   let building = false;
+  let dirty = false;
+
+  // A save landing while a rebuild is in flight cannot be dropped: the running
+  // build already read that file's pre-save content, so "the next save
+  // rebuilds anyway" leaves dist/ stale right after "Rebuilt." prints. Mark
+  // the tree dirty and run one more build when the in-flight one completes.
+  const rebuild = (): void => {
+    building = true;
+    void runBuild()
+      .then((ok) => {
+        if (ok) console.warn('[frontend] Rebuilt. Refresh the browser to see the change.');
+      })
+      .finally(() => {
+        building = false;
+        if (dirty) {
+          dirty = false;
+          rebuild();
+        }
+      });
+  };
+
   const watcher = watch(WATCH_DIR, { recursive: true }, (_event, filename) => {
     // The build writes routeTree.gen.ts back into the watched tree; reacting to
     // it would make each rebuild schedule the next one.
@@ -97,17 +123,11 @@ export async function registerDevFrontend(): Promise<void> {
     if (pending) clearTimeout(pending);
     pending = setTimeout(() => {
       pending = null;
-      // A save during a rebuild is dropped rather than queued: the next save
-      // rebuilds from the same source tree anyway.
-      if (building) return;
-      building = true;
-      void runBuild()
-        .then((ok) => {
-          if (ok) console.warn('[frontend] Rebuilt. Refresh the browser to see the change.');
-        })
-        .finally(() => {
-          building = false;
-        });
+      if (building) {
+        dirty = true;
+        return;
+      }
+      rebuild();
     }, REBUILD_DEBOUNCE_MS);
   });
 
