@@ -423,6 +423,15 @@ assuming the XML grew an `errors` count.
 > adds it when `GITHUB_ACTIONS=true` (which Turbo does pass through to the lane
 > tasks, measured), and omitting it costs the run every inline failure
 > annotation.
+>
+> `test:coverage:merge` is the one Vitest invocation that keeps `default` alone,
+> and that is deliberate. Its own failure mode is the coverage threshold gate,
+> and a threshold miss is not a reporter event: istanbul prints
+> `ERROR: Coverage for statements (76.1%) does not meet global threshold (100%)`
+> and Vitest exits 1. Measured with the annotation reporter explicitly enabled —
+> 165 files and 1343 tests green, exit 1 on the threshold, **zero** `::error`
+> lines. Test failures the merge replays were already annotated by the shard
+> that ran them.
 
 > Bun does not create the parent directory for `--reporter-outfile`, and it does
 > **not** fail the run when it is missing: it prints `JUnitReportFailed` and
