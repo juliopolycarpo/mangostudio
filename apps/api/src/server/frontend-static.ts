@@ -3,7 +3,7 @@
  * Extracted from the server entrypoint so it can be reused and tested.
  */
 
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, type Stats, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { staticPlugin } from '@elysia/static';
 import { NotFound } from 'elysia';
@@ -110,8 +110,23 @@ const HASHED_ASSET_DIR = 'assets';
  */
 const UNHASHED_CACHE_CONTROL = 'public, max-age=86400';
 
+/** `statSync`, or null when the entry is gone or unreadable. */
+function statFile(path: string): Stats | null {
+  try {
+    return statSync(path);
+  } catch {
+    return null;
+  }
+}
+
 function serveUnhashedFile(filePath: string, request: Request): Response {
-  const stats = statSync(filePath);
+  // The routes below are enumerated once at boot, but the file behind one can
+  // disappear afterwards: `build.ts` removes `dist/` before every rebuild, so a
+  // request that lands in that window — or after a rebuild that failed and left
+  // nothing — would otherwise throw ENOENT out of the handler and answer 500.
+  // A file that is not there is a 404, the same answer the static plugin gave.
+  const stats = statFile(filePath);
+  if (!stats) return new Response(null, { status: 404 });
   const etag = `"${stats.size.toString(16)}-${Math.trunc(stats.mtimeMs).toString(16)}"`;
   const headers = { 'Cache-Control': UNHASHED_CACHE_CONTROL, ETag: etag };
   if (request.headers.get('If-None-Match') === etag) {
@@ -130,7 +145,10 @@ function serveUnhashedFile(filePath: string, request: Request): Response {
 function unhashedAssetPaths(frontendDir: string): string[] {
   return (
     readdirSync(frontendDir, { recursive: true, encoding: 'utf8' })
-      .filter((entry) => statSync(join(frontendDir, entry)).isFile())
+      // `statFile`, not `statSync`: a dangling symlink or an entry removed
+      // between the readdir and the stat would otherwise throw out of
+      // `registerFrontend()` and stop the server from booting at all.
+      .filter((entry) => statFile(join(frontendDir, entry))?.isFile() === true)
       // index.html is served by the explicit GET / route and the SPA fallback.
       .filter((entry) => entry !== 'index.html' && !entry.startsWith(`${HASHED_ASSET_DIR}${sep}`))
       // Recursive readdir yields platform separators; URL paths always use '/'.
