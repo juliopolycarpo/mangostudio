@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import { app } from '../../../src/app';
 import { getConfig } from '../../../src/lib/config';
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
+import { SPLIT_DEPLOYMENT_TEST_ORIGIN } from '../../support/setup/test-environment';
 
 const ROUTE_INVENTORY_FIXTURE = join(
   import.meta.dir,
@@ -105,6 +106,26 @@ describe('CORS policy', () => {
       'Content-Type, Authorization, x-api-key'
     );
     expect(response.headers.get('vary')).toContain('Origin');
+  });
+
+  // The split deployment `VITE_API_URL` exists for: the bundle is served from
+  // another origin, and `server.allowedOrigins` is the only thing that can tell
+  // this API about it. The test environment sets that key, so an accepted
+  // foreign origin here is evidence the setting reaches the CORS middleware.
+  it('grants an origin configured through server.allowedOrigins', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/health', {
+        method: 'OPTIONS',
+        headers: {
+          Origin: SPLIT_DEPLOYMENT_TEST_ORIGIN,
+          'Access-Control-Request-Method': 'POST',
+        },
+      })
+    );
+
+    expect(getConfig().server.allowedOrigins).toContain(SPLIT_DEPLOYMENT_TEST_ORIGIN);
+    expect(response.headers.get('access-control-allow-origin')).toBe(SPLIT_DEPLOYMENT_TEST_ORIGIN);
+    expect(response.headers.get('access-control-allow-credentials')).toBe('true');
   });
 
   it('withholds the allow-origin header from an origin that is not configured', async () => {

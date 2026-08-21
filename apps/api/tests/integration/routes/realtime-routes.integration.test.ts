@@ -12,6 +12,7 @@ import {
 import type { Elysia } from 'elysia';
 import { getApiKeyApi } from '../../../src/auth';
 import { getDb } from '../../../src/db/database';
+import { loadConfigForTest } from '../../../src/lib/config';
 import { createChat } from '../../../src/modules/chats/infrastructure/chat-repository';
 import {
   createRealtimeRoutes,
@@ -316,6 +317,43 @@ describe('realtime WebSocket origins and liveness', () => {
       });
       expect((await rejectedClient.closed).code).toBe(REALTIME_CLOSE_CODES.FORBIDDEN);
     }
+  });
+
+  // The handshake reads cfg.corsOrigins when the routes are built, so a config
+  // installed before startServer() is what this asserts on: the origin is only
+  // reachable because server.allowedOrigins named it.
+  it('accepts an origin configured through server.allowedOrigins', async () => {
+    loadConfigForTest({
+      auth: { secret: 'test-secret-at-least-32-characters-long', url: 'http://localhost:3001' },
+      server: {
+        host: '0.0.0.0',
+        port: 3001,
+        publicUrl: '',
+        allowedOrigins: ['https://split.example.com'],
+      },
+    });
+
+    const { httpUrl, wsUrl } = startServer();
+    const user = await signUp(httpUrl);
+
+    const configuredClient = connect(wsUrl, {
+      Cookie: user.cookie,
+      Origin: 'https://split.example.com',
+    });
+    await configuredClient.opened;
+    expect(await configuredClient.nextMessage()).toEqual({ type: 'ready' });
+
+    const rejectedClient = connect(wsUrl, {
+      Cookie: user.cookie,
+      Origin: 'https://attacker.example',
+    });
+    await rejectedClient.opened;
+    expect(await rejectedClient.nextMessage()).toEqual({
+      type: 'error',
+      error: 'Origin is not allowed',
+      code: ERROR_CODES.PERMISSION_DENIED,
+    });
+    expect((await rejectedClient.closed).code).toBe(REALTIME_CLOSE_CODES.FORBIDDEN);
   });
 
   it('responds to application-level ping messages', async () => {

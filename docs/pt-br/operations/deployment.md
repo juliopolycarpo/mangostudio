@@ -85,6 +85,13 @@ port = 3001
 # de pareamento não tem outra forma de imprimir o endereço que eles discam, e um
 # cabeçalho de requisição seria um palpite falsificável. Env: PUBLIC_URL.
 publicUrl = "https://seu-dominio.com"
+# Apenas para deploy dividido, em que o bundle do frontend é servido a partir de
+# uma origem diferente desta API. É somado às origens do próprio servidor, nunca
+# as substitui. Cada entrada precisa ser um scheme://host[:port] puro — caminho,
+# barra final ou porta padrão explícita falham na inicialização, porque cada
+# gate compara o cabeçalho Origin do navegador por string exata. Env:
+# ALLOWED_ORIGINS (separado por vírgulas), que substitui esta lista.
+allowedOrigins = ["https://studio.example.com"]
 
 [database]
 path = "/var/lib/mangostudio/database.sqlite"

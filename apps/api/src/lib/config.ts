@@ -43,6 +43,14 @@ export interface MangoConfig {
      * nothing derives it from a request header, which the caller controls.
      */
     publicUrl: string;
+    /**
+     * Extra browser origins allowed to call this API, for the split deployment
+     * the `VITE_API_URL` build-time override exists for: the frontend bundle is
+     * served from one origin and this API answers on another. Added to the
+     * server's own origins rather than replacing them, so a same-origin install
+     * keeps working. Empty means same-origin only.
+     */
+    allowedOrigins: string[];
   };
   /**
    * @deprecated The API serves the frontend itself, so there is no second
@@ -117,7 +125,7 @@ export interface MangoConfig {
      */
     wslExecutable: string;
   };
-  /** Computed CORS origins derived from the server host/port. */
+  /** The server's own origins plus every `server.allowedOrigins` entry. */
   corsOrigins: string[];
   /** Path to the config.toml that was loaded (for TOML-based services). */
   configFilePath: string;
@@ -137,7 +145,7 @@ export interface MangoConfig {
 }
 
 const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
-  server: { host: '0.0.0.0', port: 3001, publicUrl: '' },
+  server: { host: '0.0.0.0', port: 3001, publicUrl: '', allowedOrigins: [] },
   frontend: { host: 'localhost', port: 5173 },
   database: { path: '' },
   uploads: { dir: '' },
@@ -168,6 +176,24 @@ export function parseBooleanFlag(value: string): boolean {
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
 }
 
+/**
+ * Trims an origin list and drops the empty entries a trailing comma or a blank
+ * TOML string leaves behind. Nothing else is filtered: a malformed entry is
+ * kept so `computeDerived` can reject it out loud, rather than the value
+ * disappearing somewhere between the config file and the CORS gate.
+ */
+function normalizeOriginList(entries: string[]): string[] {
+  return entries.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+}
+
+/**
+ * Splits the comma-separated `ALLOWED_ORIGINS` list.
+ * // Usage: parseOriginList('https://a.example, https://b.example:8443')
+ */
+function parseOriginList(value: string): string[] {
+  return normalizeOriginList(value.split(','));
+}
+
 /** Maps .env keys to config paths for override resolution. */
 const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   API_PORT: (cfg, v) => {
@@ -178,6 +204,9 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   PUBLIC_URL: (cfg, v) => {
     cfg.server.publicUrl = v;
+  },
+  ALLOWED_ORIGINS: (cfg, v) => {
+    cfg.server.allowedOrigins = parseOriginList(v);
   },
   // Deprecated and ignored; still parsed so an existing .env keeps booting.
   FRONTEND_PORT: (cfg, v) => {
@@ -332,6 +361,44 @@ export function getAuthSecretValidationMessage(secret: string): string | null {
   return null;
 }
 
+/**
+ * Returns why an allowed-origin entry is unusable, or null when it is safe.
+ *
+ * Every gate that reads `corsOrigins` compares the browser's `Origin` header by
+ * exact string, so a near-miss — a trailing slash, a path, an explicit default
+ * port, an uppercase host — parses cleanly and then matches nothing. The entry
+ * has to be a canonical origin or be rejected out loud.
+ * // Usage: getAllowedOriginValidationMessage('https://studio.example.com')
+ */
+function getAllowedOriginValidationMessage(origin: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return `"${origin}" is not a URL`;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return `"${origin}" must use http:// or https://`;
+  }
+  if (parsed.origin !== origin) {
+    return `"${origin}" must be a bare scheme://host[:port] origin (did you mean "${parsed.origin}"?)`;
+  }
+  return null;
+}
+
+/** Fails before the server binds with an origin no browser request can match. */
+function assertValidAllowedOrigins(origins: string[]): void {
+  const messages = origins
+    .map((origin) => getAllowedOriginValidationMessage(origin))
+    .filter((message): message is string => message !== null);
+  if (messages.length === 0) return;
+
+  throw new Error(
+    `Invalid server.allowedOrigins (ALLOWED_ORIGINS): ${messages.join('; ')}. ` +
+      'Each entry must be a bare origin such as https://studio.example.com.'
+  );
+}
+
 /** Fails before Better Auth can initialize with an unsafe secret. // Usage: assertValidAuthSecret(secret) */
 export function assertValidAuthSecret(secret: string): void {
   const message = getAuthSecretValidationMessage(secret);
@@ -407,7 +474,8 @@ function warnFrontendPortDeprecated(serverPort: number): void {
   if (warnedFrontendPortDeprecated) return;
   warnedFrontendPortDeprecated = true;
   console.warn(
-    `[config] The [frontend] settings are deprecated and ignored; the frontend is served by the API on ${serverPort}.`
+    `[config] The [frontend] settings are deprecated and ignored; the frontend is served by the API on ${serverPort}. ` +
+      'To allow a frontend served from another origin, set server.allowedOrigins (or ALLOWED_ORIGINS).'
   );
 }
 
@@ -419,7 +487,9 @@ export function resetFrontendPortDeprecationWarning(): void {
 /** Deep-clones the default config. */
 function cloneDefaults(): MangoConfig {
   return {
-    server: { ...DEFAULT_CONFIG.server },
+    // allowedOrigins is copied, not shared: a spread would alias the default
+    // array into every clone, so one loaded config could mutate the next.
+    server: { ...DEFAULT_CONFIG.server, allowedOrigins: [...DEFAULT_CONFIG.server.allowedOrigins] },
     frontend: { ...DEFAULT_CONFIG.frontend },
     database: { ...DEFAULT_CONFIG.database },
     uploads: { ...DEFAULT_CONFIG.uploads },
@@ -446,6 +516,12 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
     if (typeof server.host === 'string') cfg.server.host = server.host;
     if (typeof server.port === 'number') cfg.server.port = server.port;
     if (typeof server.publicUrl === 'string') cfg.server.publicUrl = server.publicUrl;
+    if (
+      Array.isArray(server.allowedOrigins) &&
+      server.allowedOrigins.every((entry) => typeof entry === 'string')
+    ) {
+      cfg.server.allowedOrigins = normalizeOriginList(server.allowedOrigins);
+    }
   }
 
   const frontend = parsed.frontend as Record<string, unknown> | undefined;
@@ -628,8 +704,8 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
     cfg.secretStore.unsafeFileFallbackDir = resolveUserPath(cfg.secretStore.unsafeFileFallbackDir);
   }
 
-  // The server's own origin is the only one the app uses: the API process serves
-  // the frontend, so there is no second origin to allow.
+  // The API process serves the frontend, so its own origin is the one every
+  // default install needs.
   //
   // In standalone mode the runner scripts (run.sh / run.bat) launch the binary with
   // API_PORT set to whatever port the user chose. The binary reads that value via
@@ -638,15 +714,25 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
   // regardless of whether it came from config.toml, .env, or API_PORT.
   //
   // The browser sends Origin: http://<host>:<sPort> on CORS preflight requests
-  // (e.g. POST with JSON body). Both the Elysia CORS middleware and Better Auth
-  // trustedOrigins validate against corsOrigins, so this origin must be present
-  // or same-origin requests from the served frontend are rejected.
+  // (e.g. POST with JSON body). The Elysia CORS middleware, Better Auth
+  // trustedOrigins, and the realtime handshake all validate against corsOrigins,
+  // so this origin must be present or same-origin requests from the served
+  // frontend are rejected.
+  //
+  // A split deployment — the bundle built with VITE_API_URL and served from
+  // somewhere else — has no origin here to derive, so the user names it:
+  // `server.allowedOrigins` in config.toml, or ALLOWED_ORIGINS in the
+  // environment. Those are unioned in rather than replacing the defaults, so
+  // configuring one never breaks a local browser session.
+  assertValidAllowedOrigins(cfg.server.allowedOrigins);
   const sHost = cfg.server.host;
   const sPort = cfg.server.port;
-  cfg.corsOrigins = [`http://localhost:${sPort}`, `http://127.0.0.1:${sPort}`];
+  const origins = new Set([`http://localhost:${sPort}`, `http://127.0.0.1:${sPort}`]);
   if (sHost !== 'localhost' && sHost !== '127.0.0.1') {
-    cfg.corsOrigins.push(`http://${sHost}:${sPort}`);
+    origins.add(`http://${sHost}:${sPort}`);
   }
+  for (const origin of cfg.server.allowedOrigins) origins.add(origin);
+  cfg.corsOrigins = [...origins];
 }
 
 /**

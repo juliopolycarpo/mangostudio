@@ -16,11 +16,33 @@ from the shape the binary ships: proxy timeouts, WebSocket upgrade handling, and
 behaviour all existed only in dev. Serving the bundle from Elysia collapses the two into one
 topology, so a deep link, a WebSocket, and a `/uploads/*` fetch behave the same everywhere.
 
-Consequence: the frontend is same-origin with the API. The CORS origin list is now the
-server's own origin only — `http://localhost:<port>`, `http://127.0.0.1:<port>`, and
+Consequence: the frontend is same-origin with the API. The CORS origin list defaults to the
+server's own origin — `http://localhost:<port>`, `http://127.0.0.1:<port>`, and
 `http://<server.host>:<port>` when the bind host is neither of those. `FRONTEND_PORT` and
 `frontend.port` are deprecated: both still parse, so an existing `~/.mango/config.toml` or
 `.env` keeps booting, but they drive nothing and setting either logs one warning at startup.
+
+## Serving the bundle from another origin
+
+A split deployment — the bundle on a CDN or a separate web server, this API somewhere else —
+is still supported, and it is what the `VITE_API_URL` build-time override exists for. Nothing
+can derive that origin, so it is named explicitly:
+
+```toml
+[server]
+allowedOrigins = ["https://studio.example.com"]
+```
+
+or `ALLOWED_ORIGINS=https://studio.example.com,https://staging.example.com` in the
+environment (comma-separated; the env value replaces the TOML list). Each entry must be a
+bare `scheme://host[:port]` origin: no path, no trailing slash, no explicit default port. All
+three gates that guard a browser request — the CORS middleware in `apps/api/src/app.ts`,
+Better Auth's `trustedOrigins`, and the realtime WebSocket handshake — compare the `Origin`
+header by exact string, so an entry that is merely close would match nothing. Startup fails
+with the canonical form rather than accepting one silently.
+
+Configured origins are added to the server's own, never substituted for them, so a local
+browser session keeps working alongside them.
 
 ## Development
 

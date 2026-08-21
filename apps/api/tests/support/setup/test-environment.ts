@@ -35,6 +35,18 @@ import { setChatGptLoopbackPortForTest } from '../../../src/modules/connectors/i
 import { setProviderSecretSyncTtlForTest } from '../../../src/services/providers/core/secret-service';
 import { registerApplicationServices } from '../../../src/services/register-application-services';
 
+/**
+ * A foreign origin every API test runs with, standing in for a split deployment
+ * where the frontend bundle is served from somewhere other than this API.
+ *
+ * It has to be installed here rather than per-test: `app.ts` captures
+ * `getConfig().corsOrigins` once, at module evaluation, so the CORS gate is
+ * bound to whatever the config held when the first test file imported the app.
+ * Setting it in the synchronous bootstrap phase is what lets a test prove the
+ * `server.allowedOrigins` setting actually reaches that gate.
+ */
+export const SPLIT_DEPLOYMENT_TEST_ORIGIN = 'https://studio.test';
+
 /** Set synchronously once config + services are in place (DB migrations follow). */
 let initialized = false;
 /** Memoizes the one-time async setup so repeated calls share a single run. */
@@ -53,6 +65,13 @@ function installBaseTestConfig(): void {
     auth: {
       secret: 'test-secret-at-least-32-characters-long',
       url: 'http://localhost:3001',
+    },
+    // Same host/port the defaults already produce; the list is what differs.
+    server: {
+      host: '0.0.0.0',
+      port: 3001,
+      publicUrl: '',
+      allowedOrigins: [SPLIT_DEPLOYMENT_TEST_ORIGIN],
     },
     database: { path: ':memory:' },
     configFilePath: TEST_MANAGED_CONFIG_PATH,

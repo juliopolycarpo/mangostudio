@@ -18,6 +18,7 @@ import {
   loadConfig,
   loadConfigForTest,
   parseBooleanFlag,
+  RUNTIME_CONFIG_ENV_KEYS,
   resetConfig,
   resetFrontendPortDeprecationWarning,
   TEST_MANAGED_CONFIG_DIR,
@@ -43,6 +44,7 @@ const WATCHED_ENV_KEYS = [
   'MANGO_ENV_INSTALLS_ENABLED',
   'MANGO_CONTAINER',
   'FRONTEND_PORT',
+  'ALLOWED_ORIGINS',
 ];
 
 function saveEnv(): Record<string, string | undefined> {
@@ -389,7 +391,7 @@ describe('parseBooleanFlag', () => {
   });
 });
 
-describe('corsOrigins includes server origin for same-origin deployments', () => {
+describe('corsOrigins: the server origin plus configured allowed origins', () => {
   let savedEnv: Record<string, string | undefined>;
 
   beforeEach(() => {
@@ -454,6 +456,90 @@ describe('corsOrigins includes server origin for same-origin deployments', () =>
     expect(cfg.corsOrigins).toContain('http://api.internal:4000');
   });
 
+  test('a configured allowed origin joins the defaults instead of replacing them', () => {
+    writeFileSync(
+      TMP_TOML,
+      '[server]\nport = 3001\nallowedOrigins = ["https://studio.example.com"]\n'
+    );
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.corsOrigins).toEqual([
+      'http://localhost:3001',
+      'http://127.0.0.1:3001',
+      'http://0.0.0.0:3001',
+      'https://studio.example.com',
+    ]);
+  });
+
+  test('ALLOWED_ORIGINS takes a comma-separated list', () => {
+    process.env.ALLOWED_ORIGINS = 'https://studio.example.com, http://192.168.1.10:4173';
+
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(cfg.server.allowedOrigins).toEqual([
+      'https://studio.example.com',
+      'http://192.168.1.10:4173',
+    ]);
+    expect(cfg.corsOrigins).toContain('https://studio.example.com');
+    expect(cfg.corsOrigins).toContain('http://192.168.1.10:4173');
+    // The server's own origins survive, so a local browser session still works.
+    expect(cfg.corsOrigins).toContain('http://localhost:3001');
+  });
+
+  test('ALLOWED_ORIGINS tolerates padding and a trailing comma', () => {
+    process.env.ALLOWED_ORIGINS = '  https://studio.example.com ,, ';
+
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(cfg.server.allowedOrigins).toEqual(['https://studio.example.com']);
+  });
+
+  test('ALLOWED_ORIGINS replaces the config.toml list rather than extending it', () => {
+    writeFileSync(TMP_TOML, '[server]\nallowedOrigins = ["https://from-toml.example"]\n');
+    process.env.ALLOWED_ORIGINS = 'https://from-env.example';
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.corsOrigins).toContain('https://from-env.example');
+    expect(cfg.corsOrigins).not.toContain('https://from-toml.example');
+  });
+
+  test('an allowed origin that repeats a default is not listed twice', () => {
+    process.env.ALLOWED_ORIGINS = 'http://localhost:3001';
+
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(cfg.corsOrigins.filter((origin) => origin === 'http://localhost:3001')).toHaveLength(1);
+  });
+
+  test('ALLOWED_ORIGINS is forwarded to detached servers with the other config keys', () => {
+    expect(RUNTIME_CONFIG_ENV_KEYS).toContain('ALLOWED_ORIGINS');
+  });
+
+  // Every gate compares the browser's Origin header by exact string, so an
+  // entry that is merely close parses fine and then matches nothing. Rejecting
+  // it at load is what turns a silent no-op into a startup failure.
+  test.each([
+    ['studio.example.com', 'is not a URL'],
+    ['ftp://studio.example.com', 'must use http:// or https://'],
+    ['https://studio.example.com/app', 'must be a bare scheme://host[:port] origin'],
+    ['https://studio.example.com/', 'must be a bare scheme://host[:port] origin'],
+    ['https://studio.example.com:443', 'must be a bare scheme://host[:port] origin'],
+  ])('rejects the malformed allowed origin %p', (origin, expected) => {
+    process.env.ALLOWED_ORIGINS = origin;
+
+    expect(() => loadConfig(join(TMP_DIR, 'nonexistent.toml'))).toThrow(expected);
+  });
+
+  test('names the canonical form when an entry is close but not exact', () => {
+    process.env.ALLOWED_ORIGINS = 'https://studio.example.com/';
+
+    expect(() => loadConfig(join(TMP_DIR, 'nonexistent.toml'))).toThrow(
+      'did you mean "https://studio.example.com"'
+    );
+  });
+
   test('a configured frontend port contributes no origin of its own', () => {
     writeFileSync(TMP_TOML, '[server]\nport = 3001\n[frontend]\nport = 5173\n');
 
@@ -506,7 +592,9 @@ describe('frontend.port deprecation warning', () => {
     loadConfig(TMP_TOML);
 
     expect(deprecationWarnings()).toEqual([
-      '[config] The [frontend] settings are deprecated and ignored; the frontend is served by the API on 3001.',
+      '[config] The [frontend] settings are deprecated and ignored; the frontend is served by ' +
+        'the API on 3001. To allow a frontend served from another origin, set ' +
+        'server.allowedOrigins (or ALLOWED_ORIGINS).',
     ]);
   });
 
