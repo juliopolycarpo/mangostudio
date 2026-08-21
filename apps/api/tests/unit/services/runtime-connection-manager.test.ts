@@ -972,6 +972,95 @@ describe('RuntimeConnectionManager', () => {
     }
   });
 
+  // The wedge behind #922. `getClient` hands the in-flight promise to every
+  // later caller, so an in-process attempt that never settles is not one slow
+  // call — it is every subsequent call, forever. What breaks that is the
+  // eviction the deadline triggers, so the assertions that matter are the ones
+  // after the rejection.
+  it('evicts an in-process connect that never settles instead of queueing on it', async () => {
+    let connectCalls = 0;
+    let lateCloses = 0;
+    let finishWedged: ((connection: ManagedRuntimeConnection) => void) | undefined;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(localDefinition('user-1')),
+      connectors: {
+        'in-process': () => {
+          connectCalls += 1;
+          if (connectCalls > 1) return Promise.resolve(fakeConnection(() => undefined));
+          return new Promise<ManagedRuntimeConnection>((resolve) => {
+            finishWedged = resolve;
+          });
+        },
+      },
+      connectDeadlinesMs: { 'in-process': 25 },
+    });
+
+    // Both callers are settled together rather than awaited one after the
+    // other: they share one rejection, and awaiting them in sequence leaves the
+    // second one momentarily unhandled, which Bun reports as a test failure.
+    const [wedged, joined] = await Promise.all([
+      manager.getClient('user-1', 'local').catch((error: unknown) => error),
+      manager.getClient('user-1', 'local').catch((error: unknown) => error),
+    ]);
+    const timedOut = {
+      code: 'RUNTIME_UNAVAILABLE',
+      message: 'Connecting to environment "local" timed out after 25ms.',
+    };
+    expect(wedged).toMatchObject(timedOut);
+    expect(joined).toMatchObject(timedOut);
+    expect(manager.getStatus('user-1', 'local')).toMatchObject({
+      state: 'error',
+      errorCode: 'RUNTIME_UNAVAILABLE',
+    });
+
+    // The entry is evicted, not held: the next caller is answered by the
+    // ordinary backoff rather than joining the corpse of the first attempt.
+    await expect(manager.getClient('user-1', 'local')).rejects.toMatchObject({
+      message: expect.stringContaining('the next connection attempt is allowed in'),
+    });
+    expect(connectCalls).toBe(1);
+
+    advanceSeconds(2);
+    expect((await manager.getClient('user-1', 'local')).manifest).toEqual(TEST_MANIFEST);
+    expect(connectCalls).toBe(2);
+
+    // A connection that arrives after its attempt was abandoned owns a live
+    // runtime host that nothing else will ever close.
+    finishWedged?.(fakeConnection(() => lateCloses++));
+    await flushMicrotasks();
+    expect(lateCloses).toBe(1);
+  });
+
+  it('lets the next Local connect start while the previous attempt is stuck', async () => {
+    let openCalls = 0;
+    let releaseStuck: ((connection: ManagedRuntimeConnection) => void) | undefined;
+    const connector = createLocalRuntimeConnector({
+      chainDeadlineMs: 25,
+      isWorkspaceAuthorized: () => true,
+      open: () => {
+        openCalls += 1;
+        if (openCalls > 1) return Promise.resolve(fakeConnection(() => undefined));
+        return new Promise<ManagedRuntimeConnection>((resolve) => {
+          releaseStuck = resolve;
+        });
+      },
+    });
+
+    const stuck = connector(localDefinition('user-1'), () => undefined, connectContext());
+    // Before the chain was bounded this never settled: the serial chain only
+    // advanced when the previous attempt did.
+    const next = await connector(localDefinition('user-1'), () => undefined, connectContext());
+
+    try {
+      expect(openCalls).toBe(2);
+      expect(next.client.manifest).toEqual(TEST_MANIFEST);
+    } finally {
+      releaseStuck?.(fakeConnection(() => undefined));
+      await (await stuck).close();
+      await next.close();
+    }
+  });
+
   it('re-reads a stale manifest in the background, once, without blocking the read', async () => {
     const probe = healthProbe(TEST_MANIFEST);
     let publishes = 0;
