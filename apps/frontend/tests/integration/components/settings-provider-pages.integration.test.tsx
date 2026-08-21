@@ -6,24 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import userEvent from '@testing-library/user-event';
 import { flushAsyncRender, render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
+import { LinkStub } from '../../support/mocks/router';
 
 // Declared at module level rather than inline in the factory: biome's
 // `noComponentHookFactories` rejects a component defined inside a function.
-function LinkStub({
-  to,
-  children,
-  ...props
-}: {
-  to: string;
-  children: React.ReactNode;
-  [k: string]: unknown;
-}) {
-  return (
-    <a href={to} {...props}>
-      {children}
-    </a>
-  );
-}
 
 // `importOriginal` has no `bun test` equivalent: import the real namespace
 // first, register the mock over it, then import the subject. `mock.module` is

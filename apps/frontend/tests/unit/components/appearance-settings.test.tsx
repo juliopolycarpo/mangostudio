@@ -5,31 +5,10 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { act, fireEvent, screen } from '@testing-library/react';
 import { render, renderHook } from '../../support/harness/render';
+import { LinkStub } from '../../support/mocks/router';
 
 // SettingsTabs uses TanStack Router Link — mock it to a simple anchor
 const actual = await import('@tanstack/react-router');
-
-function LinkStub({
-  to,
-  children,
-  activeProps: _activeProps,
-  inactiveProps: _inactiveProps,
-  activeOptions: _activeOptions,
-  ...props
-}: {
-  to: string;
-  children: React.ReactNode;
-  activeProps?: unknown;
-  inactiveProps?: unknown;
-  activeOptions?: unknown;
-  [k: string]: unknown;
-}) {
-  return (
-    <a href={to} {...props}>
-      {children}
-    </a>
-  );
-}
 
 mock.module('@tanstack/react-router', () => ({
   ...actual,
@@ -237,7 +216,7 @@ describe('useTheme hook', () => {
   });
 
   it('system theme resolves based on OS preference', () => {
-    // jsdom matchMedia defaults to not matching (prefers-color-scheme: dark = false → light)
+    // The stubbed matchMedia defaults to not matching (prefers-color-scheme: dark = false → light)
     const { result } = renderHook(() => useTheme());
     act(() => {
       result.current.setConfig({ appTheme: 'system' });

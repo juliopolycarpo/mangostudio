@@ -16,19 +16,12 @@ import { useUpdateToolSetting } from '../../../../src/features/settings/tools/ho
 import { toolSettingsKeys } from '../../../../src/features/settings/tools/queries';
 import { render } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
+import { LinkStub } from '../../../support/mocks/router';
 
 // `vi.mock(m, async (importOriginal) => ({ ...await importOriginal(), … }))`
 // ports as three statements: import the real namespace, register the mock, then
 // import the subject. `mock.module` is not hoisted and static imports are.
 const actualRouter = await import('@tanstack/react-router');
-
-function LinkStub({ to, children, ...props }: { to: string; children: React.ReactNode }) {
-  return (
-    <a href={to} {...props}>
-      {children}
-    </a>
-  );
-}
 
 mock.module('@tanstack/react-router', () => ({ ...actualRouter, Link: LinkStub }));
 

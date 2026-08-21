@@ -5,6 +5,7 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { screen } from '@testing-library/react';
 import { render } from '../../support/harness/render';
+import { LinkStub } from '../../support/mocks/router';
 
 // The `bun test` shape of vitest's `vi.mock(…, async () => ({ ...await
 // vi.importActual(…) }))`: the real namespace is imported first, spread into
@@ -15,22 +16,6 @@ import { render } from '../../support/harness/render';
 // survives `mock.restore()`, so this lane runs under `--isolate`. Without it,
 // every later file in the run would get this `Link` too.
 const actual = await import('@tanstack/react-router');
-
-function LinkStub({
-  to,
-  children,
-  ...props
-}: {
-  to: string;
-  children: React.ReactNode;
-  [key: string]: unknown;
-}) {
-  return (
-    <a href={to} {...props}>
-      {children}
-    </a>
-  );
-}
 
 mock.module('@tanstack/react-router', () => ({ ...actual, Link: LinkStub }));
 

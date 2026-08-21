@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import userEvent from '@testing-library/user-event';
-import type { ComponentType, ReactNode } from 'react';
+import type { ComponentType } from 'react';
 import { render, screen, waitFor } from '../../support/harness/render';
+import { LinkStub } from '../../support/mocks/router';
 import { setTestSession, setTestSignIn, setTestSignUp } from '../../support/setup/auth-client-stub';
 
 const { mockHistoryPush, mockNavigate, mockSignInEmail, mockSignUpEmail, searchState } = {
@@ -14,13 +15,6 @@ const { mockHistoryPush, mockNavigate, mockSignInEmail, mockSignUpEmail, searchS
 
 // Module-scoped so biome's `noComponentHookFactories` does not see a
 // component defined inside the `mock.module` factory below.
-function LinkStub({ to, children, ...props }: { to: string; children: ReactNode }) {
-  return (
-    <a href={to} {...props}>
-      {children}
-    </a>
-  );
-}
 
 mock.module('@tanstack/react-router', () => ({
   createFileRoute: () => (config: Record<string, unknown>) => ({

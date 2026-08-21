@@ -6,30 +6,10 @@ import { describe, expect, it, jest, mock } from 'bun:test';
 import { fireEvent, screen } from '@testing-library/react';
 import { DEFAULT_PROMPT_SETTINGS } from '../../../src/hooks/use-global-settings';
 import { render } from '../../support/harness/render';
+import { LinkStub } from '../../support/mocks/router';
 
 // Declared at module level rather than inline in the factory: biome's
 // `noComponentHookFactories` rejects a component defined inside a function.
-function LinkStub({
-  to,
-  children,
-  activeProps: _activeProps,
-  inactiveProps: _inactiveProps,
-  activeOptions: _activeOptions,
-  ...props
-}: {
-  to: string;
-  children: React.ReactNode;
-  activeProps?: unknown;
-  inactiveProps?: unknown;
-  activeOptions?: unknown;
-  [key: string]: unknown;
-}) {
-  return (
-    <a href={to} {...props}>
-      {children}
-    </a>
-  );
-}
 
 // `importActual` has no `bun test` equivalent: import the real namespace first,
 // register the mock over it, then import the subjects. `mock.module` is not

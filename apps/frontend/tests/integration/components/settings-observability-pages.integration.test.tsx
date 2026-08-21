@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { AppContext } from '../../../src/lib/app-context';
 import { render, screen } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
+import { LinkStub } from '../../support/mocks/router';
 
 /**
  * The Logs page reports how each external agent in the **active environment**
@@ -15,27 +16,6 @@ function withApp(children: React.ReactNode, currentEnvironmentId: string | null 
 
 // Declared at module level rather than inline in the factory: biome's
 // `noComponentHookFactories` rejects a component defined inside a function.
-function LinkStub({
-  to,
-  children,
-  activeProps: _activeProps,
-  inactiveProps: _inactiveProps,
-  activeOptions: _activeOptions,
-  ...props
-}: {
-  to: string;
-  children: React.ReactNode;
-  activeProps?: unknown;
-  inactiveProps?: unknown;
-  activeOptions?: unknown;
-  [key: string]: unknown;
-}) {
-  return (
-    <a href={to} {...props}>
-      {children}
-    </a>
-  );
-}
 
 // The real namespace is spread in: `bun test` resolves every export at import,
 // so a factory returning only these two breaks the module's other consumers.

@@ -1,30 +1,9 @@
 import { describe, expect, it, jest, mock } from 'bun:test';
 import { fireEvent, screen } from '@testing-library/react';
 import { render } from '../../support/harness/render';
+import { LinkStub } from '../../support/mocks/router';
 
 const actual = await import('@tanstack/react-router');
-
-function LinkStub({
-  to,
-  children,
-  activeProps: _activeProps,
-  inactiveProps: _inactiveProps,
-  activeOptions: _activeOptions,
-  ...props
-}: {
-  to: string;
-  children: React.ReactNode;
-  activeProps?: unknown;
-  inactiveProps?: unknown;
-  activeOptions?: unknown;
-  [key: string]: unknown;
-}) {
-  return (
-    <a href={to} {...props}>
-      {children}
-    </a>
-  );
-}
 
 mock.module('@tanstack/react-router', () => ({
   ...actual,

@@ -8,27 +8,13 @@ import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { providerSettingsKeys } from '../../../src/features/settings/providers/queries';
 import { render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
+import { LinkStub } from '../../support/mocks/router';
 
 // Mock TanStack Router — provide useParams
 const routeParams = { provider: 'deepseek' };
 
 // Declared at module level rather than inline in the factory: biome's
 // `noComponentHookFactories` rejects a component defined inside a function.
-function LinkStub({
-  to,
-  children,
-  ...props
-}: {
-  to: string;
-  children: React.ReactNode;
-  [k: string]: unknown;
-}) {
-  return (
-    <a href={to} {...props}>
-      {children}
-    </a>
-  );
-}
 
 // `importOriginal` has no `bun test` equivalent: import the real namespace,
 // register the mock over it, then import the subject. `mock.module` is not

@@ -1,12 +1,9 @@
 import { describe, expect, it, mock } from 'bun:test';
-import type { ReactNode } from 'react';
 import { render, screen } from '../../support/harness/render';
+import { LinkStub } from '../../support/mocks/router';
 
 // Declared at module level rather than inline in the factory: biome's
 // `noComponentHookFactories` rejects a component defined inside a function.
-function LinkStub({ to, children }: { readonly to: string; readonly children: ReactNode }) {
-  return <a href={to}>{children}</a>;
-}
 
 mock.module('@tanstack/react-router', () => ({ Link: LinkStub }));
 
