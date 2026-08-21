@@ -13,7 +13,7 @@
  * literally the production build command.
  */
 
-import { watch } from 'node:fs';
+import { readdirSync, statSync, watch } from 'node:fs';
 import { join } from 'node:path';
 import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import { setDevFrontendDir } from './dev-frontend-dir';
@@ -22,8 +22,14 @@ import { setDevFrontendDir } from './dev-frontend-dir';
 // dev task with the cwd set to `apps/api`, not the repo root.
 const FRONTEND_DIR = join(import.meta.dir, '..', '..', '..', 'frontend');
 const WATCH_DIR = join(FRONTEND_DIR, 'src');
+const DIST_DIR = join(FRONTEND_DIR, 'dist');
 /** Coalesce the burst of events an editor save produces into one rebuild. */
 const REBUILD_DEBOUNCE_MS = 120;
+/**
+ * The build regenerates this file, and it lives inside the watched directory.
+ * Rebuilding on it would make the watcher feed itself.
+ */
+const GENERATED_FILE = 'routeTree.gen.ts';
 
 async function runBuild(): Promise<boolean> {
   const proc = Bun.spawn(['bun', './build.ts', '--dev'], {
@@ -33,6 +39,30 @@ async function runBuild(): Promise<boolean> {
     ...HIDDEN_WINDOW,
   });
   return (await proc.exited) === 0;
+}
+
+/** Newest mtime under a directory, or 0 when it does not exist. */
+function newestMtime(directory: string): number {
+  try {
+    return readdirSync(directory, { recursive: true, encoding: 'utf8' }).reduce((newest, entry) => {
+      const stats = statSync(join(directory, entry));
+      return stats.isFile() ? Math.max(newest, stats.mtimeMs) : newest;
+    }, 0);
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * True when `dist/` is already newer than every frontend source file.
+ *
+ * The API's dev script runs under `bun --watch`, so editing any `apps/api/src`
+ * file restarts this process and calls back into here. Without this check every
+ * API hot reload would tear down `dist/` and rebuild it from scratch.
+ */
+function distIsCurrent(): boolean {
+  const built = newestMtime(DIST_DIR);
+  return built > 0 && built >= newestMtime(WATCH_DIR);
 }
 
 /**
@@ -47,16 +77,23 @@ async function runBuild(): Promise<boolean> {
  * import) — so a browser refresh is needed to see an edit.
  */
 export async function registerDevFrontend(): Promise<void> {
-  console.warn('[frontend] Building...');
-  if (!(await runBuild())) {
-    console.error('[frontend] Initial build failed; the server will serve API routes only.');
-    return;
+  if (distIsCurrent()) {
+    console.warn('[frontend] Bundle is up to date.');
+  } else {
+    console.warn('[frontend] Building...');
+    if (!(await runBuild())) {
+      console.error('[frontend] Initial build failed; the server will serve API routes only.');
+      return;
+    }
   }
-  setDevFrontendDir(join(FRONTEND_DIR, 'dist'));
+  setDevFrontendDir(DIST_DIR);
 
   let pending: ReturnType<typeof setTimeout> | null = null;
   let building = false;
-  const watcher = watch(WATCH_DIR, { recursive: true }, () => {
+  const watcher = watch(WATCH_DIR, { recursive: true }, (_event, filename) => {
+    // The build writes routeTree.gen.ts back into the watched tree; reacting to
+    // it would make each rebuild schedule the next one.
+    if (filename?.endsWith(GENERATED_FILE)) return;
     if (pending) clearTimeout(pending);
     pending = setTimeout(() => {
       pending = null;
