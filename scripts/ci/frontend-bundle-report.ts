@@ -8,26 +8,31 @@
 // code landed in different chunks", which is the only question worth asking
 // during the migration — hence a per-file table plus a baseline to compare it to.
 //
+// The table also splits the bundle into **eager** and **lazy** payloads. Eager
+// is what a first paint downloads: `index.html`, the stylesheets and scripts it
+// references, and the static-import closure of those scripts. A regression that
+// moves bytes from lazy chunks into that set is a first-paint regression even
+// when the total is flat, which is exactly what a totals-only diff hides.
+//
 // This is not the QA gate's bundle collector (`scripts/qa-gate/collect/bundle.ts`),
 // which reports aggregate js/css/html gzip totals into the QA report on every CI
 // run. This one is a migration instrument: run by hand, diffed against a captured
 // baseline, and reported in a PR body.
 //
-// Asset filenames carry content hashes, so every file looks new on every build.
-// Rows are therefore keyed by the hash-stripped name (`assets/index-Bqugzlgv.js`
-// → `assets/index.js`), which is what makes a diff readable at all.
-//
-// Usage: bun ./scripts/ci/frontend-bundle-report.ts [--dist <dir>] [--baseline <file>] [--json] [--out <file>]
+// Usage: bun ./scripts/ci/frontend-bundle-report.ts [--dist <dir>] [--baseline <file>] [--metafile <file>] [--json] [--out <file>]
 
 import { readdir } from 'node:fs/promises';
-import { join, sep } from 'node:path';
+import { dirname, join, posix, sep } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 
 const DEFAULT_DIST_DIR = join(ROOT_DIR, 'apps/frontend/dist');
 
-/** Report format version, so a stale baseline fails loudly instead of diffing as churn. */
-export const BUNDLE_REPORT_VERSION = 1;
+/**
+ * Report format version, so a stale baseline fails loudly instead of diffing as
+ * churn. Version 2 added the per-file `eager` flag and the eager totals.
+ */
+export const BUNDLE_REPORT_VERSION = 2;
 
 export interface BundleFile {
   /** Path relative to the dist root, always '/'-separated. */
@@ -36,12 +41,16 @@ export interface BundleFile {
   readonly key: string;
   readonly rawBytes: number;
   readonly gzipBytes: number;
+  /** True when a first paint downloads this file (see the header comment). */
+  readonly eager: boolean;
 }
 
 export interface BundleTotals {
   readonly files: number;
   readonly rawBytes: number;
   readonly gzipBytes: number;
+  readonly eagerRawBytes: number;
+  readonly eagerGzipBytes: number;
 }
 
 export interface BundleReport {
@@ -112,12 +121,80 @@ async function listFiles(dir: string): Promise<string[]> {
     .sort();
 }
 
+/**
+ * Resolves an asset reference from `index.html` or an emitted JS file to a
+ * dist-relative path. Bun emits absolute URLs (`/assets/x.js`, from
+ * `publicPath: '/'`); Vite emits absolute in HTML and relative (`./x.js`)
+ * between chunks.
+ */
+function resolveAssetRef(ref: string, fromFile: string): string | undefined {
+  if (ref.startsWith('/')) return ref.slice(1);
+  if (ref.startsWith('./') || ref.startsWith('../')) {
+    return posix.normalize(posix.join(posix.dirname(fromFile), ref));
+  }
+  return undefined;
+}
+
+/** `<script src>` and `<link rel="stylesheet" href>` targets of an HTML shell. */
+function htmlAssetRefs(html: string): string[] {
+  const scripts = [...html.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)].map((m) => m[1] ?? '');
+  const styles = [...html.matchAll(/<link[^>]*rel="stylesheet"[^>]*\shref="([^"]+)"/g)].map(
+    (m) => m[1] ?? ''
+  );
+  return [...scripts, ...styles].filter((ref) => ref !== '');
+}
+
+/**
+ * Static import specifiers of an emitted JS chunk. Dynamic `import("…")` is
+ * deliberately not matched — the parenthesis breaks the pattern — because a
+ * dynamic edge is exactly what makes the target lazy.
+ */
+function staticImportRefs(source: string): string[] {
+  return [...source.matchAll(/(?:import|from)\s*"((?:\.\.?\/|\/)[^"]+\.js)"/g)].map(
+    (m) => m[1] ?? ''
+  );
+}
+
+/**
+ * The set of dist files a first paint downloads: `index.html`, every stylesheet
+ * and script it references, and the static-import closure of those scripts.
+ */
+async function traverseEagerSet(distDir: string, paths: readonly string[]): Promise<Set<string>> {
+  const known = new Set(paths);
+  const eager = new Set<string>();
+  const queue: string[] = [];
+
+  const add = (path: string | undefined): void => {
+    if (path !== undefined && known.has(path) && !eager.has(path)) {
+      eager.add(path);
+      queue.push(path);
+    }
+  };
+
+  if (!known.has('index.html')) return eager;
+  add('index.html');
+  const html = await Bun.file(join(distDir, 'index.html')).text();
+  for (const ref of htmlAssetRefs(html)) add(resolveAssetRef(ref, 'index.html'));
+
+  while (queue.length > 0) {
+    const path = queue.shift();
+    if (path === undefined || !path.endsWith('.js')) continue;
+    const source = await Bun.file(join(distDir, path)).text();
+    for (const ref of staticImportRefs(source)) add(resolveAssetRef(ref, path));
+  }
+  return eager;
+}
+
 /** Measures every file under `distDir`, largest gzipped first. */
 export async function measureBundle(
   distDir: string,
   meta: { builder: string; capturedAt: string }
 ): Promise<BundleReport> {
-  const paths = await listFiles(distDir);
+  // Sourcemaps are a diagnostic artifact, not shipped payload; a dist built with
+  // them would otherwise report as a size regression.
+  const paths = (await listFiles(distDir)).filter((path) => !path.endsWith('.map'));
+  const eagerSet = await traverseEagerSet(distDir, paths);
+
   const files: BundleFile[] = [];
   for (const path of paths) {
     const bytes = new Uint8Array(await Bun.file(join(distDir, path)).arrayBuffer());
@@ -129,9 +206,13 @@ export async function measureBundle(
       // collector reports. The totals do not match it: this walks every file in
       // dist/, the collector counts only .js/.css/.html.
       gzipBytes: Bun.gzipSync(bytes).byteLength,
+      eager: eagerSet.has(path),
     });
   }
   files.sort((a, b) => b.gzipBytes - a.gzipBytes || a.path.localeCompare(b.path));
+
+  const total = (select: (file: BundleFile) => boolean, of: (file: BundleFile) => number): number =>
+    files.filter(select).reduce((sum, file) => sum + of(file), 0);
 
   return {
     version: BUNDLE_REPORT_VERSION,
@@ -139,8 +220,22 @@ export async function measureBundle(
     capturedAt: meta.capturedAt,
     totals: {
       files: files.length,
-      rawBytes: files.reduce((total, file) => total + file.rawBytes, 0),
-      gzipBytes: files.reduce((total, file) => total + file.gzipBytes, 0),
+      rawBytes: total(
+        () => true,
+        (file) => file.rawBytes
+      ),
+      gzipBytes: total(
+        () => true,
+        (file) => file.gzipBytes
+      ),
+      eagerRawBytes: total(
+        (file) => file.eager,
+        (file) => file.rawBytes
+      ),
+      eagerGzipBytes: total(
+        (file) => file.eager,
+        (file) => file.gzipBytes
+      ),
     },
     files,
   };
@@ -162,18 +257,33 @@ function formatDelta(current: number, previous: number | undefined): string {
   return `${delta > 0 ? '+' : '-'}${formatBytes(Math.abs(delta))}${percent}`;
 }
 
-/** Sums a report's files by hash-stripped key; two chunks can collapse onto one key. */
-export function totalsByKey(report: BundleReport): Map<string, BundleTotals> {
-  const byKey = new Map<string, BundleTotals>();
-  for (const file of report.files) {
-    const running = byKey.get(file.key) ?? { files: 0, rawBytes: 0, gzipBytes: 0 };
-    byKey.set(file.key, {
-      files: running.files + 1,
-      rawBytes: running.rawBytes + file.rawBytes,
-      gzipBytes: running.gzipBytes + file.gzipBytes,
-    });
+/**
+ * Stable per-file row labels. Files are keyed by hash-stripped name so a chunk
+ * that merely got a new hash still matches its baseline row; when several files
+ * share a key (Bun once emitted 17 `chunk-main-*.js`), each gets its own row,
+ * disambiguated by gzip-size rank (`assets/chunk-main.js #2`). Rank-matching
+ * same-keyed files across builds is approximate, but every file stays visible —
+ * a row that silently aggregates hides exactly what a bundle diff exists to
+ * catch.
+ */
+export function labelFiles(files: readonly BundleFile[]): Map<BundleFile, string> {
+  const byKey = new Map<string, BundleFile[]>();
+  for (const file of files) {
+    const group = byKey.get(file.key) ?? [];
+    group.push(file);
+    byKey.set(file.key, group);
   }
-  return byKey;
+
+  const labels = new Map<BundleFile, string>();
+  for (const [key, group] of byKey) {
+    const ranked = [...group].sort(
+      (a, b) => b.gzipBytes - a.gzipBytes || a.path.localeCompare(b.path)
+    );
+    for (const [rank, file] of ranked.entries()) {
+      labels.set(file, group.length === 1 ? key : `${key} #${rank + 1}`);
+    }
+  }
+  return labels;
 }
 
 /**
@@ -181,46 +291,95 @@ export function totalsByKey(report: BundleReport): Map<string, BundleTotals> {
  * everything above it reads the filesystem, everything below writes a stream.
  */
 export function renderBundleReport(report: BundleReport, baseline?: BundleReport): string {
-  const current = totalsByKey(report);
-  const previous = baseline ? totalsByKey(baseline) : undefined;
+  const labels = labelFiles(report.files);
+  const previous = baseline
+    ? new Map([...labelFiles(baseline.files)].map(([file, label]) => [label, file]))
+    : undefined;
   const lines = [`### Frontend bundle (${report.builder})`, ''];
 
   if (baseline) {
     lines.push(`Compared against \`${baseline.builder}\` captured ${baseline.capturedAt}.`, '');
-    lines.push('| Chunk | Raw | Gzip | Δ gzip |', '| --- | ---: | ---: | ---: |');
+    lines.push('| Chunk | Load | Raw | Gzip | Δ gzip |', '| --- | --- | ---: | ---: | ---: |');
   } else {
-    lines.push('| Chunk | Raw | Gzip |', '| --- | ---: | ---: |');
+    lines.push('| Chunk | Load | Raw | Gzip |', '| --- | --- | ---: | ---: |');
   }
 
-  for (const [key, totals] of [...current].sort(([, a], [, b]) => b.gzipBytes - a.gzipBytes)) {
-    // Bun's splitting can emit many chunks whose names collapse onto one key
-    // (17 `chunk-main-*.js` files were once a single 317 kB row). The sums stay
-    // per-key so hash-only churn still diffs as unchanged, but the multiplicity
-    // has to be visible — a row that silently aggregates hides exactly the
-    // duplication a bundle diff exists to catch.
-    const label = totals.files > 1 ? `${key} ×${totals.files}` : key;
-    const cells = [label, formatBytes(totals.rawBytes), formatBytes(totals.gzipBytes)];
-    if (previous) cells.push(formatDelta(totals.gzipBytes, previous.get(key)?.gzipBytes));
+  for (const file of report.files) {
+    const label = labels.get(file) ?? file.key;
+    const cells = [
+      label,
+      file.eager ? 'eager' : 'lazy',
+      formatBytes(file.rawBytes),
+      formatBytes(file.gzipBytes),
+    ];
+    if (previous) cells.push(formatDelta(file.gzipBytes, previous.get(label)?.gzipBytes));
     lines.push(`| ${cells.join(' | ')} |`);
   }
 
-  const totalCells = [
-    `**Total (${report.totals.files} files)**`,
-    `**${formatBytes(report.totals.rawBytes)}**`,
-    `**${formatBytes(report.totals.gzipBytes)}**`,
-  ];
-  if (baseline) {
-    totalCells.push(`**${formatDelta(report.totals.gzipBytes, baseline.totals.gzipBytes)}**`);
-  }
-  lines.push(`| ${totalCells.join(' | ')} |`, '');
+  const totalRow = (name: string, raw: number, gzip: number, previousGzip?: number): string => {
+    const cells = [`**${name}**`, '', `**${formatBytes(raw)}**`, `**${formatBytes(gzip)}**`];
+    if (baseline) {
+      cells.push(previousGzip === undefined ? '' : `**${formatDelta(gzip, previousGzip)}**`);
+    }
+    return `| ${cells.join(' | ')} |`;
+  };
+  lines.push(
+    totalRow(
+      'Eager (first paint)',
+      report.totals.eagerRawBytes,
+      report.totals.eagerGzipBytes,
+      baseline?.totals.eagerGzipBytes
+    ),
+    totalRow(
+      `Total (${report.totals.files} files)`,
+      report.totals.rawBytes,
+      report.totals.gzipBytes,
+      baseline?.totals.gzipBytes
+    ),
+    ''
+  );
 
   if (previous) {
-    const dropped = [...previous.keys()].filter((key) => !current.has(key));
+    const current = new Set(labels.values());
+    const dropped = [...previous.keys()].filter((label) => !current.has(label));
     if (dropped.length > 0) {
-      lines.push(`Gone from the baseline: ${dropped.map((key) => `\`${key}\``).join(', ')}`, '');
+      lines.push(
+        `Gone from the baseline: ${dropped.map((label) => `\`${label}\``).join(', ')}`,
+        ''
+      );
     }
   }
 
+  return lines.join('\n');
+}
+
+/**
+ * Modules that landed in more than one output chunk, from a `Bun.build()`
+ * metafile. Gzip cannot dedupe across file boundaries, so a duplicated module
+ * costs its bytes once per chunk — and nothing else in this report can see it:
+ * the size table only knows files, not what is inside them.
+ */
+export function findDuplicatedModules(metafile: {
+  outputs: Record<string, { inputs: Record<string, unknown> }>;
+}): Map<string, string[]> {
+  const moduleChunks = new Map<string, string[]>();
+  for (const [outputPath, output] of Object.entries(metafile.outputs)) {
+    if (!outputPath.endsWith('.js')) continue;
+    for (const inputPath of Object.keys(output.inputs)) {
+      const chunks = moduleChunks.get(inputPath) ?? [];
+      chunks.push(outputPath);
+      moduleChunks.set(inputPath, chunks);
+    }
+  }
+  return new Map([...moduleChunks].filter(([, chunks]) => chunks.length > 1));
+}
+
+export function renderDuplicatedModules(duplicated: Map<string, string[]>): string {
+  if (duplicated.size === 0) return 'No module is present in more than one chunk.';
+  const lines = [`**${duplicated.size} module(s) present in more than one chunk:**`, ''];
+  for (const [module, chunks] of duplicated) {
+    lines.push(`- \`${module}\` × ${chunks.length}: ${chunks.map((c) => `\`${c}\``).join(', ')}`);
+  }
   return lines.join('\n');
 }
 
@@ -273,5 +432,19 @@ if (import.meta.main) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } else {
     process.stdout.write(renderBundleReport(report, baseline));
+  }
+
+  // The build script drops a metafile next to dist; a Vite dist has none, so the
+  // check reports itself as skipped rather than silently passing.
+  const metafilePath =
+    flagValue(argv, '--metafile') ?? join(dirname(distDir), 'dist-metafile.json');
+  const metafileFile = Bun.file(metafilePath);
+  if (!argv.includes('--json')) {
+    if (await metafileFile.exists()) {
+      const metafile = (await metafileFile.json()) as Parameters<typeof findDuplicatedModules>[0];
+      process.stdout.write(`\n${renderDuplicatedModules(findDuplicatedModules(metafile))}\n`);
+    } else {
+      process.stdout.write(`\nDuplicate-module check skipped: no metafile at ${metafilePath}.\n`);
+    }
   }
 }

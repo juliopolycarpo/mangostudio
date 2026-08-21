@@ -4,33 +4,60 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  type BundleFile,
   type BundleReport,
+  findDuplicatedModules,
   formatBytes,
+  labelFiles,
   measureBundle,
   parseBundleReport,
   renderBundleReport,
+  renderDuplicatedModules,
   stripContentHash,
-  totalsByKey,
 } from '../ci/frontend-bundle-report';
 
 const META = { builder: 'vite', capturedAt: '2026-08-20' } as const;
 
 function report(files: BundleReport['files'], builder = 'bun'): BundleReport {
+  const sorted = [...files].sort(
+    (a, b) => b.gzipBytes - a.gzipBytes || a.path.localeCompare(b.path)
+  );
+  const total = (select: (file: BundleFile) => boolean, of: (file: BundleFile) => number): number =>
+    sorted.filter(select).reduce((sum, file) => sum + of(file), 0);
   return {
-    version: 1,
+    version: 2,
     builder,
     capturedAt: '2026-08-20',
     totals: {
-      files: files.length,
-      rawBytes: files.reduce((total, file) => total + file.rawBytes, 0),
-      gzipBytes: files.reduce((total, file) => total + file.gzipBytes, 0),
+      files: sorted.length,
+      rawBytes: total(
+        () => true,
+        (f) => f.rawBytes
+      ),
+      gzipBytes: total(
+        () => true,
+        (f) => f.gzipBytes
+      ),
+      eagerRawBytes: total(
+        (f) => f.eager,
+        (f) => f.rawBytes
+      ),
+      eagerGzipBytes: total(
+        (f) => f.eager,
+        (f) => f.gzipBytes
+      ),
     },
-    files,
+    files: sorted,
   };
 }
 
-function file(path: string, rawBytes: number, gzipBytes: number): BundleReport['files'][number] {
-  return { path, key: stripContentHash(path), rawBytes, gzipBytes };
+function file(
+  path: string,
+  rawBytes: number,
+  gzipBytes: number,
+  eager = false
+): BundleReport['files'][number] {
+  return { path, key: stripContentHash(path), rawBytes, gzipBytes, eager };
 }
 
 describe('stripContentHash', () => {
@@ -94,50 +121,74 @@ describe('formatBytes', () => {
   });
 });
 
-describe('totalsByKey', () => {
-  test('sums the files that collapse onto one hash-stripped key', () => {
-    const totals = totalsByKey(
-      report([
-        file('assets/index-Bqugzlgv.js', 100, 40),
-        file('assets/index-CJeZLqOC.js', 50, 20),
-        file('assets/index-BsVw1vtW.css', 10, 5),
-      ])
-    );
+describe('labelFiles', () => {
+  test('labels a lone file with its bare key', () => {
+    const files = [file('assets/index-Bqugzlgv.js', 100, 40)];
+    expect(labelFiles(files).get(files[0] as BundleFile)).toBe('assets/index.js');
+  });
 
-    expect(totals.get('assets/index.js')).toEqual({ files: 2, rawBytes: 150, gzipBytes: 60 });
-    expect(totals.get('assets/index.css')).toEqual({ files: 1, rawBytes: 10, gzipBytes: 5 });
+  test('disambiguates same-keyed files by gzip-size rank', () => {
+    // Bun once emitted 17 `chunk-main-*.js` files that rendered as a single
+    // summed row; the total was right but every individual chunk was invisible.
+    const big = file('assets/chunk-main-CJeZLqOC.js', 300, 120);
+    const small = file('assets/chunk-main-Bqugzlgv.js', 100, 40);
+    const labels = labelFiles([small, big]);
+    expect(labels.get(big)).toBe('assets/chunk-main.js #1');
+    expect(labels.get(small)).toBe('assets/chunk-main.js #2');
   });
 });
 
 describe('renderBundleReport', () => {
-  test('ranks chunks by gzipped size and totals the bundle', () => {
+  test('ranks chunks by gzipped size, marks eagerness, and totals the bundle', () => {
     const rendered = renderBundleReport(
-      report([file('assets/small-Bqugzlgv.js', 100, 40), file('assets/big-CJeZLqOC.js', 900, 400)])
+      report([
+        file('assets/small-Bqugzlgv.js', 100, 40),
+        file('assets/big-CJeZLqOC.js', 900, 400, true),
+      ])
     );
 
     const rows = rendered
       .split('\n')
       .filter((line) => line.startsWith('| ') && !line.includes('---'));
     expect(rows[0]).toContain('| Chunk |');
-    expect(rows[1]).toBe('| assets/big.js | 900 B | 400 B |');
-    expect(rows[2]).toBe('| assets/small.js | 100 B | 40 B |');
-    expect(rows[3]).toBe('| **Total (2 files)** | **1000 B** | **440 B** |');
+    expect(rows[1]).toBe('| assets/big.js | eager | 900 B | 400 B |');
+    expect(rows[2]).toBe('| assets/small.js | lazy | 100 B | 40 B |');
+    expect(rows[3]).toBe('| **Eager (first paint)** |  | **900 B** | **400 B** |');
+    expect(rows[4]).toBe('| **Total (2 files)** |  | **1000 B** | **440 B** |');
     // No baseline, so no delta column to mislead a reader.
     expect(rendered).not.toContain('Δ gzip');
   });
 
   test('diffs against a baseline through the hash-stripped key', () => {
     // Different hashes on both sides: a path-keyed diff would call every row new.
-    const baseline = report([file('assets/index-Bqugzlgv.js', 1000, 500)], 'vite');
-    const current = report([file('assets/index-CJeZLqOC.js', 1200, 600)]);
+    const baseline = report([file('assets/index-Bqugzlgv.js', 1000, 500, true)], 'vite');
+    const current = report([file('assets/index-CJeZLqOC.js', 1200, 600, true)]);
 
     const rendered = renderBundleReport(current, baseline);
 
     expect(rendered).toContain('Compared against `vite` captured 2026-08-20.');
-    expect(rendered).toContain('| assets/index.js | 1.2 kB | 600 B | +100 B (+20.0%) |');
+    expect(rendered).toContain('| assets/index.js | eager | 1.2 kB | 600 B | +100 B (+20.0%) |');
     expect(rendered).toContain(
-      '| **Total (1 files)** | **1.2 kB** | **600 B** | **+100 B (+20.0%)** |'
+      '| **Total (1 files)** |  | **1.2 kB** | **600 B** | **+100 B (+20.0%)** |'
     );
+  });
+
+  test('diffs the eager total separately from the grand total', () => {
+    // The whole point of the eager split: total flat, first paint regressed.
+    const baseline = report(
+      [file('assets/index-Bqugzlgv.js', 1000, 500, true), file('assets/cpp-CiVOhWHe.js', 800, 300)],
+      'vite'
+    );
+    const current = report([
+      file('assets/index-CJeZLqOC.js', 1800, 800, true),
+      file('assets/cpp-BqemZtDc.js', 0, 0),
+    ]);
+
+    const rendered = renderBundleReport(current, baseline);
+    expect(rendered).toContain(
+      '| **Eager (first paint)** |  | **1.8 kB** | **800 B** | **+300 B (+60.0%)** |'
+    );
+    expect(rendered).toContain('| **Total (2 files)** |  | **1.8 kB** | **800 B** | **—** |');
   });
 
   test('marks an unchanged chunk rather than printing a zero', () => {
@@ -145,14 +196,11 @@ describe('renderBundleReport', () => {
     const current = report([file('assets/index-CJeZLqOC.js', 1000, 500)]);
 
     expect(renderBundleReport(current, baseline)).toContain(
-      '| assets/index.js | 1000 B | 500 B | — |'
+      '| assets/index.js | lazy | 1000 B | 500 B | — |'
     );
   });
 
-  test('shows the file count when several chunks collapse onto one key', () => {
-    // Bun once emitted 17 `chunk-main-*.js` files that rendered as a single
-    // row; the sum was right but the multiplicity — the actual duplication
-    // signal — was invisible.
+  test('renders one row per file when several collapse onto one key', () => {
     const rendered = renderBundleReport(
       report([
         file('assets/chunk-main-Bqugzlgv.js', 100, 40),
@@ -161,8 +209,9 @@ describe('renderBundleReport', () => {
       ])
     );
 
-    expect(rendered).toContain('| assets/chunk-main.js ×2 | 400 B | 160 B |');
-    expect(rendered).toContain('| assets/index.js | 50 B | 20 B |');
+    expect(rendered).toContain('| assets/chunk-main.js #1 | lazy | 300 B | 120 B |');
+    expect(rendered).toContain('| assets/chunk-main.js #2 | lazy | 100 B | 40 B |');
+    expect(rendered).toContain('| assets/index.js | lazy | 50 B | 20 B |');
   });
 
   test('calls out chunks the migration added and removed', () => {
@@ -180,8 +229,32 @@ describe('renderBundleReport', () => {
 
     const rendered = renderBundleReport(current, baseline);
 
-    expect(rendered).toContain('| assets/chunk.js | 200 B | 90 B | new |');
+    expect(rendered).toContain('| assets/chunk.js | lazy | 200 B | 90 B | new |');
     expect(rendered).toContain('Gone from the baseline: `assets/syntax-core.js`');
+  });
+});
+
+describe('findDuplicatedModules', () => {
+  test('reports a module that landed in more than one js chunk', () => {
+    const duplicated = findDuplicatedModules({
+      outputs: {
+        './assets/main-abc12345.js': {
+          inputs: { 'src/main.tsx': {}, 'node_modules/react/index.js': {} },
+        },
+        './assets/chunk-x-abc12345.js': {
+          inputs: { 'src/lazy.tsx': {}, 'node_modules/react/index.js': {} },
+        },
+        // A css output sharing a source with a js chunk is not duplication.
+        './assets/main-abc12345.css': { inputs: { 'src/main.tsx': {} } },
+      },
+    });
+
+    expect([...duplicated.keys()]).toEqual(['node_modules/react/index.js']);
+    expect(renderDuplicatedModules(duplicated)).toContain('`node_modules/react/index.js` × 2');
+  });
+
+  test('says so when nothing is duplicated', () => {
+    expect(renderDuplicatedModules(new Map())).toBe('No module is present in more than one chunk.');
   });
 });
 
@@ -192,26 +265,50 @@ describe('parseBundleReport', () => {
   });
 
   test('rejects a baseline from an older format instead of diffing it as churn', () => {
-    const source = JSON.stringify({ ...report([]), version: 0 });
-    expect(() => parseBundleReport(source, 'baseline.json')).toThrow(/version 0/);
+    // Version 1 predates the eager/lazy split; diffing it would render every
+    // eager number against an undefined baseline.
+    const source = JSON.stringify({ ...report([]), version: 1 });
+    expect(() => parseBundleReport(source, 'baseline.json')).toThrow(/version 1/);
   });
 });
 
 describe('measureBundle', () => {
-  test('measures every file under dist, nested directories included', async () => {
+  test('walks static imports from index.html to split eager from lazy', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mango-bundle-report-'));
     try {
       await mkdir(join(dir, 'assets'));
-      await writeFile(join(dir, 'index.html'), '<!doctype html>\n', 'utf8');
-      await writeFile(join(dir, 'assets', 'index-Bqugzlgv.js'), 'console.log(1);\n'.repeat(20));
+      // The shell references the entry and stylesheet with absolute URLs (Bun's
+      // publicPath form); the entry reaches one chunk statically (Vite's
+      // relative form) and one only dynamically — that one must stay lazy.
+      await writeFile(
+        join(dir, 'index.html'),
+        '<link rel="stylesheet" crossorigin href="/assets/main-abc12345.css" />\n' +
+          '<script type="module" crossorigin src="/assets/main-abc12345.js"></script>\n'
+      );
+      await writeFile(
+        join(dir, 'assets', 'main-abc12345.js'),
+        'import{a}from"./chunk-static-abc12345.js";import("/assets/chunk-lazy-abc12345.js");\n'
+      );
+      await writeFile(join(dir, 'assets', 'main-abc12345.css'), 'body{}\n');
+      await writeFile(join(dir, 'assets', 'chunk-static-abc12345.js'), 'export const a=1;\n');
+      await writeFile(join(dir, 'assets', 'chunk-lazy-abc12345.js'), 'export const b=2;\n');
+      // Sourcemaps are a diagnostic artifact, not shipped payload.
+      await writeFile(join(dir, 'assets', 'main-abc12345.js.map'), '{}\n');
 
       const measured = await measureBundle(dir, META);
 
       expect(measured.builder).toBe('vite');
-      expect(measured.totals.files).toBe(2);
-      expect(measured.files.map((entry) => entry.key)).toEqual(['assets/index.js', 'index.html']);
-      // Largest gzipped first, and gzip is measured rather than estimated.
-      expect(measured.files[0]?.gzipBytes).toBeGreaterThan(measured.files[1]?.gzipBytes ?? 0);
+      expect(measured.totals.files).toBe(5);
+      const eagerness = new Map(measured.files.map((entry) => [entry.path, entry.eager]));
+      expect(eagerness.get('index.html')).toBe(true);
+      expect(eagerness.get('assets/main-abc12345.js')).toBe(true);
+      expect(eagerness.get('assets/main-abc12345.css')).toBe(true);
+      expect(eagerness.get('assets/chunk-static-abc12345.js')).toBe(true);
+      expect(eagerness.get('assets/chunk-lazy-abc12345.js')).toBe(false);
+      expect(measured.files.map((entry) => entry.path)).not.toContain(
+        'assets/main-abc12345.js.map'
+      );
+      expect(measured.totals.eagerGzipBytes).toBeLessThan(measured.totals.gzipBytes);
       expect(measured.totals.rawBytes).toBe(
         measured.files.reduce((total, entry) => total + entry.rawBytes, 0)
       );
