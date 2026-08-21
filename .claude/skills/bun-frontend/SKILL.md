@@ -373,6 +373,22 @@ to `apps/frontend/dist-metafile.json` (gitignored) and the bundle report's dupli
 check reads it. `production: true` also exists at runtime but is not in `bun-types` 1.4.0
 (T21 applies); the define is the typed spelling.
 
+**T37 — `env: 'PREFIX_*'` cannot ship a build-time variable to a browser; use a `define`.**
+Measured 2026-08-21 on 1.4.0, found by review of PR #916's first attempt. The `env` option
+rewrites only the exact `process.env.X` member read — never `import.meta.env.X` — so the
+Vite-era `import.meta.env?.VITE_API_URL` read was silently dead all branch (split-deployment
+override lost, invisible behind the `window.origin` fallback). Worse, the two obvious repairs
+both fail: an **unset** variable survives into the bundle as the verbatim expression (bare
+`process` → ReferenceError in a browser), and wrapping it in
+`typeof process !== 'undefined' ? process.env.X : undefined` makes the inlined value
+unreachable — the guard stays in the bundle, evaluates false in a browser, and **discards the
+literal that `env` just inlined**. The unit test passes either way because `bun test` has a
+real `process`. The working shape is the T36 mechanism:
+`define: { 'process.env.VITE_API_URL': JSON.stringify(process.env.VITE_API_URL ?? '') }`
+(always defined, `''` when unset) plus a bare `process.env.VITE_API_URL` read in
+`api-base-url.ts`. Verify by grepping the built bundle for the literal **and confirming no
+`typeof process` adjacent to it**, then a headless render.
+
 ## Test migration mechanics
 
 Everything below is what the 004 spike actually needed across its eleven files. Where a row

@@ -7,13 +7,14 @@
  * 3. Fallback for non-browser environments (unit tests, SSR)
  */
 export function getApiBaseUrl(): string {
-  // `env: 'VITE_*'` in build.ts inlines `process.env.VITE_API_URL` when the
-  // variable is set at build time — it does not touch `import.meta.env`
-  // member reads, so this must be spelled as a `process.env` access. When the
-  // variable is unset the expression survives into the bundle verbatim, and
-  // the `typeof` guard is what keeps a browser from evaluating a bare
-  // `process` it does not have.
-  const explicit = typeof process !== 'undefined' ? process.env.VITE_API_URL : undefined;
+  // Replaced at build time by the `define` in build.ts (empty string when the
+  // variable is unset), so the bundle carries a literal and never a `process`
+  // reference. Must stay a bare `process.env` member read: `define` and the
+  // bundler's env inlining both match the exact expression, and a
+  // `typeof process` guard around it would evaluate false in a browser and
+  // discard the inlined value. Under `bun test` there is no bundling and the
+  // read hits the real `process.env`.
+  const explicit = process.env.VITE_API_URL;
   if (explicit) return explicit.replace(/\/+$/, '');
 
   if (typeof window !== 'undefined' && window.location?.origin) {
