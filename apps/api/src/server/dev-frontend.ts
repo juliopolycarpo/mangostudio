@@ -13,7 +13,7 @@
  * literally the production build command.
  */
 
-import { existsSync, readdirSync, statSync, watch } from 'node:fs';
+import { type Dirent, existsSync, readdirSync, statSync, watch } from 'node:fs';
 import { join } from 'node:path';
 import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import { setDevFrontendDir } from './dev-frontend-dir';
@@ -21,15 +21,26 @@ import { setDevFrontendDir } from './dev-frontend-dir';
 // Resolved from this file rather than from `process.cwd()`: Turbo runs the API's
 // dev task with the cwd set to `apps/api`, not the repo root.
 const FRONTEND_DIR = join(import.meta.dir, '..', '..', '..', 'frontend');
-const WATCH_DIR = join(FRONTEND_DIR, 'src');
 const DIST_DIR = join(FRONTEND_DIR, 'dist');
 /** Coalesce the burst of events an editor save produces into one rebuild. */
 const REBUILD_DEBOUNCE_MS = 120;
 /**
- * The build regenerates this file, and it lives inside the watched directory.
+ * The build regenerates this file, and it lives inside the watched tree.
  * Rebuilding on it would make the watcher feed itself.
  */
 const GENERATED_FILE = 'routeTree.gen.ts';
+/**
+ * Watching only `src/` meant an edit to `index.html`, to anything under
+ * `public/`, or to `build.ts`/the Tailwind config fired no rebuild at all —
+ * and `distIsCurrent()`, comparing against the same narrow tree, then reported
+ * the stale bundle as current across every API restart. The whole frontend
+ * workspace is the real input to the build, so that is what gets watched.
+ *
+ * Two subtrees have to stay out. `dist/` is the build's own output: watching it
+ * makes each rebuild trigger the next one forever. `node_modules` is inert
+ * between installs and walking it dominates the scan.
+ */
+const UNWATCHED_DIRS = new Set(['dist', 'node_modules']);
 
 async function runBuild(): Promise<boolean> {
   const proc = Bun.spawn(['bun', './build.ts', '--dev'], {
@@ -54,7 +65,40 @@ function newestMtime(directory: string): number {
 }
 
 /**
- * True when `dist/` is already newer than every frontend source file.
+ * Newest mtime of the frontend's build *inputs*.
+ *
+ * Hand-rolled rather than `readdirSync({ recursive: true })` because that has
+ * no way to prune a subtree: it would descend all of `node_modules` — tens of
+ * thousands of stats on every dev boot — before anything could filter the
+ * result. Pruning at the directory level is the whole point.
+ */
+export function newestSourceMtime(directory: string): number {
+  let newest = 0;
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(directory, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      if (UNWATCHED_DIRS.has(entry.name)) continue;
+      newest = Math.max(newest, newestSourceMtime(join(directory, entry.name)));
+      continue;
+    }
+    if (!entry.isFile() || entry.name === GENERATED_FILE) continue;
+    try {
+      newest = Math.max(newest, statSync(join(directory, entry.name)).mtimeMs);
+    } catch {
+      // Removed between the readdir and the stat. Skipping it can only make the
+      // result older, which fails toward a rebuild — the safe direction.
+    }
+  }
+  return newest;
+}
+
+/**
+ * True when `dist/` is already newer than every frontend build input.
  *
  * The API's dev script runs under `bun --watch`, so editing any `apps/api/src`
  * file restarts this process and calls back into here. Without this check every
@@ -62,7 +106,7 @@ function newestMtime(directory: string): number {
  */
 function distIsCurrent(): boolean {
   const built = newestMtime(DIST_DIR);
-  const source = newestMtime(WATCH_DIR);
+  const source = newestSourceMtime(FRONTEND_DIR);
   // A failed source scan (newestMtime's catch returns 0, e.g. a file deleted
   // mid-scan) must read as "stale", not as "0 is older than anything built":
   // failing toward a rebuild costs seconds, the other direction serves an old
@@ -126,10 +170,17 @@ export async function registerDevFrontend(): Promise<void> {
       });
   };
 
-  const watcher = watch(WATCH_DIR, { recursive: true }, (_event, filename) => {
+  const watcher = watch(FRONTEND_DIR, { recursive: true }, (_event, filename) => {
     // The build writes routeTree.gen.ts back into the watched tree; reacting to
     // it would make each rebuild schedule the next one.
     if (filename?.endsWith(GENERATED_FILE)) return;
+    // Same self-feeding problem, one level up: now that the whole workspace is
+    // watched, `dist/` — which every rebuild rewrites — is inside it. Prune the
+    // build's own output and `node_modules` before anything is scheduled.
+    // Split on either separator rather than `path.sep`: the value here comes
+    // from the OS watch API, not from `path.join`, so it is not guaranteed to
+    // use the platform's canonical form.
+    if (filename && UNWATCHED_DIRS.has(filename.split(/[\\/]/)[0] ?? '')) return;
     if (pending) clearTimeout(pending);
     pending = setTimeout(() => {
       pending = null;
