@@ -1,3 +1,6 @@
+import { mkdir, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import { BROWSER_SMOKE_TEST_COMMAND } from './lib/browser-smoke';
 import { ALL_WORKSPACE_NAMES, ROOT_DIR } from './lib/config';
 import {
@@ -9,7 +12,8 @@ import {
   runCommand,
   runParallel,
 } from './lib/runner';
-import { createTurboTestCommand } from './lib/test';
+import { createTurboTestCommand, parseShard, type TestShard, testLaneEnv } from './lib/test';
+import { JUNIT_DIR, TIMINGS_DIR, VITEST_BLOB_DIR } from './lib/test-lanes';
 
 const ROOT_SCRIPTS_TEST_COMMAND = ['turbo', 'run', '//#test:scripts', '--ui=stream'];
 
@@ -25,6 +29,9 @@ Lane flags:
   --e2e
   --coverage     Run coverage collection across applicable workspaces
   --all          Run all lanes (unit + integration + e2e)
+  --shard=i/N    Run only shard i of N. Every lane splits its own files, so N
+                 shards run on N machines and something must merge the results
+                 (scripts/ci/merge-test-shards.ts).
   --help`);
   process.exit(0);
 }
@@ -35,6 +42,7 @@ let runIntegrationLane = false;
 let runE2ELane = false;
 let runCoverage = false;
 let runAllLanes = false;
+let shard: TestShard | null = null;
 const unexpectedArgs: string[] = [];
 
 for (const arg of args) {
@@ -50,6 +58,12 @@ for (const arg of args) {
     runCoverage = true;
   } else if (arg === '--all') {
     runAllLanes = true;
+  } else if (arg.startsWith('--shard=')) {
+    try {
+      shard = parseShard(arg);
+    } catch (caught) {
+      fatal(caught instanceof Error ? caught.message : String(caught));
+    }
   } else {
     unexpectedArgs.push(arg);
   }
@@ -58,6 +72,36 @@ for (const arg of args) {
 if (unexpectedArgs.length > 0) {
   fatal(`Unknown argument(s): ${unexpectedArgs.join(' ')}`);
 }
+
+// Sharding exists for the coverage lane, which is the only one CI fans out and
+// the only one with a merge step behind it. Accepting it on the unit or
+// integration lanes would run a fraction of the files and exit 0, which reads
+// as a green suite.
+if (shard && !runCoverage) {
+  fatal('--shard requires --coverage; no other lane has a merge step to reassemble it.');
+}
+
+// Bun refuses to create the parent directory for `--reporter-outfile` and
+// prints `JUnitReportFailed` while still exiting 0 when it is missing — the
+// lane's counts silently go to zero. Re-verified on the pinned 1.4.0: running
+// `test:scripts` on its own, outside this script, reports 765 passing tests,
+// fails to write the report, and exits 0. Create it here rather than in each of
+// the six lane scripts. Clearing it first keeps a lane that did not run this
+// time from contributing last run's counts to the merged totals.
+const junitDir = join(ROOT_DIR, JUNIT_DIR);
+await rm(junitDir, { recursive: true, force: true });
+await mkdir(junitDir, { recursive: true });
+if (shard) await rm(join(ROOT_DIR, VITEST_BLOB_DIR), { recursive: true, force: true });
+
+// Created but deliberately NOT cleared: a restored timings file is an input to
+// this run, and every shard has to read the same one or they stop agreeing on
+// the split (see scripts/ci/merge-timings-shards.ts). Bun tolerates the file
+// being absent and falls back to the round-robin split, so a cold cache is
+// safe — but it rejects a malformed one outright, which is why nothing here
+// writes a placeholder.
+await mkdir(join(ROOT_DIR, TIMINGS_DIR), { recursive: true });
+
+const laneEnv = testLaneEnv(shard);
 
 const hasExplicitLaneSelection =
   runUnitLane || runIntegrationLane || runE2ELane || runCoverage || runAllLanes;
@@ -73,10 +117,12 @@ const results: RunResult[] = [];
 if (shouldRunUnit) {
   info('\nPhase: unit');
   const unitResults = await runParallel([
-    () => runCommand('root:test:scripts', ROOT_SCRIPTS_TEST_COMMAND, { cwd: ROOT_DIR }),
+    () =>
+      runCommand('root:test:scripts', ROOT_SCRIPTS_TEST_COMMAND, { cwd: ROOT_DIR, env: laneEnv }),
     () =>
       runCommand('workspaces:test:unit', createTurboTestCommand('test:unit', ALL_WORKSPACE_NAMES), {
         cwd: ROOT_DIR,
+        env: laneEnv,
       }),
   ]);
   results.push(...unitResults);
@@ -93,7 +139,7 @@ if (shouldRunIntegration) {
       runCommand(
         'workspaces:test:integration',
         createTurboTestCommand('test:integration', ALL_WORKSPACE_NAMES),
-        { cwd: ROOT_DIR }
+        { cwd: ROOT_DIR, env: laneEnv }
       ),
   ]);
   results.push(...integrationResults);
@@ -120,12 +166,13 @@ if (runCoverage) {
   // here so `--coverage` is a self-contained replacement for `--unit
   // --integration --coverage` on CI, avoiding a duplicate test pass.
   const coverageResults = await runParallel([
-    () => runCommand('root:test:scripts', ROOT_SCRIPTS_TEST_COMMAND, { cwd: ROOT_DIR }),
+    () =>
+      runCommand('root:test:scripts', ROOT_SCRIPTS_TEST_COMMAND, { cwd: ROOT_DIR, env: laneEnv }),
     () =>
       runCommand(
         'workspaces:test:coverage',
         createTurboTestCommand('test:coverage', ALL_WORKSPACE_NAMES),
-        { cwd: ROOT_DIR }
+        { cwd: ROOT_DIR, env: laneEnv }
       ),
   ]);
   results.push(...coverageResults);

@@ -10,7 +10,7 @@ import {
 const CACHE_ACTION_SHA = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9';
 const EXPRESSION_START = '$' + '{{';
 const CACHE_EPOCH_EXPRESSION = `cache-epoch: ${EXPRESSION_START} vars.CI_CACHE_EPOCH || 'v1' }}`;
-const EXPECTED_FAMILIES = ['bun', 'turbo', 'vite', 'lint-tools', 'playwright'] as const;
+const EXPECTED_FAMILIES = ['bun', 'turbo', 'vite', 'lint-tools', 'playwright', 'timings'] as const;
 
 describe('CI cache policy', () => {
   test('keeps every cache family behind one composite and one immutable pin', () => {
@@ -22,7 +22,7 @@ describe('CI cache policy', () => {
     const manifest = readText('.github/actions/cache-scoped/action.yml');
     const cacheUses =
       manifest.match(/uses: actions\/cache(?:\/(?:restore|save))?@[a-f0-9]{40} # v[^\n]+/g) ?? [];
-    expect(cacheUses).toHaveLength(3);
+    expect(cacheUses).toHaveLength(4);
     for (const use of cacheUses) {
       expect(use).toContain(`@${CACHE_ACTION_SHA} # v6.1.0`);
     }

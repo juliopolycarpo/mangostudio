@@ -1,11 +1,12 @@
 name: QA Metrics
 
 # Unprivileged metrics collector, called from ci.yml after the Test job. It
-# merges the test fragment from the single coverage pass with the static
-# metrics (LoC, bundle, dependencies, duplication, tooling) and uploads the
-# versioned qa-metrics envelope. It runs PR code, so it must never hold more
-# than `contents: read`; the privileged side lives in pr-qa-report.yml, which
-# consumes this artifact without executing anything from it.
+# merges the test fragment the Test workflow's merge job emits from the sharded
+# coverage run with the static metrics (LoC, bundle, dependencies, duplication,
+# tooling) and uploads the versioned qa-metrics envelope. It runs PR code, so it
+# must never hold more than `contents: read`; the privileged side lives in
+# pr-qa-report.yml, which consumes this artifact without executing anything from
+# it.
 
 on:
   workflow_call:

@@ -15,12 +15,12 @@ scripts/
 ├── update-node-release-schedule.ts
 │                     Refresh bundled Node lifecycle and latest-patch data
 ├── fix.ts            Apply Biome + dprint fixes (bun run fix)
-├── test.ts           Run unit/integration/e2e/coverage lanes (bun run test)
+├── test.ts           Run unit/integration/e2e/coverage lanes, whole or sharded (bun run test)
 ├── verify.ts         check → test → build gate (bun run verify)
 ├── clean.ts          Remove build artifacts (bun run clean)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
 ├── bench/            Hermetic performance measurement (startup.ts)
-├── ci/               Dependency-free workflow steps (gate evaluation, distribution identity, cross-runtime fetch)
+├── ci/               Dependency-free workflow steps (gate evaluation, distribution identity, cross-runtime fetch, test-shard and timings merge)
 ├── lib/              Shared toolkit (see below)
 ├── examples/         Runnable maintainer samples (dependency-free Bun scripts)
 ├── install/          Archive-install smoke fixture for the release dry-run (install.sh, not shipped; canonical installers live at mangostudio.dev)
@@ -89,8 +89,21 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
 `pr-qa-report.yml` workflow with default-branch tooling only:
 
 - `collect-test-metrics.ts` — emit the test fragment (suite outcome, duration,
-  failure counts and error headlines, coverage summaries) right after CI's
-  single `bun run test --coverage` pass.
+  failure counts and error headlines, coverage summaries) in the Test workflow's
+  merge job, from the JUnit reports and coverage the eight shards produced.
+- `junit-results.ts` — count `<testcase>` outcomes per lane out of the shard
+  directories. Replaced 269 lines of runner-log regex.
+- `unhandled-errors.ts` — the one signal JUnit cannot carry, for either runner:
+  Vitest's reporter never receives the run's unhandled errors, and Bun's
+  between-tests block never reaches its report either. Each shard extracts both
+  from its own log.
+- `merge-lcov-shards.ts` — merge per-shard Bun LCOV. Not a concatenation and not
+  a union; see `docs/reference/testing.md` for why the naive merge reports a
+  coverage regression that did not happen.
+- `../ci/merge-timings-shards.ts` — reassemble the per-shard `--timings` slices
+  that balance the next run's split, and fail the run if two shards claimed the
+  same file. That is the observable symptom of shards reading different timings,
+  which means they did not cover the suite between them while all exiting 0.
 - `collect.ts` + `collect/*` — merge the test fragment with LoC, bundle,
   dependency, duplication, and tooling metrics into the versioned `qa-metrics`
   envelope (`metrics-envelope.ts`), uploaded for PR heads and main baselines.

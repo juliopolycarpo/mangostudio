@@ -1,0 +1,102 @@
+name: Randomized Order Nightly
+
+# Runs the Bun suites in a different order every night, to surface the one
+# class of bug the merge-gating run cannot see: a test that only passes because
+# of what the file before it left behind.
+#
+# This repository has a standing hazard of exactly that shape — `mock.module`
+# registrations and in-memory databases outlive the file that made them, and
+# `bun test` shares one module graph across files by default (see
+# docs/reference/testing.md, "Parallelism"). `--randomize` shuffles file order
+# as well as the tests inside each file, verified: seed 3 runs three probe files
+# as c, b, a where seeds 1 and 2 keep a, b, c.
+#
+# Deliberately **not** merge-gating. A suite that fails weekly on a different
+# seed is a bug report; making it block merges teaches everyone to re-run CI,
+# and that habit outlasts the fix. Failures rely on the standard
+# failed-scheduled-run notification.
+#
+# The seed is the run number, so every night is a new order and any failure
+# names the exact seed to reproduce with:
+#   (cd apps/<workspace> && bun test --timeout 15000 --parallel=1 --randomize --seed=<n>)
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: Seed to reproduce a specific failing order.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: randomized-order-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  randomized:
+    name: Randomized order (${{ matrix.workspace }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      # One workspace's ordering bug says nothing about another's, and finding
+      # all of them in one night beats finding the first one four nights
+      # running.
+      fail-fast: false
+      matrix:
+        workspace: [api, shared, runtime]
+    env:
+      DATABASE_PATH: /tmp/mangostudio-test.sqlite
+      SEED: ${{ inputs.seed || github.run_number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-mango
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      - name: Run database migrations
+        run: bun run --filter @mangostudio/api migrate
+
+      # The lane script's own flags plus randomization, invoked directly rather
+      # than through `bun run test`: this is a diagnostic, not the merge gate,
+      # and it must not write JUnit reports or coverage that anything else
+      # reads.
+      #
+      # Step timeout is tighter than the job's so a hang dies here and still
+      # leaves time for the log upload. A job-level timeout cancels the job
+      # before that step can run, and the log is the finding.
+      - name: Run in a randomized order
+        id: randomized
+        timeout-minutes: 12
+        working-directory: apps/${{ matrix.workspace }}
+        env:
+          MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
+          WORKSPACE: ${{ matrix.workspace }}
+        run: |
+          # `set -o pipefail` is load-bearing, not boilerplate: a step without an
+          # explicit `shell:` runs under `bash -e {0}`, which does NOT set it, so
+          # the pipeline's status would be `tee`'s and a failing suite would
+          # report success — no notification, and the log upload below (gated on
+          # `outcome != success`) would never run.
+          set -o pipefail
+          echo "::notice::Reproduce with: (cd apps/${WORKSPACE} && bun test --timeout 15000 --parallel=1 --randomize --seed=${SEED})"
+          bun test --timeout 15000 --parallel=1 --randomize --seed="${SEED}" 2>&1 | tee run.log
+
+      # The order is the finding. Without it a red run names a failing test and
+      # nothing about what ran before it, which is the half that matters.
+      # `outcome != success` covers a failed run and a step timeout; `!cancelled()`
+      # skips a user-cancelled job, where there is nothing useful to keep.
+      - name: Upload run log
+        if: ${{ !cancelled() && steps.randomized.outcome != 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: randomized-order-${{ matrix.workspace }}-seed-${{ env.SEED }}
+          path: apps/${{ matrix.workspace }}/run.log
+          retention-days: 14

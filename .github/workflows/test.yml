@@ -6,11 +6,81 @@ on:
 permissions:
   contents: read
 
+# Shard count. Eight is where the curve flattens: each job pays ~21s of fixed
+# setup and the merge job adds a fixed ~30s, so measured per-shard test time
+# falling 70s -> 35s -> 23s at N=4 -> 8 -> 12 buys less wall clock each time.
+# Raising it is a three-line change: this value, the matrix list, and the shard
+# job's name — `env` is not one of the contexts available to `jobs.<id>.name`,
+# so that last one cannot interpolate this value.
+#
+# The split itself is balanced by measured per-file duration rather than by file
+# order; see the timings cache below and docs/reference/testing.md. Changing this
+# value does NOT have to invalidate that cache: the loose restore key is
+# `<os>-<arch>-<epoch>-timings-main-test-`, so a baseline saved by a main-branch
+# run at a different N still restores. (Only main-branch ones — the loose
+# fallback is `-main-` scoped, and a pull_request run saves under `pr-<n>`.)
+# That is correct either way, because the file records per-file durations, not a
+# partition. What has to stay stable is the file all shards of one run read, and
+# that is what resolve-timings pins.
+env:
+  SHARD_COUNT: 8
+
 jobs:
-  test:
-    name: Unit & Integration Tests
+  resolve-timings:
+    # A restore inside the matrix asks each of the eight shard jobs to resolve
+    # "the most recent cache matching this prefix" independently. That is fine
+    # while the prefix only ever resolves to one immutable, long-lived entry,
+    # but it stops being fine the moment saves rotate every run (see "Save
+    # test timings" below): a save from a *different*, concurrent run can land
+    # in the minute-wide window while this run's eight shards are each
+    # resolving it, and shards that ask before versus after see different
+    # bytes — which is exactly the disagreement `merge-timings-shards.ts`
+    # exists to catch. Resolving the key once here and having every shard
+    # restore that literal key instead of a live prefix query removes the
+    # window entirely: whatever this job resolves is what all eight get,
+    # regardless of what any other run saves in the meantime.
+    #
+    # `lookup-only` makes this a metadata call, not a download — the shard
+    # jobs still fetch the actual bytes themselves once they have the key.
+    name: Resolve test timings baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      key: ${{ steps.timings.outputs.matched-key }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: timings
+        name: Resolve test timings cache key
+        uses: ./.github/actions/cache-scoped
+        with:
+          family: timings
+          path: .mango/artifacts/timings
+          validity: test-shard-${{ env.SHARD_COUNT }}
+          restore-prefix: test-
+          mode: restore
+          lookup-only: "true"
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+  shard:
+    # Sharding is what gets the suite off `--parallel=1` without waiting for
+    # oven-sh/bun#38008. That bug is a collision between concurrent isolates
+    # inside one Bun process; `--shard=i/N` splits files across processes that
+    # never share one, so the precondition never exists. In-job `--parallel`
+    # composes with this the day the fix ships — see
+    # docs/reference/testing.md.
+    name: Tests (shard ${{ matrix.shard }}/8)
+    needs: [resolve-timings]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      # Every shard reports, so one red shard still leaves seven sets of counts
+      # for the QA report instead of a run that stopped mid-fan-out.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       DATABASE_PATH: /tmp/mangostudio-test.sqlite
     steps:
@@ -36,12 +106,16 @@ jobs:
           fi
           echo "turbo=${turbo}" >> "$GITHUB_OUTPUT"
 
+      # Only the first shard saves. All eight resolve the same primary key, so
+      # letting each one save turns seven post-job steps into "cache already
+      # exists" warnings that read like a cache fault and are not one.
       - uses: ./.github/actions/cache-scoped
         with:
           family: turbo
           path: .turbo/cache
           validity: test-bun-${{ steps.setup.outputs.bun-version }}-turbo-${{ steps.toolchain.outputs.turbo }}-${{ hashFiles('turbo.jsonc', 'package.json', 'apps/*/package.json', 'packages/*/package.json') }}
           restore-prefix: test-
+          mode: ${{ matrix.shard == 1 && 'restore-save' || 'restore' }}
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Restore Vite optimizer cache
@@ -51,39 +125,186 @@ jobs:
           path: apps/frontend/node_modules/.vite
           validity: test-${{ hashFiles('bun.lock', 'apps/frontend/package.json', 'apps/frontend/vite.config.ts', 'apps/frontend/vitest.config.ts', 'apps/frontend/tsconfig*.json') }}
           restore-prefix: test-
+          mode: ${{ matrix.shard == 1 && 'restore-save' || 'restore' }}
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      # Per-file durations from a previous run, used to balance `--shard` by
+      # time instead of by file order. Measured on this repo: the critical
+      # shard goes 69.6s -> 58.6s and the spread across shards halves.
+      #
+      # Restores the exact key `resolve-timings` resolved rather than asking
+      # `cache-scoped` to resolve its own "most recent matching prefix" here —
+      # eight independent live resolutions can each pick a different entry if
+      # a save from a concurrent run lands mid-fan-out. One key, resolved
+      # once, is what keeps all eight shards reading the same bytes, which is
+      # a correctness requirement and not just a tidiness one: see
+      # scripts/ci/merge-timings-shards.ts. Only the merge job saves, and only
+      # after every shard has read, so nothing this run writes can be what a
+      # shard of this same run reads back.
+      #
+      # A miss (empty key, or nothing at the resolved key by the time this
+      # runs) is safe. Bun falls back to the round-robin split when the file
+      # is absent, which is exactly the behaviour this workflow had before.
+      - name: Restore test timings
+        if: needs.resolve-timings.outputs.key != ''
+        uses: ./.github/actions/cache-scoped
+        with:
+          family: timings
+          path: .mango/artifacts/timings
+          validity: test-shard-${{ env.SHARD_COUNT }}
+          mode: restore-exact
+          exact-key: ${{ needs.resolve-timings.outputs.key }}
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Run database migrations
         run: bun run --filter @mangostudio/api migrate
 
-      # `--coverage` is self-contained: it runs root scripts unit tests plus
-      # every workspace's full suite with instrumentation. Running a separate
-      # `--unit --integration` pass before this was duplicate work. The tee'd
-      # log plus exit code and duration feed the qa-metrics fragment below, so
-      # this single pass is the authoritative test signal for the QA report.
+      # This shard's slice of every lane. Bun lanes take `--shard` directly;
+      # the frontend Vitest lane writes a blob report for the merge job to
+      # replay, and stands its coverage thresholds down — a shard covers a
+      # fraction of the sources, so it would fail them every time. The merge
+      # job is unsharded and is where those thresholds are decided.
       - name: Run tests with coverage
         id: coverage
+        env:
+          SHARD: ${{ matrix.shard }}
         run: |
           set -o pipefail
           start="$(date +%s)"
           status=0
-          bun run test --coverage 2>&1 | tee coverage-run.log || status=$?
-          {
-            echo "exit-code=${status}"
-            echo "duration-seconds=$(( $(date +%s) - start ))"
-          } >> "$GITHUB_OUTPUT"
+          bun run test --coverage --shard="${SHARD}/${SHARD_COUNT}" 2>&1 | tee coverage-run.log || status=$?
+          printf '{"shard":%s,"exitCode":%s,"durationSeconds":%s}\n' \
+            "${SHARD}" "${status}" "$(( $(date +%s) - start ))" > shard-meta.json
           exit "${status}"
 
-      # Emitted even when the suite fails so the QA report can show the
+      # Neither runner's unhandled errors reach its JUnit report: Vitest's
+      # reporter writes errors="0" unconditionally, and Bun's "# Unhandled error
+      # between tests" block leaves failures="0" with no failing case while the
+      # run exits 1. Both classes are documented in docs/reference/testing.md and
+      # exist only in the log, so extract them here, while the log is still local
+      # to the shard that produced it.
+      - name: Extract unhandled errors
+        if: ${{ !cancelled() }}
+        run: bun ./scripts/qa-gate/unhandled-errors.ts coverage-run.log > unhandled-errors.json
+
+      # Uploaded even when the shard fails so the merge job can report the
       # failing exit code instead of a missing-metrics placeholder.
+      #
+      # `include-hidden-files` is required, not tidy-up: both `.mango` and
+      # `.vitest-reports` are dot-directories, and at the default the Vitest
+      # blob reports are dropped from the artifact silently — the upload still
+      # reports success, and the merge job is where it surfaces.
+      - name: Upload shard results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-shard-${{ matrix.shard }}
+          include-hidden-files: true
+          path: |
+            .mango/artifacts/junit/
+            .mango/artifacts/coverage/
+            .mango/artifacts/timings/
+            apps/frontend/.vitest-reports/
+            shard-meta.json
+            unhandled-errors.json
+          retention-days: 1
+
+      - name: Upload shard log
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-shard-${{ matrix.shard }}-log
+          path: coverage-run.log
+          retention-days: 7
+
+  merge:
+    # Reassembles what the fan-out split. LCOV needs a real merge (Bun's
+    # per-file line totals are run-dependent — see
+    # scripts/qa-gate/merge-lcov-shards.ts), Vitest merges its own blobs, and
+    # JUnit is read straight out of the shard directories.
+    name: Merge shard results
+    needs: [shard]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-mango
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      - name: Download shard results
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: test-shard-*
+          path: shards
+
+      - name: Merge shard coverage and run metadata
+        id: merge
+        run: bun ./scripts/ci/merge-test-shards.ts shards "${SHARD_COUNT}" > shard-summary.json
+
+      # Reassembles next run's timings, and fails this run if the eight shards
+      # claimed the same file — which means they read different timings and did
+      # not cover the suite between them. Every shard exits 0 in that case, so
+      # this step is the only thing standing between a broken split and a green
+      # board.
+      #
+      # Runs before the cache save so a partition that went wrong is never the
+      # thing the next run balances against.
+      - name: Merge test timings
+        id: timings
+        run: bun ./scripts/ci/merge-timings-shards.ts shards .mango/artifacts/timings
+
+      # Deliberately has no `if:`, so a failed merge above skips it and the next
+      # run keeps balancing against the last known-good file rather than one
+      # written from a split that did not add up.
+      #
+      # actions/cache is immutable, so a save under the same key every run
+      # would only ever write once — every later run's timings would be
+      # silently discarded and the balance would never track file changes. The
+      # run id makes each save's key unique; the restore step above matches on
+      # the `test-` prefix (not this exact key) and picks the most recent hit,
+      # so it still finds this file next run.
+      - name: Save test timings
+        uses: ./.github/actions/cache-scoped
+        with:
+          family: timings
+          path: .mango/artifacts/timings
+          validity: test-shard-${{ env.SHARD_COUNT }}-${{ github.run_id }}
+          mode: save
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      # Hard gate: this is where the frontend coverage thresholds apply, the
+      # same way `vitest run --coverage` applied them before sharding. Four
+      # shards merged reproduce the unsharded run's numbers exactly
+      # (76.08/68.06/72.81/78.76), so a drop here is a real drop.
+      - name: Merge Vitest reports and enforce coverage thresholds
+        id: thresholds
+        run: |
+          set -euo pipefail
+          mkdir -p .mango/artifacts/junit
+          bun run --filter @mangostudio/frontend test:coverage:merge
+
+      # Emitted even when a shard or the threshold gate failed, so the QA
+      # report can show the failing exit code rather than a placeholder.
+      #
+      # The gate's outcome is passed explicitly: `shard-summary.json` only knows
+      # how the shards ended, and coverage thresholds now run after them. Without
+      # it a coverage-only regression renders as a green suite in the QA report
+      # while CI is red. A skipped step (the shard merge died first) counts as a
+      # failed gate, which is what it is.
       - name: Collect test metrics fragment
         if: ${{ !cancelled() }}
         env:
-          EXIT_CODE: ${{ steps.coverage.outputs.exit-code }}
-          DURATION_SECONDS: ${{ steps.coverage.outputs.duration-seconds }}
-        run: >
-          bun ./scripts/qa-gate/collect-test-metrics.ts coverage-run.log
-          "$EXIT_CODE" "$DURATION_SECONDS" > test-metrics.json
+          GATE_OUTCOME: ${{ steps.thresholds.outcome }}
+        run: |
+          set -euo pipefail
+          gate=0
+          [ "${GATE_OUTCOME}" = "success" ] || gate=1
+          bun ./scripts/qa-gate/collect-test-metrics.ts shard-summary.json shards "${gate}" > test-metrics.json
 
       # Handoff to the qa-metrics job in the same run; nothing consumes it
       # afterwards, so the shortest retention GitHub allows is enough.
@@ -95,13 +316,19 @@ jobs:
           path: test-metrics.json
           retention-days: 1
 
-      # Raw coverage output is a failure-diagnostics artifact: green runs are
+      # Merged coverage output is a failure-diagnostics artifact: green runs are
       # summarized in the step summary and the qa-metrics envelope instead.
+      #
+      # `include-hidden-files` for the same reason the shard upload needs it:
+      # `.mango` is a dot-directory, and at the default the whole tree is dropped
+      # while the upload still reports success — an empty artifact exactly when
+      # someone is trying to diagnose a red run.
       - name: Upload coverage
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage
+          include-hidden-files: true
           path: |
             .mango/artifacts/coverage/
           retention-days: 7

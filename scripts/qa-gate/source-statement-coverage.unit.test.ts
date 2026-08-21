@@ -122,7 +122,7 @@ describe('readSourceStatementCoverageSummary', () => {
       ['SF:src/example.ts', 'DA:1,1', 'end_of_record'].join('\n')
     );
 
-    expect(readSourceStatementCoverageSummary(lcovPath, workspaceDir)).rejects.toThrow(
+    await expect(readSourceStatementCoverageSummary(lcovPath, workspaceDir)).rejects.toThrow(
       'src/example.ts'
     );
   });

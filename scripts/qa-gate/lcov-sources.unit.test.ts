@@ -50,7 +50,7 @@ describe('readCoveredSources', () => {
     );
     await writeFile(lcovPath, records.join('\n'), 'utf8');
 
-    expect(readCoveredSources(lcovPath, dir)).rejects.toThrow(
+    await expect(readCoveredSources(lcovPath, dir)).rejects.toThrow(
       /7 source file\(s\) missing .* src\/missing-0\.ts, .* \(\+2 more\)/
     );
   });
@@ -60,7 +60,7 @@ describe('readCoveredSources', () => {
     const lcovPath = join(dir, 'lcov.info');
     await writeFile(lcovPath, ['SF:', 'DA:bogus', 'end_of_record'].join('\n'), 'utf8');
 
-    expect(readCoveredSources(lcovPath, dir)).rejects.toThrow(
+    await expect(readCoveredSources(lcovPath, dir)).rejects.toThrow(
       /2 malformed record\(s\) but none resolved/
     );
   });
