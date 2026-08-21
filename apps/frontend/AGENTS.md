@@ -30,4 +30,4 @@ For per-task file maps, use `docs/reference/agent-playbooks.md`.
 - Unit or component: `bun run --filter @mangostudio/frontend test:unit`
 - Integration: `bun run --filter @mangostudio/frontend test:integration`
 - Coverage-sensitive work: `bun run --filter @mangostudio/frontend test:coverage`
-- Use `apps/frontend/tests/support/mocks/create-fetch-scenario.ts` only for jsdom hook tests that must mock `fetch` behind Eden Treaty, not for API contract testing.
+- Use `apps/frontend/tests/support/mocks/create-fetch-scenario.ts` only for happy-dom hook tests that must mock `fetch` behind Eden Treaty, not for API contract testing.

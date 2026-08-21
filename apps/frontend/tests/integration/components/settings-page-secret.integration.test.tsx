@@ -1,5 +1,5 @@
+import { afterEach, beforeEach, describe, expect, it, jest, spyOn } from 'bun:test';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectorsSettings } from '../../../src/features/settings/connectors';
 import { EMPTY_MODEL_CATALOG } from '../../../src/utils/model-utils';
 import { render, screen, waitFor } from '../../support/harness/render';
@@ -11,7 +11,7 @@ import {
 function createDefaultProps() {
   return {
     modelCatalog: EMPTY_MODEL_CATALOG,
-    reloadModelCatalog: vi.fn().mockResolvedValue(undefined),
+    reloadModelCatalog: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -25,9 +25,9 @@ function withProviderSettings(fetchScenario: ReturnType<typeof createFetchScenar
 function mockOAuthPopup() {
   const popup = {
     location: { href: '' },
-    close: vi.fn(),
+    close: jest.fn(),
   } as unknown as Window;
-  const openSpy = vi.spyOn(window, 'open').mockReturnValue(popup);
+  const openSpy = spyOn(window, 'open').mockReturnValue(popup);
   return { popup, openSpy };
 }
 
@@ -63,7 +63,7 @@ describe('ConnectorsSettings', () => {
 
   afterEach(() => {
     fetchScenario.restore();
-    vi.restoreAllMocks();
+    jest.restoreAllMocks();
   });
 
   it('shows empty state when no connectors are configured', async () => {
