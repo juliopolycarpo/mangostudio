@@ -193,7 +193,13 @@ export function renderBundleReport(report: BundleReport, baseline?: BundleReport
   }
 
   for (const [key, totals] of [...current].sort(([, a], [, b]) => b.gzipBytes - a.gzipBytes)) {
-    const cells = [key, formatBytes(totals.rawBytes), formatBytes(totals.gzipBytes)];
+    // Bun's splitting can emit many chunks whose names collapse onto one key
+    // (17 `chunk-main-*.js` files were once a single 317 kB row). The sums stay
+    // per-key so hash-only churn still diffs as unchanged, but the multiplicity
+    // has to be visible — a row that silently aggregates hides exactly the
+    // duplication a bundle diff exists to catch.
+    const label = totals.files > 1 ? `${key} ×${totals.files}` : key;
+    const cells = [label, formatBytes(totals.rawBytes), formatBytes(totals.gzipBytes)];
     if (previous) cells.push(formatDelta(totals.gzipBytes, previous.get(key)?.gzipBytes));
     lines.push(`| ${cells.join(' | ')} |`);
   }

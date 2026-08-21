@@ -149,6 +149,22 @@ describe('renderBundleReport', () => {
     );
   });
 
+  test('shows the file count when several chunks collapse onto one key', () => {
+    // Bun once emitted 17 `chunk-main-*.js` files that rendered as a single
+    // row; the sum was right but the multiplicity — the actual duplication
+    // signal — was invisible.
+    const rendered = renderBundleReport(
+      report([
+        file('assets/chunk-main-Bqugzlgv.js', 100, 40),
+        file('assets/chunk-main-CJeZLqOC.js', 300, 120),
+        file('assets/index-BqemZtDc.js', 50, 20),
+      ])
+    );
+
+    expect(rendered).toContain('| assets/chunk-main.js ×2 | 400 B | 160 B |');
+    expect(rendered).toContain('| assets/index.js | 50 B | 20 B |');
+  });
+
   test('calls out chunks the migration added and removed', () => {
     const baseline = report(
       [
