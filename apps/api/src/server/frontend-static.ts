@@ -43,10 +43,29 @@ export function registerFrontend(app: App, frontendDir: string): void {
   registerSpa(app, frontendDir);
 }
 
-function serveIndexFile(indexPath: string, cacheControl?: string): Response {
+function serveIndexFile(indexPath: string, cacheControl?: string, request?: Request): Response {
   const headers: Record<string, string> = { 'Content-Type': 'text/html' };
   if (cacheControl) {
     headers['Cache-Control'] = cacheControl;
+  }
+  // `no-cache` means "revalidate before reuse", but a browser can only
+  // revalidate against a validator. Without one it has nothing to put in
+  // `If-None-Match`, so the server can never answer 304 and the whole shell is
+  // re-downloaded on every deep link and every hard refresh — the one asset
+  // requested on literally every navigation paying full price each time.
+  //
+  // `statFile` is sync and already used here, which keeps this off the async
+  // path `serveUnhashedFile` needs. Inside a compiled binary there is no inode
+  // to stat, so it returns null and the shell is simply served without a
+  // validator, exactly as before — correct, because the content of an embedded
+  // index.html cannot change within one binary.
+  const stats = statFile(indexPath);
+  if (stats) {
+    const etag = `"${stats.size.toString(16)}-${Math.trunc(stats.mtimeMs).toString(16)}"`;
+    headers.ETag = etag;
+    if (request && matchesEtag(request.headers.get('if-none-match'), etag)) {
+      return new Response(null, { status: 304, headers });
+    }
   }
   return new Response(Bun.file(indexPath), { headers });
 }
@@ -72,13 +91,14 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
     return;
   }
 
-  const serveEmbeddedIndex = () => serveIndexFile(indexPath, SHELL_CACHE_CONTROL);
+  const serveEmbeddedIndex = (request?: Request) =>
+    serveIndexFile(indexPath, SHELL_CACHE_CONTROL, request);
 
-  app.get('/', serveEmbeddedIndex);
+  app.get('/', ({ request }) => serveEmbeddedIndex(request));
 
   for (const urlPath of Object.keys(files)) {
     if (urlPath === '/index.html') {
-      app.get('/index.html', serveEmbeddedIndex);
+      app.get('/index.html', ({ request }) => serveEmbeddedIndex(request));
       continue;
     }
     const filePath = files[urlPath];
@@ -93,7 +113,7 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
   setFrontendFallback((request) => {
     if (request.method !== 'GET') return undefined;
     const { pathname } = new URL(request.url);
-    return isSpaRoute(pathname) ? serveEmbeddedIndex() : undefined;
+    return isSpaRoute(pathname) ? serveEmbeddedIndex(request) : undefined;
   });
   app.error(NotFound, ({ request }) => frontendNotFound(request));
 }
@@ -273,9 +293,9 @@ function registerSpa(app: App, frontendDir: string): void {
   // save, so `index.html` is briefly absent — and a `Bun.file` that is not
   // there answers 500 with Bun's own error page once the body is read, on `/`
   // and on every deep link alike. A 404 is the honest answer for that window.
-  const serveIndex = (): Response =>
+  const serveIndex = (request?: Request): Response =>
     existsSync(indexPath)
-      ? serveIndexFile(indexPath, SHELL_CACHE_CONTROL)
+      ? serveIndexFile(indexPath, SHELL_CACHE_CONTROL, request)
       : new Response(null, { status: 404 });
   const assetsDir = join(frontendDir, HASHED_ASSET_DIR);
 
@@ -283,7 +303,7 @@ function registerSpa(app: App, frontendDir: string): void {
   // undefined handler inside a compiled Bun binary (htmlBundle.default is
   // undefined for a generated HTML file), so this explicit route guarantees
   // that GET / always returns index.html.
-  app.get('/', serveIndex);
+  app.get('/', ({ request }) => serveIndex(request));
 
   if (existsSync(assetsDir)) {
     // A year, not the plugin's 86400 default: these filenames carry a content
@@ -309,7 +329,7 @@ function registerSpa(app: App, frontendDir: string): void {
     // exist falls past `isSpaRoute` to `frontendNotFound`, which is a 404.
     const resolved = resolveUnhashedFile(frontendDir, pathname);
     if (resolved) return serveStattedFile(resolved.filePath, resolved.stats, request);
-    return isSpaRoute(pathname) ? serveIndex() : undefined;
+    return isSpaRoute(pathname) ? serveIndex(request) : undefined;
   });
 }
 

@@ -123,8 +123,11 @@ a real port; extend it rather than adding another `handle()`-driven case.
 
 `/assets/*` is immutable (`max-age=31536000`) in both modes because its filenames are
 content-hashed; unhashed root files get `max-age=86400` with an ETag, matching what the static
-plugin used to add for them. `index.html` is `no-cache`, so an upgraded install stops serving a
-stale shell.
+plugin used to add for them. `index.html` is `no-cache` — it must revalidate so an upgraded
+install stops serving a stale shell — and carries an ETag derived from its stat, without which
+`no-cache` degenerates into re-sending the whole document on every navigation. Inside a
+compiled binary there is no inode to stat, so the shell ships there without a validator; its
+content cannot change within one binary anyway.
 
 ## The standalone binary
 

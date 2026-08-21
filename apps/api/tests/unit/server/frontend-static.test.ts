@@ -465,6 +465,29 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
     }
   });
 
+  test('revalidates the SPA shell instead of re-sending it on every navigation', async () => {
+    const server = await startFilesystemServer();
+    try {
+      // `no-cache` means "revalidate before reuse", which needs a validator to
+      // revalidate against. Without one the shell — the one document fetched on
+      // every deep link and every hard refresh — was re-downloaded in full.
+      const first = await server.get('/');
+      expect(first.status).toBe(200);
+      const etag = first.headers.get('etag');
+      expect(etag).not.toBeNull();
+
+      const revalidated = await server.get('/', { 'If-None-Match': etag as string });
+      expect(revalidated.status).toBe(304);
+      expect(await revalidated.text()).toBe('');
+
+      const changed = await server.get('/', { 'If-None-Match': '"stale"' });
+      expect(changed.status).toBe(200);
+      expect(await changed.text()).toBe(INDEX_HTML);
+    } finally {
+      await server.stop();
+    }
+  });
+
   test('refuses to resolve a path that escapes the frontend directory', async () => {
     const server = await startFilesystemServer();
     try {
