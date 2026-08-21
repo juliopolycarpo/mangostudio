@@ -24,6 +24,17 @@ permissions:
 # that is what resolve-timings pins.
 env:
   SHARD_COUNT: 8
+  # Names every child a run spawns, and every one that never exits, in the shard
+  # log. The failure this exists for (#922) reproduces only in CI, and Bun's own
+  # `killed N dangling process` says nothing about which child it killed.
+  #
+  # Measured on a full local run: 1662 lines, all of them from the api lane —
+  # only that workspace's preload installs the wrappers. 726 spawns against 726
+  # exits (a mismatch is the signal) plus 210 synchronous ones, four fifths of
+  # them git. Sharded eight ways that is roughly 200 lines in a shard log, which
+  # is what the cost of this is. See
+  # apps/api/tests/support/setup/spawn-diagnostics.ts.
+  MANGOSTUDIO_SPAWN_DIAGNOSTICS: "1"
 
 jobs:
   resolve-timings:

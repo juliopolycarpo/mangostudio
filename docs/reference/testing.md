@@ -829,6 +829,44 @@ third-party client whose teardown is deferred.
 The QA report and the Test job step summary lead with these error headlines when
 the suite failed, and link here.
 
+## Dangling Processes And Spawn Diagnostics
+
+`killed N dangling process` in a `bun test` log means **a test timed out** and Bun
+killed the children that test spawned. Two things about that line cost real time
+in #922 and are worth knowing before you read one:
+
+- It is a **consequence** of the timeout, not a cause. A test that leaks a child
+  and passes prints nothing.
+- It is printed **above** the `(fail)` it belongs to, so it reads as if the
+  previous, passing test leaked something.
+
+It also never says *which* child. `MANGOSTUDIO_SPAWN_DIAGNOSTICS=1` does:
+
+```bash
+MANGOSTUDIO_SPAWN_DIAGNOSTICS=1 bun run --filter @mangostudio/api test:integration
+```
+
+Every `Bun.spawn`/`Bun.spawnSync` and every `node:child_process`
+`spawn`/`exec`/`execFile`/`fork` (and their sync forms) logs one stderr line
+with the command, the pid and elapsed time, and a second line when the child
+exits. A child that logs a spawn and no exit is one that outlived the run.
+
+`bun test` on 1.4.0 exposes no current-test API — not `expect.getState()`, not a
+hook argument — so events carry elapsed time rather than a test name. Interleaved
+with the reporter's `(pass)`/`(fail)` lines that still places a spawn between two
+named tests.
+
+The wrappers live in `apps/api/tests/support/setup/spawn-diagnostics.ts` and are
+installed by that workspace's preload only, so this is an api-lane instrument.
+The CI test lanes set the flag (`.github/workflows/test.yml`); unset, nothing is
+installed and nothing is paid for.
+
+> **Local is in-process.** There is no runtime child process for the `local`
+> environment — `createLocalRuntimeConnector` builds a `RuntimeHost` inside the
+> hub. A test suite that connects Local per test does spin one host per test,
+> and each host probes `git --version` synchronously. Connect once per file
+> instead; the checkpoint suites are the worked example.
+
 ## CI Artifact Retention
 
 CI artifacts fall into four retention classes; keep new uploads aligned with them:
