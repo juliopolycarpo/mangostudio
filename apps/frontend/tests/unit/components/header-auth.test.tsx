@@ -1,40 +1,30 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Header } from '../../../src/components/layout/Header';
 import { render } from '../../support/harness/render';
+import { setTestSession, setTestSignOut } from '../../support/setup/auth-client-stub';
 
-type SessionUser = { user: { name: string } } | null;
+// `vi.hoisted` existed because `vi.mock` is hoisted above the file's own
+// statements. `mock.module` is not hoisted, so plain consts are enough.
+const mockNavigate = jest.fn();
+const mockSignOut = jest.fn();
 
-const { mockNavigate, mockSignOut, sessionState } = vi.hoisted(() => ({
-  mockNavigate: vi.fn(),
-  mockSignOut: vi.fn(),
-  sessionState: { current: { user: { name: 'Test' } } as SessionUser },
-}));
+// `importActual` has no `bun test` equivalent: import the real namespace,
+// register the mock over it, then import the subject.
+const actualRouter = await import('@tanstack/react-router');
 
-vi.mock('@tanstack/react-router', async () => {
-  const actual = await vi.importActual('@tanstack/react-router');
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-  };
-});
+mock.module('@tanstack/react-router', () => ({ ...actualRouter, useNavigate: () => mockNavigate }));
 
-vi.mock('../../../src/lib/auth-client', () => ({
-  authClient: {
-    useSession: () => ({ data: sessionState.current }),
-    signOut: mockSignOut,
-  },
-}));
+const { Header } = await import('../../../src/components/layout/Header');
 
 function buildProps(
   overrides: Partial<ComponentProps<typeof Header>> = {}
 ): ComponentProps<typeof Header> {
   return {
     currentPage: 'chat',
-    onNewChat: vi.fn(),
-    onNavigateToSettings: vi.fn(),
+    onNewChat: jest.fn(),
+    onNavigateToSettings: jest.fn(),
     ...overrides,
   };
 }
@@ -49,7 +39,13 @@ describe('Header auth navigation', () => {
   beforeEach(() => {
     mockNavigate.mockReset();
     mockSignOut.mockReset();
-    sessionState.current = { user: { name: 'Test' } };
+    // `@/lib/auth-client` is a resolver alias to the shared stub, so mocking the
+    // module by its relative path — which is what this file used to do — would
+    // register a mock on a module the header never imports. Both halves of the
+    // session go in through the stub's seams instead, and `bun.setup.ts` clears
+    // them after every test.
+    setTestSession({ user: { id: 'user-header', name: 'Test' } });
+    setTestSignOut(mockSignOut);
   });
 
   it('shows logout button when user session exists', () => {
@@ -69,7 +65,7 @@ describe('Header auth navigation', () => {
     expect(mockNavigate).not.toHaveBeenCalled();
 
     // Simulate Better Auth clearing the session atom.
-    sessionState.current = null;
+    setTestSession(null);
     rerender(<Header {...props} />);
 
     await waitFor(() => {
