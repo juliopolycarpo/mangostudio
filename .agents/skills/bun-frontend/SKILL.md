@@ -389,6 +389,38 @@ real `process`. The working shape is the T36 mechanism:
 `api-base-url.ts`. Verify by grepping the built bundle for the literal **and confirming no
 `typeof process` adjacent to it**, then a headless render.
 
+**T38 — `BunFile.stat()` returns `undefined` for a file embedded in a compiled binary, and it
+is not a promise.** Measured 2026-08-21 on the pinned 1.4.0 with `bun build --compile` over an
+`import f from './asset.txt' with { type: 'file' }` entry. Three shapes, and they do not agree:
+
+| file                 | `stat()`                | `exists()` | `size` / `text()`                    |
+| -------------------- | ----------------------- | ---------- | ------------------------------------ |
+| on disk, present     | resolves `Stats`        | `true`     | real                                 |
+| on disk, missing     | **rejects** `ENOENT`    | `false`    | 0                                    |
+| embedded in a binary | **returns `undefined`** | `true`     | real size, `lastModified` a sentinel |
+
+So `await file.stat().catch(() => null)` — the obvious shape, and the one `frontend-static.ts`
+shipped — is a **synchronous `TypeError: undefined is not an object`** on the embedded row,
+thrown out of the request handler. It cost every unhashed root asset the binary serves
+(`/favicon.ico`, `/icon-192.png`, `/apple-touch-icon.png`, `/site.webmanifest` — all four
+referenced by `index.html`) a 500. Catch around the `await`, then use **`exists()` as the
+discriminator** between "embedded, no inode" and "gone"; there is nothing to revalidate against
+on the embedded row, so it gets `Cache-Control` and no ETag.
+
+Blind to every gate but one: the `registerEmbeddedSpa` unit fixtures map URL paths to real temp
+files, which stat fine, so `bun test` cannot reach the row that breaks. `scripts/test-build.ts`
+now fetches `/favicon.ico` from the running binary — per the parity gate below, it is the only
+thing that runs the compiled artifact at all.
+
+**T39 — `Bun.serve` answers 500, with its own HTML error page, when a `Response` body is a
+`Bun.file` that is not there.** Measured 2026-08-21 on 1.4.0: not a 404, and the body is
+`<!doctype html>`, so a caller sniffing content-type sees an HTML shell where it expected an
+asset. `dist/` is absent for the whole `rm`-to-rebuild window of every dev save (`build.ts`
+removes it first), which made `GET /` and every deep link 500 until the build finished. Any
+handler that hands `Bun.file` to a `Response` needs an existence check first — `serveIndexFile`
+is reached through `registerSpa`'s `serveIndex` and through the SPA fallback, so the guard
+belongs on the shared closure, not on the route.
+
 ## Test migration mechanics
 
 Everything below is what the 004 spike actually needed across its eleven files. Where a row
