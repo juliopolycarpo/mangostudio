@@ -21,10 +21,10 @@
 //
 // Usage: bun ./scripts/ci/frontend-bundle-report.ts [--dist <dir>] [--baseline <file>] [--metafile <file>] [--json] [--out <file>]
 
-import { readdir } from 'node:fs/promises';
-import { dirname, join, posix, sep } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
+import { listDistFiles } from '../lib/embed-frontend';
 
 const DEFAULT_DIST_DIR = join(ROOT_DIR, 'apps/frontend/dist');
 
@@ -112,15 +112,6 @@ function isHashLike(candidate: string): boolean {
   return /\d/.test(candidate) || (/[a-z]/.test(candidate) && /[A-Z]/.test(candidate));
 }
 
-async function listFiles(dir: string): Promise<string[]> {
-  const entries = await readdir(dir, { recursive: true, withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isFile())
-    .map((entry) => join(entry.parentPath, entry.name).slice(dir.length).split(sep).filter(Boolean))
-    .map((segments) => segments.join('/'))
-    .sort();
-}
-
 /**
  * Resolves an asset reference from `index.html` or an emitted JS file to a
  * dist-relative path. Bun emits absolute URLs (`/assets/x.js`, from
@@ -192,7 +183,11 @@ export async function measureBundle(
 ): Promise<BundleReport> {
   // Sourcemaps are a diagnostic artifact, not shipped payload; a dist built with
   // them would otherwise report as a size regression.
-  const paths = (await listFiles(distDir)).filter((path) => !path.endsWith('.map'));
+  // `listDistFiles` yields URL paths with a leading '/'; this table is keyed
+  // dist-relative.
+  const paths = listDistFiles(distDir)
+    .map((path) => path.slice(1))
+    .filter((path) => !path.endsWith('.map'));
   const eagerSet = await traverseEagerSet(distDir, paths);
 
   const files: BundleFile[] = [];
@@ -211,8 +206,9 @@ export async function measureBundle(
   }
   files.sort((a, b) => b.gzipBytes - a.gzipBytes || a.path.localeCompare(b.path));
 
-  const total = (select: (file: BundleFile) => boolean, of: (file: BundleFile) => number): number =>
-    files.filter(select).reduce((sum, file) => sum + of(file), 0);
+  const sum = (list: readonly BundleFile[], of: (file: BundleFile) => number): number =>
+    list.reduce((acc, file) => acc + of(file), 0);
+  const eagerFiles = files.filter((file) => file.eager);
 
   return {
     version: BUNDLE_REPORT_VERSION,
@@ -220,22 +216,10 @@ export async function measureBundle(
     capturedAt: meta.capturedAt,
     totals: {
       files: files.length,
-      rawBytes: total(
-        () => true,
-        (file) => file.rawBytes
-      ),
-      gzipBytes: total(
-        () => true,
-        (file) => file.gzipBytes
-      ),
-      eagerRawBytes: total(
-        (file) => file.eager,
-        (file) => file.rawBytes
-      ),
-      eagerGzipBytes: total(
-        (file) => file.eager,
-        (file) => file.gzipBytes
-      ),
+      rawBytes: sum(files, (file) => file.rawBytes),
+      gzipBytes: sum(files, (file) => file.gzipBytes),
+      eagerRawBytes: sum(eagerFiles, (file) => file.rawBytes),
+      eagerGzipBytes: sum(eagerFiles, (file) => file.gzipBytes),
     },
     files,
   };
