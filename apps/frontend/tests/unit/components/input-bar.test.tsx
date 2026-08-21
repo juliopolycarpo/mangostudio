@@ -1,16 +1,16 @@
+import { describe, expect, it, jest } from 'bun:test';
 import type { Environment } from '@mangostudio/shared/environments';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
 import { InputBar } from '../../../src/features/chat/components/InputBar';
 import { render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 function renderInputBar(overrides: Partial<React.ComponentProps<typeof InputBar>> = {}) {
   const props: React.ComponentProps<typeof InputBar> = {
-    onSubmit: vi.fn(),
+    onSubmit: jest.fn(),
     ...overrides,
   };
   const result = render(<InputBar {...props} />);
@@ -46,7 +46,7 @@ describe('InputBar — chat-only composer', () => {
     renderInputBar({
       selectedAgentId: 'default',
       agents,
-      onSelectedAgentIdChange: vi.fn(),
+      onSelectedAgentIdChange: jest.fn(),
     });
 
     expect(screen.getByRole('combobox', { name: 'Select agent' })).toHaveValue('default');
@@ -84,7 +84,7 @@ describe('InputBar — chat-only composer', () => {
 
     try {
       const user = userEvent.setup();
-      const onEnvironmentChange = vi.fn().mockResolvedValue(undefined);
+      const onEnvironmentChange = jest.fn().mockResolvedValue(undefined);
       renderInputBar({
         chatId: 'chat-1',
         environmentId: 'local',
@@ -114,7 +114,7 @@ describe('InputBar — chat-only composer', () => {
 
   it('shows the active workdir basename and reopens the picker', async () => {
     const user = userEvent.setup();
-    const onWorkdirClick = vi.fn();
+    const onWorkdirClick = jest.fn();
     renderInputBar({
       workdir: '/srv/projects/mangostudio',
       onWorkdirClick,
@@ -124,7 +124,7 @@ describe('InputBar — chat-only composer', () => {
     expect(button).toHaveAttribute('title', '/srv/projects/mangostudio');
     await user.click(button);
 
-    expect(onWorkdirClick).toHaveBeenCalledOnce();
+    expect(onWorkdirClick).toHaveBeenCalledTimes(1);
   });
 
   it('does not render a reference image upload button', () => {
@@ -134,14 +134,14 @@ describe('InputBar — chat-only composer', () => {
   });
 
   it('renders the Create images tool intent button', () => {
-    renderInputBar({ onImageToolIntentChange: vi.fn() });
+    renderInputBar({ onImageToolIntentChange: jest.fn() });
 
     expect(screen.getByRole('button', { name: 'Create images' })).toBeInTheDocument();
   });
 
   it('calls onSubmit with the prompt text on submit', async () => {
     const user = userEvent.setup();
-    const onSubmit = vi.fn();
+    const onSubmit = jest.fn();
     renderInputBar({ onSubmit });
 
     await user.type(screen.getByRole('textbox'), 'hello world');
@@ -159,7 +159,7 @@ describe('InputBar — chat-only composer', () => {
 
   it('toggles the Create images button active state', async () => {
     const user = userEvent.setup();
-    const onImageToolIntentChange = vi.fn();
+    const onImageToolIntentChange = jest.fn();
     renderInputBar({ imageToolIntent: false, onImageToolIntentChange });
 
     await user.click(screen.getByRole('button', { name: 'Create images' }));
@@ -351,10 +351,7 @@ describe('InputBar — mid-turn steering', () => {
   it('disables the composer while a steer is in flight, so a later edit cannot be lost', async () => {
     const originalFetch = globalThis.fetch;
     const deferred = Promise.withResolvers<Response>();
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() => deferred.promise)
-    );
+    globalThis.fetch = jest.fn(() => deferred.promise) as unknown as typeof fetch;
 
     try {
       const user = userEvent.setup();
@@ -385,7 +382,7 @@ describe('InputBar — mid-turn steering', () => {
       await waitFor(() => expect(screen.getByRole('textbox')).not.toBeDisabled());
       expect(screen.getByRole('textbox')).toHaveValue('');
     } finally {
-      vi.stubGlobal('fetch', originalFetch);
+      globalThis.fetch = originalFetch;
     }
   });
 

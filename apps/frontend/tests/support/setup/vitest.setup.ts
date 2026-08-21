@@ -1,5 +1,11 @@
 import '@testing-library/jest-dom';
 import { vi } from 'vitest';
+import { type FetchScenarioMockFactory, setFetchMockFactory } from '../mocks/create-fetch-scenario';
+
+// The fetch scenario no longer imports a runner; each lane supplies its own
+// mock factory so that `expect(fetchMock).toHaveBeenCalledWith(...)` keeps
+// working under whichever `expect` is in scope. `bun.setup.ts` passes `jest.fn`.
+setFetchMockFactory(vi.fn as unknown as FetchScenarioMockFactory);
 
 /**
  * Keeps the real Better Auth client out of the suite.

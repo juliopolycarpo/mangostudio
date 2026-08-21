@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectorsSettings } from '../../../src/features/settings/connectors';
 import { EMPTY_MODEL_CATALOG } from '../../../src/utils/model-utils';
 import { render, screen, waitFor } from '../../support/harness/render';
-import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
+import {
+  createFetchScenario,
+  type FetchScenarioMock,
+} from '../../support/mocks/create-fetch-scenario';
 
 function createDefaultProps() {
   return {
@@ -30,7 +33,7 @@ function mockOAuthPopup() {
 
 type FetchCall = [RequestInfo | URL, RequestInit | undefined];
 
-function findFetchCall(fetchMock: ReturnType<typeof vi.fn>, method: string, path: string) {
+function findFetchCall(fetchMock: FetchScenarioMock, method: string, path: string) {
   return fetchMock.mock.calls.find((rawCall) => {
     const call = rawCall as FetchCall;
     const input = call[0];

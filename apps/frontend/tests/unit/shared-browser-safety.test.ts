@@ -18,11 +18,11 @@
  * hub and the runtime import.
  */
 
+import { describe, expect, it } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
 
-const REPO_ROOT = resolve(__dirname, '../../../..');
+const REPO_ROOT = resolve(import.meta.dir, '../../../..');
 const SHARED_ROOT = join(REPO_ROOT, 'apps/shared');
 const FRONTEND_SRC = join(REPO_ROOT, 'apps/frontend/src');
 const PACKAGE = '@mangostudio/shared';
