@@ -18,7 +18,7 @@ import { screen, within } from '@testing-library/react';
 import type { FunctionComponent } from 'react';
 import { Route as EnvironmentsRoute } from '../../../src/routes/_authenticated/environments';
 import { Route as LibraryRoute } from '../../../src/routes/_authenticated/environments/library';
-import { act, render } from '../../support/harness/render';
+import { act, flushAsyncRender, render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 /** The route's page component, which the file keeps module-local. */
@@ -75,9 +75,7 @@ async function renderUmbrellaAt(path: string) {
   // there is no element to await — without flushing its promise chain here the
   // resolution lands after the test body and prints an "update was not wrapped
   // in act(...)" block while every assertion still passes.
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
+  await flushAsyncRender();
   return result;
 }
 

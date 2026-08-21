@@ -4,7 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import userEvent from '@testing-library/user-event';
-import { act, render, screen, waitFor } from '../../support/harness/render';
+import { flushAsyncRender, render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 // Declared at module level rather than inline in the factory: biome's
@@ -127,9 +127,7 @@ describe('ProviderSettingsPage integration', () => {
     // descriptor back into the editor. `waitFor` returns on the call, so
     // without flushing that response the state update lands outside `act` and
     // prints an "update was not wrapped in act(...)" block on a green test.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    await flushAsyncRender();
   });
 
   it('removes explicit save actions from the provider page', async () => {
