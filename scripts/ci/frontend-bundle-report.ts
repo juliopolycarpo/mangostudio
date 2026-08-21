@@ -139,11 +139,17 @@ function htmlAssetRefs(html: string): string[] {
  * Static import specifiers of an emitted JS chunk. Dynamic `import("…")` is
  * deliberately not matched — the parenthesis breaks the pattern — because a
  * dynamic edge is exactly what makes the target lazy.
+ *
+ * Both quote styles: a single-quoted specifier would drop its target and
+ * everything behind it out of the eager set, understating the one number this
+ * report exists to defend, with no sign that anything was missed.
  */
 function staticImportRefs(source: string): string[] {
-  return [...source.matchAll(/(?:import|from)\s*"((?:\.\.?\/|\/)[^"]+\.js)"/g)].map(
-    (m) => m[1] ?? ''
-  );
+  return [
+    ...source.matchAll(
+      /(?:import|from)\s*(?:"((?:\.\.?\/|\/)[^"]+\.js)"|'((?:\.\.?\/|\/)[^']+\.js)')/g
+    ),
+  ].map((m) => m[1] ?? m[2] ?? '');
 }
 
 /**
