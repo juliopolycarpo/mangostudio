@@ -26,8 +26,7 @@ bun run dev
 
 URLs locais padrão:
 
-- Frontend: `http://localhost:5173`
-- API: `http://localhost:3001`
+- App e API: `http://localhost:3001`
 
 ## 3. Saber Por Onde Começar
 

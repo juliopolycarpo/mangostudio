@@ -14,7 +14,9 @@ export default defineConfig({
     : 'list',
   projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
   use: {
-    baseURL: 'http://localhost:5173',
+    // One origin: the API builds and serves the frontend, so there is no
+    // separate dev server and nothing on :5173 any more.
+    baseURL: 'http://localhost:3001',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
@@ -22,17 +24,15 @@ export default defineConfig({
     {
       command: 'bun run dev --api',
       port: 3001,
+      // The API builds the frontend bundle before it listens, so the default
+      // 60s is not enough on a cold runner.
+      timeout: 180_000,
       reuseExistingServer: !process.env.CI,
       env: {
         // Required since the auth-secret startup guard landed; a 32+ char
         // random value satisfies the runtime check without exposing a real key.
         BETTER_AUTH_SECRET: 'browser-smoke-test-secret-at-least-32-characters-long',
       },
-    },
-    {
-      command: 'bun run dev --frontend',
-      port: 5173,
-      reuseExistingServer: !process.env.CI,
     },
   ],
 });

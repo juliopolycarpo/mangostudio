@@ -32,7 +32,7 @@ cp .mango/.env.example ~/.mango/.env
 ## Fluxo de Desenvolvimento
 
 ```bash
-# Inicia todos os servidores de dev (API em :3001, frontend em :5173)
+# Inicia o servidor de dev (API e frontend em :3001)
 bun run dev
 
 # Ou inicie cada workspace individualmente

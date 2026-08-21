@@ -95,7 +95,7 @@ Para deploy em container, veja [`docs/operations/deployment.md`](../operations/d
 
    Isso inicia:
    - **API** em `http://localhost:3001` (Elysia + Kysely/SQLite)
-   - **Frontend** em `http://localhost:5173` (Vite + React)
+   - **Frontend** servido pela mesma API em `http://localhost:3001` (React, empacotado com Bun)
 
 ## Configuração de Conectores (Secrets)
 

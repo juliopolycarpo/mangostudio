@@ -60,7 +60,7 @@ export const ROOT_BIOME_PATHS: string[] = [
   'apps/runtime/package.json',
   'apps/runtime/turbo.json',
   'tests/browser-smoke',
-  'apps/frontend/vite.config.ts',
+  'apps/frontend/build.ts',
   'apps/frontend/vitest.config.ts',
   'apps/api/tests',
   'apps/frontend/tests',

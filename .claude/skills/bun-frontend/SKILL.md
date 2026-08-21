@@ -37,11 +37,11 @@ imported bundle. The same issue documents that `get('/*')` shadows `.use()`/`.mo
 which is why `registerEmbeddedSpa` registers one explicit GET per asset instead of a root
 wildcard. Preserve that shape.
 
-**T3 — `await staticPlugin()` is what enables the fullstack dev server.** The `await` is
-load-bearing per Elysia's docs; it installs the HMR hooks. `apps/api` is already on
-`@elysia/static@2.0.0-beta.2` and `elysia@2.0.0-beta.4`, so no version bump is needed. Open
-issue [#1857](https://github.com/elysiajs/elysia/issues/1857) reports `@elysia/static` breaking
-dev-server static bundling — verify against beta.2 rather than assuming it applies.
+**T3 — ~~`await staticPlugin()` enables the fullstack dev server~~. Moot: there is no
+fullstack dev server.** Superseded by T20. Bun's HTML-bundle path is unusable for this app, so
+dev serves a built `dist/` through the ordinary directory branch and `staticPlugin` is
+constructed exactly as production always did. Do not reopen this; the reason is T20, not the
+`await`.
 
 **T4 — the fd leak is still live upstream on Bun 1.4.0.** `oven-sh/bun#37968` is open (updated
 2026-08-19) and its fix `#38008` is open and unmerged; both re-verified via `gh api` on
@@ -133,6 +133,90 @@ Vite/rollup writes base64url (`index-Bqugzlgv.js`, and it can contain a `-`:
 of Bun's hashes contain no digit at all, so anything that tries to recognize a hash by "it
 looks random" misfires at random. `scripts/ci/frontend-bundle-report.ts` keys on suffix length
 instead, for that reason.
+
+**T20 — Bun's HTML *entrypoint loader* silently drops a transitive import from this app's
+graph. Never give Bun an HTML entrypoint.** Measured 2026-08-21 on Bun 1.4.0 with real headless
+chromium loads (`playwright-core` + `~/.cache/ms-playwright/chromium-1237/chrome-linux64/chrome`):
+
+| entrypoint       | browser result                                              |
+| ---------------- | ----------------------------------------------------------- |
+| `./index.html`   | `pageerror: atom is not defined`, `#root` empty, blank page |
+| `./src/main.tsx` | app renders, Tailwind applies, **zero console errors**      |
+
+`atom` is better-auth's `nanostores` import. The same failure appears through
+`Bun.serve({ routes: { '/': htmlBundle } })` and through `app.listen({ routes })` — so the
+common factor is the HTML loader, not `Bun.serve`, not Elysia's two-phase boot, and not the
+`development` flag (all three of `true` / `false` / omitted fail). `splitting: true` is **not**
+the trigger; it was ruled out explicitly.
+
+That is why there is no HMR and why `apps/frontend/build.ts` stitches `index.html` by hand.
+`bun build ./index.html` also fails *hard* on the four absolute `public/` hrefs
+(`error: Could not resolve: "/favicon.ico"`) — a TS entrypoint never parses the HTML, so that
+problem disappears too.
+
+Related upstream, but **not** the same bug: `oven-sh/bun#34357` (`var [arguments, eval] =
+hmr.imports` from typebox's `build/system/arguments/`) is closed *by the reporter*, not by a
+fix; the actual fix `#34361` is open and unmerged. It would only address the `arguments`
+SyntaxError. Even if it lands, the dropped-import bug above is untouched.
+
+**T18 — `naming.entry` and `naming.chunk` must not share a pattern, and the stitch must resolve
+by `kind`.** Under `splitting: true` Bun names a dynamic-import chunk after the entry that
+reaches it, so one pattern for both produced **18 files matching `assets/main-*.js`**. A
+glob-based stitch then picks a chunk instead of the entry and the page renders **blank with
+zero console errors** — no diagnostic at all. Use a `chunk-` prefix *and*
+`result.outputs.find(o => o.kind === 'entry-point')`.
+
+**T19 — `reactCompiler: true` really runs on Bun 1.4.0** (compare `Bun.Archive.write`'s
+accepted-and-ignored `mode`). Unminified A/B on the same entrypoint: `false` → 7,462,834 bytes,
+**0** `$[n]` memo slots, 0 `compiler-runtime` imports; `true` → 8,102,894 bytes, 769× `$[0]`,
+2 `compiler-runtime` imports. Cost measured against the Vite baseline: the bundler swap alone
+is **+11.1% gzip**, and the compiler adds **another ~+205 kB gzip** on top for **+33.6%** total.
+It is a behavior change, not parity — `vite.config.ts` ran `@vitejs/plugin-react` without it.
+
+**T21 — `@types/bun` must track the pinned runtime.** `reactCompiler` is absent from
+`BuildConfig` in `bun-types@1.3.14`, so a correct `Bun.build()` call fails `tsc` with
+`TS2353` while running fine. Bumped to `^1.4.0` in all four `package.json` files;
+`root:dependency-cohort` requires they agree.
+
+**T22 — `getDefaultFrontendDir()` resolves against `process.cwd()`, and Turbo runs the API's
+dev task from `apps/api`.** So dev needs `dev-frontend-dir.ts`, a get/set seam populated only
+by `src/dev.ts`. Resolve the frontend directory from `import.meta.dir`, never the cwd.
+
+**T23 — plain `app.listen()` is enough; the raw-`Bun.serve()` WS shim is not needed.** Verified
+live against `bun run dev`: `/api/ws` and `/api/runtime` both upgrade (`OPEN`), and `/api/*`,
+`/api/auth/*`, `/scalar`, `/uploads/*`, `/images/*` all return their own content-type rather
+than the SPA shell. An earlier iteration hand-rolled `Bun.serve({ routes, websocket, fetch })`
+plus `app.server = server` and Elysia's undocumented `buildGlobalWSHandler()`; that is only
+required when passing an HTML bundle through `routes`, which T20 rules out.
+
+> "Not the SPA shell" was the wrong assertion to check. `/api/auth/*` was answering a JSON
+> 404 — its own content-type, and still broken. See T24.
+
+**T24 — `staticPlugin({ prefix: '/' })` registers `GET /*`, and on `.listen()` that outranks
+every `.all('/*')` route in the app.** `alwaysStatic` keys off `NODE_ENV === 'production'`,
+which nothing in this repo sets, so `@elysia/static@2.0.0-beta.2` always takes the branch at
+`dist/index.js:66` that mounts the catch-all. Once Elysia promotes routes into Bun's native
+table, that root wildcard swallows every `.all('/*')` — at the root, inside a `.group()` and
+inside a mounted prefixed instance alike. **The method is the discriminator, not the nesting:**
+measured on the pre-fix code, `.all('/x/*')` was shadowed at all three depths while
+`.get('/y/*')` was reached at all three. So Better Auth (mounted `.all('/*')` in
+`routes/auth.ts`) 404'd every path but the literal `/ok`, and `/images/*` + `/uploads/*` —
+both `.get` — were never affected. Verify with a real file before claiming a `.get` wildcard
+is broken; a missing file 404s either way and proves nothing.
+
+**`app.handle()` resolves the same request correctly**, which is why nothing caught it: every
+route integration test drives `handle()`, `static-routes.integration.test.ts` only exercises
+the pure `isSpaRoute()`, and `test-build.ts` runs the binary, which takes the
+`registerEmbeddedSpa` branch (explicit per-file routes, no wildcard — its doc comment has
+warned about exactly this since #454). The bug predates this migration; serving the frontend
+from the API in dev is what made it user-visible.
+
+Fix in `registerSpa`: narrow the plugin to `prefix: '/assets'` (hashed filenames change on
+every rebuild, so they must stay behind a dynamic route) and register one explicit route per
+unhashed root file. Guard test: `frontend-static.test.ts` → "over a listening server", which
+binds port 0 and asserts a stand-in `.all('/*')` stays reachable, with a `.get('/*')` control
+so it cannot pass for the wrong reason. **Any new frontend-serving branch needs a test that
+binds a real port**; `handle()` is blind to this whole class.
 
 ## Test migration mechanics
 

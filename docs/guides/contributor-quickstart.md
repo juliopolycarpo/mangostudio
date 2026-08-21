@@ -24,10 +24,9 @@ cp .mango/.env.example ~/.mango/.env
 bun run dev
 ```
 
-Default local URLs:
+One server, one URL — the API builds and serves the frontend:
 
-- Frontend: `http://localhost:5173`
-- API: `http://localhost:3001`
+- App and API: `http://localhost:3001`
 
 ## 3. Know Where To Start
 

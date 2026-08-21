@@ -96,9 +96,8 @@ For container deployment details, see [`docs/operations/deployment.md`](docs/ope
    bun run dev
    ```
 
-   This starts:
-   - **API** at `http://localhost:3001` (Elysia + Kysely/SQLite)
-   - **Frontend** at `http://localhost:5173` (Vite + React)
+   This starts one server at `http://localhost:3001` (Elysia + Kysely/SQLite) that also
+   builds and serves the React frontend. There is no separate frontend port.
 
 ## Connector Configuration (Secrets)
 
@@ -271,7 +270,7 @@ Files that pass formatting are re-staged automatically. All hooks must succeed f
 
 | Layer        | Technologies                                                                     |
 | ------------ | -------------------------------------------------------------------------------- |
-| **Frontend** | React 19, Vite 8, Tailwind CSS v4, TanStack Router/Query                         |
+| **Frontend** | React 19, Bun bundler, Tailwind CSS v4, TanStack Router/Query                    |
 | **API**      | Elysia, Better Auth, native rate limiting, DDD-inspired modular architecture     |
 | **Database** | SQLite via Kysely (type-safe query builder)                                      |
 | **AI**       | Multi-provider (Gemini, OpenAI, Anthropic, DeepSeek, ChatGPT, OpenAI-compatible) |

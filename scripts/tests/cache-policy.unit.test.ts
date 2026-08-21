@@ -107,7 +107,7 @@ describe('CI cache policy', () => {
     const vite = byFamily('vite');
     expect(vite.length).toBeGreaterThan(0);
     for (const site of vite) {
-      for (const file of ['bun.lock', 'vite.config.ts', 'vitest.config.ts', 'tsconfig*.json']) {
+      for (const file of ['bun.lock', 'build.ts', 'vitest.config.ts', 'tsconfig*.json']) {
         expect(site.inputs.validity).toContain(file);
       }
     }

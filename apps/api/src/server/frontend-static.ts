@@ -3,8 +3,8 @@
  * Extracted from the server entrypoint so it can be reused and tested.
  */
 
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { join, sep } from 'node:path';
 import { staticPlugin } from '@elysia/static';
 import { NotFound } from 'elysia';
 import type { App } from '../app';
@@ -95,34 +95,70 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
   app.error(NotFound, ({ request }) => frontendNotFound(request));
 }
 
+/** Directory holding the content-hashed bundle output, relative to the frontend root. */
+const HASHED_ASSET_DIR = 'assets';
+
+/**
+ * Files the build emits outside `assets/`, as URL paths.
+ *
+ * Their names are fixed (favicon, icons, manifest, build-info), so enumerating
+ * once at boot is safe — unlike the hashed bundle output, whose filenames change
+ * on every rebuild and therefore has to stay behind a dynamic route.
+ */
+function unhashedAssetPaths(frontendDir: string): string[] {
+  return (
+    readdirSync(frontendDir, { recursive: true, encoding: 'utf8' })
+      .filter((entry) => statSync(join(frontendDir, entry)).isFile())
+      // index.html is served by the explicit GET / route and the SPA fallback.
+      .filter((entry) => entry !== 'index.html' && !entry.startsWith(`${HASHED_ASSET_DIR}${sep}`))
+      // Recursive readdir yields platform separators; URL paths always use '/'.
+      .map((entry) => entry.split(sep).join('/'))
+  );
+}
+
+/**
+ * Serve a built frontend from disk without a root catch-all wildcard.
+ *
+ * `staticPlugin({ prefix: '/' })` registers `GET /*` unless `alwaysStatic` is on
+ * (it keys off `NODE_ENV === 'production'`, which nothing here sets). Once
+ * `.listen()` promotes routes into Bun's native table, that root wildcard wins
+ * over every `.all('/*')` route in the app — at the root, inside a `.group()`
+ * and inside a mounted prefixed instance alike — while literal routes and
+ * `.get('/*')` wildcards keep matching. Better Auth is mounted as `.all('/*')`
+ * in `routes/auth.ts`, so sign-in, sign-up and get-session all answered 404
+ * while `/api/auth/ok` worked. `app.handle()` resolves the same request
+ * correctly, so nothing that drives the app in-process can see it.
+ *
+ * So the prefix is narrowed to `/assets`, which is where the only
+ * rebuild-renamed files live, and everything else gets an explicit route. This
+ * mirrors what `registerEmbeddedSpa` already does for the same reason.
+ */
 function registerSpa(app: App, frontendDir: string): void {
   const indexPath = join(frontendDir, 'index.html');
+  const serveIndex = () => serveIndexFile(indexPath);
+  const assetsDir = join(frontendDir, HASHED_ASSET_DIR);
 
-  app
-    // Register GET / explicitly before staticPlugin. The static plugin may
-    // register GET / with an undefined handler inside a compiled Bun binary
-    // (htmlBundle.default is undefined for Vite-generated HTML), so this explicit
-    // route guarantees that GET / always returns index.html.
-    .get('/', () => serveIndexFile(indexPath))
-    .use(
-      staticPlugin({
-        assets: frontendDir,
-        prefix: '/',
-        // ignorePatterns in @elysia/static still has an inverted comparison, so
-        // string patterns never match and only regex patterns work — verified
-        // against 2.0.0-beta.2, so the regex form below is still load-bearing.
-        // Exclude index.html so the plugin does not register a GET /index.html
-        // handler that fails in compiled binaries; GET /index.html is handled by
-        // the NotFound fallback below.
-        ignorePatterns: [/index\.html$/, '/api/*', '/uploads/*', '/images/*', '/scalar'],
-      })
-    )
-    .error(NotFound, ({ request }) => frontendNotFound(request));
+  // Registered before the plugin: the static plugin may register GET / with an
+  // undefined handler inside a compiled Bun binary (htmlBundle.default is
+  // undefined for a generated HTML file), so this explicit route guarantees
+  // that GET / always returns index.html.
+  app.get('/', serveIndex);
+
+  for (const urlPath of unhashedAssetPaths(frontendDir)) {
+    const filePath = join(frontendDir, urlPath);
+    app.get(`/${urlPath}`, () => new Response(Bun.file(filePath)));
+  }
+
+  if (existsSync(assetsDir)) {
+    app.use(staticPlugin({ assets: assetsDir, prefix: `/${HASHED_ASSET_DIR}` }));
+  }
+
+  app.error(NotFound, ({ request }) => frontendNotFound(request));
 
   setFrontendFallback((request) => {
     if (request.method !== 'GET') return undefined;
     const { pathname } = new URL(request.url);
-    return isSpaRoute(pathname) ? serveIndexFile(indexPath) : undefined;
+    return isSpaRoute(pathname) ? serveIndex() : undefined;
   });
 }
 

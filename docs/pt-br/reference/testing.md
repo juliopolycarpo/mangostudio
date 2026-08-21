@@ -70,7 +70,7 @@ bun run verify              # gate CI local completo: check → test --coverage 
 
 ## Browser Smoke
 
-Suíte Playwright Chromium em `tests/browser-smoke/`. Cobre o fluxo completo de auth contra uma stack real rodando com API em `:3001` e frontend em `:5173`.
+Suíte Playwright Chromium em `tests/browser-smoke/`. Cobre o fluxo completo de auth contra uma stack real em `:3001` — um único servidor entregando a API e o frontend.
 
 ```bash
 bun run test:e2e:setup
