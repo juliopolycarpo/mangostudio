@@ -1,5 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import { navigateToLoginPage, setAuthNavigate } from '../../../src/lib/auth-navigate';
+import {
+  advanceTimersByTimeAsync,
+  restoreRealTimers,
+  useFakeTimers,
+} from '../../support/harness/timers';
 
 function mockHandler() {
   // noop — test-only callback
@@ -42,18 +47,20 @@ describe('auth-navigate', () => {
 });
 
 describe('scheduleLoginRedirect', () => {
-  let navigate = vi.fn();
+  let navigate = jest.fn();
 
   beforeEach(() => {
-    navigate = vi.fn();
-    // A fresh module instance per test so the debounce flag never leaks.
-    vi.resetModules();
-    vi.useFakeTimers();
+    navigate = jest.fn();
+    // Vitest reset the module here so the debounce flag could not leak. There
+    // is no `jest.resetModules()` under `bun test`, and none is needed: the
+    // flag re-arms in the timer's own `finally`, and every case below advances
+    // past the 100ms window before it ends.
+    useFakeTimers();
     setPath('/');
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
+  afterEach(async () => {
+    await restoreRealTimers();
     setPath('/');
   });
 
@@ -69,8 +76,8 @@ describe('scheduleLoginRedirect', () => {
     scheduleLoginRedirect();
     expect(navigate).not.toHaveBeenCalled();
 
-    vi.advanceTimersByTime(100);
-    expect(navigate).toHaveBeenCalledOnce();
+    await advanceTimersByTimeAsync(100);
+    expect(navigate).toHaveBeenCalledTimes(1);
   });
 
   it('does not navigate multiple times for concurrent calls', async () => {
@@ -79,7 +86,7 @@ describe('scheduleLoginRedirect', () => {
     scheduleLoginRedirect();
     scheduleLoginRedirect();
 
-    vi.advanceTimersByTime(100);
+    await advanceTimersByTimeAsync(100);
     expect(navigate).toHaveBeenCalledTimes(1);
   });
 
@@ -87,9 +94,9 @@ describe('scheduleLoginRedirect', () => {
     const { scheduleLoginRedirect } = await loadModule();
 
     scheduleLoginRedirect();
-    vi.advanceTimersByTime(100);
+    await advanceTimersByTimeAsync(100);
     scheduleLoginRedirect();
-    vi.advanceTimersByTime(100);
+    await advanceTimersByTimeAsync(100);
 
     expect(navigate).toHaveBeenCalledTimes(2);
   });
@@ -99,7 +106,7 @@ describe('scheduleLoginRedirect', () => {
     const { scheduleLoginRedirect } = await loadModule();
 
     scheduleLoginRedirect();
-    vi.advanceTimersByTime(100);
+    await advanceTimersByTimeAsync(100);
 
     expect(navigate).not.toHaveBeenCalled();
   });
@@ -109,7 +116,7 @@ describe('scheduleLoginRedirect', () => {
     const { scheduleLoginRedirect } = await loadModule();
 
     scheduleLoginRedirect();
-    vi.advanceTimersByTime(100);
+    await advanceTimersByTimeAsync(100);
 
     expect(navigate).not.toHaveBeenCalled();
   });
@@ -119,14 +126,14 @@ describe('scheduleLoginRedirect', () => {
 
     scheduleLoginRedirect();
     setPath('/login');
-    vi.advanceTimersByTime(100);
+    await advanceTimersByTimeAsync(100);
 
     expect(navigate).not.toHaveBeenCalled();
 
     // Flag must re-arm even when the navigate is skipped.
     setPath('/');
     scheduleLoginRedirect();
-    vi.advanceTimersByTime(100);
-    expect(navigate).toHaveBeenCalledOnce();
+    await advanceTimersByTimeAsync(100);
+    expect(navigate).toHaveBeenCalledTimes(1);
   });
 });

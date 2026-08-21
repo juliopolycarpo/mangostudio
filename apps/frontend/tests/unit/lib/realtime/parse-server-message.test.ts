@@ -1,5 +1,5 @@
+import { describe, expect, it } from 'bun:test';
 import type { RealtimeServerMessage } from '@mangostudio/shared/realtime';
-import { describe, expect, it } from 'vitest';
 import { parseServerMessage } from '@/lib/realtime/parse-server-message';
 
 const VALID_FRAMES: readonly RealtimeServerMessage[] = [
@@ -55,7 +55,9 @@ describe('parseServerMessage', () => {
   it('forwards a scope the current contract does not know', () => {
     // Forward compatibility: a newer server adding a scope must not cost this
     // client the whole frame, so scopes are shape-checked, not enumerated.
-    expect(
+    // `expect<unknown>` because bun-types types `toEqual` against the received
+    // type, and the whole point here is a scope the contract does not list.
+    expect<unknown>(
       parseServerMessage('{"type":"invalidate","topic":"git:c1","scopes":["worktrees"]}')
     ).toEqual({ type: 'invalidate', topic: 'git:c1', scopes: ['worktrees'] });
   });

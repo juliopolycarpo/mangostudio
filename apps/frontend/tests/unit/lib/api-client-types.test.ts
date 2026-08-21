@@ -13,7 +13,7 @@
  * only keeps the file honest as a test.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import { client } from '../../../src/lib/api-client';
 
 /**

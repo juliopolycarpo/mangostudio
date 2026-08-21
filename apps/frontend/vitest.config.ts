@@ -68,19 +68,16 @@ export default defineConfig({
         '**/*.d.ts',
         '**/*.config.*',
       ],
-      // A shard runs a fraction of the files and therefore covers a fraction
-      // of the sources, so these can only be judged after `--mergeReports`
-      // reassembles the run — which is unsharded, so it does enforce them.
-      // `--reporter=blob` does not switch them off on its own: a sharded run
-      // still evaluates them and still fails, and it fails on every shard.
-      thresholds: process.env.MANGOSTUDIO_TEST_SHARD
-        ? undefined
-        : {
-            statements: 70,
-            branches: 60,
-            functions: 64,
-            lines: 72,
-          },
+      // No thresholds while the suite migrates to `bun test`.
+      //
+      // 70/60/64/72 were measured over all 167 files. This lane now runs
+      // whatever has not moved yet, so the numbers describe a shrinking and
+      // arbitrary subset of the sources — moving eight files already took
+      // branches within 4.9 points of its floor, and the set reaches zero
+      // before this PR ends. Ratcheting them down per batch would gate on a
+      // number nobody chose. The Bun lane re-derives real thresholds against
+      // the whole suite.
+      thresholds: undefined,
     },
   },
 });

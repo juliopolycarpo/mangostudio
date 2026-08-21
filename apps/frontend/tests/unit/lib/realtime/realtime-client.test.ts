@@ -1,5 +1,5 @@
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import { REALTIME_CLOSE_CODES } from '@mangostudio/shared/realtime';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   bindRealtimeClientToUser,
   createRealtimeClient,
@@ -10,6 +10,11 @@ import {
   type RealtimeTopicListener,
   resetRealtimeClient,
 } from '@/lib/realtime/realtime-client';
+import {
+  advanceTimersByTimeAsync,
+  restoreRealTimers,
+  useFakeTimers,
+} from '../../../support/harness/timers';
 
 /** Heartbeat cadence: the idle timeout (60 s) divided by 2.5. */
 const HEARTBEAT_MS = 24_000;
@@ -82,16 +87,16 @@ class FakeWebSocket {
 }
 
 describe('createRealtimeClient', () => {
-  let onUnauthorized = vi.fn();
+  let onUnauthorized = jest.fn();
 
   beforeEach(() => {
     FakeWebSocket.instances = [];
-    onUnauthorized = vi.fn();
-    vi.useFakeTimers();
+    onUnauthorized = jest.fn();
+    useFakeTimers();
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
+  afterEach(async () => {
+    await restoreRealTimers();
   });
 
   function createClient(overrides: Partial<RealtimeClientOptions> = {}): RealtimeClient {
@@ -152,15 +157,15 @@ describe('createRealtimeClient', () => {
     expect(socketAt(0).url).toBe('ws://realtime.test/api/ws');
   });
 
-  it('sends nothing before ready, even once the transport is open', () => {
+  it('sends nothing before ready, even once the transport is open', async () => {
     const client = createClient();
     client.subscribe('settings', () => undefined);
 
-    vi.advanceTimersByTime(0);
+    await advanceTimersByTimeAsync(0);
     expect(socketAt(0).sent).toHaveLength(0);
 
     socketAt(0).open();
-    vi.advanceTimersByTime(0);
+    await advanceTimersByTimeAsync(0);
     expect(socketAt(0).sent).toHaveLength(0);
 
     socketAt(0).emit({ type: 'ready' });
@@ -191,14 +196,14 @@ describe('createRealtimeClient', () => {
     ]);
   });
 
-  it('coalesces same-tick adds into one subscribe frame', () => {
+  it('coalesces same-tick adds into one subscribe frame', async () => {
     const client = createClient();
     client.subscribe('settings', () => undefined);
     const socket = makeReady();
 
     client.subscribe('git:chat-1', () => undefined);
     client.subscribe('git:chat-2', () => undefined);
-    vi.advanceTimersByTime(0);
+    await advanceTimersByTimeAsync(0);
 
     expect(frames(socket)).toEqual([
       { type: 'subscribe', topics: ['settings'] },
@@ -206,14 +211,14 @@ describe('createRealtimeClient', () => {
     ]);
   });
 
-  it('costs no frames and no socket churn for StrictMode subscribe/unsubscribe/subscribe', () => {
+  it('costs no frames and no socket churn for StrictMode subscribe/unsubscribe/subscribe', async () => {
     const client = createClient();
     const release = client.subscribe('settings', () => undefined);
     release();
     client.subscribe('settings', () => undefined);
 
     const socket = makeReady();
-    vi.advanceTimersByTime(LINGER_MS);
+    await advanceTimersByTimeAsync(LINGER_MS);
 
     expect(FakeWebSocket.instances).toHaveLength(1);
     expect(frames(socket)).toEqual([{ type: 'subscribe', topics: ['settings'] }]);
@@ -310,7 +315,7 @@ describe('createRealtimeClient', () => {
     const client = createClient();
     const second = collect();
     let release: () => void = () => undefined;
-    const selfReleasing = vi.fn(() => {
+    const selfReleasing = jest.fn(() => {
       release();
     });
     release = client.subscribe('settings', selfReleasing);
@@ -318,11 +323,11 @@ describe('createRealtimeClient', () => {
 
     const socket = makeReady();
     expect(() => socket.emit({ type: 'subscribed', topics: ['settings'] })).not.toThrow();
-    expect(selfReleasing).toHaveBeenCalledOnce();
+    expect(selfReleasing).toHaveBeenCalledTimes(1);
     expect(second.signals).toHaveLength(1);
 
     socket.emit({ type: 'subscribed', topics: ['settings'] });
-    expect(selfReleasing).toHaveBeenCalledOnce();
+    expect(selfReleasing).toHaveBeenCalledTimes(1);
     expect(second.signals).toHaveLength(2);
   });
 
@@ -330,7 +335,7 @@ describe('createRealtimeClient', () => {
     const client = createClient();
     const second = collect();
     let releaseSecond: () => void = () => undefined;
-    const first = vi.fn(() => {
+    const first = jest.fn(() => {
       releaseSecond();
     });
     client.subscribe('settings', first);
@@ -347,34 +352,34 @@ describe('createRealtimeClient', () => {
     expect(second.signals).toHaveLength(1);
   });
 
-  it('pings on the heartbeat interval and clears the watchdog on any inbound frame', () => {
+  it('pings on the heartbeat interval and clears the watchdog on any inbound frame', async () => {
     const client = createClient();
     client.subscribe('settings', () => undefined);
     const socket = makeReady();
 
-    vi.advanceTimersByTime(HEARTBEAT_MS);
+    await advanceTimersByTimeAsync(HEARTBEAT_MS);
     expect(frames(socket).at(-1)).toEqual({ type: 'ping' });
 
     socket.emit({ type: 'pong' });
-    vi.advanceTimersByTime(HEARTBEAT_MS);
+    await advanceTimersByTimeAsync(HEARTBEAT_MS);
     expect(
       frames(socket).filter((frame) => JSON.stringify(frame) === '{"type":"ping"}')
     ).toHaveLength(2);
     expect(socket.closedWith).toBeUndefined();
   });
 
-  it('reconnects when a pong never arrives', () => {
+  it('reconnects when a pong never arrives', async () => {
     const client = createClient();
     client.subscribe('settings', () => undefined);
     const socket = makeReady();
 
-    vi.advanceTimersByTime(HEARTBEAT_MS);
-    vi.advanceTimersByTime(HEARTBEAT_MS);
+    await advanceTimersByTimeAsync(HEARTBEAT_MS);
+    await advanceTimersByTimeAsync(HEARTBEAT_MS);
 
     expect(socket.closedWith).toBeDefined();
     expect(FakeWebSocket.instances).toHaveLength(1);
 
-    vi.advanceTimersByTime(500);
+    await advanceTimersByTimeAsync(500);
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
@@ -383,62 +388,62 @@ describe('createRealtimeClient', () => {
    * is the first-failure delay, and the escalation from there is 1000 ms rather
    * than the 2000 ms a double-counted failure would produce.
    */
-  function expectSingleCountedFailure(): void {
+  async function expectSingleCountedFailure(): Promise<void> {
     const before = FakeWebSocket.instances.length;
-    vi.advanceTimersByTime(499);
+    await advanceTimersByTimeAsync(499);
     expect(FakeWebSocket.instances, 'retry was not armed at the 500 ms delay').toHaveLength(before);
-    vi.advanceTimersByTime(1);
+    await advanceTimersByTimeAsync(1);
     expect(FakeWebSocket.instances).toHaveLength(before + 1);
 
     makeReady();
     lastSocket().drop(1006);
-    vi.advanceTimersByTime(999);
+    await advanceTimersByTimeAsync(999);
     expect(FakeWebSocket.instances, 'failure count escalated too far').toHaveLength(before + 1);
-    vi.advanceTimersByTime(1);
+    await advanceTimersByTimeAsync(1);
     expect(FakeWebSocket.instances).toHaveLength(before + 2);
   }
 
-  it('ignores a late onclose from a socket it already abandoned', () => {
+  it('ignores a late onclose from a socket it already abandoned', async () => {
     const client = createClient();
     client.subscribe('settings', () => undefined);
     const socket = makeReady();
 
     // Force the missed-pong reconnect: the client nulls its socket reference and
     // arms one timer at the first-failure delay.
-    vi.advanceTimersByTime(HEARTBEAT_MS * 2);
+    await advanceTimersByTimeAsync(HEARTBEAT_MS * 2);
     // The abandoned socket now reports the close the browser observed.
     socket.drop(1006);
 
-    expectSingleCountedFailure();
+    await expectSingleCountedFailure();
   });
 
-  it('ignores a late frame from a socket it already abandoned', () => {
+  it('ignores a late frame from a socket it already abandoned', async () => {
     const client = createClient();
     client.subscribe('settings', () => undefined);
     const socket = makeReady();
 
-    vi.advanceTimersByTime(HEARTBEAT_MS * 2);
+    await advanceTimersByTimeAsync(HEARTBEAT_MS * 2);
     // A frame the half-open socket had already queued. Honoring it would flip the
     // phase back to ready and strand the client with no socket and no retry.
     socket.emit({ type: 'ready' });
 
-    vi.advanceTimersByTime(500);
+    await advanceTimersByTimeAsync(500);
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
-  it('drops its socket reference before closing, so a synchronous onclose is stale', () => {
+  it('drops its socket reference before closing, so a synchronous onclose is stale', async () => {
     const client = createClient();
     client.subscribe('settings', () => undefined);
     const socket = makeReady();
     socket.closeFiresOnclose = true;
 
     // The forced close now re-enters the close handler synchronously.
-    vi.advanceTimersByTime(HEARTBEAT_MS * 2);
+    await advanceTimersByTimeAsync(HEARTBEAT_MS * 2);
 
-    expectSingleCountedFailure();
+    await expectSingleCountedFailure();
   });
 
-  it('unsubscribes only the dropped topics after the linger window', () => {
+  it('unsubscribes only the dropped topics after the linger window', async () => {
     const client = createClient();
     const release = client.subscribe('git:chat-1', () => undefined);
     client.subscribe('settings', () => undefined);
@@ -446,15 +451,15 @@ describe('createRealtimeClient', () => {
     socket.emit({ type: 'subscribed', topics: ['git:chat-1', 'settings'] });
 
     release();
-    vi.advanceTimersByTime(LINGER_MS - 1);
+    await advanceTimersByTimeAsync(LINGER_MS - 1);
     expect(frames(socket)).toHaveLength(1);
 
-    vi.advanceTimersByTime(1);
+    await advanceTimersByTimeAsync(1);
     expect(frames(socket).at(-1)).toEqual({ type: 'unsubscribe', topics: ['git:chat-1'] });
     expect(socket.closedWith).toBeUndefined();
   });
 
-  it('does not push an armed linger window out when another topic is dropped', () => {
+  it('does not push an armed linger window out when another topic is dropped', async () => {
     const client = createClient();
     const releaseFirst = client.subscribe('git:chat-1', () => undefined);
     const releaseSecond = client.subscribe('git:chat-2', () => undefined);
@@ -463,11 +468,11 @@ describe('createRealtimeClient', () => {
     socket.emit({ type: 'subscribed', topics: ['git:chat-1', 'git:chat-2', 'settings'] });
 
     releaseFirst();
-    vi.advanceTimersByTime(3_000);
+    await advanceTimersByTimeAsync(3_000);
     releaseSecond();
     // The window still expires 5 s after the *first* drop, so a page churning
     // through chats cannot defer cleanup past the server's active-topic cap.
-    vi.advanceTimersByTime(2_000);
+    await advanceTimersByTimeAsync(2_000);
 
     expect(frames(socket).at(-1)).toEqual({
       type: 'unsubscribe',
@@ -475,7 +480,7 @@ describe('createRealtimeClient', () => {
     });
   });
 
-  it('sends no unsubscribe when the topic is wanted again by linger time', () => {
+  it('sends no unsubscribe when the topic is wanted again by linger time', async () => {
     const client = createClient();
     const release = client.subscribe('settings', () => undefined);
     const socket = makeReady();
@@ -483,20 +488,20 @@ describe('createRealtimeClient', () => {
 
     release();
     client.subscribe('settings', () => undefined);
-    vi.advanceTimersByTime(LINGER_MS);
+    await advanceTimersByTimeAsync(LINGER_MS);
 
     expect(frames(socket)).toEqual([{ type: 'subscribe', topics: ['settings'] }]);
     expect(socket.closedWith).toBeUndefined();
   });
 
-  it('tears the socket down once nothing is wanted', () => {
+  it('tears the socket down once nothing is wanted', async () => {
     const client = createClient();
     const release = client.subscribe('settings', () => undefined);
     const socket = makeReady();
     socket.emit({ type: 'subscribed', topics: ['settings'] });
 
     release();
-    vi.advanceTimersByTime(LINGER_MS);
+    await advanceTimersByTimeAsync(LINGER_MS);
     expect(socket.closedWith).toBeDefined();
 
     // A later subscribe starts a fresh socket rather than reviving a dead one.
@@ -504,7 +509,7 @@ describe('createRealtimeClient', () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
-  it('re-subscribes a topic dropped and re-added after the linger reconcile', () => {
+  it('re-subscribes a topic dropped and re-added after the linger reconcile', async () => {
     const client = createClient();
     const release = client.subscribe('git:chat-1', () => undefined);
     client.subscribe('settings', () => undefined);
@@ -512,14 +517,14 @@ describe('createRealtimeClient', () => {
     socket.emit({ type: 'subscribed', topics: ['git:chat-1', 'settings'] });
 
     release();
-    vi.advanceTimersByTime(LINGER_MS);
+    await advanceTimersByTimeAsync(LINGER_MS);
 
     client.subscribe('git:chat-1', () => undefined);
-    vi.advanceTimersByTime(0);
+    await advanceTimersByTimeAsync(0);
     expect(frames(socket).at(-1)).toEqual({ type: 'subscribe', topics: ['git:chat-1'] });
   });
 
-  it('unsubscribes a late subscribed ack for a topic already released past linger', () => {
+  it('unsubscribes a late subscribed ack for a topic already released past linger', async () => {
     const client = createClient();
     const release = client.subscribe('git:chat-1', () => undefined);
     client.subscribe('settings', () => undefined);
@@ -527,119 +532,119 @@ describe('createRealtimeClient', () => {
     socket.emit({ type: 'subscribed', topics: ['git:chat-1', 'settings'] });
 
     release();
-    vi.advanceTimersByTime(LINGER_MS);
+    await advanceTimersByTimeAsync(LINGER_MS);
     expect(frames(socket).at(-1)).toEqual({ type: 'unsubscribe', topics: ['git:chat-1'] });
 
     socket.emit({ type: 'subscribed', topics: ['git:chat-1'] });
     expect(frames(socket).at(-1)).toEqual({ type: 'unsubscribe', topics: ['git:chat-1'] });
 
     client.subscribe('git:chat-1', () => undefined);
-    vi.advanceTimersByTime(0);
+    await advanceTimersByTimeAsync(0);
     expect(frames(socket).at(-1)).toEqual({ type: 'subscribe', topics: ['git:chat-1'] });
   });
 
-  it('escalates the reconnect delay 500/1000/2000/4000/8000/15000', () => {
+  it('escalates the reconnect delay 500/1000/2000/4000/8000/15000', async () => {
     const client = createClient();
     client.subscribe('settings', () => undefined);
 
     const schedule = [500, 1_000, 2_000, 4_000, 8_000, 15_000, 15_000];
     for (const [index, delay] of schedule.entries()) {
       lastSocket().drop(1006);
-      vi.advanceTimersByTime(delay - 1);
+      await advanceTimersByTimeAsync(delay - 1);
       expect(FakeWebSocket.instances, `socket ${index + 1} opened early`).toHaveLength(index + 1);
-      vi.advanceTimersByTime(1);
+      await advanceTimersByTimeAsync(1);
       expect(FakeWebSocket.instances, `socket ${index + 2} did not open`).toHaveLength(index + 2);
     }
   });
 
-  it('does not forgive failures without a full stability window', () => {
+  it('does not forgive failures without a full stability window', async () => {
     const client = createClient();
     client.subscribe('settings', () => undefined);
 
     socketAt(0).drop(1006);
-    vi.advanceTimersByTime(500);
+    await advanceTimersByTimeAsync(500);
     makeReady();
 
-    vi.advanceTimersByTime(STABILITY_MS - 1);
+    await advanceTimersByTimeAsync(STABILITY_MS - 1);
     socketAt(1).drop(1006);
 
-    vi.advanceTimersByTime(999);
+    await advanceTimersByTimeAsync(999);
     expect(FakeWebSocket.instances).toHaveLength(2);
-    vi.advanceTimersByTime(1);
+    await advanceTimersByTimeAsync(1);
     expect(FakeWebSocket.instances).toHaveLength(3);
   });
 
-  it('forgives failures after a full stability window', () => {
+  it('forgives failures after a full stability window', async () => {
     const client = createClient();
     client.subscribe('settings', () => undefined);
 
     socketAt(0).drop(1006);
-    vi.advanceTimersByTime(500);
+    await advanceTimersByTimeAsync(500);
     makeReady();
 
-    vi.advanceTimersByTime(STABILITY_MS);
+    await advanceTimersByTimeAsync(STABILITY_MS);
     socketAt(1).drop(1006);
 
-    vi.advanceTimersByTime(499);
+    await advanceTimersByTimeAsync(499);
     expect(FakeWebSocket.instances).toHaveLength(2);
-    vi.advanceTimersByTime(1);
+    await advanceTimersByTimeAsync(1);
     expect(FakeWebSocket.instances).toHaveLength(3);
   });
 
-  it('starts at the delay ceiling for a 4429 close', () => {
+  it('starts at the delay ceiling for a 4429 close', async () => {
     const client = createClient();
     client.subscribe('settings', () => undefined);
 
     socketAt(0).drop(REALTIME_CLOSE_CODES.RATE_LIMITED);
-    vi.advanceTimersByTime(14_999);
+    await advanceTimersByTimeAsync(14_999);
     expect(FakeWebSocket.instances).toHaveLength(1);
-    vi.advanceTimersByTime(1);
+    await advanceTimersByTimeAsync(1);
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
-  it('stops for good on 4401 and returns to the auth flow once', () => {
+  it('stops for good on 4401 and returns to the auth flow once', async () => {
     const client = createClient();
     client.subscribe('settings', () => undefined);
 
     socketAt(0).drop(REALTIME_CLOSE_CODES.UNAUTHORIZED);
-    expect(onUnauthorized).toHaveBeenCalledOnce();
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
 
-    vi.advanceTimersByTime(120_000);
+    await advanceTimersByTimeAsync(120_000);
     expect(FakeWebSocket.instances).toHaveLength(1);
 
     // Terminal for the client's lifetime — a later mount must not reconnect.
     client.subscribe('git:chat-1', () => undefined);
-    vi.advanceTimersByTime(120_000);
+    await advanceTimersByTimeAsync(120_000);
     expect(FakeWebSocket.instances).toHaveLength(1);
-    expect(onUnauthorized).toHaveBeenCalledOnce();
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 
   it.each([
     ['4403', REALTIME_CLOSE_CODES.FORBIDDEN],
     ['4400', REALTIME_CLOSE_CODES.INVALID_MESSAGE],
-  ])('stops without redirecting on %s', (_label, code) => {
+  ])('stops without redirecting on %s', async (_label, code) => {
     const client = createClient();
     client.subscribe('settings', () => undefined);
 
     socketAt(0).drop(code);
-    vi.advanceTimersByTime(120_000);
+    await advanceTimersByTimeAsync(120_000);
 
     expect(FakeWebSocket.instances).toHaveLength(1);
     expect(onUnauthorized).not.toHaveBeenCalled();
   });
 
-  it('cancels an armed reconnect once nothing is wanted', () => {
+  it('cancels an armed reconnect once nothing is wanted', async () => {
     const client = createClient();
     const release = client.subscribe('settings', () => undefined);
 
     socketAt(0).drop(1006);
     release();
 
-    vi.advanceTimersByTime(120_000);
+    await advanceTimersByTimeAsync(120_000);
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
-  it('clears a reconnect armed beyond the linger window on teardown', () => {
+  it('clears a reconnect armed beyond the linger window on teardown', async () => {
     const client = createClient();
     const release = client.subscribe('settings', () => undefined);
 
@@ -647,17 +652,17 @@ describe('createRealtimeClient', () => {
     // teardown — not the reconnect callback — is what has to clear the timer.
     for (const delay of [500, 1_000, 2_000, 4_000, 8_000]) {
       lastSocket().drop(1006);
-      vi.advanceTimersByTime(delay);
+      await advanceTimersByTimeAsync(delay);
     }
     lastSocket().drop(1006);
     const openedSockets = FakeWebSocket.instances.length;
 
     release();
-    vi.advanceTimersByTime(120_000);
+    await advanceTimersByTimeAsync(120_000);
     expect(FakeWebSocket.instances).toHaveLength(openedSockets);
   });
 
-  it('leaves topics unrequested when a send fails so the next connect re-sends them', () => {
+  it('leaves topics unrequested when a send fails so the next connect re-sends them', async () => {
     const client = createClient();
     client.subscribe('settings', () => undefined);
     const socket = makeReady();
@@ -666,13 +671,13 @@ describe('createRealtimeClient', () => {
     // A socket that died without an onclose yet: the send throws.
     socket.readyState = FakeWebSocket.CLOSED;
     client.subscribe('git:chat-1', () => undefined);
-    vi.advanceTimersByTime(0);
+    await advanceTimersByTimeAsync(0);
     expect(frames(socket)).toHaveLength(1);
 
     // Still unrequested, so the very next flush on this same socket re-sends it.
     socket.readyState = FakeWebSocket.OPEN;
     client.subscribe('git:chat-2', () => undefined);
-    vi.advanceTimersByTime(0);
+    await advanceTimersByTimeAsync(0);
     expect(frames(socket).at(-1)).toEqual({
       type: 'subscribe',
       topics: ['git:chat-1', 'git:chat-2'],
@@ -680,13 +685,13 @@ describe('createRealtimeClient', () => {
 
     socket.readyState = FakeWebSocket.CLOSED;
     socket.drop(1006);
-    vi.advanceTimersByTime(500);
+    await advanceTimersByTimeAsync(500);
     expect(frames(makeReady())).toEqual([
       { type: 'subscribe', topics: ['settings', 'git:chat-1', 'git:chat-2'] },
     ]);
   });
 
-  it('retries a topic the server rejected only on the next connection', () => {
+  it('retries a topic the server rejected only on the next connection', async () => {
     const client = createClient();
     client.subscribe('settings', () => undefined);
     client.subscribe('git:chat-1', () => undefined);
@@ -695,17 +700,17 @@ describe('createRealtimeClient', () => {
     // Only `settings` is acked; the git topic came back as an error instead.
     socket.emit({ type: 'subscribed', topics: ['settings'] });
     socket.emit({ type: 'error', error: 'Realtime topic is unavailable', code: 'NOT_FOUND' });
-    vi.advanceTimersByTime(LINGER_MS);
+    await advanceTimersByTimeAsync(LINGER_MS);
     expect(frames(socket)).toHaveLength(1);
 
     socket.drop(1006);
-    vi.advanceTimersByTime(500);
+    await advanceTimersByTimeAsync(500);
     expect(frames(makeReady())).toEqual([
       { type: 'subscribe', topics: ['settings', 'git:chat-1'] },
     ]);
   });
 
-  it('treats a socket constructor throw as a connection failure', () => {
+  it('treats a socket constructor throw as a connection failure', async () => {
     let attempts = 0;
     const client = createRealtimeClient({
       createSocket: (url) => {
@@ -721,7 +726,7 @@ describe('createRealtimeClient', () => {
     client.subscribe('settings', () => undefined);
     expect(FakeWebSocket.instances).toHaveLength(0);
 
-    vi.advanceTimersByTime(500);
+    await advanceTimersByTimeAsync(500);
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
@@ -730,7 +735,7 @@ describe('createRealtimeClient', () => {
     expect(() => client.subscribe('', () => undefined)).toThrow(TypeError);
   });
 
-  it('releases idempotently', () => {
+  it('releases idempotently', async () => {
     const client = createClient();
     const release = client.subscribe('settings', () => undefined);
     client.subscribe('settings', () => undefined);
@@ -739,7 +744,7 @@ describe('createRealtimeClient', () => {
 
     release();
     release();
-    vi.advanceTimersByTime(LINGER_MS);
+    await advanceTimersByTimeAsync(LINGER_MS);
 
     // One listener remains, so the topic is still wanted.
     expect(frames(socket)).toEqual([{ type: 'subscribe', topics: ['settings'] }]);
@@ -748,17 +753,22 @@ describe('createRealtimeClient', () => {
 });
 
 describe('getRealtimeClient', () => {
+  // `vi.stubGlobal` / `vi.unstubAllGlobals` do not exist on Bun, so the
+  // original is captured and put back by hand.
+  let originalWebSocket: typeof WebSocket;
+
   beforeEach(() => {
     FakeWebSocket.instances = [];
     resetRealtimeClient();
-    vi.stubGlobal('WebSocket', FakeWebSocket as unknown as typeof WebSocket);
-    vi.useFakeTimers();
+    originalWebSocket = globalThis.WebSocket;
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    useFakeTimers();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     resetRealtimeClient();
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
+    globalThis.WebSocket = originalWebSocket;
+    await restoreRealTimers();
   });
 
   it('returns one shared client per tab', () => {
@@ -793,7 +803,7 @@ describe('getRealtimeClient', () => {
     expect(first?.closedWith).toBeDefined();
   });
 
-  it('does not clear the session binding when a stopped client linger fires after 4401', () => {
+  it('does not clear the session binding when a stopped client linger fires after 4401', async () => {
     const stopped = getRealtimeClient();
     const release = stopped.subscribe('settings', () => undefined);
     const first = FakeWebSocket.instances[0];
@@ -803,7 +813,7 @@ describe('getRealtimeClient', () => {
     first?.drop(REALTIME_CLOSE_CODES.UNAUTHORIZED);
 
     release();
-    vi.advanceTimersByTime(LINGER_MS);
+    await advanceTimersByTimeAsync(LINGER_MS);
 
     const live = getRealtimeClient();
     bindRealtimeClientToUser('user-a');

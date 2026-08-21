@@ -1,16 +1,12 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../../src/lib/utils';
-import {
-  McpElicitationGoneError,
-  respondMcpElicitation,
-} from '../../../src/services/mcp-elicitation-service';
 
-const { mockPost } = vi.hoisted(() => ({
-  mockPost: vi.fn(),
-}));
+// `vi.hoisted` existed because `vi.mock` is hoisted above the file's own
+// statements. `mock.module` is not hoisted, so a plain const is enough.
+const mockPost = jest.fn();
 
-vi.mock('../../../src/lib/api-client', () => ({
+mock.module('../../../src/lib/api-client', () => ({
   client: {
     api: {
       mcp: {
@@ -23,6 +19,12 @@ vi.mock('../../../src/lib/api-client', () => ({
     },
   },
 }));
+
+// Below the mock, never as a static import: those are evaluated first and the
+// service would bind the real API client.
+const { McpElicitationGoneError, respondMcpElicitation } = await import(
+  '../../../src/services/mcp-elicitation-service'
+);
 
 describe('respondMcpElicitation', () => {
   beforeEach(() => {
@@ -40,7 +42,9 @@ describe('respondMcpElicitation', () => {
       content: { confirmed: true },
     });
 
-    expect(result).toEqual({ status: 'accepted' });
+    // `expect<unknown>` because bun-types types `toEqual` against the received
+    // type, and the double above answers with a deliberately partial payload.
+    expect<unknown>(result).toEqual({ status: 'accepted' });
   });
 
   it('throws McpElicitationGoneError when the elicitation is not found', async () => {
