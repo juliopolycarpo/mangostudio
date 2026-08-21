@@ -2,9 +2,9 @@
  * Runtime lifecycle panel: health summary, WSL actions, and copyable commands.
  */
 
+import { afterEach, describe, expect, it } from 'bun:test';
 import type { Environment, RuntimeLifecycleView } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
-import { afterEach, describe, expect, it } from 'vitest';
 import { RuntimeLifecyclePanel } from '../../../../src/features/environments/components/RuntimeLifecyclePanel';
 import { formatMessage } from '../../../../src/lib/i18n-format';
 import { render, screen, waitFor } from '../../../support/harness/render';

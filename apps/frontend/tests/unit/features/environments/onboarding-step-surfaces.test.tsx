@@ -7,10 +7,10 @@
  * Tools is where the install permission has to arrive unticked.
  */
 
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import type { Environment } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PermissionsStep } from '../../../../src/features/environments/onboarding/PermissionsStep';
 import { ToolsStep } from '../../../../src/features/environments/onboarding/ToolsStep';
 import { render, screen, waitFor } from '../../../support/harness/render';
@@ -79,7 +79,7 @@ describe('PermissionsStep', () => {
   });
 
   it('records a paired answer without sending it anywhere yet', async () => {
-    const onConsent = vi.fn();
+    const onConsent = jest.fn();
     const user = userEvent.setup();
     render(
       <PermissionsStep

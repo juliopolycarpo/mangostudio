@@ -9,11 +9,11 @@
  * wearing its initials.
  */
 
+import { describe, expect, it, jest } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
 import { TOOL_IMAGE_MAX_BYTES } from '@mangostudio/shared/tool-identity';
 import { fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
 import { ToolAvatar } from '../../../../src/components/ui/ToolAvatar';
 import { toolAvatarPalette } from '../../../../src/components/ui/tool-avatar-palette';
 import { IdentityEditDialog } from '../../../../src/features/environments/identity/IdentityEditDialog';
@@ -151,7 +151,7 @@ describe('IdentityEditDialog', () => {
   it('previews the derived monogram as the name is typed', async () => {
     const user = userEvent.setup();
     render(
-      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={vi.fn()} />
+      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={jest.fn()} />
     );
 
     await user.type(screen.getByLabelText(en.environments.identity.nameLabel), 'My Agent');
@@ -171,7 +171,7 @@ describe('IdentityEditDialog', () => {
           customized: true,
         }}
         defaultName="Claude Code"
-        onClose={vi.fn()}
+        onClose={jest.fn()}
       />
     );
 
@@ -186,7 +186,7 @@ describe('IdentityEditDialog', () => {
       <IdentityEditDialog
         identity={{ ...claudeIdentity, storedMonogram: 'CC', customized: true }}
         defaultName="Claude Code"
-        onClose={vi.fn()}
+        onClose={jest.fn()}
       />
     );
 
@@ -202,7 +202,7 @@ describe('IdentityEditDialog', () => {
 
   it('is a labelled modal that closes on Escape', async () => {
     const user = userEvent.setup();
-    const onClose = vi.fn();
+    const onClose = jest.fn();
     render(
       <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={onClose} />
     );
@@ -220,7 +220,7 @@ describe('IdentityEditDialog', () => {
   it('explains an unusable monogram instead of letting the request fail', async () => {
     const user = userEvent.setup();
     render(
-      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={vi.fn()} />
+      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={jest.fn()} />
     );
 
     await user.type(screen.getByLabelText(en.environments.identity.monogramLabel), '<>');
@@ -232,7 +232,7 @@ describe('IdentityEditDialog', () => {
   it('starts on the monogram, and offers caching first when an address is chosen', async () => {
     const user = userEvent.setup();
     render(
-      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={vi.fn()} />
+      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={jest.fn()} />
     );
 
     const labels = en.environments.identity;
@@ -251,7 +251,7 @@ describe('IdentityEditDialog', () => {
   it('spells out what a hotlinked image costs the moment caching is turned off', async () => {
     const user = userEvent.setup();
     render(
-      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={vi.fn()} />
+      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={jest.fn()} />
     );
 
     const labels = en.environments.identity;
@@ -268,7 +268,7 @@ describe('IdentityEditDialog', () => {
   it('refuses to save an address that is not https', async () => {
     const user = userEvent.setup();
     render(
-      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={vi.fn()} />
+      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={jest.fn()} />
     );
 
     const labels = en.environments.identity;
@@ -282,7 +282,7 @@ describe('IdentityEditDialog', () => {
   it('previews a valid address on the avatar itself', async () => {
     const user = userEvent.setup();
     render(
-      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={vi.fn()} />
+      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={jest.fn()} />
     );
 
     const labels = en.environments.identity;
@@ -302,7 +302,7 @@ describe('IdentityEditDialog', () => {
   it('will not upload nothing when the upload mode is picked', async () => {
     const user = userEvent.setup();
     render(
-      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={vi.fn()} />
+      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={jest.fn()} />
     );
 
     const labels = en.environments.identity;
@@ -317,7 +317,7 @@ describe('IdentityEditDialog', () => {
   it('refuses an oversized file before any of the save has been sent', async () => {
     const user = userEvent.setup();
     render(
-      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={vi.fn()} />
+      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={jest.fn()} />
     );
 
     const labels = en.environments.identity;
@@ -344,7 +344,7 @@ describe('IdentityEditDialog', () => {
           customized: true,
         }}
         defaultName="Claude Code"
-        onClose={vi.fn()}
+        onClose={jest.fn()}
       />
     );
 

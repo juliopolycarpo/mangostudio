@@ -4,7 +4,7 @@
  * be satisfied here.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import { resolveInstallChain } from '../../../../src/features/environments/install-chain';
 import { installRecipe } from './fixtures';
 

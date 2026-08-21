@@ -1,12 +1,14 @@
+import { describe, expect, it, mock } from 'bun:test';
 import type { ReactNode } from 'react';
-import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '../../../support/harness/render';
 
-vi.mock('@tanstack/react-router', () => ({
-  Link: ({ to, children }: { readonly to: string; readonly children: ReactNode }) => (
-    <a href={to}>{children}</a>
-  ),
-}));
+// Declared at module level rather than inline in the factory: biome's
+// `noComponentHookFactories` rejects a component defined inside a function.
+function LinkStub({ to, children }: { readonly to: string; readonly children: ReactNode }) {
+  return <a href={to}>{children}</a>;
+}
+
+mock.module('@tanstack/react-router', () => ({ Link: LinkStub }));
 
 describe('EnvironmentTabs', () => {
   it('carries the library as a tab of the umbrella', async () => {

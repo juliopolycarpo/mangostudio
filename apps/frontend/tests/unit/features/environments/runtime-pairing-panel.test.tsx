@@ -4,10 +4,10 @@
  * presentation detail.
  */
 
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { Environment } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EnvironmentEntitiesOverview } from '../../../../src/features/environments/components/EnvironmentEntitiesOverview';
 import { render, screen, waitFor, within } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
