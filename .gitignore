@@ -3,6 +3,7 @@ node_modules/
 build/
 dist/
 dist-npm/
+dist-metafile.json
 release-assets/
 docker-ctx/
 .distribution-bundles/
