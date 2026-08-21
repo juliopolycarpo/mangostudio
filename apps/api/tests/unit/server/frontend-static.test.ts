@@ -191,8 +191,11 @@ describe('registerFrontend from the filesystem', () => {
     const get = await buildFilesystemApp();
     const response = await get('/assets/index-AbCd1234.js');
 
+    // A year, the same freshness the embedded branch gives these files. The
+    // plugin composes `${directive}, max-age=${maxAge}` from a single-token
+    // directive, so `immutable` cannot be added alongside `public` here.
     expect(response.status).toBe(200);
-    expect(response.headers.get('cache-control')).toBe('public, max-age=86400');
+    expect(response.headers.get('cache-control')).toBe('public, max-age=31536000');
     expect(await response.text()).toBe(ASSET_JS);
   });
 

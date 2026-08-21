@@ -110,6 +110,9 @@ const HASHED_ASSET_DIR = 'assets';
  */
 const UNHASHED_CACHE_CONTROL = 'public, max-age=86400';
 
+/** One year, for the content-hashed `assets/` output whose URL changes with it. */
+const HASHED_MAX_AGE = 31_536_000;
+
 /** `statSync`, or null when the entry is gone or unreadable. */
 function statFile(path: string): Stats | null {
   try {
@@ -194,7 +197,16 @@ function registerSpa(app: App, frontendDir: string): void {
   }
 
   if (existsSync(assetsDir)) {
-    app.use(staticPlugin({ assets: assetsDir, prefix: `/${HASHED_ASSET_DIR}` }));
+    // A year, not the plugin's 86400 default: these filenames carry a content
+    // hash, so a changed file is a different URL and the old one can never go
+    // stale. The embedded branch says `public, max-age=31536000, immutable` for
+    // the same files; `immutable` is the one part not expressible here, because
+    // the plugin builds the header as `${directive}, max-age=${maxAge}` from a
+    // single-token `directive` and overwrites anything `headers` set. The
+    // freshness lifetime is the part that matters, and it now matches.
+    app.use(
+      staticPlugin({ assets: assetsDir, prefix: `/${HASHED_ASSET_DIR}`, maxAge: HASHED_MAX_AGE })
+    );
   }
 
   app.error(NotFound, ({ request }) => frontendNotFound(request));
