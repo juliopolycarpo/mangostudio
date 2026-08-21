@@ -13,7 +13,7 @@
  * literally the production build command.
  */
 
-import { readdirSync, statSync, watch } from 'node:fs';
+import { existsSync, readdirSync, statSync, watch } from 'node:fs';
 import { join } from 'node:path';
 import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import { setDevFrontendDir } from './dev-frontend-dir';
@@ -87,8 +87,18 @@ export async function registerDevFrontend(): Promise<void> {
   } else {
     console.warn('[frontend] Building...');
     if (!(await runBuild())) {
-      console.error('[frontend] Initial build failed; the server will serve API routes only.');
-      return;
+      // Not a `return`. The watcher below still goes up, so fixing the source
+      // rebuilds without a manual step — and if a previous bundle is on disk it
+      // keeps being served meanwhile. What a failed *initial* build cannot do is
+      // hand the server a directory to register: `registerFrontend()` inspects
+      // it once at boot, so with nothing there the process has to be restarted
+      // after the build goes green. Returning here also skipped the watcher,
+      // which made that restart the only way out of a typo.
+      console.error(
+        existsSync(join(DIST_DIR, 'index.html'))
+          ? '[frontend] Initial build failed; serving the previous bundle until the next rebuild.'
+          : '[frontend] Initial build failed and no previous bundle exists; serving API routes only. Fix the error, then restart `bun run dev`.'
+      );
     }
   }
   setDevFrontendDir(DIST_DIR);
