@@ -132,6 +132,12 @@ const laneWorkspaces: WorkspaceName[] = only ? [only] : [...ALL_WORKSPACE_NAMES]
 const coverageWorkspaces: WorkspaceName[] = shard ? shardedCoverageWorkspaces() : laneWorkspaces;
 // The root scripts lane has no workspace, so --only leaves it out.
 const runRootScripts = only === null;
+const rootScriptsTask = runRootScripts
+  ? [
+      () =>
+        runCommand('root:test:scripts', ROOT_SCRIPTS_TEST_COMMAND, { cwd: ROOT_DIR, env: laneEnv }),
+    ]
+  : [];
 
 const hasExplicitLaneSelection =
   runUnitLane || runIntegrationLane || runE2ELane || runCoverage || runAllLanes;
@@ -147,15 +153,7 @@ const results: RunResult[] = [];
 if (shouldRunUnit) {
   info('\nPhase: unit');
   const unitResults = await runParallel([
-    ...(runRootScripts
-      ? [
-          () =>
-            runCommand('root:test:scripts', ROOT_SCRIPTS_TEST_COMMAND, {
-              cwd: ROOT_DIR,
-              env: laneEnv,
-            }),
-        ]
-      : []),
+    ...rootScriptsTask,
     () =>
       runCommand('workspaces:test:unit', createTurboTestCommand('test:unit', laneWorkspaces), {
         cwd: ROOT_DIR,
@@ -203,15 +201,7 @@ if (runCoverage) {
   // here so `--coverage` is a self-contained replacement for `--unit
   // --integration --coverage` on CI, avoiding a duplicate test pass.
   const coverageResults = await runParallel([
-    ...(runRootScripts
-      ? [
-          () =>
-            runCommand('root:test:scripts', ROOT_SCRIPTS_TEST_COMMAND, {
-              cwd: ROOT_DIR,
-              env: laneEnv,
-            }),
-        ]
-      : []),
+    ...rootScriptsTask,
     () =>
       runCommand(
         'workspaces:test:coverage',
