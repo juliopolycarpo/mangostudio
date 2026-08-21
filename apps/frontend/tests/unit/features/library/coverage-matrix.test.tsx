@@ -15,7 +15,7 @@ import { renderWithRouter } from '../../../support/harness/render-with-router';
 import { fullCoverage, instance, location, resource, TARGETS } from './fixtures';
 
 /**
- * jsdom reports every element as zero-sized, and the row virtualizer measures
+ * happy-dom reports every element as zero-sized, and the row virtualizer measures
  * the scroll container with `offsetHeight`. Without a height it computes an
  * empty window and renders no rows, so the box is stubbed for this file only.
  */

@@ -10,7 +10,7 @@ import type { Message, MessagePart } from '@mangostudio/shared';
 import { fireEvent, screen } from '@testing-library/react';
 import { flushAsyncRender, render } from '../../support/harness/render';
 
-// The virtualizer depends on DOM layout measurements not available in jsdom.
+// The virtualizer depends on DOM layout measurements not available in happy-dom.
 // We mock it so every item in the messages array is rendered directly.
 mock.module('@tanstack/react-virtual', () => ({
   useVirtualizer: (opts: { count: number }) => ({

@@ -1,6 +1,6 @@
 /**
  * Unit tests for useChatAutoFollow.
- * jsdom does not lay out elements, so scroll metrics (scrollHeight, clientHeight,
+ * happy-dom does not lay out elements, so scroll metrics (scrollHeight, clientHeight,
  * scrollTop) are stubbed on the prototype to drive the follow logic. Each test
  * mounts a tiny harness that wires the hook to a real scroll container.
  */

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, jest } from 'bun:test';
+import { describe, expect, it, jest } from 'bun:test';
 import { ToastProvider, useToast } from '@/components/ui/Toast';
 import { act, render, screen } from '../../../support/harness/render';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../../support/harness/timers';
