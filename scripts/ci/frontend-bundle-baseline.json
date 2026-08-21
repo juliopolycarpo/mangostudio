@@ -1,258 +1,301 @@
 {
-  "version": 1,
+  "version": 2,
   "builder": "vite",
   "capturedAt": "2026-08-21",
   "totals": {
     "files": 41,
     "rawBytes": 4663985,
-    "gzipBytes": 938208
+    "gzipBytes": 938208,
+    "eagerRawBytes": 2071821,
+    "eagerGzipBytes": 560512
   },
   "files": [
     {
       "path": "assets/index-Bqugzlgv.js",
       "key": "assets/index.js",
       "rawBytes": 1108224,
-      "gzipBytes": 272681
+      "gzipBytes": 272681,
+      "eager": true
     },
     {
       "path": "assets/vendor-DtHexqGf.js",
       "key": "assets/vendor.js",
       "rawBytes": 375857,
-      "gzipBytes": 120020
+      "gzipBytes": 120020,
+      "eager": true
     },
     {
       "path": "assets/cpp-CiVOhWHe.js",
       "key": "assets/cpp.js",
       "rawBytes": 796960,
-      "gzipBytes": 60657
+      "gzipBytes": 60657,
+      "eager": false
     },
     {
       "path": "assets/vendor-deps-BqemZtDc.js",
       "key": "assets/vendor-deps.js",
       "rawBytes": 192777,
-      "gzipBytes": 54102
+      "gzipBytes": 54102,
+      "eager": true
     },
     {
       "path": "assets/syntax-core-DirPGU7q.js",
       "key": "assets/syntax-core.js",
       "rawBytes": 162083,
-      "gzipBytes": 53451
+      "gzipBytes": 53451,
+      "eager": true
     },
     {
       "path": "assets/ui-C6iVO7UL.js",
       "key": "assets/ui.js",
       "rawBytes": 132792,
-      "gzipBytes": 43467
+      "gzipBytes": 43467,
+      "eager": true
     },
     {
       "path": "assets/php-Th-NmKLT.js",
       "key": "assets/php.js",
       "rawBytes": 113060,
-      "gzipBytes": 28847
+      "gzipBytes": 28847,
+      "eager": false
     },
     {
       "path": "assets/logo-DsGvk33E.png",
       "key": "assets/logo.png",
       "rawBytes": 26073,
-      "gzipBytes": 25719
+      "gzipBytes": 25719,
+      "eager": false
     },
     {
       "path": "icon-512.png",
       "key": "icon-512.png",
       "rawBytes": 26073,
-      "gzipBytes": 25719
+      "gzipBytes": 25719,
+      "eager": false
     },
     {
       "path": "assets/jsx-fcCEM_-L.js",
       "key": "assets/jsx.js",
       "rawBytes": 177858,
-      "gzipBytes": 16774
+      "gzipBytes": 16774,
+      "eager": false
     },
     {
       "path": "assets/tsx-JMDX3aQ7.js",
       "key": "assets/tsx.js",
       "rawBytes": 175602,
-      "gzipBytes": 16681
+      "gzipBytes": 16681,
+      "eager": false
     },
     {
       "path": "assets/javascript-BgS3c2Ky.js",
       "key": "assets/javascript.js",
       "rawBytes": 174820,
-      "gzipBytes": 16626
+      "gzipBytes": 16626,
+      "eager": false
     },
     {
       "path": "assets/typescript-BAz-bF8J.js",
       "key": "assets/typescript.js",
       "rawBytes": 181146,
-      "gzipBytes": 16295
+      "gzipBytes": 16295,
+      "eager": false
     },
     {
       "path": "assets/index-Cjxqw5N1.css",
       "key": "assets/index.css",
       "rawBytes": 97002,
-      "gzipBytes": 15334
+      "gzipBytes": 15334,
+      "eager": true
     },
     {
       "path": "assets/swift-CyEgAFGc.js",
       "key": "assets/swift.js",
       "rawBytes": 87224,
-      "gzipBytes": 14793
+      "gzipBytes": 14793,
+      "eager": false
     },
     {
       "path": "assets/markdown-parser-MlRw1Qxl.js",
       "key": "assets/markdown-parser.js",
       "rawBytes": 42044,
-      "gzipBytes": 12533
+      "gzipBytes": 12533,
+      "eager": false
     },
     {
       "path": "assets/syntax-themes-CJeZLqOC.js",
       "key": "assets/syntax-themes.js",
       "rawBytes": 84762,
-      "gzipBytes": 12424
+      "gzipBytes": 12424,
+      "eager": false
     },
     {
       "path": "assets/ruby-DNJlTsMV.js",
       "key": "assets/ruby.js",
       "rawBytes": 88036,
-      "gzipBytes": 11906
+      "gzipBytes": 11906,
+      "eager": false
     },
     {
       "path": "assets/css-BsVw1vtW.js",
       "key": "assets/css.js",
       "rawBytes": 49034,
-      "gzipBytes": 11903
+      "gzipBytes": 11903,
+      "eager": false
     },
     {
       "path": "assets/html-BY76lXLH.js",
       "key": "assets/html.js",
       "rawBytes": 57244,
-      "gzipBytes": 11741
+      "gzipBytes": 11741,
+      "eager": false
     },
     {
       "path": "assets/csharp-oqKa8noW.js",
       "key": "assets/csharp.js",
       "rawBytes": 90182,
-      "gzipBytes": 10711
+      "gzipBytes": 10711,
+      "eager": false
     },
     {
       "path": "assets/c-aGSZMVdM.js",
       "key": "assets/c.js",
       "rawBytes": 72179,
-      "gzipBytes": 10559
+      "gzipBytes": 10559,
+      "eager": false
     },
     {
       "path": "icon-192.png",
       "key": "icon-192.png",
       "rawBytes": 10228,
-      "gzipBytes": 10127
+      "gzipBytes": 10127,
+      "eager": false
     },
     {
       "path": "apple-touch-icon.png",
       "key": "apple-touch-icon.png",
       "rawBytes": 9135,
-      "gzipBytes": 9158
+      "gzipBytes": 9158,
+      "eager": false
     },
     {
       "path": "assets/python-gzcpVVnB.js",
       "key": "assets/python.js",
       "rawBytes": 69945,
-      "gzipBytes": 9098
+      "gzipBytes": 9098,
+      "eager": false
     },
     {
       "path": "assets/sql-BsFa4tDR.js",
       "key": "assets/sql.js",
       "rawBytes": 23421,
-      "gzipBytes": 7452
+      "gzipBytes": 7452,
+      "eager": false
     },
     {
       "path": "assets/shellscript-CqHdAlCp.js",
       "key": "assets/shellscript.js",
       "rawBytes": 41466,
-      "gzipBytes": 6072
+      "gzipBytes": 6072,
+      "eager": false
     },
     {
       "path": "assets/markdown-BYOwaDjH.js",
       "key": "assets/markdown.js",
       "rawBytes": 59328,
-      "gzipBytes": 5665
+      "gzipBytes": 5665,
+      "eager": false
     },
     {
       "path": "assets/go-rLFTqkRN.js",
       "key": "assets/go.js",
       "rawBytes": 46811,
-      "gzipBytes": 5149
+      "gzipBytes": 5149,
+      "eager": false
     },
     {
       "path": "assets/java-duG_UTKe.js",
       "key": "assets/java.js",
       "rawBytes": 27285,
-      "gzipBytes": 4312
+      "gzipBytes": 4312,
+      "eager": false
     },
     {
       "path": "assets/powershell-CCSX75yM.js",
       "key": "assets/powershell.js",
       "rawBytes": 20151,
-      "gzipBytes": 4058
+      "gzipBytes": 4058,
+      "eager": false
     },
     {
       "path": "favicon.ico",
       "key": "favicon.ico",
       "rawBytes": 3490,
-      "gzipBytes": 3445
+      "gzipBytes": 3445,
+      "eager": false
     },
     {
       "path": "assets/rust-Cfkwpbl8.js",
       "key": "assets/rust.js",
       "rawBytes": 15062,
-      "gzipBytes": 2715
+      "gzipBytes": 2715,
+      "eager": false
     },
     {
       "path": "assets/yaml-rwi0_p6S.js",
       "key": "assets/yaml.js",
       "rawBytes": 10499,
-      "gzipBytes": 2267
+      "gzipBytes": 2267,
+      "eager": false
     },
     {
       "path": "assets/MarkdownContentRenderer-DqdWINqg.js",
       "key": "assets/MarkdownContentRenderer.js",
       "rawBytes": 4278,
-      "gzipBytes": 1953
+      "gzipBytes": 1953,
+      "eager": false
     },
     {
       "path": "assets/xml-DIWth4Ji.js",
       "key": "assets/xml.js",
       "rawBytes": 5386,
-      "gzipBytes": 1211
+      "gzipBytes": 1211,
+      "eager": false
     },
     {
       "path": "index.html",
       "key": "index.html",
       "rawBytes": 2185,
-      "gzipBytes": 947
+      "gzipBytes": 947,
+      "eager": true
     },
     {
       "path": "assets/json-qhed-kSA.js",
       "key": "assets/json.js",
       "rawBytes": 2817,
-      "gzipBytes": 770
+      "gzipBytes": 770,
+      "eager": false
     },
     {
       "path": "assets/rolldown-runtime-B0Z9INg1.js",
       "key": "assets/rolldown-runtime.js",
       "rawBytes": 901,
-      "gzipBytes": 510
+      "gzipBytes": 510,
+      "eager": true
     },
     {
       "path": "site.webmanifest",
       "key": "site.webmanifest",
       "rawBytes": 498,
-      "gzipBytes": 274
+      "gzipBytes": 274,
+      "eager": false
     },
     {
       "path": "assets/bash-BiGZg9Om.js",
       "key": "assets/bash.js",
       "rawBytes": 67,
-      "gzipBytes": 82
+      "gzipBytes": 82,
+      "eager": false
     }
   ]
 }
