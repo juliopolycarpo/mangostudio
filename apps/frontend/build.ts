@@ -74,7 +74,10 @@ export async function buildFrontend(options: BuildFrontendOptions = {}): Promise
     minify: production,
     sourcemap: 'none',
     publicPath: '/',
-    reactCompiler: false,
+    // Auto-memoization. `@vitejs/plugin-react` did not run it, so this is a
+    // behavior change rather than parity, and nothing in the test suite covers
+    // the transform. Off in dev so the loop stays fast.
+    reactCompiler: production,
     plugins: [tailwind],
     naming: {
       // `entry` and `chunk` must not share a pattern. Bun names a dynamic-import
