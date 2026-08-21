@@ -215,8 +215,13 @@ function assertAbsoluteAssetUrls(html: string): void {
   // Anything that is not root-relative, scheme-qualified, protocol-relative or a
   // fragment. Matching only a `./` prefix would miss the bare form
   // (`assets/x.js`), which resolves against the deep link exactly the same way.
-  const relative = [...html.matchAll(/(?:src|href)="([^"]*)"/g)]
-    .map((match) => match[1])
+  //
+  // Both quote styles, and the attribute has to start at a whitespace boundary:
+  // an unanchored `src="` also matches `data-src="`, while a single-quoted
+  // `src='./assets/x.js'` slipped through entirely — a hole in the one guard
+  // that stands between a relative URL and a blank page on every deep link.
+  const relative = [...html.matchAll(/\s(?:src|href)=(?:"([^"]*)"|'([^']*)')/g)]
+    .map((match) => match[1] ?? match[2] ?? '')
     .filter((url) => url !== '' && !/^(?:\/|#|[a-z][a-z0-9+.-]*:)/i.test(url));
   if (relative.length > 0) {
     throw new Error(`Built index.html has relative asset URLs: ${relative.join(', ')}`);
