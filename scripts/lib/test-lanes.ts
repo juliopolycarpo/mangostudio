@@ -42,8 +42,9 @@ export const JUNIT_DIR = '.mango/artifacts/junit';
  * shards derive the same partition independently and cannot disagree. With
  * them the partition is a function of a *shared file*, and N shards that read
  * different bytes will not cover the file set between them — some files run
- * twice, others not at all, and every shard still exits 0. `verifyPartition`
- * in `scripts/ci/merge-timings-shards.ts` is what turns that into a failure.
+ * twice, others not at all, and every shard still exits 0. The duplicate-claim
+ * check in `mergeLaneSlices` (`scripts/ci/merge-timings-shards.ts`) is what
+ * turns that into a failure.
  */
 export const TIMINGS_DIR = '.mango/artifacts/timings';
 

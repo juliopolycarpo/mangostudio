@@ -15,8 +15,13 @@ permissions:
 #
 # The split itself is balanced by measured per-file duration rather than by file
 # order; see the timings cache below and docs/reference/testing.md. Changing this
-# value invalidates that cache by design — the validity string carries it,
-# because a timings file written for a different N describes a different split.
+# value does NOT have to invalidate that cache: the loose restore key is
+# `<os>-<arch>-<epoch>-timings-main-test-`, so a baseline saved by a main-branch
+# run at a different N still restores. (Only main-branch ones — the loose
+# fallback is `-main-` scoped, and a pull_request run saves under `pr-<n>`.)
+# That is correct either way, because the file records per-file durations, not a
+# partition. What has to stay stable is the file all shards of one run read, and
+# that is what resolve-timings pins.
 env:
   SHARD_COUNT: 8
 
