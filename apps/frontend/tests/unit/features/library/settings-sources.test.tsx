@@ -7,9 +7,9 @@
  * markers too, the API would be reporting them to nobody.
  */
 
+import { afterEach, describe, expect, it } from 'bun:test';
 import { en, ptBR } from '@mangostudio/shared/i18n';
 import type { SettingsSnapshot } from '@mangostudio/shared/library';
-import { afterEach, describe, expect, it } from 'vitest';
 import { SettingsSourcePanel } from '../../../../src/features/library/components/SettingsComparison';
 import { render, screen, within } from '../../../support/harness/render';
 

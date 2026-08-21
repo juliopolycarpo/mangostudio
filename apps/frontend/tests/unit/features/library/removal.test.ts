@@ -6,13 +6,13 @@
  * the two could disagree, the form is the stricter of the pair.
  */
 
+import { describe, expect, it } from 'bun:test';
 import type {
   LibraryLocationId,
   RemovalLocation,
   RemovalPreview,
   RemovalPreviewEntry,
 } from '@mangostudio/shared/library';
-import { describe, expect, it } from 'vitest';
 import {
   acknowledgedLastCopyKeys,
   buildRemovalDecisions,

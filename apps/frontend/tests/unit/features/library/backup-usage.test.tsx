@@ -7,9 +7,9 @@
  * the only way a user finds the screen that hands them back.
  */
 
+import { afterEach, describe, expect, it } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
 import type { PropagationBackupUsage } from '@mangostudio/shared/library';
-import { afterEach, describe, expect, it } from 'vitest';
 import { BackupUsage } from '../../../../src/features/library/components/BackupUsage';
 import { screen } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';

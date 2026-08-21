@@ -6,10 +6,10 @@
  * failed, so writes are still on disk.
  */
 
+import { describe, expect, it, jest } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
 import type { PropagationApply, PropagationUndo } from '@mangostudio/shared/library';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
 import { ResultPanel } from '../../../../src/features/library/components/ResultPanel';
 import { render, screen } from '../../../support/harness/render';
 
@@ -40,7 +40,7 @@ const applied: PropagationApply = {
 
 describe('ResultPanel', () => {
   it('offers undo with the backup the apply returned', async () => {
-    const onUndo = vi.fn();
+    const onUndo = jest.fn();
     render(
       <ResultPanel
         environmentName={(id: string) => id}
@@ -55,7 +55,7 @@ describe('ResultPanel', () => {
     expect(screen.getByText(/backup-2026-07-27/)).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('undo-button'));
 
-    expect(onUndo).toHaveBeenCalledOnce();
+    expect(onUndo).toHaveBeenCalledTimes(1);
   });
 
   it('reports what the undo restored and what it left alone', () => {

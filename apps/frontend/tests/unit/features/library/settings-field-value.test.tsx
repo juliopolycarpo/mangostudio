@@ -7,9 +7,9 @@
  * the same as `redacted`, the marker bought nothing.
  */
 
+import { afterEach, describe, expect, it } from 'bun:test';
 import { en, ptBR } from '@mangostudio/shared/i18n';
 import type { SettingsField } from '@mangostudio/shared/library';
-import { afterEach, describe, expect, it } from 'vitest';
 import { SettingsFieldValue } from '../../../../src/features/library/components/SettingsComparison';
 import { render, screen } from '../../../support/harness/render';
 
