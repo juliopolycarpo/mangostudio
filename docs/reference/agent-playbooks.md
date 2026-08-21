@@ -650,7 +650,7 @@ Open these first:
 Open these first:
 
 - `docs/architecture/frontend-build.md` (how the bundle is built, served, and embedded)
-- `apps/frontend/vite.config.ts` and `apps/frontend/vitest.config.ts`
+- `apps/frontend/build.ts` and `apps/frontend/bunfig.toml`
 - `apps/api/src/server/frontend-static.ts` (static assets + SPA fallback)
 - `apps/api/src/server/embedded-frontend.ts`
 - `scripts/lib/embed-frontend.ts` (binary embedding) and `scripts/test-build.ts`

@@ -320,6 +320,40 @@ Also from that volume, and not a Bun fact: **biome's `noComponentHookFactories` 
 component defined inline in a `mock.module` factory** — which is exactly the shape every
 `Link` stub had under `vi.mock`. Declare the stub at module level and reference it.
 
+**T34 — `bunfig.toml`'s `coverageThreshold` cannot express a total-coverage gate.** Measured
+2026-08-21 on released 1.4.0, fixture and real suite agreeing:
+
+- **It is enforced per *file***: every file must individually clear the bar. A two-file
+  fixture at 33%/100% lines fails `lines = 0.34` and passes `0.3`; the real 167-file suite
+  (82–83% totals, some files legitimately 0%) fails every positive value.
+- Keys are **plural** (`lines` / `functions` / `statements`); singular names are accepted and
+  silently ignored.
+- A key you **omit** is not "no gate" — it keeps a hidden ~0.9 default, so `{ lines = 0.5 }`
+  fails a suite whose functions sit at 50% with no mention of functions anywhere.
+- The whole gate is **silently inert under `coverageReporter = ["lcov"]`** without `"text"` —
+  the check lives in the text reporter's path (Bun's docs now say so).
+- A miss prints **nothing at all**; it exists only in the exit code.
+
+Hence `scripts/qa-gate/enforce-coverage-thresholds.ts`: it reads the emitted LCOV back and
+compares *totals* (lines/functions from LCOV, statements/branches source-derived via
+`coverage-summary.ts`) against floors in `scripts/lib/test-lanes.ts` — chained after
+`bun test --coverage` inside the frontend `test:coverage` script, so a miss fails the lane's
+own invocation. Floors 81/76/81/53 against measured 82.35/77.53/82.39/54.45; observed
+run-to-run jitter on an unchanged suite was 0.03pp (82.35 → 82.32 lines).
+
+**T35 — the D7 soak: `--parallel=4` is clean on the real suite.** Twelve runs of
+`taskset -c 0-3 bun test --tsconfig-override=./tsconfig.test.json --parallel=4
+--timeout 15000 tests` on 2026-08-21: **12/12 exit 0, 1397 pass / 0 fail every run, zero
+`epoll_ctl`, zero hangs, 33–34s per run** against the ~102s pinned serial baseline (the
+plan's soak command omitted the tsconfig flag; it must not be omitted). `test:coverage`
+now carries `--parallel=4 --isolate`; the fallback if CI ever reproduces #37968 is
+`--parallel=2`, not serial (T5). The only stderr signal, in 5 of 12 runs, was the
+previously unattributed `act(...)` warning — root-caused to
+`tests/unit/features/library/backup-usage.test.tsx` asserting *absence* synchronously while
+its mocked usage query resolved after the test ended; fixed with `flushAsyncRender()`
+before the `queryByTestId` check. Unpinned on 28 cores the same coverage invocation runs in
+~30s.
+
 ## Test migration mechanics
 
 Everything below is what the 004 spike actually needed across its eleven files. Where a row

@@ -5,17 +5,17 @@
 // `.mango/artifacts/coverage/`. collect.ts merges this fragment so the suite
 // never runs twice for one report.
 //
-// JUnit reports are read from every shard directory *and* from the repository
-// root: the Bun lanes write theirs inside the shard that ran them, while the
-// frontend Vitest report only exists after `vitest --mergeReports` replays the
-// blobs here in the merge job.
+// JUnit reports are read from every test-job directory *and* from the
+// repository root: on CI every lane writes inside the job that ran it (the
+// frontend's whole-suite report arrives via its own `test-shard-frontend`
+// artifact), while a local unsharded run writes straight into the checkout.
 //
-// The optional third argument is the merge job's coverage-threshold gate exit
-// code. The shard summary only knows how the shards themselves ended, and the
-// frontend thresholds now run after them; without this a coverage-only failure
-// would report `exitCode: 0` and render a passing verdict on a red run.
+// The frontend coverage thresholds need no separate plumbing here: they are
+// enforced inside the lane's own `test:coverage` invocation
+// (enforce-coverage-thresholds.ts), so a miss is already a non-zero exit code
+// in that job's shard-meta.
 //
-// Usage: bun ./scripts/qa-gate/collect-test-metrics.ts <shard-summary.json> [shards-dir] [gate-exit-code]
+// Usage: bun ./scripts/qa-gate/collect-test-metrics.ts <shard-summary.json> [shards-dir]
 
 import { listShardDirs, type ShardSummary } from '../ci/merge-test-shards';
 import { ALL_WORKSPACE_NAMES, ROOT_DIR } from '../lib/config';
@@ -25,10 +25,10 @@ import { readWorkspaceCoverageSummary } from './coverage-summary';
 import { buildTestSuiteStats, readLaneResults } from './junit-results';
 import type { UnhandledErrors } from './unhandled-errors';
 
-const [, , summaryPath, shardsRoot, gateExitCodeArg] = process.argv;
+const [, , summaryPath, shardsRoot] = process.argv;
 if (!summaryPath) {
   process.stderr.write(
-    'Usage: bun ./scripts/qa-gate/collect-test-metrics.ts <shard-summary.json> [shards-dir] [gate-exit-code]\n'
+    'Usage: bun ./scripts/qa-gate/collect-test-metrics.ts <shard-summary.json> [shards-dir]\n'
   );
   process.exit(1);
 }
@@ -86,17 +86,7 @@ const readShardSummary = async (path: string): Promise<ShardSummary> => {
 };
 
 const summary = await readShardSummary(summaryPath);
-
-// A missing or unparseable value is treated as a failed gate: this argument
-// only ever comes from a step outcome, and "unknown" there means the step did
-// not report success.
-const gateExitCode = ((): number => {
-  if (gateExitCodeArg === undefined) return 0;
-  if (gateExitCodeArg.trim() === '') return 1;
-  const parsed = Number(gateExitCodeArg);
-  return Number.isInteger(parsed) ? parsed : 1;
-})();
-const exitCode = summary.exitCode !== 0 ? summary.exitCode : gateExitCode;
+const exitCode = summary.exitCode;
 
 const listShards = async (root: string): Promise<readonly string[]> => {
   try {

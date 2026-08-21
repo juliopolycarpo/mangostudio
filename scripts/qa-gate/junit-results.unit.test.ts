@@ -90,8 +90,7 @@ describe('buildTestSuiteStats', () => {
   const green: readonly LaneResult[] = [
     laneResult('api', counts({ tests: 10, passed: 10 })),
     laneResult('root', counts({ tests: 4, passed: 4 })),
-    laneResult('frontend-vitest', counts({ tests: 6, passed: 6 })),
-    laneResult('frontend-bun', counts({ tests: 2, passed: 2 })),
+    laneResult('frontend', counts({ tests: 8, passed: 8 })),
   ];
 
   it('sums a green run per workspace and omits every failure field', () => {
@@ -104,7 +103,6 @@ describe('buildTestSuiteStats', () => {
       api: 10,
       shared: 0,
       runtime: 0,
-      // Both frontend lanes fold into one workspace count.
       frontend: 8,
     });
   });
