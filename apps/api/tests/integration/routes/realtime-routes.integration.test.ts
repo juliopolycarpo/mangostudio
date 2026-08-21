@@ -289,7 +289,7 @@ describe('realtime WebSocket origins and liveness', () => {
     }
   });
 
-  it('accepts configured, public-auth, and absent origins but rejects other browser origins', async () => {
+  it('accepts configured and absent origins but rejects other browser origins', async () => {
     const { httpUrl, wsUrl } = startServer();
     const user = await signUp(httpUrl);
     const acceptedOrigins = ['http://localhost:3001', 'http://127.0.0.1:3001'];
