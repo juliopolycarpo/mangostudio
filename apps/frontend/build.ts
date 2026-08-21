@@ -131,7 +131,19 @@ async function writeHtml(result: Awaited<ReturnType<typeof Bun.build>>): Promise
   // Resolved by `kind`, not by filename — see the `naming` comment above.
   const entry = result.outputs.find((output) => output.kind === 'entry-point');
   if (!entry) throw new Error('Frontend build produced no entry-point output');
-  const css = result.outputs.find((output) => output.path.endsWith('.css'));
+  // The shell links one stylesheet, which holds while `src/main.tsx` carries the
+  // only CSS import in the graph. The first component that imports its own
+  // `.css` would emit a second output, and picking the first of two here would
+  // silently drop a stylesheet from every page — no build error, no console
+  // error, just unstyled UI. Fail instead, so the choice is made deliberately.
+  const stylesheets = result.outputs.filter((output) => output.path.endsWith('.css'));
+  if (stylesheets.length > 1) {
+    throw new Error(
+      `Frontend build emitted ${stylesheets.length} stylesheets; index.html links one. ` +
+        `Decide which are eager before shipping: ${stylesheets.map((s) => distUrl(s.path)).join(', ')}`
+    );
+  }
+  const css = stylesheets[0];
 
   const template = await Bun.file(HTML_TEMPLATE).text();
   if (!template.includes(SOURCE_SCRIPT_TAG)) {
@@ -159,7 +171,12 @@ function distUrl(absolutePath: string): string {
  * blanks the page in production.
  */
 function assertAbsoluteAssetUrls(html: string): void {
-  const relative = [...html.matchAll(/(?:src|href)="(\.\/[^"]*)"/g)].map((match) => match[1]);
+  // Anything that is not root-relative, scheme-qualified, protocol-relative or a
+  // fragment. Matching only a `./` prefix would miss the bare form
+  // (`assets/x.js`), which resolves against the deep link exactly the same way.
+  const relative = [...html.matchAll(/(?:src|href)="([^"]*)"/g)]
+    .map((match) => match[1])
+    .filter((url) => url !== '' && !/^(?:\/|#|[a-z][a-z0-9+.-]*:)/i.test(url));
   if (relative.length > 0) {
     throw new Error(`Built index.html has relative asset URLs: ${relative.join(', ')}`);
   }
