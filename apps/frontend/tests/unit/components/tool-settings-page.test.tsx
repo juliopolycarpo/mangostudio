@@ -6,11 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import userEvent from '@testing-library/user-event';
 import { ToolSettingsPage } from '../../../src/features/settings/tools/components/ToolSettingsPage';
 import { act, fireEvent, render, screen, waitFor } from '../../support/harness/render';
-import {
-  advanceTimersByTimeAsync,
-  restoreRealTimers,
-  useFakeTimers,
-} from '../../support/harness/timers';
+import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const TOOLS_RESPONSE = {
@@ -64,8 +60,7 @@ describe('ToolSettingsPage', () => {
     fetchScenario.install();
   });
 
-  afterEach(async () => {
-    await restoreRealTimers();
+  afterEach(() => {
     fetchScenario.restore();
   });
 

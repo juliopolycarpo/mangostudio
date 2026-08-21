@@ -10,11 +10,7 @@ import {
   type RealtimeTopicListener,
   resetRealtimeClient,
 } from '@/lib/realtime/realtime-client';
-import {
-  advanceTimersByTimeAsync,
-  restoreRealTimers,
-  useFakeTimers,
-} from '../../../support/harness/timers';
+import { advanceTimersByTimeAsync, useFakeTimers } from '../../../support/harness/timers';
 
 /** Heartbeat cadence: the idle timeout (60 s) divided by 2.5. */
 const HEARTBEAT_MS = 24_000;
@@ -93,10 +89,6 @@ describe('createRealtimeClient', () => {
     FakeWebSocket.instances = [];
     onUnauthorized = jest.fn();
     useFakeTimers();
-  });
-
-  afterEach(async () => {
-    await restoreRealTimers();
   });
 
   function createClient(overrides: Partial<RealtimeClientOptions> = {}): RealtimeClient {
@@ -765,10 +757,9 @@ describe('getRealtimeClient', () => {
     useFakeTimers();
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     resetRealtimeClient();
     globalThis.WebSocket = originalWebSocket;
-    await restoreRealTimers();
   });
 
   it('returns one shared client per tab', () => {

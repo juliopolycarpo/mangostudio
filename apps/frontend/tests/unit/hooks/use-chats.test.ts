@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:tes
 import type { Chat } from '@mangostudio/shared';
 import { createMockChat } from '@mangostudio/shared/test-utils';
 import { act, renderHook } from '../../support/harness/render';
-import { restoreRealTimers, useFakeTimers } from '../../support/harness/timers';
+import { useFakeTimers } from '../../support/harness/timers';
 
 const CHAT_A: Chat = createMockChat({
   id: 'chat-a',
@@ -69,8 +69,7 @@ describe('useChats', () => {
     mockDeleteChat.mockResolvedValue({ success: true });
   });
 
-  afterEach(async () => {
-    await restoreRealTimers();
+  afterEach(() => {
     jest.clearAllMocks();
   });
 

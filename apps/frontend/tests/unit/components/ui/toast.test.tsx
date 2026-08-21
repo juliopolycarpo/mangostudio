@@ -1,11 +1,7 @@
 import { afterEach, describe, expect, it, jest } from 'bun:test';
 import { ToastProvider, useToast } from '@/components/ui/Toast';
 import { act, render, screen } from '../../../support/harness/render';
-import {
-  advanceTimersByTimeAsync,
-  restoreRealTimers,
-  useFakeTimers,
-} from '../../../support/harness/timers';
+import { advanceTimersByTimeAsync, useFakeTimers } from '../../../support/harness/timers';
 
 function ToastTester() {
   const { toast } = useToast();
@@ -69,10 +65,6 @@ describe('ToastProvider + useToast', () => {
   });
 
   describe('auto-dismiss timers', () => {
-    afterEach(async () => {
-      await restoreRealTimers();
-    });
-
     it('drops the toast once the auto-dismiss delay elapses', async () => {
       useFakeTimers();
       render(

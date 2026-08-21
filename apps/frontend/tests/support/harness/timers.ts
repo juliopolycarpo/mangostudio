@@ -57,14 +57,13 @@ export async function advanceTimersByTimeAsync(ms: number): Promise<void> {
  *
  * Safe from an unconditional `afterEach`, which is why it tracks installation
  * itself — `jest.advanceTimersByTime()` throws `Fake timers are not active`
- * when they never were.
+ * when they never were. The suite-wide `bun.setup.ts` `afterEach` calls it for
+ * every test, so a file only calls it explicitly when a test needs real timers
+ * back mid-body (e.g. before a `waitFor`).
  */
 export async function restoreRealTimers(): Promise<void> {
   if (fakeTimersInstalled) {
-    await act(async () => {
-      jest.advanceTimersByTime(0);
-      await Promise.resolve();
-    });
+    await advanceTimersByTimeAsync(0);
     fakeTimersInstalled = false;
   }
   jest.useRealTimers();

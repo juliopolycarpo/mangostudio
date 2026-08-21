@@ -9,11 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
 import { ToolSettingsCard } from '../../../src/features/settings/tools/components/ToolSettingsCard';
 import { act, fireEvent, render, screen } from '../../support/harness/render';
-import {
-  advanceTimersByTimeAsync,
-  restoreRealTimers,
-  useFakeTimers,
-} from '../../support/harness/timers';
+import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const TOOL_PATH = '/api/settings/tools/get_current_datetime';
@@ -57,8 +53,7 @@ describe('ToolSettingsCard', () => {
     fetchScenario.install();
   });
 
-  afterEach(async () => {
-    await restoreRealTimers();
+  afterEach(() => {
     fetchScenario.restore();
   });
 

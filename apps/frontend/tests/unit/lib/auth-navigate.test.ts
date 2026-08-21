@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import { navigateToLoginPage, setAuthNavigate } from '../../../src/lib/auth-navigate';
-import {
-  advanceTimersByTimeAsync,
-  restoreRealTimers,
-  useFakeTimers,
-} from '../../support/harness/timers';
+import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
 
 function mockHandler() {
   // noop — test-only callback
@@ -59,8 +55,7 @@ describe('scheduleLoginRedirect', () => {
     setPath('/');
   });
 
-  afterEach(async () => {
-    await restoreRealTimers();
+  afterEach(() => {
     setPath('/');
   });
 

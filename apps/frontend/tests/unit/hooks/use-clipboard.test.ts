@@ -1,19 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import { useClipboard } from '../../../src/hooks/use-clipboard';
 import { act, renderHook } from '../../support/harness/render';
-import {
-  advanceTimersByTimeAsync,
-  restoreRealTimers,
-  useFakeTimers,
-} from '../../support/harness/timers';
+import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
 
 describe('useClipboard', () => {
   beforeEach(() => {
     useFakeTimers();
   });
 
-  afterEach(async () => {
-    await restoreRealTimers();
+  afterEach(() => {
     jest.restoreAllMocks();
   });
 

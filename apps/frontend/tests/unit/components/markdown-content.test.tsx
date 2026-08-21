@@ -1,11 +1,7 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { act } from 'react';
 import { render, screen, waitFor } from '../../support/harness/render';
-import {
-  advanceTimersByTimeAsync,
-  restoreRealTimers,
-  useFakeTimers,
-} from '../../support/harness/timers';
+import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
 
 // Held as their own handles rather than reached back through
 // `shiki.x`: `bun test` has no `jest.mocked`, and reading the
@@ -376,6 +372,5 @@ describe('MarkdownContent — copy code button', () => {
     await waitFor(() => expect(btn.classList.contains('copy-code-btn--copied')).toBe(true));
     await advanceTimersByTimeAsync(2000);
     expect(btn.classList.contains('copy-code-btn--copied')).toBe(false);
-    await restoreRealTimers();
   });
 });

@@ -15,6 +15,7 @@
 import { afterEach, expect } from 'bun:test';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { cleanup } from '@testing-library/react';
+import { restoreRealTimers } from '../harness/timers';
 import { resetTestSession } from './auth-client-stub';
 
 expect.extend(matchers);
@@ -111,7 +112,10 @@ globalThis.IntersectionObserver =
 
 // `bun test` never auto-registers testing-library's `cleanup`; without it a
 // second render in the same file finds the first one's DOM.
-afterEach(() => {
+afterEach(async () => {
+  // Before cleanup: a test that failed mid-assertion must not strand fake
+  // timers (and the React Query batch queued behind them) into the next test.
+  await restoreRealTimers();
   cleanup();
   resetTestSession();
   // A file that swapped `fetch` and did not put it back cannot poison the next
