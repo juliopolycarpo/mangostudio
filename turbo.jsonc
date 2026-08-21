@@ -13,6 +13,11 @@
     "DISTRIBUTION_CHANNEL",
     "DISTRIBUTION_MANIFEST_PATH",
     "DRY_RUN",
+    // Selects Vitest's `github-actions` reporter, in both apps/frontend's
+    // vitest.config.ts and the reporter list scripts/lib/test.ts builds for it.
+    // Presentation only — it changes annotations, not results — so it stays out
+    // of the cache keys.
+    "GITHUB_ACTIONS",
     "GITHUB_OUTPUT",
     // Names the repository whose Actions cache usage the gate job reports.
     "GITHUB_REPOSITORY",

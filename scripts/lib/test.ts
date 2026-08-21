@@ -37,6 +37,25 @@ export function parseShard(arg: string): TestShard {
 }
 
 /**
+ * The console reporters `vitest.config.ts` would have chosen for this run.
+ *
+ * A CLI `--reporter` *replaces* the config's `reporters` array rather than
+ * adding to it (measured), so passing a file reporter alone silently drops
+ * every console one. Both matter: without `default` the run prints nothing and
+ * the `Errors N errors` / `This error originated in "…"` lines are never
+ * emitted — the sole source `scripts/qa-gate/unhandled-errors.ts` has for
+ * Vitest, because its JUnit reporter hardcodes `errors="0"` — and without
+ * `github-actions` a failing test loses its inline annotation on the CI run.
+ * The `GITHUB_ACTIONS` test mirrors the config's own; Turbo passes that
+ * variable through to the lane tasks (measured).
+ * // Usage: `${consoleReporters()} --reporter=junit --outputFile=…`
+ */
+const consoleReporters = (): string =>
+  process.env.GITHUB_ACTIONS === 'true'
+    ? '--reporter=default --reporter=github-actions'
+    : '--reporter=default';
+
+/**
  * The environment the lane scripts read. `MANGOSTUDIO_BUN_TEST_ARGS` carries
  * the shard flag for every Bun lane; `MANGOSTUDIO_VITEST_ARGS` carries the
  * frontend Vitest lane's whole reporter configuration, because its two modes
@@ -50,6 +69,9 @@ export function parseShard(arg: string): TestShard {
  *   Measured: four shards merged reproduce the unsharded run's coverage exactly
  *   (76.08 / 68.06 / 72.81 / 78.76 statements/branches/functions/lines).
  *
+ * Both modes lead with `consoleReporters()` — see there for why the file
+ * reporter cannot be passed on its own.
+ *
  * Turbo's `MANGOSTUDIO_*` allowlist on the test tasks puts both in the cache
  * key, so a run at a different shard is a different run.
  * // Usage: runCommand(label, cmd, { env: testLaneEnv(shard) });
@@ -60,7 +82,7 @@ export function testLaneEnv(shard: TestShard | null): Record<string, string> {
     return {
       MANGOSTUDIO_TEST_SHARD: '',
       MANGOSTUDIO_BUN_TEST_ARGS: '',
-      MANGOSTUDIO_VITEST_ARGS: `--reporter=junit --outputFile=../../${vitestLane.junitPath}`,
+      MANGOSTUDIO_VITEST_ARGS: `${consoleReporters()} --reporter=junit --outputFile=../../${vitestLane.junitPath}`,
     };
   }
   const spec = `${shard.index}/${shard.count}`;
@@ -69,6 +91,6 @@ export function testLaneEnv(shard: TestShard | null): Record<string, string> {
     // thresholds when it is set. `--reporter=blob` does not do that on its own.
     MANGOSTUDIO_TEST_SHARD: spec,
     MANGOSTUDIO_BUN_TEST_ARGS: `--shard=${spec}`,
-    MANGOSTUDIO_VITEST_ARGS: `--shard=${spec} --reporter=blob --outputFile=.vitest-reports/blob-${shard.index}.json`,
+    MANGOSTUDIO_VITEST_ARGS: `--shard=${spec} ${consoleReporters()} --reporter=blob --outputFile=.vitest-reports/blob-${shard.index}.json`,
   };
 }

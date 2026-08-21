@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
 
 import { ALL_WORKSPACE_NAMES, ROOT_DIR } from '../lib/config';
@@ -126,12 +126,26 @@ describe('parseShard', () => {
 });
 
 describe('testLaneEnv', () => {
+  // The reporter list mirrors `vitest.config.ts`'s own `GITHUB_ACTIONS` test,
+  // so these have to pin the variable instead of inheriting the runner's:
+  // otherwise the exact-string cases below pass locally and fail on CI, where
+  // it is set. Restored afterwards because `bun test` shares one module graph
+  // across files.
+  const inherited = process.env.GITHUB_ACTIONS;
+  const setGithubActions = (value: string | undefined): void => {
+    if (value === undefined) delete process.env.GITHUB_ACTIONS;
+    else process.env.GITHUB_ACTIONS = value;
+  };
+
+  beforeEach(() => setGithubActions(undefined));
+  afterAll(() => setGithubActions(inherited));
+
   it('writes JUnit directly when unsharded', () => {
     const env = testLaneEnv(null);
     expect(env.MANGOSTUDIO_TEST_SHARD).toBe('');
     expect(env.MANGOSTUDIO_BUN_TEST_ARGS).toBe('');
     expect(env.MANGOSTUDIO_VITEST_ARGS).toBe(
-      '--reporter=junit --outputFile=../../.mango/artifacts/junit/frontend-vitest.xml'
+      '--reporter=default --reporter=junit --outputFile=../../.mango/artifacts/junit/frontend-vitest.xml'
     );
   });
 
@@ -139,9 +153,33 @@ describe('testLaneEnv', () => {
     const env = testLaneEnv({ index: 3, count: 8 });
     expect(env.MANGOSTUDIO_BUN_TEST_ARGS).toBe('--shard=3/8');
     expect(env.MANGOSTUDIO_VITEST_ARGS).toBe(
-      '--shard=3/8 --reporter=blob --outputFile=.vitest-reports/blob-3.json'
+      '--shard=3/8 --reporter=default --reporter=blob --outputFile=.vitest-reports/blob-3.json'
     );
     expect(env.MANGOSTUDIO_VITEST_ARGS).not.toContain('junit');
+  });
+
+  // A CLI `--reporter` replaces `vitest.config.ts`'s `reporters` rather than
+  // adding to it, so a file-only reporter set prints nothing — and the
+  // `Errors N errors` line is the only place Vitest's unhandled errors ever
+  // appear (its JUnit reporter hardcodes `errors="0"`).
+  it('keeps the console reporter in both modes so unhandled errors reach the log', () => {
+    expect(testLaneEnv(null).MANGOSTUDIO_VITEST_ARGS).toContain('--reporter=default');
+    expect(testLaneEnv({ index: 3, count: 8 }).MANGOSTUDIO_VITEST_ARGS).toContain(
+      '--reporter=default'
+    );
+  });
+
+  // Same replacement rule, second casualty: the config adds `github-actions`
+  // under CI, so omitting it here would drop every inline failure annotation
+  // from the run — a regression the suite's own green counts cannot show.
+  it('restores the CI annotation reporter the config would have added', () => {
+    setGithubActions('true');
+    expect(testLaneEnv(null).MANGOSTUDIO_VITEST_ARGS).toBe(
+      '--reporter=default --reporter=github-actions --reporter=junit --outputFile=../../.mango/artifacts/junit/frontend-vitest.xml'
+    );
+    expect(testLaneEnv({ index: 3, count: 8 }).MANGOSTUDIO_VITEST_ARGS).toBe(
+      '--shard=3/8 --reporter=default --reporter=github-actions --reporter=blob --outputFile=.vitest-reports/blob-3.json'
+    );
   });
 
   // Measured, not assumed: `--reporter=blob` leaves the thresholds on, so a

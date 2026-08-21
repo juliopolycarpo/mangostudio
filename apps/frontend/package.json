@@ -21,7 +21,7 @@
     "test:coverage": "bun run test:coverage:vitest && bun run test:coverage:bun",
     "test:coverage:vitest": "vitest run --coverage $MANGOSTUDIO_VITEST_ARGS",
     "test:coverage:bun": "bun test --timings=../../.mango/artifacts/timings/frontend-bun.json --update-timings --coverage --timeout 15000 --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/frontend-bun.xml $MANGOSTUDIO_BUN_TEST_ARGS tests/unit/lib/utils.test.ts tests/unit/utils/model-utils.test.ts",
-    "test:coverage:merge": "vitest --mergeReports=.vitest-reports --coverage --reporter=junit --outputFile=../../.mango/artifacts/junit/frontend-vitest.xml",
+    "test:coverage:merge": "vitest --mergeReports=.vitest-reports --coverage --reporter=default --reporter=junit --outputFile=../../.mango/artifacts/junit/frontend-vitest.xml",
     "test:ui": "vitest --ui"
   },
   "dependencies": {

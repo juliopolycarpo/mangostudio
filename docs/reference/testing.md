@@ -286,7 +286,9 @@ alone at 278s.
 Eight is where the curve flattens. What bites is the ~21s of fixed setup each
 job pays and the merge job's fixed cost, so measured per-shard test time of 70s
 → 35s → 23s at N=4 → 8 → 12 turns into diminishing wall clock. Raising it is a
-two-line change: `SHARD_COUNT` and the matrix list.
+three-line change: `SHARD_COUNT`, the matrix list, and the shard job's `name`
+(`env` is not one of the contexts available to `jobs.<id>.name`, so the `/8`
+there cannot interpolate the value).
 
 #### Balancing the split by time
 
@@ -404,6 +406,23 @@ exists only in the log for either runner, and each shard extracts it with
 `scripts/qa-gate/unhandled-errors.ts` before the log leaves the job. If you ever
 replace that with a structured source, check the reporter first rather than
 assuming the XML grew an `errors` count.
+
+> That only works because every Vitest invocation leads with the console
+> reporters `vitest.config.ts` would have chosen (`consoleReporters()` in
+> `scripts/lib/test.ts`). A CLI `--reporter` **replaces** the config's
+> `reporters` rather than adding to it, so `--reporter=blob` alone prints
+> exactly one line (`blob report written to …`) and no summary — measured, and
+> measured end to end: the same run with `--reporter=default --reporter=blob`
+> feeds `unhandled-errors.ts` `{"errors":1,…}`, and without it `{"errors":0}`.
+> Drop `default` and the `Errors N errors` and `This error originated in "…"`
+> lines stop being emitted at all, which silently removes the only Vitest source
+> `unhandled-errors.ts` has: the run still exits 1, but the QA report degrades
+> to `parseMiss` and the "this is not a flake, do not re-run it" guidance in
+> `scripts/qa-gate/render/test-failures.ts` (gated on `errors > 0`) can never
+> fire. `github-actions` is the second casualty of the same rule — the config
+> adds it when `GITHUB_ACTIONS=true` (which Turbo does pass through to the lane
+> tasks, measured), and omitting it costs the run every inline failure
+> annotation.
 
 > Bun does not create the parent directory for `--reporter-outfile`, and it does
 > **not** fail the run when it is missing: it prints `JUnitReportFailed` and
