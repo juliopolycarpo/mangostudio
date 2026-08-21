@@ -9,8 +9,6 @@ export const DEV_WORKSPACES: WorkspaceName[] = ['api'];
 export interface DevSelection {
   runnableWorkspaces: WorkspaceName[];
   skippedWorkspaces: WorkspaceName[];
-  /** True when an explicit --frontend request was redirected to api. */
-  frontendRedirected: boolean;
 }
 
 export type TurboDevUi = 'stream' | 'tui';
@@ -22,15 +20,13 @@ export type TurboDevUi = 'stream' | 'tui';
  * // Usage: selectDevWorkspaces(['frontend']);
  */
 export function selectDevWorkspaces(workspaces: WorkspaceName[]): DevSelection {
-  const frontendRedirected = workspaces.includes('frontend');
-  const normalized = frontendRedirected
-    ? dedupe(workspaces.map((workspace) => (workspace === 'frontend' ? 'api' : workspace)))
-    : workspaces;
+  const normalized = dedupe(
+    workspaces.map((workspace) => (workspace === 'frontend' ? 'api' : workspace))
+  );
 
   return {
     runnableWorkspaces: normalized.filter(isDevWorkspace),
     skippedWorkspaces: normalized.filter((workspace) => !isDevWorkspace(workspace)),
-    frontendRedirected,
   };
 }
 

@@ -6,6 +6,12 @@ import { error } from './log';
 
 export interface ParsedArgs {
   workspaces: WorkspaceName[];
+  /**
+   * Workspaces the caller named with their own flag (`--frontend`, `--api`, …),
+   * before `--all` or the default expand `workspaces` to every name. For
+   * messaging that should react to what the user typed, not to the expansion.
+   */
+  explicitWorkspaces: WorkspaceName[];
   includeRoot: boolean;
   flags: Record<string, boolean>;
   values: Record<string, string>;
@@ -67,6 +73,7 @@ export function parseArgs(options: ParseArgsOptions = {}): ParsedArgs {
   if (workspaces.length === 0 && !includeRoot && !allExplicit) {
     return {
       workspaces: [...ALL_WORKSPACE_NAMES],
+      explicitWorkspaces: workspaces,
       includeRoot: true,
       flags,
       values,
@@ -77,6 +84,7 @@ export function parseArgs(options: ParseArgsOptions = {}): ParsedArgs {
   if (allExplicit) {
     return {
       workspaces: [...ALL_WORKSPACE_NAMES],
+      explicitWorkspaces: workspaces,
       includeRoot: true,
       flags,
       values,
@@ -85,7 +93,15 @@ export function parseArgs(options: ParseArgsOptions = {}): ParsedArgs {
     };
   }
 
-  return { workspaces, includeRoot, flags, values, positional, usedDefaultSelection: false };
+  return {
+    workspaces,
+    explicitWorkspaces: workspaces,
+    includeRoot,
+    flags,
+    values,
+    positional,
+    usedDefaultSelection: false,
+  };
 }
 
 /** Print an error and exit non-zero. // Usage: fatal('Unknown flag'); */

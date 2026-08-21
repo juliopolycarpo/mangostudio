@@ -13,7 +13,6 @@ describe('dev script', () => {
     expect(selectDevWorkspaces(['api', 'shared'])).toEqual({
       runnableWorkspaces: ['api'],
       skippedWorkspaces: ['shared'],
-      frontendRedirected: false,
     });
   });
 
@@ -21,7 +20,6 @@ describe('dev script', () => {
     expect(selectDevWorkspaces(['frontend'])).toEqual({
       runnableWorkspaces: ['api'],
       skippedWorkspaces: [],
-      frontendRedirected: true,
     });
   });
 
@@ -29,7 +27,6 @@ describe('dev script', () => {
     expect(selectDevWorkspaces(['api', 'frontend'])).toEqual({
       runnableWorkspaces: ['api'],
       skippedWorkspaces: [],
-      frontendRedirected: true,
     });
   });
 

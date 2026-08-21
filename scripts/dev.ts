@@ -29,7 +29,8 @@ Workspace flags:
   process.exit(0);
 }
 
-const { workspaces, includeRoot, flags, positional, usedDefaultSelection } = parseArgs();
+const { workspaces, explicitWorkspaces, includeRoot, flags, positional, usedDefaultSelection } =
+  parseArgs();
 
 if (flags['--help']) {
   printHelp();
@@ -42,14 +43,12 @@ if (includeRoot) {
 }
 
 const requestedWorkspaces = usedDefaultSelection ? DEV_WORKSPACES : workspaces;
-const { runnableWorkspaces, skippedWorkspaces, frontendRedirected } =
-  selectDevWorkspaces(requestedWorkspaces);
+const { runnableWorkspaces, skippedWorkspaces } = selectDevWorkspaces(requestedWorkspaces);
 
 // `--all` expands to every workspace, so `frontend` appearing in the selection
 // there is not somebody asking for a frontend dev server — only an explicit
 // `--frontend` is, and only that deserves the redirect notice.
-const askedForFrontend = process.argv.slice(2).includes('--frontend');
-if (frontendRedirected && askedForFrontend) {
+if (explicitWorkspaces.includes('frontend')) {
   warn('The frontend is served by the API dev server now; starting `api` instead of `frontend`.');
 }
 
