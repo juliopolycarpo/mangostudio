@@ -4,23 +4,26 @@
  * and no markdown rendering of text a third-party process wrote.
  */
 
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type {
   ExternalActivityPart,
   ExternalApprovalPart,
   MessagePart,
 } from '@mangostudio/shared/types';
 import { fireEvent, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { MessageParts } from '../../../src/features/chat/components/MessageParts';
-import { render } from '../../support/harness/render';
+import { render, waitFor } from '../../support/harness/render';
 
 const answerExternalApproval =
-  vi.fn<(chatId: string, body: { requestId: string; optionId: string }) => Promise<unknown>>();
+  jest.fn<(chatId: string, body: { requestId: string; optionId: string }) => Promise<unknown>>();
 
-vi.mock('../../../src/services/external-agent-service', () => ({
+mock.module('../../../src/services/external-agent-service', () => ({
   answerExternalApproval: (chatId: string, body: { requestId: string; optionId: string }) =>
     answerExternalApproval(chatId, body),
 }));
+
+// After the mock, never before: a static import is evaluated first and would
+// bind MessageParts to the real external-agent service.
+const { MessageParts } = await import('../../../src/features/chat/components/MessageParts');
 
 function turnPart(overrides: Partial<MessagePart & { type: 'external_turn' }> = {}): MessagePart {
   return {
@@ -125,12 +128,14 @@ describe('external approval card', () => {
     expect(deny).toBeEnabled();
   });
 
-  it('posts the option id that was pressed', () => {
+  it('posts the option id that was pressed', async () => {
     renderParts([turnPart({ status: 'active' }), approvalPart()]);
     fireEvent.click(screen.getByRole('button', { name: 'Approve for this session' }));
-    expect(answerExternalApproval).toHaveBeenCalledWith('chat-1', {
-      requestId: 'req-1',
-      optionId: 'approve',
+    await waitFor(() => {
+      expect(answerExternalApproval).toHaveBeenCalledWith('chat-1', {
+        requestId: 'req-1',
+        optionId: 'approve',
+      });
     });
   });
 
@@ -216,8 +221,11 @@ describe('vendor prose', () => {
     expect(container.querySelector('a')).toBeNull();
   });
 
-  it('leaves a MangoStudio turn on the markdown path', () => {
+  it('leaves a MangoStudio turn on the markdown path', async () => {
     const { container } = renderParts([{ type: 'text', text: HOSTILE_MARKDOWN }]);
+    // The lazy-loaded markdown renderer settles asynchronously; wait for its
+    // output before asserting on the vendor-text marker it never adds.
+    await screen.findByText('Not a heading');
     expect(container.querySelector('[data-vendor-text]')).toBeNull();
   });
 });

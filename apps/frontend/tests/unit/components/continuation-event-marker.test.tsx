@@ -1,5 +1,5 @@
+import { describe, expect, it } from 'bun:test';
 import { screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
 import { ContinuationEventMarker } from '../../../src/features/chat/components/ContinuationEventMarker';
 import { render } from '../../support/harness/render';
 

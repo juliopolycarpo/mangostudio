@@ -8,10 +8,10 @@
  * withdrawing actually reaches the server.
  */
 
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExternalAgentSettingsPage } from '../../../src/features/settings/external-agents';
-import { render, screen } from '../../support/harness/render';
+import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const ACKNOWLEDGED_AT = Date.parse('2026-08-08T09:30:00.000Z');
@@ -75,7 +75,7 @@ describe('ExternalAgentSettingsPage', () => {
     // `/external-agents/disclosure` — or another target's row — would withdraw a
     // consent the user did not touch, which is exactly what the server-side
     // reap was just narrowed to avoid.
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(
         fetchScenario.fetchMock.mock.calls.some(
           ([input, init]) =>

@@ -8,26 +8,31 @@
  * asked for a code review when they enabled unattended approvals.
  */
 
+import { describe, expect, it, jest, mock } from 'bun:test';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
-import { ExternalReviewAction } from '../../../src/features/external-agents/ExternalReviewAction';
 import { AppContext } from '../../../src/lib/app-context';
 import { ApiError } from '../../../src/lib/utils';
 import { render, screen } from '../../support/harness/render';
 
 const descriptors: ExternalAgentDescriptor[] = [];
 
-vi.mock('../../../src/features/external-agents/useExternalAgents', () => ({
+mock.module('../../../src/features/external-agents/useExternalAgents', () => ({
   useExternalAgents: () => ({
     agents: descriptors,
     isLoading: false,
     find: (targetId: string) => descriptors.find((agent) => agent.targetId === targetId),
   }),
 }));
+
+// After the mock, never before: a static import is evaluated first and would
+// bind the action to the real useExternalAgents hook.
+const { ExternalReviewAction } = await import(
+  '../../../src/features/external-agents/ExternalReviewAction'
+);
 
 function descriptor(nativeReview: boolean): ExternalAgentDescriptor {
   return {
@@ -51,7 +56,7 @@ function renderAction(
 ) {
   descriptors.length = 0;
   descriptors.push(descriptor(options.nativeReview ?? true));
-  const handleReviewChanges = vi.fn(() => {
+  const handleReviewChanges = jest.fn(() => {
     const failure = options.reviewFailure?.();
     return failure ? Promise.reject(failure) : Promise.resolve();
   });

@@ -6,9 +6,9 @@
  * is a wire value, not a name the user should be shown.
  */
 
+import { describe, expect, it } from 'bun:test';
 import { createMockMessage } from '@mangostudio/shared/test-utils';
 import { screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
 import { AssistantMessageHeader } from '../../../src/features/chat/components/AssistantMessageHeader';
 import { render } from '../../support/harness/render';
 

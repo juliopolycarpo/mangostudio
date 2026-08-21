@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, jest } from 'bun:test';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { render, screen } from '../../support/harness/render';
 
@@ -9,8 +9,8 @@ describe('ConfirmDialog', () => {
     entityName: 'My OpenAI Key',
     confirmLabel: 'Delete Connector',
     cancelLabel: 'Cancel',
-    onConfirm: vi.fn(),
-    onCancel: vi.fn(),
+    onConfirm: jest.fn(),
+    onCancel: jest.fn(),
   };
 
   it('renders the entity name in the confirmation message', () => {
@@ -27,7 +27,7 @@ describe('ConfirmDialog', () => {
   });
 
   it('calls onCancel when cancel is clicked', () => {
-    const onCancel = vi.fn();
+    const onCancel = jest.fn();
     render(<ConfirmDialog {...props} onCancel={onCancel} />);
 
     screen.getByText('Cancel').click();
@@ -35,7 +35,7 @@ describe('ConfirmDialog', () => {
   });
 
   it('calls onConfirm when confirm is clicked', () => {
-    const onConfirm = vi.fn();
+    const onConfirm = jest.fn();
     render(<ConfirmDialog {...props} onConfirm={onConfirm} />);
 
     screen.getByRole('button', { name: 'Delete Connector' }).click();

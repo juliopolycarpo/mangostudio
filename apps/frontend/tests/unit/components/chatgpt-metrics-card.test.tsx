@@ -1,16 +1,25 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { Connector } from '@mangostudio/shared';
 import type { ChatGptUsageSnapshot } from '@mangostudio/shared/connectors';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChatGptMetricsCard } from '@/features/settings/observability/components/ChatGptMetricsCard';
 import { render, screen } from '../../support/harness/render';
 
-const mockGetChatGptUsageHistory = vi.fn();
-const mockGetChatGptUsageStats = vi.fn();
+const mockGetChatGptUsageHistory = jest.fn();
+const mockGetChatGptUsageStats = jest.fn();
+// ChatGptMetricsCard renders ChatGptResetCreditAction, which imports this
+// export from the same module; a partial mock without it fails to link.
+const mockRedeemChatGptResetCredit = jest.fn();
 
-vi.mock('@/features/settings/connectors/api', () => ({
+mock.module('@/features/settings/connectors/api', () => ({
   getChatGptUsageHistory: (...args: unknown[]) => mockGetChatGptUsageHistory(...args),
   getChatGptUsageStats: (...args: unknown[]) => mockGetChatGptUsageStats(...args),
+  redeemChatGptResetCredit: (...args: unknown[]) => mockRedeemChatGptResetCredit(...args),
 }));
+
+// After the mock, never before: a static import is evaluated first and would
+// bind the card to the real connectors API.
+const { ChatGptMetricsCard } = await import(
+  '@/features/settings/observability/components/ChatGptMetricsCard'
+);
 
 function makeConnector(usage: Partial<ChatGptUsageSnapshot> | null): Connector {
   return {

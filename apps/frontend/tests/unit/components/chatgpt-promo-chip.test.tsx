@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { ChatGptPromoChip } from '@/features/settings/connectors/components/ChatGptPromoChip';
 import { fireEvent, render, screen } from '../../support/harness/render';
 
