@@ -13,8 +13,8 @@
     "circular": "madge --circular --extensions ts,tsx .",
     "fix": "biome check --write src tests",
     "test": "bun run test:unit && bun run test:integration",
-    "test:unit": "bun test --tsconfig-override=./tsconfig.test.json --isolate --timeout 15000 tests/unit",
-    "test:integration": "bun test --tsconfig-override=./tsconfig.test.json --isolate --timeout 15000 tests/integration",
+    "test:unit": "bun test --tsconfig-override=./tsconfig.test.json --parallel=4 --isolate --timeout 15000 tests/unit",
+    "test:integration": "bun test --tsconfig-override=./tsconfig.test.json --parallel=4 --isolate --timeout 15000 tests/integration",
     "test:coverage": "bun test --tsconfig-override=./tsconfig.test.json --isolate --parallel=4 --timeout 15000 tests --coverage --timings=../../.mango/artifacts/timings/frontend.json --update-timings --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/frontend.xml && bun ../../scripts/qa-gate/enforce-coverage-thresholds.ts frontend"
   },
   "dependencies": {
