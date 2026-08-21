@@ -116,6 +116,22 @@ url = "https://your-domain.com"
 - Defina `auth.url` com a URL pública da aplicação.
 - Use um reverse proxy para terminação TLS.
 
+### Deploy dividido
+
+`allowedOrigins` é só metade de um deploy dividido. Ele diz a esta API de qual origem aceitar
+requisições; o bundle também precisa saber onde a API está. Extraia
+`mangostudio-<versão>-frontend-dist.tar.gz` e edite o `config.js` ao lado do `index.html`:
+
+```js
+window.__MANGO_CONFIG__ = { apiUrl: 'https://api.example.com' };
+```
+
+Não é preciso rebuildar — o arquivo é lido no carregamento da página e tem precedência sobre
+qualquer valor embutido em tempo de build. Deixe `apiUrl` vazio (o padrão distribuído) para
+usar a origem que serviu a página, que é o que tanto uma instalação de origem única quanto o
+binário standalone querem. `MANGO_API_URL` define o mesmo valor em tempo de build, para quem
+compila o bundle por conta própria. Veja `docs/architecture/frontend-build.md`.
+
 ## Banco De Dados
 
 O banco SQLite usa `~/.mango/database.sqlite` por padrão. Em produção, configure um path persistente:

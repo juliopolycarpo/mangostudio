@@ -25,6 +25,8 @@ import { registerFrontend } from '../../../src/server/frontend-static';
 const INDEX_HTML = '<html><body>embedded index</body></html>';
 const ASSET_JS = 'console.log("embedded")';
 const UPLOAD_BYTES = 'not-really-a-png';
+/** What `build.ts` emits as the deployer-editable runtime config. */
+const RUNTIME_CONFIG_JS = 'window.__MANGO_CONFIG__ = { apiUrl: "" };\n';
 
 let assetDir: string;
 /** Extra fixture directories a test created; removed together in afterEach. */
@@ -411,6 +413,46 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
       const response = await server.get('/assets/index-Rebuilt1.js');
       expect(response.status).toBe(200);
       expect(await response.text()).toBe(ASSET_JS);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves config.js with revalidation rather than a day-long cache', async () => {
+    const server = await startFilesystemServer();
+    try {
+      // config.js is the one unhashed file a deployer edits — it carries the
+      // runtime API base URL for a split deployment. At the 86400 the other
+      // unhashed files get, correcting a wrong URL would leave clients using
+      // the old one for a day with nothing to point at.
+      //
+      // This is the disk branch. The compiled binary reaches the same directive
+      // through `serveUnhashedFile`, a different call site, which
+      // `scripts/test-build.ts` pins separately.
+      writeFileSync(join(server.frontendDir, 'config.js'), RUNTIME_CONFIG_JS);
+
+      const response = await server.get('/config.js');
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-cache');
+      expect(await response.text()).toBe(RUNTIME_CONFIG_JS);
+
+      // Still validator-backed, so revalidating costs a 304 and not a resend.
+      const etag = response.headers.get('etag');
+      expect(etag).not.toBeNull();
+      const revalidated = await server.get('/config.js', { 'If-None-Match': etag as string });
+      expect(revalidated.status).toBe(304);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('leaves every other unhashed root file on the long cache', async () => {
+    const server = await startFilesystemServer();
+    try {
+      // The config.js carve-out must be exactly one file: an icon that started
+      // revalidating on every navigation would be a silent regression.
+      const response = await server.get('/favicon.ico');
+      expect(response.headers.get('cache-control')).toBe('public, max-age=86400');
     } finally {
       await server.stop();
     }
