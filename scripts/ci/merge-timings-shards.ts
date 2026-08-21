@@ -23,20 +23,31 @@
 // earlier lane's failure (fail-fast, no `--continue`) never touches the
 // `--timings` file it restored, so what lands on disk is the *previous* run's
 // full baseline, not this shard's slice — and looks exactly like a legitimate
-// one until it collides with whichever shard actually owns those files. A
-// lane's JUnit report is the tell: a lane that ran always writes one, even
-// over zero files, so a shard missing it never ran the lane and its restored
-// `--timings` file is discarded rather than merged as a claim (measured: PR
-// #903's own CI, shard 4/8 restored a 398-entry `api` baseline unchanged
-// after `runtime` failed first in the same job, and would have duplicate-
-// claimed 370 files against the shards that actually ran them).
+// one until it collides with whichever shard actually owns those files.
+// (Measured: PR #903's own CI, shard 4/8 restored a 398-entry `api` baseline
+// unchanged after `runtime` failed first in the same job, and would have
+// duplicate-claimed 370 files against the shards that actually ran them.)
+//
+// A lane's JUnit report is the tell, but not because "a lane that ran always
+// writes one" — measured on Bun 1.4.0, a shard whose slice of a lane is *empty*
+// runs zero files, writes no JUnit report, and exits 0. What makes the rule
+// safe is that the same empty run also rewrites its `--timings` file to
+// `{"version":1,"files":{}}`, so the two cases a missing report covers are:
+//
+//   lane ran, empty slice  -> nothing to contribute; discarding costs nothing.
+//   lane never ran         -> the restored full baseline is still on disk, and
+//                             discarding it is the whole point.
+//
+// Both are discarded rather than merged as a claim. Do not weaken the JUnit
+// check on the assumption that an empty run leaves a distinguishable file.
 //
 // Usage: bun ./scripts/ci/merge-timings-shards.ts <shards-dir> <out-dir>
 
-import { mkdir, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { TEST_LANES, TIMINGS_DIR } from '../lib/test-lanes';
+import { listShardDirs } from './merge-test-shards';
 
 /** The on-disk shape Bun reads and writes. A malformed file is a hard error. */
 export interface TimingsFile {
@@ -124,7 +135,9 @@ type SliceRead =
 // covered between them — sits on disk exactly as if this shard had covered
 // it too. Nothing distinguishes that file from a genuine full-coverage
 // contribution except that this shard's JUnit report for the same lane is
-// missing: a lane that ran, even over zero files, always writes one.
+// missing. A lane that ran over zero files also writes no report, but it
+// rewrites its timings file to an empty map first, so discarding that one
+// too costs nothing — see the header for why the rule is safe.
 const readSlice = async (junitPath: string, timingsPath: string): Promise<SliceRead> => {
   const file = Bun.file(timingsPath);
   if (!(await file.exists())) return { status: 'missing' };
@@ -143,10 +156,11 @@ export const mergeTimingsShards = async (
   shardsRoot: string,
   outDir: string
 ): Promise<TimingsMergeResult> => {
-  const shardDirs = (await readdir(shardsRoot, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => join(shardsRoot, entry.name))
-    .sort();
+  // Shared with the coverage merge rather than re-derived: the merge job's
+  // `pattern: test-shard-*` download also matches the `test-shard-<n>-log`
+  // failure artifacts, and a second copy of that rule is a second thing to
+  // forget.
+  const shardDirs = await listShardDirs(shardsRoot);
 
   await mkdir(outDir, { recursive: true });
 
@@ -170,8 +184,10 @@ export const mergeTimingsShards = async (
       problems.push({ lane: lane.id, kind: 'malformed', files: malformed.sort() });
     }
     // A lane with no slices at all is not an error here: `frontend-bun` runs two
-    // files across eight shards, so most shards legitimately contribute nothing,
-    // and a lane that did not run leaves the previous merged file in place.
+    // files across eight shards, so most shards legitimately contribute nothing.
+    // The lane is simply left out of `outDir`, which means it drops out of the
+    // saved cache and next run's split for it falls back to round-robin —
+    // degraded balance, never a wrong partition.
     if (slices.length === 0) continue;
 
     const { merged, problem } = mergeLaneSlices(lane.id, slices);

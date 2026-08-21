@@ -1,10 +1,16 @@
-import { describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { afterEach, describe, expect, it } from 'bun:test';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { mergeLaneSlices, mergeTimingsShards, type TimingsFile } from '../ci/merge-timings-shards';
 import { JUNIT_DIR, TIMINGS_DIR } from '../lib/test-lanes';
+
+const temps: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(temps.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
 
 const slice = (files: Record<string, number>): TimingsFile => ({ version: 1, files });
 
@@ -20,6 +26,7 @@ const stageShards = async (
   shards: readonly StagedShard[]
 ): Promise<{ root: string; out: string }> => {
   const root = await mkdtemp(join(tmpdir(), 'timings-shards-'));
+  temps.push(root);
   const out = join(root, 'merged');
   for (const shard of shards) {
     const shardRoot = join(root, 'shards', shard.name);
@@ -171,6 +178,23 @@ describe('mergeTimingsShards', () => {
   // would have duplicate-claimed every file the shards that actually ran
   // `api` already covered. No JUnit report for the lane is the only signal
   // that distinguishes this from a genuine full-coverage contribution.
+  // The merge job downloads `test-shard-*`, which also matches the
+  // `test-shard-<n>-log` failure artifacts. Those carry no timings, but the
+  // rule lives in one place (`listShardDirs`) so this side cannot drift from
+  // the coverage merge's.
+  it('ignores the failure-log artifact directories', async () => {
+    const { root, out } = await stageShards([
+      { name: 'test-shard-1', lane: 'api', files: { 'tests/unit/a.test.ts': 10 } },
+    ]);
+    await mkdir(join(root, 'test-shard-1-log'), { recursive: true });
+    await writeFile(join(root, 'test-shard-1-log', 'coverage-run.log'), 'log');
+
+    const result = await mergeTimingsShards(root, out);
+
+    expect(result.problems).toEqual([]);
+    expect(result.lanes[0]).toMatchObject({ lane: 'api', shards: 1, files: 1 });
+  });
+
   it('discards a restored baseline the shard never touched', async () => {
     const { root, out } = await stageShards([
       { name: 'test-shard-1', lane: 'api', files: { 'tests/unit/a.test.ts': 10 } },
