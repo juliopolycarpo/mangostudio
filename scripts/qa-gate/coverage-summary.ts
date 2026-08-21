@@ -27,13 +27,7 @@ interface JsonCoverageSummaryShape {
 }
 
 const WORKSPACE_COVERAGE_SOURCES: Readonly<Record<WorkspaceName, readonly CoverageSource[]>> = {
-  frontend: [
-    {
-      kind: 'json-summary',
-      file: '.mango/artifacts/coverage/frontend/vitest/coverage-summary.json',
-    },
-    { kind: 'lcov', file: '.mango/artifacts/coverage/frontend/bun/lcov.info' },
-  ],
+  frontend: [{ kind: 'lcov', file: '.mango/artifacts/coverage/frontend/lcov.info' }],
   api: [{ kind: 'lcov', file: '.mango/artifacts/coverage/api/lcov.info' }],
   shared: [{ kind: 'lcov', file: '.mango/artifacts/coverage/shared/lcov.info' }],
   runtime: [{ kind: 'lcov', file: '.mango/artifacts/coverage/runtime/lcov.info' }],
@@ -43,6 +37,7 @@ const SOURCE_DERIVED_COVERAGE_FILES: Readonly<Partial<Record<WorkspaceName, stri
   api: '.mango/artifacts/coverage/api/lcov.info',
   shared: '.mango/artifacts/coverage/shared/lcov.info',
   runtime: '.mango/artifacts/coverage/runtime/lcov.info',
+  frontend: '.mango/artifacts/coverage/frontend/lcov.info',
 };
 
 export const readJsonCoverageSummary = async (absPath: string): Promise<CoverageSummary> => {

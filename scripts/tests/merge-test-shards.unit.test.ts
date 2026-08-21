@@ -9,7 +9,7 @@ import {
   type ShardMeta,
   summarizeShardMeta,
 } from '../ci/merge-test-shards';
-import { SHARDED_LCOV_PATHS, VITEST_BLOB_DIR } from '../lib/test-lanes';
+import { SHARDED_LCOV_PATHS } from '../lib/test-lanes';
 import { parseLcovSummary } from '../qa-gate/parse-lcov';
 
 const temps: string[] = [];
@@ -39,8 +39,7 @@ const lcov = (lines: ReadonlyArray<[number, number]>): string =>
 interface ShardFiles {
   readonly name: string;
   readonly lcovLines?: ReadonlyArray<[number, number]>;
-  readonly blob?: string;
-  readonly meta?: { shard: number; exitCode: number; durationSeconds: number };
+  readonly meta?: { shard: number | string; exitCode: number; durationSeconds: number };
   readonly unhandledErrors?: { errors: number; headlines: [] };
 }
 
@@ -52,7 +51,6 @@ const writeShards = async (root: string, shards: readonly ShardFiles[]): Promise
         await Bun.write(join(dir, lcovPath), lcov(shard.lcovLines));
       }
     }
-    if (shard.blob) await Bun.write(join(dir, VITEST_BLOB_DIR, shard.blob), '{}');
     if (shard.meta) await Bun.write(join(dir, 'shard-meta.json'), JSON.stringify(shard.meta));
     if (shard.unhandledErrors) {
       await Bun.write(join(dir, 'unhandled-errors.json'), JSON.stringify(shard.unhandledErrors));
@@ -136,7 +134,7 @@ describe('listShardDirs', () => {
 });
 
 describe('mergeTestShards', () => {
-  it('merges coverage, stages blobs, and folds run metadata', async () => {
+  it('merges coverage and folds run metadata', async () => {
     const shards = await makeTemp();
     const output = await makeTemp();
     await writeShards(shards, [
@@ -146,7 +144,6 @@ describe('mergeTestShards', () => {
           [1, 4],
           [2, 0],
         ],
-        blob: 'blob-1.json',
         meta: { shard: 1, exitCode: 0, durationSeconds: 61 },
         unhandledErrors: { errors: 0, headlines: [] },
       },
@@ -156,7 +153,6 @@ describe('mergeTestShards', () => {
           [1, 0],
           [2, 3],
         ],
-        blob: 'blob-2.json',
         meta: { shard: 2, exitCode: 0, durationSeconds: 66 },
         unhandledErrors: { errors: 0, headlines: [] },
       },
@@ -167,32 +163,30 @@ describe('mergeTestShards', () => {
 
     const merged = await parseLcovSummary(join(output, SHARDED_LCOV_PATHS.api));
     expect(merged.lines).toMatchObject({ total: 2, covered: 2 });
-    expect(await Bun.file(join(output, VITEST_BLOB_DIR, 'blob-2.json')).exists()).toBe(true);
   });
 
-  // Shard directories sort lexically, so `test-shard-10` lands before
-  // `test-shard-2`. Blob names are reassigned on copy rather than derived from
-  // that order, so no shard's report is silently overwritten.
-  it('stages every blob when there are more than nine shards', async () => {
+  // The frontend job uploads the same artifact shape as a numbered shard, with
+  // a string id in its meta; the fold must treat it like any other job.
+  it('folds the frontend job meta alongside the numbered shards', async () => {
     const shards = await makeTemp();
     const output = await makeTemp();
-    await writeShards(
-      shards,
-      Array.from({ length: 12 }, (_, index) => ({
-        name: `test-shard-${index + 1}`,
-        lcovLines: [[1, index]] as ReadonlyArray<[number, number]>,
-        blob: `blob-${index + 1}.json`,
-        meta: { shard: index + 1, exitCode: 0, durationSeconds: index },
-      }))
-    );
-
-    const summary = await mergeTestShards(shards, output);
-    expect(summary.shards).toBe(12);
-    for (let index = 1; index <= 12; index++) {
-      expect(await Bun.file(join(output, VITEST_BLOB_DIR, `blob-${index}.json`)).exists()).toBe(
-        true
-      );
-    }
+    await writeShards(shards, [
+      {
+        name: 'test-shard-1',
+        lcovLines: [[1, 1]],
+        meta: { shard: 1, exitCode: 0, durationSeconds: 30 },
+      },
+      {
+        name: 'test-shard-frontend',
+        lcovLines: [[1, 1]],
+        meta: { shard: 'frontend', exitCode: 3, durationSeconds: 45 },
+      },
+    ]);
+    expect(await mergeTestShards(shards, output)).toMatchObject({
+      shards: 2,
+      exitCode: 3,
+      durationSeconds: 45,
+    });
   });
 
   it('treats a shard that wrote no metadata as failed rather than green', async () => {
@@ -202,19 +196,11 @@ describe('mergeTestShards', () => {
       {
         name: 'test-shard-1',
         lcovLines: [[1, 1]],
-        blob: 'blob-1.json',
         meta: { shard: 1, exitCode: 0, durationSeconds: 30 },
       },
-      { name: 'test-shard-2', lcovLines: [[1, 1]], blob: 'blob-2.json' },
+      { name: 'test-shard-2', lcovLines: [[1, 1]] },
     ]);
     expect((await mergeTestShards(shards, output)).exitCode).toBe(1);
-  });
-
-  it('fails loudly when no shard produced a Vitest blob', async () => {
-    const shards = await makeTemp();
-    const output = await makeTemp();
-    await writeShards(shards, [{ name: 'test-shard-1', lcovLines: [[1, 1]] }]);
-    await expect(mergeTestShards(shards, output)).rejects.toThrow(/No Vitest blob reports/);
   });
 
   it('fails loudly when there are no shards at all', async () => {
@@ -232,12 +218,11 @@ describe('mergeTestShards', () => {
       {
         name: 'test-shard-1',
         lcovLines: [[1, 1]],
-        blob: 'blob-1.json',
         meta: { shard: 1, exitCode: 0, durationSeconds: 30 },
       },
     ]);
     await expect(mergeTestShards(shards, output, 8)).rejects.toThrow(
-      /Expected 8 shard directories/
+      /Expected 8 test-job directories/
     );
   });
 
@@ -248,7 +233,6 @@ describe('mergeTestShards', () => {
       {
         name: 'test-shard-1',
         lcovLines: [[1, 1]],
-        blob: 'blob-1.json',
         meta: { shard: 1, exitCode: 0, durationSeconds: 30 },
       },
     ]);
@@ -259,21 +243,20 @@ describe('mergeTestShards', () => {
 describe('collect-test-metrics degradation', () => {
   const script = join(import.meta.dir, '..', 'qa-gate', 'collect-test-metrics.ts');
 
-  const collect = async (summaryPath: string, shardsRoot?: string, gateExitCode?: string) => {
+  const collect = async (summaryPath: string, shardsRoot?: string) => {
     const proc = Bun.spawn({
-      cmd: [
-        'bun',
-        script,
-        summaryPath,
-        ...(shardsRoot ? [shardsRoot] : []),
-        ...(gateExitCode === undefined ? [] : [gateExitCode]),
-      ],
+      cmd: ['bun', script, summaryPath, ...(shardsRoot ? [shardsRoot] : [])],
       stdout: 'pipe',
       stderr: 'pipe',
     });
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     return { stdout, exitCode };
   };
+
+  // On a checkout with real coverage artifacts the collector also derives
+  // frontend statement/branch coverage from the sources, which alone takes
+  // ~4s — hence the explicit per-test timeout on every spawn below.
+  const COLLECT_TIMEOUT = 20_000;
 
   // This step runs under `if: !cancelled()` so a broken merge still produces a
   // fragment for the QA report. A truncated summary is exactly what a merge
@@ -287,60 +270,51 @@ describe('collect-test-metrics degradation', () => {
       'malformed unhandledErrors',
       '{"shards":8,"exitCode":0,"durationSeconds":1,"unhandledErrors":{"errors":"nope"}}',
     ],
-  ])('reports a failing suite rather than throwing on a %s summary', async (_label, contents) => {
-    const dir = await makeTemp();
-    const summaryPath = join(dir, 'shard-summary.json');
-    await Bun.write(summaryPath, contents);
+  ])(
+    'reports a failing suite rather than throwing on a %s summary',
+    async (_label, contents) => {
+      const dir = await makeTemp();
+      const summaryPath = join(dir, 'shard-summary.json');
+      await Bun.write(summaryPath, contents);
 
-    const { stdout, exitCode } = await collect(summaryPath);
-    expect(exitCode).toBe(0);
-    const fragment = JSON.parse(stdout) as { tests: { exitCode: number } };
-    expect(fragment.tests.exitCode).toBe(1);
-  });
+      const { stdout, exitCode } = await collect(summaryPath);
+      expect(exitCode).toBe(0);
+      const fragment = JSON.parse(stdout) as { tests: { exitCode: number } };
+      expect(fragment.tests.exitCode).toBe(1);
+    },
+    COLLECT_TIMEOUT
+  );
 
-  it('reports a failing suite when the summary was never written', async () => {
-    const dir = await makeTemp();
-    const { stdout, exitCode } = await collect(join(dir, 'missing.json'), join(dir, 'no-shards'));
-    expect(exitCode).toBe(0);
-    expect((JSON.parse(stdout) as { tests: { exitCode: number } }).tests.exitCode).toBe(1);
-  });
+  it(
+    'reports a failing suite when the summary was never written',
+    async () => {
+      const dir = await makeTemp();
+      const { stdout, exitCode } = await collect(join(dir, 'missing.json'), join(dir, 'no-shards'));
+      expect(exitCode).toBe(0);
+      expect((JSON.parse(stdout) as { tests: { exitCode: number } }).tests.exitCode).toBe(1);
+    },
+    COLLECT_TIMEOUT
+  );
 
-  it('accepts a complete summary rather than degrading it', async () => {
-    const dir = await makeTemp();
-    const summaryPath = join(dir, 'shard-summary.json');
-    await Bun.write(
-      summaryPath,
-      JSON.stringify({
-        shards: 8,
-        exitCode: 0,
-        durationSeconds: 12,
-        unhandledErrors: { errors: 0, headlines: [] },
-      })
-    );
+  it(
+    'accepts a complete summary rather than degrading it',
+    async () => {
+      const dir = await makeTemp();
+      const summaryPath = join(dir, 'shard-summary.json');
+      await Bun.write(
+        summaryPath,
+        JSON.stringify({
+          shards: 8,
+          exitCode: 0,
+          durationSeconds: 12,
+          unhandledErrors: { errors: 0, headlines: [] },
+        })
+      );
 
-    const { stdout, exitCode } = await collect(summaryPath);
-    expect(exitCode).toBe(0);
-    expect((JSON.parse(stdout) as { tests: { exitCode: number } }).tests.exitCode).toBe(0);
-  });
-
-  // The frontend coverage thresholds moved out of the sharded run and into the
-  // merge job, so the shard summary can be all-green while the run is red. If
-  // the gate's outcome did not reach the fragment, verdict.ts — which keys
-  // entirely on `tests.exitCode` — would render a passing suite on a red CI run.
-  it('reports the merge job coverage gate failure on an all-green shard summary', async () => {
-    const dir = await makeTemp();
-    const summaryPath = join(dir, 'shard-summary.json');
-    await Bun.write(
-      summaryPath,
-      JSON.stringify({
-        shards: 8,
-        exitCode: 0,
-        durationSeconds: 12,
-        unhandledErrors: { errors: 0, headlines: [] },
-      })
-    );
-
-    const { stdout } = await collect(summaryPath, join(dir, 'no-shards'), '1');
-    expect((JSON.parse(stdout) as { tests: { exitCode: number } }).tests.exitCode).toBe(1);
-  });
+      const { stdout, exitCode } = await collect(summaryPath);
+      expect(exitCode).toBe(0);
+      expect((JSON.parse(stdout) as { tests: { exitCode: number } }).tests.exitCode).toBe(0);
+    },
+    COLLECT_TIMEOUT
+  );
 });

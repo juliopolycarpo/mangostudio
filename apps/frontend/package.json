@@ -15,11 +15,7 @@
     "test": "bun run test:unit && bun run test:integration",
     "test:unit": "bun test --tsconfig-override=./tsconfig.test.json --isolate --timeout 15000 tests/unit",
     "test:integration": "bun test --tsconfig-override=./tsconfig.test.json --isolate --timeout 15000 tests/integration",
-    "test:coverage": "bun run test:coverage:vitest && bun run test:coverage:bun",
-    "test:coverage:vitest": "vitest run --coverage --passWithNoTests $MANGOSTUDIO_VITEST_ARGS",
-    "test:coverage:bun": "bun test --tsconfig-override=./tsconfig.test.json --isolate --timeout 15000 tests --coverage --timings=../../.mango/artifacts/timings/frontend-bun.json --update-timings --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/frontend-bun.xml $MANGOSTUDIO_BUN_TEST_ARGS",
-    "test:coverage:merge": "vitest --mergeReports=.vitest-reports --coverage --passWithNoTests --reporter=default --reporter=junit --outputFile=../../.mango/artifacts/junit/frontend-vitest.xml",
-    "test:ui": "vitest --ui"
+    "test:coverage": "bun test --tsconfig-override=./tsconfig.test.json --isolate --parallel=4 --timeout 15000 tests --coverage --timings=../../.mango/artifacts/timings/frontend.json --update-timings --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/frontend.xml && bun ../../scripts/qa-gate/enforce-coverage-thresholds.ts frontend"
   },
   "dependencies": {
     "@elysia/eden": "2.0.0-beta.2",
@@ -53,7 +49,6 @@
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
     "@vitest/coverage-istanbul": "4.1.10",
-    "@vitest/ui": "^4.1.10",
     "bun-plugin-tailwind": "^0.1.2",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4.3.3",

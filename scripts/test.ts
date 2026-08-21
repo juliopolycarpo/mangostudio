@@ -2,7 +2,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { BROWSER_SMOKE_TEST_COMMAND } from './lib/browser-smoke';
-import { ALL_WORKSPACE_NAMES, ROOT_DIR } from './lib/config';
+import { ALL_WORKSPACE_NAMES, ROOT_DIR, type WorkspaceName } from './lib/config';
 import {
   exitWithResults,
   fatal,
@@ -12,8 +12,14 @@ import {
   runCommand,
   runParallel,
 } from './lib/runner';
-import { createTurboTestCommand, parseShard, type TestShard, testLaneEnv } from './lib/test';
-import { JUNIT_DIR, TIMINGS_DIR, VITEST_BLOB_DIR } from './lib/test-lanes';
+import {
+  createTurboTestCommand,
+  parseShard,
+  shardedCoverageWorkspaces,
+  type TestShard,
+  testLaneEnv,
+} from './lib/test';
+import { JUNIT_DIR, TIMINGS_DIR } from './lib/test-lanes';
 
 const ROOT_SCRIPTS_TEST_COMMAND = ['turbo', 'run', '//#test:scripts', '--ui=stream'];
 
@@ -29,9 +35,12 @@ Lane flags:
   --e2e
   --coverage     Run coverage collection across applicable workspaces
   --all          Run all lanes (unit + integration + e2e)
-  --shard=i/N    Run only shard i of N. Every lane splits its own files, so N
-                 shards run on N machines and something must merge the results
-                 (scripts/ci/merge-test-shards.ts).
+  --shard=i/N    Run only shard i of N. Every sharded lane splits its own
+                 files, so N shards run on N machines and something must merge
+                 the results (scripts/ci/merge-test-shards.ts). The frontend
+                 lane is excluded: its LCOV cannot be merged across shards, so
+                 CI runs it whole via --only=frontend in its own job.
+  --only=<ws>    Run only that workspace's lanes (and skip the root scripts).
   --help`);
   process.exit(0);
 }
@@ -43,6 +52,7 @@ let runE2ELane = false;
 let runCoverage = false;
 let runAllLanes = false;
 let shard: TestShard | null = null;
+let only: WorkspaceName | null = null;
 const unexpectedArgs: string[] = [];
 
 for (const arg of args) {
@@ -64,6 +74,12 @@ for (const arg of args) {
     } catch (caught) {
       fatal(caught instanceof Error ? caught.message : String(caught));
     }
+  } else if (arg.startsWith('--only=')) {
+    const workspace = arg.slice('--only='.length);
+    if (!(ALL_WORKSPACE_NAMES as readonly string[]).includes(workspace)) {
+      fatal(`Unknown workspace '${workspace}'. Expected one of: ${ALL_WORKSPACE_NAMES.join(', ')}`);
+    }
+    only = workspace as WorkspaceName;
   } else {
     unexpectedArgs.push(arg);
   }
@@ -81,6 +97,13 @@ if (shard && !runCoverage) {
   fatal('--shard requires --coverage; no other lane has a merge step to reassemble it.');
 }
 
+// The two flags answer the same question — "which lanes run here?" — with
+// contradictory answers: a shard covers a slice of the sharded lanes, while
+// --only names one workspace whole.
+if (shard && only) {
+  fatal('--shard and --only are mutually exclusive.');
+}
+
 // Bun refuses to create the parent directory for `--reporter-outfile` and
 // prints `JUnitReportFailed` while still exiting 0 when it is missing — the
 // lane's counts silently go to zero. Re-verified on the pinned 1.4.0: running
@@ -91,7 +114,6 @@ if (shard && !runCoverage) {
 const junitDir = join(ROOT_DIR, JUNIT_DIR);
 await rm(junitDir, { recursive: true, force: true });
 await mkdir(junitDir, { recursive: true });
-if (shard) await rm(join(ROOT_DIR, VITEST_BLOB_DIR), { recursive: true, force: true });
 
 // Created but deliberately NOT cleared: a restored timings file is an input to
 // this run, and every shard has to read the same one or they stop agreeing on
@@ -102,6 +124,14 @@ if (shard) await rm(join(ROOT_DIR, VITEST_BLOB_DIR), { recursive: true, force: t
 await mkdir(join(ROOT_DIR, TIMINGS_DIR), { recursive: true });
 
 const laneEnv = testLaneEnv(shard);
+
+// Which workspaces each turbo fan-out targets. `--only` scopes everything to
+// one workspace; a sharded coverage run drops the frontend, whose LCOV cannot
+// be reassembled from slices (see shardedCoverageWorkspaces).
+const laneWorkspaces: WorkspaceName[] = only ? [only] : [...ALL_WORKSPACE_NAMES];
+const coverageWorkspaces: WorkspaceName[] = shard ? shardedCoverageWorkspaces() : laneWorkspaces;
+// The root scripts lane has no workspace, so --only leaves it out.
+const runRootScripts = only === null;
 
 const hasExplicitLaneSelection =
   runUnitLane || runIntegrationLane || runE2ELane || runCoverage || runAllLanes;
@@ -117,10 +147,17 @@ const results: RunResult[] = [];
 if (shouldRunUnit) {
   info('\nPhase: unit');
   const unitResults = await runParallel([
+    ...(runRootScripts
+      ? [
+          () =>
+            runCommand('root:test:scripts', ROOT_SCRIPTS_TEST_COMMAND, {
+              cwd: ROOT_DIR,
+              env: laneEnv,
+            }),
+        ]
+      : []),
     () =>
-      runCommand('root:test:scripts', ROOT_SCRIPTS_TEST_COMMAND, { cwd: ROOT_DIR, env: laneEnv }),
-    () =>
-      runCommand('workspaces:test:unit', createTurboTestCommand('test:unit', ALL_WORKSPACE_NAMES), {
+      runCommand('workspaces:test:unit', createTurboTestCommand('test:unit', laneWorkspaces), {
         cwd: ROOT_DIR,
         env: laneEnv,
       }),
@@ -138,7 +175,7 @@ if (shouldRunIntegration) {
     () =>
       runCommand(
         'workspaces:test:integration',
-        createTurboTestCommand('test:integration', ALL_WORKSPACE_NAMES),
+        createTurboTestCommand('test:integration', laneWorkspaces),
         { cwd: ROOT_DIR, env: laneEnv }
       ),
   ]);
@@ -166,12 +203,19 @@ if (runCoverage) {
   // here so `--coverage` is a self-contained replacement for `--unit
   // --integration --coverage` on CI, avoiding a duplicate test pass.
   const coverageResults = await runParallel([
-    () =>
-      runCommand('root:test:scripts', ROOT_SCRIPTS_TEST_COMMAND, { cwd: ROOT_DIR, env: laneEnv }),
+    ...(runRootScripts
+      ? [
+          () =>
+            runCommand('root:test:scripts', ROOT_SCRIPTS_TEST_COMMAND, {
+              cwd: ROOT_DIR,
+              env: laneEnv,
+            }),
+        ]
+      : []),
     () =>
       runCommand(
         'workspaces:test:coverage',
-        createTurboTestCommand('test:coverage', ALL_WORKSPACE_NAMES),
+        createTurboTestCommand('test:coverage', coverageWorkspaces),
         { cwd: ROOT_DIR, env: laneEnv }
       ),
   ]);

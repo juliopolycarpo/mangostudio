@@ -253,35 +253,43 @@ by a process that never shares itself with another shard, so that precondition
 never exists. The two compose: in-job `--parallel` still applies the day
 oven-sh/bun#38008 ships.
 
-`bun run test --coverage --shard=i/N` splits every lane at once. Each Bun lane
-takes the flag through `MANGOSTUDIO_BUN_TEST_ARGS`; the frontend Vitest lane
-takes `MANGOSTUDIO_VITEST_ARGS` and switches to a **blob report** for the merge
-step to replay. `--shard` requires `--coverage`: it is the only lane with a
-merge step behind it, and a shard of any other lane would run a fraction of the
-files and exit 0.
+`bun run test --coverage --shard=i/N` splits every **sharded** lane at once;
+each takes the flag through `MANGOSTUDIO_BUN_TEST_ARGS`. `--shard` requires
+`--coverage`: it is the only lane with a merge step behind it, and a shard of
+any other lane would run a fraction of the files and exit 0.
 
-> **`--reporter=blob` does not switch the coverage thresholds off.** A sharded
-> Vitest run still evaluates them, against a fraction of the sources, and so
-> fails on *every* shard — measured, and the reason `vitest.config.ts` drops
-> `coverage.thresholds` when `MANGOSTUDIO_TEST_SHARD` is set. The merge
-> invocation is unsharded, so it is what enforces them.
+**The frontend lane does not shard.** Bun's LCOV cannot be reassembled from
+slices (see [Merging is not concatenation](#merging-is-not-concatenation)), so
+its coverage has to come from one invocation. CI runs it whole in its own job
+via `bun run test --coverage --only=frontend`, parallelised in-process instead:
+`--parallel=4 --isolate`, adopted after a 12-run soak of the full 167-file
+suite pinned to four cores came back 12/12 clean — 1397 pass / 0 fail every
+run, zero `epoll_ctl`, zero hangs, ~34s per run against a ~102s serial
+baseline. The lane registry (`scripts/lib/test-lanes.ts`) carries the
+`sharded` flag, and `test-lanes.unit.test.ts` pins that the frontend's script
+cannot even receive `$MANGOSTUDIO_BUN_TEST_ARGS`.
 
-CI runs eight shards plus one merge job (`.github/workflows/test.yml`). Where
-the run's time actually goes, measured on run 32331139863 (four-core runner,
-Turbo running the lanes concurrently):
+> The soak matters because oven-sh/bun#37968 (the fd-leak/`epoll_ctl` abort) is
+> still open upstream; a green run means the collision is not manifesting at
+> this scale, not that the defect is gone. If CI later reproduces it, drop to
+> `--parallel=2` first — parallelism *divides* the stale-registration
+> accumulation across workers, so serial `--isolate` concentrates rather than
+> avoids it.
+
+CI runs eight shards, the frontend job, and one merge job
+(`.github/workflows/test.yml`). Where the sharded run's time went when the
+split was designed, measured on run 32331139863 (four-core runner, Turbo
+running the lanes concurrently, the frontend then still on Vitest at 189.4s):
 
 | Lane                                          | Files | Duration |
 | --------------------------------------------- | ----- | -------- |
 | `apps/api` `bun test --coverage --parallel=1` | 398   | 278.3s   |
-| `apps/frontend` `vitest run --coverage`       | 165   | 189.4s   |
 | `apps/runtime`                                | 63    | 26.4s    |
 | root `test:scripts`                           | 81    | 16.3s    |
 | `apps/shared`                                 | 54    | 1.8s     |
-| `apps/frontend` Bun files                     | 2     | 0.1s     |
 
-Two long poles, not one, which is why the shard boundary is a slice of *every*
-lane rather than one job per workspace: a per-workspace split leaves `apps/api`
-alone at 278s.
+The shard boundary is a slice of *every* sharded lane rather than one job per
+workspace: a per-workspace split leaves `apps/api` alone at 278s.
 
 Eight is where the curve flattens. What bites is the ~21s of fixed setup each
 job pays and the merge job's fixed cost, so measured per-shard test time of 70s
@@ -337,14 +345,7 @@ shard `i`. Balancing it is worth 0.5s within the lane and 0.6s overall (59.2s vs
 
 #### Merging is not concatenation
 
-**Vitest merges exactly.** `--reporter=blob` per shard, then
-`vitest --mergeReports --coverage` (`test:coverage:merge`) replays them. Four
-shards merged reproduce the unsharded run's numbers to the digit —
-`76.08 / 68.06 / 72.81 / 78.76` statements/branches/functions/lines — and that
-merge is where the coverage thresholds apply, so a drop there is a real drop.
-It costs about four seconds.
-
-**Bun's LCOV does not.** Its per-file `LF:`/`FNF:` are *run-dependent*: a source
+Bun's per-file `LF:`/`FNF:` are *run-dependent*: a source
 file a shard loaded but never exercised reports every line as coverable, while
 the same file under a shard that ran its code reports the collapsed set lazy
 parsing leaves behind. On `apps/shared` at `--shard=i/3`,
@@ -378,6 +379,12 @@ single shard sits from the union. Only line coverage reaches the QA verdict
 (`scripts/qa-gate/render/verdict.ts`, 0.1pp epsilon), so the function number is
 a table entry rather than a signal.
 
+This approximation is also why the frontend lane refuses to shard at all: its
+coverage carries an enforced gate (see [Coverage](#coverage)), and a gate on a
+number the merge can only approximate would drift with the shard count rather
+than with the tests. Its single whole-run LCOV rides the same merge machinery
+as a one-input degenerate case — a copy.
+
 > **One transitional report.** The PR QA report compares a head against a
 > `main` baseline. The first PRs after sharding landed compare a sharded head
 > against a pre-shard baseline and show a one-time `line coverage −0.54pp`.
@@ -387,51 +394,21 @@ a table entry rather than a signal.
 #### JUnit, and the one thing it cannot carry
 
 Every lane writes JUnit to `.mango/artifacts/junit/<lane>.xml`, and
-`scripts/qa-gate/junit-results.ts` counts `<testcase>` elements out of the shard
-directories. Counts come from the elements rather than the `<testsuites>`
-header because the runners disagree on the header — Bun emits
-`tests`/`assertions`/`failures`/`skipped`, Vitest emits `tests`/`failures`/
-`errors` and puts `skipped` only on the nested `<testsuite>`, which Bun also
-nests once per `describe`.
+`scripts/qa-gate/junit-results.ts` counts `<testcase>` elements out of the
+test-job directories. Counts come from the elements rather than the
+`<testsuites>` header because header conventions differ across runners — Bun
+emits `tests`/`assertions`/`failures`/`skipped` and nests a `<testsuite>` once
+per `describe`, so summing headers double-counts. A `<testcase>` is a leaf.
 
-Unhandled errors are the exception, in **both** runners. Vitest's JUnit reporter
-is `onTestRunEnd(testModules)` — it never receives the run's `unhandledErrors`
-and writes `errors="0"` unconditionally, and its JSON reporter takes the same
-argument. Bun is the same shape from the other direction: an error raised between
-tests prints a `# Unhandled error between tests` block and a `N error` summary
-line and exits 1, while its JUnit report reads `failures="0"` with no failing
-`<testcase>` (measured on 1.4.0-canary.1). So the failure class in
+Unhandled errors are the exception. An error raised between tests prints a
+`# Unhandled error between tests` block and a `N error` summary line and exits
+1, while the JUnit report reads `failures="0"` with no failing `<testcase>`
+(measured on 1.4.0-canary.1). So the failure class in
 [Unhandled Errors With Green Test Counts](#unhandled-errors-with-green-test-counts)
-exists only in the log for either runner, and each shard extracts it with
-`scripts/qa-gate/unhandled-errors.ts` before the log leaves the job. If you ever
-replace that with a structured source, check the reporter first rather than
-assuming the XML grew an `errors` count.
-
-> That only works because every Vitest invocation leads with the console
-> reporters `vitest.config.ts` would have chosen (`consoleReporters()` in
-> `scripts/lib/test.ts`). A CLI `--reporter` **replaces** the config's
-> `reporters` rather than adding to it, so `--reporter=blob` alone prints
-> exactly one line (`blob report written to …`) and no summary — measured, and
-> measured end to end: the same run with `--reporter=default --reporter=blob`
-> feeds `unhandled-errors.ts` `{"errors":1,…}`, and without it `{"errors":0}`.
-> Drop `default` and the `Errors N errors` and `This error originated in "…"`
-> lines stop being emitted at all, which silently removes the only Vitest source
-> `unhandled-errors.ts` has: the run still exits 1, but the QA report degrades
-> to `parseMiss` and the "this is not a flake, do not re-run it" guidance in
-> `scripts/qa-gate/render/test-failures.ts` (gated on `errors > 0`) can never
-> fire. `github-actions` is the second casualty of the same rule — the config
-> adds it when `GITHUB_ACTIONS=true` (which Turbo does pass through to the lane
-> tasks, measured), and omitting it costs the run every inline failure
-> annotation.
->
-> `test:coverage:merge` is the one Vitest invocation that keeps `default` alone,
-> and that is deliberate. Its own failure mode is the coverage threshold gate,
-> and a threshold miss is not a reporter event: istanbul prints
-> `ERROR: Coverage for statements (76.1%) does not meet global threshold (100%)`
-> and Vitest exits 1. Measured with the annotation reporter explicitly enabled —
-> 165 files and 1343 tests green, exit 1 on the threshold, **zero** `::error`
-> lines. Test failures the merge replays were already annotated by the shard
-> that ran them.
+exists only in the log, and each test job — the shards and the frontend job
+alike — extracts it with `scripts/qa-gate/unhandled-errors.ts` before the log
+leaves the job. If you ever replace that with a structured source, check the
+reporter first rather than assuming the XML grew an `errors` count.
 
 > Bun does not create the parent directory for `--reporter-outfile`, and it does
 > **not** fail the run when it is missing: it prints `JUnitReportFailed` and
@@ -758,19 +735,34 @@ Each provider stream test must cover:
 
 ## Coverage
 
-Coverage reports are written under `.mango/artifacts/coverage/`. The whole frontend suite
-now runs on `bun test`, which writes LCOV under `.mango/artifacts/coverage/frontend/bun/`;
-`.mango/artifacts/coverage/frontend/vitest/` is produced by a lane that matches no files:
+Coverage reports are written under `.mango/artifacts/coverage/`, one directory
+per workspace; the frontend's LCOV lands at
+`.mango/artifacts/coverage/frontend/lcov.info`:
 
 ```bash
 bun run --filter @mangostudio/frontend test:coverage
 ```
 
-**The frontend declares no coverage thresholds right now.** The previous
-70/60/64/72 were istanbul figures measured over the Vitest suite, and that suite
-has moved runners — the numbers describe a file set that no longer exists, and
-`bun test`'s own LCOV is not comparable to istanbul's. They are re-derived
-against the Bun lane rather than carried over.
+**The frontend carries total-coverage floors** — lines 81 / functions 76 /
+statements 81 / branches 53, measured 2026-08-21 at 82.35 / 77.53 / 82.39 /
+54.45 over the full 167-file suite and floored with ~1pt of headroom for
+run-to-run LCOV jitter. (These are Bun-instrumentation numbers; the retired
+istanbul 70/60/64/72 are not comparable.) The floors live in
+`scripts/lib/test-lanes.ts` and are enforced by
+`scripts/qa-gate/enforce-coverage-thresholds.ts`, chained inside
+`test:coverage` itself, so a miss fails the same invocation CI watches — lines
+and functions read from the LCOV, statements and branches derived from the
+sources by `coverage-summary.ts`.
+
+> **Why not `bunfig.toml`'s `coverageThreshold`?** Measured on Bun 1.4.0, it is
+> a different feature than it looks: the threshold applies per *file* (every
+> file must individually clear the bar, so one legitimately uncovered file
+> fails any positive value), a key you omit still enforces a hidden ~0.9
+> default, singular key names (`line`) are silently ignored, the whole gate is
+> silently inert under `coverageReporter = ["lcov"]` without `"text"`, and a
+> miss prints nothing — it exists only in the exit code.
+> `test-lanes.unit.test.ts` pins the key's absence so it cannot come back by
+> accident.
 
 When raising or repairing coverage, prioritize release-critical surfaces first:
 
@@ -781,16 +773,10 @@ When raising or repairing coverage, prioritize release-critical surfaces first:
 
 ## Unhandled Errors With Green Test Counts
 
-A frontend run can report every file and every test as passed and still print an
-error block — `Errors N errors` under Vitest, `# Unhandled error between tests`
-under `bun test` — and exit 1. That is not a flake. Do not re-run it. CI already
-failed correctly. The green counts are why it looks like noise.
-
-```
-Test Files  144 passed (144)
-     Tests  1150 passed (1150)
-    Errors  2 errors
-```
+A frontend run can report every file and every test as passed and still print a
+`# Unhandled error between tests` block — and exit 1. That is not a flake. Do
+not re-run it. CI already failed correctly. The green counts are why it looks
+like noise.
 
 The mechanism is always the same. Something outlives the test that started it —
 a timer, a `lazy()` chunk behind a Suspense boundary, an unanswered `fetch` — and
@@ -869,14 +855,13 @@ a `validity` string (toolchain versions plus content hashes). `setup-mango`
 wraps the Bun install family; every other family is invoked from the workflow
 that produces or consumes it.
 
-| Family                | Producer / consumer           | Path                               | Invalidators                                             | Restore behavior                  |
-| --------------------- | ----------------------------- | ---------------------------------- | -------------------------------------------------------- | --------------------------------- |
-| Bun install           | every job using `setup-mango` | `~/.bun/install/cache`             | OS, arch, Bun revision, lockfile                         | loose trusted-`main` prefix       |
-| Turbo task output     | check, test, build            | `.turbo/cache`                     | OS, arch, Bun revision, Turbo version, lane, task config | lane-scoped trusted-`main` prefix |
-| Vite optimizer        | test and build                | `apps/frontend/node_modules/.vite` | lockfile and frontend/Vite/Vitest/TS config              | lane-scoped trusted-`main` prefix |
-| TypeScript build info | check                         | `.mango/artifacts/tsbuildinfo/`    | TypeScript version, tsconfig graph, TS sources           | version-scoped trusted-`main`     |
-| Workflow lint tools   | check                         | `.mango/artifacts/tools/`          | pinned tool manifest                                     | exact trusted restore only        |
-| Playwright browser    | browser smoke                 | `~/.cache/ms-playwright`           | OS, arch, Playwright version                             | exact trusted restore only        |
+| Family                | Producer / consumer           | Path                            | Invalidators                                             | Restore behavior                  |
+| --------------------- | ----------------------------- | ------------------------------- | -------------------------------------------------------- | --------------------------------- |
+| Bun install           | every job using `setup-mango` | `~/.bun/install/cache`          | OS, arch, Bun revision, lockfile                         | loose trusted-`main` prefix       |
+| Turbo task output     | check, test, build            | `.turbo/cache`                  | OS, arch, Bun revision, Turbo version, lane, task config | lane-scoped trusted-`main` prefix |
+| TypeScript build info | check                         | `.mango/artifacts/tsbuildinfo/` | TypeScript version, tsconfig graph, TS sources           | version-scoped trusted-`main`     |
+| Workflow lint tools   | check                         | `.mango/artifacts/tools/`       | pinned tool manifest                                     | exact trusted restore only        |
+| Playwright browser    | browser smoke                 | `~/.cache/ms-playwright`        | OS, arch, Playwright version                             | exact trusted restore only        |
 
 `mode` selects `restore-save` (default), `restore`, or `save`. Exact-restore
 families (`lint-tools`, `playwright`) set `exact-restore: true` so a loose

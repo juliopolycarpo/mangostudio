@@ -183,11 +183,12 @@ export const mergeTimingsShards = async (
     if (malformed.length > 0) {
       problems.push({ lane: lane.id, kind: 'malformed', files: malformed.sort() });
     }
-    // A lane with no slices at all is not an error here: `frontend-bun` runs two
-    // files across eight shards, so most shards legitimately contribute nothing.
-    // The lane is simply left out of `outDir`, which means it drops out of the
-    // saved cache and next run's split for it falls back to round-robin —
-    // degraded balance, never a wrong partition.
+    // A lane with no slices at all is not an error here: a lane whose files all
+    // landed on other jobs legitimately contributes nothing. The lane is simply
+    // left out of `outDir`, which means it drops out of the saved cache and next
+    // run's split for it falls back to round-robin — degraded balance, never a
+    // wrong partition. The unsharded frontend lane rides the same path: its own
+    // job contributes the one whole slice and every shard contributes none.
     if (slices.length === 0) continue;
 
     const { merged, problem } = mergeLaneSlices(lane.id, slices);
