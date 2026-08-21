@@ -38,11 +38,16 @@ export interface BuildFrontendOptions {
 async function generateRouteTree(): Promise<void> {
   const proc = Bun.spawn(['bun', 'run', 'routes'], {
     cwd: ROOT,
-    stdout: 'pipe',
+    // `ignore`, not `pipe`: nothing reads stdout, and an undrained pipe leaks a
+    // descriptor per run — the dev watcher calls this on every save.
+    stdout: 'ignore',
     stderr: 'pipe',
   });
+  // Drained unconditionally, for the same reason: reading it only on failure
+  // leaks the descriptor on every successful build.
+  const stderr = await new Response(proc.stderr).text();
   if ((await proc.exited) !== 0) {
-    throw new Error(`tsr generate failed:\n${await new Response(proc.stderr).text()}`);
+    throw new Error(`tsr generate failed:\n${stderr}`);
   }
 }
 
