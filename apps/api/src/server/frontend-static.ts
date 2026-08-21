@@ -221,7 +221,15 @@ function unhashedAssetPaths(frontendDir: string): string[] {
  */
 function registerSpa(app: App, frontendDir: string): void {
   const indexPath = join(frontendDir, 'index.html');
-  const serveIndex = () => serveIndexFile(indexPath, SHELL_CACHE_CONTROL);
+  // Existence-checked for the same reason `serveUnhashedFile` is: `build.ts`
+  // removes `dist/` before every rebuild and the dev watcher rebuilds on every
+  // save, so `index.html` is briefly absent — and a `Bun.file` that is not
+  // there answers 500 with Bun's own error page once the body is read, on `/`
+  // and on every deep link alike. A 404 is the honest answer for that window.
+  const serveIndex = (): Response =>
+    existsSync(indexPath)
+      ? serveIndexFile(indexPath, SHELL_CACHE_CONTROL)
+      : new Response(null, { status: 404 });
   const assetsDir = join(frontendDir, HASHED_ASSET_DIR);
 
   // Registered before the plugin: the static plugin may register GET / with an
