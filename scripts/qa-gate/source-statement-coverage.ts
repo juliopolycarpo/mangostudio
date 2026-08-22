@@ -1,6 +1,6 @@
 import * as ts from '@typescript/typescript6';
 
-import { type CoveredSource, readCoveredSources } from './lcov-sources';
+import type { CoveredSource } from './lcov-sources';
 import { type CoverageBucket, coverageBucket } from './parse-lcov';
 
 interface StatementTotals {
@@ -88,9 +88,3 @@ export const sourceStatementCoverageFromSources = (
 
   return coverageBucket(totals.total, totals.covered);
 };
-
-export const readSourceStatementCoverageSummary = async (
-  lcovPath: string,
-  baseDir: string
-): Promise<CoverageBucket> =>
-  sourceStatementCoverageFromSources(await readCoveredSources(lcovPath, baseDir));
