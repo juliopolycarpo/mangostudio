@@ -249,6 +249,7 @@ function serveStattedFile(
  */
 function resolveUnhashedFile(
   frontendDir: string,
+  frontendRoot: string | null,
   pathname: string
 ): { filePath: string; stats: Stats } | null {
   if (!pathname.startsWith('/') || !/\.[A-Za-z0-9]+$/.test(pathname)) return null;
@@ -273,8 +274,7 @@ function resolveUnhashedFile(
   // Defence in depth behind the segment check: a symlink inside dist/ could
   // still resolve outward, and only a realpath comparison catches that.
   const real = realpathSyncSafe(filePath);
-  const root = realpathSyncSafe(frontendDir);
-  if (!real || !root || !real.startsWith(root + sep)) return null;
+  if (!real || !frontendRoot || !real.startsWith(frontendRoot + sep)) return null;
 
   // `statFile`, not `statSync`: a dangling symlink or a file removed between
   // the resolve and the stat must answer 404, not throw out of the handler.
@@ -310,6 +310,10 @@ function realpathSyncSafe(path: string): string | null {
  */
 function registerSpa(app: App, frontendDir: string): void {
   const indexPath = join(frontendDir, 'index.html');
+  // Resolved once here rather than per request: `frontendDir` does not change
+  // for the life of the server, so re-resolving it on every SPA-fallback
+  // request bought nothing but a repeated syscall.
+  const frontendRoot = realpathSyncSafe(frontendDir);
   // Existence-checked for the same reason `serveUnhashedFile` is: `build.ts`
   // removes `dist/` before every rebuild and the dev watcher rebuilds on every
   // save, so `index.html` is briefly absent — and a `Bun.file` that is not
@@ -348,8 +352,8 @@ function registerSpa(app: App, frontendDir: string): void {
     // This fallback sits on *every* unmatched request, so an unknown endpoint
     // under an API-owned prefix arrives here too. Those can never name a file
     // in `dist/`, and rejecting them on the prefix — pure string work — keeps a
-    // 404 for `/api/v1/thing.json` from costing a decode, a segment scan, two
-    // `realpathSync` calls and a `statSync`. `/assets` is not rejected here:
+    // 404 for `/api/v1/thing.json` from costing a decode, a segment scan, a
+    // `realpathSync` call and a `statSync`. `/assets` is not rejected here:
     // those files do live in `frontendDir`, and resolving them per request is
     // what serves a dev rebuild's freshly hashed names without a restart.
     if (isApiReservedPath(pathname)) return undefined;
@@ -357,7 +361,7 @@ function registerSpa(app: App, frontendDir: string): void {
     // a `public/` file added while the dev watcher is running is served instead
     // of being answered with the SPA shell. A root-level file that does not
     // exist falls past `isSpaRoute` to `frontendNotFound`, which is a 404.
-    const resolved = resolveUnhashedFile(frontendDir, pathname);
+    const resolved = resolveUnhashedFile(frontendDir, frontendRoot, pathname);
     if (resolved) {
       return serveStattedFile(
         resolved.filePath,
