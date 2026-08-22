@@ -9,7 +9,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { newestSourceMtime } from '../../../src/server/dev-frontend';
+import { isWatchedInput, newestSourceMtime } from '../../../src/server/dev-frontend';
 
 /** Seconds since the epoch, so mtimes are far enough apart to compare. */
 const OLD = 1_000_000;
@@ -124,5 +124,52 @@ describe('newestSourceMtime', () => {
 
   test('reports 0 for a directory that does not exist, which reads as stale', () => {
     expect(newestSourceMtime(join(tmpdir(), 'dev-frontend-absent-fixture'))).toBe(0);
+  });
+});
+
+/**
+ * The watcher's half of the same allowlist. Pinned separately because nothing
+ * else reaches it: `dev-frontend.ts` is never imported by the binary entry, so
+ * `test-build.ts` cannot run it, and a watcher that stops firing produces no
+ * error and no log line — just a dev save that silently does not rebuild.
+ */
+describe('isWatchedInput', () => {
+  test.each([
+    ['src/main.tsx'],
+    ['src/routes/index.tsx'],
+    ['src/styles/app.css'],
+    ['index.html'],
+    ['build.ts'],
+    ['public/favicon.ico'],
+    ['tsconfig.json'],
+    ['tsr.config.json'],
+    ['package.json'],
+    // The watch API is not guaranteed to hand back the platform separator.
+    ['src\\components\\Thing.tsx'],
+    // Nor a path without a leading one. An empty first segment matches no
+    // allowlist entry, so this would otherwise be a rebuild that never fires.
+    ['/src/main.tsx'],
+  ])('rebuilds on %s', (filename) => {
+    expect(isWatchedInput(filename)).toBe(true);
+  });
+
+  test.each([
+    // The build's own writes: reacting to any of these schedules the next
+    // rebuild forever.
+    ['dist/index.html'],
+    ['dist/assets/index-abc123.js'],
+    ['dist-metafile.json'],
+    ['src/routeTree.gen.ts'],
+    // Workspace traffic that is not a build input. `.turbo` logs land here on
+    // every `bun run check`.
+    ['tests/unit/thing.test.tsx'],
+    ['.turbo/turbo-typecheck.log'],
+    ['.tanstack/tmp/scratch'],
+    ['node_modules/pkg/index.js'],
+    ['AGENTS.md'],
+    ['tsconfig.test.json'],
+    ['turbo.json'],
+  ])('ignores %s', (filename) => {
+    expect(isWatchedInput(filename)).toBe(false);
   });
 });

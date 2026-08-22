@@ -70,6 +70,32 @@ function isBuildInput(name: string, depth: number): boolean {
   return depth === 0 ? BUILD_INPUTS.has(name) : name !== GENERATED_FILE;
 }
 
+/**
+ * Whether a path the watcher reported should schedule a rebuild, given
+ * relative to the frontend root.
+ *
+ * Split on either separator rather than `path.sep`: the value comes from the
+ * OS watch API, not from `path.join`, so it is not guaranteed to use the
+ * platform's canonical form.
+ *
+ * Note the direction this fails in. An allowlist skips unless every segment
+ * passes, so a path shaped differently than expected — a leading separator
+ * makes the first segment empty — is a rebuild that does *not* happen, and a
+ * missed rebuild is silent where a spurious one is merely slow. That is the
+ * opposite of `distIsCurrent()`'s bias, and it is why this is exported and
+ * pinned rather than left inline: nothing else in the suite, and nothing in
+ * `test-build.ts`, ever executes this module.
+ */
+export function isWatchedInput(filename: string): boolean {
+  // A leading separator would otherwise make the first segment empty, which no
+  // allowlist entry matches — so the one plausible shape variation would turn
+  // every event into a skipped rebuild rather than a spurious one.
+  return filename
+    .replace(/^[\\/]+/, '')
+    .split(/[\\/]/)
+    .every((segment, depth) => isBuildInput(segment, depth));
+}
+
 async function runBuild(): Promise<boolean> {
   const proc = Bun.spawn(['bun', './build.ts', '--dev'], {
     cwd: FRONTEND_DIR,
@@ -219,15 +245,7 @@ export async function registerDevFrontend(): Promise<void> {
     // (`dist/`, `dist-metafile.json`, the regenerated route tree) schedule the
     // next rebuild forever, and unrelated workspace traffic — a saved test, a
     // turbo log — costs a full rebuild that tears `dist/` down first.
-    //
-    // Split on either separator rather than `path.sep`: the value here comes
-    // from the OS watch API, not from `path.join`, so it is not guaranteed to
-    // use the platform's canonical form.
-    if (
-      filename &&
-      !filename.split(/[\\/]/).every((segment, depth) => isBuildInput(segment, depth))
-    )
-      return;
+    if (filename && !isWatchedInput(filename)) return;
     if (pending) clearTimeout(pending);
     pending = setTimeout(() => {
       pending = null;
