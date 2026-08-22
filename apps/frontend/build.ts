@@ -200,7 +200,23 @@ async function buildFrontend(options: BuildFrontendOptions = {}): Promise<void> 
   // dist/ also puts it outside the `dist/**` glob, so it is declared as a
   // second `build` output in turbo.json — otherwise a cache hit restores dist/
   // and leaves whatever metafile happens to be on disk describing it.
-  await writeFile(join(ROOT, 'dist-metafile.json'), JSON.stringify(result.metafile));
+  //
+  // Production only. It is ~1.5 MB of JSON and its sole consumer is the bundle
+  // report, which the parity gate runs against a production build; writing it
+  // on every dev save spent the stringify of that whole object graph on
+  // something nothing in the dev loop reads. The report already handles its
+  // absence — it prints that the duplicate-module check was skipped.
+  //
+  // A dev build *removes* it rather than leaving the last production one
+  // behind. The invariant worth keeping is that the metafile on disk describes
+  // the bundle in dist/; a stale one silently describes a different build, and
+  // the report has no way to tell. Absent is a state it reports honestly.
+  const metafilePath = join(ROOT, 'dist-metafile.json');
+  if (production) {
+    await writeFile(metafilePath, JSON.stringify(result.metafile));
+  } else {
+    await rm(metafilePath, { force: true });
+  }
 }
 
 async function writeHtml(result: Awaited<ReturnType<typeof Bun.build>>): Promise<void> {
@@ -300,24 +316,15 @@ function assertAbsoluteAssetUrls(html: string): void {
   }
 }
 
-/** Files in `dist/`, relative and '/'-separated. */
-async function listDist(): Promise<string[]> {
+/** How many files the build wrote into `dist/`. */
+async function countDistFiles(): Promise<number> {
   const entries = await readdir(DIST, { recursive: true, withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isFile())
-    .map((entry) =>
-      join(entry.parentPath, entry.name)
-        .slice(DIST.length + 1)
-        .replaceAll('\\', '/')
-    )
-    .sort();
+  return entries.filter((entry) => entry.isFile()).length;
 }
 
 if (import.meta.main) {
   const started = performance.now();
   await buildFrontend({ dev: process.argv.includes('--dev') });
-  const files = await listDist();
-  console.warn(
-    `[frontend] built ${files.length} files in ${Math.round(performance.now() - started)}ms`
-  );
+  const count = await countDistFiles();
+  console.warn(`[frontend] built ${count} files in ${Math.round(performance.now() - started)}ms`);
 }
