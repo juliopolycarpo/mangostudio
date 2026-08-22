@@ -290,6 +290,10 @@ describe('realtime WebSocket origins and liveness', () => {
     }
   });
 
+  // The handshake origin check is ours (`realtime-routes.ts`), so a rejection
+  // asserted here is a real rejection. Better Auth's trustedOrigins gate reads
+  // the same cfg.corsOrigins but is off under NODE_ENV=test — do not model a
+  // test of that one on this one. See apps/api/tests/unit/auth.test.ts.
   it('accepts configured and absent origins but rejects other browser origins', async () => {
     const { httpUrl, wsUrl } = startServer();
     const user = await signUp(httpUrl);

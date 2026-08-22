@@ -447,6 +447,62 @@ already neutralised it before any code under test ran. `frontend-static.ts`'s
 containment with a `realpathSync` prefix comparison so a symlink inside `dist/` cannot resolve
 outward either.
 
+**T41 — Better Auth turns three security gates off when `NODE_ENV=test`, so `bun test` cannot
+assert any of them.** Measured 2026-08-21 on better-auth 1.6.26 / Bun 1.4.0. From better-auth's
+own `dist/context/create-context.mjs`:
+
+| gate               | line | default                                               |
+| ------------------ | ---- | ----------------------------------------------------- |
+| origin + form CSRF | :210 | `skipOriginCheck: isTest() ? true : false`            |
+| rate limiting      | :171 | `enabled: options.rateLimit?.enabled ?? isProduction` |
+| secret validation  | :40  | `validateSecret()` returns early `if (isTest())`      |
+
+and `@better-auth/core/dist/env/env-impl.mjs:36` — `const isTest = () => nodeENV === "test" ||
+toBoolean(env.TEST)`. `bun test` sets `NODE_ENV=test`. `apps/api/src/auth.ts` sets neither
+`advanced.disableOriginCheck` nor a root `rateLimit` (the `rateLimit: { enabled: false }` there
+is inside the `apiKey({ … })` plugin block), so all three take the environment default.
+
+The same five requests, `POST /api/auth/sign-up/email`, trusted list
+`["http://localhost:3001","http://127.0.0.1:3001","http://0.0.0.0:3001","https://studio.test"]`:
+
+| request                                | in-process, `NODE_ENV=test` | compiled binary, `NODE_ENV=production`    |
+| -------------------------------------- | --------------------------- | ----------------------------------------- |
+| no `Origin` at all                     | 200                         | 200                                       |
+| foreign `Origin`, no cookie            | 200                         | **403** `INVALID_ORIGIN`                  |
+| foreign `Origin` + cookie              | 200                         | **403** `INVALID_ORIGIN`                  |
+| foreign `Origin` + cross-site navigate | 200                         | **429** (rate limit, not the origin gate) |
+| trusted `Origin`                       | 200                         | 200, then 429                             |
+
+**The rule: an assertion about origin rejection, rate limiting, or auth-secret validation cannot
+be written as a `bun test` case — it is vacuous by construction.** Same failure shape as T40: the
+environment neutralised the input before the code under test ran. It is worse here because it is
+self-confirming in both directions — the obvious positive test passes while checking nothing, and
+the obvious *negative* test sees a 200 and reads as a discovered vulnerability. Both happened in
+one session, and the second was relayed as "Better Auth does not behaviorally enforce
+`trustedOrigins` on any endpoint this app enables". That claim is false; production enforces.
+
+Three things not to re-derive:
+
+- **`no Origin at all` being 200 is correct, in both columns.**
+  `dist/api/middlewares/origin-check.mjs:95` returns early unless `forceValidate || headers.has("cookie")`
+  — a cookieless request with no `Origin` carries no ambient authority; it is `curl`, not CSRF.
+  `sign-up`/`sign-in` additionally mount `formCsrfMiddleware` (`dist/api/routes/sign-up.mjs:25`,
+  `sign-in.mjs:214`), which escalates to `validateOrigin(ctx, true)` as soon as **any** `Origin`,
+  `Referer` or `Sec-Fetch-*` header is present. That is the row a probe should target.
+- **The 429s are the second gate, not a flake.** Rate limiting is production-only, so it appears
+  for the first time exactly where these probes run and nowhere a developer looks. Probe B saw it
+  after roughly four sign-ups — space the cases or reuse one, or a 429 gets misread as the origin
+  check.
+- **`scripts/test-build.ts` is the only vehicle.** It already spawns the binary with
+  `NODE_ENV: 'production'`, and per the parity gate below it is the only thing that runs the
+  compiled artifact at all. Do not force the check on under test with
+  `advanced.disableOriginCheck: false`: that makes `bun test` diverge from dev *and* prod on a
+  security path, and the API harness carries no per-suite origin.
+
+The gates that *are* ours — the Elysia CORS middleware in `app.ts` and the realtime handshake in
+`realtime-routes.ts` — read the same `cfg.corsOrigins` and do run under `bun test`. Their tests
+sit next to the Better Auth one and look interchangeable with it. They are not.
+
 ## Test migration mechanics
 
 Everything below is what the 004 spike actually needed across its eleven files. Where a row

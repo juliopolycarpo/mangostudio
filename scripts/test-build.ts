@@ -737,24 +737,90 @@ async function smokeTest(): Promise<void> {
       pass('/api/auth/get-session → handled by Better Auth (not intercepted by SPA fallback)');
     }
 
+    // A foreign Origin on sign-up → 403 INVALID_ORIGIN.
+    //
+    // This is the only place in the repository that can assert it. Better Auth
+    // reads its own environment: `skipOriginCheck` defaults to `isTest()`
+    // (better-auth/dist/context/create-context.mjs:210, and `isTest()` is
+    // `NODE_ENV === 'test' || TEST` in @better-auth/core), so under `bun test`
+    // the origin and CSRF checks are simply off and the same request answers
+    // 200. An `expect(...).toBe(403)` written there passes nothing; a negative
+    // one reads as a vulnerability that is not there. This binary is spawned
+    // with NODE_ENV=production above, which is what makes the gate live.
+    //
+    // `sign-up` mounts `formCsrfMiddleware`, which escalates to
+    // `validateOrigin(ctx, forceValidate = true)` as soon as any Origin,
+    // Referer or Sec-Fetch-* header is present — so no cookie is needed here.
+    // A cookieless request with *no* Origin at all stays 200 by design: it
+    // carries no ambient authority, and asserting a rejection for it would
+    // encode the wrong model.
+    //
+    // The code is asserted, not just the status, so an unrelated future guard
+    // answering 403 cannot satisfy this.
+    {
+      const res = await fetch(`${authBaseUrl}/api/auth/sign-up/email`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'https://attacker.example',
+        },
+        body: JSON.stringify({
+          email: `smoke-foreign-origin-${Date.now()}@test.local`,
+          password: 'smoke-pass-12345',
+          name: 'Foreign Origin',
+        }),
+      });
+      const body = await res.text();
+      if (res.status !== 403)
+        fail(
+          `sign-up from a foreign Origin returned ${res.status}, expected 403 — Better Auth's origin check is not enforcing: ${body}`
+        );
+      let code: unknown;
+      try {
+        code = (JSON.parse(body) as { code?: unknown }).code;
+      } catch {
+        fail(`sign-up from a foreign Origin returned a non-JSON 403 body: ${body}`);
+      }
+      if (code !== 'INVALID_ORIGIN')
+        fail(
+          `sign-up from a foreign Origin returned 403 with code ${String(code)}, expected INVALID_ORIGIN — some other guard answered: ${body}`
+        );
+      pass('POST /api/auth/sign-up/email with a foreign Origin → 403 INVALID_ORIGIN');
+    }
+
     // The connector smokes both need an account. The Cursor one always runs —
     // it asserts a refusal, which needs nothing running behind it.
+    //
+    // The `Origin` header here is the other half of the check above: the
+    // server's own origin is in `cfg.corsOrigins`, so the same middleware that
+    // just rejected `attacker.example` has to let this through. Sending it on
+    // the sign-up the suite already needs keeps the request count down —
+    // rate limiting is production-only too (`create-context.mjs:171` defaults
+    // `enabled` to `isProduction`), so it appears for the first time exactly
+    // here, and a 429 after roughly four sign-ups would be misread as the
+    // origin check firing.
     {
       const signupEmail = `smoke-${Date.now()}@test.local`;
       const signupResponse = await fetch(`${authBaseUrl}/api/auth/sign-up/email`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Origin: authBaseUrl },
         body: JSON.stringify({
           email: signupEmail,
           password: 'smoke-pass-12345',
           name: 'Smoke User',
         }),
       });
+      if (signupResponse.status === 403) {
+        const signupBody = await signupResponse.text();
+        fail(
+          `Auth sign-up from the server's own origin (${authBaseUrl}) was rejected with 403 — trustedOrigins does not contain it: ${signupBody}`
+        );
+      }
       if (!signupResponse.ok) {
         const signupBody = await signupResponse.text();
         fail(`Auth sign-up failed with ${signupResponse.status}: ${signupBody}`);
       }
-      pass('POST /api/auth/sign-up/email → session created');
+      pass("POST /api/auth/sign-up/email with the server's own Origin → session created");
 
       const sessionCookie = buildSessionCookieHeader(signupResponse);
 

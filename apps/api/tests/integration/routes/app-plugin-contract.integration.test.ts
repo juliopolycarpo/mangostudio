@@ -84,6 +84,13 @@ function routeInventory(document: OpenApiDocument): Record<string, string[]> {
   return inventory;
 }
 
+// These are behavioural on purpose, and they can be: the CORS middleware is
+// ours (`app.ts`), so it runs under `bun test` like any other route code. The
+// third gate reading the same cfg.corsOrigins — Better Auth's trustedOrigins —
+// cannot be tested this way, because Better Auth turns its origin check off
+// when NODE_ENV=test. See apps/api/tests/unit/auth.test.ts for why that one is
+// asserted structurally, and scripts/test-build.ts for where it is exercised
+// for real.
 describe('CORS policy', () => {
   it('grants a configured origin credentialed access with the configured verbs', async () => {
     const response = await app.handle(

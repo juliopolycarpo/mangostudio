@@ -29,10 +29,22 @@ describe('getAuth', () => {
   });
 
   // Better Auth is one of three gates reading cfg.corsOrigins, and the only
-  // thing a split deployment can point at it is server.allowedOrigins. Asserted
-  // on the options Better Auth was built with rather than on a rejected
-  // request: no endpoint this app enables refuses an untrusted Origin header,
-  // so the request path would pass either way and prove nothing.
+  // thing a split deployment can point at it is server.allowedOrigins.
+  //
+  // Deliberately structural. Better Auth reads its own environment, and
+  // `bun test` sets NODE_ENV=test: `skipOriginCheck` defaults to `isTest()`
+  // (better-auth/dist/context/create-context.mjs:210), so the origin and CSRF
+  // checks are off for the whole of this suite — as are rate limiting (:171)
+  // and secret validation (:40). A behavioural version of this test would send
+  // an untrusted Origin, see 200, and assert nothing at all; its negative twin
+  // would read that same 200 as a vulnerability. Neither is true: production
+  // answers 403 INVALID_ORIGIN for a foreign origin on sign-up.
+  //
+  // So do not "upgrade" this to a request-path assertion. The behavioural half
+  // lives in scripts/test-build.ts, which spawns the compiled binary with
+  // NODE_ENV=production — the one place in this repo where the gate is live.
+  // What this asserts is what actually regressed in #913: the configured list
+  // never reaching Better Auth's options.
   it('trusts the configured allowed origins alongside the server origin', () => {
     loadConfigForTest({
       auth: { secret: 'test-secret-at-least-32-characters-long', url: VALID_AUTH_URL },
