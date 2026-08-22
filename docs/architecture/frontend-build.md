@@ -4,10 +4,6 @@ One bundler, one dev server, one topology. `apps/frontend` is built by `Bun.buil
 served by Elysia — in development, from `dist/` in a normal install, and from bytes embedded
 in the standalone binary. There is no second HTTP server and no proxy.
 
-> Status: the bundler and the dev topology described here are live. The test harness is still
-> Vitest and migrates separately. The measured traps live in the `bun-frontend` skill — read
-> it before changing anything on this page's path.
-
 ## Why one server
 
 Vite's dev server ran on `:5173` and proxied four path prefixes (`/api/ws`, `/api`,
@@ -87,8 +83,8 @@ rebuilds in a few seconds; the browser needs a manual refresh.
 ## Production build
 
 `apps/frontend/build.ts`, run by `bun run --filter @mangostudio/frontend build`. `Bun.build()`
-in a script, not the `bun build` CLI — the CLI has no plugin flag, and Tailwind is a plugin
-(T1 in the skill). The build produces the layout the rest of the repo already expects:
+in a script, not the `bun build` CLI — the CLI has no plugin flag, and Tailwind v4 needs one.
+The build produces the layout the rest of the repo already expects:
 
 ```text
 apps/frontend/dist/

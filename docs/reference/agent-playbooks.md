@@ -657,8 +657,9 @@ Open these first:
 - `scripts/ci/frontend-bundle-report.ts` (per-chunk size diff against a saved baseline)
 - `scripts/lib/test-lanes.ts` (the lane registry, not just `package.json`)
 
-The Vite/Vitest → Bun migration has its own runbook: the `bun-frontend` skill carries the
-measured traps and the parity gate. Read it before editing anything in this section.
+`docs/architecture/frontend-build.md` carries the measured traps for this section (bundler,
+dev server, embedding) and `docs/reference/testing.md`'s Frontend section carries the ones
+for the test harness. Read both before editing anything here.
 
 ## Shared Contracts, Types, And i18n
 

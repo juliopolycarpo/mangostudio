@@ -1,4 +1,0 @@
-interface:
-  display_name: "Bun Frontend Migration"
-  short_description: "Traps and parity gate for the Vite/Vitest → Bun cutover"
-  default_prompt: "Use $bun-frontend before changing or reviewing the frontend bundler, dev server, or test harness."

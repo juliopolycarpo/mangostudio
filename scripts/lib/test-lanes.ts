@@ -20,7 +20,7 @@ export type TestLaneId = 'root' | 'api' | 'shared' | 'runtime' | 'frontend';
  * `coverageThreshold` is enforced per *file*: every file must individually
  * clear the bar, so any workspace with a legitimately uncovered file cannot
  * express a total-coverage gate through it (measured; see
- * .claude/skills/bun-frontend/SKILL.md).
+ * docs/reference/testing.md's Frontend section).
  */
 interface CoverageThresholds {
   readonly lines: number;
