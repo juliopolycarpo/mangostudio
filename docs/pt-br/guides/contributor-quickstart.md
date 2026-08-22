@@ -28,6 +28,13 @@ URLs locais padrão:
 
 - App e API: `http://localhost:3001`
 
+Nada observa o frontend. Depois de editar um arquivo do frontend, reconstrua e atualize o
+navegador — não há HMR, então a atualização é necessária de qualquer forma:
+
+```bash
+bun run --filter @mangostudio/frontend build
+```
+
 ## 3. Saber Por Onde Começar
 
 - Leia [`../../../AGENTS.md`](../../../AGENTS.md) para regras e roteamento do repositório.

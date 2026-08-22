@@ -28,6 +28,13 @@ One server, one URL — the API builds and serves the frontend:
 
 - App and API: `http://localhost:3001`
 
+Nothing watches the frontend. After editing a frontend file, rebuild it and refresh the
+browser — there is no HMR, so a refresh is needed either way:
+
+```bash
+bun run --filter @mangostudio/frontend build
+```
+
 ## 3. Know Where To Start
 
 - Read [`../../AGENTS.md`](../../AGENTS.md) for repository rules and routing.
