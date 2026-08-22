@@ -19,7 +19,7 @@
 // run. This one is a migration instrument: run by hand, diffed against a captured
 // baseline, and reported in a PR body.
 //
-// Usage: bun ./scripts/ci/frontend-bundle-report.ts [--dist <dir>] [--baseline <file>] [--metafile <file>] [--json] [--out <file>]
+// Usage: bun ./scripts/ci/frontend-bundle-report.ts [--dist <dir>] [--baseline <file>] [--builder <name>] [--metafile <file>] [--json] [--out <file>]
 
 import { dirname, join, posix } from 'node:path';
 
@@ -267,7 +267,7 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** 2).toFixed(2)} MB`;
 }
 
-/** Signed delta, or '—' when there is nothing to compare against. */
+/** Signed delta, '—' when it is zero, or 'new' with nothing to compare against. */
 function formatDelta(current: number, previous: number | undefined): string {
   if (previous === undefined) return 'new';
   const delta = current - previous;
@@ -414,6 +414,11 @@ export function parseBundleReport(source: string, path: string): BundleReport {
   return parsed;
 }
 
+const VALUE_FLAGS = ['--dist', '--baseline', '--out', '--builder', '--metafile'] as const;
+const BOOLEAN_FLAGS = ['--json'] as const;
+const USAGE =
+  'Usage: bun ./scripts/ci/frontend-bundle-report.ts [--dist <dir>] [--baseline <file>] [--builder <name>] [--metafile <file>] [--json] [--out <file>]';
+
 function flagValue(argv: readonly string[], name: string): string | undefined {
   const index = argv.indexOf(name);
   if (index === -1) return undefined;
@@ -422,8 +427,33 @@ function flagValue(argv: readonly string[], name: string): string | undefined {
   return value;
 }
 
+/**
+ * Reject anything not in the two flag lists.
+ *
+ * `flagValue` looks a flag up by name, so an unrecognised one is simply never
+ * read — and the failure that produces is silent and wrong in the same
+ * direction the report exists to detect. `--baselien path.json` yields a full
+ * table in which every row reads `new` and the totals show no delta: the
+ * migration instrument reporting a clean diff against nothing.
+ */
+function assertKnownFlags(argv: readonly string[]): void {
+  const valueFlags: readonly string[] = VALUE_FLAGS;
+  const booleanFlags: readonly string[] = BOOLEAN_FLAGS;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index] ?? '';
+    // Skip the flag's value too; `flagValue` is what checks one is present.
+    if (valueFlags.includes(arg)) {
+      index += 1;
+      continue;
+    }
+    if (booleanFlags.includes(arg)) continue;
+    throw new Error(`Unknown argument: ${arg}\n${USAGE}`);
+  }
+}
+
 if (import.meta.main) {
   const argv = process.argv.slice(2);
+  assertKnownFlags(argv);
   const distDir = flagValue(argv, '--dist') ?? DEFAULT_DIST_DIR;
   const baselinePath = flagValue(argv, '--baseline');
   const outPath = flagValue(argv, '--out');
