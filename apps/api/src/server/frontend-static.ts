@@ -8,8 +8,8 @@ import { join, sep } from 'node:path';
 import { staticPlugin } from '@elysia/static';
 import { NotFound } from 'elysia';
 import type { App } from '../app';
-import { matchesEtag } from '../lib/http-cache';
-import { isSpaRoute } from '../lib/spa-guard';
+import { fileEtag, matchesEtag } from '../lib/http-cache';
+import { HASHED_ASSET_DIR, isApiReservedPath, isSpaRoute } from '../lib/spa-guard';
 import { type EmbeddedFrontendFiles, getEmbeddedFrontend } from './embedded-frontend';
 import { frontendNotFound, setFrontendFallback } from './frontend-fallback';
 
@@ -43,11 +43,11 @@ export function registerFrontend(app: App, frontendDir: string): void {
   registerSpa(app, frontendDir);
 }
 
-function serveIndexFile(indexPath: string, cacheControl?: string, request?: Request): Response {
-  const headers: Record<string, string> = { 'Content-Type': 'text/html' };
-  if (cacheControl) {
-    headers['Cache-Control'] = cacheControl;
-  }
+function serveIndexFile(indexPath: string, request: Request): Response {
+  const headers: Record<string, string> = {
+    'Content-Type': 'text/html',
+    'Cache-Control': SHELL_CACHE_CONTROL,
+  };
   // `no-cache` means "revalidate before reuse", but a browser can only
   // revalidate against a validator. Without one it has nothing to put in
   // `If-None-Match`, so the server can never answer 304 and the whole shell is
@@ -61,9 +61,9 @@ function serveIndexFile(indexPath: string, cacheControl?: string, request?: Requ
   // index.html cannot change within one binary.
   const stats = statFile(indexPath);
   if (stats) {
-    const etag = `"${stats.size.toString(16)}-${Math.trunc(stats.mtimeMs).toString(16)}"`;
+    const etag = fileEtag(stats);
     headers.ETag = etag;
-    if (request && matchesEtag(request.headers.get('if-none-match'), etag)) {
+    if (matchesEtag(request.headers.get('if-none-match'), etag)) {
       return new Response(null, { status: 304, headers });
     }
   }
@@ -91,8 +91,7 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
     return;
   }
 
-  const serveEmbeddedIndex = (request?: Request) =>
-    serveIndexFile(indexPath, SHELL_CACHE_CONTROL, request);
+  const serveEmbeddedIndex = (request: Request) => serveIndexFile(indexPath, request);
 
   app.get('/', ({ request }) => serveEmbeddedIndex(request));
 
@@ -107,7 +106,10 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
       app.get(urlPath, () => new Response(Bun.file(filePath), { headers }));
       continue;
     }
-    app.get(urlPath, ({ request }) => serveUnhashedFile(filePath, request));
+    // The route's own URL path is a loop constant, so the directive it implies
+    // is settled here rather than re-derived from `request.url` on every hit.
+    const cacheControl = unhashedCacheControl(urlPath);
+    app.get(urlPath, ({ request }) => serveUnhashedFile(filePath, cacheControl, request));
   }
 
   setFrontendFallback((request) => {
@@ -117,9 +119,6 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
   });
   app.error(NotFound, ({ request }) => frontendNotFound(request));
 }
-
-/** Directory holding the content-hashed bundle output, relative to the frontend root. */
-const HASHED_ASSET_DIR = 'assets';
 
 /**
  * The cache policy, stated once for both the embedded and the disk branch.
@@ -186,7 +185,11 @@ async function statBunFile(file: Bun.BunFile): Promise<Stats | null> {
   }
 }
 
-async function serveUnhashedFile(filePath: string, request: Request): Promise<Response> {
+async function serveUnhashedFile(
+  filePath: string,
+  cacheControl: string,
+  request: Request
+): Promise<Response> {
   // The routes below are enumerated once at boot, but the file behind one can
   // disappear afterwards: `build.ts` removes `dist/` before every rebuild, so a
   // request that lands in that window — or after a rebuild that failed and left
@@ -204,11 +207,9 @@ async function serveUnhashedFile(filePath: string, request: Request): Promise<Re
     if (!(await file.exists())) return new Response(null, { status: 404 });
     // Embedded: the content cannot change within one binary, so there is
     // nothing to revalidate against and no ETag to derive.
-    return new Response(file, {
-      headers: { 'Cache-Control': unhashedCacheControl(new URL(request.url).pathname) },
-    });
+    return new Response(file, { headers: { 'Cache-Control': cacheControl } });
   }
-  return serveStattedFile(filePath, stats, request);
+  return serveStattedFile(filePath, stats, cacheControl, request);
 }
 
 /**
@@ -217,12 +218,14 @@ async function serveUnhashedFile(filePath: string, request: Request): Promise<Re
  * whose contract is synchronous — it has a `statSync` result in hand from
  * `resolveUnhashedFile` and does not need to re-stat through `BunFile`.
  */
-function serveStattedFile(filePath: string, stats: Stats, request: Request): Response {
-  const etag = `"${stats.size.toString(16)}-${Math.trunc(stats.mtimeMs).toString(16)}"`;
-  const headers = {
-    'Cache-Control': unhashedCacheControl(new URL(request.url).pathname),
-    ETag: etag,
-  };
+function serveStattedFile(
+  filePath: string,
+  stats: Stats,
+  cacheControl: string,
+  request: Request
+): Response {
+  const etag = fileEtag(stats);
+  const headers = { 'Cache-Control': cacheControl, ETag: etag };
   if (matchesEtag(request.headers.get('if-none-match'), etag)) {
     return new Response(null, { status: 304, headers });
   }
@@ -312,9 +315,9 @@ function registerSpa(app: App, frontendDir: string): void {
   // save, so `index.html` is briefly absent — and a `Bun.file` that is not
   // there answers 500 with Bun's own error page once the body is read, on `/`
   // and on every deep link alike. A 404 is the honest answer for that window.
-  const serveIndex = (request?: Request): Response =>
+  const serveIndex = (request: Request): Response =>
     existsSync(indexPath)
-      ? serveIndexFile(indexPath, SHELL_CACHE_CONTROL, request)
+      ? serveIndexFile(indexPath, request)
       : new Response(null, { status: 404 });
   const assetsDir = join(frontendDir, HASHED_ASSET_DIR);
 
@@ -342,12 +345,27 @@ function registerSpa(app: App, frontendDir: string): void {
   setFrontendFallback((request) => {
     if (request.method !== 'GET') return undefined;
     const { pathname } = new URL(request.url);
+    // This fallback sits on *every* unmatched request, so an unknown endpoint
+    // under an API-owned prefix arrives here too. Those can never name a file
+    // in `dist/`, and rejecting them on the prefix — pure string work — keeps a
+    // 404 for `/api/v1/thing.json` from costing a decode, a segment scan, two
+    // `realpathSync` calls and a `statSync`. `/assets` is not rejected here:
+    // those files do live in `frontendDir`, and resolving them per request is
+    // what serves a dev rebuild's freshly hashed names without a restart.
+    if (isApiReservedPath(pathname)) return undefined;
     // Unhashed files resolve here rather than through routes pinned at boot, so
     // a `public/` file added while the dev watcher is running is served instead
     // of being answered with the SPA shell. A root-level file that does not
     // exist falls past `isSpaRoute` to `frontendNotFound`, which is a 404.
     const resolved = resolveUnhashedFile(frontendDir, pathname);
-    if (resolved) return serveStattedFile(resolved.filePath, resolved.stats, request);
+    if (resolved) {
+      return serveStattedFile(
+        resolved.filePath,
+        resolved.stats,
+        unhashedCacheControl(pathname),
+        request
+      );
+    }
     return isSpaRoute(pathname) ? serveIndex(request) : undefined;
   });
 }
