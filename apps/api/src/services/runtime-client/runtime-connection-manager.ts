@@ -263,8 +263,10 @@ function isDialIn(transportKind: EnvironmentTransportKind | undefined): boolean 
  * legitimately minutes — and capping them here would be a guess about
  * behaviour nothing has measured.
  */
+const IN_PROCESS_CONNECT_DEADLINE_MS = 10_000;
+
 const CONNECT_DEADLINE_MS: Partial<Record<EnvironmentTransportKind, number>> = {
-  'in-process': 10_000,
+  'in-process': IN_PROCESS_CONNECT_DEADLINE_MS,
 };
 
 /**
@@ -1119,8 +1121,11 @@ export interface LocalRuntimeConnectorOptions {
  * waiting on the previous attempt *forever* is not part of what that buys. An
  * attempt that never settles would otherwise dam every later local connect in
  * the process, including ones for a different user that the wedged one has no
- * claim over. Same length as the manager's {@link CONNECT_DEADLINE_MS} on
+ * claim over. Same length as the manager's {@link CONNECT_DEADLINE_MS} entry on
  * purpose: the hub gives up on the attempt at the same moment the chain does.
+ * Both read {@link IN_PROCESS_CONNECT_DEADLINE_MS}, so retuning one retunes the
+ * other — the coupling the sentence above describes is enforced by construction
+ * rather than by two literals that happen to agree.
  *
  * Note what this trades away. {@link withConnectDeadline} stops the *hub*
  * waiting; it does not cancel the attempt, and the in-process connector ignores
@@ -1131,7 +1136,7 @@ export interface LocalRuntimeConnectorOptions {
  * set. Damming every user behind one wedged connect was judged the worse
  * failure; closing this properly needs a cancellable in-process connect.
  */
-const LOCAL_CHAIN_DEADLINE_MS = CONNECT_DEADLINE_MS['in-process'] ?? 10_000;
+const LOCAL_CHAIN_DEADLINE_MS = IN_PROCESS_CONNECT_DEADLINE_MS;
 
 /** Resolves when `attempt` settles, or when the chain stops waiting for it. */
 function advanceChainAfter(attempt: Promise<unknown>, deadlineMs: number): Promise<void> {
