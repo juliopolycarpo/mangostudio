@@ -1,8 +1,9 @@
 /**
- * The dev rebuild loop's staleness scan. `newestSourceMtime` decides whether
+ * The dev boot's staleness scan. `newestSourceMtime` decides whether
  * `bun run dev` rebuilds or reports the existing bundle as current, so a
- * subtree it fails to see is a bundle that never rebuilds — and a subtree it
- * wrongly *does* see (`dist/`) is a rebuild that triggers the next one forever.
+ * subtree it fails to see is a stale bundle served as current — and a subtree
+ * it wrongly *does* see (`dist/`) is a full rebuild on every API hot reload,
+ * which `bun --watch` triggers on every `apps/api/src` save.
  *
  * The scan counts directory mtimes as well as file mtimes, because a deletion
  * advances nothing else. That makes the fixtures timestamp-sensitive in both
@@ -13,7 +14,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { isWatchedInput, newestSourceMtime } from '../../../src/server/dev-frontend';
+import { newestSourceMtime } from '../../../src/server/dev-frontend';
 
 /** Seconds since the epoch, so mtimes are far enough apart to compare. */
 const OLD = 1_000_000;
@@ -56,8 +57,18 @@ describe('newestSourceMtime', () => {
     try {
       writeAt(join(root, 'src', 'main.tsx'), OLD);
       // Each of these was invisible to the old `src/`-only scan, so editing one
-      // left `distIsCurrent()` reporting a stale bundle as current.
-      for (const path of ['index.html', 'build.ts', join('public', 'logo.svg')]) {
+      // left `distIsCurrent()` reporting a stale bundle as current. The two
+      // configs are inputs for non-obvious reasons — `Bun.build()` honours
+      // tsconfig `paths`, and route generation reads `tsr.config.json` — which
+      // is exactly why dropping either from the allowlist would go unnoticed.
+      for (const path of [
+        'index.html',
+        'build.ts',
+        'package.json',
+        'tsconfig.json',
+        'tsr.config.json',
+        join('public', 'logo.svg'),
+      ]) {
         writeAt(join(root, path), NEW);
         holdDirs(root);
         expect(newestSourceMtime(root)).toBe(NEW * 1000);
@@ -189,52 +200,5 @@ describe('newestSourceMtime', () => {
 
   test('reports 0 for a directory that does not exist, which reads as stale', () => {
     expect(newestSourceMtime(join(tmpdir(), 'dev-frontend-absent-fixture'))).toBe(0);
-  });
-});
-
-/**
- * The watcher's half of the same allowlist. Pinned separately because nothing
- * else reaches it: `dev-frontend.ts` is never imported by the binary entry, so
- * `test-build.ts` cannot run it, and a watcher that stops firing produces no
- * error and no log line — just a dev save that silently does not rebuild.
- */
-describe('isWatchedInput', () => {
-  test.each([
-    ['src/main.tsx'],
-    ['src/routes/index.tsx'],
-    ['src/styles/app.css'],
-    ['index.html'],
-    ['build.ts'],
-    ['public/favicon.ico'],
-    ['tsconfig.json'],
-    ['tsr.config.json'],
-    ['package.json'],
-    // The watch API is not guaranteed to hand back the platform separator.
-    ['src\\components\\Thing.tsx'],
-    // Nor a path without a leading one. An empty first segment matches no
-    // allowlist entry, so this would otherwise be a rebuild that never fires.
-    ['/src/main.tsx'],
-  ])('rebuilds on %s', (filename) => {
-    expect(isWatchedInput(filename)).toBe(true);
-  });
-
-  test.each([
-    // The build's own writes: reacting to any of these schedules the next
-    // rebuild forever.
-    ['dist/index.html'],
-    ['dist/assets/index-abc123.js'],
-    ['dist-metafile.json'],
-    ['src/routeTree.gen.ts'],
-    // Workspace traffic that is not a build input. `.turbo` logs land here on
-    // every `bun run check`.
-    ['tests/unit/thing.test.tsx'],
-    ['.turbo/turbo-typecheck.log'],
-    ['.tanstack/tmp/scratch'],
-    ['node_modules/pkg/index.js'],
-    ['AGENTS.md'],
-    ['tsconfig.test.json'],
-    ['turbo.json'],
-  ])('ignores %s', (filename) => {
-    expect(isWatchedInput(filename)).toBe(false);
   });
 });

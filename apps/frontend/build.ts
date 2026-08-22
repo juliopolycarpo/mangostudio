@@ -41,7 +41,7 @@ async function generateRouteTree(): Promise<void> {
   const proc = Bun.spawn(['bun', 'run', 'routes'], {
     cwd: ROOT,
     // `ignore`, not `pipe`: nothing reads stdout, and an undrained pipe leaks a
-    // descriptor per run — the dev watcher calls this on every save.
+    // descriptor per run — the dev loop calls this on every rebuild.
     stdout: 'ignore',
     stderr: 'pipe',
   });
@@ -55,8 +55,8 @@ async function generateRouteTree(): Promise<void> {
 
 /**
  * True when `src/routeTree.gen.ts` is newer than everything that feeds it, so
- * the dev rebuild loop can skip the `tsr generate` spawn — measured at ~1.1s
- * of a ~3s dev rebuild, paid on every save anywhere under `src/`.
+ * a dev rebuild can skip the `tsr generate` spawn — measured at ~1.1s of a ~3s
+ * dev rebuild, paid on every rebuild that touches anything under `src/`.
  *
  * Directory mtimes are compared on purpose: deleting or renaming a route file
  * bumps no surviving file's mtime, only its parent directory's, so a file-only

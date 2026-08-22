@@ -69,16 +69,25 @@ browser session keeps working alongside them.
 ## Development
 
 `bun run dev` starts one process. Before it listens, `apps/api/src/server/dev-frontend.ts`
-runs the production build script as a subprocess, then watches `apps/frontend/src` and rebuilds
-on change. Serving is the ordinary directory mode below — dev and production share both the
-build and the route table, so there is no dev-only serving path to drift.
+runs the production build script as a subprocess — but only when `dist/` is older than the
+frontend's inputs, since `bun --watch` restarts this process on every `apps/api/src` save and
+each restart would otherwise rebuild from scratch. Serving is the ordinary directory mode
+below — dev and production share both the build and the route table, so there is no dev-only
+serving path to drift.
+
+**Nothing watches the frontend.** After editing a frontend file, run
+`bun run --filter @mangostudio/frontend build` and refresh. A watcher used to do this on save;
+it was never hot reload, so a refresh was needed either way, and what it bought — saving one
+command — cost a hand-maintained input allowlist that mistook a turbo log for a source change,
+a debounce-and-coalesce state machine, and a rebuild that removes `dist/` out from under the
+running server.
 
 **There is no HMR, and this is not a temporary omission.** Bun's HTML-bundle dev server
 (`Bun.serve({ routes: { '/': htmlBundle } })`) silently drops a nested transitive import from
 this app's dependency graph, which renders a blank page. So does `Bun.build()` when handed
 `index.html` as the entrypoint. Only a **TS entrypoint** (`src/main.tsx`) bundles this app
-correctly, and the HTML is stitched afterwards — see `apps/frontend/build.ts`. A source edit
-rebuilds in a few seconds; the browser needs a manual refresh.
+correctly, and the HTML is stitched afterwards — see `apps/frontend/build.ts`. A rebuild takes
+about 1.5s; the browser needs a manual refresh.
 
 ## Production build
 
@@ -155,7 +164,7 @@ Two shapes there are deliberate and must survive any change:
 
 The directory mode resolves unhashed files (favicon, icons, manifest, build-info) inside that
 same fallback, per request. Enumerating them into routes at boot looked safe — the names are
-fixed — but the *set* is not: the dev watcher rebuilds on every save, so a file added to
+fixed — but the *set* is not: a dev rebuild lands while the server runs, so a file added to
 `public/` afterwards had no route, fell through to the fallback and came back as `index.html`
 at 200 `text/html`. `isSpaRoute()` therefore stops claiming root-level paths that carry a file
 extension, so a missing one is a 404 instead of an HTML document handed to an `<img>`. The
@@ -180,7 +189,7 @@ content cannot change within one binary anyway.
 and an entry that registers the manifest before booting the real CLI. `bun build --compile`
 embeds the bytes and rewrites each import to an embedded path that `Bun.file()` can serve.
 
-This is why the dev-mode build and watcher sit behind a **module boundary**, not a runtime
+This is why the dev-mode build sits behind a **module boundary**, not a runtime
 `if`. `apps/api/src/dev.ts` is a separate entrypoint that `index.ts` — the binary entry —
 never imports, so nothing in `dev-frontend.ts` reaches `bun build --compile`. A binary must
 never shell out to a bundler; it already carries the built output. `dev-frontend-dir.ts` is

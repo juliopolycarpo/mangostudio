@@ -238,10 +238,11 @@ function serveStattedFile(
  *
  * This replaced a boot-time enumeration of `dist/`. Enumerating once looked
  * safe — the names outside `assets/` are fixed (favicon, icons, manifest,
- * build-info) — but the *set* is not: `bun run dev` rebuilds on every save, so
- * a file added to `public/` after boot had no route, fell through to the SPA
- * fallback, and was answered with `index.html` at 200 `text/html`. Resolving
- * per request is what `/assets/*` already does, and for the same reason.
+ * build-info) — but the *set* is not: a dev rebuild lands while this server is
+ * running, so a file added to `public/` after boot had no route, fell through
+ * to the SPA fallback, and was answered with `index.html` at 200 `text/html`.
+ * Resolving per request is what `/assets/*` already does, and for the same
+ * reason.
  *
  * Only the last segment's extension makes a path a candidate, and the file has
  * to exist: that keeps SPA deep links whose final segment happens to be dotted
@@ -315,8 +316,8 @@ function registerSpa(app: App, frontendDir: string): void {
   // request bought nothing but a repeated syscall.
   const frontendRoot = realpathSyncSafe(frontendDir);
   // Existence-checked for the same reason `serveUnhashedFile` is: `build.ts`
-  // removes `dist/` before every rebuild and the dev watcher rebuilds on every
-  // save, so `index.html` is briefly absent — and a `Bun.file` that is not
+  // removes `dist/` before every rebuild, so a rebuild run against a live dev
+  // server leaves `index.html` briefly absent — and a `Bun.file` that is not
   // there answers 500 with Bun's own error page once the body is read, on `/`
   // and on every deep link alike. A 404 is the honest answer for that window.
   const serveIndex = (request: Request): Response =>
@@ -358,8 +359,8 @@ function registerSpa(app: App, frontendDir: string): void {
     // what serves a dev rebuild's freshly hashed names without a restart.
     if (isApiReservedPath(pathname)) return undefined;
     // Unhashed files resolve here rather than through routes pinned at boot, so
-    // a `public/` file added while the dev watcher is running is served instead
-    // of being answered with the SPA shell. A root-level file that does not
+    // a `public/` file a rebuild added since boot is served instead of being
+    // answered with the SPA shell. A root-level file that does not
     // exist falls past `isSpaRoute` to `frontendNotFound`, which is a 404.
     const resolved = resolveUnhashedFile(frontendDir, frontendRoot, pathname);
     if (resolved) {
