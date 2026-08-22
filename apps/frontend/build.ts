@@ -12,9 +12,10 @@
  */
 
 import { readdirSync, statSync, utimesSync } from 'node:fs';
-import { cp, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { listDistFiles } from '@mangostudio/shared/utils/dist-files';
 import tailwind from 'bun-plugin-tailwind';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -316,15 +317,9 @@ function assertAbsoluteAssetUrls(html: string): void {
   }
 }
 
-/** How many files the build wrote into `dist/`. */
-async function countDistFiles(): Promise<number> {
-  const entries = await readdir(DIST, { recursive: true, withFileTypes: true });
-  return entries.filter((entry) => entry.isFile()).length;
-}
-
 if (import.meta.main) {
   const started = performance.now();
   await buildFrontend({ dev: process.argv.includes('--dev') });
-  const count = await countDistFiles();
+  const count = listDistFiles(DIST).length;
   console.warn(`[frontend] built ${count} files in ${Math.round(performance.now() - started)}ms`);
 }

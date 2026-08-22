@@ -8,8 +8,9 @@
  * real CLI.
  */
 
-import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { distFilePath, listDistFiles } from '@mangostudio/shared/utils/dist-files';
 
 export interface EmbedModuleOptions {
   /** Built frontend directory (apps/frontend/dist). */
@@ -28,26 +29,10 @@ export interface EmbedModules {
   fileCount: number;
 }
 
-/**
- * Lists every file under the dist directory as URL paths ('/index.html',
- * '/assets/index-abc.js'). Keys always use '/' separators regardless of the
- * host platform; sorted for deterministic module output.
- */
-export function listDistFiles(distDir: string): string[] {
-  return readdirSync(distDir, { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .map((entry) => {
-      const absolute = join(entry.parentPath, entry.name);
-      const relative = absolute.slice(distDir.length).split(sep).filter(Boolean);
-      return `/${relative.join('/')}`;
-    })
-    .sort();
-}
-
 /** Renders the manifest module: one file-loader import per dist file, keyed by URL path. */
 export function renderFrontendManifestModule(distDir: string, urlPaths: readonly string[]): string {
   const imports = urlPaths.map((urlPath, index) => {
-    const filePath = join(distDir, ...urlPath.split('/').filter(Boolean));
+    const filePath = distFilePath(distDir, urlPath);
     return `import f${index} from ${JSON.stringify(filePath)} with { type: 'file' };`;
   });
   const entries = urlPaths.map((urlPath, index) => `  ${JSON.stringify(urlPath)}: f${index},`);

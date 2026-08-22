@@ -4,6 +4,7 @@
 import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { extname, join } from 'node:path';
+import { distFilePath, listDistFiles } from '@mangostudio/shared/utils/dist-files';
 import { ROOT_DIR } from '../../lib/config';
 import { runCapture } from './support';
 import type { BundleStats } from './types';
@@ -27,17 +28,6 @@ const defaultDeps: BundleCollectorDeps = {
   buildFrontend: defaultBuildFrontend,
 };
 
-const walkFiles = async (dir: string): Promise<string[]> => {
-  const entries = await readdir(dir, { withFileTypes: true });
-  const nested = await Promise.all(
-    entries.map((entry) => {
-      const path = join(dir, entry.name);
-      return entry.isDirectory() ? walkFiles(path) : Promise.resolve([path]);
-    })
-  );
-  return nested.flat();
-};
-
 const assertDistUsable = async (distDir: string): Promise<void> => {
   if (!existsSync(distDir)) {
     throw new Error(`QA_FRONTEND_DIST is set but missing: ${distDir}`);
@@ -58,15 +48,15 @@ const resolveDistDir = async (deps: BundleCollectorDeps): Promise<string> => {
 };
 
 const measureDist = async (distDir: string): Promise<BundleStats> => {
-  const files = (await walkFiles(distDir)).filter((path) => BUNDLE_EXTENSIONS.has(extname(path)));
+  const paths = listDistFiles(distDir).filter((path) => BUNDLE_EXTENSIONS.has(extname(path)));
   let rawBytes = 0;
   let gzipBytes = 0;
   let jsGzipBytes = 0;
   let cssGzipBytes = 0;
   let htmlGzipBytes = 0;
 
-  for (const path of files) {
-    const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
+  for (const path of paths) {
+    const bytes = new Uint8Array(await Bun.file(distFilePath(distDir, path)).arrayBuffer());
     const compressedBytes = Bun.gzipSync(bytes).byteLength;
     rawBytes += bytes.byteLength;
     gzipBytes += compressedBytes;
@@ -76,7 +66,7 @@ const measureDist = async (distDir: string): Promise<BundleStats> => {
   }
 
   return {
-    files: files.length,
+    files: paths.length,
     rawBytes,
     gzipBytes,
     jsGzipBytes,

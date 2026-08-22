@@ -22,9 +22,8 @@
 // Usage: bun ./scripts/ci/frontend-bundle-report.ts [--dist <dir>] [--baseline <file>] [--builder <name>] [--metafile <file>] [--json] [--out <file>]
 
 import { dirname, join, posix } from 'node:path';
-
+import { listDistFiles } from '@mangostudio/shared/utils/dist-files';
 import { ROOT_DIR } from '../lib/config';
-import { listDistFiles } from '../lib/embed-frontend';
 
 const DEFAULT_DIST_DIR = join(ROOT_DIR, 'apps/frontend/dist');
 

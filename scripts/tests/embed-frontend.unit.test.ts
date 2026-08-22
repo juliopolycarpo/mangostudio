@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { listDistFiles } from '@mangostudio/shared/utils/dist-files';
 import {
-  listDistFiles,
   renderEmbedEntryModule,
   renderFrontendManifestModule,
   writeEmbedModules,
@@ -26,17 +26,6 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(distDir, { recursive: true, force: true });
   rmSync(embedDir, { recursive: true, force: true });
-});
-
-describe('listDistFiles', () => {
-  test('maps every file to a sorted URL path with / separators', () => {
-    expect(listDistFiles(distDir)).toEqual([
-      '/assets/index-AbCd1234.js',
-      '/assets/nested/font.woff2',
-      '/build-info.json',
-      '/index.html',
-    ]);
-  });
 });
 
 describe('renderFrontendManifestModule', () => {
