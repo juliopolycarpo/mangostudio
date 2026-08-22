@@ -131,17 +131,17 @@ extension is used so that inline comments can document migration decisions.
 
 Current task definitions:
 
-| Task               | Cache | Outputs / Env                                      | Notes                                        |
-| ------------------ | ----- | -------------------------------------------------- | -------------------------------------------- |
-| `dev`              | off   | —                                                  | Persistent — runs dev servers                |
-| `build`            | on    | `dist/**`; env `VITE_*`                            | Depends on upstream `^build`; restores dist  |
-| `check:quick`      | on    | —                                                  | Lint / format; inputs scoped to `biome.json` |
-| `typecheck`        | on    | —                                                  | Inputs scoped to root `tsconfig.json`        |
-| `circular`         | on    | —                                                  | Circular dependency detection                |
-| `test:unit`        | on    | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`         | Unit tests                                   |
-| `test:integration` | off   | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`         | Integration tests (always re-run)            |
-| `test:coverage`    | off   | `$TURBO_ROOT$/.mango/artifacts/coverage/**`; env ↑ | Coverage reports (always re-run)             |
-| `//#test:scripts`  | on    | inputs `$TURBO_DEFAULT$`, `scripts/**`             | Root scripts tests (cached via turbo)        |
+| Task               | Cache | Outputs / Env                                      | Notes                                                                                                                                 |
+| ------------------ | ----- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `dev`              | off   | —                                                  | Persistent — runs dev servers                                                                                                         |
+| `build`            | on    | `dist/**`                                          | Depends on upstream `^build`; `apps/frontend` overrides `env` to `MANGO_API_URL`, `VITE_*` and adds `dist-metafile.json` to `outputs` |
+| `check:quick`      | on    | —                                                  | Lint / format; inputs scoped to `biome.json`                                                                                          |
+| `typecheck`        | on    | —                                                  | Inputs scoped to root `tsconfig.json`                                                                                                 |
+| `circular`         | on    | —                                                  | Circular dependency detection                                                                                                         |
+| `test:unit`        | on    | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`         | Unit tests                                                                                                                            |
+| `test:integration` | off   | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`         | Integration tests (always re-run)                                                                                                     |
+| `test:coverage`    | off   | `$TURBO_ROOT$/.mango/artifacts/coverage/**`; env ↑ | Coverage reports (always re-run)                                                                                                      |
+| `//#test:scripts`  | on    | inputs `$TURBO_DEFAULT$`, `scripts/**`             | Root scripts tests (cached via turbo)                                                                                                 |
 
 ### Inspection Scripts
 
