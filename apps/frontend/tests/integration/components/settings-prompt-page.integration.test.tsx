@@ -6,17 +6,11 @@ import { describe, expect, it, jest, mock } from 'bun:test';
 import { fireEvent, screen } from '@testing-library/react';
 import { DEFAULT_PROMPT_SETTINGS } from '../../../src/hooks/use-global-settings';
 import { render } from '../../support/harness/render';
-import { LinkStub } from '../../support/mocks/router';
+import { routerWithLinkStub } from '../../support/mocks/router';
 
-// Declared at module level rather than inline in the factory: biome's
-// `noComponentHookFactories` rejects a component defined inside a function.
-
-// `importActual` has no `bun test` equivalent: import the real namespace first,
-// register the mock over it, then import the subjects. `mock.module` is not
-// hoisted and static imports are.
-const actualRouter = await import('@tanstack/react-router');
-
-mock.module('@tanstack/react-router', () => ({ ...actualRouter, Link: LinkStub }));
+// Registered before the subjects are imported: `mock.module` is not hoisted and
+// static imports are.
+mock.module('@tanstack/react-router', await routerWithLinkStub());
 
 const { PromptSettings } = await import('../../../src/components/settings/PromptSettings');
 const { SettingsTabs } = await import('../../../src/components/settings/SettingsTabs');

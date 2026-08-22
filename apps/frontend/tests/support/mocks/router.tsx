@@ -34,3 +34,26 @@ export function LinkStub({
     </a>
   );
 }
+
+/**
+ * The real router namespace with `Link` replaced by {@link LinkStub}, as the
+ * factory `mock.module` wants and with the `await import` already done:
+ *
+ * ```ts
+ * mock.module('@tanstack/react-router', await routerWithLinkStub({ useParams: () => params }));
+ * ```
+ *
+ * The spread is the point. Bun links a mocked module's whole namespace at
+ * import, so a factory returning fewer names than the real module exports is a
+ * hard `SyntaxError: Export named 'x' not found` in whichever consumer reaches
+ * for a missing one — surfaced as an unhandled error between tests, naming
+ * neither the mock nor the consumer. A file that stubs only `Link` passes right
+ * up until someone adds a `useNavigate` to the component under test. Written
+ * once here, the next copy cannot forget it.
+ */
+export async function routerWithLinkStub(
+  overrides: Record<string, unknown> = {}
+): Promise<() => Record<string, unknown>> {
+  const actual = await import('@tanstack/react-router');
+  return () => ({ ...actual, Link: LinkStub, ...overrides });
+}

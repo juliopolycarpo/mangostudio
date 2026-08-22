@@ -8,24 +8,13 @@ import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { providerSettingsKeys } from '../../../src/features/settings/providers/queries';
 import { render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
-import { LinkStub } from '../../support/mocks/router';
+import { routerWithLinkStub } from '../../support/mocks/router';
 
-// Mock TanStack Router — provide useParams
 const routeParams = { provider: 'deepseek' };
 
-// Declared at module level rather than inline in the factory: biome's
-// `noComponentHookFactories` rejects a component defined inside a function.
-
-// `importOriginal` has no `bun test` equivalent: import the real namespace,
-// register the mock over it, then import the subject. `mock.module` is not
-// hoisted and static imports are.
-const actualRouter = await import('@tanstack/react-router');
-
-mock.module('@tanstack/react-router', () => ({
-  ...actualRouter,
-  Link: LinkStub,
-  useParams: () => routeParams,
-}));
+// Registered before the subject is imported: `mock.module` is not hoisted and
+// static imports are, so the subject has to come in afterwards to bind to it.
+mock.module('@tanstack/react-router', await routerWithLinkStub({ useParams: () => routeParams }));
 
 const { ProviderSettingsPage } = await import(
   '../../../src/features/settings/providers/components/ProviderSettingsPage'

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import userEvent from '@testing-library/user-event';
 import type { ComponentType } from 'react';
 import { render, screen, waitFor } from '../../support/harness/render';
-import { LinkStub } from '../../support/mocks/router';
+import { routerWithLinkStub } from '../../support/mocks/router';
 import { setTestSession, setTestSignIn, setTestSignUp } from '../../support/setup/auth-client-stub';
 
 const { mockHistoryPush, mockNavigate, mockSignInEmail, mockSignUpEmail, searchState } = {
@@ -13,18 +13,17 @@ const { mockHistoryPush, mockNavigate, mockSignInEmail, mockSignUpEmail, searchS
   searchState: { current: {} as { redirect?: string } },
 };
 
-// Module-scoped so biome's `noComponentHookFactories` does not see a
-// component defined inside the `mock.module` factory below.
-
-mock.module('@tanstack/react-router', () => ({
-  createFileRoute: () => (config: Record<string, unknown>) => ({
-    ...config,
-    useSearch: () => searchState.current,
-  }),
-  Link: LinkStub,
-  useNavigate: () => mockNavigate,
-  useRouter: () => ({ history: { push: mockHistoryPush } }),
-}));
+mock.module(
+  '@tanstack/react-router',
+  await routerWithLinkStub({
+    createFileRoute: () => (config: Record<string, unknown>) => ({
+      ...config,
+      useSearch: () => searchState.current,
+    }),
+    useNavigate: () => mockNavigate,
+    useRouter: () => ({ history: { push: mockHistoryPush } }),
+  })
+);
 
 // Static imports are evaluated before any statement above runs, so the
 // routes have to come in afterwards or they bind the real router.

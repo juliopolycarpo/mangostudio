@@ -1,14 +1,9 @@
 import { describe, expect, it, jest, mock } from 'bun:test';
 import { fireEvent, screen } from '@testing-library/react';
 import { render } from '../../support/harness/render';
-import { LinkStub } from '../../support/mocks/router';
+import { routerWithLinkStub } from '../../support/mocks/router';
 
-const actual = await import('@tanstack/react-router');
-
-mock.module('@tanstack/react-router', () => ({
-  ...actual,
-  Link: LinkStub,
-}));
+mock.module('@tanstack/react-router', await routerWithLinkStub());
 
 // After the mock, never before: a static import is evaluated first and would
 // bind SettingsTabs to the real router.

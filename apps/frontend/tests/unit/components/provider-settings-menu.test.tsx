@@ -6,17 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { screen } from '@testing-library/react';
 import { render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
-import { LinkStub } from '../../support/mocks/router';
+import { routerWithLinkStub } from '../../support/mocks/router';
 
-// Declared at module level rather than inline in the factory: biome's
-// `noComponentHookFactories` rejects a component defined inside a function.
-
-// `importOriginal` has no `bun test` equivalent: import the real namespace,
-// register the mock over it, then import the subject. `mock.module` is not
-// hoisted and static imports are.
-const actualRouter = await import('@tanstack/react-router');
-
-mock.module('@tanstack/react-router', () => ({ ...actualRouter, Link: LinkStub }));
+// Registered before the subject is imported: `mock.module` is not hoisted and
+// static imports are.
+mock.module('@tanstack/react-router', await routerWithLinkStub());
 
 const { ProviderSettingsMenu } = await import(
   '../../../src/features/settings/providers/components/ProviderSettingsMenu'

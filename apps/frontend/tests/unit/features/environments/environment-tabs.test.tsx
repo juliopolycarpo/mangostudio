@@ -1,11 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { render, screen } from '../../../support/harness/render';
-import { LinkStub } from '../../../support/mocks/router';
+import { routerWithLinkStub } from '../../../support/mocks/router';
 
-// Declared at module level rather than inline in the factory: biome's
-// `noComponentHookFactories` rejects a component defined inside a function.
-
-mock.module('@tanstack/react-router', () => ({ Link: LinkStub }));
+mock.module('@tanstack/react-router', await routerWithLinkStub());
 
 describe('EnvironmentTabs', () => {
   it('carries the library as a tab of the umbrella', async () => {

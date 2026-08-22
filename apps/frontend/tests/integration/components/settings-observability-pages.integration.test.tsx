@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { AppContext } from '../../../src/lib/app-context';
 import { render, screen } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
-import { LinkStub } from '../../support/mocks/router';
+import { routerWithLinkStub } from '../../support/mocks/router';
 
 /**
  * The Logs page reports how each external agent in the **active environment**
@@ -14,18 +14,12 @@ function withApp(children: React.ReactNode, currentEnvironmentId: string | null 
   return <AppContext value={{ currentEnvironmentId } as never}>{children}</AppContext>;
 }
 
-// Declared at module level rather than inline in the factory: biome's
-// `noComponentHookFactories` rejects a component defined inside a function.
-
-// The real namespace is spread in: `bun test` resolves every export at import,
-// so a factory returning only these two breaks the module's other consumers.
-const actualRouter = await import('@tanstack/react-router');
-
-mock.module('@tanstack/react-router', () => ({
-  ...actualRouter,
-  Link: LinkStub,
-  useRouterState: () => ({ location: { pathname: '/settings/metrics' } }),
-}));
+mock.module(
+  '@tanstack/react-router',
+  await routerWithLinkStub({
+    useRouterState: () => ({ location: { pathname: '/settings/metrics' } }),
+  })
+);
 
 // Below the mock, never as static imports.
 const { SettingsTabs } = await import('../../../src/components/settings/SettingsTabs');
