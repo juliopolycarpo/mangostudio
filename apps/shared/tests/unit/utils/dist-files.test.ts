@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { distFilePath, listDistFiles } from '../../../src/utils/dist-files';
@@ -61,11 +61,26 @@ describe('distFilePath', () => {
     );
   });
 
-  test('round-trips every path listDistFiles returns', () => {
-    for (const urlPath of listDistFiles(distDir)) {
-      expect(distFilePath(distDir, urlPath)).toBe(
-        join(distDir, ...urlPath.split('/').filter(Boolean))
-      );
+  // Shape *and* existence, for every spelling of the directory. The two callers
+  // that matter both read the file back — the QA collector gzips it, and the
+  // binary build imports it into the embed manifest — so a URL path that does
+  // not name a real file is the whole failure mode, and asserting the join
+  // alone reproduces the walker's own bug rather than catching it.
+  test.each([
+    ['absolute', (dir: string) => dir],
+    ['relative', (dir: string) => relative(process.cwd(), dir)],
+    [
+      'relative with a trailing separator',
+      (dir: string) => `${relative(process.cwd(), dir)}${sep}`,
+    ],
+  ])('round-trips every path to an existing file for a %s dist directory', (_label, spell) => {
+    const dir = spell(distDir);
+    const paths = listDistFiles(dir);
+    expect(paths.length).toBeGreaterThan(0);
+    for (const urlPath of paths) {
+      const filePath = distFilePath(dir, urlPath);
+      expect(filePath).toBe(join(dir, ...urlPath.split('/').filter(Boolean)));
+      expect(existsSync(filePath)).toBe(true);
     }
   });
 });
