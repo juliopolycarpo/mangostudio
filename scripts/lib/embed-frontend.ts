@@ -63,9 +63,32 @@ export function renderEmbedEntryModule(registryModulePath: string, apiEntryPath:
   ].join('\n');
 }
 
+/**
+ * Refuse to compile a binary that would ship without its frontend.
+ *
+ * The embedded manifest is the only place a binary's assets come from — there
+ * is no disk fallback to catch a miss. Without this the failure is silent and
+ * late: an empty manifest compiles, the binary boots, `registerEmbeddedSpa`
+ * finds no `/index.html`, and every route answers API-only. That looks like a
+ * server problem to whoever hits it, an hour and a release pipeline away from
+ * the build that caused it.
+ *
+ * `/index.html` specifically, not just a non-empty walk: it is the one file the
+ * shell and every SPA deep link resolve to, and a dist that somehow has assets
+ * without it is no more servable than an empty one.
+ */
+function assertEmbeddable(distDir: string, urlPaths: readonly string[]): void {
+  if (urlPaths.includes('/index.html')) return;
+  throw new Error(
+    `Cannot embed a frontend from ${distDir}: no /index.html among ${urlPaths.length} file(s). ` +
+      'Build the frontend before compiling the binary.'
+  );
+}
+
 /** Writes manifest + entry modules and returns the entry to compile. // Usage: writeEmbedModules(options) */
 export function writeEmbedModules(options: EmbedModuleOptions): EmbedModules {
   const urlPaths = listDistFiles(options.distDir);
+  assertEmbeddable(options.distDir, urlPaths);
   mkdirSync(options.embedDir, { recursive: true });
 
   const manifestPath = join(options.embedDir, 'frontend-manifest.ts');

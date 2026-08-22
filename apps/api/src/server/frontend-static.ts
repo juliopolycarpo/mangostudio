@@ -24,7 +24,7 @@ function hasFrontend(frontendDir: string): boolean {
 }
 
 /** Register static assets + SPA fallback, or a bare 404 when no frontend exists. */
-// Usage: registerFrontend(app, getDefaultFrontendDir());
+// Usage: registerFrontend(app, getSourceFrontendDir());
 export function registerFrontend(app: App, frontendDir: string): void {
   const embedded = getEmbeddedFrontend();
   if (embedded) {

@@ -5,7 +5,7 @@
  * unconditionally. Only `apps/api/src/dev.ts` — never the binary entry —
  * populates it.
  *
- * It exists because `getDefaultFrontendDir()` resolves `apps/frontend/dist`
+ * It exists because `getSourceFrontendDir()` resolves `apps/frontend/dist`
  * against `process.cwd()`, and Turbo runs the API's dev task with the cwd set to
  * `apps/api`, not the repo root.
  */

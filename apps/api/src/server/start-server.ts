@@ -15,7 +15,7 @@ import {
   reloadSecretEnv,
 } from '../lib/config';
 import { ensureRuntimeDirs } from '../lib/mango-paths';
-import { getDefaultFrontendDir } from '../lib/runtime-paths';
+import { getSourceFrontendDir } from '../lib/runtime-paths';
 import { removeState, type ServerState, writeState } from '../lib/server-state';
 import { externalSessionManager } from '../modules/external-agents/application/external-session-manager';
 import { reconcileExternalTurns } from '../modules/external-agents/application/external-turn-recovery';
@@ -79,12 +79,12 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
       .catch(() => undefined);
   });
   // Populated only by src/dev.ts, before startServer() runs — never by the
-  // binary entry. It is an override for getDefaultFrontendDir() alone: the dev
+  // binary entry. It is an override for getSourceFrontendDir() alone: the dev
   // build lands in apps/frontend/dist, which that helper resolves against the
   // cwd, and Turbo runs the dev task from apps/api.
   const devFrontendDir = getDevFrontendDir();
   const frontendDir =
-    devFrontendDir ?? (getEmbeddedFrontend() ? EMBEDDED_FRONTEND_DIR : getDefaultFrontendDir());
+    devFrontendDir ?? (getEmbeddedFrontend() ? EMBEDDED_FRONTEND_DIR : getSourceFrontendDir());
   registerFrontend(app, frontendDir);
 
   listenOrExit(port, host);

@@ -70,4 +70,29 @@ describe('writeEmbedModules', () => {
     expect(readFileSync(result.manifestPath, 'utf8')).toContain('"/build-info.json"');
     expect(readFileSync(result.entryPath, 'utf8')).toContain("from './frontend-manifest'");
   });
+
+  // The binary has no disk fallback, so an unservable manifest has to stop the
+  // build. Without this it compiles, boots, and answers every route API-only —
+  // a silent failure a release pipeline away from the build that caused it.
+  test.each([
+    ['the dist has no index.html', () => rmSync(join(distDir, 'index.html'))],
+    [
+      'the dist is empty',
+      () => {
+        rmSync(distDir, { recursive: true, force: true });
+        mkdirSync(distDir, { recursive: true });
+      },
+    ],
+  ])('refuses to embed when %s', (_label, breakDist) => {
+    breakDist();
+
+    expect(() =>
+      writeEmbedModules({
+        distDir,
+        embedDir,
+        registryModulePath: '/repo/apps/api/src/server/embedded-frontend.ts',
+        apiEntryPath: '/repo/apps/api/src/index.ts',
+      })
+    ).toThrow(/no \/index\.html/);
+  });
 });

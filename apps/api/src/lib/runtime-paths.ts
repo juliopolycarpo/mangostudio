@@ -2,7 +2,7 @@
  * Runtime path helpers for development and standalone executable modes.
  */
 
-import { existsSync, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
 function isBunBinary(execPath: string): boolean {
@@ -42,21 +42,24 @@ export function getRuntimeBaseDir(): string {
 }
 
 /**
- * Returns the default frontend public directory for the current runtime mode.
+ * The frontend directory a *source checkout* serves from.
+ *
+ * There is no standalone branch. A compiled binary serves the frontend from
+ * the manifest embedded at build time, and `scripts/build.ts` refuses to
+ * produce one without it, so a binary reaching for a directory on disk is a
+ * state that cannot be built. The `<executable>/public` sidecar this used to
+ * fall back to was never produced by anything: the Docker image copies only the
+ * two binaries, and the Homebrew and npm artifacts ship the same way. What it
+ * did produce was a silent failure mode — a binary missing its assets booted
+ * happily and answered every route API-only.
+ *
+ * Unconditional rather than existence-checked. The old version fell back to
+ * `<cwd>/public` when `apps/frontend/dist` was absent, which turned "the
+ * frontend is not built yet" into a path pointing somewhere it was never going
+ * to be, and the "no frontend found at" warning then named the wrong directory.
  */
-export function getDefaultFrontendDir(): string {
-  if (isStandaloneExecutable()) {
-    return join(getRuntimeBaseDir(), 'public');
-  }
-
-  // In monorepo dev mode, look into apps/frontend/dist
-  const monorepoFrontend = join(getRuntimeBaseDir(), 'apps', 'frontend', 'dist');
-  if (existsSync(monorepoFrontend)) {
-    return monorepoFrontend;
-  }
-
-  // Fallback to local public dir
-  return join(getRuntimeBaseDir(), 'public');
+export function getSourceFrontendDir(): string {
+  return join(getRuntimeBaseDir(), 'apps', 'frontend', 'dist');
 }
 
 /** Filename of the runtime binary that ships beside the hub executable. */

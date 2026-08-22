@@ -3,7 +3,7 @@
  * by `bun build --compile`: `index.ts` (the binary entry) does not import this
  * file, directly or transitively.
  *
- * There is no dev-specific *serving* code. `getDefaultFrontendDir()` already
+ * There is no dev-specific *serving* code. `getSourceFrontendDir()` already
  * resolves `apps/frontend/dist` in a source checkout, so once this module has
  * produced that directory the normal `registerFrontend()` path serves it —
  * the same code the shipped binary's filesystem branch uses.
