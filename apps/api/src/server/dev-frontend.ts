@@ -25,10 +25,23 @@ const DIST_DIR = join(FRONTEND_DIR, 'dist');
 /** Coalesce the burst of events an editor save produces into one rebuild. */
 const REBUILD_DEBOUNCE_MS = 120;
 /**
- * The build regenerates this file, and it lives inside the watched tree.
- * Rebuilding on it would make the watcher feed itself.
+ * Files the build writes back into the watched tree. Both prune mechanisms
+ * below have to skip them: the watcher, or every rebuild schedules the next one
+ * forever, and `newestSourceMtime`, or the tree is always newer than `dist/`
+ * and `distIsCurrent()` can never be true again.
+ *
+ * `routeTree.gen.ts` is regenerated under `src/`. `dist-metafile.json` is
+ * written to the frontend *root* — beside `dist/`, deliberately outside it so
+ * the binary does not embed it — which puts it outside `UNWATCHED_DIRS`' reach
+ * and makes it the last write of every build.
  */
 const GENERATED_FILE = 'routeTree.gen.ts';
+const BUILD_OUTPUT_FILES = new Set([GENERATED_FILE, 'dist-metafile.json']);
+
+/** True when a watched path's last segment names a file the build itself writes. */
+function isBuildOutputFile(path: string): boolean {
+  return BUILD_OUTPUT_FILES.has(path.split(/[\\/]/).pop() ?? '');
+}
 /**
  * Watching only `src/` meant an edit to `index.html`, to anything under
  * `public/`, or to `build.ts`/the Tailwind config fired no rebuild at all —
@@ -86,7 +99,7 @@ export function newestSourceMtime(directory: string): number {
       newest = Math.max(newest, newestSourceMtime(join(directory, entry.name)));
       continue;
     }
-    if (!entry.isFile() || entry.name === GENERATED_FILE) continue;
+    if (!entry.isFile() || BUILD_OUTPUT_FILES.has(entry.name)) continue;
     try {
       newest = Math.max(newest, statSync(join(directory, entry.name)).mtimeMs);
     } catch {
@@ -161,6 +174,14 @@ export async function registerDevFrontend(): Promise<void> {
       .then((ok) => {
         if (ok) console.warn('[frontend] Rebuilt. Refresh the browser to see the change.');
       })
+      // `runBuild` rejects when the *spawn* fails rather than the build — `bun`
+      // off PATH, or EAGAIN under the fd pressure oven-sh/bun#37968 still
+      // produces. Without a handler the rejection escapes the `void` as an
+      // unhandled rejection, which takes the dev server down and says nothing
+      // about the frontend.
+      .catch((error: unknown) => {
+        console.error('[frontend] Rebuild could not start:', error);
+      })
       .finally(() => {
         building = false;
         if (dirty) {
@@ -171,9 +192,11 @@ export async function registerDevFrontend(): Promise<void> {
   };
 
   const watcher = watch(FRONTEND_DIR, { recursive: true }, (_event, filename) => {
-    // The build writes routeTree.gen.ts back into the watched tree; reacting to
-    // it would make each rebuild schedule the next one.
-    if (filename?.endsWith(GENERATED_FILE)) return;
+    // The build writes routeTree.gen.ts and dist-metafile.json back into the
+    // watched tree; reacting to either would make each rebuild schedule the
+    // next one. The metafile is the build's *last* write, so nothing about the
+    // debounce or the in-flight guard can absorb it.
+    if (filename && isBuildOutputFile(filename)) return;
     // Same self-feeding problem, one level up: now that the whole workspace is
     // watched, `dist/` — which every rebuild rewrites — is inside it. Prune the
     // build's own output and `node_modules` before anything is scheduled.

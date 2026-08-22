@@ -69,6 +69,20 @@ describe('newestSourceMtime', () => {
     }
   });
 
+  test('ignores dist-metafile.json, which the build writes beside dist/ and not inside it', () => {
+    const root = fixture();
+    try {
+      writeAt(join(root, 'src', 'main.tsx'), OLD);
+      // The last write of every build, at the frontend root — so `UNWATCHED_DIRS`
+      // cannot prune it, and counting it would make `distIsCurrent()` false on
+      // every API restart while the watcher rebuilt in a loop.
+      writeAt(join(root, 'dist-metafile.json'), NEW);
+      expect(newestSourceMtime(root)).toBe(OLD * 1000);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('ignores the generated route tree the build writes back into src/', () => {
     const root = fixture();
     try {
