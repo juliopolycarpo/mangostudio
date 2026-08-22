@@ -13,6 +13,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { CliError } from '../../../src/cli/errors';
 import {
   getConfigEnvFilePath,
   loadConfig,
@@ -530,6 +531,12 @@ describe('corsOrigins: the server origin plus configured allowed origins', () =>
     process.env.ALLOWED_ORIGINS = origin;
 
     expect(() => loadConfig(join(TMP_DIR, 'nonexistent.toml'))).toThrow(expected);
+  });
+
+  test('a malformed allowed origin fails as a CliError, not a plain Error', () => {
+    process.env.ALLOWED_ORIGINS = 'studio.example.com';
+
+    expect(() => loadConfig(join(TMP_DIR, 'nonexistent.toml'))).toThrow(CliError);
   });
 
   test('names the canonical form when an entry is close but not exact', () => {

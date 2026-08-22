@@ -13,6 +13,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import { parse as parseToml } from 'smol-toml';
+import { CliError } from '../cli/errors';
 
 /**
  * Absolute path to the monorepo root, derived from this file's location.
@@ -393,7 +394,7 @@ function assertValidAllowedOrigins(origins: string[]): void {
     .filter((message): message is string => message !== null);
   if (messages.length === 0) return;
 
-  throw new Error(
+  throw new CliError(
     `Invalid server.allowedOrigins (ALLOWED_ORIGINS): ${messages.join('; ')}. ` +
       'Each entry must be a bare origin such as https://studio.example.com.'
   );
