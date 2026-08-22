@@ -3,6 +3,10 @@
  * `bun run dev` rebuilds or reports the existing bundle as current, so a
  * subtree it fails to see is a bundle that never rebuilds — and a subtree it
  * wrongly *does* see (`dist/`) is a rebuild that triggers the next one forever.
+ *
+ * The scan counts directory mtimes as well as file mtimes, because a deletion
+ * advances nothing else. That makes the fixtures timestamp-sensitive in both
+ * directions: see `holdDirs`.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -20,12 +24,29 @@ function writeAt(path: string, seconds: number): void {
   utimesSync(path, seconds, seconds);
 }
 
+/**
+ * Hold every counted directory at OLD.
+ *
+ * The scan counts directory mtimes as well as file mtimes — that is the only
+ * signal a *deletion* produces — and mkdir, writeFile and rm all leave the
+ * containing directory at wall-clock now, which would swamp OLD/NEW. Every
+ * assertion about a file's mtime calls this first, so what it measures is the
+ * file. The deletion test is the one that deliberately does not.
+ */
+function holdDirs(root: string): void {
+  for (const directory of ['src', 'public']) {
+    utimesSync(join(root, directory), OLD, OLD);
+  }
+}
+
 function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'dev-frontend-'));
-  mkdirSync(join(root, 'src'), { recursive: true });
+  mkdirSync(join(root, 'src', 'routes'), { recursive: true });
   mkdirSync(join(root, 'public'), { recursive: true });
   mkdirSync(join(root, 'dist', 'assets'), { recursive: true });
   mkdirSync(join(root, 'node_modules', 'pkg'), { recursive: true });
+  utimesSync(join(root, 'src', 'routes'), OLD, OLD);
+  holdDirs(root);
   return root;
 }
 
@@ -38,6 +59,7 @@ describe('newestSourceMtime', () => {
       // left `distIsCurrent()` reporting a stale bundle as current.
       for (const path of ['index.html', 'build.ts', join('public', 'logo.svg')]) {
         writeAt(join(root, path), NEW);
+        holdDirs(root);
         expect(newestSourceMtime(root)).toBe(NEW * 1000);
         rmSync(join(root, path));
       }
@@ -52,6 +74,7 @@ describe('newestSourceMtime', () => {
       writeAt(join(root, 'src', 'main.tsx'), OLD);
       writeAt(join(root, 'dist', 'index.html'), NEW);
       writeAt(join(root, 'dist', 'assets', 'index-abc123.js'), NEW);
+      holdDirs(root);
       expect(newestSourceMtime(root)).toBe(OLD * 1000);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -63,6 +86,7 @@ describe('newestSourceMtime', () => {
     try {
       writeAt(join(root, 'src', 'main.tsx'), OLD);
       writeAt(join(root, 'node_modules', 'pkg', 'index.js'), NEW);
+      holdDirs(root);
       expect(newestSourceMtime(root)).toBe(OLD * 1000);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -78,6 +102,7 @@ describe('newestSourceMtime', () => {
       // `distIsCurrent()` false on every API restart while the watcher rebuilt
       // in a loop.
       writeAt(join(root, 'dist-metafile.json'), NEW);
+      holdDirs(root);
       expect(newestSourceMtime(root)).toBe(OLD * 1000);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -103,6 +128,7 @@ describe('newestSourceMtime', () => {
       ]) {
         mkdirSync(join(root, dirname(path)), { recursive: true });
         writeAt(join(root, path), NEW);
+        holdDirs(root);
         expect(newestSourceMtime(root)).toBe(OLD * 1000);
         rmSync(join(root, path));
       }
@@ -116,6 +142,45 @@ describe('newestSourceMtime', () => {
     try {
       writeAt(join(root, 'src', 'main.tsx'), OLD);
       writeAt(join(root, 'src', 'routeTree.gen.ts'), NEW);
+      // `tsr generate` rewrites this file in place, which leaves `src/`'s own
+      // mtime alone — so holding the directories at OLD is what the real build
+      // does, not a convenience for the assertion.
+      holdDirs(root);
+      expect(newestSourceMtime(root)).toBe(OLD * 1000);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('sees a deleted input, which advances no file mtime at all', () => {
+    const root = fixture();
+    try {
+      // A route removed while `bun run dev` was stopped. Nothing under `src/`
+      // gets a new file mtime — only `src/routes/` does — so a file-only scan
+      // reported the newest *surviving* file, `distIsCurrent()` called the old
+      // bundle current, and the next `bun run dev` served the deleted route.
+      writeAt(join(root, 'src', 'routes', 'keep.tsx'), OLD);
+      writeAt(join(root, 'src', 'routes', 'gone.tsx'), OLD);
+      rmSync(join(root, 'src', 'routes', 'gone.tsx'));
+      utimesSync(join(root, 'src', 'routes'), NEW, NEW);
+      holdDirs(root);
+      expect(newestSourceMtime(root)).toBe(NEW * 1000);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('ignores directories the allowlist prunes, mtime included', () => {
+    const root = fixture();
+    try {
+      writeAt(join(root, 'src', 'main.tsx'), OLD);
+      // Counting directory mtimes must not reopen what the allowlist closed:
+      // `dist/` is recreated by every build and `node_modules/` by every
+      // install, and either one reading as an input is a rebuild loop.
+      for (const directory of ['dist', join('dist', 'assets'), 'node_modules']) {
+        utimesSync(join(root, directory), NEW, NEW);
+      }
+      holdDirs(root);
       expect(newestSourceMtime(root)).toBe(OLD * 1000);
     } finally {
       rmSync(root, { recursive: true, force: true });

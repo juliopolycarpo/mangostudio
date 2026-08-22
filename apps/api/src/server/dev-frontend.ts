@@ -107,12 +107,19 @@ async function runBuild(): Promise<boolean> {
 }
 
 /**
- * Newest file mtime under a directory, or 0 when it does not exist.
+ * Newest mtime under a directory, or 0 when it does not exist.
  *
  * `keep` decides which entries are descended into and counted, which is what
  * lets one walker answer for both sides of `distIsCurrent()` — the output tree
  * whole, and the input tree filtered. Two walkers is how `GENERATED_FILE` came
  * to be honoured by one of them and not the other.
+ *
+ * `countDirectories` adds each kept subdirectory's own mtime to the maximum.
+ * That is the only way to see a *removal*: deleting a file advances its parent
+ * directory's mtime and touches no file, so a file-only scan still reports the
+ * newest surviving file and misses the change entirely. It is set for the input
+ * side alone — raising `built` is the direction that serves a stale bundle
+ * while claiming it is current.
  *
  * Hand-rolled rather than `readdirSync({ recursive: true })` because that has
  * no way to prune a subtree: it would descend all of `node_modules` — tens of
@@ -122,6 +129,7 @@ async function runBuild(): Promise<boolean> {
 function newestMtime(
   directory: string,
   keep: (name: string, depth: number) => boolean,
+  countDirectories: boolean,
   depth = 0
 ): number {
   let newest = 0;
@@ -135,7 +143,15 @@ function newestMtime(
     if (!keep(entry.name, depth)) continue;
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
-      newest = Math.max(newest, newestMtime(path, keep, depth + 1));
+      newest = Math.max(newest, newestMtime(path, keep, countDirectories, depth + 1));
+      if (countDirectories) {
+        try {
+          newest = Math.max(newest, statSync(path).mtimeMs);
+        } catch {
+          // Same reasoning as the file case below: skipping can only make the
+          // result older, which fails toward a rebuild.
+        }
+      }
       continue;
     }
     if (!entry.isFile()) continue;
@@ -149,9 +165,22 @@ function newestMtime(
   return newest;
 }
 
-/** Newest mtime of the frontend's build *inputs*. */
+/**
+ * Newest mtime of the frontend's build *inputs*, including the mtimes of the
+ * allowlisted subdirectories themselves so that deleting or renaming an input
+ * registers as a change.
+ *
+ * `directory`'s own mtime is deliberately not counted. It advances whenever any
+ * entry appears or disappears at the frontend root, which a build does on every
+ * run (`dist/` is removed and recreated) and `bun run check` does the first time
+ * it writes `.turbo/` — churn that has nothing to do with the bundle's inputs.
+ * The accepted gap is that deleting a root-level input (`build.ts`,
+ * `index.html`, the configs) is still invisible to this scan; each of those
+ * breaks the build loudly the moment it does run, unlike a quietly dropped
+ * route.
+ */
 export function newestSourceMtime(directory: string): number {
-  return newestMtime(directory, isBuildInput);
+  return newestMtime(directory, isBuildInput, true);
 }
 
 /**
@@ -165,7 +194,7 @@ function distIsCurrent(): boolean {
   // No `dist/` settles the question on its own, so the input scan — the more
   // expensive of the two — is not run at all in the case that needs a full
   // build anyway.
-  const built = newestMtime(DIST_DIR, () => true);
+  const built = newestMtime(DIST_DIR, () => true, false);
   if (built === 0) return false;
   // A failed source scan (the walker's catch returns 0, e.g. a file deleted
   // mid-scan) must read as "stale", not as "0 is older than anything built":
