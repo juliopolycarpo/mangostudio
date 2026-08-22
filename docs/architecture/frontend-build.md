@@ -183,7 +183,9 @@ fixed — but the *set* is not: a dev rebuild lands while the server runs, so a 
 `public/` afterwards had no route, fell through to the fallback and came back as `index.html`
 at 200 `text/html`. `isSpaRoute()` therefore stops claiming root-level paths that carry a file
 extension, so a missing one is a 404 instead of an HTML document handed to an `<img>`. The
-rule is anchored to a single segment: `/library/my-skill.md` is a real SPA deep link.
+rule is anchored to a single segment: `/library/my-skill.md` is a real SPA deep link. Ownership
+checks decode the pathname first, so encoded API roots and file extensions cannot fall through
+to the shell; malformed escapes and decoded traversal forms also fail with a 404.
 
 `app.handle()` resolves both correctly, so an in-process test cannot see either failure. The
 `over a listening server` suite in `apps/api/tests/unit/server/frontend-static.test.ts` binds

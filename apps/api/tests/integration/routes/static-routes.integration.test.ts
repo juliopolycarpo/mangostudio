@@ -54,12 +54,27 @@ describe('SPA onError NOT_FOUND guard', () => {
     expect(isSpaRoute('/assets/app.js')).toBe(false);
   });
 
+  test('percent-encoded API, asset, and root-file paths are NOT served as SPA', () => {
+    expect(isSpaRoute('/%61pi/nope')).toBe(false);
+    expect(isSpaRoute('/%61ssets/missing.js')).toBe(false);
+    expect(isSpaRoute('/api%2fnope')).toBe(false);
+    expect(isSpaRoute('/never-built%2esvg')).toBe(false);
+  });
+
+  test('malformed and unsafe decoded paths are NOT served as SPA', () => {
+    expect(isSpaRoute('/%ZZ/nope')).toBe(false);
+    expect(isSpaRoute('/..%2fsecret.svg')).toBe(false);
+    expect(isSpaRoute('/route%5csecret')).toBe(false);
+    expect(isSpaRoute('/route%00secret')).toBe(false);
+  });
+
   test('lookalike path segments ARE served as SPA', () => {
     expect(isSpaRoute('/apiary')).toBe(true);
     expect(isSpaRoute('/uploads-old')).toBe(true);
     expect(isSpaRoute('/images-archive')).toBe(true);
     expect(isSpaRoute('/assets-page')).toBe(true);
     expect(isSpaRoute('/scalarity')).toBe(true);
+    expect(isSpaRoute('/%61piary')).toBe(true);
   });
 
   test('generic SPA routes ARE served as SPA', () => {
@@ -86,6 +101,7 @@ describe('SPA onError NOT_FOUND guard', () => {
     // claiming every dot for the filesystem would 404 links that work today.
     expect(isSpaRoute('/library/my-skill.md')).toBe(true);
     expect(isSpaRoute('/settings/providers/openai.com')).toBe(true);
+    expect(isSpaRoute('/library/my-skill%2emd')).toBe(true);
     // No extension, so not a file request even at the root.
     expect(isSpaRoute('/some.page/nested')).toBe(true);
   });

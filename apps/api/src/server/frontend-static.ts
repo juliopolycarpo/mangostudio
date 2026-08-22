@@ -10,7 +10,7 @@ import { BUILD_STATE_URL_PATH } from '@mangostudio/shared/utils/dist-files';
 import { NotFound } from 'elysia';
 import type { App } from '../app';
 import { fileEtag, matchesEtag } from '../lib/http-cache';
-import { HASHED_ASSET_DIR, isApiReservedPath, isSpaRoute } from '../lib/spa-guard';
+import { HASHED_ASSET_DIR, isApiOwnedPath, isSpaRoute } from '../lib/spa-guard';
 import { type EmbeddedFrontendFiles, getEmbeddedFrontend } from './embedded-frontend';
 import { frontendNotFound, setFrontendFallback } from './frontend-fallback';
 
@@ -358,12 +358,12 @@ function registerSpa(app: App, frontendDir: string): void {
     const { pathname } = new URL(request.url);
     // This fallback sits on *every* unmatched request, so an unknown endpoint
     // under an API-owned prefix arrives here too. Those can never name a file
-    // in `dist/`, and rejecting them on the prefix — pure string work — keeps a
-    // 404 for `/api/v1/thing.json` from costing a decode, a segment scan, a
-    // `realpathSync` call and a `statSync`. `/assets` is not rejected here:
-    // those files do live in `frontendDir`, and resolving them per request is
-    // what serves a dev rebuild's freshly hashed names without a restart.
-    if (isApiReservedPath(pathname)) return undefined;
+    // in `dist/`, and rejecting them here keeps a 404 for `/api/v1/thing.json`
+    // from costing a `realpathSync` call and a `statSync`. `/assets` is not
+    // rejected: those files do live in `frontendDir`, and resolving them per
+    // request is what serves a dev rebuild's freshly hashed names without a
+    // restart.
+    if (isApiOwnedPath(pathname)) return undefined;
     // Unhashed files resolve here rather than through routes pinned at boot, so
     // a `public/` file a rebuild added since boot is served instead of being
     // answered with the SPA shell. A root-level file that does not
@@ -385,9 +385,10 @@ function registerApiOnly(app: App): void {
   setFrontendFallback((request) => {
     const { pathname } = new URL(request.url);
     // The outer `NotFound` handler in `app.ts` runs first and stops when this
-    // returns a body. Claiming `/api/*` here would turn unknown endpoints into
-    // plaintext instead of `ApiErrorResponse`.
-    if (pathname === '/api' || pathname.startsWith('/api/')) return undefined;
+    // returns a body. Claiming an API-owned path here would turn unknown
+    // endpoints into plaintext instead of `ApiErrorResponse` — which is also
+    // why an undecodable pathname counts as owned rather than falling through.
+    if (isApiOwnedPath(pathname)) return undefined;
     return new Response('Frontend not found. API is running.', { status: 404 });
   });
   app.error(NotFound, ({ request }) => frontendNotFound(request));

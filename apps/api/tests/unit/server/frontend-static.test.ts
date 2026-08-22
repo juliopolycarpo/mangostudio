@@ -104,7 +104,9 @@ describe('registerFrontend with embedded assets', () => {
 
     await expectJsonNotFound(await get('/api'));
     await expectJsonNotFound(await get('/api/nope'));
+    await expectJsonNotFound(await get('/%61pi/nope'));
     expect((await get('/assets/missing.js')).status).toBe(404);
+    expect((await get('/never-built%2esvg')).status).toBe(404);
   });
 
   test('does not shadow mounted wildcard routes such as Better Auth /api/auth/*', async () => {
@@ -268,10 +270,10 @@ describe('registerFrontend from the filesystem', () => {
     const get = await buildFilesystemApp();
 
     expect((await get('/api/health')).status).toBe(200);
-    for (const path of ['/api', '/api/nope']) {
+    for (const path of ['/api', '/api/nope', '/%61pi/nope']) {
       await expectJsonNotFound(await get(path));
     }
-    for (const path of ['/assets/missing.js', '/scalar']) {
+    for (const path of ['/assets/missing.js', '/%61ssets/missing.js', '/scalar']) {
       const response = await get(path);
       expect(response.status).toBe(404);
       expect(await response.text()).not.toBe(INDEX_HTML);
@@ -494,15 +496,17 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
     }
   });
 
-  test('404s a root file that does not exist instead of serving the shell', async () => {
+  test('404s literal and encoded root files that do not exist instead of serving the shell', async () => {
     const server = await startFilesystemServer();
     try {
-      const response = await server.get('/never-built.svg');
+      for (const path of ['/never-built.svg', '/never-built%2esvg']) {
+        const response = await server.get(path);
 
-      // The failure this replaces was silent: a 200 HTML shell. A 404 is the
-      // one answer a browser and a maintainer can both act on.
-      expect(response.status).toBe(404);
-      expect(await response.text()).not.toBe(INDEX_HTML);
+        // The failure this replaces was silent: a 200 HTML shell. A 404 is the
+        // one answer a browser and a maintainer can both act on.
+        expect(response.status).toBe(404);
+        expect(await response.text()).not.toBe(INDEX_HTML);
+      }
     } finally {
       await server.stop();
     }
@@ -605,7 +609,18 @@ describe('registerFrontend without embedded assets', () => {
       .use(new Elysia({ prefix: '/api' }).use(errorHandler).get('/health', () => ({ ok: true })));
     registerFrontend(app as unknown as App, '/nonexistent-frontend-dir');
 
-    for (const path of ['/api', '/api/nope']) {
+    // `/uploads`, `/images` and `/scalar` are API-owned too, so an unknown path
+    // under any of them is the error handler's to answer. `%E0%A4` is a
+    // malformed escape — undecodable, and so still not the fallback's to claim.
+    // Answering that one with the plaintext body is the regression this pins.
+    for (const path of [
+      '/api',
+      '/api/nope',
+      '/%61pi/nope',
+      '/uploads/nope',
+      '/scalar/nope',
+      '/api/chats/%E0%A4',
+    ]) {
       const missing = await app.handle(new Request(`http://localhost${path}`));
       await expectJsonNotFound(missing);
     }

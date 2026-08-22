@@ -39,9 +39,48 @@ function hasPrefix(pathname: string, prefixes: readonly string[]): boolean {
   return prefixes.some((root) => pathname === root || pathname.startsWith(`${root}/`));
 }
 
-/** True when the path belongs to an API-owned prefix rather than the frontend. */
-export function isApiReservedPath(pathname: string): boolean {
-  return hasPrefix(pathname, API_RESERVED_PREFIXES);
+/**
+ * Decode a URL pathname for ownership checks, or null when it is unsafe.
+ *
+ * `URL.pathname` preserves percent escapes, including unreserved characters,
+ * so raw checks let `/%61pi` and `/logo%2esvg` bypass the API and file guards.
+ * Malformed escapes and decoded traversal forms must fail away from the SPA:
+ * its shell is never a useful answer to an invalid or ambiguous pathname.
+ */
+function normalizePathname(pathname: string): string | null {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+  if (!decoded.startsWith('/') || /[\\\0]/.test(decoded)) return null;
+  if (
+    decoded
+      .slice(1)
+      .split('/')
+      .some((segment) => segment === '.' || segment === '..')
+  ) {
+    return null;
+  }
+  return decoded;
+}
+
+/**
+ * True when the frontend fallback must decline the request and leave it to the
+ * API error handler: an API-owned prefix, or a pathname that cannot be decoded
+ * safely at all.
+ *
+ * The two fail directions are deliberate and opposite to `isSpaRoute`'s. There,
+ * an undecodable path must not be answered with the shell, so `null` means
+ * "not a SPA route". Here it must not be answered with the fallback's plaintext
+ * body either — `ApiErrorResponse` is the contract for anything the API can
+ * still own — so `null` means "decline". Returning false for a malformed path
+ * is what turned `/api/chats/%E0%A4` into a plaintext 404 in API-only mode.
+ */
+export function isApiOwnedPath(pathname: string): boolean {
+  const normalized = normalizePathname(pathname);
+  return normalized === null || hasPrefix(normalized, API_RESERVED_PREFIXES);
 }
 
 /**
@@ -57,6 +96,8 @@ export function isApiReservedPath(pathname: string): boolean {
  * `/index.html` is the exception: it is the shell, not an asset beside it.
  */
 export function isSpaRoute(pathname: string): boolean {
-  if (pathname !== '/index.html' && ROOT_FILE.test(pathname)) return false;
-  return !hasPrefix(pathname, [...API_RESERVED_PREFIXES, `/${HASHED_ASSET_DIR}`]);
+  const normalized = normalizePathname(pathname);
+  if (normalized === null) return false;
+  if (normalized !== '/index.html' && ROOT_FILE.test(normalized)) return false;
+  return !hasPrefix(normalized, [...API_RESERVED_PREFIXES, `/${HASHED_ASSET_DIR}`]);
 }
