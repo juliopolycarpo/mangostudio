@@ -3,7 +3,8 @@
   "extends": ["//"],
   "tasks": {
     "build": {
-      "outputs": ["dist/**", "dist-metafile.json"]
+      "outputs": ["dist/**", "dist-metafile.json"],
+      "env": ["MANGO_API_URL", "VITE_*"]
     }
   }
 }

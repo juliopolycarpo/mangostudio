@@ -78,27 +78,6 @@ function routeTreeIsCurrent(): boolean {
 }
 
 /**
- * Build the app and write `dist/`.
- *
- * Two things here are load-bearing and look optional:
- *
- * - **The entrypoint is `src/main.tsx`, never `index.html`.** Bun's HTML loader
- *   silently drops a nested transitive import from this app's graph (measured:
- *   better-auth's `nanostores`, surfacing as `ReferenceError: atom is not
- *   defined` and a blank page). The TS entrypoint is unaffected, so the HTML is
- *   stitched by hand below instead of being handed to the bundler.
- * - **`publicPath: '/'`.** Without it Bun rewrites the HTML to relative asset
- *   URLs, and the SPA shell served at `/settings/agents` then resolves
- *   `./assets/x.js` to `/settings/assets/x.js` — a 404, a blank page, and no
- *   server-side error. The assertion at the end of this file is the guard.
- * - **The `NODE_ENV` define.** Nothing in this repo sets `NODE_ENV`, and
- *   `Bun.build()` then resolves `process.env.NODE_ENV` to `'development'` —
- *   which is how React, its scheduler, and every dev-gated dependency picked
- *   their *development* builds in a minified production bundle (measured:
- *   +78 kB gzip on the eager payload, plus React's dev-mode runtime checks).
- *   Vite inlined `'production'`; this define restores that.
- */
-/**
  * The split-deployment API base URL, from `MANGO_API_URL` or the deprecated
  * `VITE_API_URL` alias.
  *
@@ -107,6 +86,15 @@ function routeTreeIsCurrent(): boolean {
  * looking for a `vite.config.ts` that does not exist. The alias stays for one
  * release so an existing build script keeps working, and says so out loud when
  * it is the one that supplied the value.
+ *
+ * The value is baked into the bundle, so it has to be in the `build` task's
+ * Turbo cache key or a run with a changed one restores a `dist/` pointing at
+ * the previous API. `VITE_API_URL` was covered incidentally by the root
+ * `turbo.jsonc` task's `VITE_*` glob; the rename moved the primary name out of
+ * it, so `apps/frontend/turbo.json` names `MANGO_API_URL` explicitly and
+ * restates `VITE_*` — a package task's `env` *replaces* the root's for that
+ * task rather than adding to it (verified with
+ * `turbo run build --dry=json --filter=@mangostudio/frontend`).
  */
 function resolveApiUrlOverride(): string {
   const current = process.env.MANGO_API_URL;
@@ -124,6 +112,27 @@ function resolveApiUrlOverride(): string {
   return '';
 }
 
+/**
+ * Build the app and write `dist/`.
+ *
+ * Three things here are load-bearing and look optional:
+ *
+ * - **The entrypoint is `src/main.tsx`, never `index.html`.** Bun's HTML loader
+ *   silently drops a nested transitive import from this app's graph (measured:
+ *   better-auth's `nanostores`, surfacing as `ReferenceError: atom is not
+ *   defined` and a blank page). The TS entrypoint is unaffected, so the HTML is
+ *   stitched by hand below instead of being handed to the bundler.
+ * - **`publicPath: '/'`.** Without it Bun rewrites the HTML to relative asset
+ *   URLs, and the SPA shell served at `/settings/agents` then resolves
+ *   `./assets/x.js` to `/settings/assets/x.js` — a 404, a blank page, and no
+ *   server-side error. The assertion at the end of this file is the guard.
+ * - **The `NODE_ENV` define.** Nothing in this repo sets `NODE_ENV`, and
+ *   `Bun.build()` then resolves `process.env.NODE_ENV` to `'development'` —
+ *   which is how React, its scheduler, and every dev-gated dependency picked
+ *   their *development* builds in a minified production bundle (measured:
+ *   +78 kB gzip on the eager payload, plus React's dev-mode runtime checks).
+ *   Vite inlined `'production'`; this define restores that.
+ */
 async function buildFrontend(options: BuildFrontendOptions = {}): Promise<void> {
   const production = !options.dev;
   // Only the dev loop skips: a production build must be byte-identical to one
