@@ -14,7 +14,8 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { newestSourceMtime } from '../../../src/server/dev-frontend';
+import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
+import { distIsCurrent, newestSourceMtime, readBuildState } from '../../../src/server/dev-frontend';
 
 /** Seconds since the epoch, so mtimes are far enough apart to compare. */
 const OLD = 1_000_000;
@@ -23,6 +24,27 @@ const NEW = 2_000_000;
 function writeAt(path: string, seconds: number): void {
   writeFileSync(path, 'x');
   utimesSync(path, seconds, seconds);
+}
+
+function writeBuildState(root: string, apiUrl: string, mode: 'dev' | 'production' = 'dev'): void {
+  const path = join(root, 'dist', BUILD_STATE_FILE);
+  writeFileSync(path, JSON.stringify({ apiUrl, mode }));
+  utimesSync(path, NEW, NEW);
+}
+
+function sharedFixture(root: string): string {
+  const shared = join(root, 'shared');
+  mkdirSync(join(shared, 'src', 'i18n'), { recursive: true });
+  writeAt(join(shared, 'package.json'), OLD);
+  writeAt(join(shared, 'tsconfig.json'), OLD);
+  writeAt(join(shared, 'src', 'index.ts'), OLD);
+  utimesSync(join(shared, 'src', 'i18n'), OLD, OLD);
+  utimesSync(join(shared, 'src'), OLD, OLD);
+  return shared;
+}
+
+function effectiveApiUrl(): string {
+  return process.env.MANGO_API_URL || process.env.VITE_API_URL || '';
 }
 
 /**
@@ -200,5 +222,154 @@ describe('newestSourceMtime', () => {
 
   test('reports 0 for a directory that does not exist, which reads as stale', () => {
     expect(newestSourceMtime(join(tmpdir(), 'dev-frontend-absent-fixture'))).toBe(0);
+  });
+});
+
+describe('distIsCurrent', () => {
+  test('treats a shared source edit as stale', () => {
+    const root = fixture();
+    const shared = sharedFixture(root);
+    try {
+      writeAt(join(root, 'src', 'main.tsx'), OLD);
+      writeAt(join(shared, 'src', 'i18n', 'en.ts'), OLD);
+      writeAt(join(root, 'dist', 'index.html'), NEW);
+      writeBuildState(root, effectiveApiUrl());
+      holdDirs(root);
+      utimesSync(join(shared, 'src', 'i18n'), OLD, OLD);
+      utimesSync(join(shared, 'src'), OLD, OLD);
+
+      expect(distIsCurrent(root, shared)).toBe(true);
+
+      writeAt(join(shared, 'src', 'i18n', 'en.ts'), NEW + 1);
+      expect(distIsCurrent(root, shared)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('treats shared package metadata changes as stale', () => {
+    const root = fixture();
+    const shared = sharedFixture(root);
+    try {
+      writeAt(join(root, 'src', 'main.tsx'), OLD);
+      writeAt(join(root, 'dist', 'index.html'), NEW);
+      writeBuildState(root, effectiveApiUrl());
+      holdDirs(root);
+
+      expect(distIsCurrent(root, shared)).toBe(true);
+
+      writeAt(join(shared, 'package.json'), NEW + 1);
+      expect(distIsCurrent(root, shared)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('requires index.html even when an emitted asset is current', () => {
+    const root = fixture();
+    const shared = sharedFixture(root);
+    try {
+      writeAt(join(root, 'src', 'main.tsx'), OLD);
+      writeAt(join(root, 'dist', 'assets', 'index-abc123.js'), NEW);
+      writeBuildState(root, effectiveApiUrl());
+      holdDirs(root);
+
+      expect(distIsCurrent(root, shared)).toBe(false);
+
+      writeAt(join(root, 'dist', 'index.html'), NEW);
+      expect(distIsCurrent(root, shared)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('requires a valid build state matching the effective API URL', () => {
+    const root = fixture();
+    const shared = sharedFixture(root);
+    const originalApiUrl = process.env.MANGO_API_URL;
+    const originalDeprecatedApiUrl = process.env.VITE_API_URL;
+    try {
+      process.env.MANGO_API_URL = 'https://current.example';
+      process.env.VITE_API_URL = 'https://deprecated.example';
+      writeAt(join(root, 'src', 'main.tsx'), OLD);
+      writeAt(join(root, 'dist', 'index.html'), NEW);
+      holdDirs(root);
+
+      expect(distIsCurrent(root, shared)).toBe(false);
+
+      writeAt(join(root, 'dist', BUILD_STATE_FILE), NEW);
+      expect(distIsCurrent(root, shared)).toBe(false);
+
+      writeBuildState(root, 'https://previous.example');
+      expect(distIsCurrent(root, shared)).toBe(false);
+
+      writeBuildState(root, 'https://current.example');
+      expect(distIsCurrent(root, shared)).toBe(true);
+
+      // A production bundle is not a reason to rebuild. It is the same app built
+      // more carefully, and treating it as stale is what let an unrelated
+      // `apps/api` save replace it with an unminified dev build.
+      writeBuildState(root, 'https://current.example', 'production');
+      expect(distIsCurrent(root, shared)).toBe(true);
+
+      delete process.env.MANGO_API_URL;
+      expect(distIsCurrent(root, shared)).toBe(false);
+
+      writeBuildState(root, 'https://deprecated.example');
+      expect(distIsCurrent(root, shared)).toBe(true);
+    } finally {
+      if (originalApiUrl === undefined) delete process.env.MANGO_API_URL;
+      else process.env.MANGO_API_URL = originalApiUrl;
+      if (originalDeprecatedApiUrl === undefined) delete process.env.VITE_API_URL;
+      else process.env.VITE_API_URL = originalDeprecatedApiUrl;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * The reader `distIsCurrent` and the production-downgrade warning share.
+ *
+ * Every rejection below has to answer null rather than throw or return a
+ * half-populated object: the caller treats null as "nothing is known about
+ * dist/", which rebuilds, and that is the only safe answer to a stamp this
+ * version cannot read.
+ */
+describe('readBuildState', () => {
+  function writeState(root: string, contents: string): string {
+    const dist = join(root, 'dist');
+    writeFileSync(join(dist, BUILD_STATE_FILE), contents);
+    return dist;
+  }
+
+  test('reads a complete stamp', () => {
+    const root = fixture();
+    try {
+      const dist = writeState(root, JSON.stringify({ apiUrl: '', mode: 'production' }));
+      expect(readBuildState(dist)).toEqual({ apiUrl: '', mode: 'production' });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a missing, unparseable or incomplete stamp', () => {
+    const root = fixture();
+    try {
+      expect(readBuildState(join(root, 'dist'))).toBeNull();
+      for (const contents of [
+        'not json',
+        'null',
+        '"a string"',
+        JSON.stringify({ mode: 'dev' }),
+        JSON.stringify({ apiUrl: '' }),
+        // The pre-stamp shape, and the one a future mode name would take.
+        JSON.stringify({ apiUrl: '', mode: 'staging' }),
+        JSON.stringify({ apiUrl: 42, mode: 'dev' }),
+      ]) {
+        expect(readBuildState(writeState(root, contents))).toBeNull();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

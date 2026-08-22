@@ -6,6 +6,7 @@
 import { existsSync, realpathSync, type Stats, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { staticPlugin } from '@elysia/static';
+import { BUILD_STATE_URL_PATH } from '@mangostudio/shared/utils/dist-files';
 import { NotFound } from 'elysia';
 import type { App } from '../app';
 import { fileEtag, matchesEtag } from '../lib/http-cache';
@@ -265,6 +266,11 @@ function resolveUnhashedFile(
     // A malformed percent-escape is not a file name.
     return null;
   }
+  // Build freshness metadata is an internal input, never a public frontend
+  // asset. The embedded branch never sees it — `listDistFiles` drops it before
+  // the manifest is generated — but this branch resolves against a live `dist/`,
+  // where every build writes one.
+  if (decoded === BUILD_STATE_URL_PATH) return null;
   // Checked *after* decoding: `new URL()` normalises literal `..` segments away
   // but leaves `%2e%2e` and `%2f` encoded, so the traversal attempt only becomes
   // visible here. A NUL truncates the path at the syscall boundary.

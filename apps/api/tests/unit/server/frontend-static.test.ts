@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { staticPlugin } from '@elysia/static';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
+import { BUILD_STATE_FILE, BUILD_STATE_URL_PATH } from '@mangostudio/shared/utils/dist-files';
 import { Elysia, NotFound } from 'elysia';
 import Value from 'typebox/value';
 import type { App } from '../../../src/app';
@@ -154,6 +155,10 @@ describe('registerFrontend from the filesystem', () => {
     mkdirSync(join(frontendDir, 'assets'), { recursive: true });
     writeFileSync(join(frontendDir, 'index.html'), INDEX_HTML);
     writeFileSync(join(frontendDir, 'assets', 'index-AbCd1234.js'), ASSET_JS);
+    writeFileSync(
+      join(frontendDir, BUILD_STATE_FILE),
+      JSON.stringify({ apiUrl: 'https://secret.example.test', mode: 'dev' })
+    );
 
     const uploadsDir = mkdtempSync(join(tmpdir(), 'fs-uploads-'));
     writeFileSync(join(uploadsDir, 'photo.png'), UPLOAD_BYTES);
@@ -199,6 +204,17 @@ describe('registerFrontend from the filesystem', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('public, max-age=31536000');
     expect(await response.text()).toBe(ASSET_JS);
+  });
+
+  test('does not serve the internal build state', async () => {
+    const get = await buildFilesystemApp();
+    // The percent-encoded spelling is the point: the guard compares the decoded
+    // path, so an encoded first character must not walk around it.
+    for (const path of [BUILD_STATE_URL_PATH, '/.%62uild-state.json']) {
+      const response = await get(path);
+      expect(response.status).toBe(404);
+      expect(await response.text()).not.toContain('secret.example.test');
+    }
   });
 
   test('404s an unhashed file that disappeared after boot', async () => {

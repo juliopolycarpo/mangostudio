@@ -2,6 +2,7 @@
 // into either "no attention signals" or a short list of concrete regressions,
 // so reviewers don't have to scan the detail tables.
 
+import { ALL_WORKSPACE_NAMES } from '../../lib/config';
 import type { Failable, Metrics } from '../collect/types';
 import {
   getBundle,
@@ -87,7 +88,16 @@ const headCollectorErrors = (head: Metrics | null): string[] => {
     ['frontendBundle', head.frontendBundle],
     ['dependencies', head.dependencies],
   ];
-  return named.filter(([, value]) => isError(value)).map(([name]) => name);
+  const errors = named.filter(([, value]) => isError(value)).map(([name]) => name);
+  for (const workspace of ALL_WORKSPACE_NAMES) {
+    const workspaceNamed: ReadonlyArray<readonly [string, Failable<unknown>]> = [
+      [`coverage/${workspace}`, head.coverage[workspace]],
+      [`tsErrors/${workspace}`, head.tsErrors[workspace]],
+      [`loc/${workspace}`, head.loc[workspace]],
+    ];
+    errors.push(...workspaceNamed.filter(([, value]) => isError(value)).map(([name]) => name));
+  }
+  return errors;
 };
 
 /**

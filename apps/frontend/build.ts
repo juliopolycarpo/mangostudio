@@ -11,11 +11,11 @@
  * Usage: bun ./build.ts [--dev]
  */
 
-import { readdirSync, statSync, utimesSync } from 'node:fs';
-import { cp, rm, writeFile } from 'node:fs/promises';
+import { readdirSync, rmSync, statSync, utimesSync } from 'node:fs';
+import { chmod, cp, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { listDistFiles } from '@mangostudio/shared/utils/dist-files';
+import { BUILD_STATE_FILE, listDistFiles } from '@mangostudio/shared/utils/dist-files';
 import tailwind from 'bun-plugin-tailwind';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -29,6 +29,84 @@ const SOURCE_SCRIPT_TAG = '<script type="module" src="./src/main.tsx"></script>'
 interface BuildFrontendOptions {
   /** Skip minify and the React Compiler pass. Halves build time for the dev loop. */
   readonly dev?: boolean;
+}
+
+/**
+ * What `BUILD_STATE_FILE` records about the bundle sitting in `dist/`.
+ *
+ * Written by every build, dev and production alike. Writing it only in dev
+ * meant a production build left none, and the reader could not tell "built with
+ * a different API URL" from "built by the other mode" — it answered stale to
+ * both, so an unrelated API save rebuilt in dev mode straight over a production
+ * bundle. Both fields are here for the same reason: they are the two inputs
+ * that change what is in `dist/` without changing any source file's mtime.
+ */
+export interface BuildState {
+  /** The `MANGO_API_URL` compiled into the bundle, empty when unset. */
+  readonly apiUrl: string;
+  readonly mode: 'dev' | 'production';
+}
+
+/**
+ * Staging and backup paths this process created and has not yet cleaned up.
+ *
+ * `publishDist` moves the live bundle aside before renaming the staged one into
+ * place, and Ctrl-C is the ordinary way to stop the dev server that spawns a
+ * build on every boot. Killed in that window, the process left `dist/` absent
+ * and a full bundle copy stranded under `.dist-backup-<uuid>`, which nothing
+ * ever reaped — one multi-MB directory per interrupt.
+ *
+ * Cleanup is driven by this set rather than by a glob sweep of the workspace on
+ * startup: the documented two-terminal workflow makes a concurrent build real
+ * (a `bun run dev` boot spawns one while a manual build is running), and a
+ * sweep cannot tell another run's live staging directory from an orphan.
+ */
+const tempPaths = new Set<string>();
+
+export function trackTempPath(path: string): string {
+  tempPaths.add(path);
+  return path;
+}
+
+async function untrackTempPath(path: string, options: { recursive?: boolean } = {}): Promise<void> {
+  tempPaths.delete(path);
+  await rm(path, { force: true, ...options });
+}
+
+/**
+ * Remove every path this process is still tracking. Synchronous because it runs
+ * from a signal handler, where the process is about to exit and a pending
+ * promise would never settle.
+ */
+export function removeTempPaths(): void {
+  for (const path of tempPaths) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+    } catch {
+      // Nothing useful to do while unwinding, and a failed cleanup must not
+      // replace the interrupt's exit code with a crash.
+    }
+    tempPaths.delete(path);
+  }
+}
+
+/**
+ * Clean up when the build is interrupted.
+ *
+ * Installed from the CLI entrypoint only, so importing this module for a test
+ * does not take over the test runner's signal handling. `once`, and the exit
+ * code is the conventional 128 + signal so a shell still sees an interrupt.
+ */
+function removeTempPathsOnSignal(): void {
+  for (const [signal, code] of [
+    ['SIGINT', 130],
+    ['SIGTERM', 143],
+  ] as const) {
+    process.once(signal, () => {
+      removeTempPaths();
+      process.exit(code);
+    });
+  }
 }
 
 /**
@@ -97,13 +175,21 @@ function routeTreeIsCurrent(): boolean {
  * task rather than adding to it (verified with
  * `turbo run build --dry=json --filter=@mangostudio/frontend`).
  */
-function resolveApiUrlOverride(): string {
-  const current = process.env.MANGO_API_URL;
+interface BuildEnvironment {
+  readonly MANGO_API_URL?: string;
+  readonly VITE_API_URL?: string;
+}
+
+export function resolveApiUrlOverride(
+  environment: BuildEnvironment = process.env as BuildEnvironment,
+  warn: (message: string) => void = console.warn
+): string {
+  const current = environment.MANGO_API_URL;
   if (current) return current;
 
-  const deprecated = process.env.VITE_API_URL;
+  const deprecated = environment.VITE_API_URL;
   if (deprecated) {
-    console.warn(
+    warn(
       '[build] VITE_API_URL is deprecated and will be removed in a future release; rename it to MANGO_API_URL.'
     );
     return deprecated;
@@ -136,6 +222,7 @@ function resolveApiUrlOverride(): string {
  */
 async function buildFrontend(options: BuildFrontendOptions = {}): Promise<void> {
   const production = !options.dev;
+  const apiUrlOverride = resolveApiUrlOverride();
   // Only the dev loop skips: a production build must be byte-identical to one
   // from a clean checkout, whatever the mtimes say.
   if (production || !routeTreeIsCurrent()) {
@@ -149,78 +236,223 @@ async function buildFrontend(options: BuildFrontendOptions = {}): Promise<void> 
       utimesSync(join(ROOT, 'src', 'routeTree.gen.ts'), now, now);
     }
   }
-  await rm(DIST, { recursive: true, force: true });
-
-  const result = await Bun.build({
-    entrypoints: [join(ROOT, 'src/main.tsx')],
-    outdir: DIST,
-    target: 'browser',
-    splitting: true,
-    minify: production,
-    sourcemap: 'none',
-    publicPath: '/',
-    define: {
-      'process.env.NODE_ENV': JSON.stringify(production ? 'production' : 'development'),
-      // The split-deployment override read by src/lib/api-base-url.ts, always
-      // defined (empty string when unset) so the bundle never contains a bare
-      // `process` reference. A define, not `env: 'MANGO_*'`: the env option
-      // rewrites the member read but leaves any surrounding
-      // `typeof process` guard to evaluate false in a browser and discard the
-      // inlined value, and an unset variable survives verbatim — both
-      // measured on 1.4.0.
-      'process.env.MANGO_API_URL': JSON.stringify(resolveApiUrlOverride()),
-    },
-    metafile: true,
-    // Auto-memoization. `@vitejs/plugin-react` did not run it, so this is a
-    // behavior change rather than parity, and nothing in the test suite covers
-    // the transform. Off in dev so the loop stays fast.
-    reactCompiler: production,
-    plugins: [tailwind],
-    naming: {
-      // `entry` and `chunk` must not share a pattern. Bun names a dynamic-import
-      // chunk after the entry that reaches it, so one pattern for both yields
-      // eighteen files called `assets/main-<hash>.js` and any glob that looks for
-      // the entry finds a chunk instead — which renders a blank page with no
-      // console error at all.
-      entry: 'assets/[name]-[hash].[ext]',
-      chunk: 'assets/chunk-[name]-[hash].[ext]',
-      asset: 'assets/[name]-[hash].[ext]',
-    },
-  });
-
-  if (!result.success) {
-    for (const log of result.logs) console.error(String(log));
-    throw new Error('Frontend build failed');
-  }
-
-  await cp(PUBLIC_DIR, DIST, { recursive: true });
-  await writeHtml(result);
-  // Next to dist/, not inside it: the binary build embeds every file dist/
-  // contains, and the metafile is a build diagnostic (the bundle report's
-  // duplicate-module check reads it), not shipped payload. Sitting outside
-  // dist/ also puts it outside the `dist/**` glob, so it is declared as a
-  // second `build` output in turbo.json — otherwise a cache hit restores dist/
-  // and leaves whatever metafile happens to be on disk describing it.
-  //
-  // Production only. It is ~1.5 MB of JSON and its sole consumer is the bundle
-  // report, which the parity gate runs against a production build; writing it
-  // on every dev save spent the stringify of that whole object graph on
-  // something nothing in the dev loop reads. The report already handles its
-  // absence — it prints that the duplicate-module check was skipped.
-  //
-  // A dev build *removes* it rather than leaving the last production one
-  // behind. The invariant worth keeping is that the metafile on disk describes
-  // the bundle in dist/; a stale one silently describes a different build, and
-  // the report has no way to tell. Absent is a state it reports honestly.
+  // Build beside dist/, then publish only after every output and post-build
+  // assertion succeeds. A failed dev rebuild therefore leaves the bundle the
+  // API is already serving intact.
+  const stagedDist = trackTempPath(await mkdtemp(join(ROOT, '.dist-staging-')));
   const metafilePath = join(ROOT, 'dist-metafile.json');
-  if (production) {
-    await writeFile(metafilePath, JSON.stringify(result.metafile));
-  } else {
-    await rm(metafilePath, { force: true });
+  const stagedMetafilePath = production
+    ? trackTempPath(join(ROOT, `.dist-metafile-staging-${Bun.randomUUIDv7()}`))
+    : null;
+  try {
+    // `mkdtemp` creates mode 0700. dist/ is packaged and may be served by a
+    // different user, so preserve the ordinary directory mode from the old
+    // remove-and-recreate build.
+    await chmod(stagedDist, 0o755);
+    const result = await Bun.build({
+      entrypoints: [join(ROOT, 'src/main.tsx')],
+      outdir: stagedDist,
+      target: 'browser',
+      splitting: true,
+      minify: production,
+      sourcemap: 'none',
+      publicPath: '/',
+      define: {
+        'process.env.NODE_ENV': JSON.stringify(production ? 'production' : 'development'),
+        // The split-deployment override read by src/lib/api-base-url.ts, always
+        // defined (empty string when unset) so the bundle never contains a bare
+        // `process` reference. A define, not `env: 'MANGO_*'`: the env option
+        // rewrites the member read but leaves any surrounding
+        // `typeof process` guard to evaluate false in a browser and discard the
+        // inlined value, and an unset variable survives verbatim — both
+        // measured on 1.4.0.
+        'process.env.MANGO_API_URL': JSON.stringify(apiUrlOverride),
+      },
+      metafile: true,
+      // Auto-memoization. `@vitejs/plugin-react` did not run it, so this is a
+      // behavior change rather than parity, and nothing in the test suite covers
+      // the transform. Off in dev so the loop stays fast.
+      reactCompiler: production,
+      plugins: [tailwind],
+      naming: {
+        // `entry` and `chunk` must not share a pattern. Bun names a dynamic-import
+        // chunk after the entry that reaches it, so one pattern for both yields
+        // eighteen files called `assets/main-<hash>.js` and any glob that looks for
+        // the entry finds a chunk instead — which renders a blank page with no
+        // console error at all.
+        entry: 'assets/[name]-[hash].[ext]',
+        chunk: 'assets/chunk-[name]-[hash].[ext]',
+        asset: 'assets/[name]-[hash].[ext]',
+      },
+    });
+
+    if (!result.success) {
+      for (const log of result.logs) console.error(String(log));
+      throw new Error('Frontend build failed');
+    }
+
+    await cp(PUBLIC_DIR, stagedDist, { recursive: true });
+    await writeHtml(result, stagedDist);
+    await writeRuntimeConfig(stagedDist);
+    await writeBuildState(stagedDist, {
+      apiUrl: apiUrlOverride,
+      mode: production ? 'production' : 'dev',
+    });
+
+    // Next to dist/, not inside it: the binary build embeds every file dist/
+    // contains, and the metafile is a build diagnostic (the bundle report's
+    // duplicate-module check reads it), not shipped payload. Sitting outside
+    // dist/ also puts it outside the `dist/**` glob, so it is declared as a
+    // second `build` output in turbo.json — otherwise a cache hit restores dist/
+    // and leaves whatever metafile happens to be on disk describing it.
+    //
+    // Production only. It is ~1.5 MB of JSON and its sole consumer is the bundle
+    // report, which the parity gate runs against a production build; writing it
+    // on every dev save spent the stringify of that whole object graph on
+    // something nothing in the dev loop reads. The report already handles its
+    // absence — it prints that the duplicate-module check was skipped.
+    //
+    // A dev build *removes* it rather than leaving the last production one
+    // behind. The invariant worth keeping is that the metafile on disk describes
+    // the bundle in dist/; a stale one silently describes a different build, and
+    // the report has no way to tell. Absent is a state it reports honestly.
+    if (stagedMetafilePath) {
+      await writeFile(stagedMetafilePath, JSON.stringify(result.metafile));
+    }
+    await publishDist(stagedDist, DIST, async () => {
+      if (stagedMetafilePath) {
+        await publishMetafile(stagedMetafilePath, metafilePath);
+      } else {
+        await rm(metafilePath, { force: true });
+      }
+    });
+  } finally {
+    // No-op after publish because rename moved this path to dist/. On failure,
+    // remove the partial outputs without touching the previous bundle.
+    await untrackTempPath(stagedDist, { recursive: true });
+    if (stagedMetafilePath) await untrackTempPath(stagedMetafilePath);
   }
 }
 
-async function writeHtml(result: Awaited<ReturnType<typeof Bun.build>>): Promise<void> {
+/** Record what this build compiled into `dist/`, for the dev server's freshness check. */
+export async function writeBuildState(outputDir: string, state: BuildState): Promise<void> {
+  await writeFile(join(outputDir, BUILD_STATE_FILE), `${JSON.stringify(state)}\n`);
+}
+
+/**
+ * Replace a published directory with a fully prepared staging directory.
+ *
+ * POSIX cannot rename a directory over another non-empty directory. Move the
+ * old one aside first, but restore it if publishing the staged tree or its
+ * final sidecar operation fails.
+ */
+export async function publishDist(
+  stagedDist: string,
+  dist: string,
+  finalize?: () => Promise<void>
+): Promise<void> {
+  const backupDist = trackTempPath(join(dirname(dist), `.dist-backup-${Bun.randomUUIDv7()}`));
+  let hasBackup = false;
+  try {
+    await rename(dist, backupDist);
+    hasBackup = true;
+  } catch (error) {
+    tempPaths.delete(backupDist);
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+
+  let published = false;
+  try {
+    await rename(stagedDist, dist);
+    published = true;
+    if (finalize) await finalize();
+  } catch (publishError) {
+    const rollbackErrors: unknown[] = [];
+    if (published) {
+      try {
+        await rm(dist, { recursive: true, force: true });
+      } catch (removeError) {
+        rollbackErrors.push(removeError);
+      }
+    }
+    if (hasBackup && rollbackErrors.length === 0) {
+      // Untracked either way: restored, it is `dist` again; unrestored, it holds
+      // the only copy of the previous bundle and an interrupt must not take it.
+      tempPaths.delete(backupDist);
+      try {
+        await rename(backupDist, dist);
+      } catch (restoreError) {
+        rollbackErrors.push(restoreError);
+      }
+    }
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError(
+        [publishError, ...rollbackErrors],
+        `Failed to publish ${dist} and restore its previous contents`
+      );
+    }
+    throw publishError;
+  }
+
+  if (hasBackup) {
+    try {
+      await untrackTempPath(backupDist, { recursive: true });
+    } catch (error) {
+      // The new dist is already live. Do not report the build as failed and
+      // make the dev server claim it fell back to the previous bundle.
+      console.warn(
+        `[frontend] Could not remove previous bundle at ${backupDist}: ${String(error)}`
+      );
+    }
+  }
+}
+
+/** Publish the production metafile without losing its previous valid version on failure. */
+async function publishMetafile(stagedMetafile: string, metafile: string): Promise<void> {
+  const backupMetafile = trackTempPath(
+    join(dirname(metafile), `.dist-metafile-backup-${Bun.randomUUIDv7()}`)
+  );
+  let hasBackup = false;
+  try {
+    await rename(metafile, backupMetafile);
+    hasBackup = true;
+  } catch (error) {
+    tempPaths.delete(backupMetafile);
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+
+  try {
+    await rename(stagedMetafile, metafile);
+  } catch (publishError) {
+    if (hasBackup) {
+      tempPaths.delete(backupMetafile);
+      try {
+        await rename(backupMetafile, metafile);
+      } catch (restoreError) {
+        throw new AggregateError(
+          [publishError, restoreError],
+          `Failed to publish ${metafile} and restore its previous contents`
+        );
+      }
+    }
+    throw publishError;
+  }
+
+  if (hasBackup) {
+    try {
+      await untrackTempPath(backupMetafile);
+    } catch (error) {
+      console.warn(
+        `[frontend] Could not remove previous metafile at ${backupMetafile}: ${String(error)}`
+      );
+    }
+  }
+}
+
+async function writeHtml(
+  result: Awaited<ReturnType<typeof Bun.build>>,
+  outputDir: string
+): Promise<void> {
   // Resolved by `kind`, not by filename — see the `naming` comment above.
   const entry = result.outputs.find((output) => output.kind === 'entry-point');
   if (!entry) throw new Error('Frontend build produced no entry-point output');
@@ -233,7 +465,9 @@ async function writeHtml(result: Awaited<ReturnType<typeof Bun.build>>): Promise
   if (stylesheets.length > 1) {
     throw new Error(
       `Frontend build emitted ${stylesheets.length} stylesheets; index.html links one. ` +
-        `Decide which are eager before shipping: ${stylesheets.map((s) => distUrl(s.path)).join(', ')}`
+        `Decide which are eager before shipping: ${stylesheets
+          .map((stylesheet) => distUrl(stylesheet.path, outputDir))
+          .join(', ')}`
     );
   }
   const css = stylesheets[0];
@@ -244,20 +478,19 @@ async function writeHtml(result: Awaited<ReturnType<typeof Bun.build>>): Promise
   }
 
   const tags = [
-    css ? `<link rel="stylesheet" crossorigin href="${distUrl(css.path)}" />` : null,
+    css ? `<link rel="stylesheet" crossorigin href="${distUrl(css.path, outputDir)}" />` : null,
     // A *classic* script, and it must stay classic: a classic script without
     // `defer`/`async` runs the moment the parser reaches it, while module
     // scripts are deferred by default. That ordering is the whole guarantee —
     // `window.__MANGO_CONFIG__` is populated before any bundle code evaluates.
     // Deliberately unhashed so a deployer can edit it in place.
     `<script src="${RUNTIME_CONFIG_URL}"></script>`,
-    `<script type="module" crossorigin src="${distUrl(entry.path)}"></script>`,
+    `<script type="module" crossorigin src="${distUrl(entry.path, outputDir)}"></script>`,
   ].filter((tag) => tag !== null);
 
   const html = template.replace(SOURCE_SCRIPT_TAG, tags.join('\n    '));
   assertAbsoluteAssetUrls(html);
-  await writeFile(join(DIST, 'index.html'), html);
-  await writeRuntimeConfig();
+  await writeFile(join(outputDir, 'index.html'), html);
 }
 
 /** URL of the deployer-editable runtime config, relative to `publicPath`. */
@@ -277,7 +510,7 @@ const RUNTIME_CONFIG_URL = '/config.js';
  * build, including into the standalone binary, where it stays empty and the
  * same-origin path is exactly what it was before.
  */
-async function writeRuntimeConfig(): Promise<void> {
+async function writeRuntimeConfig(outputDir: string): Promise<void> {
   const contents = [
     '// Runtime configuration for a deployment that serves this bundle from a',
     '// different origin than the API. Edit apiUrl in place — no rebuild needed.',
@@ -287,12 +520,12 @@ async function writeRuntimeConfig(): Promise<void> {
     'window.__MANGO_CONFIG__ = { apiUrl: "" };',
     '',
   ].join('\n');
-  await writeFile(join(DIST, RUNTIME_CONFIG_URL.slice(1)), contents);
+  await writeFile(join(outputDir, RUNTIME_CONFIG_URL.slice(1)), contents);
 }
 
 /** `/tmp/x/dist/assets/main-abc.js` -> `/assets/main-abc.js`, matching publicPath. */
-function distUrl(absolutePath: string): string {
-  return `/${absolutePath.slice(DIST.length + 1).replaceAll('\\', '/')}`;
+function distUrl(absolutePath: string, outputDir: string): string {
+  return `/${absolutePath.slice(outputDir.length + 1).replaceAll('\\', '/')}`;
 }
 
 /**
@@ -318,6 +551,7 @@ function assertAbsoluteAssetUrls(html: string): void {
 }
 
 if (import.meta.main) {
+  removeTempPathsOnSignal();
   const started = performance.now();
   await buildFrontend({ dev: process.argv.includes('--dev') });
   const count = listDistFiles(DIST).length;

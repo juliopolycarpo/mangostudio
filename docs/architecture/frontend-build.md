@@ -75,6 +75,19 @@ each restart would otherwise rebuild from scratch. Serving is the ordinary direc
 below — dev and production share both the build and the route table, so there is no dev-only
 serving path to drift.
 
+Mtimes cannot see the one input that is not a file. Every build — dev and production alike —
+stamps `dist/.build-state.json` with the `MANGO_API_URL` it compiled in and the mode it ran
+in, and the freshness check rebuilds when that URL differs from the running server's, or when
+the stamp is missing or unreadable. The mode is not part of the comparison: a production
+bundle answers `bun run dev` perfectly well. It is only reported, because a dev rebuild
+replaces a production bundle with an unminified one and that should not happen quietly.
+
+The stamp lives inside `dist/` so the rename that publishes a build publishes it too, which
+means the directory's wholesale consumers have to skip it: `listDistFiles` drops it (keeping it
+out of the embedded manifest, where it would become a route the shipped binary answers, and
+out of the bundle reports), `archive-assets.ts` excludes it from the `frontend-dist` tarball,
+and `frontend-static.ts` refuses to serve its path from a live `dist/`.
+
 **Nothing watches the frontend.** After editing a frontend file, run
 `bun run --filter @mangostudio/frontend build` and refresh. A watcher used to do this on save;
 it was never hot reload, so a refresh was needed either way, and what it bought — saving one
@@ -93,7 +106,9 @@ about 1.5s; the browser needs a manual refresh.
 
 `apps/frontend/build.ts`, run by `bun run --filter @mangostudio/frontend build`. `Bun.build()`
 in a script, not the `bun build` CLI — the CLI has no plugin flag, and Tailwind v4 needs one.
-The build produces the layout the rest of the repo already expects:
+The script builds and checks a staging directory first, then replaces `dist/`. A failed build
+leaves the previous bundle available to the dev server. The build produces the layout the rest
+of the repo already expects:
 
 ```text
 apps/frontend/dist/

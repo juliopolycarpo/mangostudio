@@ -103,6 +103,22 @@ describe('collectAttentionItems', () => {
     );
   });
 
+  it('flags per-workspace head collectors that returned an error', () => {
+    const cleanHead = makeMetrics('head-sha');
+    const brokenHead = makeMetrics('head-sha', {
+      coverage: { ...cleanHead.coverage, runtime: { error: 'head runtime coverage missing' } },
+      tsErrors: {
+        ...cleanHead.tsErrors,
+        frontend: { error: 'head frontend TypeScript count missing' },
+      },
+      loc: { ...cleanHead.loc, api: { error: 'head api LoC missing' } },
+    });
+
+    expect(collectAttentionItems(base, brokenHead)).toContain(
+      'metrics not collected: `tsErrors/frontend`, `loc/api`, `coverage/runtime`'
+    );
+  });
+
   // A base envelope is legitimately absent on a first run and on a forked PR.
   // Flagging that would fire on every change that broke nothing.
   it('does not flag base-side collector errors', () => {
@@ -124,6 +140,21 @@ describe('renderVerdict', () => {
 
   it('reports when head metrics are absent entirely', () => {
     expect(renderVerdict(base, null)).toContain('Verdict unavailable');
+  });
+
+  it('warns when a nested TypeScript collector failed', () => {
+    const head = makeMetrics('head-sha', {
+      tsErrors: {
+        frontend: { error: 'tsc output was not available' },
+        api: 0,
+        shared: 0,
+        runtime: 0,
+      },
+    });
+
+    expect(renderVerdict(base, head)).toBe(
+      '⚠️ **Needs attention:** metrics not collected: `tsErrors/frontend`'
+    );
   });
 
   // A missing base must not produce the "healthy against base" claim: the

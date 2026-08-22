@@ -2,6 +2,10 @@
 node_modules/
 build/
 dist/
+.dist-staging-*/
+.dist-backup-*/
+.dist-metafile-staging-*
+.dist-metafile-backup-*
 dist-npm/
 dist-metafile.json
 release-assets/

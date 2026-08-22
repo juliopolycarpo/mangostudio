@@ -22,15 +22,17 @@
  * literally the production build command.
  */
 
-import { type Dirent, existsSync, readdirSync, statSync } from 'node:fs';
+import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { HIDDEN_WINDOW } from '@mangostudio/runtime';
+import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
 import { setDevFrontendDir } from './dev-frontend-dir';
 
 // Resolved from this file rather than from `process.cwd()`: Turbo runs the API's
 // dev task with the cwd set to `apps/api`, not the repo root.
 const FRONTEND_DIR = join(import.meta.dir, '..', '..', '..', 'frontend');
 const DIST_DIR = join(FRONTEND_DIR, 'dist');
+const SHARED_DIR = join(FRONTEND_DIR, '..', 'shared');
 /**
  * The build regenerates this under `src/`, so it is inside the input tree and
  * has to be skipped by name: counting its mtime makes the tree permanently
@@ -67,6 +69,9 @@ const BUILD_INPUTS = new Set([
   'tsr.config.json',
 ]);
 
+/** Shared workspace inputs that can alter what the frontend resolves or bundles. */
+const SHARED_BUILD_INPUTS = new Set(['src', 'package.json', 'tsconfig.json']);
+
 /**
  * Whether a directory entry counts as a build input, given its depth below the
  * frontend root. The allowlist applies at the root only; below it, everything
@@ -74,6 +79,10 @@ const BUILD_INPUTS = new Set([
  */
 function isBuildInput(name: string, depth: number): boolean {
   return depth === 0 ? BUILD_INPUTS.has(name) : name !== GENERATED_FILE;
+}
+
+function isSharedBuildInput(name: string, depth: number): boolean {
+  return depth === 0 ? SHARED_BUILD_INPUTS.has(name) : true;
 }
 
 async function runBuild(): Promise<boolean> {
@@ -163,25 +172,76 @@ export function newestSourceMtime(directory: string): number {
   return newestMtime(directory, isBuildInput, true);
 }
 
+/** What `build.ts` records about the bundle in `dist/`. Mirrors its `BuildState`. */
+interface BuildState {
+  readonly apiUrl: string;
+  readonly mode: 'dev' | 'production';
+}
+
+/** The API base URL a bundle must have been built with to be reusable as-is. */
+function effectiveApiUrl(): string {
+  return process.env.MANGO_API_URL || process.env.VITE_API_URL || '';
+}
+
 /**
- * True when `dist/` is already newer than every frontend build input.
+ * The build stamp in `dist/`, or null when there is none to trust.
+ *
+ * Null covers a missing file, unreadable JSON and a shape this version does not
+ * recognise, and every one of them means the same thing to the caller: nothing
+ * is known about what is in `dist/`. Every build writes this file — production
+ * included — so in practice null is a bundle from before that was true, or one
+ * whose publication was interrupted. Rebuilding is the safe answer to both.
+ */
+export function readBuildState(distDirectory: string): BuildState | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(join(distDirectory, BUILD_STATE_FILE), 'utf8'));
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const { apiUrl, mode } = parsed as Partial<BuildState>;
+  if (typeof apiUrl !== 'string') return null;
+  if (mode !== 'dev' && mode !== 'production') return null;
+  return { apiUrl, mode };
+}
+
+/**
+ * True when `dist/` is complete, matches the current build environment, and is
+ * newer than every frontend or shared build input.
  *
  * The API's dev script runs under `bun --watch`, so editing any `apps/api/src`
  * file restarts this process and calls back into here. Without this check every
  * API hot reload would tear down `dist/` and rebuild it from scratch.
+ *
+ * The build mode is deliberately *not* part of the comparison. A production
+ * bundle is a perfectly good answer to `bun run dev` — it is the same code,
+ * built more carefully — so finding one is not a reason to rebuild. What it is
+ * a reason for is the warning in `registerDevFrontend`, on the path where
+ * something else already decided a rebuild is needed.
  */
-function distIsCurrent(): boolean {
+export function distIsCurrent(
+  frontendDirectory = FRONTEND_DIR,
+  sharedDirectory = SHARED_DIR
+): boolean {
+  const distDirectory = join(frontendDirectory, 'dist');
   // No `dist/` settles the question on its own, so the input scan — the more
   // expensive of the two — is not run at all in the case that needs a full
   // build anyway.
-  const built = newestMtime(DIST_DIR, () => true, false);
+  if (!existsSync(join(distDirectory, 'index.html'))) return false;
+
+  const state = readBuildState(distDirectory);
+  if (!state || state.apiUrl !== effectiveApiUrl()) return false;
+
+  const built = newestMtime(distDirectory, () => true, false);
   if (built === 0) return false;
   // A failed source scan (the walker's catch returns 0, e.g. a file deleted
   // mid-scan) must read as "stale", not as "0 is older than anything built":
   // failing toward a rebuild costs seconds, the other direction serves an old
   // bundle while claiming it is up to date.
-  const source = newestSourceMtime(FRONTEND_DIR);
-  return source > 0 && built >= source;
+  const frontendSource = newestSourceMtime(frontendDirectory);
+  const sharedSource = newestMtime(sharedDirectory, isSharedBuildInput, true);
+  return frontendSource > 0 && sharedSource > 0 && built >= Math.max(frontendSource, sharedSource);
 }
 
 /** What to run after editing a frontend file, printed wherever that is the next step. */
@@ -203,6 +263,18 @@ export async function registerDevFrontend(): Promise<void> {
   if (distIsCurrent()) {
     console.warn('[frontend] Bundle is up to date.');
   } else {
+    // The rebuild below is always `--dev`: unminified, no React Compiler. When
+    // what it is about to replace was built for production, say so. The staleness
+    // that got us here can be real (a frontend edit, a changed MANGO_API_URL) or
+    // spurious — the input allowlist above has been wrong three times, and each
+    // time the symptom was a rebuild nobody asked for. Rebuilding anyway is
+    // still right, because refusing would serve code that may genuinely be
+    // stale; doing it silently is what made the swap impossible to notice.
+    if (readBuildState(DIST_DIR)?.mode === 'production') {
+      console.warn(
+        `[frontend] Replacing the production bundle with a dev build (unminified, no React Compiler). Run \`${REBUILD_HINT}\` to get a production one back.`
+      );
+    }
     console.warn('[frontend] Building...');
     if (!(await runBuild())) {
       // Not a `return`: a previous bundle on disk keeps being served, and the

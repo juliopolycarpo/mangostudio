@@ -145,10 +145,7 @@ function logRunning(host: string, port: number, devFrontend: boolean): void {
   console.warn(`[api] MangoStudio API running on http://${shown}:${port}`);
   console.warn(`[api] Scalar UI available at http://${shown}:${port}/scalar`);
   if (devFrontend) {
-    // dev-frontend.ts rebuilds the bundle on a source change, but there is no
-    // HMR: Bun's HTML-bundle dev server drops a transitive import from this
-    // app's graph, so the bundle is a plain build and the browser must reload.
-    console.warn('[api] Frontend rebuilds on change; refresh the browser to see it.');
+    console.warn('[api] Rebuild the frontend after edits, then refresh the browser.');
   }
 }
 

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
-import { distFilePath, listDistFiles } from '../../../src/utils/dist-files';
+import { BUILD_STATE_FILE, distFilePath, listDistFiles } from '../../../src/utils/dist-files';
 
 let distDir: string;
 
@@ -28,7 +28,15 @@ const EXPECTED = [
 ];
 
 describe('listDistFiles', () => {
-  test('maps every file to a sorted URL path with / separators, no filtering', () => {
+  test('maps every file to a sorted URL path with / separators', () => {
+    expect(listDistFiles(distDir)).toEqual(EXPECTED);
+  });
+
+  test('omits the build stamp, which is a diagnostic rather than shipped payload', () => {
+    // Every build writes this into dist/. It reaches the embedded manifest if it
+    // survives here, and `registerEmbeddedSpa` registers a GET route per
+    // embedded file — so the compiled binary would answer for it.
+    writeFileSync(join(distDir, BUILD_STATE_FILE), '{"apiUrl":"","mode":"production"}');
     expect(listDistFiles(distDir)).toEqual(EXPECTED);
   });
 
