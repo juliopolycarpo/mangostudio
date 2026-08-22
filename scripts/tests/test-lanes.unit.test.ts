@@ -99,6 +99,27 @@ describe('test lane declarations', () => {
     expect(covered).toEqual(new Set(['root', ...ALL_WORKSPACE_NAMES]));
     expect(new Set(TEST_LANES.map((lane) => lane.junitPath)).size).toBe(TEST_LANES.length);
   });
+
+  // `coverageThresholds` reads as per-lane infrastructure, but nothing in the
+  // registry enforces it — the gate is a `&&` appended to one workspace's
+  // coverage script. Declaring floors on a second lane without chaining the
+  // enforcer there would be a gate that never runs, and every gate stays green
+  // while it does not run. Iterated over the registry rather than pinned to
+  // `frontend` so the declaration and the wiring cannot drift apart.
+  //
+  // Sharded lanes cannot be wired this way at all: each shard's LCOV is
+  // partial, so a per-package chain would fail every run. Their floors belong
+  // in the merge job, so a declaration here is asserted to be an error.
+  it.each(TEST_LANES.filter((lane) => lane.coverageThresholds))(
+    'the $id lane chains enforcement of the floors it declares',
+    async (lane) => {
+      expect(lane.sharded).toBe(false);
+      const scripts = await readScripts(lane.manifest);
+      expect(scripts[lane.coverageScript]).toContain(
+        `bun ../../scripts/qa-gate/enforce-coverage-thresholds.ts ${lane.id}`
+      );
+    }
+  );
 });
 
 describe('frontend lane', () => {
@@ -131,17 +152,15 @@ describe('frontend lane', () => {
   // on 2026-08-21) and set ~1pt under; their *presence* is what this pins —
   // the frontend went gateless between the istanbul thresholds' deletion and
   // this lane, and nothing else fails when someone deletes the numbers.
-  it('declares total-coverage floors and chains their enforcement', async () => {
+  // The wiring is pinned for every lane that declares floors, in the registry
+  // suite above; this pins that the frontend is one of them.
+  it('declares total-coverage floors', () => {
     const thresholds = frontend.coverageThresholds;
     expect(thresholds).toBeDefined();
     for (const metric of ['lines', 'functions', 'statements', 'branches'] as const) {
       expect(thresholds?.[metric]).toBeGreaterThan(0);
       expect(thresholds?.[metric]).toBeLessThan(100);
     }
-    const scripts = await readScripts(frontend.manifest);
-    expect(scripts['test:coverage']).toContain(
-      'bun ../../scripts/qa-gate/enforce-coverage-thresholds.ts frontend'
-    );
   });
 
   // Bun 1.4.0's own `coverageThreshold` is enforced per *file* — any workspace
