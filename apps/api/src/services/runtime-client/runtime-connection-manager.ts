@@ -1119,9 +1119,17 @@ export interface LocalRuntimeConnectorOptions {
  * waiting on the previous attempt *forever* is not part of what that buys. An
  * attempt that never settles would otherwise dam every later local connect in
  * the process, including ones for a different user that the wedged one has no
- * claim over. The wedged attempt still settles on its own through the manager's
- * {@link CONNECT_DEADLINE_MS}; this only bounds how long the chain waits on it,
- * so both are the same length on purpose.
+ * claim over. Same length as the manager's {@link CONNECT_DEADLINE_MS} on
+ * purpose: the hub gives up on the attempt at the same moment the chain does.
+ *
+ * Note what this trades away. {@link withConnectDeadline} stops the *hub*
+ * waiting; it does not cancel the attempt, and the in-process connector ignores
+ * its abort signal. So a wedged attempt is still live when the chain releases,
+ * and if it later completes it runs `ownerUserId ??= …` and `active.add(…)`
+ * alongside the attempt that took its place — the one window in which two users
+ * can both observe the owner binding as empty and `multipleOwners` never be
+ * set. Damming every user behind one wedged connect was judged the worse
+ * failure; closing this properly needs a cancellable in-process connect.
  */
 const LOCAL_CHAIN_DEADLINE_MS = CONNECT_DEADLINE_MS['in-process'] ?? 10_000;
 
