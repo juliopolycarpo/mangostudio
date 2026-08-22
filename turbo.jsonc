@@ -43,8 +43,7 @@
     },
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"],
-      "env": ["VITE_*"]
+      "outputs": ["dist/**"]
     },
     "check:quick": {
       "inputs": ["$TURBO_ROOT$/biome.json", "$TURBO_DEFAULT$"]
