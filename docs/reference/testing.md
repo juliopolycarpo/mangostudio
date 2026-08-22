@@ -594,6 +594,36 @@ Frontend support lives in `apps/frontend/tests/support/`:
 - `harness/render.tsx` — minimal render surface with providers
 - `mocks/create-fetch-scenario.ts` — method-and-path fetch registry **for React hook tests only** (see scope below)
 
+#### Bun test runner facts
+
+- **Coverage thresholds are enforced per file, not in total.** `bunfig.toml`'s
+  `coverageThreshold` fails as soon as any one file misses the bar, so a suite
+  with legitimately uncovered files cannot express a total-coverage gate
+  through it. `scripts/qa-gate/enforce-coverage-thresholds.ts` reads the
+  emitted LCOV back and compares floors from `scripts/lib/test-lanes.ts`
+  against the suite's totals instead, chained after `test:coverage`.
+- **happy-dom is registered at `http://localhost:3001`** — where the API
+  really listens in dev — so a relative request a scenario never registered
+  opens a real socket instead of failing fast. `bun.setup.ts` installs a
+  `fetch` that rejects immediately and names the unanswered request,
+  reinstalled in `afterEach`.
+- **`mockReset()` strips a mock's implementation** rather than restoring it
+  (the opposite of Vitest); a mock built with `jest.fn(impl)` returns
+  `undefined` after a reset. `mockClear()` is the one call that means the same
+  thing in both runners.
+- **Bun links a mocked module's whole namespace at import.** A `mock.module`
+  factory returning fewer names than the real module throws a hard
+  `SyntaxError: Export named 'x' not found` from whichever *other* consumer
+  imports it next — Vitest resolved lazily and let a partial factory pass
+  unnoticed. Spread `const actual = await import(spec)` into any factory that
+  does not cover the full module.
+- **Better Auth turns off origin, rate-limit and secret validation under
+  `NODE_ENV=test`** (`bun test` sets it), so no `bun test` case can assert any
+  of the three — the positive case passes while checking nothing and the
+  negative case reads as a discovered vulnerability. `scripts/test-build.ts`
+  spawns the compiled binary with `NODE_ENV=production` and is the only
+  vehicle that can make that assertion.
+
 ### Shared
 
 ```bash
