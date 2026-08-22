@@ -90,6 +90,13 @@ out of the embedded manifest, where it would become a route the shipped binary a
 out of the bundle reports), `archive-assets.ts` excludes it from the `frontend-dist` tarball,
 and `frontend-static.ts` refuses to serve its path from a live `dist/`.
 
+That rename is a transaction: the live bundle moves aside to `.dist-backup-<uuid>` first, because
+POSIX cannot rename a directory over a non-empty one. Both renames are synchronous, so a Ctrl-C
+cannot land between them. A build that fails *after* the backup is taken unwinds through the CLI
+entrypoint, which restores `dist/` rather than leaving the only copy of the previous bundle
+stranded under a dotted name — the one exception being a rollback that could not remove the
+failed bundle, where the backup is kept on disk instead of deleted.
+
 **Nothing watches the frontend.** After editing a frontend file, run
 `bun run --filter @mangostudio/frontend build` and refresh. A watcher used to do this on save;
 it was never hot reload, so a refresh was needed either way, and what it bought — saving one

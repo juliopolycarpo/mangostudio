@@ -11,8 +11,8 @@
  * Usage: bun ./build.ts [--dev]
  */
 
-import { readdirSync, rmSync, statSync, utimesSync } from 'node:fs';
-import { chmod, cp, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { existsSync, readdirSync, renameSync, rmSync, statSync, utimesSync } from 'node:fs';
+import { chmod, cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BUILD_STATE_FILE, listDistFiles } from '@mangostudio/shared/utils/dist-files';
@@ -61,10 +61,15 @@ export interface BuildState {
  * (a `bun run dev` boot spawns one while a manual build is running), and a
  * sweep cannot tell another run's live staging directory from an orphan.
  */
-const tempPaths = new Set<string>();
+interface TempPathOptions {
+  /** Restore this path here if cleanup finds the destination absent. */
+  readonly restoreTo?: string;
+}
 
-export function trackTempPath(path: string): string {
-  tempPaths.add(path);
+const tempPaths = new Map<string, TempPathOptions>();
+
+export function trackTempPath(path: string, options: TempPathOptions = {}): string {
+  tempPaths.set(path, options);
   return path;
 }
 
@@ -74,19 +79,49 @@ async function untrackTempPath(path: string, options: { recursive?: boolean } = 
 }
 
 /**
+ * Put a tracked backup back where it came from, if its destination is free.
+ *
+ * Only ever a restore, never a removal. Called on paths where the destination
+ * may hold a *failed* bundle — `publishDist`'s rollback reaches here after its
+ * own `rmSync` threw — and deleting the backup in that state would destroy the
+ * only good copy. `existsSync(restoreTo)` therefore means "leave it alone",
+ * not "the backup is redundant".
+ */
+function restoreTempPath(path: string): void {
+  const restoreTo = tempPaths.get(path)?.restoreTo;
+  if (!restoreTo) return;
+  try {
+    if (existsSync(path) && !existsSync(restoreTo)) {
+      renameSync(path, restoreTo);
+      tempPaths.delete(path);
+    }
+  } catch {
+    // Already unwinding. The backup stays tracked and on disk, which is the
+    // outcome that keeps the previous bundle recoverable by hand.
+  }
+}
+
+/**
  * Remove every path this process is still tracking. Synchronous because it runs
  * from a signal handler, where the process is about to exit and a pending
  * promise would never settle.
  */
 export function removeTempPaths(): void {
-  for (const path of tempPaths) {
+  for (const [path, { restoreTo }] of tempPaths) {
+    // Forget first so a path whose name is reused later in this process is not
+    // mistaken for this build's temporary output. If restoration fails, the
+    // backup itself remains on disk rather than being deleted below.
+    tempPaths.delete(path);
     try {
-      rmSync(path, { recursive: true, force: true });
+      if (restoreTo && existsSync(path) && !existsSync(restoreTo)) {
+        renameSync(path, restoreTo);
+      } else {
+        rmSync(path, { recursive: true, force: true });
+      }
     } catch {
       // Nothing useful to do while unwinding, and a failed cleanup must not
       // replace the interrupt's exit code with a crash.
     }
-    tempPaths.delete(path);
   }
 }
 
@@ -351,10 +386,17 @@ export async function publishDist(
   dist: string,
   finalize?: () => Promise<void>
 ): Promise<void> {
-  const backupDist = trackTempPath(join(dirname(dist), `.dist-backup-${Bun.randomUUIDv7()}`));
+  const backupDist = trackTempPath(join(dirname(dist), `.dist-backup-${Bun.randomUUIDv7()}`), {
+    restoreTo: dist,
+  });
+  // Keep the state-changing filesystem operations synchronous. A signal
+  // handler cannot interleave with a sync syscall, so cleanup always observes
+  // either the state before a rename/removal or the state after it. With async
+  // calls, an in-flight rename could finish after cleanup inspected the paths
+  // and recreate the exact missing-dist failure this transaction prevents.
   let hasBackup = false;
   try {
-    await rename(dist, backupDist);
+    renameSync(dist, backupDist);
     hasBackup = true;
   } catch (error) {
     tempPaths.delete(backupDist);
@@ -363,29 +405,34 @@ export async function publishDist(
 
   let published = false;
   try {
-    await rename(stagedDist, dist);
+    renameSync(stagedDist, dist);
     published = true;
     if (finalize) await finalize();
   } catch (publishError) {
     const rollbackErrors: unknown[] = [];
     if (published) {
       try {
-        await rm(dist, { recursive: true, force: true });
+        rmSync(dist, { recursive: true, force: true });
       } catch (removeError) {
         rollbackErrors.push(removeError);
       }
     }
     if (hasBackup && rollbackErrors.length === 0) {
-      // Untracked either way: restored, it is `dist` again; unrestored, it holds
-      // the only copy of the previous bundle and an interrupt must not take it.
-      tempPaths.delete(backupDist);
       try {
-        await rename(backupDist, dist);
+        renameSync(backupDist, dist);
+        tempPaths.delete(backupDist);
       } catch (restoreError) {
+        // Still tracked as a rollback backup. A later signal cleanup retries the
+        // restore instead of deleting what may be the only valid bundle.
         rollbackErrors.push(restoreError);
       }
     }
     if (rollbackErrors.length > 0) {
+      // One last attempt before unwinding, for the branch where the inline
+      // restore above is what threw: `dist` is absent and this backup holds the
+      // only copy of the previous bundle. A no-op when the failure was the
+      // `rmSync` instead, because then `dist` still exists.
+      restoreTempPath(backupDist);
       throw new AggregateError(
         [publishError, ...rollbackErrors],
         `Failed to publish ${dist} and restore its previous contents`
@@ -410,11 +457,12 @@ export async function publishDist(
 /** Publish the production metafile without losing its previous valid version on failure. */
 async function publishMetafile(stagedMetafile: string, metafile: string): Promise<void> {
   const backupMetafile = trackTempPath(
-    join(dirname(metafile), `.dist-metafile-backup-${Bun.randomUUIDv7()}`)
+    join(dirname(metafile), `.dist-metafile-backup-${Bun.randomUUIDv7()}`),
+    { restoreTo: metafile }
   );
   let hasBackup = false;
   try {
-    await rename(metafile, backupMetafile);
+    renameSync(metafile, backupMetafile);
     hasBackup = true;
   } catch (error) {
     tempPaths.delete(backupMetafile);
@@ -422,13 +470,14 @@ async function publishMetafile(stagedMetafile: string, metafile: string): Promis
   }
 
   try {
-    await rename(stagedMetafile, metafile);
+    renameSync(stagedMetafile, metafile);
   } catch (publishError) {
     if (hasBackup) {
-      tempPaths.delete(backupMetafile);
       try {
-        await rename(backupMetafile, metafile);
+        renameSync(backupMetafile, metafile);
+        tempPaths.delete(backupMetafile);
       } catch (restoreError) {
+        restoreTempPath(backupMetafile);
         throw new AggregateError(
           [publishError, restoreError],
           `Failed to publish ${metafile} and restore its previous contents`
@@ -553,7 +602,19 @@ function assertAbsoluteAssetUrls(html: string): void {
 if (import.meta.main) {
   removeTempPathsOnSignal();
   const started = performance.now();
-  await buildFrontend({ dev: process.argv.includes('--dev') });
+  try {
+    await buildFrontend({ dev: process.argv.includes('--dev') });
+  } catch (error) {
+    // Not decoration. A failed publish can leave a tracked backup holding the
+    // only copy of the previous bundle while `dist/` is absent, and unwinding
+    // through an unhandled rejection would kill the process without ever
+    // running `removeTempPaths` — the exact stranded-backup failure the
+    // transaction exists to prevent. `removeTempPathsOnSignal` does not cover
+    // this: no signal is delivered on a plain throw.
+    removeTempPaths();
+    console.error(error);
+    process.exit(1);
+  }
   const count = listDistFiles(DIST).length;
   console.warn(`[frontend] built ${count} files in ${Math.round(performance.now() - started)}ms`);
 }

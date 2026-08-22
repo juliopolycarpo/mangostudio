@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
@@ -109,6 +109,43 @@ describe('publishDist', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test('keeps the backup when the rollback cannot remove the failed bundle', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'frontend-publish-'));
+    const staged = join(root, 'staged');
+    const dist = join(root, 'dist');
+    try {
+      await mkdir(staged);
+      await mkdir(dist);
+      await writeFile(join(staged, 'index.html'), 'new');
+      await writeFile(join(dist, 'index.html'), 'old');
+
+      // The branch where `dist` exists but is *not* a successful publish: the
+      // sidecar failed, and the rollback's own `rmSync(dist)` failed too. A
+      // read-only parent is what makes that removal fail. Cleanup must read
+      // this as "leave the backup alone", never as "the backup is redundant" —
+      // it holds the only copy of the previous bundle.
+      await expect(
+        publishDist(staged, dist, async () => {
+          await chmod(root, 0o555);
+          throw new Error('sidecar failed');
+        })
+      ).rejects.toThrow(AggregateError);
+
+      // What the CLI entrypoint does next on a failed build, with the directory
+      // still in the state that broke the rollback.
+      removeTempPaths();
+
+      await chmod(root, 0o755);
+      const backups = (await readdir(root)).filter((entry) => entry.startsWith('.dist-backup-'));
+      expect(backups).toHaveLength(1);
+      expect(await readFile(join(root, backups[0] as string, 'index.html'), 'utf8')).toBe('old');
+      expect(await readFile(join(dist, 'index.html'), 'utf8')).toBe('new');
+    } finally {
+      await chmod(root, 0o755);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 /**
@@ -159,6 +196,57 @@ describe('removeTempPaths', () => {
       await mkdir(directory);
       removeTempPaths();
       expect(existsSync(directory)).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('restores the rollback backup when the replacement was never published', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'frontend-temp-'));
+    const staged = trackTempPath(join(root, '.dist-staging-abc'));
+    const dist = join(root, 'dist');
+    const backup = trackTempPath(join(root, '.dist-backup-abc'), { restoreTo: dist });
+    try {
+      await mkdir(staged);
+      await writeFile(join(staged, 'index.html'), 'new');
+      await mkdir(dist);
+      await writeFile(join(dist, 'index.html'), 'old');
+
+      // The state a failed publish leaves behind: the live bundle moved aside
+      // and the replacement never landed. Reached from `publishDist`'s
+      // `AggregateError` path, not from a signal — the renames there are
+      // synchronous, so no handler can interleave between them. Cleanup has to
+      // put the previous bundle back rather than delete it.
+      await rename(dist, backup);
+      removeTempPaths();
+
+      expect(await readFile(join(dist, 'index.html'), 'utf8')).toBe('old');
+      expect(existsSync(backup)).toBe(false);
+      expect(existsSync(staged)).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('keeps the replacement once it is published', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'frontend-temp-'));
+    const staged = trackTempPath(join(root, '.dist-staging-abc'));
+    const dist = join(root, 'dist');
+    const backup = trackTempPath(join(root, '.dist-backup-abc'), { restoreTo: dist });
+    try {
+      await mkdir(staged);
+      await writeFile(join(staged, 'index.html'), 'new');
+      await mkdir(dist);
+      await writeFile(join(dist, 'index.html'), 'old');
+
+      // Interruptible for real: `publishDist` awaits `finalize()` here, so a
+      // signal handler can observe this state.
+      await rename(dist, backup);
+      await rename(staged, dist);
+      removeTempPaths();
+
+      expect(await readFile(join(dist, 'index.html'), 'utf8')).toBe('new');
+      expect(existsSync(backup)).toBe(false);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
