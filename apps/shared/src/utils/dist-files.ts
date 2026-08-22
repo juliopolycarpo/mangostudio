@@ -1,18 +1,24 @@
 import { readdirSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { join, relative, sep } from 'node:path';
 
 /**
  * Lists every file under the dist directory as URL paths ('/index.html',
  * '/assets/index-abc.js'). Keys always use '/' separators regardless of the
  * host platform; sorted for deterministic module output.
+ *
+ * `relative()` rather than slicing `distDir` off the front of each child path:
+ * Bun normalizes `Dirent.parentPath`, so a caller's './frontend-dist' comes back
+ * as 'frontend-dist' and a slice by the longer original string eats real
+ * characters — '/index.html' became '/ndex.html', and a trailing separator ate
+ * two. `relative()` resolves both sides, so any spelling of the same directory
+ * yields the same URL paths.
  */
 export function listDistFiles(distDir: string): string[] {
   return readdirSync(distDir, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile())
     .map((entry) => {
-      const absolute = join(entry.parentPath, entry.name);
-      const relative = absolute.slice(distDir.length).split(sep).filter(Boolean);
-      return `/${relative.join('/')}`;
+      const child = relative(distDir, join(entry.parentPath, entry.name));
+      return `/${child.split(sep).join('/')}`;
     })
     .sort();
 }
