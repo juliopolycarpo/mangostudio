@@ -124,11 +124,15 @@ export const TEST_LANES: readonly TestLane[] = [
     timingsPath: `${TIMINGS_DIR}/frontend.json`,
     manifest: 'apps/frontend/package.json',
     coverageScript: 'test:coverage',
-    // Measured 2026-08-21 on the full 167-file suite: 82.35 / 77.53 / 82.39 /
-    // 54.45 (Bun's own instrumentation — not comparable to the retired
-    // istanbul figures 76.1 / 68.08 / 72.84 / 78.78), then floored with ~1pt
-    // of headroom for run-to-run LCOV jitter. A miss fails the lane's own CI
-    // job — see enforce-coverage-thresholds.ts.
+    // Measured 2026-08-22 on the full 168-file suite: 81.78 / 77.33 / 81.92 /
+    // 54.27 (Bun's own instrumentation — not comparable to the retired
+    // istanbul figures 76.1 / 68.08 / 72.84 / 78.78). The floors are unchanged
+    // from the 2026-08-21 measurement of 82.35 / 77.53 / 82.39 / 54.45, which
+    // set them ~1pt below it for run-to-run LCOV jitter; dropping
+    // `src/lib/utils.ts` and `src/utils/model-utils.ts` from
+    // `coveragePathIgnorePatterns` and covering `build.ts` moved the reported
+    // figures down within that headroom rather than through it. A miss fails
+    // the lane's own CI job — see enforce-coverage-thresholds.ts.
     coverageThresholds: { lines: 81, functions: 76, statements: 81, branches: 53 },
   },
 ];

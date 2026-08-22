@@ -7,8 +7,6 @@ coverageSkipTestFiles = true
 # harness lines that no test asserts on.
 coveragePathIgnorePatterns = [
   "tests/**",
-  "src/lib/utils.ts",
-  "src/utils/model-utils.ts",
   "**/*.d.ts",
   "**/*.config.*",
 ]
