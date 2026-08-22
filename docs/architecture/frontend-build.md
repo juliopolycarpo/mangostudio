@@ -70,7 +70,9 @@ browser session keeps working alongside them.
 
 `bun run dev` starts one process. Before it listens, `apps/api/src/server/dev-frontend.ts`
 runs the production build script as a subprocess — but only when `dist/` is older than the
-frontend's inputs, since `bun --watch` restarts this process on every `apps/api/src` save and
+frontend or shared inputs, the root `package.json`, or `bun.lock`. The root dependency files
+matter because a lockfile-only transitive update changes the bytes the bundler resolves without
+touching frontend source. `bun --watch` restarts this process on every `apps/api/src` save, and
 each restart would otherwise rebuild from scratch. Serving is the ordinary directory mode
 below — dev and production share both the build and the route table, so there is no dev-only
 serving path to drift.

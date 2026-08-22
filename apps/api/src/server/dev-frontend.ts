@@ -33,6 +33,7 @@ import { setDevFrontendDir } from './dev-frontend-dir';
 const FRONTEND_DIR = join(import.meta.dir, '..', '..', '..', 'frontend');
 const DIST_DIR = join(FRONTEND_DIR, 'dist');
 const SHARED_DIR = join(FRONTEND_DIR, '..', 'shared');
+const REPOSITORY_DIR = join(FRONTEND_DIR, '..', '..');
 /**
  * The build regenerates this under `src/`, so it is inside the input tree and
  * has to be skipped by name: counting its mtime makes the tree permanently
@@ -71,6 +72,9 @@ const BUILD_INPUTS = new Set([
 
 /** Shared workspace inputs that can alter what the frontend resolves or bundles. */
 const SHARED_BUILD_INPUTS = new Set(['src', 'package.json', 'tsconfig.json']);
+
+/** Root files that determine which dependency bytes the frontend bundles. */
+const DEPENDENCY_INPUTS = ['package.json', 'bun.lock'] as const;
 
 /**
  * Whether a directory entry counts as a build input, given its depth below the
@@ -172,6 +176,17 @@ export function newestSourceMtime(directory: string): number {
   return newestMtime(directory, isBuildInput, true);
 }
 
+/** Newest required root dependency input, or 0 when any input cannot be read. */
+function newestDependencyMtime(directory: string): number {
+  try {
+    return Math.max(...DEPENDENCY_INPUTS.map((name) => statSync(join(directory, name)).mtimeMs));
+  } catch {
+    // A missing manifest or lockfile leaves the installed dependency graph
+    // unknowable. Fail toward a rebuild rather than blessing stale bundle bytes.
+    return 0;
+  }
+}
+
 /** What `build.ts` records about the bundle in `dist/`. Mirrors its `BuildState`. */
 interface BuildState {
   readonly apiUrl: string;
@@ -222,7 +237,8 @@ export function readBuildState(distDirectory: string): BuildState | null {
  */
 export function distIsCurrent(
   frontendDirectory = FRONTEND_DIR,
-  sharedDirectory = SHARED_DIR
+  sharedDirectory = SHARED_DIR,
+  repositoryDirectory = REPOSITORY_DIR
 ): boolean {
   const distDirectory = join(frontendDirectory, 'dist');
   // No `dist/` settles the question on its own, so the input scan — the more
@@ -241,7 +257,13 @@ export function distIsCurrent(
   // bundle while claiming it is up to date.
   const frontendSource = newestSourceMtime(frontendDirectory);
   const sharedSource = newestMtime(sharedDirectory, isSharedBuildInput, true);
-  return frontendSource > 0 && sharedSource > 0 && built >= Math.max(frontendSource, sharedSource);
+  const dependencies = newestDependencyMtime(repositoryDirectory);
+  return (
+    frontendSource > 0 &&
+    sharedSource > 0 &&
+    dependencies > 0 &&
+    built >= Math.max(frontendSource, sharedSource, dependencies)
+  );
 }
 
 /** What to run after editing a frontend file, printed wherever that is the next step. */

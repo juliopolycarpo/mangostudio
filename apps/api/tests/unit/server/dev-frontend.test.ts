@@ -43,6 +43,14 @@ function sharedFixture(root: string): string {
   return shared;
 }
 
+function dependencyFixture(root: string): string {
+  const repository = join(root, 'repository');
+  mkdirSync(repository);
+  writeAt(join(repository, 'package.json'), OLD);
+  writeAt(join(repository, 'bun.lock'), OLD);
+  return repository;
+}
+
 function effectiveApiUrl(): string {
   return process.env.MANGO_API_URL || process.env.VITE_API_URL || '';
 }
@@ -229,6 +237,7 @@ describe('distIsCurrent', () => {
   test('treats a shared source edit as stale', () => {
     const root = fixture();
     const shared = sharedFixture(root);
+    const repository = dependencyFixture(root);
     try {
       writeAt(join(root, 'src', 'main.tsx'), OLD);
       writeAt(join(shared, 'src', 'i18n', 'en.ts'), OLD);
@@ -238,10 +247,10 @@ describe('distIsCurrent', () => {
       utimesSync(join(shared, 'src', 'i18n'), OLD, OLD);
       utimesSync(join(shared, 'src'), OLD, OLD);
 
-      expect(distIsCurrent(root, shared)).toBe(true);
+      expect(distIsCurrent(root, shared, repository)).toBe(true);
 
       writeAt(join(shared, 'src', 'i18n', 'en.ts'), NEW + 1);
-      expect(distIsCurrent(root, shared)).toBe(false);
+      expect(distIsCurrent(root, shared, repository)).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -250,16 +259,59 @@ describe('distIsCurrent', () => {
   test('treats shared package metadata changes as stale', () => {
     const root = fixture();
     const shared = sharedFixture(root);
+    const repository = dependencyFixture(root);
     try {
       writeAt(join(root, 'src', 'main.tsx'), OLD);
       writeAt(join(root, 'dist', 'index.html'), NEW);
       writeBuildState(root, effectiveApiUrl());
       holdDirs(root);
 
-      expect(distIsCurrent(root, shared)).toBe(true);
+      expect(distIsCurrent(root, shared, repository)).toBe(true);
 
       writeAt(join(shared, 'package.json'), NEW + 1);
-      expect(distIsCurrent(root, shared)).toBe(false);
+      expect(distIsCurrent(root, shared, repository)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('treats root manifest and lockfile changes as stale dependency inputs', () => {
+    const root = fixture();
+    const shared = sharedFixture(root);
+    const repository = dependencyFixture(root);
+    try {
+      writeAt(join(root, 'src', 'main.tsx'), OLD);
+      writeAt(join(root, 'dist', 'index.html'), NEW);
+      writeBuildState(root, effectiveApiUrl());
+      holdDirs(root);
+
+      expect(distIsCurrent(root, shared, repository)).toBe(true);
+
+      writeAt(join(repository, 'bun.lock'), NEW + 1);
+      expect(distIsCurrent(root, shared, repository)).toBe(false);
+
+      writeAt(join(repository, 'bun.lock'), OLD);
+      writeAt(join(repository, 'package.json'), NEW + 1);
+      expect(distIsCurrent(root, shared, repository)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('fails closed when a required dependency input is missing', () => {
+    const root = fixture();
+    const shared = sharedFixture(root);
+    const repository = dependencyFixture(root);
+    try {
+      writeAt(join(root, 'src', 'main.tsx'), OLD);
+      writeAt(join(root, 'dist', 'index.html'), NEW);
+      writeBuildState(root, effectiveApiUrl());
+      holdDirs(root);
+
+      expect(distIsCurrent(root, shared, repository)).toBe(true);
+
+      rmSync(join(repository, 'bun.lock'));
+      expect(distIsCurrent(root, shared, repository)).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -268,16 +320,17 @@ describe('distIsCurrent', () => {
   test('requires index.html even when an emitted asset is current', () => {
     const root = fixture();
     const shared = sharedFixture(root);
+    const repository = dependencyFixture(root);
     try {
       writeAt(join(root, 'src', 'main.tsx'), OLD);
       writeAt(join(root, 'dist', 'assets', 'index-abc123.js'), NEW);
       writeBuildState(root, effectiveApiUrl());
       holdDirs(root);
 
-      expect(distIsCurrent(root, shared)).toBe(false);
+      expect(distIsCurrent(root, shared, repository)).toBe(false);
 
       writeAt(join(root, 'dist', 'index.html'), NEW);
-      expect(distIsCurrent(root, shared)).toBe(true);
+      expect(distIsCurrent(root, shared, repository)).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -286,6 +339,7 @@ describe('distIsCurrent', () => {
   test('requires a valid build state matching the effective API URL', () => {
     const root = fixture();
     const shared = sharedFixture(root);
+    const repository = dependencyFixture(root);
     const originalApiUrl = process.env.MANGO_API_URL;
     const originalDeprecatedApiUrl = process.env.VITE_API_URL;
     try {
@@ -295,28 +349,28 @@ describe('distIsCurrent', () => {
       writeAt(join(root, 'dist', 'index.html'), NEW);
       holdDirs(root);
 
-      expect(distIsCurrent(root, shared)).toBe(false);
+      expect(distIsCurrent(root, shared, repository)).toBe(false);
 
       writeAt(join(root, 'dist', BUILD_STATE_FILE), NEW);
-      expect(distIsCurrent(root, shared)).toBe(false);
+      expect(distIsCurrent(root, shared, repository)).toBe(false);
 
       writeBuildState(root, 'https://previous.example');
-      expect(distIsCurrent(root, shared)).toBe(false);
+      expect(distIsCurrent(root, shared, repository)).toBe(false);
 
       writeBuildState(root, 'https://current.example');
-      expect(distIsCurrent(root, shared)).toBe(true);
+      expect(distIsCurrent(root, shared, repository)).toBe(true);
 
       // A production bundle is not a reason to rebuild. It is the same app built
       // more carefully, and treating it as stale is what let an unrelated
       // `apps/api` save replace it with an unminified dev build.
       writeBuildState(root, 'https://current.example', 'production');
-      expect(distIsCurrent(root, shared)).toBe(true);
+      expect(distIsCurrent(root, shared, repository)).toBe(true);
 
       delete process.env.MANGO_API_URL;
-      expect(distIsCurrent(root, shared)).toBe(false);
+      expect(distIsCurrent(root, shared, repository)).toBe(false);
 
       writeBuildState(root, 'https://deprecated.example');
-      expect(distIsCurrent(root, shared)).toBe(true);
+      expect(distIsCurrent(root, shared, repository)).toBe(true);
     } finally {
       if (originalApiUrl === undefined) delete process.env.MANGO_API_URL;
       else process.env.MANGO_API_URL = originalApiUrl;
