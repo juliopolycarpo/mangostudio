@@ -131,6 +131,11 @@ afterEach(async () => {
   await restoreRealTimers();
   cleanup();
   resetTestSession();
+  // Same reason `fetch` is put back below: the runtime override outranks the
+  // build-time one, so a test that sets it and does not clean up repoints
+  // `getApiBaseUrl()` for every later test in the file. Deleting it at preload
+  // only covers the first.
+  delete (globalThis as { window?: Window }).window?.__MANGO_CONFIG__;
   // A file that swapped `fetch` and did not put it back cannot poison the next
   // one in the shared process.
   globalThis.fetch = unreachableFetch as unknown as typeof fetch;
