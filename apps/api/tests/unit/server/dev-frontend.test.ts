@@ -8,7 +8,7 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { newestSourceMtime } from '../../../src/server/dev-frontend';
 
 /** Seconds since the epoch, so mtimes are far enough apart to compare. */
@@ -73,11 +73,39 @@ describe('newestSourceMtime', () => {
     const root = fixture();
     try {
       writeAt(join(root, 'src', 'main.tsx'), OLD);
-      // The last write of every build, at the frontend root — so `UNWATCHED_DIRS`
-      // cannot prune it, and counting it would make `distIsCurrent()` false on
-      // every API restart while the watcher rebuilt in a loop.
+      // The last write of every build, at the frontend root — so a `dist`-and-
+      // `node_modules` denylist could not prune it, and counting it would make
+      // `distIsCurrent()` false on every API restart while the watcher rebuilt
+      // in a loop.
       writeAt(join(root, 'dist-metafile.json'), NEW);
       expect(newestSourceMtime(root)).toBe(OLD * 1000);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('ignores workspace entries the bundler never reads', () => {
+    const root = fixture();
+    try {
+      writeAt(join(root, 'src', 'main.tsx'), OLD);
+      // None of these is a build input, and each one used to read as one: a
+      // saved test or a turbo log left the tree newer than `dist/`, so the next
+      // API hot reload rebuilt from scratch and the watcher fired a rebuild
+      // that removed `dist/` out from under the running dev server. `bun run
+      // check` — mandated after every change — writes the turbo logs.
+      for (const path of [
+        join('tests', 'unit', 'thing.test.tsx'),
+        join('.turbo', 'turbo-typecheck.log'),
+        join('.tanstack', 'tmp', 'scratch'),
+        'AGENTS.md',
+        'tsconfig.test.json',
+        'turbo.json',
+      ]) {
+        mkdirSync(join(root, dirname(path)), { recursive: true });
+        writeAt(join(root, path), NEW);
+        expect(newestSourceMtime(root)).toBe(OLD * 1000);
+        rmSync(join(root, path));
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

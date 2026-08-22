@@ -25,35 +25,50 @@ const DIST_DIR = join(FRONTEND_DIR, 'dist');
 /** Coalesce the burst of events an editor save produces into one rebuild. */
 const REBUILD_DEBOUNCE_MS = 120;
 /**
- * Files the build writes back into the watched tree. Both prune mechanisms
- * below have to skip them: the watcher, or every rebuild schedules the next one
- * forever, and `newestSourceMtime`, or the tree is always newer than `dist/`
- * and `distIsCurrent()` can never be true again.
- *
- * `routeTree.gen.ts` is regenerated under `src/`. `dist-metafile.json` is
- * written to the frontend *root* — beside `dist/`, deliberately outside it so
- * the binary does not embed it — which puts it outside `UNWATCHED_DIRS`' reach
- * and makes it the last write of every build.
+ * The build regenerates this under `src/`, so it is inside the input tree and
+ * has to be skipped by name: reacting to it makes every rebuild schedule the
+ * next one forever, and counting its mtime makes the tree permanently newer
+ * than `dist/` so `distIsCurrent()` can never be true again.
  */
 const GENERATED_FILE = 'routeTree.gen.ts';
-const BUILD_OUTPUT_FILES = new Set([GENERATED_FILE, 'dist-metafile.json']);
 
-/** True when a watched path's last segment names a file the build itself writes. */
-function isBuildOutputFile(path: string): boolean {
-  return BUILD_OUTPUT_FILES.has(path.split(/[\\/]/).pop() ?? '');
-}
 /**
- * Watching only `src/` meant an edit to `index.html`, to anything under
- * `public/`, or to `build.ts`/the Tailwind config fired no rebuild at all —
- * and `distIsCurrent()`, comparing against the same narrow tree, then reported
- * the stale bundle as current across every API restart. The whole frontend
- * workspace is the real input to the build, so that is what gets watched.
+ * Frontend workspace entries that are genuine inputs to `build.ts`.
  *
- * Two subtrees have to stay out. `dist/` is the build's own output: watching it
- * makes each rebuild trigger the next one forever. `node_modules` is inert
- * between installs and walking it dominates the scan.
+ * An allowlist, not a denylist. Watching only `src/` was too narrow — an edit
+ * to `index.html`, to `public/`, or to `build.ts` fired no rebuild at all — but
+ * the correction, watching the whole workspace minus `dist/` and
+ * `node_modules`, was too wide in a way that kept losing ground: the tree also
+ * accumulates `tests/`, `.turbo/`, `.tanstack/` and `dist-metafile.json`, none
+ * of which the bundler reads. Each cost a full rebuild — which starts by
+ * removing `dist/`, so the running dev app 404s until it finishes — and each
+ * also left `distIsCurrent()` false, so the next API hot reload rebuilt from
+ * scratch. `bun run check` writing a turbo log was enough to trigger both.
+ *
+ * A denylist has to be extended for every artifact anyone adds to the
+ * workspace, and the symptom of missing one is a slow dev loop that never looks
+ * like a bug. The set of real inputs is small, known, and changes rarely, so it
+ * is the side worth enumerating: `tsconfig.json` is here because `Bun.build()`
+ * honours its `paths`, and `tsr.config.json` because route generation reads it.
  */
-const UNWATCHED_DIRS = new Set(['dist', 'node_modules']);
+const BUILD_INPUTS = new Set([
+  'src',
+  'public',
+  'index.html',
+  'build.ts',
+  'package.json',
+  'tsconfig.json',
+  'tsr.config.json',
+]);
+
+/**
+ * Whether a directory entry counts as a build input, given its depth below the
+ * frontend root. The allowlist applies at the root only; below it, everything
+ * is an input except the file the build itself generates.
+ */
+function isBuildInput(name: string, depth: number): boolean {
+  return depth === 0 ? BUILD_INPUTS.has(name) : name !== GENERATED_FILE;
+}
 
 async function runBuild(): Promise<boolean> {
   const proc = Bun.spawn(['bun', './build.ts', '--dev'], {
@@ -65,27 +80,24 @@ async function runBuild(): Promise<boolean> {
   return (await proc.exited) === 0;
 }
 
-/** Newest mtime under a directory, or 0 when it does not exist. */
-function newestMtime(directory: string): number {
-  try {
-    return readdirSync(directory, { recursive: true, encoding: 'utf8' }).reduce((newest, entry) => {
-      const stats = statSync(join(directory, entry));
-      return stats.isFile() ? Math.max(newest, stats.mtimeMs) : newest;
-    }, 0);
-  } catch {
-    return 0;
-  }
-}
-
 /**
- * Newest mtime of the frontend's build *inputs*.
+ * Newest file mtime under a directory, or 0 when it does not exist.
+ *
+ * `keep` decides which entries are descended into and counted, which is what
+ * lets one walker answer for both sides of `distIsCurrent()` — the output tree
+ * whole, and the input tree filtered. Two walkers is how `GENERATED_FILE` came
+ * to be honoured by one of them and not the other.
  *
  * Hand-rolled rather than `readdirSync({ recursive: true })` because that has
  * no way to prune a subtree: it would descend all of `node_modules` — tens of
  * thousands of stats on every dev boot — before anything could filter the
  * result. Pruning at the directory level is the whole point.
  */
-export function newestSourceMtime(directory: string): number {
+function newestMtime(
+  directory: string,
+  keep: (name: string, depth: number) => boolean,
+  depth = 0
+): number {
   let newest = 0;
   let entries: Dirent[];
   try {
@@ -94,20 +106,26 @@ export function newestSourceMtime(directory: string): number {
     return 0;
   }
   for (const entry of entries) {
+    if (!keep(entry.name, depth)) continue;
+    const path = join(directory, entry.name);
     if (entry.isDirectory()) {
-      if (UNWATCHED_DIRS.has(entry.name)) continue;
-      newest = Math.max(newest, newestSourceMtime(join(directory, entry.name)));
+      newest = Math.max(newest, newestMtime(path, keep, depth + 1));
       continue;
     }
-    if (!entry.isFile() || BUILD_OUTPUT_FILES.has(entry.name)) continue;
+    if (!entry.isFile()) continue;
     try {
-      newest = Math.max(newest, statSync(join(directory, entry.name)).mtimeMs);
+      newest = Math.max(newest, statSync(path).mtimeMs);
     } catch {
       // Removed between the readdir and the stat. Skipping it can only make the
       // result older, which fails toward a rebuild — the safe direction.
     }
   }
   return newest;
+}
+
+/** Newest mtime of the frontend's build *inputs*. */
+export function newestSourceMtime(directory: string): number {
+  return newestMtime(directory, isBuildInput);
 }
 
 /**
@@ -118,13 +136,17 @@ export function newestSourceMtime(directory: string): number {
  * API hot reload would tear down `dist/` and rebuild it from scratch.
  */
 function distIsCurrent(): boolean {
-  const built = newestMtime(DIST_DIR);
-  const source = newestSourceMtime(FRONTEND_DIR);
-  // A failed source scan (newestMtime's catch returns 0, e.g. a file deleted
+  // No `dist/` settles the question on its own, so the input scan — the more
+  // expensive of the two — is not run at all in the case that needs a full
+  // build anyway.
+  const built = newestMtime(DIST_DIR, () => true);
+  if (built === 0) return false;
+  // A failed source scan (the walker's catch returns 0, e.g. a file deleted
   // mid-scan) must read as "stale", not as "0 is older than anything built":
   // failing toward a rebuild costs seconds, the other direction serves an old
   // bundle while claiming it is up to date.
-  return built > 0 && source > 0 && built >= source;
+  const source = newestSourceMtime(FRONTEND_DIR);
+  return source > 0 && built >= source;
 }
 
 /**
@@ -192,18 +214,20 @@ export async function registerDevFrontend(): Promise<void> {
   };
 
   const watcher = watch(FRONTEND_DIR, { recursive: true }, (_event, filename) => {
-    // The build writes routeTree.gen.ts and dist-metafile.json back into the
-    // watched tree; reacting to either would make each rebuild schedule the
-    // next one. The metafile is the build's *last* write, so nothing about the
-    // debounce or the in-flight guard can absorb it.
-    if (filename && isBuildOutputFile(filename)) return;
-    // Same self-feeding problem, one level up: now that the whole workspace is
-    // watched, `dist/` — which every rebuild rewrites — is inside it. Prune the
-    // build's own output and `node_modules` before anything is scheduled.
+    // Filtered through the same allowlist the staleness scan uses, so the two
+    // cannot disagree about what an input is. Without it a rebuild's own writes
+    // (`dist/`, `dist-metafile.json`, the regenerated route tree) schedule the
+    // next rebuild forever, and unrelated workspace traffic — a saved test, a
+    // turbo log — costs a full rebuild that tears `dist/` down first.
+    //
     // Split on either separator rather than `path.sep`: the value here comes
     // from the OS watch API, not from `path.join`, so it is not guaranteed to
     // use the platform's canonical form.
-    if (filename && UNWATCHED_DIRS.has(filename.split(/[\\/]/)[0] ?? '')) return;
+    if (
+      filename &&
+      !filename.split(/[\\/]/).every((segment, depth) => isBuildInput(segment, depth))
+    )
+      return;
     if (pending) clearTimeout(pending);
     pending = setTimeout(() => {
       pending = null;
