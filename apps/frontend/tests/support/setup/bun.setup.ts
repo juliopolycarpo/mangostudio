@@ -15,6 +15,7 @@
 import { afterEach, expect } from 'bun:test';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { cleanup } from '@testing-library/react';
+import { restoreClipboard } from '../harness/clipboard';
 import { restoreRealTimers } from '../harness/timers';
 import { resetTestSession } from './auth-client-stub';
 
@@ -131,6 +132,10 @@ afterEach(async () => {
   await restoreRealTimers();
   cleanup();
   resetTestSession();
+  // `navigator.clipboard` is a readonly getter under happy-dom, so a test that
+  // substitutes it does so with a property descriptor — and one left in place
+  // is the clipboard every later test in the file gets.
+  restoreClipboard();
   // Same reason `fetch` is put back below: the runtime override outranks the
   // build-time one, so a test that sets it and does not clean up repoints
   // `getApiBaseUrl()` for every later test in the file. Deleting it at preload

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { act } from 'react';
+import { stubClipboard } from '../../support/harness/clipboard';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
 
@@ -299,11 +300,7 @@ describe('MarkdownContent — copy code button', () => {
     shiki.preloadCodeLanguages.mockReturnValue(createPendingPreload());
 
     clipboardWriteText = jest.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', {
-      value: { writeText: clipboardWriteText },
-      configurable: true,
-      writable: true,
-    });
+    stubClipboard(clipboardWriteText);
   });
 
   it('renders a copy button in each code block', () => {

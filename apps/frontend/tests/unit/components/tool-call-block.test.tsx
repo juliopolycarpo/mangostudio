@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, jest } from 'bun:test';
 import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { ToolCallBlock } from '@/features/chat/components/ToolCallBlock';
+import { stubClipboard } from '../../support/harness/clipboard';
 import { render } from '../../support/harness/render';
 
 function snapshot(overrides: Partial<ToolExecutionSnapshot> = {}): ToolExecutionSnapshot {
@@ -128,31 +129,16 @@ describe('ToolCallBlock', () => {
 
   it('copies the result from the expanded body', async () => {
     const writeText = jest.fn().mockResolvedValue(undefined);
-    // jsdom left `navigator.clipboard` writable; happy-dom defines it as a
-    // readonly getter, so `Object.assign` throws outright. Defined and restored
-    // instead, so the substitution stays inside this test.
-    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
-    Object.defineProperty(navigator, 'clipboard', {
-      value: { writeText },
-      configurable: true,
-    });
+    stubClipboard(writeText);
     render(
       <ToolCallBlock name="read_file" args={{ path: '/a' }} status="succeeded" result='"logs"' />
     );
 
-    try {
-      fireEvent.click(screen.getByRole('button'));
-      fireEvent.click(screen.getByTitle('Copy result'));
-      await waitFor(() => {
-        expect(writeText).toHaveBeenCalledWith('logs');
-      });
-    } finally {
-      if (originalClipboard) {
-        Object.defineProperty(navigator, 'clipboard', originalClipboard);
-      } else {
-        Reflect.deleteProperty(navigator, 'clipboard');
-      }
-    }
+    fireEvent.click(screen.getByRole('button'));
+    fireEvent.click(screen.getByTitle('Copy result'));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('logs');
+    });
   });
 
   it('renders get_current_datetime without hint', () => {
