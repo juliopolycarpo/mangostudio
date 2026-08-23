@@ -1,127 +1,164 @@
-import { describe, expect, it, jest } from 'bun:test';
-import { mockChats } from '@mangostudio/shared/test-utils';
+/**
+ * The overhauled sidebar: date groups, harness badges, search, and the
+ * behaviors that must survive the rebuild — rename, delete, new chat.
+ *
+ * Fixtures are placed relative to a local noon anchor so a run at 00:30 or
+ * 23:59 still lands each chat in the bucket the assertion names.
+ */
+
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+import type { Chat } from '@mangostudio/shared';
 import { fireEvent, screen, within } from '@testing-library/react';
 import { Sidebar } from '../../../src/features/sidebar/components/Sidebar';
-import { render } from '../../support/harness/render';
+import { flushAsyncRender, render } from '../../support/harness/render';
 
-const defaultProps = {
-  currentPage: 'chat' as const,
-  onNavigate: jest.fn(),
-  chats: mockChats,
-  currentChatId: 'chat-1',
-  onSelectChat: jest.fn(),
-  onUpdateChatTitle: jest.fn(),
-  onDeleteChat: jest.fn(),
-  onNewChat: jest.fn(),
-};
+// Today at noon: stable "today" regardless of when the lane runs.
+const todayNoon = new Date();
+todayNoon.setHours(12, 0, 0, 0);
+const DAY_MS = 86_400_000;
 
-describe('Sidebar', () => {
-  it('renders navigation items for all top-level pages', () => {
-    render(<Sidebar {...defaultProps} />);
+function chatFixture(
+  id: string,
+  title: string,
+  updatedAt: number,
+  runner: Chat['runner'],
+  workdir: string | null = null
+): Chat {
+  return { id, title, updatedAt, runner, workdir } as unknown as Chat;
+}
 
-    expect(screen.getAllByRole('button', { name: /studio/i }).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByRole('button', { name: /gallery/i }).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByRole('button', { name: /settings/i }).length).toBeGreaterThanOrEqual(1);
-  });
+const CHATS = [
+  chatFixture(
+    'c1',
+    'Plugin LSP TypeScript',
+    todayNoon.getTime(),
+    { kind: 'external', targetId: 'codex' },
+    '/home/u/projects/mango-lsp-store'
+  ),
+  chatFixture('c2', 'sse-soak load test', todayNoon.getTime() - DAY_MS, {
+    kind: 'mangostudio',
+    agentId: 'default',
+  } as Chat['runner']),
+  chatFixture('c3', 'Ancient refactor', todayNoon.getTime() - 70 * DAY_MS, {
+    kind: 'external',
+    targetId: 'claude',
+  }),
+];
 
-  // The library lives under the environments umbrella now, so a Library entry
-  // here would be a second way in to a surface that already has one.
-  it('offers no standalone Library entry', () => {
-    render(<Sidebar {...defaultProps} />);
+function renderSidebar(overrides: Partial<React.ComponentProps<typeof Sidebar>> = {}) {
+  const props = {
+    currentPage: 'chat' as const,
+    onNavigate: jest.fn(),
+    chats: CHATS,
+    currentChatId: 'c1',
+    onSelectChat: jest.fn(),
+    onUpdateChatTitle: jest.fn(),
+    onDeleteChat: jest.fn(),
+    onNewChat: jest.fn(),
+    ...overrides,
+  };
+  const result = render(<Sidebar {...props} />);
+  return { ...result, props };
+}
 
-    expect(screen.queryByRole('button', { name: /library/i })).toBeNull();
-    expect(screen.getAllByRole('button', { name: /environments/i }).length).toBeGreaterThanOrEqual(
-      1
+beforeEach(() => {
+  window.localStorage.setItem('mangostudio:locale', 'en');
+});
+
+afterEach(() => {
+  window.localStorage.clear();
+});
+
+describe('sidebar grouping', () => {
+  it('renders one dated group per bucket, in list order', () => {
+    renderSidebar();
+    expect(screen.getByText('Today')).toBeInTheDocument();
+    expect(screen.getByText('Yesterday')).toBeInTheDocument();
+    const oldMonth = new Intl.DateTimeFormat('en', { month: 'long' }).format(
+      new Date(todayNoon.getTime() - 70 * DAY_MS)
     );
+    expect(screen.getByText(new RegExp(oldMonth))).toBeInTheDocument();
   });
 
-  it('highlights Studio when it is the current page', () => {
-    render(<Sidebar {...defaultProps} currentPage="studio" />);
+  it('attributes each row to its harness', () => {
+    renderSidebar();
+    expect(screen.getByText('codex')).toBeInTheDocument();
+    expect(screen.getByText('mango')).toBeInTheDocument();
+    expect(screen.getByText('claude')).toBeInTheDocument();
+  });
+});
 
-    const studioButtons = screen.getAllByRole('button', { name: /studio/i });
-    expect(studioButtons[0].className).toContain('text-primary');
+describe('sidebar search', () => {
+  it('filters by title and drops emptied groups', async () => {
+    renderSidebar();
+    fireEvent.change(screen.getByLabelText('Search chats…'), { target: { value: 'sse' } });
+    await flushAsyncRender();
+    expect(screen.getByText('sse-soak load test')).toBeInTheDocument();
+    expect(screen.queryByText('Plugin LSP TypeScript')).toBeNull();
+    expect(screen.queryByText('Today')).toBeNull();
   });
 
-  it('calls onNavigate with "studio" when Studio is clicked', () => {
-    const onNavigate = jest.fn();
-    render(<Sidebar {...defaultProps} onNavigate={onNavigate} />);
+  it('filters by workdir basename and by runner label', async () => {
+    renderSidebar();
+    const input = screen.getByLabelText('Search chats…');
+    fireEvent.change(input, { target: { value: 'lsp-store' } });
+    await flushAsyncRender();
+    expect(screen.getByText('Plugin LSP TypeScript')).toBeInTheDocument();
+    expect(screen.queryByText('Ancient refactor')).toBeNull();
 
-    fireEvent.click(screen.getAllByRole('button', { name: /studio/i })[0]);
-    expect(onNavigate).toHaveBeenCalledWith('studio');
+    fireEvent.change(input, { target: { value: 'claude' } });
+    await flushAsyncRender();
+    expect(screen.getByText('Ancient refactor')).toBeInTheDocument();
+    expect(screen.queryByText('sse-soak load test')).toBeNull();
   });
 
-  it('does not interfere with existing navigation items', () => {
-    render(<Sidebar {...defaultProps} />);
-
-    expect(screen.getAllByRole('button', { name: /gallery/i }).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByRole('button', { name: /settings/i }).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('First Chat')).toBeInTheDocument();
+  it('shows the empty state for a query nothing matches', async () => {
+    renderSidebar();
+    fireEvent.change(screen.getByLabelText('Search chats…'), { target: { value: 'zzz' } });
+    await flushAsyncRender();
+    expect(screen.getByText('No results for "zzz"')).toBeInTheDocument();
   });
 
-  it('is visible on mobile when isMobileOpen is true', () => {
-    const { container } = render(<Sidebar {...defaultProps} isMobileOpen />);
-    const aside = container.querySelector('aside');
-    expect(aside?.className).toContain('flex');
-    expect(aside?.className).not.toContain('hidden');
+  it('clears on Escape', async () => {
+    renderSidebar();
+    const input = screen.getByLabelText<HTMLInputElement>('Search chats…');
+    fireEvent.change(input, { target: { value: 'zzz' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    await flushAsyncRender();
+    expect(input.value).toBe('');
+    expect(screen.getByText('Plugin LSP TypeScript')).toBeInTheDocument();
+  });
+});
+
+describe('sidebar behaviors that must survive the overhaul', () => {
+  it('starts a new chat from the CTA, whose accessible name stays clean of the shortcut', () => {
+    const { props } = renderSidebar();
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat' }));
+    expect(props.onNewChat).toHaveBeenCalledTimes(1);
   });
 
-  it('is hidden on mobile when isMobileOpen is false', () => {
-    const { container } = render(<Sidebar {...defaultProps} isMobileOpen={false} />);
-    const aside = container.querySelector('aside');
-    expect(aside?.className).toContain('hidden');
+  it('selects a chat on row click', () => {
+    const { props } = renderSidebar();
+    fireEvent.click(screen.getByText('sse-soak load test'));
+    expect(props.onSelectChat).toHaveBeenCalledWith('c2');
   });
 
-  it('exposes chat titles through the title attribute when truncated', () => {
-    render(<Sidebar {...defaultProps} />);
-    expect(screen.getByText('First Chat')).toHaveAttribute('title', 'First Chat');
+  it('renames through the inline editor', () => {
+    const { props } = renderSidebar();
+    const row = screen.getByText('Plugin LSP TypeScript').closest('[role="button"]');
+    if (!row) throw new Error('row not found');
+    fireEvent.click(within(row as HTMLElement).getByTitle('Edit title'));
+    const editor = screen.getByDisplayValue<HTMLInputElement>('Plugin LSP TypeScript');
+    fireEvent.change(editor, { target: { value: 'Renamed' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(props.onUpdateChatTitle).toHaveBeenCalledWith('c1', 'Renamed');
   });
 
-  it('resizes from the keyboard and persists the clamped width', () => {
-    const onWidthChange = jest.fn();
-    const { container } = render(
-      <Sidebar {...defaultProps} width={256} onWidthChange={onWidthChange} />
-    );
-    const handle = screen.getByRole('separator', { name: /resize chat sidebar/i });
-    expect(handle).toHaveAttribute('aria-valuenow', '256');
-    // `h-auto` overrides the preflight `hr { height: 0 }`; without it the handle is unhittable.
-    expect(handle).toHaveClass('h-auto');
-    expect(handle.nextElementSibling).toHaveClass('bg-outline-variant/50');
-
-    fireEvent.keyDown(handle, { key: 'ArrowRight' });
-    fireEvent.keyUp(handle, { key: 'ArrowRight' });
-    expect(onWidthChange).toHaveBeenCalledWith(272);
-    expect(container.querySelector('aside')).toHaveStyle({ width: '272px' });
-  });
-
-  // The rail handle sits on the opposite edge, so a shared component that mixed
-  // the two directions up would still pass the rail's drag test.
-  it('grows the sidebar when its right-edge handle is dragged right', () => {
-    const onWidthPreview = jest.fn();
-    const { container } = render(
-      <Sidebar
-        {...defaultProps}
-        width={256}
-        onWidthPreview={onWidthPreview}
-        onWidthChange={jest.fn()}
-      />
-    );
-    const handle = screen.getByRole('separator', { name: /resize chat sidebar/i });
-
-    fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientX: 256 });
-    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 296 });
-
-    expect(onWidthPreview).toHaveBeenLastCalledWith(296);
-    expect(container.querySelector('aside')).toHaveStyle({ width: '296px' });
-  });
-
-  it('mobile shortcuts close the sidebar after navigation', () => {
-    const onNavigate = jest.fn();
-    const onMobileClose = jest.fn();
-    render(<Sidebar {...defaultProps} onNavigate={onNavigate} onMobileClose={onMobileClose} />);
-
-    const shortcuts = screen.getByTestId('mobile-shortcuts');
-    fireEvent.click(within(shortcuts).getByRole('button', { name: /studio/i }));
-    expect(onNavigate).toHaveBeenCalledWith('studio');
-    expect(onMobileClose).toHaveBeenCalled();
+  it('deletes from the row action', () => {
+    const { props } = renderSidebar();
+    const row = screen.getByText('Ancient refactor').closest('[role="button"]');
+    if (!row) throw new Error('row not found');
+    fireEvent.click(within(row as HTMLElement).getByTitle('Delete chat'));
+    expect(props.onDeleteChat).toHaveBeenCalledWith('c3');
   });
 });

@@ -1290,6 +1290,25 @@ export const messages = {
     chatSidebarWidth: 'Largura atual: {width}px',
     chatSidebarResetWidth: 'Redefinir largura da barra lateral',
     chatSidebarResize: 'Redimensionar barra lateral de chats',
+    breadcrumbIn: 'em',
+    breadcrumbDirty: 'Alterações não commitadas',
+  },
+
+  sidebar: {
+    groups: {
+      today: 'Hoje',
+      yesterday: 'Ontem',
+      thisWeek: 'Esta semana',
+    },
+    searchPlaceholder: 'Buscar conversas…',
+    searchNoResultsHint: 'Tente outro título, pasta ou agente.',
+    // Rótulos de harness estilo terminal — nomes de marca, iguais nos dois idiomas.
+    runner: {
+      mango: 'mango',
+      codex: 'codex',
+      claude: 'claude',
+      cursor: 'cursor',
+    },
   },
 
   git: {

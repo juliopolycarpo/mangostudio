@@ -5,20 +5,23 @@ import {
   useNavigate,
   useRouterState,
 } from '@tanstack/react-router';
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Layout } from '@/components/layout/Layout';
 import { Spinner } from '@/components/ui/Spinner';
 import { chatListQueryOptions, messagesQueryOptions } from '@/features/chat/queries';
 import { ExternalDisclosureGate } from '@/features/external-agents/ExternalDisclosureGate';
 import { ExternalWorkspaceTrustGate } from '@/features/external-agents/ExternalWorkspaceTrustGate';
+import { HeaderQuotaPill } from '@/features/external-agents/HeaderQuotaPill';
 import { RunnerSelectorContainer } from '@/features/external-agents/RunnerSelectorContainer';
 import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
 import { appSettingsQueryOptions } from '@/features/settings/app/queries';
+import { WorkspaceBreadcrumb } from '@/features/workspace/components/WorkspaceBreadcrumb';
 import { useAppState } from '@/hooks/use-app-state';
 import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
 import { AppContext } from '@/lib/app-context';
+import { isNewChatShortcut } from '@/lib/keyboard';
 
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: ({ context, location }) => {
@@ -57,6 +60,21 @@ function AuthenticatedLayout() {
   const currentPath = routerState.location.pathname;
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
+  // The one global shortcut, on the shell that owns the action. The command
+  // palette will grow this into a registry; until then a registry of one is
+  // just indirection. Some browsers reserve mod+N for themselves and never
+  // deliver it — the sidebar button stays the reliable path.
+  const handleNewChat = app.handleNewChat;
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat || !isNewChatShortcut(event)) return;
+      event.preventDefault();
+      void handleNewChat();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleNewChat]);
+
   if (!auth.isAuthenticated) {
     void navigate({ to: '/login' });
     return null;
@@ -93,6 +111,12 @@ function AuthenticatedLayout() {
           onNewChat={() => void app.handleNewChat()}
           onNavigateToSettings={() => app.handleNavigate('settings')}
           runnerSelector={<RunnerSelectorContainer />}
+          workspaceContext={
+            activePage === 'chat' && app.currentChatId ? (
+              <WorkspaceBreadcrumb chatId={app.currentChatId} workdir={app.currentWorkdir} />
+            ) : undefined
+          }
+          quotaPill={activePage === 'chat' ? <HeaderQuotaPill /> : undefined}
           onMobileMenuToggle={() => setIsMobileSidebarOpen((v) => !v)}
         />
 

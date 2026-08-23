@@ -11,7 +11,7 @@ import { interpretExternalAccountLimits } from '@mangostudio/shared/external-age
 import { RefreshCw } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 
-function formatCompactDuration(ms: number): string {
+export function formatCompactDuration(ms: number): string {
   const totalMinutes = Math.max(0, Math.round(ms / 60_000));
   if (totalMinutes < 60) return `${totalMinutes}m`;
   const hours = Math.floor(totalMinutes / 60);

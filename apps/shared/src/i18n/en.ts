@@ -1271,6 +1271,25 @@ export const messages: Messages = {
     chatSidebarWidth: 'Current width: {width}px',
     chatSidebarResetWidth: 'Reset sidebar width',
     chatSidebarResize: 'Resize chat sidebar',
+    breadcrumbIn: 'in',
+    breadcrumbDirty: 'Uncommitted changes',
+  },
+
+  sidebar: {
+    groups: {
+      today: 'Today',
+      yesterday: 'Yesterday',
+      thisWeek: 'This week',
+    },
+    searchPlaceholder: 'Search chats…',
+    searchNoResultsHint: 'Try another title, folder or agent.',
+    // Terminal-style harness labels — brand names, identical in both locales.
+    runner: {
+      mango: 'mango',
+      codex: 'codex',
+      claude: 'claude',
+      cursor: 'cursor',
+    },
   },
 
   git: {
