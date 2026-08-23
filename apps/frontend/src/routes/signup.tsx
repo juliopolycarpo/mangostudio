@@ -103,7 +103,7 @@ function SignupPage() {
             {loading ? t.auth.signupLoading : t.auth.signupButton}
           </Button>
 
-          <p className="text-sm text-center text-on-surface/50">
+          <p className="text-sm text-center text-on-surface-variant">
             {t.auth.hasAccount}{' '}
             <Link to="/login" className="text-primary hover:underline">
               {t.auth.loginLink}

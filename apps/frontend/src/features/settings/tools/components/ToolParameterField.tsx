@@ -184,7 +184,7 @@ function PathListField({
                     type="button"
                     onClick={() => handleDelete(index)}
                     disabled={disabled}
-                    className="p-1.5 rounded-md text-danger hover:bg-danger/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="p-1.5 rounded-md text-error hover:bg-error/10 disabled:opacity-50 disabled:cursor-not-allowed"
                     aria-label={s.delete}
                   >
                     <Trash2 className="w-3.5 h-3.5" />

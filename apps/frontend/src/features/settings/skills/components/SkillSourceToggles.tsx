@@ -51,7 +51,7 @@ export function SkillSourceToggles({ sources }: SkillSourceTogglesProps) {
         </Button>
       </div>
       {rescan.isError && (
-        <p className="text-xs text-destructive" role="alert">
+        <p className="text-xs text-error" role="alert">
           {s.refreshLibraryFailed}
         </p>
       )}

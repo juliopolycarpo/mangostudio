@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes"
     />
-    <meta name="theme-color" content="#131313" />
+    <meta name="theme-color" content="#141210" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="/icon-192.png" sizes="192x192" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
@@ -16,11 +16,19 @@
       content="MangoStudio - AI-powered chat and image generation studio for multiple providers"
     />
     <title>MangoStudio</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap"
-      rel="stylesheet"
+      rel="preload"
+      href="/fonts/inter-latin-wght.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/fonts/manrope-latin-wght.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
     />
     <script>
     // Prevent flash of wrong theme (FOWT) — runs before React hydrates

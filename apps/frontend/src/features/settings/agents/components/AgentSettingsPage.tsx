@@ -121,7 +121,7 @@ export function AgentSettingsPage() {
   if (agentsQuery.error || toolsQuery.error) {
     return (
       <div className="flex flex-col items-center gap-3 py-16">
-        <p className="text-sm text-destructive">{labels.loadError}</p>
+        <p className="text-sm text-error">{labels.loadError}</p>
         <Button
           variant="ghost"
           size="sm"

@@ -10,7 +10,7 @@ import { healthLabel } from '../format';
 
 const HEALTH_STYLES: Record<RuntimeHealth, string> = {
   ok: 'bg-primary/10 text-primary',
-  warn: 'bg-tertiary/15 text-tertiary',
+  warn: 'bg-warning/15 text-warning',
   missing: 'bg-surface-container-highest text-on-surface-variant',
   error: 'bg-error/10 text-error',
 };
