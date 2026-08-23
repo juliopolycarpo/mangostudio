@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { WorkspaceBreadcrumbView } from '../../../src/features/workspace/components/WorkspaceBreadcrumb';
 import { render } from '../../support/harness/render';
 
@@ -16,11 +16,15 @@ describe('WorkspaceBreadcrumbView', () => {
     render(
       <WorkspaceBreadcrumbView basename="mango-lsp-store" branch="feat/lsp-plugin" dirty={false} />
     );
+    // Segment-by-segment, not substring: the branch fixture keeps a `/` on
+    // purpose, and against the whole line `toHaveTextContent('/')` — and
+    // `('in')`, which "lsp-plugin" also contains — would pass on the branch
+    // alone even with the label and the separator gone.
     const breadcrumb = screen.getByTestId('workspace-breadcrumb');
-    expect(breadcrumb).toHaveTextContent('in');
-    expect(breadcrumb).toHaveTextContent('mango-lsp-store');
-    expect(breadcrumb).toHaveTextContent('/');
-    expect(breadcrumb).toHaveTextContent('feat/lsp-plugin');
+    expect(within(breadcrumb).getByText('in')).toBeInTheDocument();
+    expect(within(breadcrumb).getByText('mango-lsp-store')).toBeInTheDocument();
+    expect(within(breadcrumb).getByText('/')).toBeInTheDocument();
+    expect(within(breadcrumb).getByText('feat/lsp-plugin')).toBeInTheDocument();
     expect(screen.queryByText('Uncommitted changes')).toBeNull();
   });
 
