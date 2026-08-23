@@ -180,4 +180,99 @@ describe('sidebar behaviors that must survive the overhaul', () => {
     fireEvent.keyDown(editor, { key: ' ' });
     expect(props.onSelectChat).not.toHaveBeenCalled();
   });
+
+  it('exposes chat titles through the title attribute when truncated', () => {
+    renderSidebar();
+    expect(screen.getByText('Ancient refactor')).toHaveAttribute('title', 'Ancient refactor');
+  });
+});
+
+/**
+ * The shell around the session list. None of it moved in the overhaul, which is
+ * exactly why it is asserted here: the rewrite of the list is the change most
+ * likely to take the nav, the resize handle or the mobile slide-over with it.
+ */
+describe('sidebar shell', () => {
+  it('renders navigation items for all top-level pages', () => {
+    renderSidebar();
+    expect(screen.getAllByRole('button', { name: /studio/i }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole('button', { name: /gallery/i }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole('button', { name: /settings/i }).length).toBeGreaterThanOrEqual(1);
+  });
+
+  // The library lives under the environments umbrella now, so a Library entry
+  // here would be a second way in to a surface that already has one.
+  it('offers no standalone Library entry', () => {
+    renderSidebar();
+    expect(screen.queryByRole('button', { name: /library/i })).toBeNull();
+    expect(screen.getAllByRole('button', { name: /environments/i }).length).toBeGreaterThanOrEqual(
+      1
+    );
+  });
+
+  it('highlights Studio when it is the current page', () => {
+    renderSidebar({ currentPage: 'studio' });
+    const studioButtons = screen.getAllByRole('button', { name: /studio/i });
+    expect(studioButtons[0]?.className).toContain('text-primary');
+  });
+
+  it('calls onNavigate with "studio" when Studio is clicked', () => {
+    const { props } = renderSidebar();
+    fireEvent.click(screen.getAllByRole('button', { name: /studio/i })[0] as HTMLElement);
+    expect(props.onNavigate).toHaveBeenCalledWith('studio');
+  });
+
+  it('mobile shortcuts close the sidebar after navigation', () => {
+    const onMobileClose = jest.fn();
+    const { props } = renderSidebar({ onMobileClose });
+    const shortcuts = screen.getByTestId('mobile-shortcuts');
+    fireEvent.click(within(shortcuts).getByRole('button', { name: /studio/i }));
+    expect(props.onNavigate).toHaveBeenCalledWith('studio');
+    expect(onMobileClose).toHaveBeenCalled();
+  });
+
+  it('is visible on mobile when isMobileOpen is true', () => {
+    const { container } = renderSidebar({ isMobileOpen: true });
+    const aside = container.querySelector('aside');
+    expect(aside?.className).toContain('flex');
+    expect(aside?.className).not.toContain('hidden');
+  });
+
+  it('is hidden on mobile when isMobileOpen is false', () => {
+    const { container } = renderSidebar({ isMobileOpen: false });
+    expect(container.querySelector('aside')?.className).toContain('hidden');
+  });
+
+  it('resizes from the keyboard and persists the clamped width', () => {
+    const onWidthChange = jest.fn();
+    const { container } = renderSidebar({ width: 256, onWidthChange });
+    const handle = screen.getByRole('separator', { name: /resize chat sidebar/i });
+    expect(handle).toHaveAttribute('aria-valuenow', '256');
+    // `h-auto` overrides the preflight `hr { height: 0 }`; without it the handle is unhittable.
+    expect(handle).toHaveClass('h-auto');
+    expect(handle.nextElementSibling).toHaveClass('bg-outline-variant/50');
+
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    fireEvent.keyUp(handle, { key: 'ArrowRight' });
+    expect(onWidthChange).toHaveBeenCalledWith(272);
+    expect(container.querySelector('aside')).toHaveStyle({ width: '272px' });
+  });
+
+  // The rail handle sits on the opposite edge, so a shared component that mixed
+  // the two directions up would still pass the rail's drag test.
+  it('grows the sidebar when its right-edge handle is dragged right', () => {
+    const onWidthPreview = jest.fn();
+    const { container } = renderSidebar({
+      width: 256,
+      onWidthPreview,
+      onWidthChange: jest.fn(),
+    });
+    const handle = screen.getByRole('separator', { name: /resize chat sidebar/i });
+
+    fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientX: 256 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 296 });
+
+    expect(onWidthPreview).toHaveBeenLastCalledWith(296);
+    expect(container.querySelector('aside')).toHaveStyle({ width: '296px' });
+  });
 });
