@@ -14,7 +14,7 @@ const variantStyles: Record<NonNullable<CardProps['variant']>, string> = {
 export function Card({ variant = 'solid', className = '', children }: CardProps) {
   return (
     <div
-      className={`rounded-2xl border border-outline-variant/10 p-8 ${variantStyles[variant]} ${className}`}
+      className={`rounded-xl border border-outline-variant/10 p-8 ${variantStyles[variant]} ${className}`}
     >
       {children}
     </div>
