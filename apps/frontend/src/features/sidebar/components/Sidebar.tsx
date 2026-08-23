@@ -17,7 +17,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useDeferredValue, useEffect, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -147,14 +147,27 @@ export function Sidebar({
     { page: 'settings', icon: Settings, label: t.settings.title },
   ] as const;
 
-  const now = new Date();
   const badgeLabels = t.sidebar.runner;
-  const visibleChats = filterChats(
-    chats,
-    deferredQuery,
-    (chat) => runnerBadge(chat.runner, badgeLabels).label
-  );
-  const groups = groupChatsByDate(visibleChats, now);
+  const groupLabels = t.sidebar.groups;
+  // Memoized because `deferredQuery` is deferred: without this, React renders
+  // once urgently with the old query and once more with the new one, and both
+  // passes redo the whole filter, the bucketing and one `Intl.DateTimeFormat`
+  // per month group — so the deferral would cost a second pass and buy nothing.
+  const { visibleCount, groups } = useMemo(() => {
+    const now = new Date();
+    const visible = filterChats(
+      chats,
+      deferredQuery,
+      (chat) => runnerBadge(chat.runner, badgeLabels).label
+    );
+    return {
+      visibleCount: visible.length,
+      groups: groupChatsByDate(visible, now).map((group) => ({
+        ...group,
+        label: chatGroupLabel(group, groupLabels, locale, now),
+      })),
+    };
+  }, [chats, deferredQuery, badgeLabels, groupLabels, locale]);
   const searching = deferredQuery.trim().length > 0;
 
   return (
@@ -249,7 +262,7 @@ export function Sidebar({
           className="flex-1 px-4 overflow-y-auto hide-scrollbar pb-2"
           aria-label={t.chat.sectionLabel}
         >
-          {searching && visibleChats.length === 0 ? (
+          {searching && visibleCount === 0 ? (
             <EmptyState
               icon={<SearchX size={20} />}
               title={formatMessage(t.common.noResultsFor, { query: deferredQuery.trim() })}
@@ -259,7 +272,7 @@ export function Sidebar({
           {groups.map((group) => (
             <div key={group.key} className="space-y-1">
               <MicroLabel as="div" className="px-4 pb-1 pt-3 text-on-surface-variant/60">
-                {chatGroupLabel(group, t.sidebar.groups, locale, now)}
+                {group.label}
               </MicroLabel>
               {group.chats.map((chat) => {
                 const ctx = contextCache?.get(chat.id);
