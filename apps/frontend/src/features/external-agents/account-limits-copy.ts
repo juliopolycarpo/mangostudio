@@ -7,7 +7,14 @@
  * so each keeps its own tone mapping and takes `low` as the one shared input.
  */
 
-import type { ExternalAccountLimitsVerdict } from '@mangostudio/shared/external-agents';
+import type {
+  ExternalAccountLimits,
+  ExternalAccountLimitsVerdict,
+} from '@mangostudio/shared/external-agents';
+import {
+  EXTERNAL_ACCOUNT_LIMITS_STALE_MS,
+  interpretExternalAccountLimits,
+} from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
 
 type LimitsLabels = Messages['externalAgents']['limits'];
@@ -67,4 +74,42 @@ export function describeAccountLimits(
     body: labels.remaining.replace('{percent}', String(Math.round(remaining))),
     low: remaining <= 15,
   };
+}
+
+/** Half a minute: `formatCompactDuration` rounds, so the number turns over here. */
+const MINUTE_ROUNDING_OFFSET_MS = 30_000;
+
+/**
+ * When this copy next says something different on the clock alone, or
+ * `undefined` when nothing more will change until new data arrives.
+ *
+ * Three things move with no new snapshot: the snapshot goes stale, an exhausted
+ * window reaches its reset, and the countdown ticks down a minute. A caller that
+ * armed only the staleness deadline would leave "resets in 1m" on screen for the
+ * quarter hour after that reset actually passed — which is the one moment the
+ * user is watching the pill for.
+ *
+ * Always strictly in the future, so a caller can arm a timer on it without
+ * risking a wake that computes the same answer and never wakes again.
+ */
+export function nextAccountLimitsCopyChangeMs(
+  limits: ExternalAccountLimits | null | undefined,
+  nowMs: number
+): number | undefined {
+  if (!limits) return undefined;
+  // `+ 1`: staleness flips on *strictly* older than the window.
+  const staleAtMs = limits.observedAtMs + EXTERNAL_ACCOUNT_LIMITS_STALE_MS + 1;
+  // Past the deadline the copy is the single word "stale" — nothing left to wake for.
+  if (staleAtMs <= nowMs) return undefined;
+
+  const verdict = interpretExternalAccountLimits(limits, nowMs);
+  const resetsAtMs =
+    verdict.kind === 'ok' && verdict.exhausted ? verdict.tightest.resetsAtMs : undefined;
+  if (resetsAtMs === undefined || resetsAtMs <= nowMs) return staleAtMs;
+
+  const shownMinutes = Math.round((resetsAtMs - nowMs) / 60_000);
+  const nextTickMs = resetsAtMs - (shownMinutes * 60_000 - MINUTE_ROUNDING_OFFSET_MS);
+  // Standing exactly on a boundary rounds up, so the shown number is already one
+  // instant from turning over; `nowMs + 1` is that instant.
+  return Math.min(staleAtMs, resetsAtMs, Math.max(nextTickMs, nowMs + 1));
 }

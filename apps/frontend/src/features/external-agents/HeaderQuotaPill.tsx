@@ -9,16 +9,13 @@
  */
 
 import type { ExternalAccountLimits } from '@mangostudio/shared/external-agents';
-import {
-  EXTERNAL_ACCOUNT_LIMITS_STALE_MS,
-  interpretExternalAccountLimits,
-} from '@mangostudio/shared/external-agents';
+import { interpretExternalAccountLimits } from '@mangostudio/shared/external-agents';
 import { RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
-import { describeAccountLimits } from './account-limits-copy';
+import { describeAccountLimits, nextAccountLimitsCopyChangeMs } from './account-limits-copy';
 import { useExternalAccountLimits } from './use-external-account-limits';
 import { useExternalAgents } from './useExternalAgents';
 
@@ -29,7 +26,7 @@ export function HeaderQuotaPill() {
   const descriptor = (runner.kind === 'external' && external.find(runner.targetId)) || null;
   const quotaDescriptor = descriptor?.capabilities.accountUsage ? descriptor : null;
   const { limits, refreshing, refresh } = useExternalAccountLimits(quotaDescriptor);
-  const nowMs = useFreshnessDeadline(limits?.observedAtMs);
+  const nowMs = useQuotaClock(limits);
 
   if (!quotaDescriptor) return null;
   return (
@@ -38,28 +35,36 @@ export function HeaderQuotaPill() {
 }
 
 /**
- * `Date.now()` for the render, plus the one re-render that the deadline needs.
+ * `Date.now()` for the render, plus the re-renders the copy needs to stay true.
  *
- * Freshness is a clock comparison, so a tab left open crosses the threshold with
- * nothing to notice it: the pill would keep claiming a quota it no longer knows
- * until something unrelated re-rendered the header. One `setTimeout` armed for
- * the exact moment the snapshot expires closes that, and it is still not a poll
- * — it fires once per snapshot, and the next snapshot arms the next one.
+ * Everything this pill says is a clock comparison, so a tab left open drifts
+ * away from it with nothing to notice: the snapshot goes stale, and an exhausted
+ * window's reset arrives and passes, while the header keeps whatever sentence it
+ * last rendered. One `setTimeout` armed for the next moment the copy changes
+ * closes that.
+ *
+ * Still not a poll. Each wake arms the next one, every wake is a moment the
+ * words on screen actually change, and the whole chain ends at the staleness
+ * deadline — so the busiest case, a minute-by-minute countdown, is bounded by
+ * the fifteen minutes a snapshot is worth reading at all.
  */
-function useFreshnessDeadline(observedAtMs: number | undefined): number {
-  const [, setExpiries] = useState(0);
+function useQuotaClock(limits: ExternalAccountLimits | null | undefined): number {
+  const [, setTicks] = useState(0);
+  const nowMs = Date.now();
+  const wakeAtMs = nextAccountLimitsCopyChangeMs(limits, nowMs);
 
   useEffect(() => {
-    if (observedAtMs === undefined) return;
-    // `+ 1`: the verdict flips on *strictly* older than the window, so waking on
-    // the boundary itself would re-render to the same answer and never wake again.
-    const delay = observedAtMs + EXTERNAL_ACCOUNT_LIMITS_STALE_MS + 1 - Date.now();
-    if (delay <= 0) return;
-    const timer = setTimeout(() => setExpiries((count) => count + 1), delay);
+    if (wakeAtMs === undefined) return;
+    // Re-read the clock: `wakeAtMs` was computed a render ago, and `Math.max`
+    // turns that drift into an immediate wake rather than a negative delay.
+    const timer = setTimeout(
+      () => setTicks((count) => count + 1),
+      Math.max(0, wakeAtMs - Date.now())
+    );
     return () => clearTimeout(timer);
-  }, [observedAtMs]);
+  }, [wakeAtMs]);
 
-  return Date.now();
+  return nowMs;
 }
 
 export function QuotaPillView({
