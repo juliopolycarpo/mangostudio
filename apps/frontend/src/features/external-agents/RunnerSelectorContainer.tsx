@@ -104,6 +104,7 @@ export function RunnerSelectorContainer() {
         agents={app.agents}
         isAgentListLoading={app.isAgentListLoading}
         externalAgents={external.agents}
+        isExternalAgentListLoading={external.isLoading}
         environmentName={environmentName}
         environmentTransportKind={environment?.transportKind}
         hasTurns={hasTurns}

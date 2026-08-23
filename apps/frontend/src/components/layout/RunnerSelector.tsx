@@ -35,6 +35,12 @@ export interface RunnerSelectorProps {
   agents: ReadonlyArray<AgentProfile>;
   isAgentListLoading: boolean;
   externalAgents: readonly ExternalAgentDescriptor[];
+  /**
+   * True while discovery is still answering. Load-bearing for the pill's dot: a
+   * missing descriptor and a refused one are the same shape, so without this an
+   * unanswered query reads as "this agent cannot run here".
+   */
+  isExternalAgentListLoading?: boolean;
   /** The environment the descriptors describe, named in the unavailability copy. */
   environmentName: string;
   /**
@@ -69,6 +75,7 @@ export function RunnerSelector({
   agents,
   isAgentListLoading,
   externalAgents,
+  isExternalAgentListLoading = false,
   environmentName,
   environmentTransportKind,
   hasTurns,
@@ -108,7 +115,9 @@ export function RunnerSelector({
   const activeLabel =
     runner.kind === 'mangostudio'
       ? (selectableAgents.find((agent) => agent.id === runner.agentId)?.name ?? runner.agentId)
-      : t.externalAgents.target[runner.targetId];
+      : // A target this bundle predates still names itself: its raw id beats a
+        // blank pill, and the sidebar badge already degrades the same way.
+        (t.externalAgents.target[runner.targetId] ?? runner.targetId);
 
   // The pill's dot answers "can this runner take a turn right now": MangoStudio
   // always can (accent), an external runner grades from signed-in through
@@ -127,22 +136,22 @@ export function RunnerSelector({
     !!activeDescriptor &&
     externalAgentSelectable(activeDescriptor) &&
     activeDescriptor.unavailableReason !== 'disclosure-required';
-  const availability: StatusDotTone =
+  // Tone and its screen-reader sentence are one decision, so they are made once:
+  // splitting them into parallel ternaries is how the two drift.
+  //
+  // The unanswered-discovery arm comes first because a missing descriptor and a
+  // refused one are indistinguishable here. Painting the refusal while the query
+  // is still in flight told every reader "pick another agent" on every mount.
+  const availability: { tone: StatusDotTone; text: string | null } =
     runner.kind === 'mangostudio'
-      ? 'accent'
-      : !activeUsable
-        ? 'error'
-        : activeDescriptor?.authState === 'signed-in'
-          ? 'success'
-          : 'warning';
-  const availabilityText =
-    runner.kind === 'external'
-      ? !activeUsable
-        ? labels.unavailableHere
-        : activeDescriptor?.authState === 'signed-in'
-          ? labels.signedIn
-          : labels.authUnknown
-      : null;
+      ? { tone: 'accent', text: null }
+      : !activeDescriptor && isExternalAgentListLoading
+        ? { tone: 'neutral', text: labels.loading }
+        : !activeUsable
+          ? { tone: 'error', text: labels.unavailableHere }
+          : activeDescriptor?.authState === 'signed-in'
+            ? { tone: 'success', text: labels.signedIn }
+            : { tone: 'warning', text: labels.authUnknown };
 
   return (
     <div ref={containerRef} className="relative">
@@ -155,8 +164,8 @@ export function RunnerSelector({
         aria-label={labels.label}
         className="flex h-9 max-w-full items-center gap-2 rounded-full border border-outline-variant/20 bg-surface-container-lowest px-3 text-sm font-medium text-on-surface transition-colors hover:border-primary/30 disabled:opacity-50"
       >
-        <StatusDot tone={availability} />
-        {availabilityText ? <span className="sr-only">{availabilityText}</span> : null}
+        <StatusDot tone={availability.tone} />
+        {availability.text ? <span className="sr-only">{availability.text}</span> : null}
         <span className="truncate">{activeLabel}</span>
         <ChevronDown size={14} className="shrink-0 text-on-surface-variant" />
       </button>

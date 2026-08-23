@@ -210,3 +210,61 @@ describe('D14 — one runner kind per chat', () => {
     expect(props.onSelectAgent).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The closed pill's own readout, which is a different question from the picker's:
+ * not "may I choose this" but "can it take a turn right now". Discovery not
+ * having answered yet is not the same answer as "no".
+ */
+describe('runner pill availability', () => {
+  function renderPill(overrides: Partial<React.ComponentProps<typeof RunnerSelector>> = {}) {
+    const props = {
+      runner: { kind: 'external', targetId: 'codex' },
+      agents: AGENTS,
+      isAgentListLoading: false,
+      externalAgents: [descriptor()],
+      environmentName: 'this laptop',
+      hasTurns: false,
+      onSelectAgent: jest.fn(),
+      onSelectExternal: jest.fn(),
+      onForkWithRunner: jest.fn(),
+      onBrowseSessions: jest.fn(),
+      ...overrides,
+    } as React.ComponentProps<typeof RunnerSelector>;
+    render(<RunnerSelector {...props} />);
+    return screen.getByRole('button', { name: /who runs this chat/i });
+  }
+
+  const toneOf = (pill: HTMLElement) =>
+    pill.querySelector('[data-tone]')?.getAttribute('data-tone') ?? null;
+
+  it('reads signed in for a usable descriptor', () => {
+    const pill = renderPill();
+    expect(within(pill).getByText('signed in')).toBeInTheDocument();
+    expect(toneOf(pill)).toBe('success');
+  });
+
+  it('does not claim the agent is unavailable while discovery is still answering', () => {
+    const pill = renderPill({ externalAgents: [], isExternalAgentListLoading: true });
+    expect(within(pill).queryByText(/cannot run here/i)).toBeNull();
+    expect(toneOf(pill)).toBe('neutral');
+  });
+
+  it('reports unavailable once discovery answered without the descriptor', () => {
+    const pill = renderPill({ externalAgents: [], isExternalAgentListLoading: false });
+    expect(within(pill).getByText(/cannot run here/i)).toBeInTheDocument();
+    expect(toneOf(pill)).toBe('error');
+  });
+
+  // The sidebar badge already degrades this way; the pill must not be the one
+  // surface that goes blank on a chat a newer build wrote.
+  it('names a target this bundle has no label for instead of rendering blank', () => {
+    const pill = renderPill({
+      runner: { kind: 'external', targetId: 'gemini' } as unknown as React.ComponentProps<
+        typeof RunnerSelector
+      >['runner'],
+      externalAgents: [],
+    });
+    expect(within(pill).getByText('gemini')).toBeInTheDocument();
+  });
+});
