@@ -27,10 +27,11 @@ export function HeaderQuotaPill() {
   const external = useExternalAgents(app.currentEnvironmentId);
   const runner = app.runner;
   const descriptor = (runner.kind === 'external' && external.find(runner.targetId)) || null;
-  const { limits, refreshing, refresh } = useExternalAccountLimits(descriptor);
+  const quotaDescriptor = descriptor?.capabilities.accountUsage ? descriptor : null;
+  const { limits, refreshing, refresh } = useExternalAccountLimits(quotaDescriptor);
   const nowMs = useFreshnessDeadline(limits?.observedAtMs);
 
-  if (!descriptor?.capabilities.accountUsage) return null;
+  if (!quotaDescriptor) return null;
   return (
     <QuotaPillView limits={limits} nowMs={nowMs} refreshing={refreshing} onRefresh={refresh} />
   );
