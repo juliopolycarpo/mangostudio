@@ -279,6 +279,11 @@ export function Sidebar({
                     className={`group relative flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all duration-300 w-full text-left truncate cursor-pointer ${currentPage === 'chat' && currentChatId === chat.id ? 'text-primary bg-surface-container-high' : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'}`}
                     onClick={activateChat}
                     onKeyDown={(e) => {
+                      // Edit, delete, and the inline-edit input all live inside this
+                      // row and bubble their own Enter/Space keydowns up here — only
+                      // react when the row itself is the target, or its
+                      // `preventDefault()` cancels their native activation.
+                      if (e.target !== e.currentTarget) return;
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
                         activateChat();

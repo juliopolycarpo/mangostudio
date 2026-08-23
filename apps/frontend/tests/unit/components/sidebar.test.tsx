@@ -161,4 +161,23 @@ describe('sidebar behaviors that must survive the overhaul', () => {
     fireEvent.click(within(row as HTMLElement).getByTitle('Delete chat'));
     expect(props.onDeleteChat).toHaveBeenCalledWith('c3');
   });
+
+  it('does not let Enter/Space on the edit or delete buttons activate the row', () => {
+    const { props } = renderSidebar();
+    const row = screen.getByText('Plugin LSP TypeScript').closest('[role="button"]');
+    if (!row) throw new Error('row not found');
+    fireEvent.keyDown(within(row as HTMLElement).getByTitle('Edit title'), { key: 'Enter' });
+    fireEvent.keyDown(within(row as HTMLElement).getByTitle('Delete chat'), { key: ' ' });
+    expect(props.onSelectChat).not.toHaveBeenCalled();
+  });
+
+  it('does not let a space in the inline editor activate the row', () => {
+    const { props } = renderSidebar();
+    const row = screen.getByText('Plugin LSP TypeScript').closest('[role="button"]');
+    if (!row) throw new Error('row not found');
+    fireEvent.click(within(row as HTMLElement).getByTitle('Edit title'));
+    const editor = screen.getByDisplayValue<HTMLInputElement>('Plugin LSP TypeScript');
+    fireEvent.keyDown(editor, { key: ' ' });
+    expect(props.onSelectChat).not.toHaveBeenCalled();
+  });
 });
