@@ -643,6 +643,33 @@ async function smokeTest(): Promise<void> {
       pass('/ → 200 HTML');
     }
 
+    // The shell's ETag must be content-derived, and only this harness can see
+    // it: embedded files stat *successfully* with `mtimeMs: 0`, and index.html's
+    // byte size is stable across builds (hashed asset names are fixed-length),
+    // so a size+mtime validator collapses to the same "<size>-0" constant in
+    // every release — an upgraded binary answers 304 to the previous build's
+    // shell and returning users keep the old frontend until a hard refresh.
+    // Unit fixtures stat real temp files with real mtimes, so they cannot
+    // reproduce the constant; the compiled binary is where it exists.
+    {
+      const res = await fetch(`http://127.0.0.1:${PORT}/`);
+      const etag = res.headers.get('etag');
+      if (!etag) fail('/ carries no ETag — the shell cannot revalidate after an upgrade');
+      if (/-0"$/.test(etag as string))
+        fail(`/ ETag ${etag} is stat-derived (mtime 0) — constant across builds`);
+      const revalidated = await fetch(`http://127.0.0.1:${PORT}/`, {
+        headers: { 'If-None-Match': etag as string },
+      });
+      if (revalidated.status !== 304)
+        fail(`/ with matching If-None-Match returned ${revalidated.status}, expected 304`);
+      const upgraded = await fetch(`http://127.0.0.1:${PORT}/`, {
+        headers: { 'If-None-Match': '"71f-0"' },
+      });
+      if (upgraded.status !== 200)
+        fail(`/ with a stale validator returned ${upgraded.status}, expected 200`);
+      pass('/ shell ETag is content-derived and revalidates correctly');
+    }
+
     // /index.html → 200 HTML
     {
       const res = await fetch(`http://127.0.0.1:${PORT}/index.html`);

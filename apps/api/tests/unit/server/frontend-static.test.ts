@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { staticPlugin } from '@elysia/static';
@@ -15,6 +15,7 @@ import { BUILD_STATE_FILE, BUILD_STATE_URL_PATH } from '@mangostudio/shared/util
 import { Elysia, NotFound } from 'elysia';
 import Value from 'typebox/value';
 import type { App } from '../../../src/app';
+import { contentEtag } from '../../../src/lib/http-cache';
 import { errorHandler } from '../../../src/plugins/error-handler';
 import {
   registerEmbeddedFrontend,
@@ -89,6 +90,22 @@ describe('registerFrontend with embedded assets', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
     expect(await response.text()).toBe(ASSET_JS);
+  });
+
+  test('derives the shell ETag from content, never from stat', async () => {
+    // Inside a compiled binary the embedded index.html stats *successfully*
+    // with `mtimeMs: 0`, and its byte size is stable across builds because
+    // hashed asset names are fixed-length — so a size+mtime validator is the
+    // same constant in every release and an upgraded binary answers 304 to the
+    // previous build's shell. Mimic that stat shape on the fixture and pin the
+    // validator to the bytes instead.
+    utimesSync(join(assetDir, 'index.html'), 0, 0);
+    const get = registerEmbedded();
+    const response = await get('/');
+
+    const etag = response.headers.get('etag');
+    expect(etag).toBe(contentEtag(INDEX_HTML));
+    expect(etag).not.toMatch(/-0"$/);
   });
 
   test('falls back to index.html for SPA routes', async () => {
@@ -662,7 +679,7 @@ describe('registerFrontend with embedded assets, over a listening server', () =>
    * regression on this branch is the standing proof.
    */
   async function startEmbeddedServer(): Promise<{
-    get: (path: string) => Promise<Response>;
+    get: (path: string, headers?: Record<string, string>) => Promise<Response>;
     stop: () => Promise<void>;
   }> {
     writeFileSync(join(assetDir, 'favicon.ico'), UPLOAD_BYTES);
@@ -681,12 +698,35 @@ describe('registerFrontend with embedded assets, over a listening server', () =>
     app.listen({ hostname: '127.0.0.1', port: 0, reusePort: false });
     const origin = `http://127.0.0.1:${app.server?.port}`;
     return {
-      get: (path: string) => fetch(`${origin}${path}`),
+      get: (path: string, headers?: Record<string, string>) =>
+        fetch(`${origin}${path}`, { headers }),
       stop: async () => {
         await app.stop();
       },
     };
   }
+
+  test('revalidates the embedded shell against its content hash', async () => {
+    const server = await startEmbeddedServer();
+    try {
+      const first = await server.get('/');
+      expect(first.status).toBe(200);
+      const etag = first.headers.get('etag');
+      expect(etag).toBe(contentEtag(INDEX_HTML));
+
+      const revalidated = await server.get('/', { 'If-None-Match': etag as string });
+      expect(revalidated.status).toBe(304);
+      expect(await revalidated.text()).toBe('');
+
+      // The old build's validator must miss, not 304 — that miss is what makes
+      // a browser fetch the new shell after a binary upgrade.
+      const upgraded = await server.get('/', { 'If-None-Match': '"71f-0"' });
+      expect(upgraded.status).toBe(200);
+      expect(await upgraded.text()).toBe(INDEX_HTML);
+    } finally {
+      await server.stop();
+    }
+  });
 
   test('serves a root file whose extension is percent-encoded', async () => {
     const server = await startEmbeddedServer();

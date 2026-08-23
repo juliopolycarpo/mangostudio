@@ -14,6 +14,19 @@ export function fileEtag(stats: { size: number; mtimeMs: number }): string {
 }
 
 /**
+ * The validator for content whose bytes are its only stable identity.
+ *
+ * A file embedded in a compiled binary stats as `mtimeMs: 0`, and the shell's
+ * byte *size* barely moves between builds because hashed asset names are
+ * fixed-length — so `fileEtag` there collapses to the same string in every
+ * release, and an upgraded binary answers 304 to the previous build's shell.
+ * Hashing the bytes makes the tag change exactly when the content does.
+ */
+export function contentEtag(content: string | Uint8Array): string {
+  return `"${Bun.hash(content).toString(16)}"`;
+}
+
+/**
  * `If-None-Match` carries a list, and a cache is allowed to weaken a tag it
  * stored. Both are handled here rather than by comparing the header whole.
  */

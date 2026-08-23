@@ -3,13 +3,13 @@
  * Extracted from the server entrypoint so it can be reused and tested.
  */
 
-import { existsSync, realpathSync, type Stats, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, type Stats, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { staticPlugin } from '@elysia/static';
 import { BUILD_STATE_URL_PATH } from '@mangostudio/shared/utils/dist-files';
 import { NotFound } from 'elysia';
 import type { App } from '../app';
-import { fileEtag, matchesEtag } from '../lib/http-cache';
+import { contentEtag, fileEtag, matchesEtag } from '../lib/http-cache';
 import { HASHED_ASSET_DIR, isApiOwnedPath, isSpaRoute } from '../lib/spa-guard';
 import { type EmbeddedFrontendFiles, getEmbeddedFrontend } from './embedded-frontend';
 import { frontendNotFound, setFrontendFallback } from './frontend-fallback';
@@ -44,31 +44,48 @@ export function registerFrontend(app: App, frontendDir: string): void {
   registerSpa(app, frontendDir);
 }
 
-function serveIndexFile(indexPath: string, request: Request): Response {
+/**
+ * `no-cache` means "revalidate before reuse", but a browser can only
+ * revalidate against a validator. Without one it has nothing to put in
+ * `If-None-Match`, so the server can never answer 304 and the whole shell is
+ * re-downloaded on every deep link and every hard refresh — the one asset
+ * requested on literally every navigation paying full price each time.
+ *
+ * The caller supplies the validator because the right one depends on where the
+ * shell lives. On disk it is `fileEtag` of a fresh stat, so a dev rebuild's
+ * new mtime invalidates cached copies. Embedded in a compiled binary it must
+ * be `contentEtag`: `statSync` *succeeds* on the embedded virtual path but
+ * reports `mtimeMs: 0`, and index.html's byte size is constant across builds
+ * (hashed asset names are fixed-length), so a stat-derived tag is the same
+ * string in every release — an upgraded binary would answer 304 to the old
+ * build's shell and returning users would keep the previous frontend until a
+ * hard refresh. Null means "no validator": always serve fresh, never a wrong 304.
+ */
+function serveIndexFile(indexPath: string, etag: string | null, request: Request): Response {
   const headers: Record<string, string> = {
     'Content-Type': 'text/html',
     'Cache-Control': SHELL_CACHE_CONTROL,
   };
-  // `no-cache` means "revalidate before reuse", but a browser can only
-  // revalidate against a validator. Without one it has nothing to put in
-  // `If-None-Match`, so the server can never answer 304 and the whole shell is
-  // re-downloaded on every deep link and every hard refresh — the one asset
-  // requested on literally every navigation paying full price each time.
-  //
-  // `statFile` is sync and already used here, which keeps this off the async
-  // path `serveUnhashedFile` needs. Inside a compiled binary there is no inode
-  // to stat, so it returns null and the shell is simply served without a
-  // validator, exactly as before — correct, because the content of an embedded
-  // index.html cannot change within one binary.
-  const stats = statFile(indexPath);
-  if (stats) {
-    const etag = fileEtag(stats);
+  if (etag) {
     headers.ETag = etag;
     if (matchesEtag(request.headers.get('if-none-match'), etag)) {
       return new Response(null, { status: 304, headers });
     }
   }
   return new Response(Bun.file(indexPath), { headers });
+}
+
+/**
+ * The embedded shell's validator: a hash of its bytes, computed once at boot.
+ * The content cannot change within one binary, so once is enough — and the
+ * bytes are the only identity that survives embedding (see serveIndexFile).
+ */
+function embeddedShellEtag(indexPath: string): string | null {
+  try {
+    return contentEtag(readFileSync(indexPath));
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -92,7 +109,8 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
     return;
   }
 
-  const serveEmbeddedIndex = (request: Request) => serveIndexFile(indexPath, request);
+  const shellEtag = embeddedShellEtag(indexPath);
+  const serveEmbeddedIndex = (request: Request) => serveIndexFile(indexPath, shellEtag, request);
 
   app.get('/', ({ request }) => serveEmbeddedIndex(request));
 
@@ -359,15 +377,19 @@ function registerSpa(app: App, frontendDir: string): void {
   // for the life of the server, so re-resolving it on every SPA-fallback
   // request bought nothing but a repeated syscall.
   const frontendRoot = realpathSyncSafe(frontendDir);
-  // Existence-checked for the same reason `serveUnhashedFile` is: `build.ts`
+  // Stat-checked for the same reason `serveUnhashedFile` is: `build.ts`
   // removes `dist/` before every rebuild, so a rebuild run against a live dev
   // server leaves `index.html` briefly absent — and a `Bun.file` that is not
   // there answers 500 with Bun's own error page once the body is read, on `/`
   // and on every deep link alike. A 404 is the honest answer for that window.
-  const serveIndex = (request: Request): Response =>
-    existsSync(indexPath)
-      ? serveIndexFile(indexPath, request)
+  // The stat that proves existence also spells the validator: size+mtime, so a
+  // rebuild's new mtime invalidates cached shells.
+  const serveIndex = (request: Request): Response => {
+    const stats = statFile(indexPath);
+    return stats
+      ? serveIndexFile(indexPath, fileEtag(stats), request)
       : new Response(null, { status: 404 });
+  };
   const assetsDir = join(frontendDir, HASHED_ASSET_DIR);
 
   // Registered before the plugin: the static plugin may register GET / with an
