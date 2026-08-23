@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 import { createTurboBuildCommand, selectBuildWorkspaces } from './lib/build';
@@ -510,6 +510,15 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
   console.log(`📁 Output directory: ${outDir}`);
   console.log('---');
 
+  // Pruned before the sidecar build, not trusted to the build itself: a Turbo
+  // cache restore lays its outputs over whatever is already in `dist/` without
+  // deleting extras, so repeated local binary builds embedded assets from
+  // superseded builds (measured: 58 embedded files where a clean tree gives 57,
+  // including a chunk whose source had been reverted). CI and releases build
+  // from a clean checkout and never saw it; this makes a local binary equally
+  // faithful. A cache hit repopulates the directory in full, so this costs
+  // nothing when nothing changed.
+  if (!options.dryRun) rmSync(frontendDist, { recursive: true, force: true });
   await buildFrontendSidecar(options.dryRun);
   if (options.dryRun) {
     console.log('   (dry run) Would generate embedded frontend modules and compile them in');
