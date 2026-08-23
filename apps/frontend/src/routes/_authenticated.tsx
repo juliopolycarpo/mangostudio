@@ -5,7 +5,7 @@ import {
   useNavigate,
   useRouterState,
 } from '@tanstack/react-router';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Layout } from '@/components/layout/Layout';
 import { Spinner } from '@/components/ui/Spinner';
@@ -64,16 +64,22 @@ function AuthenticatedLayout() {
   // palette will grow this into a registry; until then a registry of one is
   // just indirection. Some browsers reserve mod+N for themselves and never
   // deliver it — the sidebar button stays the reliable path.
-  const handleNewChat = app.handleNewChat;
+  //
+  // Read through a ref, not a dependency: `useChats()` hands back a fresh object
+  // every render, so `handleNewChat` never memoizes and a dependency on it would
+  // re-register the window listener once per render — once per streamed token,
+  // since the generation state lives on this layout.
+  const handleNewChatRef = useRef(app.handleNewChat);
+  handleNewChatRef.current = app.handleNewChat;
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat || !isNewChatShortcut(event)) return;
       event.preventDefault();
-      void handleNewChat();
+      void handleNewChatRef.current();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleNewChat]);
+  }, []);
 
   if (!auth.isAuthenticated) {
     void navigate({ to: '/login' });
