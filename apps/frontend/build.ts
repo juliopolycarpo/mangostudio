@@ -144,6 +144,25 @@ function removeTempPathsOnSignal(): void {
   }
 }
 
+interface FileIdentity {
+  readonly dev: number;
+  readonly ino: number;
+}
+
+function fileIdentity(path: string): FileIdentity | undefined {
+  try {
+    const stat = statSync(path);
+    return { dev: stat.dev, ino: stat.ino };
+  } catch {
+    return undefined;
+  }
+}
+
+function isFileIdentity(path: string, expected: FileIdentity): boolean {
+  const actual = fileIdentity(path);
+  return actual?.dev === expected.dev && actual.ino === expected.ino;
+}
+
 /**
  * Regenerate `src/routeTree.gen.ts` from `src/routes/`. Was the Vite plugin's
  * job; `@tanstack/router-cli` produces a byte-identical file. Routed through the
@@ -404,20 +423,24 @@ export async function publishDist(
   }
 
   let published = false;
+  let publishedIdentity: FileIdentity | undefined;
   try {
     renameSync(stagedDist, dist);
     published = true;
+    publishedIdentity = fileIdentity(dist);
     if (finalize) await finalize();
   } catch (publishError) {
     const rollbackErrors: unknown[] = [];
-    if (published) {
+    const ownsPublishedDist =
+      published && publishedIdentity !== undefined && isFileIdentity(dist, publishedIdentity);
+    if (ownsPublishedDist) {
       try {
         rmSync(dist, { recursive: true, force: true });
       } catch (removeError) {
         rollbackErrors.push(removeError);
       }
     }
-    if (hasBackup && rollbackErrors.length === 0) {
+    if (hasBackup && rollbackErrors.length === 0 && (!published || ownsPublishedDist)) {
       try {
         renameSync(backupDist, dist);
         tempPaths.delete(backupDist);
@@ -425,6 +448,29 @@ export async function publishDist(
         // Still tracked as a rollback backup. A later signal cleanup retries the
         // restore instead of deleting what may be the only valid bundle.
         rollbackErrors.push(restoreError);
+      }
+    }
+    if (published && !ownsPublishedDist) {
+      // A newer transaction owns dist now, so this backup is two bundles out of
+      // date and must never be restored — not here, and not later.
+      //
+      // Deliberately unconditional on `dist` existing. The newer transaction
+      // spends a window between its own `renameSync(dist, backup)` and
+      // `renameSync(staged, dist)` with nothing at `dist` at all, and leaving
+      // this backup tracked with `restoreTo: dist` hands the decision to
+      // `removeTempPaths`, which has no identity to check against: it would see
+      // a free destination and rename this stale bundle into place, failing the
+      // newer publish with ENOTEMPTY and going live with the wrong bundle.
+      //
+      // `untrackTempPath` forgets the path before removing it, so an interrupt
+      // mid-removal cannot find a half-deleted backup still tracked as
+      // restorable.
+      try {
+        await untrackTempPath(backupDist, { recursive: true });
+      } catch (cleanupError) {
+        console.warn(
+          `[frontend] Could not remove superseded backup at ${backupDist}: ${String(cleanupError)}`
+        );
       }
     }
     if (rollbackErrors.length > 0) {

@@ -110,6 +110,91 @@ describe('publishDist', () => {
     }
   });
 
+  test('does not roll back over a newer concurrent publication', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'frontend-publish-'));
+    const stagedA = join(root, 'staged-a');
+    const stagedB = join(root, 'staged-b');
+    const dist = join(root, 'dist');
+    let finalizeStarted!: () => void;
+    let rejectFinalize!: (error: Error) => void;
+    const finalizeStartedPromise = new Promise<void>((resolve) => {
+      finalizeStarted = resolve;
+    });
+    const finalizePromise = new Promise<void>((_resolve, reject) => {
+      rejectFinalize = reject;
+    });
+    try {
+      await mkdir(stagedA);
+      await mkdir(stagedB);
+      await mkdir(dist);
+      await writeFile(join(stagedA, 'index.html'), 'build A');
+      await writeFile(join(stagedB, 'index.html'), 'build B');
+      await writeFile(join(dist, 'index.html'), 'old');
+
+      const publishA = publishDist(stagedA, dist, async () => {
+        finalizeStarted();
+        await finalizePromise;
+      });
+      await finalizeStartedPromise;
+
+      await publishDist(stagedB, dist);
+      rejectFinalize(new Error('build A finalizer failed'));
+      await expect(publishA).rejects.toThrow('build A finalizer failed');
+
+      expect(await readFile(join(dist, 'index.html'), 'utf8')).toBe('build B');
+      removeTempPaths();
+      expect((await readdir(root)).filter((entry) => entry.startsWith('.dist-backup-'))).toEqual(
+        []
+      );
+    } finally {
+      removeTempPaths();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('does not restore over a newer publication that is still mid-swap', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'frontend-publish-'));
+    const stagedA = join(root, 'staged-a');
+    const stagedB = join(root, 'staged-b');
+    const dist = join(root, 'dist');
+    const backupB = join(root, 'backup-b');
+    try {
+      await mkdir(stagedA);
+      await mkdir(stagedB);
+      await mkdir(dist);
+      await writeFile(join(stagedA, 'index.html'), 'build A');
+      await writeFile(join(stagedB, 'index.html'), 'build B');
+      await writeFile(join(dist, 'index.html'), 'old');
+
+      // Fail A at the one moment a newer transaction owns the publication but
+      // has nothing at `dist` yet: after its `rename(dist, backup)` and before
+      // its `rename(staged, dist)`. A cannot see whose bundle is missing.
+      await expect(
+        publishDist(stagedA, dist, async () => {
+          await rename(dist, backupB);
+          throw new Error('build A finalizer failed');
+        })
+      ).rejects.toThrow('build A finalizer failed');
+
+      // The pre-A bundle must stay gone, here and through cleanup. Putting it
+      // back is what fails the newer rename with ENOTEMPTY and leaves a stale
+      // bundle live.
+      expect(existsSync(dist)).toBe(false);
+      removeTempPaths();
+      expect(existsSync(dist)).toBe(false);
+      expect((await readdir(root)).filter((entry) => entry.startsWith('.dist-backup-'))).toEqual(
+        []
+      );
+
+      // So the newer transaction finishes as if this one had never run.
+      await rename(stagedB, dist);
+      expect(await readFile(join(dist, 'index.html'), 'utf8')).toBe('build B');
+    } finally {
+      removeTempPaths();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test('keeps the backup when the rollback cannot remove the failed bundle', async () => {
     const root = await mkdtemp(join(tmpdir(), 'frontend-publish-'));
     const staged = join(root, 'staged');
