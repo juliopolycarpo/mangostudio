@@ -396,7 +396,12 @@ function openStream(
                 });
               },
               onEvent(event) {
-                const chunk = externalAgentEventToStreamChunk(event);
+                // The same binding the hub caches an account-limits snapshot
+                // under, so the client's cache key and the hub's row agree by
+                // construction rather than by both guessing from discovery.
+                const chunk = externalAgentEventToStreamChunk(event, {
+                  vendorAccountFingerprint: resolution.vendorAccountFingerprint,
+                });
                 if (chunk) send(chunk);
               },
               onSteer(steer) {

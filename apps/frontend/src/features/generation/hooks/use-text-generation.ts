@@ -523,7 +523,15 @@ export function useTextGeneration({
             // alternative is a probe on the user's machine. A review stream
             // shares this handler, so it lands there too.
             if (chunk.type === 'external_account_limits') {
-              publishExternalAccountLimits(queryClient, activeEnvironmentId, chunk.limits);
+              publishExternalAccountLimits(
+                queryClient,
+                activeEnvironmentId,
+                chunk.limits,
+                // The account the hub bound this turn to. Absent means the vendor
+                // has none — not "look it up", which is how a reading from the
+                // account the turn is running as ends up under another one.
+                chunk.vendorAccountFingerprint ?? null
+              );
             }
           };
 

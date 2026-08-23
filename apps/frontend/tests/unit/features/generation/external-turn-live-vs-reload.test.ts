@@ -187,7 +187,7 @@ describe('external turn: live stream vs reloaded transcript', () => {
         resumed: false,
       }),
       ...interrupted
-        .map(externalAgentEventToStreamChunk)
+        .map((event) => externalAgentEventToStreamChunk(event))
         .filter((chunk): chunk is StreamChunk => chunk !== null),
       externalTurnCompletedChunk('runtime-disconnected'),
     ];
@@ -229,7 +229,7 @@ describe('external turn: live stream vs reloaded transcript', () => {
           resumed: false,
         }),
         ...prefix
-          .map(externalAgentEventToStreamChunk)
+          .map((event) => externalAgentEventToStreamChunk(event))
           .filter((chunk): chunk is StreamChunk => chunk !== null),
         ...(outcome === 'rejected'
           ? [

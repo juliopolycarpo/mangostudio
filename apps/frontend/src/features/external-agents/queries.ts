@@ -15,7 +15,6 @@
 import type {
   ExternalAccountLimits,
   ExternalAgentDescriptor,
-  ExternalAgentDescriptorListResponse,
 } from '@mangostudio/shared/external-agents';
 import type { QueryClient } from '@tanstack/react-query';
 import { queryOptions } from '@tanstack/react-query';
@@ -47,12 +46,20 @@ export function externalAgentsQueryOptions(environmentId: string | null) {
  * a value fetched for another account — the key simply stops matching.
  */
 export function externalAccountLimitsKey(descriptor: ExternalAgentDescriptor | null) {
-  return [
-    'external-account-limits',
+  return externalAccountLimitsKeyFor(
     descriptor?.targetId ?? '',
     descriptor?.environmentId ?? '',
-    descriptor?.account?.fingerprint ?? '',
-  ] as const;
+    descriptor?.account?.fingerprint ?? null
+  );
+}
+
+/** The same key from an identity that did not come from a rendered descriptor. */
+function externalAccountLimitsKeyFor(
+  targetId: string,
+  environmentId: string,
+  fingerprint: string | null
+) {
+  return ['external-account-limits', targetId, environmentId, fingerprint ?? ''] as const;
 }
 
 /**
@@ -113,24 +120,27 @@ export function cacheExternalAccountLimitsIfNewer(
  * week's percentage — while the vendor has already told us the current number
  * mid-turn. The user's manual refresh was the only way to see it.
  *
- * The account is resolved through the same cached descriptor list the pill and
- * the chip read (`useExternalAgents(environmentId).find(targetId)`), so the
- * write and the reads land on one key by construction and cannot disagree about
- * which account this is. No descriptor means nothing is rendering this target's
- * quota, and the snapshot is dropped rather than guessed at — writing under a
- * wildcard fingerprint is exactly the cross-account paint the key prevents.
+ * Both halves of the account identity come from the turn, not from anything that
+ * can move underneath it. The environment is the one captured when the turn
+ * started; the fingerprint is the one the hub bound the turn to and files its own
+ * cache row under, sent down with the snapshot. Resolving the account from the
+ * discovery list instead would file a reading from the account the turn is
+ * running as under whichever account discovery had most recently observed — the
+ * exact cross-account paint the key exists to prevent.
+ *
+ * A hub that sent no fingerprint means the vendor has no account to name, which
+ * is the identity the descriptor-shaped key spells `''`. It matches.
  */
 export function publishExternalAccountLimits(
   queryClient: QueryClient,
   environmentId: string | null,
-  limits: ExternalAccountLimits
+  limits: ExternalAccountLimits,
+  vendorAccountFingerprint: string | null
 ): void {
   if (!environmentId) return;
-  const listed = queryClient.getQueryData<ExternalAgentDescriptorListResponse>(
-    externalAgentKeys.byEnvironment(environmentId)
+  cacheExternalAccountLimitsIfNewer(
+    queryClient,
+    externalAccountLimitsKeyFor(limits.targetId, environmentId, vendorAccountFingerprint),
+    limits
   );
-  const descriptor = listed?.agents.find((agent) => agent.targetId === limits.targetId);
-  if (!descriptor) return;
-
-  cacheExternalAccountLimitsIfNewer(queryClient, externalAccountLimitsKey(descriptor), limits);
 }

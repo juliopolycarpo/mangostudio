@@ -431,6 +431,16 @@ const SSEExternalThreadUsageEventSchema = Type.Object({
 const SSEExternalAccountLimitsEventSchema = Type.Object({
   type: Type.Literal('external_account_limits'),
   limits: ExternalAccountLimitsSchema,
+  /**
+   * The vendor account the turn was bound to when it started, which is the
+   * account this reading describes — the hub caches it under exactly this value.
+   *
+   * The snapshot itself names only a target, and a client that resolved the
+   * account from its own discovery cache would file a reading from account A
+   * under account B the moment discovery noticed a switch mid-turn. Absent when
+   * the vendor has no account to fingerprint.
+   */
+  vendorAccountFingerprint: Type.Optional(Type.String({ maxLength: 128 })),
   done: Type.Literal(false),
 });
 

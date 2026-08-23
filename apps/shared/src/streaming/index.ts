@@ -29,6 +29,7 @@ export type {
 } from './events';
 export {
   type ExternalStreamSession,
+  type ExternalTurnAccountBinding,
   externalAgentEventToStreamChunk,
   externalSessionStartedChunk,
   externalSteerChunk,

@@ -24,6 +24,20 @@ import type {
 } from '../external-agents/schemas';
 import type { StreamChunk } from './events';
 
+/**
+ * Identity the hub resolved when the turn started and the vendor's own events
+ * cannot carry.
+ *
+ * A turn is pinned to one vendor account for its whole life — that is what the
+ * hub keys its own quota cache by — while the client's discovery cache is free
+ * to notice a sign-out and a different account at any moment. Passing the
+ * binding down with the events is what keeps the two from disagreeing.
+ */
+export interface ExternalTurnAccountBinding {
+  /** `null` when the vendor has no account to fingerprint. */
+  readonly vendorAccountFingerprint: string | null;
+}
+
 /** What the hub knows about a session once the runtime has opened one. */
 export interface ExternalStreamSession {
   /** Hub-minted, not the vendor's own handle. */
@@ -105,7 +119,10 @@ export function externalSteerChunk(
  *   {@link externalTurnCompletedChunk} instead of twice with different
  *   vocabularies.
  */
-export function externalAgentEventToStreamChunk(event: ExternalAgentEvent): StreamChunk | null {
+export function externalAgentEventToStreamChunk(
+  event: ExternalAgentEvent,
+  binding?: ExternalTurnAccountBinding
+): StreamChunk | null {
   switch (event.type) {
     case 'session_started':
     case 'completed':
@@ -178,7 +195,17 @@ export function externalAgentEventToStreamChunk(event: ExternalAgentEvent): Stre
       return { type: 'external_thread_usage', usage: event.usage, done: false };
 
     case 'account_limits':
-      return { type: 'external_account_limits', limits: event.limits, done: false };
+      return {
+        type: 'external_account_limits',
+        limits: event.limits,
+        // Stamped from the turn, not read off the snapshot: the vendor names a
+        // target and nothing else, and the account is the half of the identity
+        // the client cannot safely re-derive.
+        ...(binding?.vendorAccountFingerprint
+          ? { vendorAccountFingerprint: binding.vendorAccountFingerprint }
+          : {}),
+        done: false,
+      };
 
     case 'error':
       return { type: 'external_error', error: event.error, done: false };
