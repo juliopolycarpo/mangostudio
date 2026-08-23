@@ -109,6 +109,64 @@ describe('registerFrontend with embedded assets', () => {
     expect((await get('/never-built%2esvg')).status).toBe(404);
   });
 
+  // Elysia matches the literal manifest keys registered at boot and does not
+  // normalise percent escapes first, so an encoded spelling falls through to
+  // the fallback. It used to end there: `isSpaRoute` decodes, sees a root file
+  // and declines, so the shipped binary 404'd a file it holds — while the same
+  // request off disk was served, because `resolveUnhashedFile` decodes.
+  describe('percent-encoded paths', () => {
+    function registerWithRootFiles(): (path: string) => Promise<Response> {
+      writeFileSync(join(assetDir, 'favicon.ico'), UPLOAD_BYTES);
+      writeFileSync(join(assetDir, 'config.js'), RUNTIME_CONFIG_JS);
+      registerEmbeddedFrontend({
+        '/index.html': join(assetDir, 'index.html'),
+        '/assets/index-AbCd1234.js': join(assetDir, 'index-AbCd1234.js'),
+        '/favicon.ico': join(assetDir, 'favicon.ico'),
+        '/config.js': join(assetDir, 'config.js'),
+      });
+      return buildApp();
+    }
+
+    test('serves a root file, with the headers its literal route would have sent', async () => {
+      const get = registerWithRootFiles();
+
+      const literal = await get('/favicon.ico');
+      const encoded = await get('/favicon%2eico');
+
+      expect(encoded.status).toBe(200);
+      expect(await encoded.text()).toBe(UPLOAD_BYTES);
+      expect(encoded.headers.get('cache-control')).toBe(literal.headers.get('cache-control'));
+      expect(encoded.headers.get('etag')).toBe(literal.headers.get('etag'));
+    });
+
+    test('keeps /config.js on its own revalidating directive', async () => {
+      const get = registerWithRootFiles();
+      const response = await get('/%63onfig.js');
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-cache');
+      expect(await response.text()).toBe(RUNTIME_CONFIG_JS);
+    });
+
+    test('serves the shell for an encoded /index.html rather than as a plain asset', async () => {
+      const get = registerWithRootFiles();
+      const response = await get('/index%2ehtml');
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-cache');
+      expect(await response.text()).toBe(INDEX_HTML);
+    });
+
+    test('does not resolve an encoded traversal onto a manifest entry', async () => {
+      const get = registerWithRootFiles();
+
+      // `/assets/..%2fconfig.js` decodes to `/assets/../config.js`, which is not
+      // a manifest key, so there is nothing to serve and nothing to escape into.
+      expect((await get('/assets/..%2fconfig.js')).status).toBe(404);
+      expect((await get('/config.js%00')).status).toBe(404);
+    });
+  });
+
   test('does not shadow mounted wildcard routes such as Better Auth /api/auth/*', async () => {
     // Reproduces the binary-smoke regression: Better Auth mounts /api/auth/*
     // as a wildcard on a prefixed sub-instance (routes/auth.ts). A root
@@ -396,6 +454,18 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
     }
   });
 
+  test('serves a root file when its extension is percent-encoded', async () => {
+    const server = await startFilesystemServer();
+    try {
+      const response = await server.get('/favicon%2eico');
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe(UPLOAD_BYTES);
+    } finally {
+      await server.stop();
+    }
+  });
+
   test('serves unhashed root files with the cache headers the static plugin used to add', async () => {
     const server = await startFilesystemServer();
     try {
@@ -453,6 +523,11 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
       expect(response.status).toBe(200);
       expect(response.headers.get('cache-control')).toBe('no-cache');
       expect(await response.text()).toBe(RUNTIME_CONFIG_JS);
+
+      const encodedPath = await server.get('/%63onfig.js');
+      expect(encodedPath.status).toBe(200);
+      expect(encodedPath.headers.get('cache-control')).toBe('no-cache');
+      expect(await encodedPath.text()).toBe(RUNTIME_CONFIG_JS);
 
       // Still validator-backed, so revalidating costs a 304 and not a resend.
       const etag = response.headers.get('etag');

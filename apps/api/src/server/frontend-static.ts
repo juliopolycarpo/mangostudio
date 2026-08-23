@@ -116,9 +116,48 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
   setFrontendFallback((request) => {
     if (request.method !== 'GET') return undefined;
     const { pathname } = new URL(request.url);
+    // The routes above are literal manifest keys and Elysia does not normalise
+    // percent escapes before matching them, so `/favicon%2eico` never reaches
+    // `/favicon.ico`'s route and arrives here instead. `isSpaRoute` *does*
+    // decode, recognises a root file and declines — a 404 for a file the same
+    // build serves fine from disk, where `resolveUnhashedFile` decodes first.
+    // The shipped binary is this branch, so the decode has to happen here too.
+    const decoded = decodedManifestKey(pathname);
+    if (decoded !== null) {
+      if (decoded === '/index.html') return serveEmbeddedIndex(request);
+      const filePath = files[decoded];
+      // An exact key lookup is the whole guard: a decoded traversal, backslash
+      // or NUL form is simply not a manifest key and falls through below.
+      if (filePath) return serveUnhashedFile(filePath, embeddedCacheControl(decoded), request);
+    }
     return isSpaRoute(pathname) ? serveEmbeddedIndex(request) : undefined;
   });
   app.error(NotFound, ({ request }) => frontendNotFound(request));
+}
+
+/**
+ * The decoded form of a pathname that could still name an embedded asset, or
+ * null when there is nothing left to try.
+ *
+ * A pathname that decodes to itself was already offered to its literal route
+ * and did not match, so re-checking the manifest for it would find nothing.
+ */
+function decodedManifestKey(pathname: string): string | null {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    // A malformed percent-escape is not a file name.
+    return null;
+  }
+  return decoded === pathname ? null : decoded;
+}
+
+/** Cache directive for an embedded asset, given the manifest key it lives at. */
+function embeddedCacheControl(urlPath: string): string {
+  return urlPath.startsWith(`/${HASHED_ASSET_DIR}/`)
+    ? HASHED_CACHE_CONTROL
+    : unhashedCacheControl(urlPath);
 }
 
 /**
@@ -253,12 +292,7 @@ function resolveUnhashedFile(
   frontendDir: string,
   frontendRoot: string | null,
   pathname: string
-): { filePath: string; stats: Stats } | null {
-  if (!pathname.startsWith('/') || !/\.[A-Za-z0-9]+$/.test(pathname)) return null;
-  // index.html is the shell. It is served by the explicit GET / route and by
-  // the SPA fallback, with revalidation headers this path would not apply.
-  if (pathname === '/index.html') return null;
-
+): { filePath: string; stats: Stats; urlPath: string } | null {
   let decoded: string;
   try {
     decoded = decodeURIComponent(pathname);
@@ -266,6 +300,10 @@ function resolveUnhashedFile(
     // A malformed percent-escape is not a file name.
     return null;
   }
+  if (!decoded.startsWith('/') || !/\.[A-Za-z0-9]+$/.test(decoded)) return null;
+  // index.html is the shell. It is served by the explicit GET / route and by
+  // the SPA fallback, with revalidation headers this path would not apply.
+  if (decoded === '/index.html') return null;
   // Build freshness metadata is an internal input, never a public frontend
   // asset. The embedded branch never sees it — `listDistFiles` drops it before
   // the manifest is generated — but this branch resolves against a live `dist/`,
@@ -286,7 +324,7 @@ function resolveUnhashedFile(
   // `statFile`, not `statSync`: a dangling symlink or a file removed between
   // the resolve and the stat must answer 404, not throw out of the handler.
   const stats = statFile(real);
-  return stats?.isFile() === true ? { filePath: real, stats } : null;
+  return stats?.isFile() === true ? { filePath: real, stats, urlPath: decoded } : null;
 }
 
 /** `realpathSync`, or null when the path cannot be resolved. */
@@ -373,7 +411,7 @@ function registerSpa(app: App, frontendDir: string): void {
       return serveStattedFile(
         resolved.filePath,
         resolved.stats,
-        unhashedCacheControl(pathname),
+        unhashedCacheControl(resolved.urlPath),
         request
       );
     }
