@@ -9,6 +9,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import type { ContextInfo } from '@/features/generation/types';
+import { invalidateAllGitScopes } from '@/features/workspace/hooks/use-git-state';
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 import { invalidateChatCapabilities } from './hooks/capability-invalidation';
@@ -112,15 +113,27 @@ export function useUpdateChatMutation() {
         )
       );
 
+      const switchedEnvironment =
+        variables.updates.environmentId !== undefined &&
+        variables.updates.environmentId !== previousEnvironmentId;
+
       // Shell and tool eligibility now come from the selected runtime's manifest,
       // but the capability key holds only chat/model/agent and the invalidation
       // registry does not watch chat queries. Without this the inspector keeps
       // showing the previous environment's capabilities until it goes stale.
-      if (
-        variables.updates.environmentId !== undefined &&
-        variables.updates.environmentId !== previousEnvironmentId
-      ) {
+      if (switchedEnvironment) {
         void invalidateChatCapabilities(queryClient);
+      }
+
+      // A repoint is the one workspace change the hub does not announce on
+      // `git:<chatId>`, and the Git keys hold nothing but the chat id — so the
+      // rail and the header breadcrumb would keep the previous repository's
+      // branch and dirty flag until a window focus. An environment switch counts
+      // even without a new path: the same folder on another machine is another
+      // repository, and `applyChatUpdates` clears the workdir outright unless
+      // this request supplied one.
+      if (variables.updates.workdir !== undefined || switchedEnvironment) {
+        void invalidateAllGitScopes(queryClient, variables.id);
       }
     },
   });

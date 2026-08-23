@@ -31,6 +31,7 @@ import { useToast } from '@/components/ui/Toast';
 import { ExternalReviewAction } from '@/features/external-agents/ExternalReviewAction';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
+import { workdirBasename } from '@/lib/paths';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { BranchControl } from './BranchControl';
 import { CommitForm } from './CommitForm';
@@ -949,7 +950,7 @@ function changePaths(changes: readonly GitFileChange[]): string[] {
   ];
 }
 
+/** Shared segment split; a path that is all separators falls back to itself. */
 function basename(path: string): string {
-  const trimmed = path.replace(/[\\/]+$/, '');
-  return trimmed.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+  return workdirBasename(path) ?? path;
 }

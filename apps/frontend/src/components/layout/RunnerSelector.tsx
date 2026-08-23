@@ -21,22 +21,26 @@ import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { EnvironmentTransportKind } from '@mangostudio/shared/environments';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
-import { Bot, Check, ChevronDown, Copy, CornerUpRight, Cpu, History } from 'lucide-react';
+import { Check, ChevronDown, Copy, CornerUpRight, History } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { ExternalAccountLimitsChip } from '@/features/external-agents/ExternalAccountLimitsChip';
+import { useExternalAccountLimits } from '@/features/external-agents/use-external-account-limits';
 import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
-import {
-  getExternalAccountLimits,
-  refreshExternalAccountLimits,
-} from '@/services/external-agent-service';
 
 export interface RunnerSelectorProps {
   runner: ChatRunnerConfiguration;
   agents: ReadonlyArray<AgentProfile>;
   isAgentListLoading: boolean;
   externalAgents: readonly ExternalAgentDescriptor[];
+  /**
+   * True while discovery is still answering. Load-bearing for the pill's dot: a
+   * missing descriptor and a refused one are the same shape, so without this an
+   * unanswered query reads as "this agent cannot run here".
+   */
+  isExternalAgentListLoading?: boolean;
   /** The environment the descriptors describe, named in the unavailability copy. */
   environmentName: string;
   /**
@@ -71,6 +75,7 @@ export function RunnerSelector({
   agents,
   isAgentListLoading,
   externalAgents,
+  isExternalAgentListLoading = false,
   environmentName,
   environmentTransportKind,
   hasTurns,
@@ -110,8 +115,43 @@ export function RunnerSelector({
   const activeLabel =
     runner.kind === 'mangostudio'
       ? (selectableAgents.find((agent) => agent.id === runner.agentId)?.name ?? runner.agentId)
-      : (externalAgents.find((agent) => agent.targetId === runner.targetId)?.targetId ??
-        runner.targetId);
+      : // A target this bundle predates still names itself: its raw id beats a
+        // blank pill, and the sidebar badge already degrades the same way.
+        (t.externalAgents.target[runner.targetId] ?? runner.targetId);
+
+  // The pill's dot answers "can this runner take a turn right now": MangoStudio
+  // always can (accent), an external runner grades from signed-in through
+  // auth-unknown to not-selectable-here.
+  const activeDescriptor =
+    runner.kind === 'external'
+      ? externalAgents.find((agent) => agent.targetId === runner.targetId)
+      : undefined;
+  // `disclosure-required` is checked on top of `externalAgentSelectable`, which
+  // deliberately leaves such a descriptor selectable so the picker can route the
+  // user into the notice. The pill answers a different question — can this runner
+  // take a turn right now — and the answer is no until the notice is accepted, so
+  // a green dot reading "signed in" would promise a send that the turn-start gate
+  // refuses. Same extra condition the composer applies.
+  const activeUsable =
+    !!activeDescriptor &&
+    externalAgentSelectable(activeDescriptor) &&
+    activeDescriptor.unavailableReason !== 'disclosure-required';
+  // Tone and its screen-reader sentence are one decision, so they are made once:
+  // splitting them into parallel ternaries is how the two drift.
+  //
+  // The unanswered-discovery arm comes first because a missing descriptor and a
+  // refused one are indistinguishable here. Painting the refusal while the query
+  // is still in flight told every reader "pick another agent" on every mount.
+  const availability: { tone: StatusDotTone; text: string | null } =
+    runner.kind === 'mangostudio'
+      ? { tone: 'accent', text: null }
+      : !activeDescriptor && isExternalAgentListLoading
+        ? { tone: 'neutral', text: labels.loading }
+        : !activeUsable
+          ? { tone: 'error', text: labels.unavailableHere }
+          : activeDescriptor?.authState === 'signed-in'
+            ? { tone: 'success', text: labels.signedIn }
+            : { tone: 'warning', text: labels.authUnknown };
 
   return (
     <div ref={containerRef} className="relative">
@@ -124,11 +164,8 @@ export function RunnerSelector({
         aria-label={labels.label}
         className="flex h-9 max-w-full items-center gap-2 rounded-full border border-outline-variant/20 bg-surface-container-lowest px-3 text-sm font-medium text-on-surface transition-colors hover:border-primary/30 disabled:opacity-50"
       >
-        {runner.kind === 'mangostudio' ? (
-          <Cpu size={14} className="shrink-0 text-primary/80" />
-        ) : (
-          <Bot size={14} className="shrink-0 text-primary/80" />
-        )}
+        <StatusDot tone={availability.tone} />
+        {availability.text ? <span className="sr-only">{availability.text}</span> : null}
         <span className="truncate">{activeLabel}</span>
         <ChevronDown size={14} className="shrink-0 text-on-surface-variant" />
       </button>
@@ -416,65 +453,6 @@ function ExternalRow({
 
 /** Loads cached quota and offers a manual refresh — never polls. */
 function ExternalAccountLimitsChipFor({ descriptor }: { descriptor: ExternalAgentDescriptor }) {
-  const { t } = useI18n();
-  const [limits, setLimits] = useState<
-    import('@mangostudio/shared/external-agents').ExternalAccountLimits | null | undefined
-  >(undefined);
-  const [refreshing, setRefreshing] = useState(false);
-  const identityKey = `${descriptor.targetId}:${descriptor.environmentId}:${descriptor.account?.fingerprint ?? ''}`;
-  const identityRef = useRef(identityKey);
-  identityRef.current = identityKey;
-
-  useEffect(() => {
-    let cancelled = false;
-    // Drop the previous account's snapshot immediately so a late response cannot
-    // paint one identity's quota onto another.
-    setLimits(undefined);
-    void getExternalAccountLimits(descriptor.targetId, {
-      environmentId: descriptor.environmentId,
-      ...(descriptor.account?.fingerprint
-        ? { vendorAccountFingerprint: descriptor.account.fingerprint }
-        : {}),
-    })
-      .then((response) => {
-        if (!cancelled && identityRef.current === identityKey) {
-          setLimits(response.limits ?? null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled && identityRef.current === identityKey) setLimits(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [descriptor.targetId, descriptor.environmentId, descriptor.account?.fingerprint, identityKey]);
-
-  return (
-    <ExternalAccountLimitsChip
-      limits={limits}
-      refreshing={refreshing}
-      onRefresh={() => {
-        const requestIdentity = identityRef.current;
-        setRefreshing(true);
-        void refreshExternalAccountLimits(descriptor.targetId, {
-          environmentId: descriptor.environmentId,
-          ...(descriptor.account?.fingerprint
-            ? { vendorAccountFingerprint: descriptor.account.fingerprint }
-            : {}),
-        })
-          .then((response) => {
-            if (identityRef.current === requestIdentity) {
-              setLimits(response.limits ?? null);
-            }
-          })
-          .catch(() => {
-            // Keep the previous chip; toast would need the container.
-            void t.externalAgents.limits.refreshFailed;
-          })
-          .finally(() => {
-            if (identityRef.current === requestIdentity) setRefreshing(false);
-          });
-      }}
-    />
-  );
+  const { limits, refreshing, refresh } = useExternalAccountLimits(descriptor);
+  return <ExternalAccountLimitsChip limits={limits} refreshing={refreshing} onRefresh={refresh} />;
 }

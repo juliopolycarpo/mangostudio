@@ -1290,6 +1290,25 @@ export const messages = {
     chatSidebarWidth: 'Largura atual: {width}px',
     chatSidebarResetWidth: 'Redefinir largura da barra lateral',
     chatSidebarResize: 'Redimensionar barra lateral de chats',
+    breadcrumbIn: 'em',
+    breadcrumbDirty: 'Alterações não commitadas',
+  },
+
+  sidebar: {
+    groups: {
+      today: 'Hoje',
+      yesterday: 'Ontem',
+      thisWeek: 'Esta semana',
+    },
+    searchPlaceholder: 'Buscar conversas…',
+    searchNoResultsHint: 'Tente outro título, pasta ou agente.',
+    // Rótulos de harness estilo terminal — nomes de marca, iguais nos dois idiomas.
+    runner: {
+      mango: 'mango',
+      codex: 'codex',
+      claude: 'claude',
+      cursor: 'cursor',
+    },
   },
 
   git: {
@@ -2804,6 +2823,13 @@ export const messages = {
       remaining: '{percent}% restante',
       resetsIn: 'renova em {duration}',
       resetsAt: 'renova {time}',
+      // Unidades compactas do {duration} acima. Ficam no catálogo porque um
+      // sufixo é texto visível como qualquer outro: 'min' não é 'm' em toda
+      // língua, e a ordem horas-minutos também não é universal.
+      durationMinutes: '{count}min',
+      durationHours: '{count}h',
+      durationHoursMinutes: '{hours}h {minutes}min',
+      durationDays: '{count}d',
       unknown: 'Cota desconhecida',
       stale: 'Cota desatualizada',
       exhausted: 'Cota esgotada',

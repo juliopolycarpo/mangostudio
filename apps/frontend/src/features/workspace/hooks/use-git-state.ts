@@ -140,6 +140,18 @@ export function invalidateGitState(queryClient: QueryClient, chatId: string): Pr
   return queryClient.invalidateQueries({ queryKey: gitStateKeys.detail(chatId) });
 }
 
+/**
+ * Every Git slice for one chat, for the one thing no `git:<chatId>` event
+ * announces: the chat being repointed at another folder or another machine.
+ *
+ * Nothing in these keys but the chat id changes when that happens, so branches,
+ * history and cached diffs all still describe the repository the chat has just
+ * stopped pointing at.
+ */
+export function invalidateAllGitScopes(queryClient: QueryClient, chatId: string): Promise<void> {
+  return invalidateGitScopes(queryClient, chatId, GIT_SCOPES);
+}
+
 async function invalidateGitScopes(
   queryClient: QueryClient,
   chatId: string,

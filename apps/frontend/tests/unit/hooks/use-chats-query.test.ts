@@ -56,6 +56,41 @@ function fail(message: string) {
  */
 const drainCapabilityInvalidation = flushAsyncRender;
 
+// Written out rather than imported: these are the keys the Git hooks build, and
+// a test that derived them from the same helper would keep passing if the helper
+// changed shape underneath both.
+function gitStateKey(chatId: string) {
+  return ['git-state', chatId];
+}
+function gitBranchesKey(chatId: string) {
+  return ['git-branches', chatId];
+}
+
+/** A chat whose Git slices are already cached, so staleness is observable. */
+function renderWithGitCache(chat: Chat) {
+  const { result } = renderHook(() => {
+    const mutation = useUpdateChatMutation();
+    const queryClient = useQueryClient();
+    return { mutation, queryClient };
+  });
+
+  act(() => {
+    result.current.queryClient.setQueryData(chatKeys.detail(chat.id), chat);
+    result.current.queryClient.setQueryData(gitStateKey(chat.id), { state: 'repo' });
+    result.current.queryClient.setQueryData(gitBranchesKey(chat.id), { branches: [] });
+  });
+
+  return result;
+}
+
+function gitInvalidated(result: ReturnType<typeof renderWithGitCache>, chatId: string) {
+  const { queryClient } = result.current;
+  return {
+    state: queryClient.getQueryState(gitStateKey(chatId))?.isInvalidated,
+    branches: queryClient.getQueryState(gitBranchesKey(chatId))?.isInvalidated,
+  };
+}
+
 describe('useCreateChatMutation', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -260,6 +295,52 @@ describe('useUpdateChatMutation', () => {
     expect<unknown>(
       result.current.queryClient.getQueryData(chatKeys.detail(chatWithWorkdir.id))
     ).toEqual(expected);
+    await drainCapabilityInvalidation();
+  });
+
+  it('refetches Git state when the chat is pointed at another workdir', async () => {
+    const chat: Chat = { ...EXISTING_CHAT, environmentId: 'local', workdir: '/srv/one' };
+    const result = renderWithGitCache(chat);
+
+    await act(async () => {
+      await result.current.mutation.mutateAsync({
+        id: chat.id,
+        updates: { workdir: '/srv/two' },
+      });
+    });
+
+    // Nothing else would: the Git keys hold only the chat id, and the hub
+    // publishes no `git:<chatId>` event for a chat PUT.
+    expect(gitInvalidated(result, chat.id)).toEqual({ state: true, branches: true });
+    await drainCapabilityInvalidation();
+  });
+
+  it('refetches Git state when the chat moves to another machine', async () => {
+    const chat: Chat = { ...EXISTING_CHAT, environmentId: 'local', workdir: '/srv/one' };
+    const result = renderWithGitCache(chat);
+
+    // No new workdir, so the server clears it — and the same path on another
+    // machine would be a different repository anyway.
+    await act(async () => {
+      await result.current.mutation.mutateAsync({
+        id: chat.id,
+        updates: { environmentId: 'remote-dev' },
+      });
+    });
+
+    expect(gitInvalidated(result, chat.id)).toEqual({ state: true, branches: true });
+    await drainCapabilityInvalidation();
+  });
+
+  it('leaves Git state alone for an update that cannot move the repository', async () => {
+    const chat: Chat = { ...EXISTING_CHAT, environmentId: 'local', workdir: '/srv/one' };
+    const result = renderWithGitCache(chat);
+
+    await act(async () => {
+      await result.current.mutation.mutateAsync({ id: chat.id, updates: { title: 'Renamed' } });
+    });
+
+    expect(gitInvalidated(result, chat.id)).toEqual({ state: false, branches: false });
     await drainCapabilityInvalidation();
   });
 

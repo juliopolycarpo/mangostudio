@@ -18,6 +18,14 @@ export interface HeaderProps {
    * external descriptors or D14 forking.
    */
   runnerSelector?: ReactNode;
+  /**
+   * The active chat's workspace context (`in <repo> / <branch>`). A node for
+   * the same reason the runner selector is: the header is chrome, and git
+   * state belongs to the workspace feature.
+   */
+  workspaceContext?: ReactNode;
+  /** External-runner quota pill; a node so the header stays vendor-agnostic. */
+  quotaPill?: ReactNode;
   onMobileMenuToggle?: () => void;
 }
 
@@ -26,6 +34,8 @@ export function Header({
   onNewChat,
   onNavigateToSettings,
   runnerSelector,
+  workspaceContext,
+  quotaPill,
   onMobileMenuToggle,
 }: HeaderProps) {
   const navigate = useNavigate();
@@ -69,11 +79,19 @@ export function Header({
         >
           <Menu size={ICON_LG} />
         </Button>
+        {/* `min-w-0` without `shrink-0`: the runner name is the one thing here
+            long enough to push the right-hand controls off a 320px screen, and
+            the selector's own label already truncates. Pinning it against
+            shrinking made `min-w-0` inert and the header overflowed instead. */}
         {currentPage !== 'studio' && runnerSelector ? (
-          <div className="min-w-0 flex-1 max-w-[60vw] sm:max-w-none">{runnerSelector}</div>
+          <div className="min-w-0 max-w-[60vw] sm:max-w-none">{runnerSelector}</div>
+        ) : null}
+        {workspaceContext ? (
+          <div className="hidden min-w-0 flex-1 md:flex">{workspaceContext}</div>
         ) : null}
       </div>
       <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-2">
+        {quotaPill}
         {currentPage === 'chat' && (
           <Button
             variant="secondary"

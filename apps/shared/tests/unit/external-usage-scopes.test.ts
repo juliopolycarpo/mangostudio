@@ -43,4 +43,35 @@ describe('external usage and limits render contract', () => {
     const chunk = externalAgentEventToStreamChunk({ type: 'account_limits', limits });
     expect(chunk).toEqual({ type: 'external_account_limits', limits, done: false });
   });
+
+  it('stamps the turn account onto a limits snapshot that names only a target', () => {
+    const limits: ExternalAccountLimits = {
+      targetId: 'codex',
+      windows: [{ usedPercent: 40 }],
+      observedAtMs: 1_700_000_000_000,
+    };
+
+    // The client keys its cache on the account, and this is the only place the
+    // account can come from: the vendor's own event has no room for it.
+    expect(
+      externalAgentEventToStreamChunk(
+        { type: 'account_limits', limits },
+        { vendorAccountFingerprint: 'account-a' }
+      )
+    ).toEqual({
+      type: 'external_account_limits',
+      limits,
+      vendorAccountFingerprint: 'account-a',
+      done: false,
+    });
+
+    // A vendor with no account to fingerprint sends no field, rather than an
+    // empty string a client would have to know to read as "none".
+    expect(
+      externalAgentEventToStreamChunk(
+        { type: 'account_limits', limits },
+        { vendorAccountFingerprint: null }
+      )
+    ).not.toHaveProperty('vendorAccountFingerprint');
+  });
 });

@@ -36,6 +36,7 @@ import { externalAgentSelectable } from '@/features/external-agents/useExternalA
 import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { workdirBasename } from '@/lib/paths';
 import { steerExternalTurn } from '@/services/external-agent-service';
 import { CapabilityInspector } from './CapabilityInspector';
 import { McpComposerMenu } from './McpComposerMenu';
@@ -92,10 +93,9 @@ interface Props {
   }) => void;
 }
 
+/** Shared segment split; a path that is all separators falls back to itself. */
 function getWorkdirName(workdir: string): string {
-  const withoutTrailingSeparators = workdir.replace(/[\\/]+$/, '');
-  if (!withoutTrailingSeparators) return workdir;
-  return withoutTrailingSeparators.split(/[\\/]/).filter(Boolean).at(-1) ?? workdir;
+  return workdirBasename(workdir) ?? workdir;
 }
 
 export function InputBar({

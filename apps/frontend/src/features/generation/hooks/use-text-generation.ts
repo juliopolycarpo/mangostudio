@@ -27,13 +27,14 @@ import { invalidateChatFileCheckpoints } from '@/features/chat/hooks/use-chat-fi
 import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
 import { setChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import type { useChats } from '@/features/chat/hooks/use-chats';
-import { messageKeys } from '@/features/chat/queries';
+import { chatKeys, messageKeys } from '@/features/chat/queries';
 import { generateChatTitleSuggestion } from '@/features/chat/services/chat-title';
 import { compactChat, summarizeToNewChat } from '@/features/chat/services/context-compaction';
 import {
   type ExternalDisclosureRequest,
   promptExternalDisclosure,
 } from '@/features/external-agents/disclosure-prompt';
+import { publishExternalAccountLimits } from '@/features/external-agents/queries';
 import { promptExternalWorkspaceTrust } from '@/features/external-agents/workspace-trust-prompt';
 import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import {
@@ -373,11 +374,16 @@ export function useTextGeneration({
       let activeChatId = chats.currentChatId;
       let createdChatDuringRequest = false;
       let activeChatTitle = chats.currentChat?.title;
+      // Read alongside the title, and for the same reason: a chat created by
+      // this send is not in `chats` yet, and the machine a quota snapshot
+      // belongs to is part of the key it is cached under.
+      let activeEnvironmentId = chats.currentChat?.environmentId ?? null;
       let boundAgentSelection: { agentId: string; agentName?: string } | null = null;
       if (!activeChatId) {
         const newChat = await chats.createChat();
         activeChatId = newChat.id;
         activeChatTitle = newChat.title;
+        activeEnvironmentId = newChat.environmentId ?? null;
         createdChatDuringRequest = true;
         boundAgentSelection = (await onChatCreated?.(newChat.id)) ?? null;
       }
@@ -511,6 +517,22 @@ export function useTextGeneration({
             if (chunk.type === 'todo_update') {
               setChatTodos(queryClient, activeChatId, chunk.todos);
             }
+
+            // The vendor's own quota reading, mid-turn — fresher than anything
+            // the header could have read on mount, and the only free one: the
+            // alternative is a probe on the user's machine. A review stream
+            // shares this handler, so it lands there too.
+            if (chunk.type === 'external_account_limits') {
+              publishExternalAccountLimits(
+                queryClient,
+                activeEnvironmentId,
+                chunk.limits,
+                // The account the hub bound this turn to. Absent means the vendor
+                // has none — not "look it up", which is how a reading from the
+                // account the turn is running as ends up under another one.
+                chunk.vendorAccountFingerprint ?? null
+              );
+            }
           };
 
           // One transport per kind of turn, one reducer for both. A review has
@@ -583,9 +605,13 @@ export function useTextGeneration({
         // degradation path when the socket is unavailable or reconnecting.
         void invalidateGitState(queryClient, activeChatId);
         invalidateChatFileCheckpoints(queryClient, activeChatId);
-        if (createdChatDuringRequest) {
-          void chats.loadChats();
-        }
+        // Every turn moves the chat's `updatedAt`, and the sidebar buckets rows
+        // by it — a resumed chat that is not re-read stays in yesterday's group
+        // until a reload. Unconditional on purpose: it subsumes the chat this
+        // turn created, and a turn that failed part-way may still have persisted
+        // the user's message. The server's timestamp is the one that counts, so
+        // this re-reads rather than bumping the cached row by hand.
+        void queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
         if (
           recovery ||
           !streamState.receivedServerUserMessageId ||
