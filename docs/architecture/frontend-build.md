@@ -124,9 +124,10 @@ apps/frontend/dist/
   index.html
   assets/<name>-<hash>.js
   assets/<name>-<hash>.css
+  fonts/<family>-latin-wght.woff2
 ```
 
-Five things in that build are load-bearing:
+Six things in that build are load-bearing:
 
 - **The entrypoint is `src/main.tsx`, never `index.html`.** Bun's HTML loader drops a nested
   transitive import from this graph. `build.ts` stitches the built `<script>`/`<link>` tags
@@ -145,6 +146,11 @@ Five things in that build are load-bearing:
   dev-gated dependency selected their *development* builds in a minified production bundle
   (+78 kB gzip eager, plus React's dev-mode runtime checks). Vite inlined `'production'`;
   the explicit `define` in `build.ts` restores that.
+- **`external: ['/fonts/*']`.** The self-hosted fonts are copied verbatim from `public/fonts/`
+  into `dist/`, so the `@font-face` `url("/fonts/…")` in `src/index.css` and the
+  `<link rel="preload">` tags in `index.html` name one stable, un-hashed path. Without the
+  `external` entry the CSS bundler tries to resolve that absolute URL against the filesystem
+  at build time and the build fails.
 
 Chunking is Bun's automatic splitting; there is no `manualChunks` equivalent and none is
 reintroduced. Bundle size is tracked instead of controlled:
