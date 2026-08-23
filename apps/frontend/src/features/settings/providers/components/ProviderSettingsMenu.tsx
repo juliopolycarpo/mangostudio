@@ -23,7 +23,7 @@ export function ProviderSettingsMenu() {
   if (error) {
     return (
       <div className="flex flex-col items-center gap-3 py-16">
-        <p className="text-sm text-destructive">{t.settings.providers.loadError}</p>
+        <p className="text-sm text-error">{t.settings.providers.loadError}</p>
         <button
           type="button"
           onClick={() => void refetch()}

@@ -55,7 +55,7 @@ export function SkillCard({ descriptor }: SkillCardProps) {
               {s.sourceLabels[descriptor.source]}
             </span>
             {!descriptor.valid && (
-              <span className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-destructive/15 text-destructive">
+              <span className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-error/15 text-error">
                 {s.invalidBadge}
               </span>
             )}
@@ -73,7 +73,7 @@ export function SkillCard({ descriptor }: SkillCardProps) {
               {descriptor.description}
             </p>
           )}
-          {descriptor.error && <p className="text-xs text-destructive">{descriptor.error}</p>}
+          {descriptor.error && <p className="text-xs text-error">{descriptor.error}</p>}
           <p className="text-[11px] text-on-surface-variant/50 font-mono break-all">
             {descriptor.path}
           </p>
