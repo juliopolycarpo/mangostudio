@@ -27,7 +27,7 @@ import { invalidateChatFileCheckpoints } from '@/features/chat/hooks/use-chat-fi
 import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
 import { setChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import type { useChats } from '@/features/chat/hooks/use-chats';
-import { messageKeys } from '@/features/chat/queries';
+import { chatKeys, messageKeys } from '@/features/chat/queries';
 import { generateChatTitleSuggestion } from '@/features/chat/services/chat-title';
 import { compactChat, summarizeToNewChat } from '@/features/chat/services/context-compaction';
 import {
@@ -583,9 +583,13 @@ export function useTextGeneration({
         // degradation path when the socket is unavailable or reconnecting.
         void invalidateGitState(queryClient, activeChatId);
         invalidateChatFileCheckpoints(queryClient, activeChatId);
-        if (createdChatDuringRequest) {
-          void chats.loadChats();
-        }
+        // Every turn moves the chat's `updatedAt`, and the sidebar buckets rows
+        // by it — a resumed chat that is not re-read stays in yesterday's group
+        // until a reload. Unconditional on purpose: it subsumes the chat this
+        // turn created, and a turn that failed part-way may still have persisted
+        // the user's message. The server's timestamp is the one that counts, so
+        // this re-reads rather than bumping the cached row by hand.
+        void queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
         if (
           recovery ||
           !streamState.receivedServerUserMessageId ||

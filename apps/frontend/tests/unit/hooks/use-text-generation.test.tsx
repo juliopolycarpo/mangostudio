@@ -38,6 +38,7 @@ mock.module('../../../src/features/chat/services/context-compaction', () => ({
 
 mock.module('../../../src/features/chat/queries', () => ({
   messageKeys: { list: (id: string) => ['messages', id] },
+  chatKeys: { lists: () => ['chats', 'list'] },
 }));
 
 mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
