@@ -5,17 +5,20 @@
  * chip read the same identity-guarded load: the cold cache read on mount, a
  * refresh only on request — never a poll — and a snapshot that can never be
  * painted onto another account after a switch.
+ *
+ * Both of those consumers mount at once, so the state lives in the query cache
+ * rather than in each caller's `useState`: one entry per account, one cold read
+ * between them, and a refresh started from either one lands in the other.
  */
 
 import type {
   ExternalAccountLimits,
   ExternalAgentDescriptor,
 } from '@mangostudio/shared/external-agents';
-import { useCallback, useEffect, useState } from 'react';
-import {
-  getExternalAccountLimits,
-  refreshExternalAccountLimits,
-} from '@/services/external-agent-service';
+import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback } from 'react';
+import { refreshExternalAccountLimits } from '@/services/external-agent-service';
+import { externalAccountLimitsKey, externalAccountLimitsQueryOptions } from './queries';
 
 export interface ExternalAccountLimitsState {
   /** `undefined` while loading, `null` when the machine answered "no snapshot". */
@@ -24,90 +27,51 @@ export interface ExternalAccountLimitsState {
   refresh: () => void;
 }
 
-/**
- * The snapshot carries the identity it belongs to, so a stale value is
- * discarded when it is *read* rather than gated when it is written. Write-time
- * gating alone leaves `refreshing` latched on forever when the account changes
- * mid-request: the settling write is skipped, and the caller's refresh control
- * stays disabled for the account that never asked.
- */
-interface IdentifiedLimits {
-  identity: string | null;
-  limits: ExternalAccountLimits | null | undefined;
-  refreshing: boolean;
-}
-
-const EMPTY: IdentifiedLimits = { identity: null, limits: undefined, refreshing: false };
-
 export function useExternalAccountLimits(
   descriptor: ExternalAgentDescriptor | null
 ): ExternalAccountLimitsState {
-  const [snapshot, setSnapshot] = useState<IdentifiedLimits>(EMPTY);
-  const identityKey = descriptor
-    ? `${descriptor.targetId}:${descriptor.environmentId}:${descriptor.account?.fingerprint ?? ''}`
-    : null;
-
+  const queryClient = useQueryClient();
+  const key = externalAccountLimitsKey(descriptor);
   const targetId = descriptor?.targetId;
   const environmentId = descriptor?.environmentId;
   const fingerprint = descriptor?.account?.fingerprint;
 
-  useEffect(() => {
-    let cancelled = false;
-    // Re-anchor the snapshot on the new identity: everything still in flight for
-    // the old one is now unreadable, and nothing carries over from a previous
-    // visit to this same identity.
-    setSnapshot({ identity: identityKey, limits: undefined, refreshing: false });
-    if (!targetId || !environmentId || !identityKey) return;
-    void getExternalAccountLimits(targetId, {
-      environmentId,
-      ...(fingerprint ? { vendorAccountFingerprint: fingerprint } : {}),
-    })
-      .then((response) => {
-        if (!cancelled) applyToIdentity(setSnapshot, identityKey, response.limits ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) applyToIdentity(setSnapshot, identityKey, null);
+  // Re-annotated rather than inferred: the query result's `data` alias widens
+  // the `null` arm back into the loading one, and the two mean different things
+  // to every caller.
+  const limits: ExternalAccountLimits | null | undefined = useQuery(
+    externalAccountLimitsQueryOptions(descriptor)
+  ).data;
+
+  const { mutate } = useMutation({
+    mutationKey: key,
+    mutationFn: async (): Promise<ExternalAccountLimits | undefined> => {
+      if (!targetId || !environmentId) return undefined;
+      const response = await refreshExternalAccountLimits(targetId, {
+        environmentId,
+        ...(fingerprint ? { vendorAccountFingerprint: fingerprint } : {}),
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [targetId, environmentId, fingerprint, identityKey]);
+      return response.limits;
+    },
+    onSuccess: (refreshed) => {
+      // A probe the hub could not complete comes back as HTTP 200 with no
+      // `limits` — a non-answer, not a verdict. Writing it through would replace
+      // a good snapshot with "no snapshot" and make the pill vanish because a
+      // refresh failed. The cold read is where `null` legitimately means the
+      // account has none; a refresh may only ever improve on what is cached.
+      if (refreshed) queryClient.setQueryData(key, refreshed);
+    },
+  });
+
+  // Read off the cache rather than off this hook's own mutation state, so a
+  // refresh started from the header pill also locks the selector's chip — and so
+  // switching accounts mid-request releases the lock instead of inheriting it.
+  const refreshing = useIsMutating({ mutationKey: key, exact: true }) > 0;
 
   const refresh = useCallback(() => {
-    if (!targetId || !environmentId || !identityKey) return;
-    setSnapshot((prev) => (prev.identity === identityKey ? { ...prev, refreshing: true } : prev));
-    void refreshExternalAccountLimits(targetId, {
-      environmentId,
-      ...(fingerprint ? { vendorAccountFingerprint: fingerprint } : {}),
-    })
-      .then((response) => {
-        applyToIdentity(setSnapshot, identityKey, response.limits ?? null);
-      })
-      .catch(() => {
-        // Keep the previous snapshot; the caller's chip stays as it was.
-      })
-      .finally(() => {
-        setSnapshot((prev) =>
-          prev.identity === identityKey ? { ...prev, refreshing: false } : prev
-        );
-      });
-  }, [targetId, environmentId, fingerprint, identityKey]);
+    if (!targetId || !environmentId) return;
+    mutate();
+  }, [mutate, targetId, environmentId]);
 
-  // The effect re-anchors one commit late, so the first render after a switch
-  // still holds the previous account's snapshot. Filter it here too.
-  const current = snapshot.identity === identityKey;
-  return {
-    limits: current ? snapshot.limits : undefined,
-    refreshing: current ? snapshot.refreshing : false,
-    refresh,
-  };
-}
-
-function applyToIdentity(
-  setSnapshot: (updater: (prev: IdentifiedLimits) => IdentifiedLimits) => void,
-  identity: string,
-  limits: ExternalAccountLimits | null
-): void {
-  // Never touches `refreshing`: only the request that raised it may settle it.
-  setSnapshot((prev) => (prev.identity === identity ? { ...prev, limits } : prev));
+  return { limits, refreshing, refresh };
 }

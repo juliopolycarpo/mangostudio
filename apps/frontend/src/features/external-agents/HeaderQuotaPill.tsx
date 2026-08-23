@@ -9,8 +9,12 @@
  */
 
 import type { ExternalAccountLimits } from '@mangostudio/shared/external-agents';
-import { interpretExternalAccountLimits } from '@mangostudio/shared/external-agents';
+import {
+  EXTERNAL_ACCOUNT_LIMITS_STALE_MS,
+  interpretExternalAccountLimits,
+} from '@mangostudio/shared/external-agents';
 import { RefreshCw } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
@@ -24,9 +28,37 @@ export function HeaderQuotaPill() {
   const runner = app.runner;
   const descriptor = (runner.kind === 'external' && external.find(runner.targetId)) || null;
   const { limits, refreshing, refresh } = useExternalAccountLimits(descriptor);
+  const nowMs = useFreshnessDeadline(limits?.observedAtMs);
 
   if (!descriptor?.capabilities.accountUsage) return null;
-  return <QuotaPillView limits={limits} refreshing={refreshing} onRefresh={refresh} />;
+  return (
+    <QuotaPillView limits={limits} nowMs={nowMs} refreshing={refreshing} onRefresh={refresh} />
+  );
+}
+
+/**
+ * `Date.now()` for the render, plus the one re-render that the deadline needs.
+ *
+ * Freshness is a clock comparison, so a tab left open crosses the threshold with
+ * nothing to notice it: the pill would keep claiming a quota it no longer knows
+ * until something unrelated re-rendered the header. One `setTimeout` armed for
+ * the exact moment the snapshot expires closes that, and it is still not a poll
+ * — it fires once per snapshot, and the next snapshot arms the next one.
+ */
+function useFreshnessDeadline(observedAtMs: number | undefined): number {
+  const [, setExpiries] = useState(0);
+
+  useEffect(() => {
+    if (observedAtMs === undefined) return;
+    // `+ 1`: the verdict flips on *strictly* older than the window, so waking on
+    // the boundary itself would re-render to the same answer and never wake again.
+    const delay = observedAtMs + EXTERNAL_ACCOUNT_LIMITS_STALE_MS + 1 - Date.now();
+    if (delay <= 0) return;
+    const timer = setTimeout(() => setExpiries((count) => count + 1), delay);
+    return () => clearTimeout(timer);
+  }, [observedAtMs]);
+
+  return Date.now();
 }
 
 export function QuotaPillView({

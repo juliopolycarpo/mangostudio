@@ -1,11 +1,16 @@
 /**
- * The hook's only interesting behaviour is what happens when the account
- * changes out from under an in-flight request, so that is all this asserts.
+ * Two things make this hook interesting, and they are all this asserts.
  *
- * Both cases are about the *reader*: the snapshot carries the identity it was
- * fetched for, and a value belonging to a different identity must be
- * unreadable — during the render before the effect has re-anchored, and after a
- * request settles for an account nobody is looking at any more.
+ * The first is the account changing out from under an in-flight request: the
+ * snapshot is keyed by the identity it was fetched for, and a value belonging to
+ * a different identity must be unreadable — during the render before the switch
+ * has settled, and after a request lands for an account nobody is looking at any
+ * more.
+ *
+ * The second is that the state is shared. The header pill and the selector's
+ * chip both mount, and they must see one cold read, one snapshot and one refresh
+ * lock — a refresh in either is a refresh in both. A refresh that comes back
+ * empty is a non-answer and leaves what is cached alone.
  */
 
 import { afterEach, describe, expect, it, mock } from 'bun:test';
@@ -22,13 +27,13 @@ import { act, flushAsyncRender, renderHook } from '../../../support/harness/rend
 const actualExternalAgentService = await import('@/services/external-agent-service');
 
 interface Deferred {
-  resolve: (limits: ExternalAccountLimits | null) => void;
-  promise: Promise<{ limits: ExternalAccountLimits | null }>;
+  resolve: (limits?: ExternalAccountLimits | null) => void;
+  promise: Promise<{ limits?: ExternalAccountLimits | null }>;
 }
 
 function deferred(): Deferred {
-  let resolve!: (limits: ExternalAccountLimits | null) => void;
-  const promise = new Promise<{ limits: ExternalAccountLimits | null }>((settle) => {
+  let resolve!: (limits?: ExternalAccountLimits | null) => void;
+  const promise = new Promise<{ limits?: ExternalAccountLimits | null }>((settle) => {
     resolve = (limits) => settle({ limits });
   });
   return { resolve, promise };
@@ -133,6 +138,10 @@ describe('useExternalAccountLimits', () => {
     act(() => {
       result.current.refresh();
     });
+    // The lock is read off the mutation cache, and React Query announces cache
+    // changes through its own `setTimeout(cb, 0)` — so it is raised a macrotask
+    // after the click, not inside it.
+    await flushAsyncRender();
     expect(result.current.refreshing).toBe(true);
 
     // A's refresh is still in flight. B must not inherit its lock — the caller
@@ -145,5 +154,52 @@ describe('useExternalAccountLimits', () => {
     await flushAsyncRender();
     expect(result.current.refreshing).toBe(false);
     expect(result.current.limits).toBeUndefined();
+  });
+
+  it('keeps the previous snapshot when a refresh comes back with nothing', async () => {
+    const { result } = renderForAccount(ACCOUNT_A);
+    pendingLoads[0]?.resolve(limitsFixture(40));
+    await flushAsyncRender();
+
+    act(() => {
+      result.current.refresh();
+    });
+    // The request is not issued inside `mutate()` — it starts a turn later, so
+    // the queue is empty until this flush.
+    await flushAsyncRender();
+
+    // What the hub answers when the vendor probe failed or timed out: HTTP 200
+    // with no `limits` at all. That is a non-answer, not "this account has no
+    // quota", and it must not erase what the chip is already showing.
+    pendingRefreshes[0]?.resolve(undefined);
+    await flushAsyncRender();
+    expect(result.current.limits).toEqual(limitsFixture(40));
+    expect(result.current.refreshing).toBe(false);
+  });
+
+  it('shares one snapshot and one load between consumers of the same account', async () => {
+    const { result } = renderHook(() => ({
+      chip: useExternalAccountLimits(ACCOUNT_A),
+      pill: useExternalAccountLimits(ACCOUNT_A),
+    }));
+
+    // The header pill and the selector's chip mount together; the cold read is
+    // one request between them, not one each.
+    expect(pendingLoads.length).toBe(1);
+    pendingLoads[0]?.resolve(limitsFixture(40));
+    await flushAsyncRender();
+    expect(result.current.pill.limits).toEqual(limitsFixture(40));
+
+    // And a refresh started from either one settles into both.
+    act(() => {
+      result.current.chip.refresh();
+    });
+    await flushAsyncRender();
+    expect(result.current.pill.refreshing).toBe(true);
+
+    pendingRefreshes[0]?.resolve(limitsFixture(88));
+    await flushAsyncRender();
+    expect(result.current.chip.limits).toEqual(limitsFixture(88));
+    expect(result.current.pill.limits).toEqual(limitsFixture(88));
   });
 });
