@@ -311,11 +311,23 @@ export function Sidebar({
 
                     {editingChatId !== chat.id && (
                       <>
-                        <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[10px] text-on-surface-variant/70 group-hover:hidden">
+                        {/*
+                         * The badge yields the slot to the row actions on hover
+                         * and on focus — but only where hovering is possible.
+                         * On a coarse pointer there is no hover to reveal
+                         * anything, so both stay up: the row is a full-width
+                         * sheet there and has the space.
+                         */}
+                        <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[10px] text-on-surface-variant/70 group-hover:hidden group-focus-within:hidden">
                           <StatusDot tone="neutral" className={badge.dotClassName} />
                           {badge.label}
                         </span>
-                        <div className="hidden group-hover:flex items-center gap-1 shrink-0">
+                        {/*
+                         * `group-focus-within` is what makes these reachable:
+                         * the row itself is tabbable, so focusing it un-hides
+                         * the buttons, which then enter the tab order.
+                         */}
+                        <div className="hidden group-hover:flex group-focus-within:flex pointer-coarse:flex items-center gap-1 shrink-0">
                           <button
                             type="button"
                             onClick={(e) => handleStartEdit(chat, e)}
