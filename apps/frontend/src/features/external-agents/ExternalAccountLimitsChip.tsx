@@ -10,16 +10,7 @@ import type { ExternalAccountLimits } from '@mangostudio/shared/external-agents'
 import { interpretExternalAccountLimits } from '@mangostudio/shared/external-agents';
 import { RefreshCw } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
-
-export function formatCompactDuration(ms: number): string {
-  const totalMinutes = Math.max(0, Math.round(ms / 60_000));
-  if (totalMinutes < 60) return `${totalMinutes}m`;
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours < 48) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-  const days = Math.floor(hours / 24);
-  return `${days}d`;
-}
+import { describeAccountLimits } from './account-limits-copy';
 
 export function ExternalAccountLimitsChip({
   limits,
@@ -35,37 +26,11 @@ export function ExternalAccountLimitsChip({
   const { t } = useI18n();
   const labels = t.externalAgents.limits;
   const verdict = interpretExternalAccountLimits(limits, nowMs);
-
-  let body: string;
-  let tone: 'muted' | 'warn' | 'ok' = 'muted';
-
-  switch (verdict.kind) {
-    case 'unknown':
-      body = labels.unknown;
-      break;
-    case 'stale':
-      body = labels.stale;
-      break;
-    case 'ok': {
-      const remaining = Math.max(0, 100 - verdict.tightest.usedPercent);
-      body = labels.remaining.replace('{percent}', String(Math.round(remaining)));
-      if (verdict.exhausted) {
-        body = labels.exhausted;
-        tone = 'warn';
-        if (verdict.tightest.resetsAtMs !== undefined) {
-          const delta = verdict.tightest.resetsAtMs - nowMs;
-          if (delta > 0) {
-            body = `${labels.exhausted} · ${labels.resetsIn.replace('{duration}', formatCompactDuration(delta))}`;
-          }
-        }
-      } else if (remaining <= 15) {
-        tone = 'warn';
-      } else {
-        tone = 'ok';
-      }
-      break;
-    }
-  }
+  const { body, low } = describeAccountLimits(verdict, labels, nowMs);
+  // A snapshot too old to trust reads muted here rather than as a warning: the
+  // selector's row already carries the agent's real refusals, and colouring
+  // "we have not asked recently" like an exhausted account would outrank them.
+  const tone: 'muted' | 'warn' | 'ok' = verdict.kind !== 'ok' ? 'muted' : low ? 'warn' : 'ok';
 
   return (
     <span

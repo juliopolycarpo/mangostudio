@@ -18,7 +18,7 @@ import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
-import { formatCompactDuration } from './ExternalAccountLimitsChip';
+import { describeAccountLimits } from './account-limits-copy';
 import { useExternalAccountLimits } from './use-external-account-limits';
 import { useExternalAgents } from './useExternalAgents';
 
@@ -81,26 +81,11 @@ export function QuotaPillView({
   // chrome: a pill that says "quota unknown" all day is noise, not a warning.
   if (verdict.kind === 'unknown') return null;
 
-  let body: string;
-  let variant: 'neutral' | 'warning' = 'neutral';
-  if (verdict.kind === 'stale') {
-    body = labels.stale;
-    variant = 'warning';
-  } else if (verdict.exhausted) {
-    body = labels.exhausted;
-    variant = 'warning';
-    const resetsAtMs = verdict.tightest.resetsAtMs;
-    if (resetsAtMs !== undefined && resetsAtMs > nowMs) {
-      body = `${labels.exhausted} · ${labels.resetsIn.replace(
-        '{duration}',
-        formatCompactDuration(resetsAtMs - nowMs)
-      )}`;
-    }
-  } else {
-    const remaining = Math.max(0, 100 - verdict.tightest.usedPercent);
-    body = labels.remaining.replace('{percent}', String(Math.round(remaining)));
-    if (remaining <= 15) variant = 'warning';
-  }
+  const { body, low } = describeAccountLimits(verdict, labels, nowMs);
+  // Stale escalates here where it does not in the selector's chip: this pill is
+  // the only quota readout on screen, so "we no longer know" is the state the
+  // user has to act on rather than one the surrounding row already explains.
+  const variant: 'neutral' | 'warning' = verdict.kind === 'stale' || low ? 'warning' : 'neutral';
 
   return (
     <button
