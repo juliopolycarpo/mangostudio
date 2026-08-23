@@ -10,7 +10,7 @@
 
 import type { GitRepoState } from '@mangostudio/shared/git';
 import { StatusDot } from '@/components/ui/StatusDot';
-import { useGitState } from '@/features/workspace/hooks/use-git-state';
+import { useGitRealtimeInvalidation, useGitState } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
 import { workdirBasename } from '@/lib/paths';
 
@@ -21,6 +21,12 @@ interface WorkspaceBreadcrumbProps {
 }
 
 export function WorkspaceBreadcrumb({ chatId, workdir }: WorkspaceBreadcrumbProps) {
+  // Subscribed here as well as in the rail, because this is the mount that
+  // survives: the rail unmounts when it is collapsed, on Todos and on mobile,
+  // and a breadcrumb reading a query nobody invalidates goes quietly stale.
+  // Topic subscriptions are ref-counted per tab, so a second subscriber costs
+  // no extra socket traffic and the rail's unmount does not cancel this one.
+  useGitRealtimeInvalidation(chatId);
   // Re-declared with the contract type: the query result's `data` alias
   // defeats the compiler's discriminant narrowing without it.
   const state: GitRepoState | undefined = useGitState(chatId).data;
