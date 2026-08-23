@@ -76,5 +76,9 @@ export function externalAccountLimitsQueryOptions(descriptor: ExternalAgentDescr
     },
     enabled: Boolean(targetId && environmentId),
     staleTime: Number.POSITIVE_INFINITY,
+    // Opted out of the client-wide retry: one failed probe already cost a
+    // subprocess on somebody else's machine, and a silent second one buys a
+    // chip nobody is waiting on. The user's refresh is the retry.
+    retry: false,
   });
 }
