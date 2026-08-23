@@ -1,6 +1,5 @@
 import type { GeneratedImagePart, Message, MessagePart } from '@mangostudio/shared';
 import type {
-  ExternalAccountLimits,
   ExternalAgentError,
   ExternalAgentTargetId,
   ExternalThreadUsage,
@@ -42,8 +41,6 @@ export interface TextGenerationStreamState {
   readonly aiMessageUpdate: TextGenerationStreamMessageUpdate | null;
   /** Cumulative thread usage from the vendor — separate from per-turn `usage` on the turn part. */
   readonly threadUsage: ExternalThreadUsage | null;
-  /** Latest account-quota snapshot observed on this stream. */
-  readonly accountLimits: ExternalAccountLimits | null;
 }
 
 interface ParsedSubagentEvent {
@@ -82,7 +79,6 @@ export function createTextGenerationStreamState({
     userMessageUpdate: null,
     aiMessageUpdate: null,
     threadUsage: null,
-    accountLimits: null,
   };
 }
 
@@ -167,8 +163,6 @@ export function reduceTextGenerationStreamChunk(
       return reduceExternalUsage(nextState, chunk.usage);
     case 'external_thread_usage':
       return reduceExternalThreadUsage(nextState, chunk.usage);
-    case 'external_account_limits':
-      return { ...nextState, accountLimits: chunk.limits };
     case 'external_steer':
       return reduceExternalSteer(nextState, chunk);
     case 'external_error':
@@ -177,6 +171,10 @@ export function reduceTextGenerationStreamChunk(
       return reduceExternalTurnCompleted(nextState, chunk.reason);
     case 'done':
       return reduceDone(nextState, chunk.messageId, chunk.generationTime);
+    // Handled by the caller, not by the transcript: an account quota belongs to
+    // the machine's signed-in account, not to this turn's messages, and the send
+    // path files it in the shared query cache the quota surfaces read.
+    case 'external_account_limits':
     case 'context_info':
     case 'fallback_notice':
       return nextState;

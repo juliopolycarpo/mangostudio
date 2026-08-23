@@ -34,6 +34,7 @@ import {
   type ExternalDisclosureRequest,
   promptExternalDisclosure,
 } from '@/features/external-agents/disclosure-prompt';
+import { publishExternalAccountLimits } from '@/features/external-agents/queries';
 import { promptExternalWorkspaceTrust } from '@/features/external-agents/workspace-trust-prompt';
 import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import {
@@ -373,11 +374,16 @@ export function useTextGeneration({
       let activeChatId = chats.currentChatId;
       let createdChatDuringRequest = false;
       let activeChatTitle = chats.currentChat?.title;
+      // Read alongside the title, and for the same reason: a chat created by
+      // this send is not in `chats` yet, and the machine a quota snapshot
+      // belongs to is part of the key it is cached under.
+      let activeEnvironmentId = chats.currentChat?.environmentId ?? null;
       let boundAgentSelection: { agentId: string; agentName?: string } | null = null;
       if (!activeChatId) {
         const newChat = await chats.createChat();
         activeChatId = newChat.id;
         activeChatTitle = newChat.title;
+        activeEnvironmentId = newChat.environmentId ?? null;
         createdChatDuringRequest = true;
         boundAgentSelection = (await onChatCreated?.(newChat.id)) ?? null;
       }
@@ -510,6 +516,14 @@ export function useTextGeneration({
 
             if (chunk.type === 'todo_update') {
               setChatTodos(queryClient, activeChatId, chunk.todos);
+            }
+
+            // The vendor's own quota reading, mid-turn — fresher than anything
+            // the header could have read on mount, and the only free one: the
+            // alternative is a probe on the user's machine. A review stream
+            // shares this handler, so it lands there too.
+            if (chunk.type === 'external_account_limits') {
+              publishExternalAccountLimits(queryClient, activeEnvironmentId, chunk.limits);
             }
           };
 
