@@ -14,12 +14,13 @@
 /**
  * Returns the response the frontend claims, or `undefined` to defer.
  *
- * A promise is allowed so the embedded branch can reach the same async serving
- * path its registered routes use. It must resolve to a `Response` and never to
- * `undefined`: Elysia decides whether to try the next `NotFound` handler from
- * what the handler returns, and a promise is always something.
+ * Synchronous on purpose: Elysia decides whether to try the next `NotFound`
+ * handler from what this returns, and a promise is always something — so a
+ * fallback that resolved to `undefined` would silently stop the chain. Both
+ * branches answer from state they hold synchronously (embedded manifest +
+ * boot-time validators, or a `statSync` result), so nothing needs to be async.
  */
-export type FrontendFallback = (request: Request) => Response | Promise<Response> | undefined;
+export type FrontendFallback = (request: Request) => Response | undefined;
 
 let activeFallback: FrontendFallback | null = null;
 
@@ -34,6 +35,6 @@ export function clearFrontendFallback(): void {
 }
 
 /** The active frontend's answer for an unmatched request, if it claims one. */
-export function frontendNotFound(request: Request): Response | Promise<Response> | undefined {
+export function frontendNotFound(request: Request): Response | undefined {
   return activeFallback?.(request);
 }

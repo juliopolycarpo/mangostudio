@@ -153,6 +153,10 @@ describe('registerFrontend with embedded assets', () => {
       expect(encoded.status).toBe(200);
       expect(await encoded.text()).toBe(UPLOAD_BYTES);
       expect(encoded.headers.get('cache-control')).toBe(literal.headers.get('cache-control'));
+      // Content-derived, not stat-derived: in the shipped binary these files
+      // stat as `mtimeMs: 0` (see the shell ETag test), so the bytes are the
+      // only validator that changes when a release changes them.
+      expect(literal.headers.get('etag')).toBe(contentEtag(UPLOAD_BYTES));
       expect(encoded.headers.get('etag')).toBe(literal.headers.get('etag'));
     });
 
@@ -307,9 +311,10 @@ describe('registerFrontend from the filesystem', () => {
 
     expect((await get('/favicon.ico')).status).toBe(200);
 
-    // The route was enumerated at boot, but `build.ts` removes `dist/` before
-    // every rebuild and the dev watcher rebuilds on every save. A request in
-    // that window used to throw ENOENT out of the handler and answer 500.
+    // The file resolved on a previous request, but `build.ts` publishes
+    // `dist/` by rename, so there is a window with nothing at the path — and
+    // the binary build sets `dist/` aside before rebuilding. A request in that
+    // window used to throw ENOENT out of the handler and answer 500.
     rmSync(join(frontendDir, 'favicon.ico'));
     expect((await get('/favicon.ico')).status).toBe(404);
   });
@@ -532,8 +537,8 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
       // the old one for a day with nothing to point at.
       //
       // This is the disk branch. The compiled binary reaches the same directive
-      // through `serveUnhashedFile`, a different call site, which
-      // `scripts/test-build.ts` pins separately.
+      // through `serveEmbeddedFile`, a different call site, which
+      // `scripts/test-build.ts` pins separately — validator included.
       writeFileSync(join(server.frontendDir, 'config.js'), RUNTIME_CONFIG_JS);
 
       const response = await server.get('/config.js');
@@ -705,6 +710,27 @@ describe('registerFrontend with embedded assets, over a listening server', () =>
       },
     };
   }
+
+  test('revalidates embedded root files against their content hash', async () => {
+    const server = await startEmbeddedServer();
+    try {
+      const first = await server.get('/favicon.ico');
+      expect(first.status).toBe(200);
+      const etag = first.headers.get('etag');
+      expect(etag).toBe(contentEtag(UPLOAD_BYTES));
+
+      const revalidated = await server.get('/favicon.ico', { 'If-None-Match': etag as string });
+      expect(revalidated.status).toBe(304);
+
+      // Hashed assets stay validator-free: `immutable` means a browser never
+      // revalidates them, so an ETag would be dead weight on every response.
+      const hashed = await server.get('/assets/index-AbCd1234.js');
+      expect(hashed.status).toBe(200);
+      expect(hashed.headers.get('etag')).toBeNull();
+    } finally {
+      await server.stop();
+    }
+  });
 
   test('revalidates the embedded shell against its content hash', async () => {
     const server = await startEmbeddedServer();

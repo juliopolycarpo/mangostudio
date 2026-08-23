@@ -76,16 +76,41 @@ function serveIndexFile(indexPath: string, etag: string | null, request: Request
 }
 
 /**
- * The embedded shell's validator: a hash of its bytes, computed once at boot.
+ * An embedded file's validator: a hash of its bytes, computed once at boot.
  * The content cannot change within one binary, so once is enough — and the
  * bytes are the only identity that survives embedding (see serveIndexFile).
  */
-function embeddedShellEtag(indexPath: string): string | null {
+function embeddedEtag(filePath: string): string | null {
+  // Degrading to no validator is safe — a full download on every navigation,
+  // never a wrong 304 — but it is invisible unless said out loud: `readFileSync`
+  // works on embedded virtual paths, so this firing means something unexplained.
   try {
-    return contentEtag(readFileSync(indexPath));
-  } catch {
+    return contentEtag(readFileSync(filePath));
+  } catch (error) {
+    console.warn(`[frontend] Cannot derive a validator for embedded ${filePath}:`, error);
     return null;
   }
+}
+
+/**
+ * An embedded non-shell file: fixed bytes behind a validator the caller
+ * precomputed at boot. Null means no validator — hashed assets, which are
+ * `immutable` and never revalidated, or a failed boot-time read.
+ */
+function serveEmbeddedFile(
+  filePath: string,
+  etag: string | null,
+  cacheControl: string,
+  request: Request
+): Response {
+  const headers: Record<string, string> = { 'Cache-Control': cacheControl };
+  if (etag) {
+    headers.ETag = etag;
+    if (matchesEtag(request.headers.get('if-none-match'), etag)) {
+      return new Response(null, { status: 304, headers });
+    }
+  }
+  return new Response(Bun.file(filePath), { headers });
 }
 
 /**
@@ -109,10 +134,15 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
     return;
   }
 
-  const shellEtag = embeddedShellEtag(indexPath);
+  const shellEtag = embeddedEtag(indexPath);
   const serveEmbeddedIndex = (request: Request) => serveIndexFile(indexPath, shellEtag, request);
 
   app.get('/', ({ request }) => serveEmbeddedIndex(request));
+
+  // One validator per unhashed manifest entry, spelled at boot. Stat is not an
+  // option here — an embedded file stats as `mtimeMs: 0` (see serveIndexFile) —
+  // and hashed assets need none: they are `immutable` and never revalidated.
+  const etags = new Map<string, string | null>();
 
   for (const urlPath of Object.keys(files)) {
     if (urlPath === '/index.html') {
@@ -125,10 +155,12 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
       app.get(urlPath, () => new Response(Bun.file(filePath), { headers }));
       continue;
     }
-    // The route's own URL path is a loop constant, so the directive it implies
-    // is settled here rather than re-derived from `request.url` on every hit.
+    // The route's own URL path is a loop constant, so the directive and the
+    // validator it implies are settled here rather than re-derived per hit.
     const cacheControl = unhashedCacheControl(urlPath);
-    app.get(urlPath, ({ request }) => serveUnhashedFile(filePath, cacheControl, request));
+    const etag = embeddedEtag(filePath);
+    etags.set(urlPath, etag);
+    app.get(urlPath, ({ request }) => serveEmbeddedFile(filePath, etag, cacheControl, request));
   }
 
   setFrontendFallback((request) => {
@@ -146,7 +178,13 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
       const filePath = files[decoded];
       // An exact key lookup is the whole guard: a decoded traversal, backslash
       // or NUL form is simply not a manifest key and falls through below.
-      if (filePath) return serveUnhashedFile(filePath, embeddedCacheControl(decoded), request);
+      if (filePath) {
+        // Hashed keys were never given a validator, and `etags` holds exactly
+        // the unhashed ones — so a miss here is a hashed asset, served as its
+        // literal route serves it.
+        const etag = etags.get(decoded) ?? null;
+        return serveEmbeddedFile(filePath, etag, embeddedCacheControl(decoded), request);
+      }
     }
     return isSpaRoute(pathname) ? serveEmbeddedIndex(request) : undefined;
   });
@@ -225,56 +263,13 @@ function statFile(path: string): Stats | null {
 }
 
 /**
- * `BunFile.stat()`, or null when there is nothing to stat.
- *
- * Measured on the pinned Bun 1.4.0: for a file embedded in a compiled binary
- * `stat()` returns `undefined` — not a rejected promise, not a promise at all —
- * so `file.stat().catch(…)` throws `undefined is not an object` synchronously
- * out of the handler and the binary answers 500 with Bun's own error page. A
- * missing file on disk is the other shape: `stat()` rejects with ENOENT. Both
- * have to be caught here, and neither can be told apart from the other by the
- * result alone — `exists()` is what separates "embedded, no inode" from "gone".
- */
-async function statBunFile(file: Bun.BunFile): Promise<Stats | null> {
-  try {
-    return ((await file.stat()) as Stats | undefined) ?? null;
-  } catch {
-    return null;
-  }
-}
-
-async function serveUnhashedFile(
-  filePath: string,
-  cacheControl: string,
-  request: Request
-): Promise<Response> {
-  // The routes below are enumerated once at boot, but the file behind one can
-  // disappear afterwards: `build.ts` removes `dist/` before every rebuild, so a
-  // request that lands in that window — or after a rebuild that failed and left
-  // nothing — would otherwise throw ENOENT out of the handler and answer 500.
-  // A file that is not there is a 404, the same answer the static plugin gave.
-  const file = Bun.file(filePath);
-  // No stat means one of two things, and they are not the same answer: the
-  // file is gone (disk, ENOENT), or it is embedded in a compiled binary, where
-  // the bytes are there and there is simply no inode behind them. `exists()`
-  // is what separates them. Answering 404 for both — or letting `stat()`'s
-  // undefined return throw — broke every unhashed root asset the shipped
-  // binary serves, and all four are referenced by index.html. See statBunFile.
-  const stats = await statBunFile(file);
-  if (!stats) {
-    if (!(await file.exists())) return new Response(null, { status: 404 });
-    // Embedded: the content cannot change within one binary, so there is
-    // nothing to revalidate against and no ETag to derive.
-    return new Response(file, { headers: { 'Cache-Control': cacheControl } });
-  }
-  return serveStattedFile(filePath, stats, cacheControl, request);
-}
-
-/**
- * An unhashed file whose stat the caller already has: ETag, 304 short-circuit,
- * body. Split out so the filesystem branch can answer from `setFrontendFallback`,
- * whose contract is synchronous — it has a `statSync` result in hand from
- * `resolveUnhashedFile` and does not need to re-stat through `BunFile`.
+ * An unhashed disk file whose stat the caller already has: ETag, 304
+ * short-circuit, body. The filesystem branch answers with this from
+ * `setFrontendFallback`, holding a `statSync` result from `resolveUnhashedFile`;
+ * the stat both proves the file exists — `build.ts` publishes `dist/` by
+ * rename, so there is a window with nothing at the path, and a miss must be a
+ * 404 rather than an ENOENT thrown out of the handler — and spells the
+ * validator, so a dev rebuild's new mtime invalidates cached copies.
  */
 function serveStattedFile(
   filePath: string,
@@ -377,13 +372,14 @@ function registerSpa(app: App, frontendDir: string): void {
   // for the life of the server, so re-resolving it on every SPA-fallback
   // request bought nothing but a repeated syscall.
   const frontendRoot = realpathSyncSafe(frontendDir);
-  // Stat-checked for the same reason `serveUnhashedFile` is: `build.ts`
-  // removes `dist/` before every rebuild, so a rebuild run against a live dev
-  // server leaves `index.html` briefly absent — and a `Bun.file` that is not
-  // there answers 500 with Bun's own error page once the body is read, on `/`
-  // and on every deep link alike. A 404 is the honest answer for that window.
-  // The stat that proves existence also spells the validator: size+mtime, so a
-  // rebuild's new mtime invalidates cached shells.
+  // Stat-checked because `dist/` can be momentarily empty under a live dev
+  // server: `build.ts` publishes by rename, which has a window with nothing at
+  // the path, and the binary build prunes `dist/` outright before rebuilding —
+  // and a `Bun.file` that is not there answers 500 with Bun's own error page
+  // once the body is read, on `/` and on every deep link alike. A 404 is the
+  // honest answer for that window. The stat that proves existence also spells
+  // the validator: size+mtime, so a rebuild's new mtime invalidates cached
+  // shells.
   const serveIndex = (request: Request): Response => {
     const stats = statFile(indexPath);
     return stats

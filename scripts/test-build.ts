@@ -722,7 +722,20 @@ async function smokeTest(): Promise<void> {
       const cacheControl = res.headers.get('cache-control');
       if (cacheControl !== 'no-cache')
         fail(`/config.js cache-control is "${cacheControl}", expected no-cache`);
-      pass('/config.js → 200, empty apiUrl, no-cache');
+      // Revalidation needs a validator, and like the shell it must be
+      // content-derived — embedded files stat as mtime 0, so a stat-shaped tag
+      // would be constant across builds. Only this harness sees the binary's
+      // headers; unit fixtures stat real files.
+      const etag = res.headers.get('etag');
+      if (!etag) fail('/config.js carries no ETag — no-cache without a validator resends the body');
+      if (/-0"$/.test(etag as string))
+        fail(`/config.js ETag ${etag} is stat-derived (mtime 0) — constant across builds`);
+      const revalidated = await fetch(`http://127.0.0.1:${PORT}/config.js`, {
+        headers: { 'If-None-Match': etag as string },
+      });
+      if (revalidated.status !== 304)
+        fail(`/config.js with matching If-None-Match returned ${revalidated.status}, expected 304`);
+      pass('/config.js → 200, empty apiUrl, no-cache with a content-derived validator');
     }
 
     // A root-level file that is not in the embedded manifest → 404, not the
