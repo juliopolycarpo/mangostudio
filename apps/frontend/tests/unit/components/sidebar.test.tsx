@@ -139,13 +139,38 @@ describe('sidebar behaviors that must survive the overhaul', () => {
 
   it('selects a chat on row click', () => {
     const { props } = renderSidebar();
-    fireEvent.click(screen.getByText('sse-soak load test'));
+    fireEvent.click(screen.getByRole('button', { name: 'sse-soak load test' }));
     expect(props.onSelectChat).toHaveBeenCalledWith('c2');
+  });
+
+  /**
+   * `role="button"` makes every descendant presentational, so rename and delete
+   * would lose their role and name to assistive tech if they lived inside the
+   * control that selects the chat. They are siblings of it, not children.
+   */
+  it('keeps the row actions outside the chat-selection button', () => {
+    renderSidebar();
+    const row = screen.getByText('Plugin LSP TypeScript').closest('li');
+    if (!row) throw new Error('row not found');
+    const select = within(row).getByRole('button', { name: 'Plugin LSP TypeScript' });
+    expect(select).not.toContainElement(within(row).getByTitle('Edit title'));
+    expect(select).not.toContainElement(within(row).getByTitle('Delete chat'));
+    expect(row.querySelector('[role="button"]')).toBeNull();
+  });
+
+  it('puts the inline editor beside the row actions, not inside a button', () => {
+    renderSidebar();
+    const row = screen.getByText('Plugin LSP TypeScript').closest('li');
+    if (!row) throw new Error('row not found');
+    fireEvent.click(within(row).getByTitle('Edit title'));
+    const editor = screen.getByDisplayValue<HTMLInputElement>('Plugin LSP TypeScript');
+    expect(editor.closest('button')).toBeNull();
+    expect(editor.closest('[role="button"]')).toBeNull();
   });
 
   it('renames through the inline editor', () => {
     const { props } = renderSidebar();
-    const row = screen.getByText('Plugin LSP TypeScript').closest('[role="button"]');
+    const row = screen.getByText('Plugin LSP TypeScript').closest('li');
     if (!row) throw new Error('row not found');
     fireEvent.click(within(row as HTMLElement).getByTitle('Edit title'));
     const editor = screen.getByDisplayValue<HTMLInputElement>('Plugin LSP TypeScript');
@@ -156,7 +181,7 @@ describe('sidebar behaviors that must survive the overhaul', () => {
 
   it('deletes from the row action', () => {
     const { props } = renderSidebar();
-    const row = screen.getByText('Ancient refactor').closest('[role="button"]');
+    const row = screen.getByText('Ancient refactor').closest('li');
     if (!row) throw new Error('row not found');
     fireEvent.click(within(row as HTMLElement).getByTitle('Delete chat'));
     expect(props.onDeleteChat).toHaveBeenCalledWith('c3');
@@ -164,7 +189,7 @@ describe('sidebar behaviors that must survive the overhaul', () => {
 
   it('does not let Enter/Space on the edit or delete buttons activate the row', () => {
     const { props } = renderSidebar();
-    const row = screen.getByText('Plugin LSP TypeScript').closest('[role="button"]');
+    const row = screen.getByText('Plugin LSP TypeScript').closest('li');
     if (!row) throw new Error('row not found');
     fireEvent.keyDown(within(row as HTMLElement).getByTitle('Edit title'), { key: 'Enter' });
     fireEvent.keyDown(within(row as HTMLElement).getByTitle('Delete chat'), { key: ' ' });
@@ -173,7 +198,7 @@ describe('sidebar behaviors that must survive the overhaul', () => {
 
   it('does not let a space in the inline editor activate the row', () => {
     const { props } = renderSidebar();
-    const row = screen.getByText('Plugin LSP TypeScript').closest('[role="button"]');
+    const row = screen.getByText('Plugin LSP TypeScript').closest('li');
     if (!row) throw new Error('row not found');
     fireEvent.click(within(row as HTMLElement).getByTitle('Edit title'));
     const editor = screen.getByDisplayValue<HTMLInputElement>('Plugin LSP TypeScript');

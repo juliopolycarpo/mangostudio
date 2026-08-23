@@ -95,8 +95,7 @@ export function Sidebar({
     }
   }, [editingChatId]);
 
-  const handleStartEdit = (chat: Chat, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleStartEdit = (chat: Chat) => {
     setEditingChatId(chat.id);
     setEditTitle(chat.title);
   };
@@ -112,8 +111,7 @@ export function Sidebar({
     setEditingChatId(null);
   };
 
-  const handleDelete = (chatId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDelete = (chatId: string) => {
     onDeleteChat(chatId);
     toast(t.chat.deleted, 'success');
   };
@@ -276,104 +274,114 @@ export function Sidebar({
             />
           ) : null}
           {groups.map((group) => (
-            <div key={group.key} className="space-y-1">
+            <div key={group.key}>
               <MicroLabel as="div" className="px-4 pb-1 pt-3 text-on-surface-variant/60">
                 {group.label}
               </MicroLabel>
-              {group.chats.map((chat) => {
-                const ctx = contextCache?.get(chat.id);
-                const badge = runnerBadge(chat.runner, badgeLabels);
-                const activateChat = () => {
-                  if (editingChatId !== chat.id) {
-                    onSelectChat(chat.id);
-                    handleMobileNav('chat');
-                  }
-                };
-                return (
-                  // biome-ignore lint/a11y/useSemanticElements: cannot be a <button> because it contains nested interactive elements (edit/delete buttons, inline edit input)
-                  <div
-                    key={chat.id}
-                    role="button"
-                    tabIndex={0}
-                    className={`group relative flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all duration-300 w-full text-left truncate cursor-pointer ${currentPage === 'chat' && currentChatId === chat.id ? 'text-primary bg-surface-container-high' : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'}`}
-                    onClick={activateChat}
-                    onKeyDown={(e) => {
-                      // Edit, delete, and the inline-edit input all live inside this
-                      // row and bubble their own Enter/Space keydowns up here — only
-                      // react when the row itself is the target, or its
-                      // `preventDefault()` cancels their native activation.
-                      if (e.target !== e.currentTarget) return;
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        activateChat();
-                      }
-                    }}
-                  >
-                    {ctx ? (
-                      <ContextRing ratio={ctx.estimatedUsageRatio} severity={ctx.severity} />
-                    ) : (
-                      <MessageSquare size={16} className="shrink-0" />
-                    )}
-
-                    {editingChatId === chat.id ? (
-                      <div className="flex items-center gap-1 w-full mr-1">
-                        <input
-                          ref={editInputRef}
-                          type="text"
-                          value={editTitle}
-                          onChange={(e) => setEditTitle(e.target.value)}
-                          onKeyDown={(e) => handleKeyDown(e, chat.id)}
-                          onBlur={() => handleSaveEdit(chat.id)}
-                          className="bg-surface-container-highest text-on-surface px-1 py-0.5 rounded border border-primary outline-none text-sm w-full"
-                        />
-                      </div>
-                    ) : (
-                      <span className="font-body text-sm truncate flex-1" title={chat.title}>
-                        {chat.title}
-                      </span>
-                    )}
-
-                    {editingChatId !== chat.id && (
-                      <>
-                        {/*
-                         * The badge yields the slot to the row actions on hover
-                         * and on focus — but only where hovering is possible.
-                         * On a coarse pointer there is no hover to reveal
-                         * anything, so both stay up: the row is a full-width
-                         * sheet there and has the space.
-                         */}
-                        <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[10px] text-on-surface-variant/70 group-hover:hidden group-focus-within:hidden">
-                          <StatusDot tone="neutral" className={badge.dotClassName} />
-                          {badge.label}
-                        </span>
-                        {/*
-                         * `group-focus-within` is what makes these reachable:
-                         * the row itself is tabbable, so focusing it un-hides
-                         * the buttons, which then enter the tab order.
-                         */}
-                        <div className="hidden group-hover:flex group-focus-within:flex pointer-coarse:flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={(e) => handleStartEdit(chat, e)}
-                            className="p-1 hover:text-primary transition-colors"
-                            title={t.chat.editTitle}
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => handleDelete(chat.id, e)}
-                            className="p-1 hover:text-error transition-colors"
-                            title={t.chat.deleteTitle}
-                          >
-                            <Trash2 size={14} />
-                          </button>
+              <ul className="space-y-1">
+                {group.chats.map((chat) => {
+                  const ctx = contextCache?.get(chat.id);
+                  const badge = runnerBadge(chat.runner, badgeLabels);
+                  const isCurrent = currentPage === 'chat' && currentChatId === chat.id;
+                  const editing = editingChatId === chat.id;
+                  // Hidden from assistive tech so the select button's accessible
+                  // name stays the chat title: a button flattens its descendants
+                  // into that name, and the ring contributes both an SVG <title>
+                  // and its percentage.
+                  const leadingIcon = (
+                    <span aria-hidden="true" className="flex shrink-0 items-center">
+                      {ctx ? (
+                        <ContextRing ratio={ctx.estimatedUsageRatio} severity={ctx.severity} />
+                      ) : (
+                        <MessageSquare size={16} />
+                      )}
+                    </span>
+                  );
+                  // Shared by the select button and the inline editor so the icon
+                  // sits in the same place in both modes.
+                  const leadClassName =
+                    'flex min-w-0 flex-1 items-center gap-3 rounded-lg py-2.5 pl-4 pr-2 text-left';
+                  return (
+                    // The row cannot carry `role="button"`: rename, delete and the
+                    // inline editor are interactive descendants, which that role
+                    // makes presentational. Selection is its own button instead.
+                    <li
+                      key={chat.id}
+                      className={`group relative flex items-center rounded-lg transition-all duration-300 ${isCurrent ? 'text-primary bg-surface-container-high' : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'}`}
+                    >
+                      {editing ? (
+                        <div className={leadClassName}>
+                          {leadingIcon}
+                          <input
+                            ref={editInputRef}
+                            type="text"
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            onKeyDown={(e) => handleKeyDown(e, chat.id)}
+                            onBlur={() => handleSaveEdit(chat.id)}
+                            aria-label={t.chat.editTitle}
+                            className="min-w-0 flex-1 rounded border border-primary bg-surface-container-highest px-1 py-0.5 text-sm text-on-surface outline-none"
+                          />
                         </div>
-                      </>
-                    )}
-                  </div>
-                );
-              })}
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSelectChat(chat.id);
+                            handleMobileNav('chat');
+                          }}
+                          aria-current={isCurrent ? 'page' : undefined}
+                          className={`${leadClassName} cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary`}
+                        >
+                          {leadingIcon}
+                          <span className="truncate font-body text-sm" title={chat.title}>
+                            {chat.title}
+                          </span>
+                        </button>
+                      )}
+
+                      {!editing && (
+                        <>
+                          {/*
+                           * The badge yields the slot to the row actions on hover
+                           * and on focus — but only where hovering is possible.
+                           * On a coarse pointer there is no hover to reveal
+                           * anything, so both stay up: the row is a full-width
+                           * sheet there and has the space.
+                           */}
+                          <span className="flex shrink-0 items-center gap-1.5 pr-4 font-mono text-[10px] text-on-surface-variant/70 group-hover:hidden group-focus-within:hidden">
+                            <StatusDot tone="neutral" className={badge.dotClassName} />
+                            {badge.label}
+                          </span>
+                          {/*
+                           * `group-focus-within` is what makes these reachable:
+                           * the select button is tabbable, so focusing it un-hides
+                           * the buttons, which then enter the tab order.
+                           */}
+                          <div className="hidden shrink-0 items-center gap-1 pr-4 group-hover:flex group-focus-within:flex pointer-coarse:flex">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEdit(chat)}
+                              className="p-1 transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+                              title={t.chat.editTitle}
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(chat.id)}
+                              className="p-1 transition-colors hover:text-error focus-visible:outline-2 focus-visible:outline-primary"
+                              title={t.chat.deleteTitle}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           ))}
         </nav>
