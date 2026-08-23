@@ -18,7 +18,11 @@ import type {
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { refreshExternalAccountLimits } from '@/services/external-agent-service';
-import { externalAccountLimitsKey, externalAccountLimitsQueryOptions } from './queries';
+import {
+  cacheExternalAccountLimitsIfNewer,
+  externalAccountLimitsKey,
+  externalAccountLimitsQueryOptions,
+} from './queries';
 
 export interface ExternalAccountLimitsState {
   /** `undefined` while loading, `null` when the machine answered "no snapshot". */
@@ -59,7 +63,11 @@ export function useExternalAccountLimits(
       // a good snapshot with "no snapshot" and make the pill vanish because a
       // refresh failed. The cold read is where `null` legitimately means the
       // account has none; a refresh may only ever improve on what is cached.
-      if (refreshed) queryClient.setQueryData(key, refreshed);
+      //
+      // "Improve" is by the vendor's clock, not by arrival: a refresh that
+      // overlaps a turn streaming its own reading down can settle second with
+      // the older of the two, and this is the same entry the stream writes.
+      if (refreshed) cacheExternalAccountLimitsIfNewer(queryClient, key, refreshed);
     },
   });
 

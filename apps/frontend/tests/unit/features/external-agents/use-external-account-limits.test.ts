@@ -19,6 +19,8 @@ import type {
   ExternalAgentDescriptor,
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
+import { type QueryClient, useQueryClient } from '@tanstack/react-query';
+import { externalAccountLimitsKey } from '../../../../src/features/external-agents/queries';
 import { useExternalAccountLimits } from '../../../../src/features/external-agents/use-external-account-limits';
 import { act, flushAsyncRender, renderHook } from '../../../support/harness/render';
 
@@ -72,8 +74,10 @@ function descriptorFor(fingerprint: string): ExternalAgentDescriptor {
 const ACCOUNT_A = descriptorFor('account-a');
 const ACCOUNT_B = descriptorFor('account-b');
 
-function limitsFixture(usedPercent: number): ExternalAccountLimits {
-  return { targetId: 'codex', windows: [{ usedPercent }], observedAtMs: 1_787_000_000_000 };
+const OBSERVED_AT = 1_787_000_000_000;
+
+function limitsFixture(usedPercent: number, observedAtMs = OBSERVED_AT): ExternalAccountLimits {
+  return { targetId: 'codex', windows: [{ usedPercent }], observedAtMs };
 }
 
 afterEach(() => {
@@ -88,15 +92,19 @@ afterEach(() => {
  */
 function renderForAccount(descriptor: ExternalAgentDescriptor) {
   const painted: (ExternalAccountLimits | null | undefined)[] = [];
+  // Captured on the way past so a test can write to the same cache the stream's
+  // publish path writes to, without a second provider.
+  let queryClient!: QueryClient;
   const hook = renderHook(
     ({ descriptor: current }: { descriptor: ExternalAgentDescriptor }) => {
+      queryClient = useQueryClient();
       const state = useExternalAccountLimits(current);
       painted.push(state.limits);
       return state;
     },
     { initialProps: { descriptor } }
   );
-  return { ...hook, painted };
+  return { ...hook, painted, getQueryClient: () => queryClient };
 }
 
 describe('useExternalAccountLimits', () => {
@@ -177,6 +185,30 @@ describe('useExternalAccountLimits', () => {
     expect(result.current.refreshing).toBe(false);
   });
 
+  it('keeps a snapshot the turn streamed in while the refresh was still open', async () => {
+    const { result, getQueryClient } = renderForAccount(ACCOUNT_A);
+    pendingLoads[0]?.resolve(limitsFixture(40));
+    await flushAsyncRender();
+
+    act(() => {
+      result.current.refresh();
+    });
+    await flushAsyncRender();
+
+    // The running turn reports the vendor's own reading while the refresh probe
+    // is still closing — the same entry, from the other writer.
+    const streamed = limitsFixture(55, OBSERVED_AT + 60_000);
+    act(() => {
+      getQueryClient().setQueryData(externalAccountLimitsKey(ACCOUNT_A), streamed);
+    });
+
+    // The refresh settles second with the older of the two readings. Arrival
+    // order is not recency: the newer snapshot stays.
+    pendingRefreshes[0]?.resolve(limitsFixture(88));
+    await flushAsyncRender();
+    expect(result.current.limits).toEqual(streamed);
+  });
+
   it('shares one snapshot and one load between consumers of the same account', async () => {
     const { result } = renderHook(() => ({
       chip: useExternalAccountLimits(ACCOUNT_A),
@@ -197,9 +229,12 @@ describe('useExternalAccountLimits', () => {
     await flushAsyncRender();
     expect(result.current.pill.refreshing).toBe(true);
 
-    pendingRefreshes[0]?.resolve(limitsFixture(88));
+    // Dated after the cold read, the way a probe that actually ran is: the write
+    // is ordered by the vendor's clock, not by which request came back last.
+    const refreshed = limitsFixture(88, OBSERVED_AT + 60_000);
+    pendingRefreshes[0]?.resolve(refreshed);
     await flushAsyncRender();
-    expect(result.current.chip.limits).toEqual(limitsFixture(88));
-    expect(result.current.pill.limits).toEqual(limitsFixture(88));
+    expect(result.current.chip.limits).toEqual(refreshed);
+    expect(result.current.pill.limits).toEqual(refreshed);
   });
 });

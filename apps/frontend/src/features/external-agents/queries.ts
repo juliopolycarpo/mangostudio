@@ -86,6 +86,26 @@ export function externalAccountLimitsQueryOptions(descriptor: ExternalAgentDescr
 }
 
 /**
+ * Files a quota snapshot only if it is newer than what is already cached.
+ *
+ * Two writers reach one entry — a turn's stream and the user's refresh button —
+ * and they can be in flight at the same time. Ordering by the vendor's own
+ * `observedAtMs` rather than by arrival is what stops the slower of the two from
+ * reinstating a reading the faster one has already superseded. A missing entry
+ * and a cached `null` are both older than any snapshot: the "nothing read this
+ * yet" case is the one worth filling, and ties go to what is already there.
+ */
+export function cacheExternalAccountLimitsIfNewer(
+  queryClient: QueryClient,
+  key: readonly unknown[],
+  limits: ExternalAccountLimits
+): void {
+  const cached = queryClient.getQueryData<ExternalAccountLimits | null>(key);
+  if (cached && cached.observedAtMs >= limits.observedAtMs) return;
+  queryClient.setQueryData(key, limits);
+}
+
+/**
  * Files a quota snapshot the hub sent down a turn's stream.
  *
  * The cold read never stales and nothing polls, so without this a header that
@@ -112,11 +132,5 @@ export function publishExternalAccountLimits(
   const descriptor = listed?.agents.find((agent) => agent.targetId === limits.targetId);
   if (!descriptor) return;
 
-  const key = externalAccountLimitsKey(descriptor);
-  const cached = queryClient.getQueryData<ExternalAccountLimits | null>(key);
-  // A missing entry and a cached `null` are both older than any snapshot: the
-  // "header mounted before the turn" case is the one worth fixing, and it is
-  // exactly the one with nothing cached.
-  if (cached && cached.observedAtMs >= limits.observedAtMs) return;
-  queryClient.setQueryData(key, limits);
+  cacheExternalAccountLimitsIfNewer(queryClient, externalAccountLimitsKey(descriptor), limits);
 }
