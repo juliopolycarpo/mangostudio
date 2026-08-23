@@ -652,6 +652,79 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
   });
 });
 
+describe('registerFrontend with embedded assets, over a listening server', () => {
+  /**
+   * The embedded branch is the shipped binary, and it is the branch that
+   * registers one literal route per manifest key. `.listen()` promotes those
+   * into Bun's native route table, which is the only place it can be settled
+   * whether an encoded spelling reaches its literal route or falls through to
+   * the fallback — `app.handle()` cannot answer that, and the static-wildcard
+   * regression on this branch is the standing proof.
+   */
+  async function startEmbeddedServer(): Promise<{
+    get: (path: string) => Promise<Response>;
+    stop: () => Promise<void>;
+  }> {
+    writeFileSync(join(assetDir, 'favicon.ico'), UPLOAD_BYTES);
+    writeFileSync(join(assetDir, 'config.js'), RUNTIME_CONFIG_JS);
+    registerEmbeddedFrontend({
+      '/index.html': join(assetDir, 'index.html'),
+      '/assets/index-AbCd1234.js': join(assetDir, 'index-AbCd1234.js'),
+      '/favicon.ico': join(assetDir, 'favicon.ico'),
+      '/config.js': join(assetDir, 'config.js'),
+    });
+
+    const app = new Elysia().error(NotFound, ({ request }) => frontendNotFound(request));
+    registerFrontend(app as unknown as App, '/nonexistent-frontend-dir');
+    await app.modules;
+
+    app.listen({ hostname: '127.0.0.1', port: 0, reusePort: false });
+    const origin = `http://127.0.0.1:${app.server?.port}`;
+    return {
+      get: (path: string) => fetch(`${origin}${path}`),
+      stop: async () => {
+        await app.stop();
+      },
+    };
+  }
+
+  test('serves a root file whose extension is percent-encoded', async () => {
+    const server = await startEmbeddedServer();
+    try {
+      const response = await server.get('/favicon%2eico');
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('public, max-age=86400');
+      expect(await response.text()).toBe(UPLOAD_BYTES);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('keeps an encoded /config.js on its revalidating directive', async () => {
+    const server = await startEmbeddedServer();
+    try {
+      const response = await server.get('/%63onfig.js');
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-cache');
+      expect(await response.text()).toBe(RUNTIME_CONFIG_JS);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('still 404s an encoded path that names no embedded file', async () => {
+    const server = await startEmbeddedServer();
+    try {
+      expect((await server.get('/never-built%2esvg')).status).toBe(404);
+      expect((await server.get('/assets/..%2fconfig.js')).status).toBe(404);
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
 describe('registerFrontend without embedded assets', () => {
   test('keeps the API-only 404 behaviour when no frontend directory exists', async () => {
     const get = buildApp();
