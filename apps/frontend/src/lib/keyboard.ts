@@ -15,6 +15,6 @@ export function newChatShortcutHint(): string {
  */
 export function isNewChatShortcut(event: KeyboardEvent): boolean {
   if (event.isComposing || event.keyCode === 229) return false;
-  if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return false;
+  if (event.metaKey === event.ctrlKey || event.shiftKey || event.altKey) return false;
   return event.key === 'n' || event.key === 'N';
 }

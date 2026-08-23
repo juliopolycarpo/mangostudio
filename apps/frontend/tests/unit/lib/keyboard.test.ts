@@ -32,6 +32,7 @@ describe('isNewChatShortcut', () => {
     expect(isNewChatShortcut(keydown({ ctrlKey: true, shiftKey: true }))).toBe(false);
     expect(isNewChatShortcut(keydown({ metaKey: true, altKey: true }))).toBe(false);
     expect(isNewChatShortcut(keydown({ ctrlKey: true, key: 'm' }))).toBe(false);
+    expect(isNewChatShortcut(keydown({ ctrlKey: true, metaKey: true }))).toBe(false);
   });
 
   it('stays out of an IME composition session', () => {
