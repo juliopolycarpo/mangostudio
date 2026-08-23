@@ -6,7 +6,12 @@
 
 import { describe, expect, it } from 'bun:test';
 import type { Chat } from '@mangostudio/shared';
-import { chatGroupLabel, groupChatsByDate } from '@/features/sidebar/lib/group-chats';
+import {
+  chatGroupLabel,
+  groupChatsByDate,
+  nextLocalMidnight,
+  startOfLocalDay,
+} from '@/features/sidebar/lib/group-chats';
 
 const LABELS = { today: 'Today', yesterday: 'Yesterday', thisWeek: 'This week' };
 
@@ -86,6 +91,35 @@ describe('groupChatsByDate', () => {
 
   it('returns no groups for no chats', () => {
     expect(groupChatsByDate([], NOW)).toEqual([]);
+  });
+});
+
+describe('nextLocalMidnight', () => {
+  const dayStartOf = (ms: number) => startOfLocalDay(ms).getTime();
+
+  it('lands on the start of the following calendar day', () => {
+    const next = nextLocalMidnight(dayStartOf(local(2026, 7, 23, 12, 0, 0)));
+    expect(new Date(next).getDate()).toBe(24);
+    expect(next).toBe(dayStartOf(next));
+  });
+
+  it('rolls the month and the year over', () => {
+    const next = new Date(nextLocalMidnight(dayStartOf(local(2026, 11, 31, 23, 0, 0))));
+    expect([next.getFullYear(), next.getMonth(), next.getDate()]).toEqual([2027, 0, 1]);
+  });
+
+  it('stays on the day boundary for a full year, whatever the offset does', () => {
+    // A calendar day, not 24 hours: a DST transition makes a local day 23 or 25
+    // hours long, and a fixed offset would drift off the boundary and stay off
+    // it for the rest of the year in any zone that observes one.
+    let cursor = dayStartOf(local(2026, 0, 1, 12, 0, 0));
+    for (let day = 0; day < 366; day += 1) {
+      const next = nextLocalMidnight(cursor);
+      expect(next).toBeGreaterThan(cursor);
+      expect(next).toBe(dayStartOf(next));
+      cursor = next;
+    }
+    expect(new Date(cursor).getFullYear()).toBe(2027);
   });
 });
 

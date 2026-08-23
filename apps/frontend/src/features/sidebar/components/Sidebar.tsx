@@ -32,6 +32,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
 import { newChatShortcutHint } from '@/lib/keyboard';
+import { useLocalDayStart } from '../hooks/use-local-day-start';
 import { filterChats } from '../lib/filter-chats';
 import { chatGroupLabel, groupChatsByDate } from '../lib/group-chats';
 import { runnerBadge } from '../lib/runner-badge';
@@ -149,12 +150,17 @@ export function Sidebar({
 
   const badgeLabels = t.sidebar.runner;
   const groupLabels = t.sidebar.groups;
+  // The day the buckets are relative to, as a dependency rather than a
+  // `new Date()` read inside: the shell stays mounted across midnight, and a
+  // `now` captured by the memo would hold yesterday's headings over today's
+  // chats until something unrelated invalidated it.
+  const dayStartMs = useLocalDayStart();
   // Memoized because `deferredQuery` is deferred: without this, React renders
   // once urgently with the old query and once more with the new one, and both
   // passes redo the whole filter, the bucketing and one `Intl.DateTimeFormat`
   // per month group — so the deferral would cost a second pass and buy nothing.
   const { visibleCount, groups } = useMemo(() => {
-    const now = new Date();
+    const now = new Date(dayStartMs);
     const visible = filterChats(
       chats,
       deferredQuery,
@@ -167,7 +173,7 @@ export function Sidebar({
         label: chatGroupLabel(group, groupLabels, locale, now),
       })),
     };
-  }, [chats, deferredQuery, badgeLabels, groupLabels, locale]);
+  }, [chats, deferredQuery, badgeLabels, groupLabels, locale, dayStartMs]);
   const searching = deferredQuery.trim().length > 0;
 
   return (

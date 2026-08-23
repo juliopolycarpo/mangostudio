@@ -13,9 +13,21 @@ export type ChatGroup =
 
 const DAY_MS = 86_400_000;
 
-function startOfLocalDay(ms: number): Date {
+/** Local midnight of the day `ms` falls in. */
+export function startOfLocalDay(ms: number): Date {
   const date = new Date(ms);
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+/**
+ * The local midnight after the one `dayStartMs` is.
+ *
+ * Built by adding a calendar day rather than 24 hours, so the DST days that are
+ * 23 or 25 hours long still land on midnight instead of an hour either side.
+ */
+export function nextLocalMidnight(dayStartMs: number): number {
+  const day = new Date(dayStartMs);
+  return new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
 }
 
 /**
