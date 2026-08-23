@@ -79,8 +79,12 @@ export function Header({
         >
           <Menu size={ICON_LG} />
         </Button>
+        {/* `min-w-0` without `shrink-0`: the runner name is the one thing here
+            long enough to push the right-hand controls off a 320px screen, and
+            the selector's own label already truncates. Pinning it against
+            shrinking made `min-w-0` inert and the header overflowed instead. */}
         {currentPage !== 'studio' && runnerSelector ? (
-          <div className="min-w-0 shrink-0 max-w-[60vw] sm:max-w-none">{runnerSelector}</div>
+          <div className="min-w-0 max-w-[60vw] sm:max-w-none">{runnerSelector}</div>
         ) : null}
         {workspaceContext ? (
           <div className="hidden min-w-0 flex-1 md:flex">{workspaceContext}</div>

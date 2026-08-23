@@ -109,11 +109,16 @@ export function QuotaPillView({
       title={labels.refresh}
       data-testid="header-quota-pill"
       data-verdict={verdict.kind}
-      className="shrink-0 cursor-pointer disabled:cursor-default"
+      className="min-w-0 shrink-0 cursor-pointer disabled:cursor-default"
     >
-      <Badge variant={variant} className="gap-1.5 normal-case tracking-normal font-mono">
+      <Badge variant={variant} className="max-w-full gap-1.5 normal-case tracking-normal font-mono">
         <RefreshCw size={10} className={refreshing ? 'animate-spin' : undefined} />
-        {body}
+        {/* Below `sm` the readout collapses to its icon and the badge's own
+            colour, which is what the warning states are actually carrying — the
+            longest body ("quota exhausted, resets in …") is wider than the space
+            a 320px header has left after the runner pill and the controls. The
+            words stay in the accessibility tree at every width. */}
+        <span className="min-w-0 truncate max-sm:sr-only">{body}</span>
       </Badge>
     </button>
   );
