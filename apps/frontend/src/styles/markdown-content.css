@@ -69,7 +69,7 @@
 }
 
 .markdown-content code {
-  font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+  font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.875em;
   background: var(--color-surface-container-high);
   padding: 0.15em 0.4em;

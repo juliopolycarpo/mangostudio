@@ -323,6 +323,11 @@ async function buildFrontend(options: BuildFrontendOptions = {}): Promise<void> 
         'process.env.MANGO_API_URL': JSON.stringify(apiUrlOverride),
       },
       metafile: true,
+      // Self-hosted fonts live un-hashed in `public/fonts/` (copied into dist/
+      // below) so the `@font-face` URLs and the preload `<link>`s in index.html
+      // can share one stable path. Without this the CSS bundler tries to
+      // resolve the absolute `url("/fonts/…")` at build time and fails.
+      external: ['/fonts/*'],
       // Auto-memoization. `@vitejs/plugin-react` did not run it, so this is a
       // behavior change rather than parity, and nothing in the test suite covers
       // the transform. Off in dev so the loop stays fast.

@@ -1,30 +1,69 @@
 @import "tailwindcss";
 @import "./styles/markdown-content.css";
 
+/* ── Self-hosted fonts (variable, latin subset — covers pt-BR) ── */
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("/fonts/manrope-latin-wght.woff2") format("woff2-variations");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/inter-latin-wght.woff2") format("woff2-variations");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/fonts/jetbrains-mono-latin-wght.woff2") format("woff2-variations");
+}
+
 @theme {
-  --color-surface-dim: #131313;
-  --color-primary: #c0c1ff;
-  --color-primary-container: #4b4dd8;
-  --color-on-primary: #1000a9;
-  --color-surface-container-low: #1c1b1b;
-  --color-surface-container-highest: #353534;
-  --color-surface-container-high: #2a2a2a;
-  --color-surface-container-lowest: #0e0e0e;
-  --color-on-surface: #e5e2e1;
-  --color-on-surface-variant: #c7c4d8;
-  --color-outline-variant: #464555;
-  --color-surface: #131313;
-  --color-background: #131313;
-  --color-on-background: #e5e2e1;
+  /* Dark (default): warm blue-free near-black neutrals, mango accent. */
+  --color-surface-dim: #141210;
+  --color-primary: #f5a623;
+  --color-primary-container: #3f2c08;
+  --color-on-primary: #241600;
+  --color-on-primary-container: #ffd9a0;
+  --color-accent-muted: #f5a62326;
+  --color-tertiary: #6fd0bf;
+  --color-surface-container: #201d1a;
+  --color-surface-container-low: #1a1815;
+  --color-surface-container-highest: #322e29;
+  --color-surface-container-high: #262320;
+  --color-surface-container-lowest: #0d0c0a;
+  --color-on-surface: #ece7df;
+  --color-on-surface-variant: #a8a196;
+  --color-outline: #6e675b;
+  --color-outline-variant: #3a362f;
+  --color-surface: #141210;
+  --color-background: #141210;
+  --color-on-background: #ece7df;
 
   --color-error: #f87171;
   --color-on-error: #ffffff;
-  --color-warning: #fbbf24;
+  --color-warning: #ffd166;
   --color-success: #4ade80;
 
-  --font-headline: "Manrope", sans-serif;
-  --font-body: "Inter", sans-serif;
-  --font-label: "Inter", sans-serif;
+  /* Harness identity (runner dots and badges) */
+  --color-agent-mango: #f5a623;
+  --color-agent-claude: #e0836a;
+  --color-agent-codex: #5cc8e8;
+  --color-agent-cursor: #a78bfa;
+  --color-agent-generic: #8b8579;
+
+  --font-headline: "Manrope", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-label: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --animate-slide: slide 1s ease-in-out infinite alternate;
   --animate-blink: blink 1s step-end infinite;
@@ -51,48 +90,68 @@
 
 /* ── Theme-aware glass & overlay tokens (dark defaults) ── */
 :root {
-  --glass-bg: rgba(53, 53, 52, 0.6);
-  --glass-surface: rgba(14, 14, 14, 0.6);
-  --glass-surface-subtle: rgba(14, 14, 14, 0.5);
-  --glass-elevated: rgba(28, 27, 27, 0.85);
-  --glass-border: rgba(255, 255, 255, 0.1);
-  --glass-ring: rgba(255, 255, 255, 0.05);
+  --glass-bg: rgba(50, 46, 41, 0.6);
+  --glass-surface: rgba(13, 12, 10, 0.6);
+  --glass-surface-subtle: rgba(13, 12, 10, 0.5);
+  --glass-elevated: rgba(26, 24, 21, 0.85);
+  --glass-border: rgba(255, 246, 230, 0.1);
+  --glass-ring: rgba(255, 246, 230, 0.05);
   --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-  --gradient-primary: linear-gradient(135deg, #c0c1ff 0%, #4b4dd8 100%);
+  --gradient-primary: linear-gradient(135deg, #f5a623 0%, #d97706 100%);
+}
+
+/* ── Motion tokens (plain custom properties: referenced from CSS and `motion` variants) ── */
+:root {
+  --duration-quick: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
 }
 
 /* ── Light theme ── */
 [data-theme="light"] {
-  /* M3 light palette */
-  --color-surface-dim: #ededf4;
-  --color-primary: #4b4dd8;
-  --color-primary-container: #e0e0ff;
+  /* Warm light palette */
+  --color-surface-dim: #eeeae3;
+  --color-primary: #8f5a00;
+  --color-primary-container: #ffe3b3;
   --color-on-primary: #ffffff;
-  --color-surface-container-low: #f3f3f3;
-  --color-surface-container-highest: #e0e0e0;
-  --color-surface-container-high: #e8e8e8;
+  --color-on-primary-container: #5c3d00;
+  --color-accent-muted: #f0a02033;
+  --color-tertiary: #0c7d6c;
+  --color-surface-container: #eee9e1;
+  --color-surface-container-low: #f4f1ea;
+  --color-surface-container-highest: #ddd7cc;
+  --color-surface-container-high: #e7e2d9;
   --color-surface-container-lowest: #ffffff;
-  --color-on-surface: #1c1b1b;
-  --color-on-surface-variant: #46464f;
-  --color-outline-variant: #c6c5d0;
-  --color-surface: #faf9f9;
-  --color-background: #faf9f9;
-  --color-on-background: #1c1b1b;
+  --color-on-surface: #1e1b16;
+  --color-on-surface-variant: #56514a;
+  --color-outline: #837d72;
+  --color-outline-variant: #d5cfc4;
+  --color-surface: #faf8f4;
+  --color-background: #faf8f4;
+  --color-on-background: #1e1b16;
 
   --color-error: #dc2626;
   --color-on-error: #ffffff;
-  --color-warning: #d97706;
-  --color-success: #16a34a;
+  --color-warning: #b45309;
+  --color-success: #15803d;
+
+  --color-agent-mango: #b36b00;
+  --color-agent-claude: #b9553a;
+  --color-agent-codex: #1f7a99;
+  --color-agent-cursor: #6d4fd8;
+  --color-agent-generic: #736d63;
 
   /* Glass & overlay overrides */
-  --glass-bg: rgba(255, 255, 255, 0.7);
-  --glass-surface: rgba(255, 255, 255, 0.65);
-  --glass-surface-subtle: rgba(255, 255, 255, 0.55);
-  --glass-elevated: rgba(255, 255, 255, 0.9);
-  --glass-border: rgba(0, 0, 0, 0.08);
-  --glass-ring: rgba(0, 0, 0, 0.04);
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-  --gradient-primary: linear-gradient(135deg, #5b5deb 0%, #3537a8 100%);
+  --glass-bg: rgba(255, 253, 248, 0.7);
+  --glass-surface: rgba(255, 253, 248, 0.65);
+  --glass-surface-subtle: rgba(255, 253, 248, 0.55);
+  --glass-elevated: rgba(255, 253, 248, 0.9);
+  --glass-border: rgba(40, 30, 10, 0.08);
+  --glass-ring: rgba(40, 30, 10, 0.04);
+  --glass-shadow: 0 8px 32px rgba(30, 20, 5, 0.1);
+  --gradient-primary: linear-gradient(135deg, #d98a0e 0%, #8f5a00 100%);
 }
 
 body {
@@ -131,6 +190,34 @@ body {
   outline: 1px solid var(--glass-ring);
   overflow: hidden;
   z-index: 100;
+}
+
+/* ── Mono micro-labels & terminal-style chips ── */
+/* Layered so Tailwind utilities can override individual properties at call sites. */
+@layer components {
+  .micro-label {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem; /* 11px */
+    line-height: 1rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-on-surface-variant);
+  }
+
+  .terminal-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem; /* 12px */
+    line-height: 1.25rem;
+    padding: 0.125rem 0.5rem;
+    border: 1px solid var(--color-outline-variant);
+    border-radius: 0.375rem;
+    background: var(--color-surface-container-low);
+    color: var(--color-on-surface-variant);
+  }
 }
 
 /* ── Tool identity avatars ── */
