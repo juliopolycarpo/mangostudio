@@ -34,9 +34,14 @@ describe('bun lane resolver aliases', () => {
   it('resolves motion/react to the synchronous stub', async () => {
     const motionModule = (await import('motion/react')) as Record<string, unknown>;
 
-    // The real package exports hundreds of names; the stub exports two. Naming
-    // them beats counting, so a stub that grows an export does not fail this.
-    expect(Object.keys(motionModule).sort()).toEqual(['AnimatePresence', 'motion']);
+    // The real package exports hundreds of names; the stub exports the handful
+    // the app actually imports. Naming them beats counting, so the assertion
+    // says which ones rather than how many.
+    expect(Object.keys(motionModule).sort()).toEqual([
+      'AnimatePresence',
+      'motion',
+      'useReducedMotion',
+    ]);
   });
 
   it('resolves @/lib/auth-client to the stub, which reports signed out by default', async () => {

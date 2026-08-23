@@ -1,3 +1,4 @@
+import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { useNavigate } from '@tanstack/react-router';
 import { useCallback } from 'react';
 import type { useChats } from '@/features/chat/hooks/use-chats';
@@ -14,6 +15,24 @@ export function useChatRouteActions({ chats, navigate }: UseChatRouteActionsPara
     await chats.createChat();
     await navigate({ to: '/' });
   }, [chats, navigate]);
+
+  /**
+   * A chat that starts on a chosen runner.
+   *
+   * The runner is written against the id `createChat` just returned, never
+   * through the selector: that one persists against whatever chat is
+   * *currently* selected, and React has not observed the new one yet when this
+   * resolves — so routing it that way would rewrite the runner of the chat the
+   * user just left.
+   */
+  const handleNewChatWithRunner = useCallback(
+    async (runner: ChatRunnerConfiguration) => {
+      const chat = await chats.createChat();
+      await chats.updateChatRunner(chat.id, runner);
+      await navigate({ to: '/' });
+    },
+    [chats, navigate]
+  );
 
   const handleUpdateChatModel = useCallback(
     async (chatId: string, model: string) => {
@@ -60,6 +79,7 @@ export function useChatRouteActions({ chats, navigate }: UseChatRouteActionsPara
 
   return {
     handleNewChat,
+    handleNewChatWithRunner,
     handleUpdateChatModel,
     handleSelectChat,
     handleUpdateChatTitle,

@@ -10,6 +10,8 @@ import { Header } from '@/components/layout/Header';
 import { Layout } from '@/components/layout/Layout';
 import { Spinner } from '@/components/ui/Spinner';
 import { chatListQueryOptions, messagesQueryOptions } from '@/features/chat/queries';
+import { CommandPaletteHost } from '@/features/command-palette/CommandPaletteHost';
+import { useCommandPalette } from '@/features/command-palette/use-command-palette';
 import { ExternalDisclosureGate } from '@/features/external-agents/ExternalDisclosureGate';
 import { ExternalWorkspaceTrustGate } from '@/features/external-agents/ExternalWorkspaceTrustGate';
 import { HeaderQuotaPill } from '@/features/external-agents/HeaderQuotaPill';
@@ -59,11 +61,12 @@ function AuthenticatedLayout() {
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const commandPalette = useCommandPalette();
 
-  // The one global shortcut, on the shell that owns the action. The command
-  // palette will grow this into a registry; until then a registry of one is
-  // just indirection. Some browsers reserve mod+N for themselves and never
-  // deliver it — the sidebar button stays the reliable path.
+  // New chat keeps its own chord rather than living in the palette's registry:
+  // it is the one action worth reaching without reading a list first. Some
+  // browsers reserve mod+N for themselves and never deliver it — the sidebar
+  // button stays the reliable path.
   //
   // Read through a ref, not a dependency: `useChats()` hands back a fresh object
   // every render, so `handleNewChat` never memoizes and a dependency on it would
@@ -127,6 +130,7 @@ function AuthenticatedLayout() {
             ) : undefined
           }
           quotaPill={activePage === 'chat' ? <HeaderQuotaPill /> : undefined}
+          onOpenCommandPalette={commandPalette.open}
           onMobileMenuToggle={() => setIsMobileSidebarOpen((v) => !v)}
         />
 
@@ -147,6 +151,7 @@ function AuthenticatedLayout() {
             rather than to the view. */}
         <ExternalWorkspaceTrustGate />
         <ExternalDisclosureGate />
+        <CommandPaletteHost open={commandPalette.isOpen} onClose={commandPalette.close} />
       </Layout>
     </AppContext>
   );

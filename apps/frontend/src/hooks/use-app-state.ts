@@ -123,6 +123,7 @@ export function useAppState() {
     restrictToolsToWorkdirOverride: currentChat?.restrictToolsToWorkdir ?? null,
     updateChatRestrictToolsToWorkdir: chats.updateChatRestrictToolsToWorkdir,
     handleNewChat: chatActions.handleNewChat,
+    handleNewChatWithRunner: chatActions.handleNewChatWithRunner,
     handleUpdateChatModel: chatActions.handleUpdateChatModel,
     handleUpdateChatTitle: chatActions.handleUpdateChatTitle,
     handleDeleteChat: chatActions.handleDeleteChat,

@@ -31,9 +31,9 @@ import { Pin, Server, Timer, Trash2, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatMessage } from '@/lib/i18n-format';
+import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
 import { purgeBackup, undoPropagation } from '../api';
-import { formatBytes, formatRelativeTime } from '../format';
+import { formatBytes } from '../format';
 import { backupUsageQueryOptions, libraryKeys } from '../queries';
 import { LibraryPageState } from './LibraryPageState';
 

@@ -19,8 +19,8 @@ import type {
 } from '@mangostudio/shared/library';
 import { Server } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatMessage } from '@/lib/i18n-format';
-import { formatRelativeTime, hashPrefix } from '../format';
+import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
+import { hashPrefix } from '../format';
 import {
   eliminatesSelectedContentGroup,
   isRemovable,

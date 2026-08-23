@@ -1,11 +1,11 @@
 /**
- * The chord predicate behind the one global shortcut. Events are built as plain
- * objects rather than `KeyboardEvent` because `isComposing` is readonly on the
- * real constructor and cannot be set from a test.
+ * The chord predicates behind the two global shortcuts. Events are built as
+ * plain objects rather than `KeyboardEvent` because `isComposing` is readonly
+ * on the real constructor and cannot be set from a test.
  */
 
 import { describe, expect, it } from 'bun:test';
-import { isNewChatShortcut } from '../../../src/lib/keyboard';
+import { isCommandPaletteShortcut, isNewChatShortcut } from '../../../src/lib/keyboard';
 
 function keydown(overrides: Partial<KeyboardEvent>): KeyboardEvent {
   return {
@@ -44,5 +44,35 @@ describe('isNewChatShortcut', () => {
   it('still fires from inside an editable target — the composer is the point', () => {
     const fromTextarea = keydown({ ctrlKey: true, target: document.createElement('textarea') });
     expect(isNewChatShortcut(fromTextarea)).toBe(true);
+  });
+});
+
+describe('isCommandPaletteShortcut', () => {
+  it('accepts mod+K on either platform, in either case', () => {
+    expect(isCommandPaletteShortcut(keydown({ metaKey: true, key: 'k' }))).toBe(true);
+    expect(isCommandPaletteShortcut(keydown({ ctrlKey: true, key: 'k' }))).toBe(true);
+    expect(isCommandPaletteShortcut(keydown({ ctrlKey: true, key: 'K' }))).toBe(true);
+  });
+
+  it('claims nothing but its own chord, so plain typing is untouched', () => {
+    expect(isCommandPaletteShortcut(keydown({ key: 'k' }))).toBe(false);
+    expect(isCommandPaletteShortcut(keydown({ ctrlKey: true, shiftKey: true, key: 'k' }))).toBe(
+      false
+    );
+    expect(isCommandPaletteShortcut(keydown({ ctrlKey: true }))).toBe(false);
+  });
+
+  it('does not collide with the new-chat chord', () => {
+    expect(isCommandPaletteShortcut(keydown({ ctrlKey: true, key: 'n' }))).toBe(false);
+    expect(isNewChatShortcut(keydown({ ctrlKey: true, key: 'k' }))).toBe(false);
+  });
+
+  it('stays out of an IME composition session', () => {
+    expect(isCommandPaletteShortcut(keydown({ ctrlKey: true, key: 'k', isComposing: true }))).toBe(
+      false
+    );
+    expect(isCommandPaletteShortcut(keydown({ ctrlKey: true, key: 'k', keyCode: 229 }))).toBe(
+      false
+    );
   });
 });

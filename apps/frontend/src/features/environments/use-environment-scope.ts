@@ -49,6 +49,15 @@ export function validateEnvironmentSearch(raw: Record<string, unknown>): Environ
     : {};
 }
 
+/**
+ * The scope params for one machine. `local` is the default, so it stays out of
+ * the URL entirely — shared with the command palette so both ways of scoping
+ * the umbrella produce the same address.
+ */
+export function environmentScopeSearch(environmentId: string): EnvironmentScopeSearch {
+  return environmentId === LOCAL_ENVIRONMENT_ID ? {} : { environmentId };
+}
+
 export function useEnvironmentScope(): EnvironmentScope {
   const navigate = useNavigate();
   const search = useSearch({ strict: false }) as EnvironmentScopeSearch;
@@ -74,10 +83,10 @@ export function useEnvironmentScope(): EnvironmentScope {
         to: '.',
         search: (current: EnvironmentScopeSearch) => ({
           ...current,
-          // `local` is the default, so it stays out of the URL entirely.
-          ...(nextEnvironmentId === LOCAL_ENVIRONMENT_ID
-            ? { environmentId: undefined }
-            : { environmentId: nextEnvironmentId }),
+          // Spread over an explicit `undefined` so switching back to `local`
+          // clears the param rather than leaving the previous machine's id.
+          environmentId: undefined,
+          ...environmentScopeSearch(nextEnvironmentId),
         }),
         // Push so Back restores the machine the user was looking at before.
         replace: false,

@@ -1,12 +1,14 @@
 import { useNavigate } from '@tanstack/react-router';
-import { Menu, Plus, Settings } from 'lucide-react';
+import { Menu, Plus, Search, Settings } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { KbdHint } from '@/components/ui/KbdHint';
 import { useToast } from '@/components/ui/Toast';
 import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { useI18n } from '@/hooks/use-i18n';
 import { authClient } from '@/lib/auth-client';
 import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
+import { commandPaletteShortcutHint } from '@/lib/keyboard';
 
 export interface HeaderProps {
   currentPage: AppPage;
@@ -26,6 +28,7 @@ export interface HeaderProps {
   workspaceContext?: ReactNode;
   /** External-runner quota pill; a node so the header stays vendor-agnostic. */
   quotaPill?: ReactNode;
+  onOpenCommandPalette: () => void;
   onMobileMenuToggle?: () => void;
 }
 
@@ -36,6 +39,7 @@ export function Header({
   runnerSelector,
   workspaceContext,
   quotaPill,
+  onOpenCommandPalette,
   onMobileMenuToggle,
 }: HeaderProps) {
   const navigate = useNavigate();
@@ -92,6 +96,20 @@ export function Header({
       </div>
       <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-2">
         {quotaPill}
+        {/* The palette's discoverable half. The chord is the fast path, but
+            Firefox and Safari both reserve mod+K for their own chrome, so a
+            visible affordance is the only one every browser delivers. Below
+            `sm` it collapses to the magnifier: the chip is a desktop promise. */}
+        <Button
+          variant="secondary"
+          onClick={onOpenCommandPalette}
+          aria-label={t.commandPalette.open}
+          data-testid="command-palette-trigger"
+          className="shrink-0 gap-2 px-2 font-medium text-on-surface-variant sm:px-3"
+        >
+          <Search size={ICON_MD} />
+          <KbdHint keys={commandPaletteShortcutHint()} className="hidden md:inline-flex" />
+        </Button>
         {currentPage === 'chat' && (
           <Button
             variant="secondary"

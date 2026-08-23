@@ -25,6 +25,7 @@ function buildProps(
     currentPage: 'chat',
     onNewChat: jest.fn(),
     onNavigateToSettings: jest.fn(),
+    onOpenCommandPalette: jest.fn(),
     ...overrides,
   };
 }
