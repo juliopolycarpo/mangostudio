@@ -118,7 +118,11 @@ function AuthenticatedLayout() {
           onNavigateToSettings={() => app.handleNavigate('settings')}
           runnerSelector={<RunnerSelectorContainer />}
           workspaceContext={
-            activePage === 'chat' && app.currentChatId ? (
+            // Gated on a workdir for the same reason the workspace rail gates the
+            // Git panel on one: without it the breadcrumb still pays for a
+            // `git/state` request and a realtime subscription per chat, and then
+            // renders nothing because there is no repository to name.
+            activePage === 'chat' && app.currentChatId && app.currentWorkdir ? (
               <WorkspaceBreadcrumb chatId={app.currentChatId} workdir={app.currentWorkdir} />
             ) : undefined
           }

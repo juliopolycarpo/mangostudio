@@ -17,6 +17,12 @@ import { workdirBasename } from '@/lib/paths';
 interface WorkspaceBreadcrumbProps {
   /** Must be a real chat id — the caller gates the mount on one existing. */
   chatId: string;
+  /**
+   * The chat's workdir. The caller gates the mount on one, the same way the
+   * workspace rail gates its Git panel: without a workdir the hooks below still
+   * cost a `git/state` request and a topic subscription for a render that ends
+   * in `null`.
+   */
   workdir: string | null;
 }
 
