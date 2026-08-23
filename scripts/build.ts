@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 import { createTurboBuildCommand, selectBuildWorkspaces } from './lib/build';
@@ -87,6 +87,53 @@ async function buildFrontendSidecar(dryRun: boolean): Promise<void> {
   if (result.exitCode !== 0) {
     fatal('Frontend build failed during standalone binary packaging.');
   }
+}
+
+/**
+ * Move `apps/frontend/dist` aside so the sidecar rebuild starts from nothing,
+ * with a guarantee the previous bundle comes back if no new one is published.
+ * A dev server may be serving that directory, and losing it to a failed build
+ * is exactly what `publishDist` in `apps/frontend/build.ts` exists to prevent.
+ *
+ * `buildFrontendSidecar` reports failure through `fatal()` — `process.exit`,
+ * not a throw — so the restore is armed on process exit as well as handed back
+ * for the throwing path. A successful publish leaves a complete new `dist/`
+ * (the frontend build swaps it in by rename), in which case restore keeps the
+ * new one and drops the copy.
+ */
+function withFrontendDistAside(
+  frontendDist: string,
+  dryRun: boolean
+): { restore(): void; discard(): void } {
+  if (dryRun || !existsSync(frontendDist)) {
+    // Nothing to set aside, so nothing to restore or discard.
+    const noop = (): void => undefined;
+    return { restore: noop, discard: noop };
+  }
+  const aside = `${frontendDist}.aside-${process.pid}`;
+  rmSync(aside, { recursive: true, force: true });
+  renameSync(frontendDist, aside);
+  let settled = false;
+  const restore = (): void => {
+    if (settled) return;
+    settled = true;
+    process.off('exit', restore);
+    if (existsSync(frontendDist)) {
+      rmSync(aside, { recursive: true, force: true });
+    } else {
+      renameSync(aside, frontendDist);
+    }
+  };
+  process.on('exit', restore);
+  return {
+    restore,
+    discard(): void {
+      if (settled) return;
+      settled = true;
+      process.off('exit', restore);
+      rmSync(aside, { recursive: true, force: true });
+    },
+  };
 }
 
 /**
@@ -510,16 +557,24 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
   console.log(`📁 Output directory: ${outDir}`);
   console.log('---');
 
-  // Pruned before the sidecar build, not trusted to the build itself: a Turbo
+  // Cleared before the sidecar build, not trusted to the build itself: a Turbo
   // cache restore lays its outputs over whatever is already in `dist/` without
   // deleting extras, so repeated local binary builds embedded assets from
   // superseded builds (measured: 58 embedded files where a clean tree gives 57,
   // including a chunk whose source had been reverted). CI and releases build
   // from a clean checkout and never saw it; this makes a local binary equally
-  // faithful. A cache hit repopulates the directory in full, so this costs
-  // nothing when nothing changed.
-  if (!options.dryRun) rmSync(frontendDist, { recursive: true, force: true });
-  await buildFrontendSidecar(options.dryRun);
+  // faithful. Set aside rather than deleted — a failed or interrupted sidecar
+  // build must not leave a dev server that was serving this directory with
+  // nothing, which is the same transaction `publishDist` in
+  // `apps/frontend/build.ts` implements for the same reason.
+  const distAside = withFrontendDistAside(frontendDist, options.dryRun);
+  try {
+    await buildFrontendSidecar(options.dryRun);
+  } catch (error) {
+    distAside.restore();
+    throw error;
+  }
+  distAside.discard();
   if (options.dryRun) {
     console.log('   (dry run) Would generate embedded frontend modules and compile them in');
   } else {
