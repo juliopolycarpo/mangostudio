@@ -400,6 +400,38 @@ function assertValidAllowedOrigins(origins: string[]): void {
   );
 }
 
+/**
+ * Fails before the server binds with a `baseURL` Better Auth cannot reason about.
+ *
+ * Better Auth derives more than a link target from this value: the `__Secure-`
+ * cookie prefix comes from whether it starts with `https://`, and it seeds the
+ * origins a request is checked against. A value that is not an absolute URL
+ * mis-derives both without ever throwing — `localhost:3001` parses, with
+ * `localhost:` as its protocol and an empty hostname — so a login that silently
+ * never establishes a session is the first symptom the operator sees.
+ *
+ * Only the parts Better Auth reads are checked. A path is explicitly allowed:
+ * `basePath` is appended to this value, so a subpath deployment
+ * (`https://example.com/mango`) is a legitimate configuration.
+ */
+function assertValidAuthUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new CliError(
+      `Invalid auth.url (BETTER_AUTH_URL): "${url}" is not a URL. ` +
+        'It must be an absolute URL such as https://studio.example.com.'
+    );
+  }
+  if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.hostname === '') {
+    throw new CliError(
+      `Invalid auth.url (BETTER_AUTH_URL): "${url}" must use http:// or https:// and name a host. ` +
+        'It must be an absolute URL such as https://studio.example.com.'
+    );
+  }
+}
+
 /** Fails before Better Auth can initialize with an unsafe secret. // Usage: assertValidAuthSecret(secret) */
 export function assertValidAuthSecret(secret: string): void {
   const message = getAuthSecretValidationMessage(secret);
@@ -650,6 +682,7 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
   if (!cfg.auth.url) {
     cfg.auth.url = `http://${displayHost(cfg.server.host)}:${cfg.server.port}`;
   }
+  assertValidAuthUrl(cfg.auth.url);
 
   // database.path: auto-detect when empty, resolve relative paths against monorepo root
   if (!cfg.database.path) {

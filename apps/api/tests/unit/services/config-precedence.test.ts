@@ -561,6 +561,61 @@ describe('corsOrigins: the server origin plus configured allowed origins', () =>
   });
 });
 
+describe('auth.url validation', () => {
+  let savedEnv: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    mkdirSync(TMP_DIR, { recursive: true });
+    savedEnv = saveEnv();
+    for (const k of WATCHED_ENV_KEYS) delete process.env[k];
+    resetConfig();
+  });
+
+  afterEach(() => {
+    resetConfig();
+    restoreEnv(savedEnv);
+    rmSync(TMP_DIR, { recursive: true, force: true });
+  });
+
+  // Better Auth reads the scheme (the `__Secure-` cookie prefix) and the host
+  // (origin checks) out of this value without ever validating it, so a value
+  // that is not an absolute URL fails as a login that never establishes a
+  // session rather than as anything the operator can read.
+  test.each([
+    ['api.example.com', 'is not a URL'],
+    // Parses: protocol `localhost:`, empty hostname. The shape a bare host:port
+    // takes, and the one that would otherwise pass silently.
+    ['localhost:3001', 'must use http:// or https:// and name a host'],
+    ['ftp://api.example.com', 'must use http:// or https:// and name a host'],
+  ])('rejects the malformed auth.url %p', (url, expected) => {
+    process.env.BETTER_AUTH_URL = url;
+
+    expect(() => loadConfig(join(TMP_DIR, 'nonexistent.toml'))).toThrow(expected);
+  });
+
+  test('a malformed auth.url fails as a CliError, not a plain Error', () => {
+    process.env.BETTER_AUTH_URL = 'api.example.com';
+
+    expect(() => loadConfig(join(TMP_DIR, 'nonexistent.toml'))).toThrow(CliError);
+  });
+
+  // Unlike an allowed origin, this one is not required to be bare: Better Auth
+  // appends its basePath to it, so a subpath deployment is legitimate.
+  test('accepts a base URL carrying a path', () => {
+    process.env.BETTER_AUTH_URL = 'https://example.com/mango';
+
+    expect(loadConfig(join(TMP_DIR, 'nonexistent.toml')).auth.url).toBe(
+      'https://example.com/mango'
+    );
+  });
+
+  test('the derived default passes its own validation', () => {
+    writeFileSync(TMP_TOML, '[server]\nhost = "0.0.0.0"\nport = 3001\n');
+
+    expect(loadConfig(TMP_TOML).auth.url).toBe('http://localhost:3001');
+  });
+});
+
 describe('frontend.port deprecation warning', () => {
   let savedEnv: Record<string, string | undefined>;
   let warnings: string[];
