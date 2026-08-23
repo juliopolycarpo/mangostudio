@@ -65,6 +65,12 @@
   --font-label: "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
+  /* `--ease-*` is a Tailwind theme namespace, so these emit `ease-standard`
+   * and `ease-emphasized` utilities. Durations have no such namespace and live
+   * in `:root` below. */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
+
   --animate-slide: slide 1s ease-in-out infinite alternate;
   --animate-blink: blink 1s step-end infinite;
 
@@ -100,13 +106,16 @@
   --gradient-primary: linear-gradient(135deg, #f5a623 0%, #d97706 100%);
 }
 
-/* ── Motion tokens (plain custom properties: referenced from CSS and `motion` variants) ── */
+/* ── Duration tokens ──
+ * Tailwind has no `--duration-*` theme namespace: `duration-*` takes a bare
+ * value (`duration-200`), so putting these in `@theme` would emit no utility
+ * at all. Consume them from a class with the custom-property shorthand —
+ * `duration-(--duration-base)` — or from CSS with `var()`. The easings that
+ * pair with them are in `@theme` above. */
 :root {
   --duration-quick: 120ms;
   --duration-base: 200ms;
   --duration-slow: 320ms;
-  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
-  --ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
 }
 
 /* ── Light theme ── */
