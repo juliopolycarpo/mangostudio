@@ -2827,6 +2827,13 @@ export const messages: Messages = {
       remaining: '{percent}% left',
       resetsIn: 'resets in {duration}',
       resetsAt: 'resets {time}',
+      // Compact units for the `{duration}` above. They live in the catalogue
+      // because a suffix is user-visible text like any other: 'm' is not the
+      // minute abbreviation everywhere, and neither is the hours-minutes order.
+      durationMinutes: '{count}m',
+      durationHours: '{count}h',
+      durationHoursMinutes: '{hours}h {minutes}m',
+      durationDays: '{count}d',
       unknown: 'Quota unknown',
       stale: 'Quota outdated',
       exhausted: 'Quota exhausted',

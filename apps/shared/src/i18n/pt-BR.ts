@@ -2823,6 +2823,13 @@ export const messages = {
       remaining: '{percent}% restante',
       resetsIn: 'renova em {duration}',
       resetsAt: 'renova {time}',
+      // Unidades compactas do {duration} acima. Ficam no catálogo porque um
+      // sufixo é texto visível como qualquer outro: 'min' não é 'm' em toda
+      // língua, e a ordem horas-minutos também não é universal.
+      durationMinutes: '{count}min',
+      durationHours: '{count}h',
+      durationHoursMinutes: '{hours}h {minutes}min',
+      durationDays: '{count}d',
       unknown: 'Cota desconhecida',
       stale: 'Cota desatualizada',
       exhausted: 'Cota esgotada',
