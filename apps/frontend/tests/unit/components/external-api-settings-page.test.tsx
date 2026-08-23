@@ -3,6 +3,7 @@
  * revoke confirmation, toggle wiring, and the active-key cap.
  */
 
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import {
   API_KEY_MAX_PER_USER,
   type ApiKeySummary,
@@ -10,9 +11,8 @@ import {
 } from '@mangostudio/shared/api-keys';
 import { DEFAULT_EXTERNAL_API_SETTINGS } from '@mangostudio/shared/app-settings';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExternalApiSettingsPage } from '../../../src/features/settings/external-api/components/ExternalApiSettingsPage';
-import { render, screen } from '../../support/harness/render';
+import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const SAMPLE_KEY: ApiKeySummary = {
@@ -58,7 +58,7 @@ describe('ExternalApiSettingsPage', () => {
     render(
       <ExternalApiSettingsPage
         settings={DEFAULT_EXTERNAL_API_SETTINGS}
-        setExternalApiEnabled={vi.fn()}
+        setExternalApiEnabled={jest.fn()}
       />
     );
 
@@ -74,7 +74,7 @@ describe('ExternalApiSettingsPage', () => {
     render(
       <ExternalApiSettingsPage
         settings={DEFAULT_EXTERNAL_API_SETTINGS}
-        setExternalApiEnabled={vi.fn()}
+        setExternalApiEnabled={jest.fn()}
       />
     );
 
@@ -85,7 +85,7 @@ describe('ExternalApiSettingsPage', () => {
     respondWithKeys(fetchScenario, [SAMPLE_KEY]);
 
     render(
-      <ExternalApiSettingsPage settings={{ enabled: true }} setExternalApiEnabled={vi.fn()} />
+      <ExternalApiSettingsPage settings={{ enabled: true }} setExternalApiEnabled={jest.fn()} />
     );
 
     expect(await screen.findByText('CI pipeline')).toBeInTheDocument();
@@ -97,7 +97,7 @@ describe('ExternalApiSettingsPage', () => {
     respondWithKeys(fetchScenario, [SAMPLE_KEY]);
 
     render(
-      <ExternalApiSettingsPage settings={{ enabled: false }} setExternalApiEnabled={vi.fn()} />
+      <ExternalApiSettingsPage settings={{ enabled: false }} setExternalApiEnabled={jest.fn()} />
     );
 
     expect(await screen.findByText('CI pipeline')).toBeInTheDocument();
@@ -109,7 +109,7 @@ describe('ExternalApiSettingsPage', () => {
 
   it('calls the injected setter when the enable toggle changes', async () => {
     const user = userEvent.setup();
-    const setExternalApiEnabled = vi.fn();
+    const setExternalApiEnabled = jest.fn();
     respondWithKeys(fetchScenario, []);
 
     render(
@@ -132,7 +132,7 @@ describe('ExternalApiSettingsPage', () => {
     });
 
     render(
-      <ExternalApiSettingsPage settings={{ enabled: true }} setExternalApiEnabled={vi.fn()} />
+      <ExternalApiSettingsPage settings={{ enabled: true }} setExternalApiEnabled={jest.fn()} />
     );
 
     await user.click(await screen.findByRole('button', { name: /create key/i }));
@@ -178,7 +178,7 @@ describe('ExternalApiSettingsPage', () => {
     });
 
     render(
-      <ExternalApiSettingsPage settings={{ enabled: true }} setExternalApiEnabled={vi.fn()} />
+      <ExternalApiSettingsPage settings={{ enabled: true }} setExternalApiEnabled={jest.fn()} />
     );
 
     await user.click(await screen.findByRole('button', { name: /create key/i }));
@@ -213,13 +213,13 @@ describe('ExternalApiSettingsPage', () => {
     });
 
     render(
-      <ExternalApiSettingsPage settings={{ enabled: true }} setExternalApiEnabled={vi.fn()} />
+      <ExternalApiSettingsPage settings={{ enabled: true }} setExternalApiEnabled={jest.fn()} />
     );
 
     await user.click(await screen.findByRole('button', { name: /revoke: ci pipeline/i }));
     await user.click(screen.getByRole('button', { name: /^revoke$/i }));
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(fetchScenario.fetchMock).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ method: 'DELETE' })
@@ -237,7 +237,7 @@ describe('ExternalApiSettingsPage', () => {
     respondWithKeys(fetchScenario, keys);
 
     render(
-      <ExternalApiSettingsPage settings={{ enabled: true }} setExternalApiEnabled={vi.fn()} />
+      <ExternalApiSettingsPage settings={{ enabled: true }} setExternalApiEnabled={jest.fn()} />
     );
 
     expect(await screen.findByText('Key 0')).toBeInTheDocument();

@@ -13,6 +13,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import { parse as parseToml } from 'smol-toml';
+import { CliError } from '../cli/errors';
 
 /**
  * Absolute path to the monorepo root, derived from this file's location.
@@ -43,7 +44,20 @@ export interface MangoConfig {
      * nothing derives it from a request header, which the caller controls.
      */
     publicUrl: string;
+    /**
+     * Extra browser origins allowed to call this API, for the split deployment
+     * the `MANGO_API_URL` build-time override exists for: the frontend bundle is
+     * served from one origin and this API answers on another. Added to the
+     * server's own origins rather than replacing them, so a same-origin install
+     * keeps working. Empty means same-origin only.
+     */
+    allowedOrigins: string[];
   };
+  /**
+   * @deprecated The API serves the frontend itself, so there is no second
+   * origin to allow. Still parsed so an existing config.toml keeps booting,
+   * but nothing reads these values.
+   */
   frontend: {
     host: string;
     port: number;
@@ -112,7 +126,7 @@ export interface MangoConfig {
      */
     wslExecutable: string;
   };
-  /** Computed CORS origins derived from frontend host/port. */
+  /** The server's own origins plus every `server.allowedOrigins` entry. */
   corsOrigins: string[];
   /** Path to the config.toml that was loaded (for TOML-based services). */
   configFilePath: string;
@@ -132,7 +146,7 @@ export interface MangoConfig {
 }
 
 const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
-  server: { host: '0.0.0.0', port: 3001, publicUrl: '' },
+  server: { host: '0.0.0.0', port: 3001, publicUrl: '', allowedOrigins: [] },
   frontend: { host: 'localhost', port: 5173 },
   database: { path: '' },
   uploads: { dir: '' },
@@ -163,6 +177,24 @@ export function parseBooleanFlag(value: string): boolean {
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
 }
 
+/**
+ * Trims an origin list and drops the empty entries a trailing comma or a blank
+ * TOML string leaves behind. Nothing else is filtered: a malformed entry is
+ * kept so `computeDerived` can reject it out loud, rather than the value
+ * disappearing somewhere between the config file and the CORS gate.
+ */
+function normalizeOriginList(entries: string[]): string[] {
+  return entries.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+}
+
+/**
+ * Splits the comma-separated `ALLOWED_ORIGINS` list.
+ * // Usage: parseOriginList('https://a.example, https://b.example:8443')
+ */
+function parseOriginList(value: string): string[] {
+  return normalizeOriginList(value.split(','));
+}
+
 /** Maps .env keys to config paths for override resolution. */
 const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   API_PORT: (cfg, v) => {
@@ -174,6 +206,10 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   PUBLIC_URL: (cfg, v) => {
     cfg.server.publicUrl = v;
   },
+  ALLOWED_ORIGINS: (cfg, v) => {
+    cfg.server.allowedOrigins = parseOriginList(v);
+  },
+  // Deprecated and ignored; still parsed so an existing .env keeps booting.
   FRONTEND_PORT: (cfg, v) => {
     cfg.frontend.port = Number(v) || cfg.frontend.port;
   },
@@ -326,6 +362,76 @@ export function getAuthSecretValidationMessage(secret: string): string | null {
   return null;
 }
 
+/**
+ * Returns why an allowed-origin entry is unusable, or null when it is safe.
+ *
+ * Every gate that reads `corsOrigins` compares the browser's `Origin` header by
+ * exact string, so a near-miss — a trailing slash, a path, an explicit default
+ * port, an uppercase host — parses cleanly and then matches nothing. The entry
+ * has to be a canonical origin or be rejected out loud.
+ * // Usage: getAllowedOriginValidationMessage('https://studio.example.com')
+ */
+function getAllowedOriginValidationMessage(origin: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return `"${origin}" is not a URL`;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return `"${origin}" must use http:// or https://`;
+  }
+  if (parsed.origin !== origin) {
+    return `"${origin}" must be a bare scheme://host[:port] origin (did you mean "${parsed.origin}"?)`;
+  }
+  return null;
+}
+
+/** Fails before the server binds with an origin no browser request can match. */
+function assertValidAllowedOrigins(origins: string[]): void {
+  const messages = origins
+    .map((origin) => getAllowedOriginValidationMessage(origin))
+    .filter((message): message is string => message !== null);
+  if (messages.length === 0) return;
+
+  throw new CliError(
+    `Invalid server.allowedOrigins (ALLOWED_ORIGINS): ${messages.join('; ')}. ` +
+      'Each entry must be a bare origin such as https://studio.example.com.'
+  );
+}
+
+/**
+ * Fails before the server binds with a `baseURL` Better Auth cannot reason about.
+ *
+ * Better Auth derives more than a link target from this value: the `__Secure-`
+ * cookie prefix comes from whether it starts with `https://`, and it seeds the
+ * origins a request is checked against. A value that is not an absolute URL
+ * mis-derives both without ever throwing — `localhost:3001` parses, with
+ * `localhost:` as its protocol and an empty hostname — so a login that silently
+ * never establishes a session is the first symptom the operator sees.
+ *
+ * Only the parts Better Auth reads are checked. A path is explicitly allowed:
+ * `basePath` is appended to this value, so a subpath deployment
+ * (`https://example.com/mango`) is a legitimate configuration.
+ */
+function assertValidAuthUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new CliError(
+      `Invalid auth.url (BETTER_AUTH_URL): "${url}" is not a URL. ` +
+        'It must be an absolute URL such as https://studio.example.com.'
+    );
+  }
+  if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.hostname === '') {
+    throw new CliError(
+      `Invalid auth.url (BETTER_AUTH_URL): "${url}" must use http:// or https:// and name a host. ` +
+        'It must be an absolute URL such as https://studio.example.com.'
+    );
+  }
+}
+
 /** Fails before Better Auth can initialize with an unsafe secret. // Usage: assertValidAuthSecret(secret) */
 export function assertValidAuthSecret(secret: string): void {
   const message = getAuthSecretValidationMessage(secret);
@@ -388,10 +494,35 @@ export function resetSecretEnvTracking(): void {
   loadedSecretEnvKeys = new Set();
 }
 
+/** Whether this process already reported the frontend.port deprecation. */
+let warnedFrontendPortDeprecated = false;
+
+/**
+ * Reports `frontend.host` / `frontend.port` / `FRONTEND_PORT` once per
+ * process, and only when the user actually set one of them — the resolved
+ * config cannot answer "was it set?", because the fields still carry their
+ * Vite-era defaults.
+ */
+function warnFrontendPortDeprecated(serverPort: number): void {
+  if (warnedFrontendPortDeprecated) return;
+  warnedFrontendPortDeprecated = true;
+  console.warn(
+    `[config] The [frontend] settings are deprecated and ignored; the frontend is served by the API on ${serverPort}. ` +
+      'To allow a frontend served from another origin, set server.allowedOrigins (or ALLOWED_ORIGINS).'
+  );
+}
+
+/** Clears the once-per-process deprecation latch (for tests). */
+export function resetFrontendPortDeprecationWarning(): void {
+  warnedFrontendPortDeprecated = false;
+}
+
 /** Deep-clones the default config. */
 function cloneDefaults(): MangoConfig {
   return {
-    server: { ...DEFAULT_CONFIG.server },
+    // allowedOrigins is copied, not shared: a spread would alias the default
+    // array into every clone, so one loaded config could mutate the next.
+    server: { ...DEFAULT_CONFIG.server, allowedOrigins: [...DEFAULT_CONFIG.server.allowedOrigins] },
     frontend: { ...DEFAULT_CONFIG.frontend },
     database: { ...DEFAULT_CONFIG.database },
     uploads: { ...DEFAULT_CONFIG.uploads },
@@ -418,6 +549,12 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
     if (typeof server.host === 'string') cfg.server.host = server.host;
     if (typeof server.port === 'number') cfg.server.port = server.port;
     if (typeof server.publicUrl === 'string') cfg.server.publicUrl = server.publicUrl;
+    if (
+      Array.isArray(server.allowedOrigins) &&
+      server.allowedOrigins.every((entry) => typeof entry === 'string')
+    ) {
+      cfg.server.allowedOrigins = normalizeOriginList(server.allowedOrigins);
+    }
   }
 
   const frontend = parsed.frontend as Record<string, unknown> | undefined;
@@ -545,6 +682,7 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
   if (!cfg.auth.url) {
     cfg.auth.url = `http://${displayHost(cfg.server.host)}:${cfg.server.port}`;
   }
+  assertValidAuthUrl(cfg.auth.url);
 
   // database.path: auto-detect when empty, resolve relative paths against monorepo root
   if (!cfg.database.path) {
@@ -600,22 +738,8 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
     cfg.secretStore.unsafeFileFallbackDir = resolveUserPath(cfg.secretStore.unsafeFileFallbackDir);
   }
 
-  // CORS origins from frontend host/port (include +1 for Vite port bumping)
-  const fHost = cfg.frontend.host;
-  const fPort = cfg.frontend.port;
-  cfg.corsOrigins = [
-    `http://localhost:${fPort}`,
-    `http://127.0.0.1:${fPort}`,
-    `http://localhost:${fPort + 1}`,
-    `http://127.0.0.1:${fPort + 1}`,
-  ];
-  // Add explicit frontend host if it differs from localhost
-  if (fHost !== 'localhost' && fHost !== '127.0.0.1') {
-    cfg.corsOrigins.push(`http://${fHost}:${fPort}`);
-    cfg.corsOrigins.push(`http://${fHost}:${fPort + 1}`);
-  }
-
-  // Include the server's own origin for same-origin deployments (standalone binary).
+  // The API process serves the frontend, so its own origin is the one every
+  // default install needs.
   //
   // In standalone mode the runner scripts (run.sh / run.bat) launch the binary with
   // API_PORT set to whatever port the user chose. The binary reads that value via
@@ -623,18 +747,26 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
   // computeDerived() runs — so sPort below is already the final resolved port,
   // regardless of whether it came from config.toml, .env, or API_PORT.
   //
-  // The frontend is served by the API process itself at that same origin.
-  // The browser therefore sends Origin: http://<host>:<sPort> on CORS preflight
-  // requests (e.g. POST with JSON body). Both the Elysia CORS middleware and
-  // Better Auth trustedOrigins validate against corsOrigins, so this origin must
-  // be present or same-origin requests from the binary-served frontend are rejected.
+  // The browser sends Origin: http://<host>:<sPort> on CORS preflight requests
+  // (e.g. POST with JSON body). The Elysia CORS middleware, Better Auth
+  // trustedOrigins, and the realtime handshake all validate against corsOrigins,
+  // so this origin must be present or same-origin requests from the served
+  // frontend are rejected.
+  //
+  // A split deployment — the bundle built with MANGO_API_URL and served from
+  // somewhere else — has no origin here to derive, so the user names it:
+  // `server.allowedOrigins` in config.toml, or ALLOWED_ORIGINS in the
+  // environment. Those are unioned in rather than replacing the defaults, so
+  // configuring one never breaks a local browser session.
+  assertValidAllowedOrigins(cfg.server.allowedOrigins);
   const sHost = cfg.server.host;
   const sPort = cfg.server.port;
-  cfg.corsOrigins.push(`http://localhost:${sPort}`);
-  cfg.corsOrigins.push(`http://127.0.0.1:${sPort}`);
+  const origins = new Set([`http://localhost:${sPort}`, `http://127.0.0.1:${sPort}`]);
   if (sHost !== 'localhost' && sHost !== '127.0.0.1') {
-    cfg.corsOrigins.push(`http://${sHost}:${sPort}`);
+    origins.add(`http://${sHost}:${sPort}`);
   }
+  for (const origin of cfg.server.allowedOrigins) origins.add(origin);
+  cfg.corsOrigins = [...origins];
 }
 
 /**
@@ -711,6 +843,7 @@ export function loadConfig(overridePath?: string): MangoConfig {
   }
 
   const cfg = cloneDefaults();
+  let frontendPortInToml = false;
 
   // 1. Determine and read config.toml
   const tomlPath = overridePath ?? resolveConfigTomlPath();
@@ -718,6 +851,9 @@ export function loadConfig(overridePath?: string): MangoConfig {
     try {
       const content = readFileSync(tomlPath, 'utf8');
       const parsed = parseToml(content) as Record<string, unknown>;
+      // Either key: host is as deprecated (and as ignored) as port.
+      const frontendTable = parsed.frontend as Record<string, unknown> | undefined;
+      frontendPortInToml = frontendTable?.port !== undefined || frontendTable?.host !== undefined;
       applyToml(cfg, parsed);
     } catch (err) {
       console.warn(`[config] Failed to parse ${tomlPath}:`, err);
@@ -734,6 +870,13 @@ export function loadConfig(overridePath?: string): MangoConfig {
 
   // 4. Compute derived values
   computeDerived(cfg, tomlPath);
+
+  // 5. Report a setting that still parses but no longer does anything. Asked
+  // of the sources rather than of cfg, which cannot distinguish an explicit
+  // 5173 from the default one.
+  if (frontendPortInToml || envOverrides.FRONTEND_PORT || process.env.FRONTEND_PORT) {
+    warnFrontendPortDeprecated(cfg.server.port);
+  }
 
   return cfg;
 }

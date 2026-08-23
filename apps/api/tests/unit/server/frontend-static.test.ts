@@ -6,14 +6,16 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { staticPlugin } from '@elysia/static';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
+import { BUILD_STATE_FILE, BUILD_STATE_URL_PATH } from '@mangostudio/shared/utils/dist-files';
 import { Elysia, NotFound } from 'elysia';
 import Value from 'typebox/value';
 import type { App } from '../../../src/app';
+import { contentEtag } from '../../../src/lib/http-cache';
 import { errorHandler } from '../../../src/plugins/error-handler';
 import {
   registerEmbeddedFrontend,
@@ -25,6 +27,8 @@ import { registerFrontend } from '../../../src/server/frontend-static';
 const INDEX_HTML = '<html><body>embedded index</body></html>';
 const ASSET_JS = 'console.log("embedded")';
 const UPLOAD_BYTES = 'not-really-a-png';
+/** What `build.ts` emits as the deployer-editable runtime config. */
+const RUNTIME_CONFIG_JS = 'window.__MANGO_CONFIG__ = { apiUrl: "" };\n';
 
 let assetDir: string;
 /** Extra fixture directories a test created; removed together in afterEach. */
@@ -88,6 +92,22 @@ describe('registerFrontend with embedded assets', () => {
     expect(await response.text()).toBe(ASSET_JS);
   });
 
+  test('derives the shell ETag from content, never from stat', async () => {
+    // Inside a compiled binary the embedded index.html stats *successfully*
+    // with `mtimeMs: 0`, and its byte size is stable across builds because
+    // hashed asset names are fixed-length — so a size+mtime validator is the
+    // same constant in every release and an upgraded binary answers 304 to the
+    // previous build's shell. Mimic that stat shape on the fixture and pin the
+    // validator to the bytes instead.
+    utimesSync(join(assetDir, 'index.html'), 0, 0);
+    const get = registerEmbedded();
+    const response = await get('/');
+
+    const etag = response.headers.get('etag');
+    expect(etag).toBe(contentEtag(INDEX_HTML));
+    expect(etag).not.toMatch(/-0"$/);
+  });
+
   test('falls back to index.html for SPA routes', async () => {
     const get = registerEmbedded();
     const response = await get('/settings');
@@ -101,7 +121,71 @@ describe('registerFrontend with embedded assets', () => {
 
     await expectJsonNotFound(await get('/api'));
     await expectJsonNotFound(await get('/api/nope'));
+    await expectJsonNotFound(await get('/%61pi/nope'));
     expect((await get('/assets/missing.js')).status).toBe(404);
+    expect((await get('/never-built%2esvg')).status).toBe(404);
+  });
+
+  // Elysia matches the literal manifest keys registered at boot and does not
+  // normalise percent escapes first, so an encoded spelling falls through to
+  // the fallback. It used to end there: `isSpaRoute` decodes, sees a root file
+  // and declines, so the shipped binary 404'd a file it holds — while the same
+  // request off disk was served, because `resolveUnhashedFile` decodes.
+  describe('percent-encoded paths', () => {
+    function registerWithRootFiles(): (path: string) => Promise<Response> {
+      writeFileSync(join(assetDir, 'favicon.ico'), UPLOAD_BYTES);
+      writeFileSync(join(assetDir, 'config.js'), RUNTIME_CONFIG_JS);
+      registerEmbeddedFrontend({
+        '/index.html': join(assetDir, 'index.html'),
+        '/assets/index-AbCd1234.js': join(assetDir, 'index-AbCd1234.js'),
+        '/favicon.ico': join(assetDir, 'favicon.ico'),
+        '/config.js': join(assetDir, 'config.js'),
+      });
+      return buildApp();
+    }
+
+    test('serves a root file, with the headers its literal route would have sent', async () => {
+      const get = registerWithRootFiles();
+
+      const literal = await get('/favicon.ico');
+      const encoded = await get('/favicon%2eico');
+
+      expect(encoded.status).toBe(200);
+      expect(await encoded.text()).toBe(UPLOAD_BYTES);
+      expect(encoded.headers.get('cache-control')).toBe(literal.headers.get('cache-control'));
+      // Content-derived, not stat-derived: in the shipped binary these files
+      // stat as `mtimeMs: 0` (see the shell ETag test), so the bytes are the
+      // only validator that changes when a release changes them.
+      expect(literal.headers.get('etag')).toBe(contentEtag(UPLOAD_BYTES));
+      expect(encoded.headers.get('etag')).toBe(literal.headers.get('etag'));
+    });
+
+    test('keeps /config.js on its own revalidating directive', async () => {
+      const get = registerWithRootFiles();
+      const response = await get('/%63onfig.js');
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-cache');
+      expect(await response.text()).toBe(RUNTIME_CONFIG_JS);
+    });
+
+    test('serves the shell for an encoded /index.html rather than as a plain asset', async () => {
+      const get = registerWithRootFiles();
+      const response = await get('/index%2ehtml');
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-cache');
+      expect(await response.text()).toBe(INDEX_HTML);
+    });
+
+    test('does not resolve an encoded traversal onto a manifest entry', async () => {
+      const get = registerWithRootFiles();
+
+      // `/assets/..%2fconfig.js` decodes to `/assets/../config.js`, which is not
+      // a manifest key, so there is nothing to serve and nothing to escape into.
+      expect((await get('/assets/..%2fconfig.js')).status).toBe(404);
+      expect((await get('/config.js%00')).status).toBe(404);
+    });
   });
 
   test('does not shadow mounted wildcard routes such as Better Auth /api/auth/*', async () => {
@@ -140,17 +224,22 @@ describe('registerFrontend with embedded assets', () => {
 describe('registerFrontend from the filesystem', () => {
   /**
    * The source/`npm install` path, where assets come off disk instead of the
-   * embedded manifest. It is the branch carrying the documented
-   * `@elysia/static` `ignorePatterns` workaround, so its precedence is pinned
-   * separately from the embedded one: a plugin swap that fixes the underlying
-   * inverted-comparison bug must keep every outcome below identical before the
-   * workaround can be removed.
+   * embedded manifest. Its precedence is pinned separately from the embedded
+   * one, so a plugin swap has to keep every outcome below identical.
+   *
+   * These drive the app with `app.handle()`, which resolves routes differently
+   * from a listening server — see the `.listen()` suite below for the class of
+   * bug that is invisible here.
    */
   async function buildFilesystemApp(): Promise<(path: string) => Promise<Response>> {
     const frontendDir = mkdtempSync(join(tmpdir(), 'fs-frontend-'));
     mkdirSync(join(frontendDir, 'assets'), { recursive: true });
     writeFileSync(join(frontendDir, 'index.html'), INDEX_HTML);
     writeFileSync(join(frontendDir, 'assets', 'index-AbCd1234.js'), ASSET_JS);
+    writeFileSync(
+      join(frontendDir, BUILD_STATE_FILE),
+      JSON.stringify({ apiUrl: 'https://secret.example.test', mode: 'dev' })
+    );
 
     const uploadsDir = mkdtempSync(join(tmpdir(), 'fs-uploads-'));
     writeFileSync(join(uploadsDir, 'photo.png'), UPLOAD_BYTES);
@@ -172,16 +261,17 @@ describe('registerFrontend from the filesystem', () => {
     return (path: string) => app.handle(new Request(`http://localhost${path}`));
   }
 
-  test('serves index.html at / with no cache header', async () => {
+  test('serves index.html at / with no-cache', async () => {
     const get = await buildFilesystemApp();
     const response = await get('/');
 
-    // The explicit `GET /` registered ahead of staticPlugin. Unlike the
-    // embedded path it sets no Cache-Control, so the shell is revalidated by
-    // the browser's default heuristics rather than by an explicit directive.
+    // The explicit `GET /` registered ahead of staticPlugin, with the same
+    // directive as the embedded path: every build renames the hashed bundles
+    // the shell points at, so a heuristically cached shell would ask for
+    // scripts that no longer exist and render a blank page.
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('text/html');
-    expect(response.headers.get('cache-control')).toBeNull();
+    expect(response.headers.get('cache-control')).toBe('no-cache');
     expect(await response.text()).toBe(INDEX_HTML);
   });
 
@@ -189,9 +279,56 @@ describe('registerFrontend from the filesystem', () => {
     const get = await buildFilesystemApp();
     const response = await get('/assets/index-AbCd1234.js');
 
+    // A year, the same freshness the embedded branch gives these files. The
+    // plugin composes `${directive}, max-age=${maxAge}` from a single-token
+    // directive, so `immutable` cannot be added alongside `public` here.
     expect(response.status).toBe(200);
-    expect(response.headers.get('cache-control')).toBe('public, max-age=86400');
+    expect(response.headers.get('cache-control')).toBe('public, max-age=31536000');
     expect(await response.text()).toBe(ASSET_JS);
+  });
+
+  test('does not serve the internal build state', async () => {
+    const get = await buildFilesystemApp();
+    // The percent-encoded spelling is the point: the guard compares the decoded
+    // path, so an encoded first character must not walk around it.
+    for (const path of [BUILD_STATE_URL_PATH, '/.%62uild-state.json']) {
+      const response = await get(path);
+      expect(response.status).toBe(404);
+      expect(await response.text()).not.toContain('secret.example.test');
+    }
+  });
+
+  test('404s an unhashed file that disappeared after boot', async () => {
+    const frontendDir = mkdtempSync(join(tmpdir(), 'fs-frontend-'));
+    temporaryDirs.push(frontendDir);
+    writeFileSync(join(frontendDir, 'index.html'), INDEX_HTML);
+    writeFileSync(join(frontendDir, 'favicon.ico'), UPLOAD_BYTES);
+
+    const app = new Elysia().error(NotFound, ({ request }) => frontendNotFound(request));
+    registerFrontend(app as unknown as App, frontendDir);
+    await app.modules;
+    const get = (path: string) => app.handle(new Request(`http://localhost${path}`));
+
+    expect((await get('/favicon.ico')).status).toBe(200);
+
+    // The file resolved on a previous request, but `build.ts` publishes
+    // `dist/` by rename, so there is a window with nothing at the path — and
+    // the binary build sets `dist/` aside before rebuilding. A request in that
+    // window used to throw ENOENT out of the handler and answer 500.
+    rmSync(join(frontendDir, 'favicon.ico'));
+    expect((await get('/favicon.ico')).status).toBe(404);
+  });
+
+  test('boots past a dist entry that cannot be stat-ed', () => {
+    const frontendDir = mkdtempSync(join(tmpdir(), 'fs-frontend-'));
+    temporaryDirs.push(frontendDir);
+    writeFileSync(join(frontendDir, 'index.html'), INDEX_HTML);
+    symlinkSync(join(frontendDir, 'never-written.txt'), join(frontendDir, 'dangling.txt'));
+
+    // Enumerating the directory is boot work, so a throw here does not degrade
+    // to the API-only branch — it stops the server from starting at all.
+    const app = new Elysia();
+    expect(() => registerFrontend(app as unknown as App, frontendDir)).not.toThrow();
   });
 
   test('serves a real upload and 404s a missing one without the SPA shell', async () => {
@@ -213,10 +350,10 @@ describe('registerFrontend from the filesystem', () => {
     const get = await buildFilesystemApp();
 
     expect((await get('/api/health')).status).toBe(200);
-    for (const path of ['/api', '/api/nope']) {
+    for (const path of ['/api', '/api/nope', '/%61pi/nope']) {
       await expectJsonNotFound(await get(path));
     }
-    for (const path of ['/assets/missing.js', '/scalar']) {
+    for (const path of ['/assets/missing.js', '/%61ssets/missing.js', '/scalar']) {
       const response = await get(path);
       expect(response.status).toBe(404);
       expect(await response.text()).not.toBe(INDEX_HTML);
@@ -240,6 +377,416 @@ describe('registerFrontend from the filesystem', () => {
       const response = await get(path);
       expect(response.status).toBe(200);
       expect(await response.text()).toBe(INDEX_HTML);
+    }
+  });
+});
+
+describe('registerFrontend from the filesystem, over a listening server', () => {
+  /**
+   * `app.handle()` and `app.listen()` do not resolve routes the same way, and
+   * only the second one is what a browser talks to. Elysia promotes routes into
+   * Bun's native table on `.listen()`, and there a root `GET /*` outranks
+   * `.all('/*')` wildcards anywhere in the app — at the root, inside a `.group()`
+   * and inside a mounted prefixed instance alike — while leaving both literal
+   * routes and `.get('/*')` wildcards matching.
+   *
+   * `staticPlugin({ prefix: '/' })` used to register exactly that (it only skips
+   * the wildcard when `alwaysStatic` is on, which keys off
+   * `NODE_ENV === 'production'` — never set in this repo). Better Auth is
+   * mounted as `.all('/*')` in `routes/auth.ts`, so every path under
+   * `/api/auth/` except the literal `/ok` answered 404 on a real server while
+   * every `handle()`-driven test stayed green. Hence a suite that binds a port.
+   */
+  const SHADOWED_SHAPE = '/api/auth';
+  const SURVIVING_SHAPE = '/images';
+
+  async function startFilesystemServer(): Promise<{
+    get: (path: string, headers?: Record<string, string>) => Promise<Response>;
+    frontendDir: string;
+    stop: () => Promise<void>;
+  }> {
+    const frontendDir = mkdtempSync(join(tmpdir(), 'listen-frontend-'));
+    mkdirSync(join(frontendDir, 'assets'), { recursive: true });
+    writeFileSync(join(frontendDir, 'index.html'), INDEX_HTML);
+    writeFileSync(join(frontendDir, 'favicon.ico'), UPLOAD_BYTES);
+    writeFileSync(join(frontendDir, 'assets', 'index-AbCd1234.js'), ASSET_JS);
+    temporaryDirs.push(frontendDir);
+
+    // Stand-ins for the real routes, so the assertion is about routing
+    // precedence rather than about Better Auth or the image store. The method
+    // is the load-bearing part: `.all` is the shape that broke, `.get` is the
+    // control that never did, so the guard cannot pass for the wrong reason.
+    const app = new Elysia().error(NotFound, ({ request }) => frontendNotFound(request));
+    app.all(`${SHADOWED_SHAPE}/*`, ({ path }) => `wildcard:${path}`);
+    app.get(`${SURVIVING_SHAPE}/*`, ({ path }) => `wildcard:${path}`);
+    registerFrontend(app as unknown as App, frontendDir);
+    await app.modules;
+
+    app.listen({ hostname: '127.0.0.1', port: 0, reusePort: false });
+    const origin = `http://127.0.0.1:${app.server?.port}`;
+    return {
+      get: (path: string, headers?: Record<string, string>) =>
+        fetch(`${origin}${path}`, { headers }),
+      frontendDir,
+      stop: async () => {
+        await app.stop();
+      },
+    };
+  }
+
+  test('leaves every other wildcard route reachable', async () => {
+    const server = await startFilesystemServer();
+    try {
+      for (const prefix of [SHADOWED_SHAPE, SURVIVING_SHAPE]) {
+        const path = `${prefix}/get-session`;
+        const response = await server.get(path);
+
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe(`wildcard:${path}`);
+      }
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves the shell, a root file, and a hashed asset', async () => {
+    const server = await startFilesystemServer();
+    try {
+      for (const path of ['/', '/settings/agents']) {
+        const response = await server.get(path);
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe(INDEX_HTML);
+      }
+
+      // Unhashed root files get their own route; without one they would fall
+      // through to the SPA shell and hand an <html> document to a <link> tag.
+      const icon = await server.get('/favicon.ico');
+      expect(icon.status).toBe(200);
+      expect(await icon.text()).toBe(UPLOAD_BYTES);
+
+      const asset = await server.get('/assets/index-AbCd1234.js');
+      expect(asset.status).toBe(200);
+      expect(await asset.text()).toBe(ASSET_JS);
+
+      const missing = await server.get('/assets/missing.js');
+      expect(missing.status).toBe(404);
+      expect(await missing.text()).not.toBe(INDEX_HTML);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves a root file when its extension is percent-encoded', async () => {
+    const server = await startFilesystemServer();
+    try {
+      const response = await server.get('/favicon%2eico');
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe(UPLOAD_BYTES);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves unhashed root files with the cache headers the static plugin used to add', async () => {
+    const server = await startFilesystemServer();
+    try {
+      // `staticPlugin({ prefix: '/' })` gave these files max-age=86400, an
+      // ETag and a 304 short-circuit; the per-file routes that replaced the
+      // wildcard must not silently drop that.
+      const first = await server.get('/favicon.ico');
+      expect(first.status).toBe(200);
+      expect(first.headers.get('cache-control')).toBe('public, max-age=86400');
+      const etag = first.headers.get('etag');
+      expect(etag).not.toBeNull();
+
+      const revalidated = await server.get('/favicon.ico', { 'If-None-Match': etag as string });
+      expect(revalidated.status).toBe(304);
+      expect(await revalidated.text()).toBe('');
+
+      const changed = await server.get('/favicon.ico', { 'If-None-Match': '"stale"' });
+      expect(changed.status).toBe(200);
+      expect(await changed.text()).toBe(UPLOAD_BYTES);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves an asset written after startup', async () => {
+    const server = await startFilesystemServer();
+    try {
+      // Every rebuild renames the bundle, so `/assets/*` has to resolve from
+      // disk per request. Pinning routes at boot would make the dev server
+      // serve a 404 for the very bundle its own watcher just produced.
+      writeFileSync(join(server.frontendDir, 'assets', 'index-Rebuilt1.js'), ASSET_JS);
+
+      const response = await server.get('/assets/index-Rebuilt1.js');
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe(ASSET_JS);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves config.js with revalidation rather than a day-long cache', async () => {
+    const server = await startFilesystemServer();
+    try {
+      // config.js is the one unhashed file a deployer edits — it carries the
+      // runtime API base URL for a split deployment. At the 86400 the other
+      // unhashed files get, correcting a wrong URL would leave clients using
+      // the old one for a day with nothing to point at.
+      //
+      // This is the disk branch. The compiled binary reaches the same directive
+      // through `serveEmbeddedFile`, a different call site, which
+      // `scripts/test-build.ts` pins separately — validator included.
+      writeFileSync(join(server.frontendDir, 'config.js'), RUNTIME_CONFIG_JS);
+
+      const response = await server.get('/config.js');
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-cache');
+      expect(await response.text()).toBe(RUNTIME_CONFIG_JS);
+
+      const encodedPath = await server.get('/%63onfig.js');
+      expect(encodedPath.status).toBe(200);
+      expect(encodedPath.headers.get('cache-control')).toBe('no-cache');
+      expect(await encodedPath.text()).toBe(RUNTIME_CONFIG_JS);
+
+      // Still validator-backed, so revalidating costs a 304 and not a resend.
+      const etag = response.headers.get('etag');
+      expect(etag).not.toBeNull();
+      const revalidated = await server.get('/config.js', { 'If-None-Match': etag as string });
+      expect(revalidated.status).toBe(304);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('leaves every other unhashed root file on the long cache', async () => {
+    const server = await startFilesystemServer();
+    try {
+      // The config.js carve-out must be exactly one file: an icon that started
+      // revalidating on every navigation would be a silent regression.
+      const response = await server.get('/favicon.ico');
+      expect(response.headers.get('cache-control')).toBe('public, max-age=86400');
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves a root file added to public/ after startup', async () => {
+    const server = await startFilesystemServer();
+    try {
+      // The dev watcher rebuilds on every save, so the set of unhashed root
+      // files changes while the server is up. Enumerating it once at boot meant
+      // a new `public/` file had no route, fell through to the SPA fallback,
+      // and came back as index.html at 200 text/html — an HTML document handed
+      // to an <img> or <link>, failing with nothing in the server log.
+      writeFileSync(join(server.frontendDir, 'logo.svg'), UPLOAD_BYTES);
+
+      const response = await server.get('/logo.svg');
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe(UPLOAD_BYTES);
+      expect(response.headers.get('content-type')).not.toBe('text/html');
+      expect(response.headers.get('cache-control')).toBe('public, max-age=86400');
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('404s literal and encoded root files that do not exist instead of serving the shell', async () => {
+    const server = await startFilesystemServer();
+    try {
+      for (const path of ['/never-built.svg', '/never-built%2esvg']) {
+        const response = await server.get(path);
+
+        // The failure this replaces was silent: a 200 HTML shell. A 404 is the
+        // one answer a browser and a maintainer can both act on.
+        expect(response.status).toBe(404);
+        expect(await response.text()).not.toBe(INDEX_HTML);
+      }
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('still serves the shell for a deep link whose last segment is dotted', async () => {
+    const server = await startFilesystemServer();
+    try {
+      // `/library/$resourceKey` accepts a dotted key, so a nested dotted path is
+      // a real SPA route. Only root-level file requests are taken away from the
+      // shell; claiming every dotted path would 404 routes that work today.
+      const response = await server.get('/library/my-skill.md');
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe(INDEX_HTML);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('revalidates the SPA shell instead of re-sending it on every navigation', async () => {
+    const server = await startFilesystemServer();
+    try {
+      // `no-cache` means "revalidate before reuse", which needs a validator to
+      // revalidate against. Without one the shell — the one document fetched on
+      // every deep link and every hard refresh — was re-downloaded in full.
+      const first = await server.get('/');
+      expect(first.status).toBe(200);
+      const etag = first.headers.get('etag');
+      expect(etag).not.toBeNull();
+
+      const revalidated = await server.get('/', { 'If-None-Match': etag as string });
+      expect(revalidated.status).toBe(304);
+      expect(await revalidated.text()).toBe('');
+
+      const changed = await server.get('/', { 'If-None-Match': '"stale"' });
+      expect(changed.status).toBe(200);
+      expect(await changed.text()).toBe(INDEX_HTML);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('refuses to resolve a path that escapes the frontend directory', async () => {
+    const server = await startFilesystemServer();
+    try {
+      // Unhashed files now resolve from the URL per request, so traversal is a
+      // live concern rather than a theoretical one.
+      //
+      // Measured on Bun 1.4.0, the URL parser handles the two encodings
+      // differently: `/%2e%2e/x` is decoded *and* normalised to `/x` before a
+      // handler sees it, but `/..%2fx` arrives verbatim. So the second form is
+      // the one that actually reaches the resolver and the one this pins — the
+      // resolver has to decode before it can reject, because the `..` is not
+      // visible until then.
+      const outside = join(server.frontendDir, '..', 'escaped-secret.txt');
+      writeFileSync(outside, 'secret');
+      // `rmSync(..., { recursive: true, force: true })` in afterEach removes a
+      // plain file just as happily as a directory.
+      temporaryDirs.push(outside);
+
+      const response = await server.get('/..%2fescaped-secret.txt');
+      expect(response.status).toBe(404);
+      expect(await response.text()).not.toBe('secret');
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
+describe('registerFrontend with embedded assets, over a listening server', () => {
+  /**
+   * The embedded branch is the shipped binary, and it is the branch that
+   * registers one literal route per manifest key. `.listen()` promotes those
+   * into Bun's native route table, which is the only place it can be settled
+   * whether an encoded spelling reaches its literal route or falls through to
+   * the fallback — `app.handle()` cannot answer that, and the static-wildcard
+   * regression on this branch is the standing proof.
+   */
+  async function startEmbeddedServer(): Promise<{
+    get: (path: string, headers?: Record<string, string>) => Promise<Response>;
+    stop: () => Promise<void>;
+  }> {
+    writeFileSync(join(assetDir, 'favicon.ico'), UPLOAD_BYTES);
+    writeFileSync(join(assetDir, 'config.js'), RUNTIME_CONFIG_JS);
+    registerEmbeddedFrontend({
+      '/index.html': join(assetDir, 'index.html'),
+      '/assets/index-AbCd1234.js': join(assetDir, 'index-AbCd1234.js'),
+      '/favicon.ico': join(assetDir, 'favicon.ico'),
+      '/config.js': join(assetDir, 'config.js'),
+    });
+
+    const app = new Elysia().error(NotFound, ({ request }) => frontendNotFound(request));
+    registerFrontend(app as unknown as App, '/nonexistent-frontend-dir');
+    await app.modules;
+
+    app.listen({ hostname: '127.0.0.1', port: 0, reusePort: false });
+    const origin = `http://127.0.0.1:${app.server?.port}`;
+    return {
+      get: (path: string, headers?: Record<string, string>) =>
+        fetch(`${origin}${path}`, { headers }),
+      stop: async () => {
+        await app.stop();
+      },
+    };
+  }
+
+  test('revalidates embedded root files against their content hash', async () => {
+    const server = await startEmbeddedServer();
+    try {
+      const first = await server.get('/favicon.ico');
+      expect(first.status).toBe(200);
+      const etag = first.headers.get('etag');
+      expect(etag).toBe(contentEtag(UPLOAD_BYTES));
+
+      const revalidated = await server.get('/favicon.ico', { 'If-None-Match': etag as string });
+      expect(revalidated.status).toBe(304);
+
+      // Hashed assets stay validator-free: `immutable` means a browser never
+      // revalidates them, so an ETag would be dead weight on every response.
+      const hashed = await server.get('/assets/index-AbCd1234.js');
+      expect(hashed.status).toBe(200);
+      expect(hashed.headers.get('etag')).toBeNull();
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('revalidates the embedded shell against its content hash', async () => {
+    const server = await startEmbeddedServer();
+    try {
+      const first = await server.get('/');
+      expect(first.status).toBe(200);
+      const etag = first.headers.get('etag');
+      expect(etag).toBe(contentEtag(INDEX_HTML));
+
+      const revalidated = await server.get('/', { 'If-None-Match': etag as string });
+      expect(revalidated.status).toBe(304);
+      expect(await revalidated.text()).toBe('');
+
+      // The old build's validator must miss, not 304 — that miss is what makes
+      // a browser fetch the new shell after a binary upgrade.
+      const upgraded = await server.get('/', { 'If-None-Match': '"71f-0"' });
+      expect(upgraded.status).toBe(200);
+      expect(await upgraded.text()).toBe(INDEX_HTML);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves a root file whose extension is percent-encoded', async () => {
+    const server = await startEmbeddedServer();
+    try {
+      const response = await server.get('/favicon%2eico');
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('public, max-age=86400');
+      expect(await response.text()).toBe(UPLOAD_BYTES);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('keeps an encoded /config.js on its revalidating directive', async () => {
+    const server = await startEmbeddedServer();
+    try {
+      const response = await server.get('/%63onfig.js');
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-cache');
+      expect(await response.text()).toBe(RUNTIME_CONFIG_JS);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('still 404s an encoded path that names no embedded file', async () => {
+    const server = await startEmbeddedServer();
+    try {
+      expect((await server.get('/never-built%2esvg')).status).toBe(404);
+      expect((await server.get('/assets/..%2fconfig.js')).status).toBe(404);
+    } finally {
+      await server.stop();
     }
   });
 });
@@ -276,7 +823,18 @@ describe('registerFrontend without embedded assets', () => {
       .use(new Elysia({ prefix: '/api' }).use(errorHandler).get('/health', () => ({ ok: true })));
     registerFrontend(app as unknown as App, '/nonexistent-frontend-dir');
 
-    for (const path of ['/api', '/api/nope']) {
+    // `/uploads`, `/images` and `/scalar` are API-owned too, so an unknown path
+    // under any of them is the error handler's to answer. `%E0%A4` is a
+    // malformed escape — undecodable, and so still not the fallback's to claim.
+    // Answering that one with the plaintext body is the regression this pins.
+    for (const path of [
+      '/api',
+      '/api/nope',
+      '/%61pi/nope',
+      '/uploads/nope',
+      '/scalar/nope',
+      '/api/chats/%E0%A4',
+    ]) {
       const missing = await app.handle(new Request(`http://localhost${path}`));
       await expectJsonNotFound(missing);
     }

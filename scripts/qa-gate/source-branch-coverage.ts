@@ -1,6 +1,6 @@
 import * as ts from '@typescript/typescript6';
 
-import { readCoveredSources } from './lcov-sources';
+import type { CoveredSource } from './lcov-sources';
 import { type CoverageBucket, coverageBucket } from './parse-lcov';
 
 interface BranchTotals {
@@ -143,11 +143,11 @@ const countBranches = (
   return totals;
 };
 
-export const readSourceBranchCoverageSummary = async (
-  lcovPath: string,
-  baseDir: string
-): Promise<CoverageBucket> => {
-  const sources = await readCoveredSources(lcovPath, baseDir);
+/** Branch bucket from already-parsed sources, so one `readCoveredSources`
+ * pass can feed both this and the statement counter. */
+export const sourceBranchCoverageFromSources = (
+  sources: readonly CoveredSource[]
+): CoverageBucket => {
   let totals: BranchTotals = { total: 0, covered: 0 };
 
   for (const { sourceFile, lineHits } of sources) {

@@ -32,7 +32,7 @@ cp .mango/.env.example ~/.mango/.env
 ## Fluxo de Desenvolvimento
 
 ```bash
-# Inicia todos os servidores de dev (API em :3001, frontend em :5173)
+# Inicia o servidor de dev (API e frontend em :3001)
 bun run dev
 
 # Ou inicie cada workspace individualmente
@@ -95,7 +95,7 @@ Executa Biome, dprint, verificação de dependências circulares e verificação
 bun run build
 ```
 
-Gera o build do frontend com Vite por padrão. Use `bun run build --binary` para binários standalone.
+Gera o build do frontend com `Bun.build()` (`apps/frontend/build.ts`) por padrão. Use `bun run build --binary` para binários standalone.
 
 ## Diretrizes de Commit
 

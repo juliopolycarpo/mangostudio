@@ -5,10 +5,11 @@
  * not ask for.
  */
 
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolSettingsCard } from '../../../src/features/settings/tools/components/ToolSettingsCard';
 import { act, fireEvent, render, screen } from '../../support/harness/render';
+import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const TOOL_PATH = '/api/settings/tools/get_current_datetime';
@@ -53,7 +54,6 @@ describe('ToolSettingsCard', () => {
   });
 
   afterEach(() => {
-    vi.useRealTimers();
     fetchScenario.restore();
   });
 
@@ -62,11 +62,11 @@ describe('ToolSettingsCard', () => {
 
     expect(screen.getByDisplayValue('UTC')).toBeInTheDocument();
 
-    vi.useFakeTimers();
+    useFakeTimers();
     rerender(<ToolSettingsCard descriptor={withTimezone('Europe/Lisbon')} />);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
+      await advanceTimersByTimeAsync(400);
     });
 
     expect(screen.getByDisplayValue('Europe/Lisbon')).toBeInTheDocument();
@@ -83,14 +83,14 @@ describe('ToolSettingsCard', () => {
 
     const { rerender } = render(<ToolSettingsCard descriptor={DESCRIPTOR} />);
 
-    vi.useFakeTimers();
+    useFakeTimers();
     fireEvent.change(screen.getByDisplayValue('UTC'), {
       target: { value: 'America/Sao_Paulo' },
     });
     rerender(<ToolSettingsCard descriptor={withTimezone('Europe/Lisbon')} />);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
+      await advanceTimersByTimeAsync(400);
     });
 
     // The user is mid-edit on this control, so the remote value must not take
@@ -104,11 +104,11 @@ describe('ToolSettingsCard', () => {
 
     expect(screen.getByRole('checkbox')).toBeChecked();
 
-    vi.useFakeTimers();
+    useFakeTimers();
     rerender(<ToolSettingsCard descriptor={{ ...DESCRIPTOR, enabled: false }} />);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(400);
+      await advanceTimersByTimeAsync(400);
     });
 
     expect(screen.getByRole('checkbox')).not.toBeChecked();

@@ -1,4 +1,4 @@
-import { vi } from 'vitest';
+import { jest } from 'bun:test';
 
 export type FetchScenarioKey = `${string} ${string}`;
 
@@ -6,6 +6,26 @@ interface FetchScenarioResponse {
   body?: unknown;
   headers?: HeadersInit;
   status?: number;
+}
+
+type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+/**
+ * The mock surface the scenario exposes, spelled out rather than inferred from
+ * `jest.fn`'s return type.
+ *
+ * The declared interface is what 37 test files' type inference hangs off, and
+ * `settings-page-secret.integration.test.tsx` names it explicitly — keep it
+ * narrower than `Mock` so a scenario can only be driven through the calls the
+ * helper actually supports.
+ */
+export interface FetchScenarioMock {
+  (input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+  readonly mock: { readonly calls: [RequestInfo | URL, (RequestInit | undefined)?][] };
+  mockClear(): unknown;
+  mockImplementation(implementation: FetchImplementation): unknown;
+  mockResolvedValue(value: Response): unknown;
+  getMockImplementation(): FetchImplementation | undefined;
 }
 
 function getRequestUrl(input: RequestInfo | URL): URL {
@@ -36,8 +56,8 @@ function getRequestMethod(input: RequestInfo | URL, init?: RequestInit): string 
  * Creates a fetch scenario registry for frontend integration tests.
  *
  * **Escopo:** Use exclusivamente em testes de hooks React (ex: `use-messages-query`,
- * `use-gallery-query`) que disparam `fetch` via Eden Treaty no ambiente jsdom —
- * onde o app Elysia não está disponível.
+ * `use-gallery-query`) que disparam `fetch` via Eden Treaty no ambiente DOM
+ * simulado — onde o app Elysia não está disponível.
  *
  * Para testes de contrato de API, prefira `createApiTestApp` + `app.handle()`
  * no workspace `@mangostudio/api`.
@@ -47,7 +67,10 @@ function getRequestMethod(input: RequestInfo | URL, init?: RequestInit): string 
 export function createFetchScenario() {
   const originalFetch = globalThis.fetch;
   const responses = new Map<FetchScenarioKey, FetchScenarioResponse>();
-  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  // `jest.fn` is generic over the implementation it wraps, so it satisfies the
+  // declared surface structurally but not nominally. `FetchScenarioMock` is
+  // what the scenario's consumers are held to.
+  const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const method = getRequestMethod(input, init);
     const url = getRequestUrl(input);
     const key = `${method} ${url.pathname}${url.search}` as FetchScenarioKey;
@@ -72,7 +95,7 @@ export function createFetchScenario() {
         },
       })
     );
-  });
+  }) as unknown as FetchScenarioMock;
 
   return {
     fetchMock,
@@ -93,7 +116,9 @@ export function createFetchScenario() {
      * Installs the scenario fetch mock on globalThis.
      */
     install() {
-      vi.stubGlobal('fetch', fetchMock);
+      // Assigned directly — `bun test` has no runner-managed global stubbing,
+      // so `restore()` puts back the captured original itself.
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
       return this;
     },
 
@@ -102,13 +127,12 @@ export function createFetchScenario() {
      */
     restore() {
       responses.clear();
-      fetchMock.mockReset();
-
-      if (originalFetch) {
-        vi.stubGlobal('fetch', originalFetch);
-      } else {
-        vi.unstubAllGlobals();
-      }
+      // `mockClear`, not `mockReset`: under `bun test` a reset strips the
+      // implementation `jest.fn(impl)` was given, so the second test in a file
+      // would get a `fetch` that returns `undefined` and every request after
+      // it fails.
+      fetchMock.mockClear();
+      globalThis.fetch = originalFetch;
     },
   };
 }

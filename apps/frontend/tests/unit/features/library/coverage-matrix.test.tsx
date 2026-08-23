@@ -6,16 +6,16 @@
  * to read the state.
  */
 
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CoverageMatrix } from '../../../../src/features/library/components/CoverageMatrix';
 import { render, screen, within } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
 import { fullCoverage, instance, location, resource, TARGETS } from './fixtures';
 
 /**
- * jsdom reports every element as zero-sized, and the row virtualizer measures
+ * happy-dom reports every element as zero-sized, and the row virtualizer measures
  * the scroll container with `offsetHeight`. Without a height it computes an
  * empty window and renders no rows, so the box is stubbed for this file only.
  */

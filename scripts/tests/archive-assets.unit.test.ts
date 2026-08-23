@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
+import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
+import { captureCommand } from '../lib/exec';
 import { createReleaseAssetPlan, type ReleaseAssetPlan } from '../lib/release-assets';
 import {
   filterBinaryTargets,
@@ -59,6 +61,9 @@ const stageFrontendDist = (rootDir: string): void => {
   const distDir = join(rootDir, 'apps', 'frontend', 'dist');
   mkdirSync(join(distDir, 'assets'), { recursive: true });
   writeFileSync(join(distDir, 'index.html'), '<html></html>');
+  // Every build writes this. It is the dev server's staleness stamp, meaningless
+  // to whoever untars a release, and the archive is the whole directory.
+  writeFileSync(join(distDir, BUILD_STATE_FILE), '{"apiUrl":"","mode":"production"}');
 };
 
 const createMuslReleasePlan = (options: {
@@ -166,6 +171,11 @@ describe.serial('archiveReleaseAssets', () => {
       expect(existsSync(asset.assetPath)).toBe(true);
     }
     expect(existsSync(plan.frontendArchive.archivePath)).toBe(true);
+    const frontendMembers = (
+      await captureCommand(['tar', '-tzf', plan.frontendArchive.archivePath])
+    ).stdout;
+    expect(frontendMembers).toContain('./index.html');
+    expect(frontendMembers).not.toContain(BUILD_STATE_FILE);
     expect(existsSync(plan.checksumPath)).toBe(true);
 
     const checksumLines = readFileSync(plan.checksumPath, 'utf8').trimEnd().split('\n');

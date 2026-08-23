@@ -1,3 +1,4 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type {
   GitBranchesResponse,
   GitCommitDetailsResponse,
@@ -9,40 +10,38 @@ import type {
 import type { GithubContext } from '@mangostudio/shared/github';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { GitPanel } from '../../../src/features/workspace/GitPanel';
 import { AppContext } from '../../../src/lib/app-context';
 import { ApiError } from '../../../src/lib/utils';
 import { render } from '../../support/harness/render';
 
-const hooks = vi.hoisted(() => ({
+const hooks = {
   data: undefined as GitRepoState | undefined,
   error: null as Error | null,
   loading: false,
   fetching: false,
-  refetch: vi.fn(),
-  mutate: vi.fn(),
+  refetch: jest.fn(),
+  mutate: jest.fn(),
   initPending: false,
   initError: null as Error | null,
-  stage: vi.fn(),
-  unstage: vi.fn(),
-  discard: vi.fn(),
-  commit: vi.fn(),
-  generate: vi.fn(),
-  stashSave: vi.fn(),
-  stashPop: vi.fn(),
-  stashApply: vi.fn(),
-  stashDrop: vi.fn(),
+  stage: jest.fn(),
+  unstage: jest.fn(),
+  discard: jest.fn(),
+  commit: jest.fn(),
+  generate: jest.fn(),
+  stashSave: jest.fn(),
+  stashPop: jest.fn(),
+  stashApply: jest.fn(),
+  stashDrop: jest.fn(),
   stashes: [] as Array<{ index: number; message: string; branch?: string }>,
   branches: { branches: [], remotes: [] } as GitBranchesResponse,
-  branchSwitch: vi.fn(),
-  branchCreate: vi.fn(),
-  branchRename: vi.fn(),
-  branchDelete: vi.fn(),
-  checkoutRemote: vi.fn(),
-  gitFetch: vi.fn(),
-  gitPull: vi.fn(),
-  gitPush: vi.fn(),
+  branchSwitch: jest.fn(),
+  branchCreate: jest.fn(),
+  branchRename: jest.fn(),
+  branchDelete: jest.fn(),
+  checkoutRemote: jest.fn(),
+  gitFetch: jest.fn(),
+  gitPull: jest.fn(),
+  gitPush: jest.fn(),
   headMessage: undefined as GitHeadMessageResponse | undefined,
   headMessageError: null as Error | null,
   historyPages: [] as GitHistoryResponse[],
@@ -53,10 +52,10 @@ const hooks = vi.hoisted(() => ({
   githubError: null as Error | null,
   githubLoading: false,
   githubFetching: false,
-  githubRefetch: vi.fn(),
-}));
+  githubRefetch: jest.fn(),
+};
 
-vi.mock('../../../src/features/workspace/hooks/use-github-context', () => ({
+mock.module('../../../src/features/workspace/hooks/use-github-context', () => ({
   useGithubContext: () => ({
     data: hooks.githubData,
     error: hooks.githubError,
@@ -66,7 +65,7 @@ vi.mock('../../../src/features/workspace/hooks/use-github-context', () => ({
   }),
 }));
 
-vi.mock('../../../src/features/workspace/hooks/use-git-state', () => ({
+mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
   useGitRealtimeInvalidation: () => undefined,
   useGitState: () => ({
     data: hooks.data,
@@ -110,11 +109,15 @@ vi.mock('../../../src/features/workspace/hooks/use-git-state', () => ({
     error: null,
     hasNextPage: false,
     isFetchingNextPage: false,
-    fetchNextPage: vi.fn(),
+    fetchNextPage: jest.fn(),
   }),
   useGitCommit: () => ({ data: hooks.commitDetails, isLoading: false, error: null }),
   useGitDiff: () => ({ data: hooks.diff, isLoading: false, error: null }),
 }));
+
+// Below the mocks, never as a static import: those are evaluated first and the
+// panel would bind the real git hooks.
+const { GitPanel } = await import('../../../src/features/workspace/GitPanel');
 
 function repoState(status: Partial<GitRepoState & { status: unknown }> = {}): GitRepoState {
   return {
@@ -448,7 +451,7 @@ describe('GitPanel', () => {
     render(<Panel />);
     await user.click(screen.getByRole('button', { name: 'Initialize repository' }));
 
-    expect(hooks.mutate).toHaveBeenCalledOnce();
+    expect(hooks.mutate).toHaveBeenCalledTimes(1);
   });
 
   it('offers a retry when repository inspection fails', async () => {
@@ -458,7 +461,7 @@ describe('GitPanel', () => {
     render(<Panel />);
     await user.click(screen.getByRole('button', { name: 'Retry' }));
 
-    expect(hooks.refetch).toHaveBeenCalledOnce();
+    expect(hooks.refetch).toHaveBeenCalledTimes(1);
   });
 
   it('stages and unstages individual file changes, including both rename paths', async () => {
@@ -553,7 +556,10 @@ describe('GitPanel', () => {
     expect(screen.getByRole('dialog', { name: 'Delete untracked files?' })).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Delete files' }));
 
-    expect(hooks.discard).toHaveBeenCalledExactlyOnceWith({
+    // `toHaveBeenCalledExactlyOnceWith` is a Vitest matcher `bun test` does not
+    // have; the pair below asserts the same thing.
+    expect(hooks.discard).toHaveBeenCalledTimes(1);
+    expect(hooks.discard).toHaveBeenCalledWith({
       paths: ['notes.txt'],
       mode: 'untracked',
     });
@@ -699,7 +705,7 @@ describe('GitPanel', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Stage all and commit' }));
 
     expect(hooks.stage).toHaveBeenCalledWith({ all: true });
-    await waitFor(() => expect(hooks.commit).toHaveBeenCalledOnce());
+    await waitFor(() => expect(hooks.commit).toHaveBeenCalledTimes(1));
   });
 
   it('pushes after a successful commit and stops when the commit fails', async () => {
@@ -722,7 +728,7 @@ describe('GitPanel', () => {
     await openCommitMenu(user);
     await user.click(screen.getByRole('menuitem', { name: 'Commit and push' }));
 
-    await waitFor(() => expect(hooks.gitPush).toHaveBeenCalledOnce());
+    await waitFor(() => expect(hooks.gitPush).toHaveBeenCalledTimes(1));
     expect(await screen.findByText('Committed and pushed abcdef12')).toBeInTheDocument();
 
     hooks.commit.mockRejectedValue(new Error('hook rejected the commit'));
@@ -758,7 +764,7 @@ describe('GitPanel', () => {
     render(<Panel />);
     await user.click(screen.getByRole('button', { name: 'Generate message' }));
 
-    expect(hooks.generate).toHaveBeenCalledOnce();
+    expect(hooks.generate).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('textbox', { name: 'Commit title' })).toHaveValue(
       'feat(git): generate commit messages'
     );

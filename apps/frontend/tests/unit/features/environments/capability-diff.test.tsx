@@ -5,9 +5,9 @@
  * and only one of them is something to act on.
  */
 
+import { describe, expect, it } from 'bun:test';
 import type { Environment } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
-import { describe, expect, it } from 'vitest';
 import { CapabilityDiff } from '../../../../src/features/environments/components/CapabilityDiff';
 import { render, screen, waitFor, within } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';

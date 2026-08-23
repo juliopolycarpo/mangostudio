@@ -7,11 +7,11 @@
  * the only way a user finds the screen that hands them back.
  */
 
+import { afterEach, describe, expect, it } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
 import type { PropagationBackupUsage } from '@mangostudio/shared/library';
-import { afterEach, describe, expect, it } from 'vitest';
 import { BackupUsage } from '../../../../src/features/library/components/BackupUsage';
-import { screen } from '../../../support/harness/render';
+import { flushAsyncRender, screen } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 
@@ -83,6 +83,11 @@ describe('BackupUsage', () => {
       sets: [],
     });
 
+    // The usage query resolves after the synchronous absence check; without a
+    // flush that state update lands once the test is over and React reports an
+    // un-act()ed update against whichever file runs next. Reproduced 5 times in
+    // 12 full-lane `--parallel=4` runs, never in a single-file run.
+    await flushAsyncRender();
     expect(screen.queryByTestId('backup-usage')).not.toBeInTheDocument();
   });
 });

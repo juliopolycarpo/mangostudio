@@ -28,18 +28,33 @@ volume:
 
 Useful environment variables:
 
-| Variable             | Purpose                                                      |
-| -------------------- | ------------------------------------------------------------ |
-| `BETTER_AUTH_SECRET` | Required 32+ character auth secret                           |
-| `GEMINI_API_KEY`     | Gemini connector key; other provider keys use the same env   |
-| `API_PORT`           | Container listen port, default `3001`                        |
-| `DATABASE_PATH`      | Override SQLite path, default `/data/.mango/database.sqlite` |
-| `UPLOADS_DIR`        | Override uploaded file storage path                          |
-| `IMAGES_DIR`         | Override generated image storage path                        |
-| `TOOL_IMAGES_DIR`    | Override custom tool avatar storage path                     |
-| `AGENTS_DIR`         | Override agent settings storage path                         |
-| `BETTER_AUTH_URL`    | Public URL when deployed behind a domain                     |
-| `TRUST_PROXY`        | Set to `true` only behind a header-overwriting proxy         |
+| Variable             | Purpose                                                                       |
+| -------------------- | ----------------------------------------------------------------------------- |
+| `BETTER_AUTH_SECRET` | Required 32+ character auth secret                                            |
+| `GEMINI_API_KEY`     | Gemini connector key; other provider keys use the same env                    |
+| `API_PORT`           | Container listen port, default `3001`                                         |
+| `DATABASE_PATH`      | Override SQLite path, default `/data/.mango/database.sqlite`                  |
+| `UPLOADS_DIR`        | Override uploaded file storage path                                           |
+| `IMAGES_DIR`         | Override generated image storage path                                         |
+| `TOOL_IMAGES_DIR`    | Override custom tool avatar storage path                                      |
+| `AGENTS_DIR`         | Override agent settings storage path                                          |
+| `BETTER_AUTH_URL`    | Public URL when deployed behind a domain                                      |
+| `TRUST_PROXY`        | Set to `true` only behind a header-overwriting proxy                          |
+| `ALLOWED_ORIGINS`    | Comma-separated browser origins allowed when the frontend is served elsewhere |
+
+`ALLOWED_ORIGINS` is only half of a split deployment. It tells this API which origin to accept
+requests from; the bundle also has to be told where the API is. Unpack
+`mangostudio-<version>-frontend-dist.tar.gz` and edit `config.js` beside `index.html`:
+
+```js
+window.__MANGO_CONFIG__ = { apiUrl: 'https://api.example.com' };
+```
+
+No rebuild is needed — the file is read at page load, and it outranks anything baked in at
+build time. Leave `apiUrl` empty (the shipped default) to use the origin the page was served
+from, which is what a single-origin install and the standalone binary both want.
+`MANGO_API_URL` sets the same value at build time, for anyone building the bundle themselves.
+See `docs/architecture/frontend-build.md`.
 
 Compose example:
 
@@ -144,6 +159,13 @@ port = 3001
 # be a spoofable guess. Env override: PUBLIC_URL. Direct URL environments do
 # not need this — the hub dials the runtime's baseUrl instead.
 publicUrl = "https://your-domain.com"
+# Only for a split deployment, where the frontend bundle is served from a
+# different origin than this API. Added to the server's own origins, never
+# substituted for them. Each entry must be a bare scheme://host[:port] — a path,
+# a trailing slash, or an explicit default port fails at startup, because every
+# gate compares the browser's Origin header by exact string. Env override:
+# ALLOWED_ORIGINS (comma-separated), which replaces this list.
+allowedOrigins = ["https://studio.example.com"]
 
 [database]
 path = "/var/lib/mangostudio/database.sqlite"

@@ -1,3 +1,23 @@
 [test]
 coverageReporter = ["lcov"]
-coverageDir = "../../.mango/artifacts/coverage/frontend/bun"
+coverageDir = "../../.mango/artifacts/coverage/frontend"
+coverageSkipTestFiles = true
+# Mirrors the retired Vitest lane's `coverage.exclude`: the support tree is
+# always loaded through the preload, so without this it pads every run with
+# harness lines that no test asserts on.
+coveragePathIgnorePatterns = [
+  "tests/**",
+  "**/*.d.ts",
+  "**/*.config.*",
+]
+# No `coverageThreshold` here, deliberately. On Bun 1.4.0 it is enforced per
+# *file* — every file must individually clear the bar, so a workspace with a
+# legitimately uncovered file cannot express a total gate through it — and a
+# miss prints nothing at all. The real gate reads the LCOV back:
+# scripts/qa-gate/enforce-coverage-thresholds.ts, chained in `test:coverage`,
+# with the floors in scripts/lib/test-lanes.ts.
+# Two files, in this order, and not one: `GlobalRegistrator.register()` has to
+# run before anything imports `@testing-library/dom`, or `screen` initializes
+# against a `document` that does not exist yet and every query then fails
+# without pointing at the cause.
+preload = ["./tests/support/setup/dom-setup.ts", "./tests/support/setup/bun.setup.ts"]

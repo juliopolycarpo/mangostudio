@@ -11,9 +11,9 @@
 host = "localhost"
 port = 3001
 
-[frontend]
-host = "localhost"
-port = 5173
+# [frontend] is deprecated and ignored. The API serves the frontend on
+# [server].port, so there is no separate frontend host or port. An existing
+# config.toml that still sets it keeps working and logs a warning at startup.
 
 [database]
 # Empty = auto-detect:

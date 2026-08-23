@@ -24,6 +24,17 @@ permissions:
 # that is what resolve-timings pins.
 env:
   SHARD_COUNT: 8
+  # Names every child a run spawns, and every one that never exits, in the shard
+  # log. The failure this exists for (#922) reproduces only in CI, and Bun's own
+  # `killed N dangling process` says nothing about which child it killed.
+  #
+  # Measured on a full local run: 1662 lines, all of them from the api lane —
+  # only that workspace's preload installs the wrappers. 726 spawns against 726
+  # exits (a mismatch is the signal) plus 210 synchronous ones, four fifths of
+  # them git. Sharded eight ways that is roughly 200 lines in a shard log, which
+  # is what the cost of this is. See
+  # apps/api/tests/support/setup/spawn-diagnostics.ts.
+  MANGOSTUDIO_SPAWN_DIAGNOSTICS: "1"
 
 jobs:
   resolve-timings:
@@ -118,16 +129,6 @@ jobs:
           mode: ${{ matrix.shard == 1 && 'restore-save' || 'restore' }}
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - name: Restore Vite optimizer cache
-        uses: ./.github/actions/cache-scoped
-        with:
-          family: vite
-          path: apps/frontend/node_modules/.vite
-          validity: test-${{ hashFiles('bun.lock', 'apps/frontend/package.json', 'apps/frontend/vite.config.ts', 'apps/frontend/vitest.config.ts', 'apps/frontend/tsconfig*.json') }}
-          restore-prefix: test-
-          mode: ${{ matrix.shard == 1 && 'restore-save' || 'restore' }}
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
-
       # Per-file durations from a previous run, used to balance `--shard` by
       # time instead of by file order. Measured on this repo: the critical
       # shard goes 69.6s -> 58.6s and the spread across shards halves.
@@ -159,11 +160,9 @@ jobs:
       - name: Run database migrations
         run: bun run --filter @mangostudio/api migrate
 
-      # This shard's slice of every lane. Bun lanes take `--shard` directly;
-      # the frontend Vitest lane writes a blob report for the merge job to
-      # replay, and stands its coverage thresholds down — a shard covers a
-      # fraction of the sources, so it would fail them every time. The merge
-      # job is unsharded and is where those thresholds are decided.
+      # This shard's slice of every sharded lane; each takes `--shard`
+      # directly. The frontend lane is not among them — its LCOV cannot be
+      # merged across shards, so it runs whole in the `frontend` job below.
       - name: Run tests with coverage
         id: coverage
         env:
@@ -177,12 +176,11 @@ jobs:
             "${SHARD}" "${status}" "$(( $(date +%s) - start ))" > shard-meta.json
           exit "${status}"
 
-      # Neither runner's unhandled errors reach its JUnit report: Vitest's
-      # reporter writes errors="0" unconditionally, and Bun's "# Unhandled error
+      # Unhandled errors never reach the JUnit report: Bun's "# Unhandled error
       # between tests" block leaves failures="0" with no failing case while the
-      # run exits 1. Both classes are documented in docs/reference/testing.md and
-      # exist only in the log, so extract them here, while the log is still local
-      # to the shard that produced it.
+      # run exits 1. Documented in docs/reference/testing.md and only visible in
+      # the log, so extract them here, while the log is still local to the shard
+      # that produced it.
       - name: Extract unhandled errors
         if: ${{ !cancelled() }}
         run: bun ./scripts/qa-gate/unhandled-errors.ts coverage-run.log > unhandled-errors.json
@@ -190,10 +188,10 @@ jobs:
       # Uploaded even when the shard fails so the merge job can report the
       # failing exit code instead of a missing-metrics placeholder.
       #
-      # `include-hidden-files` is required, not tidy-up: both `.mango` and
-      # `.vitest-reports` are dot-directories, and at the default the Vitest
-      # blob reports are dropped from the artifact silently — the upload still
-      # reports success, and the merge job is where it surfaces.
+      # `include-hidden-files` is required, not tidy-up: `.mango` is a
+      # dot-directory, and at the default the whole tree is dropped from the
+      # artifact silently — the upload still reports success, and the merge job
+      # is where it surfaces.
       - name: Upload shard results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -204,7 +202,6 @@ jobs:
             .mango/artifacts/junit/
             .mango/artifacts/coverage/
             .mango/artifacts/timings/
-            apps/frontend/.vitest-reports/
             shard-meta.json
             unhandled-errors.json
           retention-days: 1
@@ -217,13 +214,99 @@ jobs:
           path: coverage-run.log
           retention-days: 7
 
+  frontend:
+    # The frontend lane runs whole rather than riding the shard matrix: Bun's
+    # LCOV is not union-mergeable (per-file `LF`/`FNF` are run-dependent, so a
+    # merged report understates coverage — see merge-lcov-shards.ts), which
+    # means its coverage must come from one invocation. Parallelism happens
+    # in-process instead: `--parallel=4`, adopted after a 12-run pinned soak
+    # of the full suite came back clean (docs/reference/testing.md). The
+    # coverage floors are enforced inside the same invocation by
+    # enforce-coverage-thresholds.ts, so a miss fails this job directly.
+    #
+    # It uploads the same artifact shape as a shard, under
+    # `test-shard-frontend`, so the merge job folds it in without a special
+    # case.
+    name: Tests (frontend)
+    needs: [resolve-timings]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: setup
+        uses: ./.github/actions/setup-mango
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      # No turbo cache here, deliberately: nothing this job runs can hit one.
+      # `--only=frontend` leaves out the root scripts lane, which is the single
+      # cached task (`//#test:scripts`), and the `test:coverage` task it does
+      # run is `cache: false` with no `dependsOn`. Restoring the shards' archive
+      # was pure download and extract in front of an uncached run.
+
+      # The same pinned key the shards restore. Here `--timings` is not a
+      # partition input (nothing splits this lane); it balances the four
+      # in-process `--parallel` workers by measured wall time.
+      - name: Restore test timings
+        if: needs.resolve-timings.outputs.key != ''
+        uses: ./.github/actions/cache-scoped
+        with:
+          family: timings
+          path: .mango/artifacts/timings
+          validity: test-shard-${{ env.SHARD_COUNT }}
+          mode: restore-exact
+          exact-key: ${{ needs.resolve-timings.outputs.key }}
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      - name: Run frontend tests with coverage
+        id: coverage
+        run: |
+          set -o pipefail
+          start="$(date +%s)"
+          status=0
+          bun run test --coverage --only=frontend 2>&1 | tee coverage-run.log || status=$?
+          printf '{"shard":"frontend","exitCode":%s,"durationSeconds":%s}\n' \
+            "${status}" "$(( $(date +%s) - start ))" > shard-meta.json
+          exit "${status}"
+
+      # Same reason as the shard job: Bun's "# Unhandled error between tests"
+      # block exists only in the log, never in the JUnit report.
+      - name: Extract unhandled errors
+        if: ${{ !cancelled() }}
+        run: bun ./scripts/qa-gate/unhandled-errors.ts coverage-run.log > unhandled-errors.json
+
+      - name: Upload frontend results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-shard-frontend
+          include-hidden-files: true
+          path: |
+            .mango/artifacts/junit/
+            .mango/artifacts/coverage/
+            .mango/artifacts/timings/
+            shard-meta.json
+            unhandled-errors.json
+          retention-days: 1
+
+      - name: Upload frontend log
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-shard-frontend-log
+          path: coverage-run.log
+          retention-days: 7
+
   merge:
     # Reassembles what the fan-out split. LCOV needs a real merge (Bun's
     # per-file line totals are run-dependent — see
-    # scripts/qa-gate/merge-lcov-shards.ts), Vitest merges its own blobs, and
-    # JUnit is read straight out of the shard directories.
+    # scripts/qa-gate/merge-lcov-shards.ts), and JUnit is read straight out of
+    # the per-job directories.
     name: Merge shard results
-    needs: [shard]
+    needs: [shard, frontend]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -242,9 +325,14 @@ jobs:
           pattern: test-shard-*
           path: shards
 
+      # The expected count is the shards plus the frontend job's artifact; a
+      # job that died before uploading leaves its directory missing, not empty,
+      # and merging the remainder would read as a green run over a partial set.
       - name: Merge shard coverage and run metadata
         id: merge
-        run: bun ./scripts/ci/merge-test-shards.ts shards "${SHARD_COUNT}" > shard-summary.json
+        # Plain shard count: the script adds one directory per unsharded lane
+        # from the test-lane registry itself.
+        run: bun ./scripts/ci/merge-test-shards.ts shards "$SHARD_COUNT" > shard-summary.json
 
       # Reassembles next run's timings, and fails this run if the eight shards
       # claimed the same file — which means they read different timings and did
@@ -277,34 +365,14 @@ jobs:
           mode: save
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      # Hard gate: this is where the frontend coverage thresholds apply, the
-      # same way `vitest run --coverage` applied them before sharding. Four
-      # shards merged reproduce the unsharded run's numbers exactly
-      # (76.08/68.06/72.81/78.76), so a drop here is a real drop.
-      - name: Merge Vitest reports and enforce coverage thresholds
-        id: thresholds
-        run: |
-          set -euo pipefail
-          mkdir -p .mango/artifacts/junit
-          bun run --filter @mangostudio/frontend test:coverage:merge
-
-      # Emitted even when a shard or the threshold gate failed, so the QA
-      # report can show the failing exit code rather than a placeholder.
-      #
-      # The gate's outcome is passed explicitly: `shard-summary.json` only knows
-      # how the shards ended, and coverage thresholds now run after them. Without
-      # it a coverage-only regression renders as a green suite in the QA report
-      # while CI is red. A skipped step (the shard merge died first) counts as a
-      # failed gate, which is what it is.
+      # Emitted even when a job failed, so the QA report can show the failing
+      # exit code rather than a placeholder. The frontend coverage floors need
+      # no separate outcome plumbing here: they fail the frontend job's own
+      # `test:coverage` invocation, so a miss is already in that job's
+      # shard-meta exit code.
       - name: Collect test metrics fragment
         if: ${{ !cancelled() }}
-        env:
-          GATE_OUTCOME: ${{ steps.thresholds.outcome }}
-        run: |
-          set -euo pipefail
-          gate=0
-          [ "${GATE_OUTCOME}" = "success" ] || gate=1
-          bun ./scripts/qa-gate/collect-test-metrics.ts shard-summary.json shards "${gate}" > test-metrics.json
+        run: bun ./scripts/qa-gate/collect-test-metrics.ts shard-summary.json shards > test-metrics.json
 
       # Handoff to the qa-metrics job in the same run; nothing consumes it
       # afterwards, so the shortest retention GitHub allows is enough.

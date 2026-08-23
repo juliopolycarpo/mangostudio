@@ -3,52 +3,52 @@
  * Verifies that multiple thinking blocks are built correctly during SSE streaming.
  */
 
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { MessagePart } from '@mangostudio/shared';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useTextGeneration } from '../../../src/features/generation/hooks/use-text-generation';
 import {
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
 } from '../../../src/hooks/use-global-settings';
+import type { respondTextStream } from '../../../src/services/generation-service';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
-vi.mock('../../../src/services/generation-service', () => ({
-  respondTextStream: vi.fn(),
-  startExternalReviewStream: vi.fn(),
-  cancelInterruptedTurn: vi.fn(),
-  dismissInterruptedTurn: vi.fn(),
+// No Bun equivalent for `vi.mocked` — the `jest.fn()` handles created here are
+// what the factories below hand back, so keep them instead.
+const mockStream = jest.fn();
+const mockCancelInterruptedTurn = jest.fn();
+const mockDismissInterruptedTurn = jest.fn();
+const mockGenerateChatTitle = jest.fn();
+const mockInvalidateGitState = jest.fn().mockResolvedValue(undefined);
+
+mock.module('../../../src/services/generation-service', () => ({
+  respondTextStream: mockStream,
+  startExternalReviewStream: jest.fn(),
+  cancelInterruptedTurn: mockCancelInterruptedTurn,
+  dismissInterruptedTurn: mockDismissInterruptedTurn,
 }));
 
-vi.mock('../../../src/features/chat/services/chat-title', () => ({
-  generateChatTitleSuggestion: vi.fn(),
+mock.module('../../../src/features/chat/services/chat-title', () => ({
+  generateChatTitleSuggestion: mockGenerateChatTitle,
 }));
 
-vi.mock('../../../src/features/chat/services/context-compaction', () => ({
-  compactChat: vi.fn(),
-  summarizeToNewChat: vi.fn(),
+mock.module('../../../src/features/chat/services/context-compaction', () => ({
+  compactChat: jest.fn(),
+  summarizeToNewChat: jest.fn(),
 }));
 
-vi.mock('../../../src/features/chat/queries', () => ({
+mock.module('../../../src/features/chat/queries', () => ({
   messageKeys: { list: (id: string) => ['messages', id] },
 }));
 
-vi.mock('../../../src/features/workspace/hooks/use-git-state', () => ({
-  invalidateGitState: vi.fn().mockResolvedValue(undefined),
+mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
+  invalidateGitState: mockInvalidateGitState,
 }));
 
-import { generateChatTitleSuggestion } from '../../../src/features/chat/services/chat-title';
-import { invalidateGitState } from '../../../src/features/workspace/hooks/use-git-state';
-import {
-  cancelInterruptedTurn,
-  dismissInterruptedTurn,
-  respondTextStream,
-} from '../../../src/services/generation-service';
-
-const mockStream = vi.mocked(respondTextStream);
-const mockCancelInterruptedTurn = vi.mocked(cancelInterruptedTurn);
-const mockDismissInterruptedTurn = vi.mocked(dismissInterruptedTurn);
-const mockGenerateChatTitle = vi.mocked(generateChatTitleSuggestion);
-const mockInvalidateGitState = vi.mocked(invalidateGitState);
+// Static imports are evaluated before any statement above runs, so the hook
+// has to come in afterwards or it binds the real services.
+const { useTextGeneration } = await import(
+  '../../../src/features/generation/hooks/use-text-generation'
+);
 
 /**
  * Builds a fake respondTextStream implementation that delivers a sequence of
@@ -106,16 +106,16 @@ function createDeferred<T>() {
 
 type TextGenerationProps = Parameters<typeof useTextGeneration>[0];
 
-function makeProps(overrides: Partial<TextGenerationProps> = {}): TextGenerationProps {
-  const updateOptimisticMessage = vi.fn();
-  const appendOptimisticMessages = vi.fn();
+function makeProps(overrides: Partial<TextGenerationProps> = {}) {
+  const updateOptimisticMessage = jest.fn();
+  const appendOptimisticMessages = jest.fn();
   return {
     chats: {
       currentChatId: 'chat-1',
       currentChat: { id: 'chat-1', title: 'Existing chat', createdAt: 1, updatedAt: 1 },
-      createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
-      updateChatTitle: vi.fn().mockResolvedValue(undefined),
-      loadChats: vi.fn().mockResolvedValue(undefined),
+      createChat: jest.fn().mockResolvedValue({ id: 'chat-new' }),
+      updateChatTitle: jest.fn().mockResolvedValue(undefined),
+      loadChats: jest.fn().mockResolvedValue(undefined),
     } as unknown as TextGenerationProps['chats'],
     getActiveModel: () => 'test-model',
     systemPrompt: '',
@@ -131,6 +131,10 @@ function makeProps(overrides: Partial<TextGenerationProps> = {}): TextGeneration
     currentChatId: 'chat-1',
     getAgentSelection: () => ({ agentId: 'default' }),
     ...overrides,
+    // Kept alongside the cast-to-unknown `optimistic` above so assertions can
+    // read `.mock.calls` — `jest.mocked` has no Bun equivalent to regain that
+    // typing.
+    updateOptimisticMessage,
   };
 }
 
@@ -159,9 +163,9 @@ describe('useTextGeneration — thinking segment tracking', () => {
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
 
     // Find the call where a thinking part was added (thinking_start + first thinking delta)
-    const calls: Array<[string, string, Partial<{ parts: MessagePart[] }>]> = vi.mocked(
-      props.optimistic.updateOptimisticMessage
-    ).mock.calls;
+    const calls = props.updateOptimisticMessage.mock.calls as Array<
+      [string, string, Partial<{ parts: MessagePart[] }>]
+    >;
 
     const thinkingCall = calls.find(([, , update]) =>
       update.parts?.some((p: MessagePart) => p.type === 'thinking' && p.text === 'initial thought')
@@ -191,9 +195,9 @@ describe('useTextGeneration — thinking segment tracking', () => {
 
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
 
-    const calls: Array<[string, string, Partial<{ parts: MessagePart[] }>]> = vi.mocked(
-      props.optimistic.updateOptimisticMessage
-    ).mock.calls;
+    const calls = props.updateOptimisticMessage.mock.calls as Array<
+      [string, string, Partial<{ parts: MessagePart[] }>]
+    >;
 
     // The last substantive parts update before done should have one thinking segment
     const lastPartsCall = [...calls]
@@ -237,9 +241,9 @@ describe('useTextGeneration — thinking segment tracking', () => {
 
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
 
-    const calls: Array<[string, string, Partial<{ parts: MessagePart[] }>]> = vi.mocked(
-      props.optimistic.updateOptimisticMessage
-    ).mock.calls;
+    const calls = props.updateOptimisticMessage.mock.calls as Array<
+      [string, string, Partial<{ parts: MessagePart[] }>]
+    >;
 
     // Find the LAST call that has two thinking parts (captures the final state of both segments)
     const twoThinkingCall = [...calls]
@@ -381,8 +385,8 @@ describe('useTextGeneration — external turn header model', () => {
     });
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
 
-    const appendCall = (props.optimistic.appendOptimisticMessages as ReturnType<typeof vi.fn>).mock
-      .calls[0];
+    const appendCall = (props.optimistic.appendOptimisticMessages as ReturnType<typeof jest.fn>)
+      .mock.calls[0];
     expect(appendCall).toBeDefined();
     const appended = (appendCall?.[1] ?? []) as { role: string; modelName?: string }[];
     return appended.find((message) => message.role === 'ai')?.modelName;
@@ -550,9 +554,9 @@ describe('useTextGeneration — subagent lifecycle events', () => {
 
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
 
-    const calls: Array<[string, string, Partial<{ parts: MessagePart[] }>]> = vi.mocked(
-      props.optimistic.updateOptimisticMessage
-    ).mock.calls;
+    const calls = props.updateOptimisticMessage.mock.calls as Array<
+      [string, string, Partial<{ parts: MessagePart[] }>]
+    >;
     const finalParts = [...calls]
       .reverse()
       .find(([, , update]) => update.parts !== undefined)?.[2].parts;
@@ -586,14 +590,14 @@ describe('useTextGeneration — prompt title auto rename', () => {
       chats: {
         currentChatId: null,
         currentChat: null,
-        createChat: vi.fn().mockResolvedValue({
+        createChat: jest.fn().mockResolvedValue({
           id: 'chat-new',
           title: 'New Chat [2026-05-09 07:05]',
           createdAt: 1,
           updatedAt: 1,
         }),
-        updateChatTitle: vi.fn().mockResolvedValue(undefined),
-        loadChats: vi.fn().mockResolvedValue(undefined),
+        updateChatTitle: jest.fn().mockResolvedValue(undefined),
+        loadChats: jest.fn().mockResolvedValue(undefined),
       } as unknown as TextGenerationProps['chats'],
     });
     mockStream.mockImplementation(
@@ -632,9 +636,9 @@ describe('useTextGeneration — prompt title auto rename', () => {
           createdAt: 1,
           updatedAt: 1,
         },
-        createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
-        updateChatTitle: vi.fn().mockResolvedValue(undefined),
-        loadChats: vi.fn().mockResolvedValue(undefined),
+        createChat: jest.fn().mockResolvedValue({ id: 'chat-new' }),
+        updateChatTitle: jest.fn().mockResolvedValue(undefined),
+        loadChats: jest.fn().mockResolvedValue(undefined),
       } as unknown as TextGenerationProps['chats'],
     });
     mockGenerateChatTitle.mockReturnValue(title.promise);
@@ -676,9 +680,9 @@ describe('useTextGeneration — prompt title auto rename', () => {
           createdAt: 1,
           updatedAt: 1,
         },
-        createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
-        updateChatTitle: vi.fn().mockReturnValue(titleUpdate.promise),
-        loadChats: vi.fn().mockResolvedValue(undefined),
+        createChat: jest.fn().mockResolvedValue({ id: 'chat-new' }),
+        updateChatTitle: jest.fn().mockReturnValue(titleUpdate.promise),
+        loadChats: jest.fn().mockResolvedValue(undefined),
       } as unknown as TextGenerationProps['chats'],
     });
     mockStream.mockImplementation(
@@ -714,9 +718,9 @@ describe('useTextGeneration — prompt title auto rename', () => {
           createdAt: 1,
           updatedAt: 1,
         },
-        createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
-        updateChatTitle: vi.fn().mockResolvedValue(undefined),
-        loadChats: vi.fn().mockResolvedValue(undefined),
+        createChat: jest.fn().mockResolvedValue({ id: 'chat-new' }),
+        updateChatTitle: jest.fn().mockResolvedValue(undefined),
+        loadChats: jest.fn().mockResolvedValue(undefined),
       } as unknown as TextGenerationProps['chats'],
     });
     mockStream.mockImplementation(
@@ -748,9 +752,9 @@ describe('useTextGeneration — prompt title auto rename', () => {
           createdAt: 1,
           updatedAt: 1,
         },
-        createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
-        updateChatTitle: vi.fn().mockResolvedValue(undefined),
-        loadChats: vi.fn().mockResolvedValue(undefined),
+        createChat: jest.fn().mockResolvedValue({ id: 'chat-new' }),
+        updateChatTitle: jest.fn().mockResolvedValue(undefined),
+        loadChats: jest.fn().mockResolvedValue(undefined),
       } as unknown as TextGenerationProps['chats'],
     });
     mockGenerateChatTitle.mockResolvedValue({ title: 'Generated title' });
@@ -785,9 +789,9 @@ describe('useTextGeneration — prompt title auto rename', () => {
           createdAt: 1,
           updatedAt: 1,
         },
-        createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
-        updateChatTitle: vi.fn().mockResolvedValue(undefined),
-        loadChats: vi.fn().mockResolvedValue(undefined),
+        createChat: jest.fn().mockResolvedValue({ id: 'chat-new' }),
+        updateChatTitle: jest.fn().mockResolvedValue(undefined),
+        loadChats: jest.fn().mockResolvedValue(undefined),
       } as unknown as TextGenerationProps['chats'],
     });
     mockGenerateChatTitle.mockRejectedValue(new Error('provider unavailable'));
@@ -869,8 +873,9 @@ describe('useTextGeneration — failure surfaced as timeline item', () => {
 
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
 
-    const calls: Array<[string, string, Partial<{ parts: MessagePart[]; isGenerating: boolean }>]> =
-      vi.mocked(props.optimistic.updateOptimisticMessage).mock.calls;
+    const calls = props.updateOptimisticMessage.mock.calls as Array<
+      [string, string, Partial<{ parts: MessagePart[]; isGenerating: boolean }>]
+    >;
 
     const finalCall = [...calls].reverse().find(([, , update]) => update.isGenerating === false);
     expect(finalCall).toBeDefined();
@@ -894,9 +899,9 @@ describe('useTextGeneration — failure surfaced as timeline item', () => {
 
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
 
-    const calls: Array<
+    const calls = props.updateOptimisticMessage.mock.calls as Array<
       [string, string, Partial<{ parts: MessagePart[]; isGenerating: boolean; text: string }>]
-    > = vi.mocked(props.optimistic.updateOptimisticMessage).mock.calls;
+    >;
 
     const finalCall = [...calls].reverse().find(([, , update]) => update.isGenerating === false);
     expect(finalCall).toBeDefined();
@@ -923,8 +928,9 @@ describe('useTextGeneration — failure surfaced as timeline item', () => {
 
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
 
-    const calls: Array<[string, string, Partial<{ parts: MessagePart[]; isGenerating: boolean }>]> =
-      vi.mocked(props.optimistic.updateOptimisticMessage).mock.calls;
+    const calls = props.updateOptimisticMessage.mock.calls as Array<
+      [string, string, Partial<{ parts: MessagePart[]; isGenerating: boolean }>]
+    >;
 
     const finalCall = [...calls].reverse().find(([, , update]) => update.isGenerating === false);
     expect(finalCall).toBeDefined();
@@ -1134,11 +1140,14 @@ describe('useTextGeneration — interrupted turn actions', () => {
     mockStream.mockRejectedValue(new Error('Resume rejected'));
     const { result } = renderHook(() => useTextGeneration(props));
 
-    await expect(
-      act(async () => {
-        await result.current.handleResumeInterruptedTurn('interrupted-ai', []);
-      })
-    ).rejects.toThrow('Resume rejected');
+    // `expect(act(...)).rejects` never settles: the harness's `act` returns a
+    // thenable bun's `expect().rejects` does not recognize as a promise, so
+    // the assertion has to sit on the call itself, inside `act`.
+    await act(async () => {
+      await expect(
+        result.current.handleResumeInterruptedTurn('interrupted-ai', [])
+      ).rejects.toThrow('Resume rejected');
+    });
   });
 
   it('dismisses the interrupted checkpoint for the current chat', async () => {

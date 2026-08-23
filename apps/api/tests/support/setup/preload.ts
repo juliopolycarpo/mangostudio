@@ -10,6 +10,12 @@
  * loud. See docs/reference/testing.md.
  */
 
+import { installSpawnDiagnostics } from './spawn-diagnostics';
 import { setupTestEnvironment } from './test-environment';
+
+// Before the bootstrap, and before any test module loads: a child spawned
+// during setup counts too, and a wrapper installed after the fact would miss
+// whatever already captured the original.
+installSpawnDiagnostics();
 
 await setupTestEnvironment();

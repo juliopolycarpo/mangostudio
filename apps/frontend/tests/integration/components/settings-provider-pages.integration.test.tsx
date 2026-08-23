@@ -2,33 +2,22 @@
  * Integration tests for provider settings pages.
  */
 
-import type * as TanstackRouter from '@tanstack/react-router';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ProviderSettingsPage } from '../../../src/features/settings/providers/components/ProviderSettingsPage';
-import { render, screen, waitFor } from '../../support/harness/render';
+import { flushAsyncRender, render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
+import { routerWithLinkStub } from '../../support/mocks/router';
 
-vi.mock('@tanstack/react-router', async (importOriginal) => {
-  const actual = await importOriginal<typeof TanstackRouter>();
-  return {
-    ...actual,
-    Link: ({
-      to,
-      children,
-      ...props
-    }: {
-      to: string;
-      children: React.ReactNode;
-      [k: string]: unknown;
-    }) => (
-      <a href={to} {...props}>
-        {children}
-      </a>
-    ),
-    useParams: () => ({ provider: 'deepseek' }),
-  };
-});
+// Registered before the subject is imported: `mock.module` is not hoisted and
+// static imports are.
+mock.module(
+  '@tanstack/react-router',
+  await routerWithLinkStub({ useParams: () => ({ provider: 'deepseek' }) })
+);
+
+const { ProviderSettingsPage } = await import(
+  '../../../src/features/settings/providers/components/ProviderSettingsPage'
+);
 
 const DEEPSEEK_DESCRIPTOR = {
   provider: 'deepseek',
@@ -112,6 +101,12 @@ describe('ProviderSettingsPage integration', () => {
       });
       expect(putCalls.length).toBeGreaterThanOrEqual(1);
     });
+
+    // The PUT resolves *after* the call is recorded and writes the saved
+    // descriptor back into the editor. `waitFor` returns on the call, so
+    // without flushing that response the state update lands outside `act` and
+    // prints an "update was not wrapped in act(...)" block on a green test.
+    await flushAsyncRender();
   });
 
   it('removes explicit save actions from the provider page', async () => {

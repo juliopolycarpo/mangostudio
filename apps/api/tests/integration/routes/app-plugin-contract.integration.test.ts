@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import { app } from '../../../src/app';
 import { getConfig } from '../../../src/lib/config';
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
+import { SPLIT_DEPLOYMENT_TEST_ORIGIN } from '../../support/setup/test-environment';
 
 const ROUTE_INVENTORY_FIXTURE = join(
   import.meta.dir,
@@ -83,20 +84,27 @@ function routeInventory(document: OpenApiDocument): Record<string, string[]> {
   return inventory;
 }
 
+// These are behavioural on purpose, and they can be: the CORS middleware is
+// ours (`app.ts`), so it runs under `bun test` like any other route code. The
+// third gate reading the same cfg.corsOrigins — Better Auth's trustedOrigins —
+// cannot be tested this way, because Better Auth turns its origin check off
+// when NODE_ENV=test. See apps/api/tests/unit/auth.test.ts for why that one is
+// asserted structurally, and scripts/test-build.ts for where it is exercised
+// for real.
 describe('CORS policy', () => {
   it('grants a configured origin credentialed access with the configured verbs', async () => {
     const response = await app.handle(
       new Request('http://localhost/api/health', {
         method: 'OPTIONS',
         headers: {
-          Origin: 'http://localhost:5173',
+          Origin: 'http://localhost:3001',
           'Access-Control-Request-Method': 'POST',
           'Access-Control-Request-Headers': 'content-type',
         },
       })
     );
 
-    expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:5173');
+    expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:3001');
     expect(response.headers.get('access-control-allow-credentials')).toBe('true');
     expect(response.headers.get('access-control-allow-methods')).toBe(
       'GET, POST, PUT, DELETE, OPTIONS'
@@ -105,6 +113,26 @@ describe('CORS policy', () => {
       'Content-Type, Authorization, x-api-key'
     );
     expect(response.headers.get('vary')).toContain('Origin');
+  });
+
+  // The split deployment `MANGO_API_URL` exists for: the bundle is served from
+  // another origin, and `server.allowedOrigins` is the only thing that can tell
+  // this API about it. The test environment sets that key, so an accepted
+  // foreign origin here is evidence the setting reaches the CORS middleware.
+  it('grants an origin configured through server.allowedOrigins', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/health', {
+        method: 'OPTIONS',
+        headers: {
+          Origin: SPLIT_DEPLOYMENT_TEST_ORIGIN,
+          'Access-Control-Request-Method': 'POST',
+        },
+      })
+    );
+
+    expect(getConfig().server.allowedOrigins).toContain(SPLIT_DEPLOYMENT_TEST_ORIGIN);
+    expect(response.headers.get('access-control-allow-origin')).toBe(SPLIT_DEPLOYMENT_TEST_ORIGIN);
+    expect(response.headers.get('access-control-allow-credentials')).toBe('true');
   });
 
   it('withholds the allow-origin header from an origin that is not configured', async () => {
@@ -121,6 +149,22 @@ describe('CORS policy', () => {
     // Absence is the refusal: a browser only releases a credentialed response
     // when the origin is echoed back. `allow-credentials` alone grants nothing,
     // so the assertion that matters is that the echo is missing.
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('withholds it from the retired Vite dev-server origin too', async () => {
+    // :5173 was allowed while Vite served the frontend on its own origin. The
+    // API serves it now, so that origin is as untrusted as any other.
+    const response = await app.handle(
+      new Request('http://localhost/api/health', {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'http://localhost:5173',
+          'Access-Control-Request-Method': 'POST',
+        },
+      })
+    );
+
     expect(response.headers.get('access-control-allow-origin')).toBeNull();
   });
 });

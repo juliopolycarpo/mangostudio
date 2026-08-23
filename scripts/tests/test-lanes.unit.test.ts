@@ -1,9 +1,9 @@
-import { afterAll, beforeEach, describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
 
 import { ALL_WORKSPACE_NAMES, ROOT_DIR } from '../lib/config';
-import { parseShard, testLaneEnv } from '../lib/test';
-import { SHARDED_LCOV_PATHS, TEST_LANES } from '../lib/test-lanes';
+import { parseShard, shardedCoverageWorkspaces, testLaneEnv } from '../lib/test';
+import { laneById, SHARDED_LCOV_PATHS, TEST_LANES } from '../lib/test-lanes';
 
 const readScripts = async (manifest: string): Promise<Record<string, string>> => {
   const json = (await Bun.file(join(ROOT_DIR, manifest)).json()) as {
@@ -16,7 +16,7 @@ describe('test lane declarations', () => {
   // The lane table is what the shard collector reads; the manifests are what
   // actually runs. A lane writing its report somewhere the collector does not
   // look is a silently missing count on a green-looking run, so pin the pair.
-  it.each(TEST_LANES.filter((lane) => lane.runner === 'bun'))(
+  it.each([...TEST_LANES])(
     'the $id lane writes JUnit where the lane table says it does',
     async (lane) => {
       const scripts = await readScripts(lane.manifest);
@@ -31,10 +31,10 @@ describe('test lane declarations', () => {
     }
   );
 
-  // Same pinning as the JUnit paths above, for a stronger reason: the timings
-  // file decides which files each shard runs, so a lane reading one path while
-  // the merge step writes another balances against a file nothing updates —
-  // and silently keeps the old split forever.
+  // Same pinning as the JUnit paths above, for a stronger reason: for sharded
+  // lanes the timings file decides which files each shard runs, so a lane
+  // reading one path while the merge step writes another balances against a
+  // file nothing updates — and silently keeps the old split forever.
   it.each(TEST_LANES.filter((lane) => lane.timingsPath))(
     'the $id lane reads timings from where the lane table says it does',
     async (lane) => {
@@ -43,7 +43,7 @@ describe('test lane declarations', () => {
       const expected =
         lane.manifest === 'package.json' ? lane.timingsPath : `../../${lane.timingsPath}`;
       expect(script).toContain(`--timings=${expected}`);
-      // Without this the shards read a timings file and never refresh it.
+      // Without this the lanes read a timings file and never refresh it.
       expect(script).toContain('--update-timings');
     }
   );
@@ -65,43 +65,124 @@ describe('test lane declarations', () => {
   // would let shard i restore a report built from a different file set. Worth
   // 0.6s; not worth that. Pinned so re-adding it is a deliberate act.
   it('the cached root lane opts out of timings', () => {
-    expect(TEST_LANES.find((lane) => lane.id === 'root')?.timingsPath).toBeUndefined();
+    expect(laneById('root').timingsPath).toBeUndefined();
   });
 
-  it('the Vitest lane declares no timings path', () => {
-    const vitest = TEST_LANES.filter((lane) => lane.runner === 'vitest');
-    expect(vitest.length).toBeGreaterThan(0);
-    for (const lane of vitest) expect(lane.timingsPath).toBeUndefined();
-  });
-
-  it('every Bun lane takes the shard argument', async () => {
-    for (const lane of TEST_LANES.filter((candidate) => candidate.runner === 'bun')) {
+  it('every sharded lane takes the shard argument', async () => {
+    for (const lane of TEST_LANES.filter((candidate) => candidate.sharded)) {
       const scripts = await readScripts(lane.manifest);
       expect(scripts[lane.coverageScript]).toContain('$MANGOSTUDIO_BUN_TEST_ARGS');
     }
   });
 
-  it('the Vitest lane takes its whole reporter configuration from the environment', async () => {
-    const scripts = await readScripts('apps/frontend/package.json');
-    expect(scripts['test:coverage:vitest']).toContain('$MANGOSTUDIO_VITEST_ARGS');
-    // Not a literal reporter: sharded and unsharded runs need structurally
-    // different ones (blob vs junit), which is why it is env-driven.
-    expect(scripts['test:coverage:vitest']).not.toContain('--reporter=');
-  });
+  // An unsharded lane must not even reference the shard variable: its LCOV is
+  // whole-run coverage, and a `--shard` leaking in would make the merge treat a
+  // fraction of the suite as the whole lane — every job still exiting 0.
+  it.each(TEST_LANES.filter((lane) => !lane.sharded))(
+    'the unsharded $id lane cannot receive a shard argument',
+    async (lane) => {
+      const scripts = await readScripts(lane.manifest);
+      expect(scripts[lane.coverageScript]).not.toContain('$MANGOSTUDIO_BUN_TEST_ARGS');
+      expect(scripts[lane.coverageScript]).not.toContain('--shard');
+    }
+  );
 
-  it('covers every workspace whose LCOV a shard splits', () => {
-    const laneWorkspaces = new Set(
-      TEST_LANES.filter((lane) => lane.runner === 'bun' && lane.workspace !== 'root').map(
-        (lane) => lane.id
-      )
+  it('covers every workspace lane in the staged-LCOV table', () => {
+    const laneIds = new Set(
+      TEST_LANES.filter((lane) => lane.workspace !== 'root').map((lane) => lane.id)
     );
-    expect(new Set(Object.keys(SHARDED_LCOV_PATHS))).toEqual(laneWorkspaces);
+    expect(new Set(Object.keys(SHARDED_LCOV_PATHS))).toEqual(laneIds);
   });
 
   it('has one lane per workspace plus root, with unique JUnit paths', () => {
     const covered = new Set(TEST_LANES.map((lane) => lane.workspace));
     expect(covered).toEqual(new Set(['root', ...ALL_WORKSPACE_NAMES]));
     expect(new Set(TEST_LANES.map((lane) => lane.junitPath)).size).toBe(TEST_LANES.length);
+  });
+
+  // `coverageThresholds` reads as per-lane infrastructure, but nothing in the
+  // registry enforces it — the gate is a `&&` appended to one workspace's
+  // coverage script. Declaring floors on a second lane without chaining the
+  // enforcer there would be a gate that never runs, and every gate stays green
+  // while it does not run. Iterated over the registry rather than pinned to
+  // `frontend` so the declaration and the wiring cannot drift apart.
+  //
+  // Sharded lanes cannot be wired this way at all: each shard's LCOV is
+  // partial, so a per-package chain would fail every run. Their floors belong
+  // in the merge job, so a declaration here is asserted to be an error.
+  it.each(TEST_LANES.filter((lane) => lane.coverageThresholds))(
+    'the $id lane chains enforcement of the floors it declares',
+    async (lane) => {
+      expect(lane.sharded).toBe(false);
+      const scripts = await readScripts(lane.manifest);
+      expect(scripts[lane.coverageScript]).toContain(
+        `bun ../../scripts/qa-gate/enforce-coverage-thresholds.ts ${lane.id}`
+      );
+    }
+  );
+});
+
+describe('frontend lane', () => {
+  const frontend = laneById('frontend');
+
+  // `mock.module` leaks across files without isolation (measured on 1.4.0), so
+  // the flag is load-bearing, and `--no-isolate` would quietly re-share the
+  // module graph even under `--parallel`.
+  it('runs isolated, never --no-isolate', async () => {
+    const scripts = await readScripts(frontend.manifest);
+    for (const key of ['test', 'test:unit', 'test:integration', 'test:coverage']) {
+      expect(scripts[key]).not.toContain('--no-isolate');
+    }
+    expect(scripts['test:coverage']).toContain('--isolate');
+    expect(scripts['test:coverage']).toContain('--parallel=4');
+  });
+
+  // Resolver-level aliases (motion/react, the auth-client stub) live in
+  // tsconfig.test.json and only reach `bun test` through this flag —
+  // `bunfig.toml`'s `[test] tsconfig` key is accepted and silently ignored, so
+  // without the flag the suite runs green against the real modules.
+  it('every bun test script carries the tsconfig override', async () => {
+    const scripts = await readScripts(frontend.manifest);
+    for (const key of ['test:unit', 'test:integration', 'test:coverage']) {
+      expect(scripts[key]).toContain('--tsconfig-override=./tsconfig.test.json');
+    }
+  });
+
+  // The floors were measured on the full suite (82.35 / 77.53 / 82.39 / 54.45
+  // on 2026-08-21) and set ~1pt under; their *presence* is what this pins —
+  // the frontend went gateless between the istanbul thresholds' deletion and
+  // this lane, and nothing else fails when someone deletes the numbers.
+  // The wiring is pinned for every lane that declares floors, in the registry
+  // suite above; this pins that the frontend is one of them.
+  it('declares total-coverage floors', () => {
+    const thresholds = frontend.coverageThresholds;
+    expect(thresholds).toBeDefined();
+    for (const metric of ['lines', 'functions', 'statements', 'branches'] as const) {
+      expect(thresholds?.[metric]).toBeGreaterThan(0);
+      expect(thresholds?.[metric]).toBeLessThan(100);
+    }
+  });
+
+  // Bun 1.4.0's own `coverageThreshold` is enforced per *file* — any workspace
+  // with a legitimately uncovered file fails every positive value — and a miss
+  // prints nothing. Pinned as absent so re-adding it is a deliberate act, not a
+  // copy-paste from Bun's docs.
+  it('keeps the per-file bunfig threshold out of the config', async () => {
+    const bunfig = await Bun.file(join(ROOT_DIR, 'apps/frontend/bunfig.toml')).text();
+    // The comment in the file may (and does) explain the trap by name; only an
+    // uncommented assignment re-arms it.
+    expect(bunfig).not.toMatch(/^\s*coverageThreshold/m);
+    // The gate reads the LCOV back, so the reporter must keep writing it.
+    expect(bunfig).toContain('"lcov"');
+  });
+
+  // The Vitest lane is retired; a script that resurrects the runner would run
+  // zero files (or the whole suite twice) without any other gate noticing.
+  it('has no script that invokes vitest', async () => {
+    const scripts = await readScripts(frontend.manifest);
+    for (const [key, script] of Object.entries(scripts)) {
+      expect(script, key).not.toContain('vitest');
+    }
   });
 });
 
@@ -126,81 +207,22 @@ describe('parseShard', () => {
 });
 
 describe('testLaneEnv', () => {
-  // The reporter list mirrors `vitest.config.ts`'s own `GITHUB_ACTIONS` test,
-  // so these have to pin the variable instead of inheriting the runner's:
-  // otherwise the exact-string cases below pass locally and fail on CI, where
-  // it is set. Restored afterwards because `bun test` shares one module graph
-  // across files.
-  const inherited = process.env.GITHUB_ACTIONS;
-  const setGithubActions = (value: string | undefined): void => {
-    if (value === undefined) delete process.env.GITHUB_ACTIONS;
-    else process.env.GITHUB_ACTIONS = value;
-  };
-
-  beforeEach(() => setGithubActions(undefined));
-  afterAll(() => setGithubActions(inherited));
-
-  it('writes JUnit directly when unsharded', () => {
-    const env = testLaneEnv(null);
-    expect(env.MANGOSTUDIO_TEST_SHARD).toBe('');
-    expect(env.MANGOSTUDIO_BUN_TEST_ARGS).toBe('');
-    expect(env.MANGOSTUDIO_VITEST_ARGS).toBe(
-      '--reporter=default --reporter=junit --outputFile=../../.mango/artifacts/junit/frontend-vitest.xml'
-    );
+  it('passes no shard flag when unsharded', () => {
+    expect(testLaneEnv(null)).toEqual({ MANGOSTUDIO_BUN_TEST_ARGS: '' });
   });
 
-  it('switches Vitest to a blob report when sharded', () => {
-    const env = testLaneEnv({ index: 3, count: 8 });
-    expect(env.MANGOSTUDIO_BUN_TEST_ARGS).toBe('--shard=3/8');
-    expect(env.MANGOSTUDIO_VITEST_ARGS).toBe(
-      '--shard=3/8 --reporter=default --reporter=blob --outputFile=.vitest-reports/blob-3.json'
-    );
-    expect(env.MANGOSTUDIO_VITEST_ARGS).not.toContain('junit');
-  });
-
-  // A CLI `--reporter` replaces `vitest.config.ts`'s `reporters` rather than
-  // adding to it, so a file-only reporter set prints nothing — and the
-  // `Errors N errors` line is the only place Vitest's unhandled errors ever
-  // appear (its JUnit reporter hardcodes `errors="0"`).
-  it('keeps the console reporter in both modes so unhandled errors reach the log', () => {
-    expect(testLaneEnv(null).MANGOSTUDIO_VITEST_ARGS).toContain('--reporter=default');
-    expect(testLaneEnv({ index: 3, count: 8 }).MANGOSTUDIO_VITEST_ARGS).toContain(
-      '--reporter=default'
-    );
-  });
-
-  // Same replacement rule, second casualty: the config adds `github-actions`
-  // under CI, so omitting it here would drop every inline failure annotation
-  // from the run — a regression the suite's own green counts cannot show.
-  it('restores the CI annotation reporter the config would have added', () => {
-    setGithubActions('true');
-    expect(testLaneEnv(null).MANGOSTUDIO_VITEST_ARGS).toBe(
-      '--reporter=default --reporter=github-actions --reporter=junit --outputFile=../../.mango/artifacts/junit/frontend-vitest.xml'
-    );
-    expect(testLaneEnv({ index: 3, count: 8 }).MANGOSTUDIO_VITEST_ARGS).toBe(
-      '--shard=3/8 --reporter=default --reporter=github-actions --reporter=blob --outputFile=.vitest-reports/blob-3.json'
-    );
-  });
-
-  // Measured, not assumed: `--reporter=blob` leaves the thresholds on, so a
-  // sharded run evaluates them against a fraction of the sources and fails on
-  // every shard. The config drops them when this is set.
-  it('signals the shard to the Vitest config so its thresholds stand down', () => {
-    expect(testLaneEnv({ index: 3, count: 8 }).MANGOSTUDIO_TEST_SHARD).toBe('3/8');
+  it('passes the shard flag to the sharded lanes', () => {
+    expect(testLaneEnv({ index: 3, count: 8 })).toEqual({
+      MANGOSTUDIO_BUN_TEST_ARGS: '--shard=3/8',
+    });
   });
 });
 
-describe('frontend coverage thresholds', () => {
-  it('are enforced unsharded and deferred to the merge when sharded', async () => {
-    const config = await Bun.file(
-      new URL('../../apps/frontend/vitest.config.ts', import.meta.url)
-    ).text();
-    expect(config).toContain('process.env.MANGOSTUDIO_TEST_SHARD');
-    // The merge invocation is unsharded, so it is what applies them.
-    const scripts = (await Bun.file(
-      new URL('../../apps/frontend/package.json', import.meta.url)
-    ).json()) as { scripts: Record<string, string> };
-    expect(scripts.scripts['test:coverage:merge']).toContain('--mergeReports');
-    expect(scripts.scripts['test:coverage:merge']).toContain('--coverage');
+describe('shardedCoverageWorkspaces', () => {
+  // The frontend must never enter a sharded coverage fan-out: its LCOV cannot
+  // be reassembled from slices, so a shard flag reaching it silently turns a
+  // fraction of the suite into "the" frontend coverage.
+  it('excludes the unsharded frontend and keeps every sharded workspace', () => {
+    expect(shardedCoverageWorkspaces().sort()).toEqual(['api', 'runtime', 'shared']);
   });
 });

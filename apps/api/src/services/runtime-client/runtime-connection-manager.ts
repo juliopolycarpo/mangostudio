@@ -115,7 +115,9 @@ export type RuntimeConnectPhase = 'pulling' | 'offline-cache';
  * waiting — a WSL provision is not the phase that wakes it, so that connect
  * still waits it out; see {@link connectWslRuntime}. A connector that only
  * spawns a process can ignore `signal` entirely; the spawn is bounded by its
- * own handshake timeout.
+ * own handshake timeout. A connector that neither watches the signal nor
+ * spawns anything — the in-process one — is bounded by the manager instead;
+ * see {@link CONNECT_DEADLINE_MS}.
  */
 export interface RuntimeConnectContext {
   readonly report: (phase: RuntimeConnectPhase) => void;
@@ -141,6 +143,13 @@ export interface RuntimeConnectionManagerOptions {
   readonly resolveEnvironment: RuntimeEnvironmentResolver;
   readonly connectors: Partial<Record<EnvironmentTransportKind, RuntimeEnvironmentConnector>>;
   readonly publish?: (userId: string) => void;
+  /**
+   * Per-transport connect deadlines, defaulting to {@link CONNECT_DEADLINE_MS}.
+   * A transport with no entry is unbounded here and bounds itself. Overridable
+   * so a test can prove the deadline in milliseconds: `setSystemTime` moves
+   * `Date.now()` and not timers, so the real 10s would be waited out for real.
+   */
+  readonly connectDeadlinesMs?: Partial<Record<EnvironmentTransportKind, number>>;
 }
 
 /**
@@ -238,6 +247,74 @@ function isDialIn(transportKind: EnvironmentTransportKind | undefined): boolean 
   return transportKind !== undefined && DIAL_IN_TRANSPORT_KINDS.has(transportKind);
 }
 
+/**
+ * How long an attempt may run before the hub stops believing in it.
+ *
+ * {@link RuntimeConnectContext} says a connector that only spawns a process "is
+ * bounded by its own handshake timeout", and for every out-of-process transport
+ * that is true. The in-process path has no spawn and so no such bound: nothing
+ * anywhere on it can end an attempt that stops making progress. That matters
+ * more than a slow connect, because `getClient` hands the entry's in-flight
+ * promise to every later caller — one attempt that never settles is a runtime
+ * every subsequent call waits on forever, not one call that fails.
+ *
+ * Only `in-process` is listed. The remote transports each bound themselves
+ * already, at lengths that suit what they are doing — a cold image pull is
+ * legitimately minutes — and capping them here would be a guess about
+ * behaviour nothing has measured.
+ */
+const IN_PROCESS_CONNECT_DEADLINE_MS = 10_000;
+
+const CONNECT_DEADLINE_MS: Partial<Record<EnvironmentTransportKind, number>> = {
+  'in-process': IN_PROCESS_CONNECT_DEADLINE_MS,
+};
+
+/**
+ * Fails an attempt the transport will not fail on its own.
+ *
+ * The attempt is not cancelled — a connector that ignores its signal cannot be
+ * stopped, and the in-process one does. What this bounds is how long the *hub*
+ * waits before treating the attempt as failed, which is what lets `connect`'s
+ * catch evict the entry and free every caller queued behind it. A connection
+ * that arrives afterwards is closed rather than leaked: by then the entry has
+ * moved on and the revision guard that normally closes a superseded connection
+ * never sees this one.
+ */
+function withConnectDeadline(
+  attempt: Promise<ManagedRuntimeConnection>,
+  deadlineMs: number,
+  environmentId: string,
+  onTimeout: () => void
+): Promise<ManagedRuntimeConnection> {
+  let pending = true;
+  const bounded = attempt.then(
+    (connection) => {
+      pending = false;
+      return connection;
+    },
+    (error: unknown) => {
+      pending = false;
+      throw error;
+    }
+  );
+  const timedOut = Promise.withResolvers<never>();
+  const timer = setTimeout(() => {
+    if (!pending) return;
+    onTimeout();
+    void bounded.then(closeDetached, () => undefined);
+    timedOut.reject(
+      unavailable(
+        `Connecting to environment "${environmentId}" timed out after ${
+          deadlineMs < 1_000 ? `${deadlineMs}ms` : `${Math.round(deadlineMs / 1_000)}s`
+        }.`
+      )
+    );
+  }, deadlineMs);
+  return Promise.race([bounded, timedOut.promise]).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
 function connectionKey(userId: string, environmentId: string): string {
   return `${userId}:${environmentId}`;
 }
@@ -333,10 +410,12 @@ export class RuntimeConnectionManager {
   readonly #entries = new Map<string, RuntimeConnectionEntry>();
   readonly #publish: (userId: string) => void;
   readonly #resolveEnvironment: RuntimeEnvironmentResolver;
+  readonly #connectDeadlinesMs: Partial<Record<EnvironmentTransportKind, number>>;
   #externalAgentsRevoked: ExternalAgentsRevokedObserver | undefined;
 
   constructor(options: RuntimeConnectionManagerOptions) {
     this.#connectors = options.connectors;
+    this.#connectDeadlinesMs = options.connectDeadlinesMs ?? CONNECT_DEADLINE_MS;
     this.#publish = options.publish ?? (() => undefined);
     this.#resolveEnvironment = options.resolveEnvironment;
   }
@@ -415,7 +494,7 @@ export class RuntimeConnectionManager {
           throw unavailable(`Environment "${environmentId}" was not found.`);
         }
         entry.transportKind = definition.transportKind;
-        return this.#openConnection(
+        const opening = this.#openConnection(
           definition,
           () => {
             this.#markUnavailable(key, userId, revision);
@@ -427,6 +506,14 @@ export class RuntimeConnectionManager {
             signal: abort.signal,
           }
         );
+        const deadlineMs = this.#connectDeadlinesMs[definition.transportKind];
+        if (deadlineMs === undefined) return opening;
+        // Aborting is for the connectors that do watch the signal; the ones
+        // this deadline exists for do not, which is why the timeout rejects
+        // rather than only cancelling.
+        return withConnectDeadline(opening, deadlineMs, definition.id, () => {
+          abort.abort();
+        });
       })
       .then((connection) => {
         if (entry.revision !== revision) {
@@ -1022,6 +1109,47 @@ export interface LocalRuntimeConnectorOptions {
     canonicalPath: string,
     signal: AbortSignal
   ) => boolean | Promise<boolean>;
+  /** How long the serial chain waits on one attempt. Overridable for tests. */
+  readonly chainDeadlineMs?: number;
+}
+
+/**
+ * How long the chain waits for a link before letting the next attempt start.
+ *
+ * Serializing attempts is load-bearing — it is what makes the successful
+ * claimant the only one that can observe the owner binding as empty — but
+ * waiting on the previous attempt *forever* is not part of what that buys. An
+ * attempt that never settles would otherwise dam every later local connect in
+ * the process, including ones for a different user that the wedged one has no
+ * claim over. Same length as the manager's {@link CONNECT_DEADLINE_MS} entry on
+ * purpose: the hub gives up on the attempt at the same moment the chain does.
+ * Both read {@link IN_PROCESS_CONNECT_DEADLINE_MS}, so retuning one retunes the
+ * other — the coupling the sentence above describes is enforced by construction
+ * rather than by two literals that happen to agree.
+ *
+ * Note what this trades away. {@link withConnectDeadline} stops the *hub*
+ * waiting; it does not cancel the attempt, and the in-process connector ignores
+ * its abort signal. So a wedged attempt is still live when the chain releases,
+ * and if it later completes it runs `ownerUserId ??= …` and `active.add(…)`
+ * alongside the attempt that took its place — the one window in which two users
+ * can both observe the owner binding as empty and `multipleOwners` never be
+ * set. Damming every user behind one wedged connect was judged the worse
+ * failure; closing this properly needs a cancellable in-process connect.
+ */
+const LOCAL_CHAIN_DEADLINE_MS = IN_PROCESS_CONNECT_DEADLINE_MS;
+
+/** Resolves when `attempt` settles, or when the chain stops waiting for it. */
+function advanceChainAfter(attempt: Promise<unknown>, deadlineMs: number): Promise<void> {
+  const settled = attempt.then(
+    () => undefined,
+    () => undefined
+  );
+  const abandoned = Promise.withResolvers<void>();
+  const timer = setTimeout(abandoned.resolve, deadlineMs);
+  void settled.then(() => {
+    clearTimeout(timer);
+  });
+  return Promise.race([settled, abandoned.promise]);
 }
 
 /**
@@ -1039,6 +1167,7 @@ export function createLocalRuntimeConnector(
 ): RuntimeEnvironmentConnector {
   const open = options.open ?? connectLocalRuntime;
   const isWorkspaceAuthorized = options.isWorkspaceAuthorized ?? isAuthorizedLocalWorkspace;
+  const chainDeadlineMs = options.chainDeadlineMs ?? LOCAL_CHAIN_DEADLINE_MS;
   let ownerUserId: string | undefined;
   let multipleOwners = false;
   let connectSerial: Promise<void> = Promise.resolve();
@@ -1115,10 +1244,7 @@ export function createLocalRuntimeConnector(
         },
       };
     });
-    connectSerial = attempt.then(
-      () => undefined,
-      () => undefined
-    );
+    connectSerial = advanceChainAfter(attempt, chainDeadlineMs);
     return attempt;
   };
 }

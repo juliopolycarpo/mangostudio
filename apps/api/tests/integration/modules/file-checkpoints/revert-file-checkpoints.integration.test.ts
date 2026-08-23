@@ -4,7 +4,7 @@
  * backwards to restore the pre-turn filesystem state.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,18 +27,26 @@ import { executeReadFile } from '../../../../src/services/tools/builtin/read-fil
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
 import { clearFileFreshness } from '../../../../src/services/tools/file-freshness';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { type ChatFixture, insertTestChat, insertTestUser } from '../../../support/factories';
+import { type ChatFixture, insertTestChat, type UserFixture } from '../../../support/factories';
+import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
 
 let tempDir: string;
 let outsideDir: string;
 let chat: ChatFixture;
 let messageId: string;
 
+// One user, and one Local runtime connection, for the whole file — the
+// helper's doc comment carries the rationale.
+let user: UserFixture;
+
+beforeAll(async () => {
+  user = await insertUserWithLocalRuntime();
+});
+
 beforeEach(async () => {
   clearFileFreshness();
   tempDir = mkdtempSync(join(tmpdir(), 'file-checkpoints-test-'));
   outsideDir = mkdtempSync(join(tmpdir(), 'file-checkpoints-outside-'));
-  const user = await insertTestUser();
   chat = await insertTestChat(user.id);
   messageId = faker.string.uuid();
   await getDb()

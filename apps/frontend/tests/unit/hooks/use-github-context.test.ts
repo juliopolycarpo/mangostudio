@@ -1,13 +1,12 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { GitRepoState } from '@mangostudio/shared/git';
 import type { GithubContext } from '@mangostudio/shared/github';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useGithubContext } from '@/features/workspace/hooks/use-github-context';
 import type * as ApiClient from '@/lib/api-client';
 import { renderHook, waitFor } from '../../support/harness/render';
 
-const { mockContext } = vi.hoisted(() => ({ mockContext: vi.fn() }));
+const mockContext = jest.fn();
 
-vi.mock('@/lib/api-client', () => ({
+mock.module('@/lib/api-client', () => ({
   client: {
     api: {
       github: {
@@ -16,6 +15,10 @@ vi.mock('@/lib/api-client', () => ({
     },
   } as unknown as typeof ApiClient,
 }));
+
+// Static imports are evaluated before any statement above runs, so the hook
+// has to come in afterwards or it binds the real api-client.
+const { useGithubContext } = await import('@/features/workspace/hooks/use-github-context');
 
 const context: GithubContext = {
   state: 'ok',
@@ -45,7 +48,7 @@ function repoState(branch: string): GitRepoState {
 
 describe('useGithubContext', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
     mockContext.mockResolvedValue({ data: context, error: null });
   });
 

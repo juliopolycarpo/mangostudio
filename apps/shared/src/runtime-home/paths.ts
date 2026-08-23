@@ -12,8 +12,9 @@
  * flavour is a parameter rather than this module's own platform.
  *
  * Deliberately free of `node:path`. This module is reachable from the
- * `environments` barrel, so it ships in the frontend bundle, and Vite resolves
- * a node builtin there to a stub rather than failing the build: the first
+ * `environments` barrel, so it ships in the frontend bundle, and a browser
+ * bundler resolves a node builtin there to a stub rather than failing the
+ * build: the first
  * module-level `posix.join` then throws on `undefined` and the whole app
  * renders nothing while every other gate stays green. Joining for a named
  * platform is a separator and no filesystem, so owning it costs less than the

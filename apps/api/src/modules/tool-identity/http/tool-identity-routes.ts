@@ -14,6 +14,7 @@ import {
 } from '@mangostudio/shared/tool-identity';
 import { Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
+import { matchesEtag } from '../../../lib/http-cache';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   listToolIdentities,
@@ -57,18 +58,6 @@ const subjectKeyParams = t.Object({ subjectKey: SubjectKeySchema });
  * cache may keep them.
  */
 const IMAGE_CACHE_CONTROL = 'private, max-age=31536000, immutable';
-
-/**
- * `If-None-Match` carries a list, and a cache is allowed to weaken a tag it
- * stored. Both are handled here rather than by comparing the header whole.
- */
-function matchesEtag(header: string | null, etag: string): boolean {
-  if (!header) return false;
-  return header
-    .split(',')
-    .map((candidate) => candidate.trim().replace(/^W\//, ''))
-    .some((candidate) => candidate === '*' || candidate === etag);
-}
 
 export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-identities', (app) =>
   app

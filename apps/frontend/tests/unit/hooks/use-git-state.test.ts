@@ -1,22 +1,7 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { GitStatus } from '@mangostudio/shared/git';
 import { GIT_SCOPES } from '@mangostudio/shared/realtime';
 import { useQuery } from '@tanstack/react-query';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  gitWriteScopes,
-  useCommit,
-  useDeleteBranch,
-  useGitFetch,
-  useGitHeadMessage,
-  useGitPull,
-  useGitPush,
-  useGitStashes,
-  useRenameBranch,
-  useStagePaths,
-  useStashApply,
-  useStashDrop,
-  useUnstagePaths,
-} from '@/features/workspace/hooks/use-git-state';
 import type * as ApiClient from '@/lib/api-client';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
@@ -33,22 +18,22 @@ const {
   mockBranchDelete,
   mockBranchRename,
   mockHeadMessage,
-} = vi.hoisted(() => ({
-  mockStage: vi.fn(),
-  mockUnstage: vi.fn(),
-  mockCommit: vi.fn(),
-  mockFetch: vi.fn(),
-  mockPull: vi.fn(),
-  mockPush: vi.fn(),
-  mockStashes: vi.fn(),
-  mockStashApply: vi.fn(),
-  mockStashDrop: vi.fn(),
-  mockBranchDelete: vi.fn(),
-  mockBranchRename: vi.fn(),
-  mockHeadMessage: vi.fn(),
-}));
+} = {
+  mockStage: jest.fn(),
+  mockUnstage: jest.fn(),
+  mockCommit: jest.fn(),
+  mockFetch: jest.fn(),
+  mockPull: jest.fn(),
+  mockPush: jest.fn(),
+  mockStashes: jest.fn(),
+  mockStashApply: jest.fn(),
+  mockStashDrop: jest.fn(),
+  mockBranchDelete: jest.fn(),
+  mockBranchRename: jest.fn(),
+  mockHeadMessage: jest.fn(),
+};
 
-vi.mock('@/lib/api-client', () => ({
+mock.module('@/lib/api-client', () => ({
   client: {
     api: {
       git: {
@@ -66,6 +51,24 @@ vi.mock('@/lib/api-client', () => ({
     },
   } as unknown as typeof ApiClient,
 }));
+
+// Static imports are evaluated before any statement above runs, so the hooks
+// under test have to come in afterwards or they bind the real api-client.
+const {
+  gitWriteScopes,
+  useCommit,
+  useDeleteBranch,
+  useGitFetch,
+  useGitHeadMessage,
+  useGitPull,
+  useGitPush,
+  useGitStashes,
+  useRenameBranch,
+  useStagePaths,
+  useStashApply,
+  useStashDrop,
+  useUnstagePaths,
+} = await import('@/features/workspace/hooks/use-git-state');
 
 const status: GitStatus = {
   branch: { name: 'main', ahead: 0, behind: 0 },
@@ -138,19 +141,19 @@ function useSeedTrackedQueries(spies: {
 
 describe('Git write hooks', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it('stages through Eden and invalidates state and diffs only', async () => {
     mockStage.mockResolvedValue({ data: status, error: null });
-    const refetchState = vi.fn().mockResolvedValue(repoState);
-    const refetchDiffs = vi.fn().mockResolvedValue({ path: 'src/panel.tsx', hunks: [] });
-    const refetchHistory = vi.fn().mockResolvedValue({ commits: [], nextCursor: null });
-    const refetchCommits = vi
+    const refetchState = jest.fn().mockResolvedValue(repoState);
+    const refetchDiffs = jest.fn().mockResolvedValue({ path: 'src/panel.tsx', hunks: [] });
+    const refetchHistory = jest.fn().mockResolvedValue({ commits: [], nextCursor: null });
+    const refetchCommits = jest
       .fn()
       .mockResolvedValue({ hash: 'abc123', subject: 'prior', files: [] });
-    const refetchBranches = vi.fn().mockResolvedValue({ branches: [], remotes: [] });
-    const refetchStashes = vi.fn().mockResolvedValue({ stashes: [] });
+    const refetchBranches = jest.fn().mockResolvedValue({ branches: [], remotes: [] });
+    const refetchStashes = jest.fn().mockResolvedValue({ stashes: [] });
 
     const { result } = renderHook(() => {
       useSeedTrackedQueries({
@@ -169,8 +172,8 @@ describe('Git write hooks', () => {
     });
 
     expect(mockStage).toHaveBeenCalledWith({ chatId: 'chat-1', paths: ['src/panel.tsx'] });
-    await waitFor(() => expect(refetchState).toHaveBeenCalledOnce());
-    await waitFor(() => expect(refetchDiffs).toHaveBeenCalledOnce());
+    await waitFor(() => expect(refetchState).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(refetchDiffs).toHaveBeenCalledTimes(1));
     expect(refetchHistory).not.toHaveBeenCalled();
     expect(refetchCommits).not.toHaveBeenCalled();
     expect(refetchBranches).not.toHaveBeenCalled();
@@ -179,12 +182,12 @@ describe('Git write hooks', () => {
 
   it('unstages without invalidating history, commits, or branches', async () => {
     mockUnstage.mockResolvedValue({ data: status, error: null });
-    const refetchState = vi.fn().mockResolvedValue(repoState);
-    const refetchHistory = vi.fn().mockResolvedValue({ commits: [], nextCursor: null });
-    const refetchCommits = vi
+    const refetchState = jest.fn().mockResolvedValue(repoState);
+    const refetchHistory = jest.fn().mockResolvedValue({ commits: [], nextCursor: null });
+    const refetchCommits = jest
       .fn()
       .mockResolvedValue({ hash: 'abc123', subject: 'prior', files: [] });
-    const refetchBranches = vi.fn().mockResolvedValue({ branches: [], remotes: [] });
+    const refetchBranches = jest.fn().mockResolvedValue({ branches: [], remotes: [] });
 
     const { result } = renderHook(() => {
       useSeedTrackedQueries({
@@ -200,7 +203,7 @@ describe('Git write hooks', () => {
       await result.current.mutateAsync({ paths: ['src/panel.tsx'] });
     });
 
-    await waitFor(() => expect(refetchState).toHaveBeenCalledOnce());
+    await waitFor(() => expect(refetchState).toHaveBeenCalledTimes(1));
     expect(refetchHistory).not.toHaveBeenCalled();
     expect(refetchCommits).not.toHaveBeenCalled();
     expect(refetchBranches).not.toHaveBeenCalled();
@@ -208,14 +211,14 @@ describe('Git write hooks', () => {
 
   it('commit invalidates history, commits, branches, and github context', async () => {
     mockCommit.mockResolvedValue({ data: { hash: 'def456', subject: 'feat' }, error: null });
-    const refetchState = vi.fn().mockResolvedValue(repoState);
-    const refetchHistory = vi.fn().mockResolvedValue({ commits: [], nextCursor: null });
-    const refetchCommits = vi
+    const refetchState = jest.fn().mockResolvedValue(repoState);
+    const refetchHistory = jest.fn().mockResolvedValue({ commits: [], nextCursor: null });
+    const refetchCommits = jest
       .fn()
       .mockResolvedValue({ hash: 'abc123', subject: 'prior', files: [] });
-    const refetchBranches = vi.fn().mockResolvedValue({ branches: [], remotes: [] });
-    const refetchGithub = vi.fn().mockResolvedValue({ state: 'none' });
-    const refetchStashes = vi.fn().mockResolvedValue({ stashes: [] });
+    const refetchBranches = jest.fn().mockResolvedValue({ branches: [], remotes: [] });
+    const refetchGithub = jest.fn().mockResolvedValue({ state: 'none' });
+    const refetchStashes = jest.fn().mockResolvedValue({ stashes: [] });
 
     const { result } = renderHook(() => {
       useSeedTrackedQueries({
@@ -233,20 +236,20 @@ describe('Git write hooks', () => {
       await result.current.mutateAsync({ title: 'feat: land' });
     });
 
-    await waitFor(() => expect(refetchState).toHaveBeenCalledOnce());
-    await waitFor(() => expect(refetchHistory).toHaveBeenCalledOnce());
-    await waitFor(() => expect(refetchCommits).toHaveBeenCalledOnce());
-    await waitFor(() => expect(refetchBranches).toHaveBeenCalledOnce());
-    await waitFor(() => expect(refetchGithub).toHaveBeenCalledOnce());
+    await waitFor(() => expect(refetchState).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(refetchHistory).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(refetchCommits).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(refetchBranches).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(refetchGithub).toHaveBeenCalledTimes(1));
     expect(refetchStashes).not.toHaveBeenCalled();
   });
 
   it('pull invalidates history while fetch does not', async () => {
     mockPull.mockResolvedValue({ data: repoState, error: null });
     mockFetch.mockResolvedValue({ data: repoState, error: null });
-    const pullHistory = vi.fn().mockResolvedValue({ commits: [], nextCursor: null });
-    const fetchHistory = vi.fn().mockResolvedValue({ commits: [], nextCursor: null });
-    const fetchState = vi.fn().mockResolvedValue(repoState);
+    const pullHistory = jest.fn().mockResolvedValue({ commits: [], nextCursor: null });
+    const fetchHistory = jest.fn().mockResolvedValue({ commits: [], nextCursor: null });
+    const fetchState = jest.fn().mockResolvedValue(repoState);
 
     const { result: pullResult } = renderHook(() => {
       useSeedTrackedQueries({ history: pullHistory });
@@ -256,7 +259,7 @@ describe('Git write hooks', () => {
     await act(async () => {
       await pullResult.current.mutateAsync({});
     });
-    await waitFor(() => expect(pullHistory).toHaveBeenCalledOnce());
+    await waitFor(() => expect(pullHistory).toHaveBeenCalledTimes(1));
 
     const { result: fetchResult } = renderHook(() => {
       useSeedTrackedQueries({ state: fetchState, history: fetchHistory });
@@ -266,7 +269,7 @@ describe('Git write hooks', () => {
     await act(async () => {
       await fetchResult.current.mutateAsync({});
     });
-    await waitFor(() => expect(fetchState).toHaveBeenCalledOnce());
+    await waitFor(() => expect(fetchState).toHaveBeenCalledTimes(1));
     expect(fetchHistory).not.toHaveBeenCalled();
   });
 
@@ -287,8 +290,8 @@ describe('Git write hooks', () => {
 
   it('applies a stash through Eden while leaving the entry listed', async () => {
     mockStashApply.mockResolvedValue({ data: repoState, error: null });
-    const refetchStashes = vi.fn().mockResolvedValue({ stashes: [] });
-    const refetchState = vi.fn().mockResolvedValue(repoState);
+    const refetchStashes = jest.fn().mockResolvedValue({ stashes: [] });
+    const refetchState = jest.fn().mockResolvedValue(repoState);
 
     const { result } = renderHook(() => {
       useSeedTrackedQueries({ state: refetchState, stashes: refetchStashes });
@@ -300,14 +303,14 @@ describe('Git write hooks', () => {
     });
 
     expect(mockStashApply).toHaveBeenCalledWith({ chatId: 'chat-1', index: 2 });
-    await waitFor(() => expect(refetchStashes).toHaveBeenCalledOnce());
-    await waitFor(() => expect(refetchState).toHaveBeenCalledOnce());
+    await waitFor(() => expect(refetchStashes).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(refetchState).toHaveBeenCalledTimes(1));
   });
 
   it('drops a stash without invalidating the worktree state', async () => {
     mockStashDrop.mockResolvedValue({ data: { stashes: [] }, error: null });
-    const refetchStashes = vi.fn().mockResolvedValue({ stashes: [] });
-    const refetchState = vi.fn().mockResolvedValue(repoState);
+    const refetchStashes = jest.fn().mockResolvedValue({ stashes: [] });
+    const refetchState = jest.fn().mockResolvedValue(repoState);
 
     const { result } = renderHook(() => {
       useSeedTrackedQueries({ state: refetchState, stashes: refetchStashes });
@@ -319,7 +322,7 @@ describe('Git write hooks', () => {
     });
 
     expect(mockStashDrop).toHaveBeenCalledWith({ chatId: 'chat-1', index: 0 });
-    await waitFor(() => expect(refetchStashes).toHaveBeenCalledOnce());
+    await waitFor(() => expect(refetchStashes).toHaveBeenCalledTimes(1));
     // The stack changed, the checkout did not.
     expect(refetchState).not.toHaveBeenCalled();
   });
@@ -327,8 +330,8 @@ describe('Git write hooks', () => {
   it('deletes and renames branches through Eden', async () => {
     mockBranchDelete.mockResolvedValue({ data: { branches: [], remotes: [] }, error: null });
     mockBranchRename.mockResolvedValue({ data: repoState, error: null });
-    const refetchBranches = vi.fn().mockResolvedValue({ branches: [], remotes: [] });
-    const refetchState = vi.fn().mockResolvedValue(repoState);
+    const refetchBranches = jest.fn().mockResolvedValue({ branches: [], remotes: [] });
+    const refetchState = jest.fn().mockResolvedValue(repoState);
 
     const { result: deleteResult } = renderHook(() => {
       useSeedTrackedQueries({ state: refetchState, branches: refetchBranches });
@@ -343,7 +346,7 @@ describe('Git write hooks', () => {
       name: 'feat/old',
       force: true,
     });
-    await waitFor(() => expect(refetchBranches).toHaveBeenCalledOnce());
+    await waitFor(() => expect(refetchBranches).toHaveBeenCalledTimes(1));
     expect(refetchState).not.toHaveBeenCalled();
 
     const { result: renameResult } = renderHook(() => {
@@ -360,7 +363,7 @@ describe('Git write hooks', () => {
       newName: 'feat/new',
     });
     // Renaming the checked-out branch changes status.branch.name.
-    await waitFor(() => expect(refetchState).toHaveBeenCalledOnce());
+    await waitFor(() => expect(refetchState).toHaveBeenCalledTimes(1));
   });
 
   it('sends the lease only when a push asks to force', async () => {

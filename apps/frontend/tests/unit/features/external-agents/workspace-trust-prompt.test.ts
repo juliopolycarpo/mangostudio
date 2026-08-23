@@ -6,7 +6,7 @@
  * the next one inherits.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import {
   type ExternalWorkspaceTrustRequest,
   onExternalWorkspaceTrustPrompt,

@@ -14,11 +14,10 @@
  * mocking a client-side rule that could disagree with the server's.
  */
 
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { RunnerSelectorContainer } from '../../../../src/features/external-agents/RunnerSelectorContainer';
 import { render } from '../../../support/harness/render';
 
 const BASE_DESCRIPTOR: ExternalAgentDescriptor = {
@@ -38,11 +37,11 @@ const NEEDS_DISCLOSURE: ExternalAgentDescriptor = {
   unavailableReason: 'disclosure-required',
 };
 
-const setRunnerTarget = vi.fn();
-const forkChatWithRunner = vi.fn((_chatId: string, _runner: unknown) =>
+const setRunnerTarget = jest.fn();
+const forkChatWithRunner = jest.fn((_chatId: string, _runner: unknown) =>
   Promise.resolve({ id: 'chat-2' })
 );
-const accept = vi.fn(() => Promise.resolve());
+const accept = jest.fn(() => Promise.resolve());
 
 const appState = {
   currentChatId: 'chat-1' as string | null,
@@ -51,9 +50,9 @@ const appState = {
   agents: [{ id: 'default', name: 'Default', role: 'primary' }],
   isAgentListLoading: false,
   isGenerating: false,
-  setSelectedAgentId: vi.fn(),
+  setSelectedAgentId: jest.fn(),
   setRunnerTarget,
-  handleSelectChat: vi.fn(),
+  handleSelectChat: jest.fn(),
   // What the chat is set to, shown in the notice so the user can check the
   // level before agreeing rather than after.
   runnerPermissions: { level: 'default', routing: 'user' },
@@ -63,12 +62,16 @@ const messagesQuery: { data: { pages: { messages: unknown[] }[] } | undefined } 
   data: undefined,
 };
 
-vi.mock('@/lib/app-context', () => ({ useApp: () => appState }));
-vi.mock('@/features/chat/queries', () => ({ useMessagesQuery: () => messagesQuery }));
+const actualEnvironmentQueries = await import('@/features/environments/queries');
+const actualExternalAgentService = await import('@/services/external-agent-service');
+
+mock.module('@/lib/app-context', () => ({ useApp: () => appState }));
+mock.module('@/features/chat/queries', () => ({ useMessagesQuery: () => messagesQuery }));
 // Partially mocked: `capability-invalidation` reads the real `environmentKeys`
-// at import time, so replacing the whole module breaks the shared harness.
-vi.mock(import('@/features/environments/queries'), async (importOriginal) => ({
-  ...(await importOriginal()),
+// at import time, so replacing the whole module breaks the shared harness. The
+// real namespace is imported first because `mock.module` is not hoisted.
+mock.module('@/features/environments/queries', () => ({
+  ...actualEnvironmentQueries,
   useEnvironmentEntitiesQuery: () =>
     ({
       data: [{ id: 'local', name: 'this laptop', transportKind: 'in-process' }],
@@ -76,10 +79,14 @@ vi.mock(import('@/features/environments/queries'), async (importOriginal) => ({
       typeof import('@/features/environments/queries').useEnvironmentEntitiesQuery
     >,
 }));
-vi.mock('@/services/external-agent-service', () => ({
+// Spread rather than replaced: `bun test` resolves the whole namespace, so a
+// factory that returns only the one function breaks every other consumer of the
+// module with `Export named 'getExternalAccountLimits' not found`.
+mock.module('@/services/external-agent-service', () => ({
+  ...actualExternalAgentService,
   forkChatWithRunner: (chatId: string, runner: unknown) => forkChatWithRunner(chatId, runner),
 }));
-vi.mock('../../../../src/features/external-agents/useExternalAgents', () => ({
+mock.module('../../../../src/features/external-agents/useExternalAgents', () => ({
   useExternalAgents: () => ({
     agents: [descriptorState.current],
     isLoading: false,
@@ -87,15 +94,21 @@ vi.mock('../../../../src/features/external-agents/useExternalAgents', () => ({
   }),
   externalAgentSelectable: () => true,
 }));
-vi.mock('../../../../src/features/external-agents/useExternalDisclosures', () => ({
+mock.module('../../../../src/features/external-agents/useExternalDisclosures', () => ({
   useExternalDisclosures: () => ({
     records: [],
     isLoading: false,
     forTarget: () => undefined,
     accept,
-    revoke: vi.fn(() => Promise.resolve()),
+    revoke: jest.fn(() => Promise.resolve()),
   }),
 }));
+
+// Below every mock, never as a static import: those are evaluated first and the
+// container would bind the real hooks.
+const { RunnerSelectorContainer } = await import(
+  '../../../../src/features/external-agents/RunnerSelectorContainer'
+);
 
 function openSelector() {
   render(<RunnerSelectorContainer />);
@@ -104,7 +117,7 @@ function openSelector() {
 
 describe('RunnerSelectorContainer', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
     appState.currentChatId = 'chat-1';
     messagesQuery.data = undefined;
     descriptorState.current = BASE_DESCRIPTOR;

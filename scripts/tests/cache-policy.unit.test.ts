@@ -10,7 +10,7 @@ import {
 const CACHE_ACTION_SHA = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9';
 const EXPRESSION_START = '$' + '{{';
 const CACHE_EPOCH_EXPRESSION = `cache-epoch: ${EXPRESSION_START} vars.CI_CACHE_EPOCH || 'v1' }}`;
-const EXPECTED_FAMILIES = ['bun', 'turbo', 'vite', 'lint-tools', 'playwright', 'timings'] as const;
+const EXPECTED_FAMILIES = ['bun', 'turbo', 'lint-tools', 'playwright', 'timings'] as const;
 
 describe('CI cache policy', () => {
   test('keeps every cache family behind one composite and one immutable pin', () => {
@@ -104,13 +104,11 @@ describe('CI cache policy', () => {
     }
     expect(readText('.github/workflows/lint.yml')).toContain('bun run turbo:version');
 
-    const vite = byFamily('vite');
-    expect(vite.length).toBeGreaterThan(0);
-    for (const site of vite) {
-      for (const file of ['bun.lock', 'vite.config.ts', 'vitest.config.ts', 'tsconfig*.json']) {
-        expect(site.inputs.validity).toContain(file);
-      }
-    }
+    // No `vite` family, deliberately: the frontend moved to `Bun.build()`, so
+    // nothing populates `node_modules/.vite` and the old optimizer cache was
+    // restoring an empty directory keyed partly on a file the bundler no
+    // longer reads.
+    expect(byFamily('vite')).toHaveLength(0);
 
     // No `tsbuildinfo` family, deliberately. TypeScript 7.0.2 reports
     // `TS2589: Type instantiation is excessively deep` when a project is

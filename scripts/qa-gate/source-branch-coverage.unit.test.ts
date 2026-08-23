@@ -3,7 +3,17 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { readSourceBranchCoverageSummary } from './source-branch-coverage';
+import { readCoveredSources } from './lcov-sources';
+import { sourceBranchCoverageFromSources } from './source-branch-coverage';
+
+/**
+ * The read-then-count pair, composed here rather than exported from the module.
+ * Production reads the sources once and feeds both counters
+ * (`coverage-summary.ts`), so a module-level wrapper for this would have no
+ * caller but these tests while reading as production API.
+ */
+const readSourceBranchCoverageSummary = async (lcovPath: string, baseDir: string) =>
+  sourceBranchCoverageFromSources(await readCoveredSources(lcovPath, baseDir));
 
 const tempDirs: string[] = [];
 

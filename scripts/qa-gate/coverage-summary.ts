@@ -1,14 +1,15 @@
 import { join } from 'node:path';
 
 import { ALL_WORKSPACE_NAMES, ROOT_DIR, type WorkspaceName } from '../lib/config';
+import { readCoveredSources } from './lcov-sources';
 import {
   type CoverageBucket,
   type CoverageSummary,
   coverageBucket,
   parseLcovSummary,
 } from './parse-lcov';
-import { readSourceBranchCoverageSummary } from './source-branch-coverage';
-import { readSourceStatementCoverageSummary } from './source-statement-coverage';
+import { sourceBranchCoverageFromSources } from './source-branch-coverage';
+import { sourceStatementCoverageFromSources } from './source-statement-coverage';
 
 type CoverageSourceKind = 'json-summary' | 'lcov';
 
@@ -27,13 +28,7 @@ interface JsonCoverageSummaryShape {
 }
 
 const WORKSPACE_COVERAGE_SOURCES: Readonly<Record<WorkspaceName, readonly CoverageSource[]>> = {
-  frontend: [
-    {
-      kind: 'json-summary',
-      file: '.mango/artifacts/coverage/frontend/vitest/coverage-summary.json',
-    },
-    { kind: 'lcov', file: '.mango/artifacts/coverage/frontend/bun/lcov.info' },
-  ],
+  frontend: [{ kind: 'lcov', file: '.mango/artifacts/coverage/frontend/lcov.info' }],
   api: [{ kind: 'lcov', file: '.mango/artifacts/coverage/api/lcov.info' }],
   shared: [{ kind: 'lcov', file: '.mango/artifacts/coverage/shared/lcov.info' }],
   runtime: [{ kind: 'lcov', file: '.mango/artifacts/coverage/runtime/lcov.info' }],
@@ -43,6 +38,7 @@ const SOURCE_DERIVED_COVERAGE_FILES: Readonly<Partial<Record<WorkspaceName, stri
   api: '.mango/artifacts/coverage/api/lcov.info',
   shared: '.mango/artifacts/coverage/shared/lcov.info',
   runtime: '.mango/artifacts/coverage/runtime/lcov.info',
+  frontend: '.mango/artifacts/coverage/frontend/lcov.info',
 };
 
 export const readJsonCoverageSummary = async (absPath: string): Promise<CoverageSummary> => {
@@ -102,20 +98,21 @@ export const readWorkspaceCoverageSummary = async (
   const derivedCoverageFile = SOURCE_DERIVED_COVERAGE_FILES[workspace];
   if (!derivedCoverageFile) return summary;
 
+  if (summary.branches && summary.statements) return summary;
+
   const lcovPath = join(ROOT_DIR, derivedCoverageFile);
   // Relative SF: records in Bun's LCOV output are workspace-relative; resolve
   // them against the workspace root, never the artifacts tree.
   const workspaceDir = join(ROOT_DIR, 'apps', workspace);
-  const [branches, statements] = await Promise.all([
-    summary.branches
-      ? Promise.resolve(summary.branches)
-      : readSourceBranchCoverageSummary(lcovPath, workspaceDir),
-    summary.statements
-      ? Promise.resolve(summary.statements)
-      : readSourceStatementCoverageSummary(lcovPath, workspaceDir),
-  ]);
+  // One read-and-parse pass feeds both counters: parsing every covered source
+  // is the expensive half (measured ~2.5s for the frontend's 440 files).
+  const sources = await readCoveredSources(lcovPath, workspaceDir);
 
-  return { ...summary, branches, statements };
+  return {
+    ...summary,
+    branches: summary.branches ?? sourceBranchCoverageFromSources(sources),
+    statements: summary.statements ?? sourceStatementCoverageFromSources(sources),
+  };
 };
 
 export const coverageWorkspaceNames = (): readonly WorkspaceName[] => ALL_WORKSPACE_NAMES;

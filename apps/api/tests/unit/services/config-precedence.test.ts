@@ -13,12 +13,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { CliError } from '../../../src/cli/errors';
 import {
   getConfigEnvFilePath,
   loadConfig,
   loadConfigForTest,
   parseBooleanFlag,
+  RUNTIME_CONFIG_ENV_KEYS,
   resetConfig,
+  resetFrontendPortDeprecationWarning,
   TEST_MANAGED_CONFIG_DIR,
 } from '../../../src/lib/config';
 
@@ -41,6 +44,8 @@ const WATCHED_ENV_KEYS = [
   'MANGO_ENV_LTS_REFRESH',
   'MANGO_ENV_INSTALLS_ENABLED',
   'MANGO_CONTAINER',
+  'FRONTEND_PORT',
+  'ALLOWED_ORIGINS',
 ];
 
 function saveEnv(): Record<string, string | undefined> {
@@ -387,7 +392,7 @@ describe('parseBooleanFlag', () => {
   });
 });
 
-describe('corsOrigins includes server origin for same-origin deployments', () => {
+describe('corsOrigins: the server origin plus configured allowed origins', () => {
   let savedEnv: Record<string, string | undefined>;
 
   beforeEach(() => {
@@ -452,12 +457,240 @@ describe('corsOrigins includes server origin for same-origin deployments', () =>
     expect(cfg.corsOrigins).toContain('http://api.internal:4000');
   });
 
-  test('frontend origins are still present alongside server origin', () => {
+  test('a configured allowed origin joins the defaults instead of replacing them', () => {
+    writeFileSync(
+      TMP_TOML,
+      '[server]\nport = 3001\nallowedOrigins = ["https://studio.example.com"]\n'
+    );
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.corsOrigins).toEqual([
+      'http://localhost:3001',
+      'http://127.0.0.1:3001',
+      'http://0.0.0.0:3001',
+      'https://studio.example.com',
+    ]);
+  });
+
+  test('ALLOWED_ORIGINS takes a comma-separated list', () => {
+    process.env.ALLOWED_ORIGINS = 'https://studio.example.com, http://192.168.1.10:4173';
+
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(cfg.server.allowedOrigins).toEqual([
+      'https://studio.example.com',
+      'http://192.168.1.10:4173',
+    ]);
+    expect(cfg.corsOrigins).toContain('https://studio.example.com');
+    expect(cfg.corsOrigins).toContain('http://192.168.1.10:4173');
+    // The server's own origins survive, so a local browser session still works.
+    expect(cfg.corsOrigins).toContain('http://localhost:3001');
+  });
+
+  test('ALLOWED_ORIGINS tolerates padding and a trailing comma', () => {
+    process.env.ALLOWED_ORIGINS = '  https://studio.example.com ,, ';
+
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(cfg.server.allowedOrigins).toEqual(['https://studio.example.com']);
+  });
+
+  test('ALLOWED_ORIGINS replaces the config.toml list rather than extending it', () => {
+    writeFileSync(TMP_TOML, '[server]\nallowedOrigins = ["https://from-toml.example"]\n');
+    process.env.ALLOWED_ORIGINS = 'https://from-env.example';
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.corsOrigins).toContain('https://from-env.example');
+    expect(cfg.corsOrigins).not.toContain('https://from-toml.example');
+  });
+
+  test('an allowed origin that repeats a default is not listed twice', () => {
+    process.env.ALLOWED_ORIGINS = 'http://localhost:3001';
+
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(cfg.corsOrigins.filter((origin) => origin === 'http://localhost:3001')).toHaveLength(1);
+  });
+
+  test('ALLOWED_ORIGINS is forwarded to detached servers with the other config keys', () => {
+    expect(RUNTIME_CONFIG_ENV_KEYS).toContain('ALLOWED_ORIGINS');
+  });
+
+  // Every gate compares the browser's Origin header by exact string, so an
+  // entry that is merely close parses fine and then matches nothing. Rejecting
+  // it at load is what turns a silent no-op into a startup failure.
+  test.each([
+    ['studio.example.com', 'is not a URL'],
+    ['ftp://studio.example.com', 'must use http:// or https://'],
+    ['https://studio.example.com/app', 'must be a bare scheme://host[:port] origin'],
+    ['https://studio.example.com/', 'must be a bare scheme://host[:port] origin'],
+    ['https://studio.example.com:443', 'must be a bare scheme://host[:port] origin'],
+  ])('rejects the malformed allowed origin %p', (origin, expected) => {
+    process.env.ALLOWED_ORIGINS = origin;
+
+    expect(() => loadConfig(join(TMP_DIR, 'nonexistent.toml'))).toThrow(expected);
+  });
+
+  test('a malformed allowed origin fails as a CliError, not a plain Error', () => {
+    process.env.ALLOWED_ORIGINS = 'studio.example.com';
+
+    expect(() => loadConfig(join(TMP_DIR, 'nonexistent.toml'))).toThrow(CliError);
+  });
+
+  test('names the canonical form when an entry is close but not exact', () => {
+    process.env.ALLOWED_ORIGINS = 'https://studio.example.com/';
+
+    expect(() => loadConfig(join(TMP_DIR, 'nonexistent.toml'))).toThrow(
+      'did you mean "https://studio.example.com"'
+    );
+  });
+
+  test('a configured frontend port contributes no origin of its own', () => {
     writeFileSync(TMP_TOML, '[server]\nport = 3001\n[frontend]\nport = 5173\n');
 
     const cfg = loadConfig(TMP_TOML);
 
-    expect(cfg.corsOrigins).toContain('http://localhost:5173');
-    expect(cfg.corsOrigins).toContain('http://localhost:3001');
+    // The API serves the frontend, so the only origins are the server's own.
+    expect(cfg.corsOrigins).toEqual([
+      'http://localhost:3001',
+      'http://127.0.0.1:3001',
+      'http://0.0.0.0:3001',
+    ]);
+  });
+});
+
+describe('auth.url validation', () => {
+  let savedEnv: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    mkdirSync(TMP_DIR, { recursive: true });
+    savedEnv = saveEnv();
+    for (const k of WATCHED_ENV_KEYS) delete process.env[k];
+    resetConfig();
+  });
+
+  afterEach(() => {
+    resetConfig();
+    restoreEnv(savedEnv);
+    rmSync(TMP_DIR, { recursive: true, force: true });
+  });
+
+  // Better Auth reads the scheme (the `__Secure-` cookie prefix) and the host
+  // (origin checks) out of this value without ever validating it, so a value
+  // that is not an absolute URL fails as a login that never establishes a
+  // session rather than as anything the operator can read.
+  test.each([
+    ['api.example.com', 'is not a URL'],
+    // Parses: protocol `localhost:`, empty hostname. The shape a bare host:port
+    // takes, and the one that would otherwise pass silently.
+    ['localhost:3001', 'must use http:// or https:// and name a host'],
+    ['ftp://api.example.com', 'must use http:// or https:// and name a host'],
+  ])('rejects the malformed auth.url %p', (url, expected) => {
+    process.env.BETTER_AUTH_URL = url;
+
+    expect(() => loadConfig(join(TMP_DIR, 'nonexistent.toml'))).toThrow(expected);
+  });
+
+  test('a malformed auth.url fails as a CliError, not a plain Error', () => {
+    process.env.BETTER_AUTH_URL = 'api.example.com';
+
+    expect(() => loadConfig(join(TMP_DIR, 'nonexistent.toml'))).toThrow(CliError);
+  });
+
+  // Unlike an allowed origin, this one is not required to be bare: Better Auth
+  // appends its basePath to it, so a subpath deployment is legitimate.
+  test('accepts a base URL carrying a path', () => {
+    process.env.BETTER_AUTH_URL = 'https://example.com/mango';
+
+    expect(loadConfig(join(TMP_DIR, 'nonexistent.toml')).auth.url).toBe(
+      'https://example.com/mango'
+    );
+  });
+
+  test('the derived default passes its own validation', () => {
+    writeFileSync(TMP_TOML, '[server]\nhost = "0.0.0.0"\nport = 3001\n');
+
+    expect(loadConfig(TMP_TOML).auth.url).toBe('http://localhost:3001');
+  });
+});
+
+describe('frontend.port deprecation warning', () => {
+  let savedEnv: Record<string, string | undefined>;
+  let warnings: string[];
+  let originalWarn: typeof console.warn;
+
+  beforeEach(() => {
+    mkdirSync(TMP_DIR, { recursive: true });
+    savedEnv = saveEnv();
+    for (const k of WATCHED_ENV_KEYS) delete process.env[k];
+    resetConfig();
+    // The latch is process-wide, so another test file may already have tripped it.
+    resetFrontendPortDeprecationWarning();
+    warnings = [];
+    originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(' '));
+    };
+  });
+
+  afterEach(() => {
+    console.warn = originalWarn;
+    resetConfig();
+    resetFrontendPortDeprecationWarning();
+    restoreEnv(savedEnv);
+    rmSync(TMP_DIR, { recursive: true, force: true });
+  });
+
+  function deprecationWarnings(): string[] {
+    return warnings.filter((line) => line.includes('[frontend] settings are deprecated'));
+  }
+
+  test('warns once per process when config.toml sets frontend.port', () => {
+    writeFileSync(TMP_TOML, '[server]\nport = 3001\n[frontend]\nport = 5173\n');
+
+    loadConfig(TMP_TOML);
+    loadConfig(TMP_TOML);
+
+    expect(deprecationWarnings()).toEqual([
+      '[config] The [frontend] settings are deprecated and ignored; the frontend is served by ' +
+        'the API on 3001. To allow a frontend served from another origin, set ' +
+        'server.allowedOrigins (or ALLOWED_ORIGINS).',
+    ]);
+  });
+
+  test('warns when config.toml sets only frontend.host', () => {
+    writeFileSync(TMP_TOML, '[server]\nport = 3001\n[frontend]\nhost = "myapp.example.com"\n');
+
+    loadConfig(TMP_TOML);
+
+    expect(deprecationWarnings()).toHaveLength(1);
+  });
+
+  test('warns when FRONTEND_PORT is set in the environment', () => {
+    process.env.FRONTEND_PORT = '5173';
+
+    loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(deprecationWarnings()).toHaveLength(1);
+  });
+
+  test('reports the resolved server port, not the deprecated one', () => {
+    process.env.FRONTEND_PORT = '5173';
+    process.env.API_PORT = '13077';
+
+    loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(deprecationWarnings()[0]).toContain('served by the API on 13077.');
+  });
+
+  test('stays silent when neither source sets it', () => {
+    writeFileSync(TMP_TOML, '[server]\nport = 3001\n');
+
+    loadConfig(TMP_TOML);
+    loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(deprecationWarnings()).toEqual([]);
   });
 });

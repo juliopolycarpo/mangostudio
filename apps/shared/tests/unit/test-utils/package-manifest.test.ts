@@ -39,6 +39,12 @@ describe('shared package manifest', () => {
     expect(manifest.exports?.['./profiles']).toBe('./src/profiles/index.ts');
   });
 
+  it('keeps utils/dist-files as an explicit public export', async () => {
+    const manifest = await readSharedManifest();
+
+    expect(manifest.exports?.['./utils/dist-files']).toBe('./src/utils/dist-files.ts');
+  });
+
   it('declares faker as a runtime dependency for the exported test-utils entrypoint', async () => {
     const manifest = await readSharedManifest();
 

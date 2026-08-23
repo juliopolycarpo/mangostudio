@@ -5,7 +5,7 @@
  * write that already happened.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,16 +23,24 @@ import {
   withMutationPersistence,
 } from '../../../../src/services/tools/file-mutation-snapshot';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { type ChatFixture, insertTestChat, insertTestUser } from '../../../support/factories';
+import { type ChatFixture, insertTestChat, type UserFixture } from '../../../support/factories';
+import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
 
 let tempDir: string;
 let chat: ChatFixture;
 let messageId: string;
 
+// One user, and one Local runtime connection, for the whole file — the
+// helper's doc comment carries the rationale.
+let user: UserFixture;
+
+beforeAll(async () => {
+  user = await insertUserWithLocalRuntime();
+});
+
 beforeEach(async () => {
   clearFileFreshness();
   tempDir = mkdtempSync(join(tmpdir(), 'checkpoint-durability-test-'));
-  const user = await insertTestUser();
   chat = await insertTestChat(user.id);
   messageId = faker.string.uuid();
   await getDb()

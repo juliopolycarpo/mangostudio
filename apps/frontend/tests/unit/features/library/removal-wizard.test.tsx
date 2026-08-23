@@ -6,10 +6,10 @@
  * to go out of reach until a fresh preview arrives.
  */
 
+import { afterEach, describe, expect, it, jest } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
 import type { RemovalPreview } from '@mangostudio/shared/library';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RemovalWizard } from '../../../../src/features/library/components/RemovalWizard';
 import { screen } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
@@ -96,7 +96,7 @@ describe('RemovalWizard while the environment scope is still loading', () => {
           })
         );
     });
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const fetchMock = jest.fn((input: RequestInfo | URL) => {
       const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
       if (url.pathname === '/api/environments') return pendingEnvironments;
       if (url.pathname === '/api/library/removal/preview') {
@@ -109,7 +109,9 @@ describe('RemovalWizard while the environment scope is still loading', () => {
       }
       return Promise.reject(new Error(`[test] Unhandled request: ${url.pathname}`));
     });
-    vi.stubGlobal('fetch', fetchMock);
+    // `vi.stubGlobal` has no Bun equivalent. `bun.setup.ts` reinstates its
+    // unreachable `fetch` after every test, so a plain assignment cannot leak.
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     await renderWithRouter(
       <RemovalWizard

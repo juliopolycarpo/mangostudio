@@ -1,13 +1,13 @@
 /**
  * Unit tests for useChatAutoFollow.
- * jsdom does not lay out elements, so scroll metrics (scrollHeight, clientHeight,
+ * happy-dom does not lay out elements, so scroll metrics (scrollHeight, clientHeight,
  * scrollTop) are stubbed on the prototype to drive the follow logic. Each test
  * mounts a tiny harness that wires the hook to a real scroll container.
  */
 
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import type { Message } from '@mangostudio/shared';
 import { fireEvent, render } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   isNearBottom,
   useChatAutoFollow,
@@ -162,7 +162,7 @@ describe('useChatAutoFollow', () => {
   it('re-enables follow and smooth-scrolls when the button is clicked', () => {
     const { getByTestId } = render(<FeedHarness chatId="a" messages={[makeMessage('1')]} />);
     const scroll = getByTestId('scroll');
-    const scrollTo = vi.fn();
+    const scrollTo = jest.fn();
     (scroll as unknown as { scrollTo: typeof scrollTo }).scrollTo = scrollTo;
 
     // Scroll away so the button shows.

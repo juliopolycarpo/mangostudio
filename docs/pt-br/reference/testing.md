@@ -19,9 +19,9 @@ apps/
       unit/
       integration/
       support/
-        setup/     # vitest.setup.ts
-        harness/   # render.tsx
-        mocks/     # create-fetch-scenario.ts (apenas hooks em jsdom)
+        setup/     # dom-setup.ts + bun.setup.ts (preloads do bunfig)
+        harness/   # render.tsx, render-with-router.tsx, timers.ts
+        mocks/     # create-fetch-scenario.ts (apenas testes de hooks em happy-dom)
 
   shared/
     tests/
@@ -38,11 +38,11 @@ apps/
 
 ## Runners Por Workspace
 
-| Workspace       | Runner                | Ambiente                                           |
-| --------------- | --------------------- | -------------------------------------------------- |
-| `apps/api`      | `bun test`            | Bun native                                         |
-| `apps/frontend` | `bun:test` + `vitest` | Bun native para lógica pura, jsdom para React/Vite |
-| `apps/shared`   | `bun:test`            | Bun native                                         |
+| Workspace       | Runner     | Ambiente                                          |
+| --------------- | ---------- | ------------------------------------------------- |
+| `apps/api`      | `bun test` | Bun native                                        |
+| `apps/frontend` | `bun test` | Bun native para lógica pura, happy-dom para React |
+| `apps/shared`   | `bun:test` | Bun native                                        |
 
 ## Scripts Da Raiz
 
@@ -62,15 +62,15 @@ bun run verify              # gate CI local completo: check → test --coverage 
 
 | Lane        | Nome da task       | Workspaces            | Runner              | Cache Turbo |
 | ----------- | ------------------ | --------------------- | ------------------- | ----------- |
-| unit        | `test:unit`        | api, frontend, shared | bun test / vitest   | sim         |
-| integration | `test:integration` | api, frontend         | bun test / vitest   | não         |
-| coverage    | `test:coverage`    | api, frontend, shared | bun test / vitest   | não         |
+| unit        | `test:unit`        | api, frontend, shared | bun test            | sim         |
+| integration | `test:integration` | api, frontend         | bun test            | não         |
+| coverage    | `test:coverage`    | api, frontend, shared | bun test            | não         |
 | e2e         | —                  | root (browser-smoke)  | Playwright Chromium | —           |
 | scripts     | `//#test:scripts`  | root                  | bun test            | sim         |
 
 ## Browser Smoke
 
-Suíte Playwright Chromium em `tests/browser-smoke/`. Cobre o fluxo completo de auth contra uma stack real rodando com API em `:3001` e frontend em `:5173`.
+Suíte Playwright Chromium em `tests/browser-smoke/`. Cobre o fluxo completo de auth contra uma stack real em `:3001` — um único servidor entregando a API e o frontend.
 
 ```bash
 bun run test:e2e:setup
@@ -152,7 +152,7 @@ bun run --filter @mangostudio/frontend test:coverage
 
 O suporte do frontend vive em `apps/frontend/tests/support/`:
 
-- `setup/vitest.setup.ts` — bootstrap de runtime apenas
+- `setup/dom-setup.ts` + `setup/bun.setup.ts` — registro do happy-dom e bootstrap de runtime (preloads do bunfig, nessa ordem)
 - `harness/render.tsx` — superfície mínima de render com providers
 - `mocks/create-fetch-scenario.ts` — registry de fetch por método/path **apenas para testes de hooks React**
 
@@ -219,7 +219,7 @@ describe('createGeminiSecretService', () => {
 
 ### Integração No Frontend — testes de hooks React com fetch mock
 
-`create-fetch-scenario.ts` é limitado a **testes de hooks React** em jsdom. Não use isso para testes de contrato da API.
+`create-fetch-scenario.ts` é limitado a **testes de hooks React** em happy-dom. Não use isso para testes de contrato da API.
 
 ```tsx
 import { render, screen } from '../../support/harness/render';
@@ -294,34 +294,37 @@ Cada teste de stream por provedor deve cobrir:
 
 ## Cobertura
 
-Os relatórios de cobertura são escritos em `.mango/artifacts/coverage/`. O Vitest do frontend
-escreve o relatório React/Vite em `.mango/artifacts/coverage/frontend/vitest/`, e `bun:test`
-escreve LCOV da lógica pura em `.mango/artifacts/coverage/frontend/bun/`:
+Os relatórios de cobertura são escritos em `.mango/artifacts/coverage/`, um
+diretório por workspace; o LCOV do frontend fica em
+`.mango/artifacts/coverage/frontend/lcov.info`:
 
 ```bash
 bun run --filter @mangostudio/frontend test:coverage
 ```
 
+**O frontend tem pisos de cobertura total** — lines 81 / functions 76 /
+statements 81 / branches 53, medidos em 2026-08-21 sobre a suíte completa e
+arredondados para baixo com ~1pt de folga. Os pisos vivem em
+`scripts/lib/test-lanes.ts` e são aplicados por
+`scripts/qa-gate/enforce-coverage-thresholds.ts`, encadeado dentro do próprio
+`test:coverage` — um estouro falha a mesma invocação que o CI observa. O
+`coverageThreshold` do `bunfig.toml` não serve para isso: no Bun 1.4.0 ele é
+aplicado por *arquivo*, fica silenciosamente inerte com
+`coverageReporter = ["lcov"]` sem `"text"`, e um estouro não imprime nada.
+
 ## Erros Não Tratados Com Contagens Verdes
 
-Uma execução Vitest do frontend pode imprimir todos os arquivos e todos os
-testes como passed, depois uma linha `Errors N errors`, e ainda assim sair com
-código 1. Isso não é flake. Não rode de novo. O CI já falhou corretamente. As
+Uma execução do frontend pode imprimir todos os arquivos e todos os testes como
+passed, depois um bloco `# Unhandled error between tests`, e ainda assim sair
+com código 1. Isso não é flake. Não rode de novo. O CI já falhou corretamente. As
 contagens verdes é que fazem parecer ruído.
 
-```
-Test Files  144 passed (144)
-     Tests  1150 passed (1150)
-    Errors  2 errors
-```
-
-O mecanismo é sempre o mesmo. Algo agenda um timer que sobrevive ao componente
-que o criou. O Vitest descarta o jsdom daquele arquivo primeiro. O callback
-então corre contra um global que já não existe: `ReferenceError: window is not
-defined`, atribuído a qualquer arquivo que estivesse rodando. Só reproduz quando
-a suíte está carregada o bastante para o timer cair nesse intervalo, então não
-aparece num teste local de um arquivo só, e reexecutar o job no CI é cara ou
-coroa.
+O mecanismo é sempre o mesmo. Algo sobrevive ao teste que o iniciou — um
+timer, um chunk `lazy()`, um `fetch` sem resposta — e aterrissa depois que o
+ambiente dele se foi, atribuído a qualquer arquivo que estivesse rodando. Só
+reproduz quando a suíte está carregada o bastante para o callback cair nesse
+intervalo, então não aparece num teste local de um arquivo só, e reexecutar o
+job no CI é cara ou coroa.
 
 ### Onde olhar
 

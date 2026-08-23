@@ -5,6 +5,7 @@
  * and the section landing on the right one of them.
  */
 
+import { describe, expect, it } from 'bun:test';
 import {
   createMemoryHistory,
   createRootRoute,
@@ -15,10 +16,9 @@ import {
 } from '@tanstack/react-router';
 import { screen, within } from '@testing-library/react';
 import type { FunctionComponent } from 'react';
-import { describe, expect, it } from 'vitest';
 import { Route as EnvironmentsRoute } from '../../../src/routes/_authenticated/environments';
 import { Route as LibraryRoute } from '../../../src/routes/_authenticated/environments/library';
-import { act, render } from '../../support/harness/render';
+import { act, flushAsyncRender, render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 /** The route's page component, which the file keeps module-local. */
@@ -70,6 +70,12 @@ async function renderUmbrellaAt(path: string) {
   await act(async () => {
     await router.load();
   });
+  // `router.load()` settles routing, not the queries the loaded tree starts.
+  // `BackupUsage` fetches on mount and renders nothing while it is pending, so
+  // there is no element to await — without flushing its promise chain here the
+  // resolution lands after the test body and prints an "update was not wrapped
+  // in act(...)" block while every assertion still passes.
+  await flushAsyncRender();
   return result;
 }
 

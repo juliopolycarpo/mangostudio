@@ -1,7 +1,7 @@
+import { describe, expect, it, jest } from 'bun:test';
 import type { TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
 import { InterruptedTurnNotice } from '@/features/chat/components/InterruptedTurnNotice';
 import { render } from '../../support/harness/render';
 
@@ -55,14 +55,14 @@ const CHECKPOINT: TurnCheckpointPart = {
 describe('InterruptedTurnNotice', () => {
   it('defaults only read-only retries on and submits explicit selections', async () => {
     const user = userEvent.setup();
-    const onResume = vi.fn().mockResolvedValue(undefined);
+    const onResume = jest.fn().mockResolvedValue(undefined);
     render(
       <InterruptedTurnNotice
         messageId="message-1"
         checkpoint={CHECKPOINT}
         disabled={false}
         onResume={onResume}
-        onDismiss={vi.fn().mockResolvedValue(undefined)}
+        onDismiss={jest.fn().mockResolvedValue(undefined)}
       />
     );
 
@@ -79,13 +79,13 @@ describe('InterruptedTurnNotice', () => {
 
   it('dismisses the prompt without changing checkpoint evidence locally', async () => {
     const user = userEvent.setup();
-    const onDismiss = vi.fn().mockResolvedValue(undefined);
+    const onDismiss = jest.fn().mockResolvedValue(undefined);
     render(
       <InterruptedTurnNotice
         messageId="message-1"
         checkpoint={CHECKPOINT}
         disabled={false}
-        onResume={vi.fn().mockResolvedValue(undefined)}
+        onResume={jest.fn().mockResolvedValue(undefined)}
         onDismiss={onDismiss}
       />
     );

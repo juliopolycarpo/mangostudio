@@ -4,6 +4,7 @@
  * projections stale immediately.
  */
 
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
   DEFAULT_APP_SETTINGS,
   DEFAULT_LIBRARY_LOCATION_SETTINGS,
@@ -11,7 +12,6 @@ import {
 } from '@mangostudio/shared/app-settings';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { chatCapabilitiesQueryOptions } from '../../../../src/features/chat/hooks/use-chat-capabilities';
 import { appSettingsKeys } from '../../../../src/features/settings/app/queries';
 import { useUpdateProviderSettings } from '../../../../src/features/settings/providers/hooks/use-provider-settings';
@@ -24,7 +24,7 @@ import { skillSettingsKeys } from '../../../../src/features/settings/skills/quer
 import { useUpdateToolSetting } from '../../../../src/features/settings/tools/hooks/use-tool-settings';
 import { toolSettingsKeys } from '../../../../src/features/settings/tools/queries';
 import { useGlobalSettings } from '../../../../src/hooks/use-global-settings';
-import { act, renderHook, waitFor } from '../../../support/harness/render';
+import { act, flushAsyncRender, renderHook, waitFor } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 
 const CAPABILITIES_KEY: readonly unknown[] = chatCapabilitiesQueryOptions({
@@ -35,6 +35,18 @@ function seedCapabilityProjection(queryClient: ReturnType<typeof useQueryClient>
   queryClient.setQueryData(CAPABILITIES_KEY, { runtimeHash: 'cached' });
   expect(queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(false);
 }
+
+/**
+ * Lets the capability invalidation this mutation triggered land inside `act`.
+ *
+ * `registerCapabilityInvalidationSources` schedules the invalidation with
+ * `queueMicrotask`, and React Query then announces the resulting cache change
+ * through its own `setTimeout(callback, 0)`. Both fall outside the `act` around
+ * `mutateAsync`, so under a loaded full-lane run the update landed after the
+ * test body — four "update to TestComponent … not wrapped in act(...)" blocks
+ * that never appear when this file runs alone.
+ */
+const drainCapabilityInvalidation = flushAsyncRender;
 
 async function seedSourceThenProjection(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -87,6 +99,7 @@ describe('capability cache invalidation', () => {
         body: { enabled: false },
       });
     });
+    await drainCapabilityInvalidation();
 
     expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true);
   });
@@ -119,6 +132,7 @@ describe('capability cache invalidation', () => {
         body: { enabled: false },
       });
     });
+    await drainCapabilityInvalidation();
 
     expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true);
   });
@@ -162,6 +176,7 @@ describe('capability cache invalidation', () => {
     await act(async () => {
       await result.current.mutation.mutateAsync({ skillKey: 'mango:review', enabled: false });
     });
+    await drainCapabilityInvalidation();
 
     expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true);
   });
@@ -188,6 +203,7 @@ describe('capability cache invalidation', () => {
     await act(async () => {
       await result.current.mutation.mutateAsync({ source: 'agents', enabled: true });
     });
+    await drainCapabilityInvalidation();
 
     expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true);
   });
@@ -231,6 +247,7 @@ describe('capability cache invalidation', () => {
     await act(async () => {
       await result.current.mutation.mutateAsync({ thinkingEnabled: false });
     });
+    await drainCapabilityInvalidation();
 
     expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true);
   });
@@ -280,6 +297,7 @@ describe('capability cache invalidation', () => {
     await act(async () => {
       await result.current.mutation.mutateAsync();
     });
+    await drainCapabilityInvalidation();
 
     expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true);
   });

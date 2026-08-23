@@ -2,10 +2,10 @@
  * Integration tests for app-level settings pages backed by /api/settings/app.
  */
 
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { type AppSettings, DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
 import { fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { GeneralSettings } from '../../../src/components/settings/GeneralSettings';
 import { PromptSettings } from '../../../src/components/settings/PromptSettings';
 import { useGlobalSettings } from '../../../src/hooks/use-global-settings';

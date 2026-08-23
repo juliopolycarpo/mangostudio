@@ -4,10 +4,10 @@
  * and the shared tool-settings listing.
  */
 
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpServer } from '@mangostudio/shared/mcp';
 import { useQueryClient } from '@tanstack/react-query';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { chatCapabilitiesQueryOptions } from '../../../src/features/chat/hooks/use-chat-capabilities';
 import {
   useAddMcpServer,
@@ -17,7 +17,7 @@ import {
   useTestMcpServer,
 } from '../../../src/features/settings/mcp/hooks/use-mcp-servers';
 import { mcpServerKeys } from '../../../src/features/settings/mcp/queries';
-import { act, renderHook, waitFor } from '../../support/harness/render';
+import { act, flushAsyncRender, renderHook, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const SERVER: McpServer = {
@@ -96,6 +96,10 @@ describe('MCP server hooks', () => {
     });
 
     await waitFor(() => expect(result.current.servers).toEqual([SERVER]));
+    // The query cache's capability-invalidation subscriber reacts on a
+    // queued microtask behind the mutation settling — drain it here so it
+    // does not fire, unwrapped in `act`, during the next test.
+    await flushAsyncRender();
   });
 
   it('invalidates capability projections after applying a portable import', async () => {
@@ -121,7 +125,12 @@ describe('MCP server hooks', () => {
       });
     });
 
-    expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true);
+    // The query cache's capability-invalidation subscriber reacts on a
+    // queued microtask behind the mutation settling, so the invalidation
+    // flag lands a tick after `act` returns — `waitFor` gives it room.
+    await waitFor(() =>
+      expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true)
+    );
   });
 
   it('useTestMcpServer posts to the test endpoint and invalidates the tools cache', async () => {
@@ -146,9 +155,14 @@ describe('MCP server hooks', () => {
     });
 
     expect(response).toMatchObject({ ok: true, status: 'connected' });
-    expect(
-      result.current.queryClient.getQueryState(mcpServerKeys.tools('srv-1'))?.isInvalidated
-    ).toBe(true);
+    // The query cache's capability-invalidation subscriber reacts on a
+    // queued microtask behind the mutation settling, so the invalidation
+    // flag lands a tick after `act` returns — `waitFor` gives it room.
+    await waitFor(() =>
+      expect(
+        result.current.queryClient.getQueryState(mcpServerKeys.tools('srv-1'))?.isInvalidated
+      ).toBe(true)
+    );
   });
 
   it('useDeleteMcpServer surfaces the typed API error message', async () => {
@@ -159,10 +173,16 @@ describe('MCP server hooks', () => {
 
     const { result } = renderHook(() => useDeleteMcpServer());
 
-    await expect(
-      act(async () => {
-        await result.current.mutateAsync('srv-1');
-      })
-    ).rejects.toThrow('Server not found.');
+    // `expect(act(...)).rejects` never settles: the harness's `act` returns a
+    // thenable bun's `expect().rejects` does not recognize as a promise, so
+    // the assertion has to sit on the mutation call itself, inside `act`.
+    await act(async () => {
+      await expect(result.current.mutateAsync('srv-1')).rejects.toThrow('Server not found.');
+      // `onSettled` invalidates the mcp server list even on failure, and the
+      // query cache's capability-invalidation subscriber reacts on a queued
+      // microtask behind that — a macrotask tick gives it room to run inside
+      // `act` rather than after.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
   });
 });

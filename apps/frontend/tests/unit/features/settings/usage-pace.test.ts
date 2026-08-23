@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import { computeBurnPace } from '@/features/settings/connectors/lib/usage-pace';
 
 const NOW = 1_700_000_000_000;

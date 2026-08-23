@@ -4,7 +4,6 @@
     "dprint.dprint",
     "TypeScriptTeam.native-preview",
     "ms-playwright.playwright",
-    "vitest.explorer",
     "oven.bun-vscode",
     "tamasfe.even-better-toml"
   ],

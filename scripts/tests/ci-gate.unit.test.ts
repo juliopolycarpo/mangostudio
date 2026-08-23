@@ -91,6 +91,11 @@ describe('gate result evaluation', () => {
 describe('ci.yml trigger and concurrency policy', () => {
   const workflow = readText('.github/workflows/ci.yml');
 
+  /**
+   * Any temporary long-lived-branch entry (the Bun frontend migration carried
+   * one) has to come here and be justified, instead of quietly widening into a
+   * branch allowlist.
+   */
   test('runs only for PRs to main, pushes to main, and manual dispatch', () => {
     const onBlock = extractOnBlock(workflow);
 

@@ -5,24 +5,17 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
+    "build": "bun ./build.ts",
+    "routes": "tsr generate",
     "check": "bun run check:quick && bun run typecheck",
     "check:quick": "biome check src tests",
     "typecheck": "tsc --noEmit",
     "circular": "madge --circular --extensions ts,tsx .",
     "fix": "biome check --write src tests",
     "test": "bun run test:unit && bun run test:integration",
-    "test:unit": "bun run test:unit:bun && bun run test:unit:vitest",
-    "test:unit:bun": "bun test --timeout 15000 tests/unit/lib/utils.test.ts tests/unit/utils/model-utils.test.ts",
-    "test:unit:vitest": "vitest run tests/unit",
-    "test:integration": "vitest run tests/integration",
-    "test:coverage": "bun run test:coverage:vitest && bun run test:coverage:bun",
-    "test:coverage:vitest": "vitest run --coverage $MANGOSTUDIO_VITEST_ARGS",
-    "test:coverage:bun": "bun test --timings=../../.mango/artifacts/timings/frontend-bun.json --update-timings --coverage --timeout 15000 --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/frontend-bun.xml $MANGOSTUDIO_BUN_TEST_ARGS tests/unit/lib/utils.test.ts tests/unit/utils/model-utils.test.ts",
-    "test:coverage:merge": "vitest --mergeReports=.vitest-reports --coverage --reporter=default --reporter=junit --outputFile=../../.mango/artifacts/junit/frontend-vitest.xml",
-    "test:ui": "vitest --ui"
+    "test:unit": "bun test --tsconfig-override=./tsconfig.test.json --parallel=4 --isolate --timeout 15000 tests/unit",
+    "test:integration": "bun test --tsconfig-override=./tsconfig.test.json --parallel=4 --isolate --timeout 15000 tests/integration",
+    "test:coverage": "bun test --tsconfig-override=./tsconfig.test.json --isolate --parallel=4 --timeout 15000 tests --coverage --timings=../../.mango/artifacts/timings/frontend.json --update-timings --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/frontend.xml && bun ../../scripts/qa-gate/enforce-coverage-thresholds.ts frontend"
   },
   "dependencies": {
     "@elysia/eden": "2.0.0-beta.2",
@@ -45,22 +38,16 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^20.11.6",
     "@mangostudio/api": "workspace:*",
-    "@tailwindcss/vite": "^4.3.3",
-    "@tanstack/router-plugin": "1.168.25",
+    "@tanstack/router-cli": "1.167.32",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "@vitejs/plugin-react": "^6.0.5",
-    "@vitest/coverage-istanbul": "4.1.10",
-    "@vitest/ui": "^4.1.10",
-    "jsdom": "^29.1.1",
-    "smol-toml": "^1.7.0",
+    "bun-plugin-tailwind": "^0.1.2",
     "tailwindcss": "^4.3.3",
-    "typescript": "7.0.2",
-    "vite": "^8.2.1",
-    "vitest": "^4.1.10"
+    "typescript": "7.0.2"
   }
 }

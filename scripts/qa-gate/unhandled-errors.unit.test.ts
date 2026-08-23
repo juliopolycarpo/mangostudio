@@ -3,37 +3,12 @@ import { join } from 'node:path';
 
 import { mergeUnhandledErrors, parseUnhandledErrors } from './unhandled-errors';
 
-// Captured runner output: the two Vitest instances in docs/reference/testing.md
-// ("Unhandled Errors With Green Test Counts") and the Bun block, whose JUnit
+// Captured runner output: a real `bun test` unhandled-error block, whose JUnit
 // report reads failures="0" while the run exits 1.
 const fixture = (name: string): Promise<string> =>
   Bun.file(join(import.meta.dir, 'testing/fixtures', `${name}.txt`)).text();
 
 describe('parseUnhandledErrors', () => {
-  it('parses the nanostores log: green counts plus Errors 2', async () => {
-    const parsed = parseUnhandledErrors(await fixture('vitest-unhandled-nanostores'));
-    expect(parsed.errors).toBe(2);
-    // Both errors report the same message and the same originating file, so
-    // they collapse to one headline rather than repeating.
-    expect(parsed.headlines).toEqual([
-      {
-        message: 'ReferenceError: window is not defined',
-        originatedIn: 'tests/unit/features/library/backup-list.test.tsx',
-      },
-    ]);
-  });
-
-  it('parses the toast auto-dismiss log: green counts plus Errors 1', async () => {
-    const parsed = parseUnhandledErrors(await fixture('vitest-unhandled-toast'));
-    expect(parsed.errors).toBe(1);
-    expect(parsed.headlines).toEqual([
-      {
-        message: 'ReferenceError: window is not defined',
-        originatedIn: 'tests/unit/components/git-panel.test.tsx',
-      },
-    ]);
-  });
-
   // Bun's JUnit report for this run is green — no failing <testcase>, and
   // failures="0" — so without the log the QA fragment would report parseMiss
   // and lose the message naming the leak.
@@ -62,23 +37,9 @@ describe('parseUnhandledErrors', () => {
     ]);
   });
 
-  it('reads Turbo-prefixed lines, which is the shape a shard job produces', () => {
-    const parsed = parseUnhandledErrors(
-      [
-        '@mangostudio/frontend:test:coverage: TypeError: fetch failed',
-        '@mangostudio/frontend:test:coverage: This error originated in "tests/unit/a.test.tsx" test file.',
-        '@mangostudio/frontend:test:coverage:      Errors  3 errors',
-      ].join('\n')
-    );
-    expect(parsed.errors).toBe(3);
-    expect(parsed.headlines).toEqual([
-      { message: 'TypeError: fetch failed', originatedIn: 'tests/unit/a.test.tsx' },
-    ]);
-  });
-
   it('finds nothing in a green log', () => {
     const parsed = parseUnhandledErrors(
-      ' Test Files  144 passed (144)\n      Tests  1150 passed (1150)\n   Duration  164.54s\n'
+      ' 1352 pass\n 0 fail\n 3062 expect() calls\nRan 1352 tests across 157 files. [82.52s]\n'
     );
     expect(parsed).toEqual({ errors: 0, headlines: [] });
   });
@@ -88,19 +49,7 @@ describe('parseUnhandledErrors', () => {
   });
 
   it('ignores GitHub Actions workflow-command lines', () => {
-    expect(parseUnhandledErrors('##[error]Errors  9 errors\n').errors).toBe(0);
-  });
-
-  it('keeps two errors that share a message but not a file', () => {
-    const parsed = parseUnhandledErrors(
-      [
-        'ReferenceError: window is not defined',
-        'This error originated in "tests/unit/a.test.tsx" test file.',
-        'ReferenceError: window is not defined',
-        'This error originated in "tests/unit/b.test.tsx" test file.',
-      ].join('\n')
-    );
-    expect(parsed.headlines).toHaveLength(2);
+    expect(parseUnhandledErrors('##[error]9 errors\n').errors).toBe(0);
   });
 });
 

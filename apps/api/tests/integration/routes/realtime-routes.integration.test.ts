@@ -12,6 +12,7 @@ import {
 import type { Elysia } from 'elysia';
 import { getApiKeyApi } from '../../../src/auth';
 import { getDb } from '../../../src/db/database';
+import { loadConfigForTest } from '../../../src/lib/config';
 import { createChat } from '../../../src/modules/chats/infrastructure/chat-repository';
 import {
   createRealtimeRoutes,
@@ -289,10 +290,14 @@ describe('realtime WebSocket origins and liveness', () => {
     }
   });
 
-  it('accepts configured, public-auth, and absent origins but rejects other browser origins', async () => {
+  // The handshake origin check is ours (`realtime-routes.ts`), so a rejection
+  // asserted here is a real rejection. Better Auth's trustedOrigins gate reads
+  // the same cfg.corsOrigins but is off under NODE_ENV=test — do not model a
+  // test of that one on this one. See apps/api/tests/unit/auth.test.ts.
+  it('accepts configured and absent origins but rejects other browser origins', async () => {
     const { httpUrl, wsUrl } = startServer();
     const user = await signUp(httpUrl);
-    const acceptedOrigins = ['http://localhost:5173', 'http://localhost:3001'];
+    const acceptedOrigins = ['http://localhost:3001', 'http://127.0.0.1:3001'];
 
     for (const origin of acceptedOrigins) {
       const client = connect(wsUrl, { Cookie: user.cookie, Origin: origin });
@@ -303,6 +308,44 @@ describe('realtime WebSocket origins and liveness', () => {
     const diagnosticClient = connect(wsUrl, { Cookie: user.cookie });
     await diagnosticClient.opened;
     expect(await diagnosticClient.nextMessage()).toEqual({ type: 'ready' });
+
+    // `http://localhost:5173` is in the rejected set on purpose: the Vite dev
+    // server that owned it is gone, and the API serves the frontend itself.
+    for (const origin of ['https://attacker.example', 'http://localhost:5173']) {
+      const rejectedClient = connect(wsUrl, { Cookie: user.cookie, Origin: origin });
+      await rejectedClient.opened;
+      expect(await rejectedClient.nextMessage()).toEqual({
+        type: 'error',
+        error: 'Origin is not allowed',
+        code: ERROR_CODES.PERMISSION_DENIED,
+      });
+      expect((await rejectedClient.closed).code).toBe(REALTIME_CLOSE_CODES.FORBIDDEN);
+    }
+  });
+
+  // The handshake reads cfg.corsOrigins when the routes are built, so a config
+  // installed before startServer() is what this asserts on: the origin is only
+  // reachable because server.allowedOrigins named it.
+  it('accepts an origin configured through server.allowedOrigins', async () => {
+    loadConfigForTest({
+      auth: { secret: 'test-secret-at-least-32-characters-long', url: 'http://localhost:3001' },
+      server: {
+        host: '0.0.0.0',
+        port: 3001,
+        publicUrl: '',
+        allowedOrigins: ['https://split.example.com'],
+      },
+    });
+
+    const { httpUrl, wsUrl } = startServer();
+    const user = await signUp(httpUrl);
+
+    const configuredClient = connect(wsUrl, {
+      Cookie: user.cookie,
+      Origin: 'https://split.example.com',
+    });
+    await configuredClient.opened;
+    expect(await configuredClient.nextMessage()).toEqual({ type: 'ready' });
 
     const rejectedClient = connect(wsUrl, {
       Cookie: user.cookie,

@@ -6,6 +6,7 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
+import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
 import { ROOT_DIR } from '../lib/config';
 import { archiveConcurrency, captureCommand, mapWithConcurrency } from '../lib/exec';
 import { assertDirectory, assertFile, assertSafeToDelete } from '../lib/fs-assert';
@@ -115,10 +116,31 @@ async function archivePlatformZip(plan: PlatformArchivePlan, assetsDir: string):
   rmSync(stagingDir, { force: true, recursive: true });
 }
 
+/**
+ * Tar the built frontend, minus the build stamp.
+ *
+ * This archive is the whole `dist/` directory, so it picks up anything a build
+ * leaves there — and `build.ts` leaves `BUILD_STATE_FILE`, which exists to tell
+ * the *dev server* whether its own bundle is stale. It means nothing to whoever
+ * untars a release, and the API serves the directory it is unpacked into.
+ * `--exclude` goes ahead of `-C` because bsdtar applies it only to the operands
+ * that follow, and the pattern is unanchored — no `./` prefix — so it matches
+ * the same member under both tars. The release pipeline runs on ubuntu, so GNU
+ * tar is what CI exercises; the portable spelling is for anyone who runs this
+ * script on a mac.
+ */
 async function archiveFrontend(plan: FrontendArchivePlan): Promise<void> {
   assertDirectory(join(plan.sourceDir, 'assets'), 'frontend assets directory');
   assertFile(join(plan.sourceDir, 'index.html'), 'frontend index.html');
-  await runCommand(['tar', '-czf', plan.archivePath, '-C', plan.sourceDir, '.']);
+  await runCommand([
+    'tar',
+    '-czf',
+    plan.archivePath,
+    `--exclude=${BUILD_STATE_FILE}`,
+    '-C',
+    plan.sourceDir,
+    '.',
+  ]);
 }
 
 function assertPlatformInputs(plan: PlatformArchivePlan): void {

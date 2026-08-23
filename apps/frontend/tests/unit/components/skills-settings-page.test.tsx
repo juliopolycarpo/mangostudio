@@ -2,6 +2,7 @@
  * Unit tests for SkillsSettingsPage component.
  */
 
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
   DEFAULT_APP_SETTINGS,
   DEFAULT_LIBRARY_LOCATION_SETTINGS,
@@ -9,9 +10,8 @@ import {
 } from '@mangostudio/shared/app-settings';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SkillsSettingsPage } from '../../../src/features/settings/skills/components/SkillsSettingsPage';
-import { render, screen } from '../../support/harness/render';
+import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const SKILLS_RESPONSE = {
@@ -130,7 +130,7 @@ describe('SkillsSettingsPage', () => {
     const [checkbox] = screen.getAllByLabelText('pdf-tools', { selector: 'input' });
     await user.click(checkbox);
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const putCalls = fetchScenario.fetchMock.mock.calls.filter((call: unknown[]) => {
         const input = call[0];
         const init = call[1] as RequestInit | undefined;
@@ -165,7 +165,7 @@ describe('SkillsSettingsPage', () => {
     const agentsToggle = screen.getByLabelText('Agents', { selector: 'input' });
     await user.click(agentsToggle);
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const putCalls = fetchScenario.fetchMock.mock.calls.filter((call: unknown[]) => {
         const input = call[0];
         const init = call[1] as RequestInit | undefined;
@@ -191,7 +191,7 @@ describe('SkillsSettingsPage', () => {
     await screen.findAllByText('pdf-tools');
     await user.click(screen.getByRole('button', { name: 'Refresh library' }));
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const postCalls = fetchScenario.fetchMock.mock.calls.filter((call: unknown[]) => {
         const input = call[0];
         const init = call[1] as RequestInit | undefined;

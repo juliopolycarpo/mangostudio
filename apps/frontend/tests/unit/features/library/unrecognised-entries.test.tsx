@@ -3,9 +3,9 @@
  * slug pattern (#705) and can never appear as a resource row.
  */
 
+import { afterEach, describe, expect, it } from 'bun:test';
 import { en, ptBR } from '@mangostudio/shared/i18n';
 import type { LibraryUnreadableEntry } from '@mangostudio/shared/library';
-import { afterEach, describe, expect, it } from 'vitest';
 import { UnrecognisedEntries } from '../../../../src/features/library/components/UnrecognisedEntries';
 import { render, screen } from '../../../support/harness/render';
 import { location } from './fixtures';

@@ -1,34 +1,36 @@
 #!/usr/bin/env bun
-// Reassemble the artifacts a sharded Test run leaves behind, so the merge job
-// can hand the QA collector the same shapes an unsharded run produced.
+// Reassemble the artifacts a fanned-out Test run leaves behind, so the merge
+// job can hand the QA collector the same shapes a single-machine run produced.
+// The fan-out is the 8 numbered shards plus the unsharded frontend job, which
+// uploads the same artifact shape under `test-shard-frontend`.
 //
-// Three kinds of state come back from the shards and each needs a different
-// merge:
+// Two kinds of state come back and each needs a different merge:
 //
 //   LCOV        per-workspace, and NOT concatenable — see
 //               scripts/qa-gate/merge-lcov-shards.ts for why a plain union of
 //               `DA:` lines reports a coverage regression that did not happen.
-//   Vitest blob just staged into place; `vitest --mergeReports` does the real
-//               work, and it reproduces the unsharded numbers exactly.
+//               The frontend contributes exactly one file (its lane cannot be
+//               sharded for that same reason), so its merge is a copy.
 //   run meta    exit codes and durations. The suite's exit code is non-zero if
-//               any shard's was, and its duration is the slowest shard's, which
-//               is the lane's wall clock now that they run concurrently.
+//               any job's was, and its duration is the slowest job's, which is
+//               the lane's wall clock now that they run concurrently.
 //
 // JUnit reports are not merged here: scripts/qa-gate/junit-results.ts reads
 // them straight out of the shard directories, so nothing has to move.
 //
-// Usage: bun ./scripts/ci/merge-test-shards.ts <shards-dir> [expected-shard-count] > shard-summary.json
+// Usage: bun ./scripts/ci/merge-test-shards.ts <shards-dir> [shard-count] > shard-summary.json
 
-import { mkdir, readdir, rm } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
-import { SHARDED_LCOV_PATHS, VITEST_BLOB_DIR } from '../lib/test-lanes';
+import { SHARDED_LCOV_PATHS, TEST_LANES } from '../lib/test-lanes';
 import { mergeLcovFiles } from '../qa-gate/merge-lcov-shards';
 import { mergeUnhandledErrors, type UnhandledErrors } from '../qa-gate/unhandled-errors';
 
 export interface ShardMeta {
-  readonly shard: number;
+  /** A shard number, or 'frontend' for the unsharded frontend job. */
+  readonly shard: number | string;
   readonly exitCode: number;
   readonly durationSeconds: number;
 }
@@ -105,9 +107,10 @@ export const mergeTestShards = async (
   // an incomplete file set.
   if (expectedShards !== undefined && shardDirs.length !== expectedShards) {
     throw new Error(
-      `Expected ${expectedShards} shard directories under ${shardsRoot}, found ${shardDirs.length}. ` +
-        'A shard job likely failed before its upload step ran; merging a partial set would report ' +
-        'incomplete coverage and test counts as a green run.'
+      `Expected ${expectedShards} test-job directories under ${shardsRoot} (the numbered shards ` +
+        `plus one job per unsharded lane), found ${shardDirs.length}. A job likely failed before ` +
+        'its upload step ran; merging a partial set would report incomplete coverage and test ' +
+        'counts as a green run.'
     );
   }
 
@@ -118,36 +121,6 @@ export const mergeTestShards = async (
         `Merging ${workspace} coverage failed: ${caught instanceof Error ? caught.message : String(caught)}`
       );
     });
-  }
-
-  // Copy whatever blob each shard produced rather than reconstructing its name
-  // from the directory order: `test-shard-10` sorts before `test-shard-2`, so
-  // an index-derived name would pair the wrong file with the wrong shard at ten
-  // or more. Names are reassigned sequentially here; `--mergeReports` reads the
-  // directory, not the file names.
-  // Cleared first: a blob left behind by an earlier run in this checkout would
-  // be replayed by `--mergeReports` and land in the coverage the threshold gate
-  // reads. `.vitest-reports` is gitignored, so a local re-run is exactly where
-  // that stale file survives.
-  const blobDir = join(outputRoot, VITEST_BLOB_DIR);
-  await rm(blobDir, { recursive: true, force: true });
-  await mkdir(blobDir, { recursive: true });
-  let blobs = 0;
-  for (const dir of shardDirs) {
-    const sourceDir = join(dir, VITEST_BLOB_DIR);
-    const names = await readdir(sourceDir).catch(() => [] as string[]);
-    for (const name of names.filter((entry) => entry.endsWith('.json')).sort()) {
-      blobs++;
-      await Bun.write(join(blobDir, `blob-${blobs}.json`), Bun.file(join(sourceDir, name)));
-    }
-  }
-  if (blobs === 0) {
-    throw new Error(
-      `No Vitest blob reports under ${shardsRoot}/*/${VITEST_BLOB_DIR}; the frontend lane ` +
-        'produced no coverage to merge. If the shards themselves were green, check that the ' +
-        'upload step sets include-hidden-files: true — .vitest-reports is a dot-directory, and ' +
-        'the default drops it from the artifact without failing the upload.'
-    );
   }
 
   const metas = await Promise.all(
@@ -173,18 +146,24 @@ export const mergeTestShards = async (
   return { shards: shardDirs.length, ...summarizeShardMeta(metas), unhandledErrors };
 };
 
+// Each unsharded lane runs whole in its own CI job and uploads its own
+// `test-shard-<id>` directory, so the expected directory count is derived here
+// from the registry rather than restated as arithmetic in the workflow — a new
+// `sharded: false` lane changes it without a YAML edit to forget.
+const unshardedJobCount = TEST_LANES.filter((lane) => !lane.sharded).length;
+
 if (import.meta.main) {
-  const [, , shardsRoot, expectedShardsArg] = process.argv;
+  const [, , shardsRoot, shardCountArg] = process.argv;
   if (!shardsRoot) {
     process.stderr.write(
-      'Usage: bun ./scripts/ci/merge-test-shards.ts <shards-dir> [expected-shard-count] > shard-summary.json\n'
+      'Usage: bun ./scripts/ci/merge-test-shards.ts <shards-dir> [shard-count] > shard-summary.json\n'
     );
     process.exit(1);
   }
   const summary = await mergeTestShards(
     shardsRoot,
     ROOT_DIR,
-    expectedShardsArg ? Number(expectedShardsArg) : undefined
+    shardCountArg ? Number(shardCountArg) + unshardedJobCount : undefined
   );
   process.stderr.write(
     `Merged ${summary.shards} shard(s): exit ${summary.exitCode}, slowest ${summary.durationSeconds}s\n`

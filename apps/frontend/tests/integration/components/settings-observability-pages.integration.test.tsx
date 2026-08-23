@@ -1,12 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SettingsTabs } from '../../../src/components/settings/SettingsTabs';
-import {
-  LogsSettingsPage,
-  MetricsSettingsPage,
-} from '../../../src/features/settings/observability';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { AppContext } from '../../../src/lib/app-context';
 import { render, screen } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
+import { routerWithLinkStub } from '../../support/mocks/router';
 
 /**
  * The Logs page reports how each external agent in the **active environment**
@@ -18,30 +14,18 @@ function withApp(children: React.ReactNode, currentEnvironmentId: string | null 
   return <AppContext value={{ currentEnvironmentId } as never}>{children}</AppContext>;
 }
 
-vi.mock('@tanstack/react-router', () => {
-  return {
-    Link: ({
-      to,
-      children,
-      activeProps: _activeProps,
-      inactiveProps: _inactiveProps,
-      activeOptions: _activeOptions,
-      ...props
-    }: {
-      to: string;
-      children: React.ReactNode;
-      activeProps?: unknown;
-      inactiveProps?: unknown;
-      activeOptions?: unknown;
-      [key: string]: unknown;
-    }) => (
-      <a href={to} {...props}>
-        {children}
-      </a>
-    ),
+mock.module(
+  '@tanstack/react-router',
+  await routerWithLinkStub({
     useRouterState: () => ({ location: { pathname: '/settings/metrics' } }),
-  };
-});
+  })
+);
+
+// Below the mock, never as static imports.
+const { SettingsTabs } = await import('../../../src/components/settings/SettingsTabs');
+const { LogsSettingsPage, MetricsSettingsPage } = await import(
+  '../../../src/features/settings/observability'
+);
 
 const fetchScenario = createFetchScenario();
 

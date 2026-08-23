@@ -27,7 +27,7 @@ import {
   type MangoConfig,
 } from '../../lib/config';
 import { getLogsDir, getRunDir } from '../../lib/mango-paths';
-import { getDefaultFrontendDir, isStandaloneExecutable } from '../../lib/runtime-paths';
+import { getSourceFrontendDir, isStandaloneExecutable } from '../../lib/runtime-paths';
 import { isStateLive, readState, type ServerState } from '../../lib/server-state';
 import {
   hasProviderSecretEnv,
@@ -304,7 +304,7 @@ function resolveDeps(deps: Partial<DoctorDeps>): Required<DoctorDeps> {
   return {
     loadConfig: deps.loadConfig ?? (() => loadConfig()),
     fs: deps.fs ?? realFsProbe(),
-    frontendDir: deps.frontendDir ?? getDefaultFrontendDir,
+    frontendDir: deps.frontendDir ?? getSourceFrontendDir,
     controller: deps.controller ?? createProcessController(),
     readState: deps.readState ?? readState,
     isCursorConfigured: deps.isCursorConfigured ?? isCursorConnectorConfigured,

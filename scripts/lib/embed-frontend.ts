@@ -8,8 +8,9 @@
  * real CLI.
  */
 
-import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { distFilePath, listDistFiles } from '@mangostudio/shared/utils/dist-files';
 
 export interface EmbedModuleOptions {
   /** Built frontend directory (apps/frontend/dist). */
@@ -28,26 +29,10 @@ export interface EmbedModules {
   fileCount: number;
 }
 
-/**
- * Lists every file under the dist directory as URL paths ('/index.html',
- * '/assets/index-abc.js'). Keys always use '/' separators regardless of the
- * host platform; sorted for deterministic module output.
- */
-export function listDistFiles(distDir: string): string[] {
-  return readdirSync(distDir, { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .map((entry) => {
-      const absolute = join(entry.parentPath, entry.name);
-      const relative = absolute.slice(distDir.length).split(sep).filter(Boolean);
-      return `/${relative.join('/')}`;
-    })
-    .sort();
-}
-
 /** Renders the manifest module: one file-loader import per dist file, keyed by URL path. */
 export function renderFrontendManifestModule(distDir: string, urlPaths: readonly string[]): string {
   const imports = urlPaths.map((urlPath, index) => {
-    const filePath = join(distDir, ...urlPath.split('/').filter(Boolean));
+    const filePath = distFilePath(distDir, urlPath);
     return `import f${index} from ${JSON.stringify(filePath)} with { type: 'file' };`;
   });
   const entries = urlPaths.map((urlPath, index) => `  ${JSON.stringify(urlPath)}: f${index},`);
@@ -78,9 +63,32 @@ export function renderEmbedEntryModule(registryModulePath: string, apiEntryPath:
   ].join('\n');
 }
 
+/**
+ * Refuse to compile a binary that would ship without its frontend.
+ *
+ * The embedded manifest is the only place a binary's assets come from — there
+ * is no disk fallback to catch a miss. Without this the failure is silent and
+ * late: an empty manifest compiles, the binary boots, `registerEmbeddedSpa`
+ * finds no `/index.html`, and every route answers API-only. That looks like a
+ * server problem to whoever hits it, an hour and a release pipeline away from
+ * the build that caused it.
+ *
+ * `/index.html` specifically, not just a non-empty walk: it is the one file the
+ * shell and every SPA deep link resolve to, and a dist that somehow has assets
+ * without it is no more servable than an empty one.
+ */
+function assertEmbeddable(distDir: string, urlPaths: readonly string[]): void {
+  if (urlPaths.includes('/index.html')) return;
+  throw new Error(
+    `Cannot embed a frontend from ${distDir}: no /index.html among ${urlPaths.length} file(s). ` +
+      'Build the frontend before compiling the binary.'
+  );
+}
+
 /** Writes manifest + entry modules and returns the entry to compile. // Usage: writeEmbedModules(options) */
 export function writeEmbedModules(options: EmbedModuleOptions): EmbedModules {
   const urlPaths = listDistFiles(options.distDir);
+  assertEmbeddable(options.distDir, urlPaths);
   mkdirSync(options.embedDir, { recursive: true });
 
   const manifestPath = join(options.embedDir, 'frontend-manifest.ts');

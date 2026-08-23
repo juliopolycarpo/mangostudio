@@ -8,6 +8,7 @@
  * a row wearing the wrong verb is a delete button reading "put the copies back".
  */
 
+import { afterEach, describe, expect, it } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
 import type {
   PropagationBackupSet,
@@ -15,7 +16,6 @@ import type {
   PropagationUndo,
 } from '@mangostudio/shared/library';
 import { userEvent } from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
 import { BackupList } from '../../../../src/features/library/components/BackupList';
 import { render, screen, waitFor, within } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';

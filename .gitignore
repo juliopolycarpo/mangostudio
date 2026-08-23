@@ -2,7 +2,12 @@
 node_modules/
 build/
 dist/
+.dist-staging-*/
+.dist-backup-*/
+.dist-metafile-staging-*
+.dist-metafile-backup-*
 dist-npm/
+dist-metafile.json
 release-assets/
 docker-ctx/
 .distribution-bundles/
@@ -12,8 +17,6 @@ playwright-report/
 test-results/
 .jscpd-out/
 .qa-gate/
-# Vitest blob reports staged by a sharded run for `vitest --mergeReports`.
-.vitest-reports/
 
 # ─── OS and logs ─── #
 .DS_Store

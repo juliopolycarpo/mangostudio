@@ -19,17 +19,18 @@ function printHelp(): never {
   console.log(`Usage: bun run dev [workspace flags]
 
 Starts development servers for the selected workspaces.
-Default: api + frontend
+Default: api (serves the frontend too)
 
 Workspace flags:
-  --api        Start the API server
-  --frontend   Start the frontend server
+  --api        Start the API server (also serves the frontend)
+  --frontend   Alias for --api; the API serves the frontend now
   --all        Start every dev-capable workspace
   --help       Show this help message`);
   process.exit(0);
 }
 
-const { workspaces, includeRoot, flags, positional, usedDefaultSelection } = parseArgs();
+const { workspaces, explicitWorkspaces, includeRoot, flags, positional, usedDefaultSelection } =
+  parseArgs();
 
 if (flags['--help']) {
   printHelp();
@@ -43,6 +44,13 @@ if (includeRoot) {
 
 const requestedWorkspaces = usedDefaultSelection ? DEV_WORKSPACES : workspaces;
 const { runnableWorkspaces, skippedWorkspaces } = selectDevWorkspaces(requestedWorkspaces);
+
+// `--all` expands to every workspace, so `frontend` appearing in the selection
+// there is not somebody asking for a frontend dev server — only an explicit
+// `--frontend` is, and only that deserves the redirect notice.
+if (explicitWorkspaces.includes('frontend')) {
+  warn('The frontend is served by the API dev server now; starting `api` instead of `frontend`.');
+}
 
 if (skippedWorkspaces.length > 0) {
   warn(`Skipping workspaces without a dev entrypoint: ${skippedWorkspaces.join(', ')}`);

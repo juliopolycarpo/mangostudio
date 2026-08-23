@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, jest } from 'bun:test';
 import { ToastProvider, useToast } from '@/components/ui/Toast';
 import { act, render, screen } from '../../../support/harness/render';
+import { advanceTimersByTimeAsync, useFakeTimers } from '../../../support/harness/timers';
 
 function ToastTester() {
   const { toast } = useToast();
@@ -64,12 +65,8 @@ describe('ToastProvider + useToast', () => {
   });
 
   describe('auto-dismiss timers', () => {
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    it('drops the toast once the auto-dismiss delay elapses', () => {
-      vi.useFakeTimers();
+    it('drops the toast once the auto-dismiss delay elapses', async () => {
+      useFakeTimers();
       render(
         <ToastProvider>
           <ToastTester />
@@ -81,9 +78,8 @@ describe('ToastProvider + useToast', () => {
       });
       expect(screen.getByText('Operation successful')).toBeInTheDocument();
 
-      act(() => {
-        vi.advanceTimersByTime(4000);
-      });
+      // No outer `act`: the harness advance wraps the clock move in one itself.
+      await advanceTimersByTimeAsync(4000);
 
       expect(screen.queryByText('Operation successful')).not.toBeInTheDocument();
     });
@@ -92,7 +88,7 @@ describe('ToastProvider + useToast', () => {
     // up inside a torn-down environment and takes the whole suite down with
     // "ReferenceError: window is not defined" from React's scheduler.
     it('clears pending timers on unmount', () => {
-      vi.useFakeTimers();
+      useFakeTimers();
       const { unmount } = render(
         <ToastProvider>
           <ToastTester />
@@ -102,15 +98,15 @@ describe('ToastProvider + useToast', () => {
       act(() => {
         screen.getByText('Show Success').click();
       });
-      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      expect(jest.getTimerCount()).toBeGreaterThan(0);
 
       unmount();
 
-      expect(vi.getTimerCount()).toBe(0);
+      expect(jest.getTimerCount()).toBe(0);
     });
 
     it('clears the pending timer when a toast is dismissed by hand', () => {
-      vi.useFakeTimers();
+      useFakeTimers();
       render(
         <ToastProvider>
           <ToastTester />
@@ -126,7 +122,7 @@ describe('ToastProvider + useToast', () => {
       });
 
       expect(screen.queryByText('Operation successful')).not.toBeInTheDocument();
-      expect(vi.getTimerCount()).toBe(0);
+      expect(jest.getTimerCount()).toBe(0);
     });
   });
 });

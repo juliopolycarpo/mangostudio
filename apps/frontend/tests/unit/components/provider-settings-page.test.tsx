@@ -2,38 +2,23 @@
  * Unit tests for ProviderSettingsPage component.
  */
 
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { type QueryClient, useQueryClient } from '@tanstack/react-query';
-import type * as TanstackRouter from '@tanstack/react-router';
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ProviderSettingsPage } from '../../../src/features/settings/providers/components/ProviderSettingsPage';
 import { providerSettingsKeys } from '../../../src/features/settings/providers/queries';
 import { render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
+import { routerWithLinkStub } from '../../support/mocks/router';
 
-// Mock TanStack Router — provide useParams
 const routeParams = { provider: 'deepseek' };
 
-vi.mock('@tanstack/react-router', async (importOriginal) => {
-  const actual = await importOriginal<typeof TanstackRouter>();
-  return {
-    ...actual,
-    Link: ({
-      to,
-      children,
-      ...props
-    }: {
-      to: string;
-      children: React.ReactNode;
-      [k: string]: unknown;
-    }) => (
-      <a href={to} {...props}>
-        {children}
-      </a>
-    ),
-    useParams: () => routeParams,
-  };
-});
+// Registered before the subject is imported: `mock.module` is not hoisted and
+// static imports are, so the subject has to come in afterwards to bind to it.
+mock.module('@tanstack/react-router', await routerWithLinkStub({ useParams: () => routeParams }));
+
+const { ProviderSettingsPage } = await import(
+  '../../../src/features/settings/providers/components/ProviderSettingsPage'
+);
 
 const DEEPSEEK_DESCRIPTOR = {
   provider: 'deepseek',
@@ -193,6 +178,13 @@ describe('ProviderSettingsPage', () => {
         await queryClient.invalidateQueries({
           queryKey: providerSettingsKeys.detail('deepseek'),
         });
+        // `invalidateQueries` resolves once the refetch has landed in the cache,
+        // but React Query announces it through `notifyManager`'s own
+        // `setTimeout(callback, 0)`. Yielding one macrotask inside this `act`
+        // is what turns that announcement into a render — without it the cache
+        // holds the new descriptor while the controls still show the old one,
+        // and the `waitFor` below never sees it change.
+        await new Promise((resolve) => setTimeout(resolve, 0));
       });
     }
 
@@ -229,6 +221,17 @@ describe('ProviderSettingsPage', () => {
       // The user turns thinking off locally; the remote change raises the
       // iteration cap, a field they have not touched.
       fireEvent.click(screen.getByLabelText(/enable thinking/i));
+
+      // The edit autosaves on a debounce. Register that PUT: with no response
+      // for it the request rejects, the editor rolls back to the server state,
+      // and the toggle goes back on for a reason that has nothing to do with
+      // the remote refresh this test is about.
+      fetchScenario.respondWithJson('PUT', '/api/settings/providers/deepseek', {
+        body: {
+          ...DEEPSEEK_DESCRIPTOR,
+          settings: { ...DEEPSEEK_DESCRIPTOR.settings, thinkingEnabled: false },
+        },
+      });
 
       fetchScenario.respondWithJson('GET', '/api/settings/providers/deepseek', {
         body: {

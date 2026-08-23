@@ -1,14 +1,19 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { Connector, ModelCatalogResponse } from '@mangostudio/shared';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useModelSelection } from '../../../src/features/settings/connectors/hooks/use-model-selection';
 import { act, renderHook } from '../../support/harness/render';
 
-const mockUpdateConnectorModels = vi.fn();
+const mockUpdateConnectorModels = jest.fn();
 
-vi.mock('../../../src/features/settings/connectors/api', () => ({
+mock.module('../../../src/features/settings/connectors/api', () => ({
   updateConnectorModels: (...args: unknown[]): Promise<void> =>
     mockUpdateConnectorModels(...args) as Promise<void>,
 }));
+
+// Static imports are evaluated before any statement above runs, so the hook
+// has to come in afterwards or it binds the real connectors api.
+const { useModelSelection } = await import(
+  '../../../src/features/settings/connectors/hooks/use-model-selection'
+);
 
 function makeCatalog(overrides: Partial<ModelCatalogResponse> = {}): ModelCatalogResponse {
   return {
@@ -51,7 +56,7 @@ describe('useModelSelection', () => {
 
   it('starts with no selected connector and empty search query', () => {
     const { result } = renderHook(() =>
-      useModelSelection(makeCatalog(), vi.fn(), vi.fn(), vi.fn())
+      useModelSelection(makeCatalog(), jest.fn(), jest.fn(), jest.fn())
     );
 
     expect(result.current.selectedConnector).toBeNull();
@@ -60,7 +65,7 @@ describe('useModelSelection', () => {
 
   it('opens modal for a connector and clears search', () => {
     const { result } = renderHook(() =>
-      useModelSelection(makeCatalog(), vi.fn(), vi.fn(), vi.fn())
+      useModelSelection(makeCatalog(), jest.fn(), jest.fn(), jest.fn())
     );
 
     act(() => {
@@ -73,7 +78,7 @@ describe('useModelSelection', () => {
 
   it('closes modal and clears selected connector', () => {
     const { result } = renderHook(() =>
-      useModelSelection(makeCatalog(), vi.fn(), vi.fn(), vi.fn())
+      useModelSelection(makeCatalog(), jest.fn(), jest.fn(), jest.fn())
     );
 
     act(() => {
@@ -100,7 +105,9 @@ describe('useModelSelection', () => {
       ] as ModelCatalogResponse['discoveredImageModels'],
     });
 
-    const { result } = renderHook(() => useModelSelection(catalog, vi.fn(), vi.fn(), vi.fn()));
+    const { result } = renderHook(() =>
+      useModelSelection(catalog, jest.fn(), jest.fn(), jest.fn())
+    );
     const models = result.current.getDiscoveredModels(makeConnector({ provider: 'openai' }));
 
     expect(models.textModels).toHaveLength(3);
@@ -110,9 +117,9 @@ describe('useModelSelection', () => {
   });
 
   it('toggles a model on and persists', async () => {
-    const reloadConnectors = vi.fn().mockResolvedValue(undefined);
-    const reloadModelCatalog = vi.fn().mockResolvedValue(undefined);
-    const onToggleError = vi.fn();
+    const reloadConnectors = jest.fn().mockResolvedValue(undefined);
+    const reloadModelCatalog = jest.fn().mockResolvedValue(undefined);
+    const onToggleError = jest.fn();
     const connector = makeConnector({ id: 'c1', enabledModels: [] });
 
     const { result } = renderHook(() =>
@@ -135,12 +142,12 @@ describe('useModelSelection', () => {
   });
 
   it('toggles a model off and persists', async () => {
-    const reloadConnectors = vi.fn().mockResolvedValue(undefined);
-    const reloadModelCatalog = vi.fn().mockResolvedValue(undefined);
+    const reloadConnectors = jest.fn().mockResolvedValue(undefined);
+    const reloadModelCatalog = jest.fn().mockResolvedValue(undefined);
     const connector = makeConnector({ id: 'c1', enabledModels: ['m1', 'm2'] });
 
     const { result } = renderHook(() =>
-      useModelSelection(makeCatalog(), reloadConnectors, reloadModelCatalog, vi.fn())
+      useModelSelection(makeCatalog(), reloadConnectors, reloadModelCatalog, jest.fn())
     );
 
     act(() => {
@@ -157,7 +164,7 @@ describe('useModelSelection', () => {
 
   it('does nothing when toggling without a selected connector', async () => {
     const { result } = renderHook(() =>
-      useModelSelection(makeCatalog(), vi.fn(), vi.fn(), vi.fn())
+      useModelSelection(makeCatalog(), jest.fn(), jest.fn(), jest.fn())
     );
 
     await act(async () => {
@@ -168,9 +175,9 @@ describe('useModelSelection', () => {
   });
 
   it('reverts optimistic state and reports on update failure', async () => {
-    const reloadConnectors = vi.fn().mockResolvedValue(undefined);
-    const reloadModelCatalog = vi.fn().mockResolvedValue(undefined);
-    const onToggleError = vi.fn();
+    const reloadConnectors = jest.fn().mockResolvedValue(undefined);
+    const reloadModelCatalog = jest.fn().mockResolvedValue(undefined);
+    const onToggleError = jest.fn();
     const failure = new Error('network down');
     mockUpdateConnectorModels.mockRejectedValue(failure);
 
@@ -193,10 +200,10 @@ describe('useModelSelection', () => {
   });
 
   it('keeps the toggle applied when the write persisted but a reload failed', async () => {
-    const reloadConnectors = vi.fn().mockResolvedValue(undefined);
+    const reloadConnectors = jest.fn().mockResolvedValue(undefined);
     const failure = new Error('catalog refresh failed');
-    const reloadModelCatalog = vi.fn().mockRejectedValue(failure);
-    const onToggleError = vi.fn();
+    const reloadModelCatalog = jest.fn().mockRejectedValue(failure);
+    const onToggleError = jest.fn();
     mockUpdateConnectorModels.mockResolvedValue(undefined);
 
     const { result } = renderHook(() =>
@@ -217,9 +224,9 @@ describe('useModelSelection', () => {
   });
 
   it('reverts only the failed toggle when a later toggle succeeded', async () => {
-    const reloadConnectors = vi.fn().mockResolvedValue(undefined);
-    const reloadModelCatalog = vi.fn().mockResolvedValue(undefined);
-    const onToggleError = vi.fn();
+    const reloadConnectors = jest.fn().mockResolvedValue(undefined);
+    const reloadModelCatalog = jest.fn().mockResolvedValue(undefined);
+    const onToggleError = jest.fn();
     let rejectA!: (reason?: unknown) => void;
     const pendingA = new Promise<void>((_resolve, reject) => {
       rejectA = reject;

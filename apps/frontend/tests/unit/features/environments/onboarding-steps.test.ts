@@ -7,8 +7,8 @@
  * user learns not to trust the flow.
  */
 
+import { describe, expect, it } from 'bun:test';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
-import { describe, expect, it } from 'vitest';
 import {
   deriveOnboardingStep,
   endStateOf,

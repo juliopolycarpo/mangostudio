@@ -1,16 +1,29 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { act } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import * as shikiLib from '@/lib/shiki';
-import { MarkdownContent } from '../../../src/components/MarkdownContent';
-import { MarkdownContentRenderer } from '../../../src/components/MarkdownContentRenderer';
-import { render, screen } from '../../support/harness/render';
+import { stubClipboard } from '../../support/harness/clipboard';
+import { render, screen, waitFor } from '../../support/harness/render';
+import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
 
-vi.mock('@/lib/shiki', () => ({
-  highlightCode: vi.fn(() => null),
-  initHighlighter: vi.fn().mockResolvedValue(undefined),
-  preloadCodeLanguages: vi.fn().mockResolvedValue(true),
+// Held as their own handles rather than reached back through
+// `shiki.x`: `bun test` has no `jest.mocked`, and reading the
+// namespace after `mock.module` would only work by accident.
+const shiki = {
+  highlightCode: jest.fn<(code: string, language: string, theme: string) => string | null>(
+    () => null
+  ),
+  initHighlighter: jest.fn(() => Promise.resolve(undefined)),
+  preloadCodeLanguages: jest.fn(() => Promise.resolve(true)),
+};
+
+mock.module('@/lib/shiki', () => ({
+  ...shiki,
   CODE_THEMES: ['one-dark-pro', 'github-dark-dimmed', 'github-light', 'one-light'],
 }));
+
+// After the mock, never before: a static import is evaluated first and would
+// bind the components to the real highlighter.
+const { MarkdownContent } = await import('../../../src/components/MarkdownContent');
+const { MarkdownContentRenderer } = await import('../../../src/components/MarkdownContentRenderer');
 
 function createPendingPreload(): Promise<boolean> {
   return new Promise(() => undefined);
@@ -26,10 +39,10 @@ function createDeferredPreload() {
 
 describe('MarkdownContent', () => {
   beforeEach(() => {
-    vi.mocked(shikiLib.highlightCode).mockReset();
-    vi.mocked(shikiLib.highlightCode).mockReturnValue(null);
-    vi.mocked(shikiLib.preloadCodeLanguages).mockReset();
-    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(createPendingPreload());
+    shiki.highlightCode.mockReset();
+    shiki.highlightCode.mockReturnValue(null);
+    shiki.preloadCodeLanguages.mockReset();
+    shiki.preloadCodeLanguages.mockReturnValue(createPendingPreload());
   });
 
   it('lazy-loads the markdown renderer behind the public component', async () => {
@@ -183,16 +196,16 @@ describe('MarkdownContent — syntax highlighting', () => {
     '<pre class="shiki one-dark-pro" style="background-color:#282c34;color:#abb2bf"><code><span style="color:#c678dd">const</span><span style="color:#e5c07b"> x</span><span style="color:#56b6c2"> =</span><span style="color:#d19a66"> 1</span><span style="color:#abb2bf">;</span></code></pre>';
 
   beforeEach(() => {
-    vi.mocked(shikiLib.highlightCode).mockReset();
-    vi.mocked(shikiLib.highlightCode).mockReturnValue(null);
-    vi.mocked(shikiLib.preloadCodeLanguages).mockReset();
-    vi.mocked(shikiLib.preloadCodeLanguages).mockResolvedValue(true);
+    shiki.highlightCode.mockReset();
+    shiki.highlightCode.mockReturnValue(null);
+    shiki.preloadCodeLanguages.mockReset();
+    shiki.preloadCodeLanguages.mockResolvedValue(true);
   });
 
   it('loads fenced code languages before reparsing with Shiki', async () => {
     const preload = createDeferredPreload();
-    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(preload.promise);
-    vi.mocked(shikiLib.highlightCode).mockReturnValue(SHIKI_HTML);
+    shiki.preloadCodeLanguages.mockReturnValue(preload.promise);
+    shiki.highlightCode.mockReturnValue(SHIKI_HTML);
     const { container } = render(
       <MarkdownContentRenderer content={'```typescript\nconst x = 1;\n```'} />
     );
@@ -202,11 +215,11 @@ describe('MarkdownContent — syntax highlighting', () => {
       await Promise.resolve();
     });
 
-    await vi.waitFor(() => {
-      expect(shikiLib.preloadCodeLanguages).toHaveBeenCalledWith(['typescript']);
+    await waitFor(() => {
+      expect(shiki.preloadCodeLanguages).toHaveBeenCalledWith(['typescript']);
       expect(container.querySelector('span[style]')).toBeInTheDocument();
     });
-    expect(shikiLib.highlightCode).toHaveBeenLastCalledWith(
+    expect(shiki.highlightCode).toHaveBeenLastCalledWith(
       'const x = 1;',
       'typescript',
       'one-dark-pro'
@@ -214,18 +227,18 @@ describe('MarkdownContent — syntax highlighting', () => {
   });
 
   it('preloads languages for code blocks nested inside list items', async () => {
-    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(createPendingPreload());
+    shiki.preloadCodeLanguages.mockReturnValue(createPendingPreload());
     render(<MarkdownContentRenderer content={'- step one\n\n  ```rust\n  fn main() {}\n  ```'} />);
 
-    await vi.waitFor(() => {
-      expect(shikiLib.preloadCodeLanguages).toHaveBeenCalledWith(['rust']);
+    await waitFor(() => {
+      expect(shiki.preloadCodeLanguages).toHaveBeenCalledWith(['rust']);
     });
   });
 
   it('adds data-lang attribute to Shiki pre element', async () => {
     const preload = createDeferredPreload();
-    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(preload.promise);
-    vi.mocked(shikiLib.highlightCode).mockReturnValue(SHIKI_HTML);
+    shiki.preloadCodeLanguages.mockReturnValue(preload.promise);
+    shiki.highlightCode.mockReturnValue(SHIKI_HTML);
     const { container } = render(
       <MarkdownContentRenderer content={'```typescript\nconst x = 1;\n```'} />
     );
@@ -235,13 +248,13 @@ describe('MarkdownContent — syntax highlighting', () => {
       await Promise.resolve();
     });
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(container.querySelector('pre')?.getAttribute('data-lang')).toBe('typescript');
     });
   });
 
   it('falls back to plain code block when language is unknown', () => {
-    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(createPendingPreload());
+    shiki.preloadCodeLanguages.mockReturnValue(createPendingPreload());
     const { container } = render(
       <MarkdownContentRenderer content={'```unknownlang\nfoo()\n```'} />
     );
@@ -258,17 +271,17 @@ describe('MarkdownContent — syntax highlighting', () => {
   });
 
   it('falls back gracefully while Shiki highlighter is not yet loaded', () => {
-    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(createPendingPreload());
+    shiki.preloadCodeLanguages.mockReturnValue(createPendingPreload());
     const { container } = render(
       <MarkdownContentRenderer content={'```typescript\nconst x = 1;\n```'} />
     );
     expect(container.querySelector('pre')).toBeInTheDocument();
     expect(container.querySelector('code')).toHaveTextContent('const x = 1;');
-    expect(shikiLib.highlightCode).not.toHaveBeenCalled();
+    expect(shiki.highlightCode).not.toHaveBeenCalled();
   });
 
   it('adds data-lang attribute to fallback pre for language badge', () => {
-    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(createPendingPreload());
+    shiki.preloadCodeLanguages.mockReturnValue(createPendingPreload());
     const { container } = render(
       <MarkdownContentRenderer content={'```python\nprint("hello")\n```'} />
     );
@@ -278,20 +291,16 @@ describe('MarkdownContent — syntax highlighting', () => {
 });
 
 describe('MarkdownContent — copy code button', () => {
-  let clipboardWriteText: ReturnType<typeof vi.fn>;
+  let clipboardWriteText: ReturnType<typeof jest.fn>;
 
   beforeEach(() => {
-    vi.mocked(shikiLib.highlightCode).mockReset();
-    vi.mocked(shikiLib.highlightCode).mockReturnValue(null);
-    vi.mocked(shikiLib.preloadCodeLanguages).mockReset();
-    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(createPendingPreload());
+    shiki.highlightCode.mockReset();
+    shiki.highlightCode.mockReturnValue(null);
+    shiki.preloadCodeLanguages.mockReset();
+    shiki.preloadCodeLanguages.mockReturnValue(createPendingPreload());
 
-    clipboardWriteText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', {
-      value: { writeText: clipboardWriteText },
-      configurable: true,
-      writable: true,
-    });
+    clipboardWriteText = jest.fn().mockResolvedValue(undefined);
+    stubClipboard(clipboardWriteText);
   });
 
   it('renders a copy button in each code block', () => {
@@ -338,7 +347,7 @@ describe('MarkdownContent — copy code button', () => {
     const { container } = render(<MarkdownContentRenderer content={'```\nconst x = 1;\n```'} />);
     const btn = container.querySelector('.copy-code-btn') as HTMLButtonElement;
     btn.click();
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(clipboardWriteText).toHaveBeenCalledWith('const x = 1;');
     });
   });
@@ -347,19 +356,18 @@ describe('MarkdownContent — copy code button', () => {
     const { container } = render(<MarkdownContentRenderer content={'```\nconst x = 1;\n```'} />);
     const btn = container.querySelector('.copy-code-btn') as HTMLButtonElement;
     btn.click();
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(btn.classList.contains('copy-code-btn--copied')).toBe(true);
     });
   });
 
   it('reverts button state after 2 seconds', async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     const { container } = render(<MarkdownContentRenderer content={'```\nconst x = 1;\n```'} />);
     const btn = container.querySelector('.copy-code-btn') as HTMLButtonElement;
     btn.click();
-    await vi.waitFor(() => expect(btn.classList.contains('copy-code-btn--copied')).toBe(true));
-    vi.advanceTimersByTime(2000);
+    await waitFor(() => expect(btn.classList.contains('copy-code-btn--copied')).toBe(true));
+    await advanceTimersByTimeAsync(2000);
     expect(btn.classList.contains('copy-code-btn--copied')).toBe(false);
-    vi.useRealTimers();
   });
 });

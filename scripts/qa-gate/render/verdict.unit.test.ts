@@ -88,6 +88,44 @@ describe('collectAttentionItems', () => {
   it('skips comparative signals when a side is missing instead of guessing', () => {
     expect(collectAttentionItems(null, makeMetrics('head-sha'))).toEqual([]);
   });
+
+  // The signature of a collector that broke: every comparative item returns
+  // null when a side is missing, so without this the headline reads "no
+  // attention signals" at the moment nothing is being measured.
+  it('flags head collectors that returned an error instead of a measurement', () => {
+    const head = makeMetrics('head-sha', {
+      frontendBundle: { error: 'frontend dist at ./frontend-dist is present but not measurable' },
+      duplication: { error: 'jscpd exited 1' },
+    });
+
+    expect(collectAttentionItems(base, head)).toContain(
+      'metrics not collected: `duplication`, `frontendBundle`'
+    );
+  });
+
+  it('flags per-workspace head collectors that returned an error', () => {
+    const cleanHead = makeMetrics('head-sha');
+    const brokenHead = makeMetrics('head-sha', {
+      coverage: { ...cleanHead.coverage, runtime: { error: 'head runtime coverage missing' } },
+      tsErrors: {
+        ...cleanHead.tsErrors,
+        frontend: { error: 'head frontend TypeScript count missing' },
+      },
+      loc: { ...cleanHead.loc, api: { error: 'head api LoC missing' } },
+    });
+
+    expect(collectAttentionItems(base, brokenHead)).toContain(
+      'metrics not collected: `tsErrors/frontend`, `loc/api`, `coverage/runtime`'
+    );
+  });
+
+  // A base envelope is legitimately absent on a first run and on a forked PR.
+  // Flagging that would fire on every change that broke nothing.
+  it('does not flag base-side collector errors', () => {
+    const staleBase = makeMetrics('base-sha', { frontendBundle: { error: 'artifact missing' } });
+
+    expect(collectAttentionItems(staleBase, makeMetrics('head-sha'))).toEqual([]);
+  });
 });
 
 describe('renderVerdict', () => {
@@ -102,6 +140,21 @@ describe('renderVerdict', () => {
 
   it('reports when head metrics are absent entirely', () => {
     expect(renderVerdict(base, null)).toContain('Verdict unavailable');
+  });
+
+  it('warns when a nested TypeScript collector failed', () => {
+    const head = makeMetrics('head-sha', {
+      tsErrors: {
+        frontend: { error: 'tsc output was not available' },
+        api: 0,
+        shared: 0,
+        runtime: 0,
+      },
+    });
+
+    expect(renderVerdict(base, head)).toBe(
+      '⚠️ **Needs attention:** metrics not collected: `tsErrors/frontend`'
+    );
   });
 
   // A missing base must not produce the "healthy against base" claim: the

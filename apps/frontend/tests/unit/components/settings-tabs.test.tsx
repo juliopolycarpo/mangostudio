@@ -1,12 +1,8 @@
-import type { ReactNode } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, mock } from 'bun:test';
 import { render, screen } from '../../support/harness/render';
+import { routerWithLinkStub } from '../../support/mocks/router';
 
-vi.mock('@tanstack/react-router', () => ({
-  Link: ({ to, children }: { readonly to: string; readonly children: ReactNode }) => (
-    <a href={to}>{children}</a>
-  ),
-}));
+mock.module('@tanstack/react-router', await routerWithLinkStub());
 
 describe('SettingsTabs', () => {
   it('includes the Agents, Git, and External API settings tabs', async () => {

@@ -11,7 +11,15 @@
  * and keeps the two files free of an import cycle.
  */
 
-/** Returns the response the frontend claims, or `undefined` to defer. */
+/**
+ * Returns the response the frontend claims, or `undefined` to defer.
+ *
+ * Synchronous on purpose: Elysia decides whether to try the next `NotFound`
+ * handler from what this returns, and a promise is always something — so a
+ * fallback that resolved to `undefined` would silently stop the chain. Both
+ * branches answer from state they hold synchronously (embedded manifest +
+ * boot-time validators, or a `statSync` result), so nothing needs to be async.
+ */
 export type FrontendFallback = (request: Request) => Response | undefined;
 
 let activeFallback: FrontendFallback | null = null;

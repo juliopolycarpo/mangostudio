@@ -1,19 +1,22 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useChatGptResetRedeem } from '../../../src/features/settings/connectors/hooks/use-chatgpt-reset-redeem';
 import { act, renderHook } from '../../support/harness/render';
 
-const mockRedeemChatGptResetCredit = vi.fn();
+const mockRedeemChatGptResetCredit = jest.fn();
 
-vi.mock('../../../src/features/settings/connectors/api', () => ({
+mock.module('../../../src/features/settings/connectors/api', () => ({
   redeemChatGptResetCredit: (...args: unknown[]) => mockRedeemChatGptResetCredit(...args),
 }));
+
+const { useChatGptResetRedeem } = await import(
+  '../../../src/features/settings/connectors/hooks/use-chatgpt-reset-redeem'
+);
 
 const messages = en.settings.connectors;
 
 function setup() {
-  const toast = vi.fn();
-  const onSettled = vi.fn();
+  const toast = jest.fn();
+  const onSettled = jest.fn();
   const rendered = renderHook(() =>
     useChatGptResetRedeem({ connectorId: 'connector-1', messages, toast, onSettled })
   );

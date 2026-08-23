@@ -32,7 +32,7 @@ class FakeFsProbe implements FsProbe {
 
 function makeConfig(overrides: Partial<MangoConfig> = {}): MangoConfig {
   return {
-    server: { host: 'localhost', port: 3001, publicUrl: '' },
+    server: { host: 'localhost', port: 3001, publicUrl: '', allowedOrigins: [] },
     frontend: { host: 'localhost', port: 5173 },
     database: { path: '/data/db.sqlite' },
     uploads: { dir: '/data/uploads' },

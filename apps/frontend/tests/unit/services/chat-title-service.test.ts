@@ -1,11 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { generateChatTitleSuggestion } from '../../../src/features/chat/services/chat-title';
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 
-const { mockPost } = vi.hoisted(() => ({
-  mockPost: vi.fn(),
-}));
+// `vi.hoisted` existed because `vi.mock` is hoisted above the file's own
+// statements. `mock.module` is not hoisted, so a plain const is enough.
+const mockPost = jest.fn();
 
-vi.mock('../../../src/lib/api-client', () => ({
+mock.module('../../../src/lib/api-client', () => ({
   client: {
     api: {
       chats: {
@@ -16,6 +15,12 @@ vi.mock('../../../src/lib/api-client', () => ({
     },
   },
 }));
+
+// Below the mock, never as a static import: those are evaluated first and the
+// service would bind the real API client.
+const { generateChatTitleSuggestion } = await import(
+  '../../../src/features/chat/services/chat-title'
+);
 
 describe('generateChatTitleSuggestion', () => {
   beforeEach(() => {

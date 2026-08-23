@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import {
   buildFileChangePreview,
   DIFF_PREVIEW_MAX_LINES,

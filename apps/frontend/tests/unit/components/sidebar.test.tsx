@@ -1,18 +1,18 @@
+import { describe, expect, it, jest } from 'bun:test';
 import { mockChats } from '@mangostudio/shared/test-utils';
 import { fireEvent, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
 import { Sidebar } from '../../../src/features/sidebar/components/Sidebar';
 import { render } from '../../support/harness/render';
 
 const defaultProps = {
   currentPage: 'chat' as const,
-  onNavigate: vi.fn(),
+  onNavigate: jest.fn(),
   chats: mockChats,
   currentChatId: 'chat-1',
-  onSelectChat: vi.fn(),
-  onUpdateChatTitle: vi.fn(),
-  onDeleteChat: vi.fn(),
-  onNewChat: vi.fn(),
+  onSelectChat: jest.fn(),
+  onUpdateChatTitle: jest.fn(),
+  onDeleteChat: jest.fn(),
+  onNewChat: jest.fn(),
 };
 
 describe('Sidebar', () => {
@@ -43,7 +43,7 @@ describe('Sidebar', () => {
   });
 
   it('calls onNavigate with "studio" when Studio is clicked', () => {
-    const onNavigate = vi.fn();
+    const onNavigate = jest.fn();
     render(<Sidebar {...defaultProps} onNavigate={onNavigate} />);
 
     fireEvent.click(screen.getAllByRole('button', { name: /studio/i })[0]);
@@ -77,7 +77,7 @@ describe('Sidebar', () => {
   });
 
   it('resizes from the keyboard and persists the clamped width', () => {
-    const onWidthChange = vi.fn();
+    const onWidthChange = jest.fn();
     const { container } = render(
       <Sidebar {...defaultProps} width={256} onWidthChange={onWidthChange} />
     );
@@ -96,13 +96,13 @@ describe('Sidebar', () => {
   // The rail handle sits on the opposite edge, so a shared component that mixed
   // the two directions up would still pass the rail's drag test.
   it('grows the sidebar when its right-edge handle is dragged right', () => {
-    const onWidthPreview = vi.fn();
+    const onWidthPreview = jest.fn();
     const { container } = render(
       <Sidebar
         {...defaultProps}
         width={256}
         onWidthPreview={onWidthPreview}
-        onWidthChange={vi.fn()}
+        onWidthChange={jest.fn()}
       />
     );
     const handle = screen.getByRole('separator', { name: /resize chat sidebar/i });
@@ -115,8 +115,8 @@ describe('Sidebar', () => {
   });
 
   it('mobile shortcuts close the sidebar after navigation', () => {
-    const onNavigate = vi.fn();
-    const onMobileClose = vi.fn();
+    const onNavigate = jest.fn();
+    const onMobileClose = jest.fn();
     render(<Sidebar {...defaultProps} onNavigate={onNavigate} onMobileClose={onMobileClose} />);
 
     const shortcuts = screen.getByTestId('mobile-shortcuts');

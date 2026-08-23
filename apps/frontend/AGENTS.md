@@ -30,4 +30,5 @@ For per-task file maps, use `docs/reference/agent-playbooks.md`.
 - Unit or component: `bun run --filter @mangostudio/frontend test:unit`
 - Integration: `bun run --filter @mangostudio/frontend test:integration`
 - Coverage-sensitive work: `bun run --filter @mangostudio/frontend test:coverage`
-- Use `apps/frontend/tests/support/mocks/create-fetch-scenario.ts` only for jsdom hook tests that must mock `fetch` behind Eden Treaty, not for API contract testing.
+- Use `apps/frontend/tests/support/mocks/create-fetch-scenario.ts` only for happy-dom hook tests that must mock `fetch` behind Eden Treaty, not for API contract testing.
+- A test that needs a session calls `setTestSession` (or `setTestSignIn` / `setTestSignUp` / `setTestSignOut`) from `tests/support/setup/auth-client-stub.ts` **by relative path**. Never `mock.module('@/lib/auth-client', …)`: the alias already resolves to the stub, so that mock targets a module the components never import and silently tests nothing.

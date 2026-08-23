@@ -2,7 +2,8 @@
 // into either "no attention signals" or a short list of concrete regressions,
 // so reviewers don't have to scan the detail tables.
 
-import type { Metrics } from '../collect/types';
+import { ALL_WORKSPACE_NAMES } from '../../lib/config';
+import type { Failable, Metrics } from '../collect/types';
 import {
   getBundle,
   getCircularDeps,
@@ -12,7 +13,7 @@ import {
   getTotalLineCoverage,
   sumTsErrors,
 } from './access';
-import { formatBytes, inlineCode } from './format';
+import { formatBytes, inlineCode, isError } from './format';
 
 // Ignore sub-0.1pp percentage drift and sub-10KiB gzip growth — both are
 // routine noise on unrelated changes and would make the verdict cry wolf.
@@ -63,11 +64,53 @@ const testSuiteItem = (head: Metrics | null): string | null => {
 };
 
 /**
+ * Head-side collectors that returned an error instead of a measurement.
+ *
+ * A metric that fails to collect does not merely go unreported — it disarms the
+ * guard built on it. Every comparative item above returns null when either side
+ * is missing, so a broken collector reads exactly like a healthy one: the
+ * headline says "no attention signals" precisely when nothing is being
+ * measured. The collector notes carry the error text, but a note under a green
+ * verdict is what let a bundle metric stay missing without anyone noticing.
+ *
+ * Head only. A base envelope is legitimately absent on a first run, on a forked
+ * PR and before the first main-push baseline exists, and flagging those would
+ * cry wolf on changes that broke nothing — `allComparisonsAvailable` already
+ * hedges the healthy verdict for that case.
+ */
+const headCollectorErrors = (head: Metrics | null): string[] => {
+  if (!head) return [];
+  const named: ReadonlyArray<readonly [string, Failable<unknown>]> = [
+    ['tests', head.tests],
+    ['tooling', head.tooling],
+    ['duplication', head.duplication],
+    ['circularDeps', head.circularDeps],
+    ['frontendBundle', head.frontendBundle],
+    ['dependencies', head.dependencies],
+  ];
+  const errors = named.filter(([, value]) => isError(value)).map(([name]) => name);
+  for (const workspace of ALL_WORKSPACE_NAMES) {
+    const workspaceNamed: ReadonlyArray<readonly [string, Failable<unknown>]> = [
+      [`coverage/${workspace}`, head.coverage[workspace]],
+      [`tsErrors/${workspace}`, head.tsErrors[workspace]],
+      [`loc/${workspace}`, head.loc[workspace]],
+    ];
+    errors.push(...workspaceNamed.filter(([, value]) => isError(value)).map(([name]) => name));
+  }
+  return errors;
+};
+
+/**
  * Collect the head-side regressions worth flagging in the headline.
  * // Usage: collectAttentionItems(base, head)
  */
 export const collectAttentionItems = (base: Metrics | null, head: Metrics | null): string[] => {
   const items: string[] = [];
+
+  const uncollected = headCollectorErrors(head);
+  if (uncollected.length > 0) {
+    items.push(`metrics not collected: ${uncollected.map(inlineCode).join(', ')}`);
+  }
 
   const suiteItem = testSuiteItem(head);
   if (suiteItem) items.push(suiteItem);

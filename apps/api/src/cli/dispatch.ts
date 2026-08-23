@@ -26,6 +26,7 @@ export async function dispatch(args: string[]): Promise<void> {
     if (error instanceof CliError) {
       writeError(error.message);
       process.exit(1);
+      return;
     }
     throw error;
   }

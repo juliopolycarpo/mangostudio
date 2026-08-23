@@ -2,17 +2,16 @@
 // per-shard files back into one per-workspace tally.
 //
 // This replaces parsing the runner log. Counts come from `<testcase>` elements
-// rather than the `<testsuites>` header, because the two runners disagree on
-// the header: Bun emits `tests`/`assertions`/`failures`/`skipped`, Vitest emits
-// `tests`/`failures`/`errors` and puts `skipped` only on the nested
+// rather than the `<testsuites>` header, because producers disagree on the
+// header: Bun emits `tests`/`assertions`/`failures`/`skipped` there, while the
+// classic dialect (Vitest's, among others) puts `skipped` only on the nested
 // `<testsuite>` — which Bun also nests, once per `describe`, so summing those
-// double-counts. A `<testcase>` is a leaf in both.
+// double-counts. A `<testcase>` is a leaf in every dialect.
 //
-// What JUnit cannot carry is either runner's unhandled errors: Vitest's
-// reporter's `onTestRunEnd(testModules)` never receives them and hardcodes
-// `errors="0"`, and Bun's `# Unhandled error between tests` block leaves the
-// report at `failures="0"` with no failing case while the run exits 1. Those
-// counts and headlines come from ./unhandled-errors.ts instead.
+// What JUnit cannot carry is unhandled errors: Bun's `# Unhandled error
+// between tests` block leaves the report at `failures="0"` with no failing
+// case while the run exits 1. Those counts and headlines come from
+// ./unhandled-errors.ts instead.
 
 import { ALL_WORKSPACE_NAMES, type WorkspaceName } from '../lib/config';
 import { TEST_LANES, type TestLane } from '../lib/test-lanes';
@@ -131,7 +130,7 @@ export const parseJunitXml = (xml: string): JunitCounts => {
       const failureEnd = endOfOpenTag(body, failureAt);
       const failureAttributes =
         failureEnd === -1 ? {} : readAttributes(body.slice(failureAt, failureEnd));
-      // `file` is Bun's; Vitest puts the file in `classname` on the testcase.
+      // `file` is Bun's; the classic dialect puts the file in `classname`.
       const originatedIn = attributes.file ?? attributes.classname ?? null;
       if (originatedIn) failedFiles.add(originatedIn);
       const message = failureAttributes.message ?? failureAttributes.type ?? 'test failed';

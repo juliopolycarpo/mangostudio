@@ -8,7 +8,7 @@
         ".claude/hooks/*.mjs",
         ".codex/hooks/*.mjs",
         "scripts/bench/startup.ts",
-        "scripts/ci/{distribution-identity,evaluate-gate,verify-cross-runtimes}.ts",
+        "scripts/ci/{distribution-identity,evaluate-gate,frontend-bundle-report,verify-cross-runtimes}.ts",
         "scripts/examples/external-api-smoke.ts",
         "scripts/qa-gate/{collect,collect-test-metrics,render-coverage-summary,render-report}.ts",
         "scripts/qa-gate/**/*.unit.test.ts",
@@ -28,8 +28,12 @@
       "ignoreBinaries": ["mkfifo"]
     },
     "apps/frontend": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "tests/support/setup/motion-react-stub.tsx"],
-      "project": ["src/**/*.{ts,tsx}", "src/**/*.css", "tests/**/*.{ts,tsx}", "*.config.ts"]
+      "entry": [
+        "src/main.tsx",
+        "tests/**/*.test.{ts,tsx}",
+        "tests/support/setup/motion-react-stub.tsx"
+      ],
+      "project": ["src/**/*.{ts,tsx}", "src/**/*.css", "tests/**/*.{ts,tsx}"]
     },
     "apps/shared": {
       "entry": ["tests/**/*.test.ts"],

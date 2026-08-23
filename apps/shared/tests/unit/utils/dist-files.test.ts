@@ -1,0 +1,94 @@
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, relative, sep } from 'node:path';
+import { BUILD_STATE_FILE, distFilePath, listDistFiles } from '../../../src/utils/dist-files';
+
+let distDir: string;
+
+beforeEach(() => {
+  distDir = mkdtempSync(join(tmpdir(), 'dist-files-'));
+
+  writeFileSync(join(distDir, 'index.html'), '<html></html>');
+  writeFileSync(join(distDir, 'build-info.json'), '{}');
+  mkdirSync(join(distDir, 'assets', 'nested'), { recursive: true });
+  writeFileSync(join(distDir, 'assets', 'index-AbCd1234.js'), 'js');
+  writeFileSync(join(distDir, 'assets', 'nested', 'font.woff2'), 'font');
+});
+
+afterEach(() => {
+  rmSync(distDir, { recursive: true, force: true });
+});
+
+const EXPECTED = [
+  '/assets/index-AbCd1234.js',
+  '/assets/nested/font.woff2',
+  '/build-info.json',
+  '/index.html',
+];
+
+describe('listDistFiles', () => {
+  test('maps every file to a sorted URL path with / separators', () => {
+    expect(listDistFiles(distDir)).toEqual(EXPECTED);
+  });
+
+  test('omits the build stamp, which is a diagnostic rather than shipped payload', () => {
+    // Every build writes this into dist/. It reaches the embedded manifest if it
+    // survives here, and `registerEmbeddedSpa` registers a GET route per
+    // embedded file — so the compiled binary would answer for it.
+    writeFileSync(join(distDir, BUILD_STATE_FILE), '{"apiUrl":"","mode":"production"}');
+    expect(listDistFiles(distDir)).toEqual(EXPECTED);
+  });
+
+  // Bun normalizes `Dirent.parentPath`, so a relative directory's children come
+  // back without the './' the caller passed. Slicing the caller's string off the
+  // front therefore removed a real character per extra character of spelling:
+  // './x' yielded '/ndex.html', './x/' yielded '/dex.html'. Both spellings reach
+  // this walker in CI — the QA workflow measures the build artifact with
+  // `QA_FRONTEND_DIST=./frontend-dist` — and the resulting paths point at no
+  // file, so the failure surfaced only as a missing metric in the report.
+  test.each([
+    ['relative', (dir: string) => relative(process.cwd(), dir)],
+    [
+      'relative with a trailing separator',
+      (dir: string) => `${relative(process.cwd(), dir)}${sep}`,
+    ],
+  ])('yields the same paths for a %s dist directory', (_label, spell) => {
+    expect(listDistFiles(spell(distDir))).toEqual(EXPECTED);
+  });
+});
+
+describe('distFilePath', () => {
+  test('resolves a root-level URL path back to its absolute path', () => {
+    expect(distFilePath(distDir, '/index.html')).toBe(join(distDir, 'index.html'));
+  });
+
+  test('resolves a nested URL path back to its absolute path', () => {
+    expect(distFilePath(distDir, '/assets/nested/font.woff2')).toBe(
+      join(distDir, 'assets', 'nested', 'font.woff2')
+    );
+  });
+
+  // Shape *and* existence, for every spelling of the directory. The two callers
+  // that matter both read the file back — the QA collector gzips it, and the
+  // binary build imports it into the embed manifest — so a URL path that does
+  // not name a real file is the whole failure mode, and asserting the join
+  // alone reproduces the walker's own bug rather than catching it.
+  test.each([
+    ['absolute', (dir: string) => dir],
+    ['relative', (dir: string) => relative(process.cwd(), dir)],
+    [
+      'relative with a trailing separator',
+      (dir: string) => `${relative(process.cwd(), dir)}${sep}`,
+    ],
+  ])('round-trips every path to an existing file for a %s dist directory', (_label, spell) => {
+    const dir = spell(distDir);
+    const paths = listDistFiles(dir);
+    expect(paths.length).toBeGreaterThan(0);
+    for (const urlPath of paths) {
+      const filePath = distFilePath(dir, urlPath);
+      expect(filePath).toBe(join(dir, ...urlPath.split('/').filter(Boolean)));
+      expect(existsSync(filePath)).toBe(true);
+    }
+  });
+});

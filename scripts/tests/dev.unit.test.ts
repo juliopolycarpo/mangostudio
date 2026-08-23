@@ -10,9 +10,23 @@ import { readText } from './support/read-text';
 
 describe('dev script', () => {
   test('keeps only dev-capable workspaces', () => {
-    expect(selectDevWorkspaces(['api', 'shared', 'frontend'])).toEqual({
-      runnableWorkspaces: ['api', 'frontend'],
+    expect(selectDevWorkspaces(['api', 'shared'])).toEqual({
+      runnableWorkspaces: ['api'],
       skippedWorkspaces: ['shared'],
+    });
+  });
+
+  test('redirects an explicit --frontend request to api instead of dropping it', () => {
+    expect(selectDevWorkspaces(['frontend'])).toEqual({
+      runnableWorkspaces: ['api'],
+      skippedWorkspaces: [],
+    });
+  });
+
+  test('does not run api twice when both --api and --frontend are given', () => {
+    expect(selectDevWorkspaces(['api', 'frontend'])).toEqual({
+      runnableWorkspaces: ['api'],
+      skippedWorkspaces: [],
     });
   });
 

@@ -1,6 +1,6 @@
+import { describe, expect, it, jest } from 'bun:test';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
 import { DeprecatedModelNotice } from '@/features/chat/components/DeprecatedModelNotice';
 import { render } from '../../support/harness/render';
 
@@ -15,7 +15,7 @@ const DETAILS = {
 describe('DeprecatedModelNotice', () => {
   it('offers the fork when the vendor CLI can start a turn', async () => {
     const user = userEvent.setup();
-    const onContinueWithRunner = vi.fn();
+    const onContinueWithRunner = jest.fn();
 
     render(
       <DeprecatedModelNotice
@@ -23,7 +23,7 @@ describe('DeprecatedModelNotice', () => {
         isForking={false}
         runnerAvailable
         onContinueWithRunner={onContinueWithRunner}
-        onDismiss={vi.fn()}
+        onDismiss={jest.fn()}
       />
     );
 
@@ -37,8 +37,8 @@ describe('DeprecatedModelNotice', () => {
         details={DETAILS}
         isForking={false}
         runnerAvailable={false}
-        onContinueWithRunner={vi.fn()}
-        onDismiss={vi.fn()}
+        onContinueWithRunner={jest.fn()}
+        onDismiss={jest.fn()}
       />
     );
 

@@ -643,6 +643,33 @@ async function smokeTest(): Promise<void> {
       pass('/ → 200 HTML');
     }
 
+    // The shell's ETag must be content-derived, and only this harness can see
+    // it: embedded files stat *successfully* with `mtimeMs: 0`, and index.html's
+    // byte size is stable across builds (hashed asset names are fixed-length),
+    // so a size+mtime validator collapses to the same "<size>-0" constant in
+    // every release — an upgraded binary answers 304 to the previous build's
+    // shell and returning users keep the old frontend until a hard refresh.
+    // Unit fixtures stat real temp files with real mtimes, so they cannot
+    // reproduce the constant; the compiled binary is where it exists.
+    {
+      const res = await fetch(`http://127.0.0.1:${PORT}/`);
+      const etag = res.headers.get('etag');
+      if (!etag) fail('/ carries no ETag — the shell cannot revalidate after an upgrade');
+      if (/-0"$/.test(etag as string))
+        fail(`/ ETag ${etag} is stat-derived (mtime 0) — constant across builds`);
+      const revalidated = await fetch(`http://127.0.0.1:${PORT}/`, {
+        headers: { 'If-None-Match': etag as string },
+      });
+      if (revalidated.status !== 304)
+        fail(`/ with matching If-None-Match returned ${revalidated.status}, expected 304`);
+      const upgraded = await fetch(`http://127.0.0.1:${PORT}/`, {
+        headers: { 'If-None-Match': '"71f-0"' },
+      });
+      if (upgraded.status !== 200)
+        fail(`/ with a stale validator returned ${upgraded.status}, expected 200`);
+      pass('/ shell ETag is content-derived and revalidates correctly');
+    }
+
     // /index.html → 200 HTML
     {
       const res = await fetch(`http://127.0.0.1:${PORT}/index.html`);
@@ -650,11 +677,90 @@ async function smokeTest(): Promise<void> {
       pass('/index.html → 200 HTML');
     }
 
+    // /favicon.ico → 200, and not the SPA shell.
+    //
+    // index.html references four unhashed root assets (favicon, two icons, the
+    // manifest) and the binary serves them through routes that used to derive
+    // an ETag from `Bun.file().stat().catch(…)`. For an embedded file `stat()`
+    // returns `undefined` synchronously rather than a promise, so `.catch` on
+    // it is itself a TypeError thrown out of the handler and the binary
+    // answered 500 with Bun's own HTML error page. Nothing else in the suite
+    // can see that: the unit fixtures point at real temp files, which stat
+    // fine, and only this script runs the compiled binary.
+    {
+      const res = await fetch(`http://127.0.0.1:${PORT}/favicon.ico`);
+      if (res.status !== 200)
+        fail(`/favicon.ico returned ${res.status} (embedded asset not served)`);
+      const ct = res.headers.get('content-type') ?? '';
+      if (ct.includes('text/html'))
+        fail(`/favicon.ico returned text/html — the SPA fallback answered instead of the asset`);
+      if ((await res.arrayBuffer()).byteLength === 0) fail('/favicon.ico returned an empty body');
+      pass('/favicon.ico → 200 (embedded unhashed asset)');
+    }
+
     // /assets/fake.js → 404 (must NOT be intercepted by SPA fallback)
     {
       const res = await fetch(`http://127.0.0.1:${PORT}/assets/fake.js`);
       if (res.status !== 404) fail(`/assets/fake.js should return 404, got ${res.status}`);
       pass('/assets/fake.js → 404 (SPA fallback bypassed)');
+    }
+
+    // /config.js → 200, and empty by default. This is the seam that lets the
+    // published frontend-dist tarball be repointed at another API without a
+    // rebuild; inside the binary it must stay empty, because that is what keeps
+    // the one-binary premise intact — an empty apiUrl falls through to
+    // window.location.origin, which is the origin this binary just served from.
+    {
+      const res = await fetch(`http://127.0.0.1:${PORT}/config.js`);
+      if (res.status !== 200) fail(`/config.js returned ${res.status} (runtime config not served)`);
+      const body = await res.text();
+      if (!body.includes('__MANGO_CONFIG__')) fail('/config.js does not define __MANGO_CONFIG__');
+      if (!/apiUrl:\s*""/.test(body))
+        fail('/config.js ships a non-empty apiUrl — the binary must default to same-origin');
+      // Deployer-editable, so it must revalidate rather than sit in a cache for
+      // a day after someone corrects a wrong URL.
+      const cacheControl = res.headers.get('cache-control');
+      if (cacheControl !== 'no-cache')
+        fail(`/config.js cache-control is "${cacheControl}", expected no-cache`);
+      // Revalidation needs a validator, and like the shell it must be
+      // content-derived — embedded files stat as mtime 0, so a stat-shaped tag
+      // would be constant across builds. Only this harness sees the binary's
+      // headers; unit fixtures stat real files.
+      const etag = res.headers.get('etag');
+      if (!etag) fail('/config.js carries no ETag — no-cache without a validator resends the body');
+      if (/-0"$/.test(etag as string))
+        fail(`/config.js ETag ${etag} is stat-derived (mtime 0) — constant across builds`);
+      const revalidated = await fetch(`http://127.0.0.1:${PORT}/config.js`, {
+        headers: { 'If-None-Match': etag as string },
+      });
+      if (revalidated.status !== 304)
+        fail(`/config.js with matching If-None-Match returned ${revalidated.status}, expected 304`);
+      pass('/config.js → 200, empty apiUrl, no-cache with a content-derived validator');
+    }
+
+    // A root-level file that is not in the embedded manifest → 404, not the
+    // shell. The binary's asset set is fixed at compile time, so a request for
+    // one that is not there can only be a stale reference — answering it with a
+    // 200 text/html document makes the <img> or <link> fail with no server-side
+    // error at all. Only this harness runs the compiled binary, so this is the
+    // one place the embedded branch's fallback rule is exercised.
+    {
+      const res = await fetch(`http://127.0.0.1:${PORT}/never-embedded.svg`);
+      if (res.status !== 404) fail(`/never-embedded.svg should return 404, got ${res.status}`);
+      if (res.headers.get('content-type')?.includes('text/html'))
+        fail('/never-embedded.svg returned text/html — the SPA shell answered a missing asset');
+      pass('/never-embedded.svg → 404 (missing root asset is not the shell)');
+    }
+
+    // ...while a genuine deep link still gets the shell. The pair is the point:
+    // the rule above must take root-level *files* away from the fallback without
+    // taking client-side routes with them.
+    {
+      const res = await fetch(`http://127.0.0.1:${PORT}/settings/agents`);
+      if (res.status !== 200) fail(`/settings/agents should return 200, got ${res.status}`);
+      if (!res.headers.get('content-type')?.includes('text/html'))
+        fail('/settings/agents did not return the SPA shell');
+      pass('/settings/agents → 200 HTML (SPA deep link still served)');
     }
 
     // /api/auth/get-session → NOT 404, NOT HTML
@@ -671,24 +777,90 @@ async function smokeTest(): Promise<void> {
       pass('/api/auth/get-session → handled by Better Auth (not intercepted by SPA fallback)');
     }
 
+    // A foreign Origin on sign-up → 403 INVALID_ORIGIN.
+    //
+    // This is the only place in the repository that can assert it. Better Auth
+    // reads its own environment: `skipOriginCheck` defaults to `isTest()`
+    // (better-auth/dist/context/create-context.mjs:210, and `isTest()` is
+    // `NODE_ENV === 'test' || TEST` in @better-auth/core), so under `bun test`
+    // the origin and CSRF checks are simply off and the same request answers
+    // 200. An `expect(...).toBe(403)` written there passes nothing; a negative
+    // one reads as a vulnerability that is not there. This binary is spawned
+    // with NODE_ENV=production above, which is what makes the gate live.
+    //
+    // `sign-up` mounts `formCsrfMiddleware`, which escalates to
+    // `validateOrigin(ctx, forceValidate = true)` as soon as any Origin,
+    // Referer or Sec-Fetch-* header is present — so no cookie is needed here.
+    // A cookieless request with *no* Origin at all stays 200 by design: it
+    // carries no ambient authority, and asserting a rejection for it would
+    // encode the wrong model.
+    //
+    // The code is asserted, not just the status, so an unrelated future guard
+    // answering 403 cannot satisfy this.
+    {
+      const res = await fetch(`${authBaseUrl}/api/auth/sign-up/email`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'https://attacker.example',
+        },
+        body: JSON.stringify({
+          email: `smoke-foreign-origin-${Date.now()}@test.local`,
+          password: 'smoke-pass-12345',
+          name: 'Foreign Origin',
+        }),
+      });
+      const body = await res.text();
+      if (res.status !== 403)
+        fail(
+          `sign-up from a foreign Origin returned ${res.status}, expected 403 — Better Auth's origin check is not enforcing: ${body}`
+        );
+      let code: unknown;
+      try {
+        code = (JSON.parse(body) as { code?: unknown }).code;
+      } catch {
+        fail(`sign-up from a foreign Origin returned a non-JSON 403 body: ${body}`);
+      }
+      if (code !== 'INVALID_ORIGIN')
+        fail(
+          `sign-up from a foreign Origin returned 403 with code ${String(code)}, expected INVALID_ORIGIN — some other guard answered: ${body}`
+        );
+      pass('POST /api/auth/sign-up/email with a foreign Origin → 403 INVALID_ORIGIN');
+    }
+
     // The connector smokes both need an account. The Cursor one always runs —
     // it asserts a refusal, which needs nothing running behind it.
+    //
+    // The `Origin` header here is the other half of the check above: the
+    // server's own origin is in `cfg.corsOrigins`, so the same middleware that
+    // just rejected `attacker.example` has to let this through. Sending it on
+    // the sign-up the suite already needs keeps the request count down —
+    // rate limiting is production-only too (`create-context.mjs:171` defaults
+    // `enabled` to `isProduction`), so it appears for the first time exactly
+    // here, and a 429 after roughly four sign-ups would be misread as the
+    // origin check firing.
     {
       const signupEmail = `smoke-${Date.now()}@test.local`;
       const signupResponse = await fetch(`${authBaseUrl}/api/auth/sign-up/email`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Origin: authBaseUrl },
         body: JSON.stringify({
           email: signupEmail,
           password: 'smoke-pass-12345',
           name: 'Smoke User',
         }),
       });
+      if (signupResponse.status === 403) {
+        const signupBody = await signupResponse.text();
+        fail(
+          `Auth sign-up from the server's own origin (${authBaseUrl}) was rejected with 403 — trustedOrigins does not contain it: ${signupBody}`
+        );
+      }
       if (!signupResponse.ok) {
         const signupBody = await signupResponse.text();
         fail(`Auth sign-up failed with ${signupResponse.status}: ${signupBody}`);
       }
-      pass('POST /api/auth/sign-up/email → session created');
+      pass("POST /api/auth/sign-up/email with the server's own Origin → session created");
 
       const sessionCookie = buildSessionCookieHeader(signupResponse);
 

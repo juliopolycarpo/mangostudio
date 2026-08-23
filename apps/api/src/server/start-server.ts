@@ -15,7 +15,7 @@ import {
   reloadSecretEnv,
 } from '../lib/config';
 import { ensureRuntimeDirs } from '../lib/mango-paths';
-import { getDefaultFrontendDir } from '../lib/runtime-paths';
+import { getSourceFrontendDir } from '../lib/runtime-paths';
 import { removeState, type ServerState, writeState } from '../lib/server-state';
 import { externalSessionManager } from '../modules/external-agents/application/external-session-manager';
 import { reconcileExternalTurns } from '../modules/external-agents/application/external-turn-recovery';
@@ -30,6 +30,7 @@ import {
   closeAllRuntimeConnections,
   getRuntimeConnectionManager,
 } from '../services/runtime-client/runtime-connection-manager';
+import { getDevFrontendDir } from './dev-frontend-dir';
 import { EMBEDDED_FRONTEND_DIR, getEmbeddedFrontend } from './embedded-frontend';
 import { registerFrontend } from './frontend-static';
 import { runMigrations } from './migrations';
@@ -77,7 +78,13 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
       .reapScope({ userId, environmentId }, 'consent-revoked')
       .catch(() => undefined);
   });
-  const frontendDir = getEmbeddedFrontend() ? EMBEDDED_FRONTEND_DIR : getDefaultFrontendDir();
+  // Populated only by src/dev.ts, before startServer() runs — never by the
+  // binary entry. It is an override for getSourceFrontendDir() alone: the dev
+  // build lands in apps/frontend/dist, which that helper resolves against the
+  // cwd, and Turbo runs the dev task from apps/api.
+  const devFrontendDir = getDevFrontendDir();
+  const frontendDir =
+    devFrontendDir ?? (getEmbeddedFrontend() ? EMBEDDED_FRONTEND_DIR : getSourceFrontendDir());
   registerFrontend(app, frontendDir);
 
   listenOrExit(port, host);
@@ -91,7 +98,7 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
     await persistState(port, host, frontendDir);
   }
 
-  logRunning(host, port);
+  logRunning(host, port, devFrontendDir !== null);
 
   return { port, host, stop: gracefulStop };
 }
@@ -133,10 +140,13 @@ async function persistState(port: number, host: string, frontendDir: string): Pr
   await writeState(state);
 }
 
-function logRunning(host: string, port: number): void {
+function logRunning(host: string, port: number, devFrontend: boolean): void {
   const shown = displayHost(host);
   console.warn(`[api] MangoStudio API running on http://${shown}:${port}`);
   console.warn(`[api] Scalar UI available at http://${shown}:${port}/scalar`);
+  if (devFrontend) {
+    console.warn('[api] Rebuild the frontend after edits, then refresh the browser.');
+  }
 }
 
 /**

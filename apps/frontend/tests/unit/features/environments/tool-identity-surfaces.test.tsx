@@ -9,10 +9,10 @@
  * command, and every id on the wire stay as they were.
  */
 
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpServer } from '@mangostudio/shared/mcp';
 import type { ToolIdentityListResponse } from '@mangostudio/shared/tool-identity';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AgentCliCard } from '../../../../src/features/environments/components/AgentCliCard';
 import { CoverageMatrix } from '../../../../src/features/library/components/CoverageMatrix';
 import { McpServerCard } from '../../../../src/features/settings/mcp/components/McpServerCard';
@@ -91,7 +91,11 @@ describe('tool identity across surfaces', () => {
   it('names the matching library matrix column the same way', async () => {
     scenario.respondWithJson('GET', '/api/tool-identities', { body: RENAMED_CLAUDE });
 
-    renderWithRouter(
+    // Awaited, unlike before: the harness settles the router's initial load
+    // inside `act`, and dropping the promise left that update outside it —
+    // "the current testing environment is not configured to support act(...)"
+    // on stderr, with the test still green.
+    await renderWithRouter(
       <CoverageMatrix
         groups={[{ locationId: null, resources: [resource()] }]}
         targets={TARGETS}

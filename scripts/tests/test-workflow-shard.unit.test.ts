@@ -51,53 +51,83 @@ describe('Test workflow shard matrix', () => {
     expect(block).toContain(`name: test-shard-${EXPR} matrix.shard }}`);
     expect(block).toContain('.mango/artifacts/junit/');
     expect(block).toContain('.mango/artifacts/coverage/');
-    expect(block).toContain('apps/frontend/.vitest-reports/');
     expect(block).toContain('shard-meta.json');
     expect(block).toContain('unhandled-errors.json');
   });
 
   test('the upload keeps dot-directories', () => {
-    // Observed on a real run: at the default, `.vitest-reports` is dropped from
-    // the artifact and the upload still reports success, so the failure only
-    // appears in the merge job.
+    // Observed on a real run: at the default, dot-directories like `.mango`
+    // are dropped from the artifact and the upload still reports success, so
+    // the failure only appears in the merge job.
     expect(extractJobBlock(workflow, 'shard')).toContain('include-hidden-files: true');
   });
 
-  test('only the first shard writes the shared caches', () => {
+  test('only the first shard writes the shared turbo cache', () => {
     // All eight resolve the same primary key; letting each save turns seven
     // post-job steps into "cache already exists" warnings that read as a fault.
     const saves = [...extractJobBlock(workflow, 'shard').matchAll(/mode: .*matrix\.shard == 1/g)];
-    expect(saves).toHaveLength(2);
+    expect(saves).toHaveLength(1);
+  });
+});
+
+describe('Test workflow frontend job', () => {
+  const frontend = extractJobBlock(workflow, 'frontend');
+
+  test('runs the whole frontend lane, never a shard of it', () => {
+    // Bun's LCOV is not union-mergeable, so a `--shard` reaching this lane
+    // would silently turn a fraction of the suite into "the" frontend
+    // coverage. The lane's own scripts refuse the shard variable
+    // (test-lanes.unit.test.ts); this pins the workflow half.
+    expect(frontend).toContain('bun run test --coverage --only=frontend');
+    expect(frontend).not.toContain('--shard');
+  });
+
+  test('restores no turbo cache, because nothing it runs can hit one', () => {
+    // `--only=frontend` skips the root scripts lane, and `//#test:scripts` is
+    // the one task turbo caches; the `test:coverage` this job does run is
+    // `cache: false` with no `dependsOn`. A restore here only ever downloaded
+    // and extracted the shards' archive in front of an uncached run — a real
+    // cost, and one that reads like working cache reuse in the job log.
+    expect(frontend).not.toContain('family: turbo');
+    expect(frontend).not.toContain('.turbo/cache');
+  });
+
+  test('uploads the same artifact shape as a shard, dot-directories included', () => {
+    expect(frontend).toContain('name: test-shard-frontend');
+    expect(frontend).toContain('include-hidden-files: true');
+    expect(frontend).toContain('shard-meta.json');
+    expect(frontend).toContain('unhandled-errors.json');
+    expect(frontend).toContain(`${NOT_CANCELLED}`);
+  });
+
+  test('restores the same pinned timings key the shards read', () => {
+    // `--timings` balances the in-process `--parallel` workers; reading the
+    // key resolve-timings pinned keeps this job off the live-prefix race the
+    // shards were moved off of.
+    expect(parseNeedsList(frontend)).toEqual(['resolve-timings']);
+    expect(frontend).toContain('mode: restore-exact');
   });
 });
 
 describe('Test workflow merge job', () => {
   const merge = extractJobBlock(workflow, 'merge');
 
-  test('waits for every shard and still runs when one failed', () => {
-    expect(parseNeedsList(merge)).toEqual(['shard']);
+  test('waits for every test job and still runs when one failed', () => {
+    expect(parseNeedsList(merge)).toEqual(['shard', 'frontend']);
     expect(merge).toContain(NOT_CANCELLED);
   });
 
-  test('collects every shard artifact rather than a fixed list', () => {
+  test('collects every test-job artifact rather than a fixed list', () => {
+    // `test-shard-*` also matches the frontend job's `test-shard-frontend`.
     expect(merge).toContain('pattern: test-shard-*');
   });
 
-  test('the Vitest merge is a hard gate, because it is where thresholds apply', () => {
-    // Sharded Vitest runs emit blob reports and skip their own thresholds, so
-    // a continue-on-error here would drop coverage enforcement entirely.
-    const stepIndex = merge.indexOf('test:coverage:merge');
-    expect(stepIndex).toBeGreaterThan(-1);
-    expect(merge.slice(0, stepIndex)).not.toContain('continue-on-error');
-  });
-
-  test('the coverage gate failure reaches the QA fragment', () => {
-    // Thresholds run here, after the shards, so shard-summary.json can be
-    // all-green on a red run. verdict.ts keys entirely on `tests.exitCode`;
-    // without the gate's outcome a coverage-only regression renders a passing
-    // verdict while CI is red.
-    expect(merge).toContain('id: thresholds');
-    expect(merge).toContain('steps.thresholds.outcome');
+  test('passes the plain shard count to the merge', () => {
+    // A job that dies before uploading leaves its directory missing, not
+    // empty; without the count the merge would report a green run over a
+    // partial artifact set. The script itself adds one directory per
+    // unsharded lane from the registry, so the workflow passes the raw count.
+    expect(merge).toContain('merge-test-shards.ts shards "$SHARD_COUNT"');
   });
 
   test('the coverage diagnostics upload keeps dot-directories', () => {
@@ -123,10 +153,11 @@ describe('Test workflow merge job', () => {
 });
 
 describe('Test workflow shape', () => {
-  test('declares exactly the resolve-timings, shard, and merge jobs', () => {
+  test('declares exactly the resolve-timings, shard, frontend, and merge jobs', () => {
     expect(extractJobBlocks(workflow).map(({ job }) => job)).toEqual([
       'resolve-timings',
       'shard',
+      'frontend',
       'merge',
     ]);
   });

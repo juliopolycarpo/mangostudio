@@ -1,18 +1,18 @@
+import { describe, expect, it, jest } from 'bun:test';
 import { mockChats } from '@mangostudio/shared/test-utils';
-import { describe, expect, it, vi } from 'vitest';
 import { Layout } from '../../../src/components/layout/Layout';
 import { render, screen } from '../../support/harness/render';
 
 describe('Layout', () => {
   const defaultProps = {
     currentPage: 'chat' as const,
-    onNavigate: vi.fn(),
+    onNavigate: jest.fn(),
     chats: mockChats,
     currentChatId: 'chat-1',
-    onSelectChat: vi.fn(),
-    onUpdateChatTitle: vi.fn(),
-    onDeleteChat: vi.fn(),
-    onNewChat: vi.fn(),
+    onSelectChat: jest.fn(),
+    onUpdateChatTitle: jest.fn(),
+    onDeleteChat: jest.fn(),
+    onNewChat: jest.fn(),
   };
 
   it('renders children inside the main content area', () => {

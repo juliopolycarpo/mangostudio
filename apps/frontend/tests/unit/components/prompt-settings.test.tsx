@@ -1,9 +1,9 @@
+import { describe, expect, it, jest } from 'bun:test';
 import type {
   PromptSettings as PromptSettingsData,
   RuleFileSetting,
 } from '@mangostudio/shared/prompt-rules';
 import { fireEvent, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
 import { PromptSettings } from '../../../src/components/settings/PromptSettings';
 import { DEFAULT_PROMPT_SETTINGS } from '../../../src/hooks/use-global-settings';
 import { render } from '../../support/harness/render';
@@ -21,11 +21,11 @@ function renderPromptSettings(
 ) {
   const props: React.ComponentProps<typeof PromptSettings> = {
     promptSettings: createPromptSettings(),
-    onTextSystemPromptChange: vi.fn(),
-    onImageSystemPromptChange: vi.fn(),
-    onUpdateRuleFile: vi.fn(),
-    onAddCustomRule: vi.fn(),
-    onRemoveCustomRule: vi.fn(),
+    onTextSystemPromptChange: jest.fn(),
+    onImageSystemPromptChange: jest.fn(),
+    onUpdateRuleFile: jest.fn(),
+    onAddCustomRule: jest.fn(),
+    onRemoveCustomRule: jest.fn(),
     ...overrides,
   };
 
@@ -101,7 +101,7 @@ describe('PromptSettings', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Rule' }));
 
-    expect(props.onAddCustomRule).toHaveBeenCalledOnce();
+    expect(props.onAddCustomRule).toHaveBeenCalledTimes(1);
   });
 
   it('renders custom rule cards with editable path and remove button', () => {

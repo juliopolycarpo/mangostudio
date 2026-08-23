@@ -5,15 +5,14 @@
  * and that the legacy single-thinking-part format still renders correctly.
  */
 
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { Message, MessagePart } from '@mangostudio/shared';
 import { fireEvent, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChatFeed } from '../../../src/features/chat/components/ChatFeed';
-import { render } from '../../support/harness/render';
+import { flushAsyncRender, render } from '../../support/harness/render';
 
-// The virtualizer depends on DOM layout measurements not available in jsdom.
+// The virtualizer depends on DOM layout measurements not available in happy-dom.
 // We mock it so every item in the messages array is rendered directly.
-vi.mock('@tanstack/react-virtual', () => ({
+mock.module('@tanstack/react-virtual', () => ({
   useVirtualizer: (opts: { count: number }) => ({
     getTotalSize: () => opts.count * 200,
     getVirtualItems: () =>
@@ -22,9 +21,13 @@ vi.mock('@tanstack/react-virtual', () => ({
         key: i,
         start: i * 200,
       })),
-    measureElement: vi.fn(),
+    measureElement: jest.fn(),
   }),
 }));
+
+// After the mock, never before: a static import is evaluated first and would
+// bind ChatFeed to the real virtualizer.
+const { ChatFeed } = await import('../../../src/features/chat/components/ChatFeed');
 
 function makeMessage(overrides: Partial<Message> = {}): Message {
   return {
@@ -41,10 +44,10 @@ function makeMessage(overrides: Partial<Message> = {}): Message {
 
 describe('ChatFeed — MessageParts interleaved rendering', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
-  it('renders a single thinking block for a legacy single-thinking part', () => {
+  it('renders a single thinking block for a legacy single-thinking part', async () => {
     const parts: MessagePart[] = [
       { type: 'thinking', text: 'single thought' },
       { type: 'text', text: 'The answer is 42.' },
@@ -52,6 +55,8 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     const msg = makeMessage({ parts });
 
     const { container } = render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
 
     // ThinkingBlock renders a button with "Thought process" label
     const thinkingButtons = container.querySelectorAll('button');
@@ -62,7 +67,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(screen.getByText('The answer is 42.')).toBeInTheDocument();
   });
 
-  it('renders multiple thinking blocks for multiple thinking parts', () => {
+  it('renders multiple thinking blocks for multiple thinking parts', async () => {
     const parts: MessagePart[] = [
       { type: 'thinking', text: 'initial thinking' },
       { type: 'tool_call', toolCallId: 'c1', name: 'search', args: {} },
@@ -74,6 +79,8 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     const { container } = render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
+    await flushAsyncRender();
+
     const thinkingButtons = container.querySelectorAll('button');
     const thoughtProcessButtons = Array.from(thinkingButtons).filter((btn) =>
       btn.textContent?.includes('Thought process')
@@ -81,7 +88,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(thoughtProcessButtons).toHaveLength(2);
   });
 
-  it('normalizes token-level interleaving into one thinking block and one text block', () => {
+  it('normalizes token-level interleaving into one thinking block and one text block', async () => {
     const parts: MessagePart[] = [
       { type: 'thinking', text: 'The ' },
       { type: 'text', text: 'Let ' },
@@ -94,6 +101,8 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     const { container } = render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
+    await flushAsyncRender();
+
     const thinkingButtons = container.querySelectorAll('button');
     const thoughtProcessButtons = Array.from(thinkingButtons).filter((btn) =>
       btn.textContent?.includes('Thought process')
@@ -103,13 +112,15 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(screen.getByText('Let me first explore')).toBeInTheDocument();
   });
 
-  it('renders tool call block with pending state when no matching result', () => {
+  it('renders tool call block with pending state when no matching result', async () => {
     const parts: MessagePart[] = [
       { type: 'tool_call', toolCallId: 'c2', name: 'calculator', args: { expr: '2+2' } },
     ];
     const msg = makeMessage({ parts, isGenerating: true });
 
     const { container } = render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
 
     // ToolCallBlock in pending state shows "Calling..." label
     const buttons = container.querySelectorAll('button');
@@ -119,7 +130,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(toolButtons.length).toBeGreaterThan(0);
   });
 
-  it('skips tool_result parts (rendered inline with tool_call)', () => {
+  it('skips tool_result parts (rendered inline with tool_call)', async () => {
     const parts: MessagePart[] = [
       { type: 'tool_call', toolCallId: 'c3', name: 'fn', args: {} },
       { type: 'tool_result', toolCallId: 'c3', content: JSON.stringify({ value: 42 }) },
@@ -129,6 +140,8 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     const { container } = render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
+    await flushAsyncRender();
+
     // fn() should appear once (in the tool_call block), not twice
     const fnButtons = Array.from(container.querySelectorAll('button')).filter((btn) =>
       btn.textContent?.includes('fn')
@@ -137,7 +150,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(screen.getByText('Used the tool.')).toBeInTheDocument();
   });
 
-  it('collapses consecutive read_file calls into a single grouped block', () => {
+  it('collapses consecutive read_file calls into a single grouped block', async () => {
     const parts: MessagePart[] = [
       { type: 'tool_call', toolCallId: 'r1', name: 'read_file', args: { path: '/a.ts' } },
       { type: 'tool_result', toolCallId: 'r1', content: '{}' },
@@ -150,6 +163,8 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     const { container } = render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
+    await flushAsyncRender();
+
     // One summary pill, not three separate Read blocks.
     const readButtons = Array.from(container.querySelectorAll('button')).filter((btn) =>
       btn.textContent?.includes('Read')
@@ -158,15 +173,17 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(readButtons[0]).toHaveTextContent('+2 more');
   });
 
-  it('shows No response placeholder when there are no text or tool parts', () => {
+  it('shows No response placeholder when there are no text or tool parts', async () => {
     const msg = makeMessage({ parts: undefined, text: '' });
 
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
+    await flushAsyncRender();
+
     expect(screen.getByText('No response')).toBeInTheDocument();
   });
 
-  it('uses a neutral fallback label when assistant model name is missing', () => {
+  it('uses a neutral fallback label when assistant model name is missing', async () => {
     const msg = makeMessage({
       parts: undefined,
       text: 'Plain text response.',
@@ -175,27 +192,33 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
+    await flushAsyncRender();
+
     expect(screen.getByText('AI model')).toBeInTheDocument();
     expect(screen.queryByText('Gemini')).not.toBeInTheDocument();
   });
 
-  it('renders text parts for messages without explicit parts array (backward compat)', () => {
+  it('renders text parts for messages without explicit parts array (backward compat)', async () => {
     const msg = makeMessage({ parts: undefined, text: 'Plain text response.' });
 
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
+    await flushAsyncRender();
+
     expect(screen.getByText('Plain text response.')).toBeInTheDocument();
   });
 
-  it('renders the create-image badge on legacy user image messages', () => {
+  it('renders the create-image badge on legacy user image messages', async () => {
     const msg = makeMessage({ role: 'user', interactionMode: 'image', text: 'a cat' });
 
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
+    await flushAsyncRender();
+
     expect(screen.getByText('Create Image')).toBeInTheDocument();
   });
 
-  it('renders legacy assistant image messages with imageUrl and style params', () => {
+  it('renders legacy assistant image messages with imageUrl and style params', async () => {
     const msg = makeMessage({
       interactionMode: 'image',
       imageUrl: '/images/generated-123.png',
@@ -205,6 +228,8 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     });
 
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
 
     expect(screen.getByText('Generated with: gpt-image-2')).toBeInTheDocument();
     expect(screen.getByAltText('Generated')).toHaveAttribute('src', '/images/generated-123.png');
@@ -212,7 +237,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(screen.getByText('1K')).toBeInTheDocument();
   });
 
-  it('renders generated images from the /images route', () => {
+  it('renders generated images from the /images route', async () => {
     const msg = makeMessage({
       interactionMode: 'image',
       imageUrl: '/images/generated-123.png',
@@ -223,13 +248,17 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
+    await flushAsyncRender();
+
     expect(screen.getByAltText('Generated')).toHaveAttribute('src', '/images/generated-123.png');
   });
 
-  it('shows an unavailable state when a generated image fails to load', () => {
+  it('shows an unavailable state when a generated image fails to load', async () => {
     const msg = makeMessage({ interactionMode: 'image', imageUrl: '/images/missing.png' });
 
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
     fireEvent.error(screen.getByAltText('Generated'));
 
     expect(screen.getByText('Image no longer available')).toBeInTheDocument();
@@ -241,10 +270,10 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
 describe('ChatFeed — generated_image part rendering', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
-  it('renders a generating placeholder for status=generating', () => {
+  it('renders a generating placeholder for status=generating', async () => {
     const parts: MessagePart[] = [
       {
         type: 'generated_image',
@@ -258,11 +287,13 @@ describe('ChatFeed — generated_image part rendering', () => {
 
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
+    await flushAsyncRender();
+
     expect(screen.getByText('Generating image...')).toBeInTheDocument();
     expect(screen.getByText('a polar bear')).toBeInTheDocument();
   });
 
-  it('renders an image for status=completed with imageUrl', () => {
+  it('renders an image for status=completed with imageUrl', async () => {
     const parts: MessagePart[] = [
       {
         type: 'generated_image',
@@ -276,13 +307,15 @@ describe('ChatFeed — generated_image part rendering', () => {
     const msg = makeMessage({ parts });
 
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
 
     const img = screen.getByAltText('Generated image');
     expect(img).toBeInTheDocument();
     expect(img).toHaveAttribute('src', '/images/gen-1.png');
   });
 
-  it('keeps generated image row aspect stable after the image loads', () => {
+  it('keeps generated image row aspect stable after the image loads', async () => {
     const parts: MessagePart[] = [
       {
         type: 'generated_image',
@@ -296,6 +329,8 @@ describe('ChatFeed — generated_image part rendering', () => {
     const msg = makeMessage({ parts });
 
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
 
     const img = screen.getByAltText('Generated image');
     const reservedContainer = img.parentElement;
@@ -306,7 +341,7 @@ describe('ChatFeed — generated_image part rendering', () => {
     expect(reservedContainer).toHaveStyle({ aspectRatio: '1 / 1' });
   });
 
-  it('renders an error card for status=error', () => {
+  it('renders an error card for status=error', async () => {
     const parts: MessagePart[] = [
       {
         type: 'generated_image',
@@ -321,11 +356,13 @@ describe('ChatFeed — generated_image part rendering', () => {
 
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
+    await flushAsyncRender();
+
     expect(screen.getByText('Image generation failed')).toBeInTheDocument();
     expect(screen.getByText('Model not available')).toBeInTheDocument();
   });
 
-  it('renders multiple generated_image parts in one message', () => {
+  it('renders multiple generated_image parts in one message', async () => {
     const parts: MessagePart[] = [
       {
         type: 'generated_image',
@@ -347,11 +384,13 @@ describe('ChatFeed — generated_image part rendering', () => {
 
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
+    await flushAsyncRender();
+
     expect(screen.getByText('first image')).toBeInTheDocument();
     expect(screen.getByAltText('Generated image')).toBeInTheDocument();
   });
 
-  it('renders generated_image parts outside of thinking blocks', () => {
+  it('renders generated_image parts outside of thinking blocks', async () => {
     const parts: MessagePart[] = [
       { type: 'thinking', text: 'I should generate an image' },
       {
@@ -368,12 +407,14 @@ describe('ChatFeed — generated_image part rendering', () => {
 
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
+    await flushAsyncRender();
+
     // Image should appear in the document, not inside a collapsed thinking block
     expect(screen.getByAltText('Generated image')).toBeInTheDocument();
     expect(screen.getByText('Here is your image.')).toBeInTheDocument();
   });
 
-  it('renders and expands subagent trace parts', () => {
+  it('renders and expands subagent trace parts', async () => {
     const parts: MessagePart[] = [
       {
         type: 'subagent_trace',
@@ -393,6 +434,8 @@ describe('ChatFeed — generated_image part rendering', () => {
 
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
+    await flushAsyncRender();
+
     expect(screen.getByText('Explore')).toBeInTheDocument();
     expect(screen.getByText('Subagent trace')).toBeInTheDocument();
     expect(screen.getByText('I used Explore.')).toBeInTheDocument();
@@ -404,7 +447,7 @@ describe('ChatFeed — generated_image part rendering', () => {
     expect(screen.getByText('read_file')).toBeInTheDocument();
   });
 
-  it('keeps subagent retry lifecycle inside the trace card', () => {
+  it('keeps subagent retry lifecycle inside the trace card', async () => {
     const parts: MessagePart[] = [
       {
         type: 'subagent_trace',
@@ -438,6 +481,8 @@ describe('ChatFeed — generated_image part rendering', () => {
     const msg = makeMessage({ parts });
 
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
 
     expect(screen.queryByText(/call=delegate-1/)).not.toBeInTheDocument();
 

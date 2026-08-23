@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import { Spinner } from '@/components/ui/Spinner';
 import { render } from '../../../support/harness/render';
 

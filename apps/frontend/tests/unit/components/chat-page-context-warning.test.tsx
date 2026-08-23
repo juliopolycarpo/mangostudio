@@ -1,47 +1,56 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
-import { ChatPage } from '../../../src/features/chat/ChatPage';
-import { DEFAULT_CONTEXT_SETTINGS } from '../../../src/hooks/use-global-settings';
-import { render } from '../../support/harness/render';
+import { setTestSession } from '../../support/setup/auth-client-stub';
 
-vi.mock('../../../src/features/chat/queries', () => ({
+const actualQueries = await import('../../../src/features/chat/queries');
+
+mock.module('../../../src/features/chat/queries', () => ({
+  ...actualQueries,
   useMessagesQuery: () => ({
     data: { pages: [{ messages: [], contextInfo: null }] },
     status: 'success',
   }),
 }));
 
-vi.mock('../../../src/lib/auth-client', () => ({
-  authClient: {
-    useSession: () => ({ data: { user: { name: 'Taylor Tester' } } }),
-  },
+function WorkspaceRailStub({ chatId }: { chatId: string }) {
+  return <div data-testid="workspace-rail">{chatId}</div>;
+}
+
+mock.module('../../../src/features/workspace/rail/WorkspaceRail', () => ({
+  WorkspaceRail: WorkspaceRailStub,
 }));
 
-vi.mock('../../../src/features/workspace/rail/WorkspaceRail', () => ({
-  WorkspaceRail: ({ chatId }: { chatId: string }) => (
-    <div data-testid="workspace-rail">{chatId}</div>
-  ),
+function PinnedTodoPanelStub({ chatId }: { chatId: string | null }) {
+  return <div data-testid="pinned-todos">{chatId}</div>;
+}
+
+mock.module('../../../src/features/chat/components/PinnedTodoPanel', () => ({
+  PinnedTodoPanel: PinnedTodoPanelStub,
 }));
 
-vi.mock('../../../src/features/chat/components/PinnedTodoPanel', () => ({
-  PinnedTodoPanel: ({ chatId }: { chatId: string | null }) => (
-    <div data-testid="pinned-todos">{chatId}</div>
-  ),
-}));
+// After the mock, never before: a static import is evaluated first and would
+// bind ChatPage to the real queries and rail components.
+const { ChatPage } = await import('../../../src/features/chat/ChatPage');
+const { DEFAULT_CONTEXT_SETTINGS } = await import('../../../src/hooks/use-global-settings');
+const { render } = await import('../../support/harness/render');
+
+beforeEach(() => {
+  setTestSession({ user: { id: 'user-1', name: 'Taylor Tester' } });
+});
 
 function renderChatPage(overrides: Partial<React.ComponentProps<typeof ChatPage>> = {}) {
   const props: React.ComponentProps<typeof ChatPage> = {
     chatId: 'chat-1',
-    onSubmit: vi.fn(),
+    onSubmit: jest.fn(),
     disabled: false,
     isGenerating: false,
-    onStop: vi.fn(),
+    onStop: jest.fn(),
     thinkingEnabled: false,
     reasoningEffort: 'medium',
-    onThinkingToggle: vi.fn(),
-    onReasoningEffortChange: vi.fn(),
+    onThinkingToggle: jest.fn(),
+    onReasoningEffortChange: jest.fn(),
     reasoningVisible: false,
     contextInfo: {
       estimatedInputTokens: 90_000,
@@ -51,15 +60,15 @@ function renderChatPage(overrides: Partial<React.ComponentProps<typeof ChatPage>
       severity: 'warning',
     },
     fallbackNotice: null,
-    seedContextInfo: vi.fn(),
+    seedContextInfo: jest.fn(),
     contextSettings: DEFAULT_CONTEXT_SETTINGS,
     isContextActionPending: false,
-    onCompactCurrentChat: vi.fn().mockResolvedValue(undefined),
-    onStartSummarizedChat: vi.fn().mockResolvedValue(undefined),
-    onResumeInterruptedTurn: vi.fn().mockResolvedValue(undefined),
-    onDismissInterruptedTurn: vi.fn().mockResolvedValue(undefined),
+    onCompactCurrentChat: jest.fn().mockResolvedValue(undefined),
+    onStartSummarizedChat: jest.fn().mockResolvedValue(undefined),
+    onResumeInterruptedTurn: jest.fn().mockResolvedValue(undefined),
+    onDismissInterruptedTurn: jest.fn().mockResolvedValue(undefined),
     imageToolIntent: false,
-    onImageToolIntentChange: vi.fn(),
+    onImageToolIntentChange: jest.fn(),
     ...overrides,
   };
 

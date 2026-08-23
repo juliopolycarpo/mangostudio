@@ -5,10 +5,10 @@
  * keeps its console.
  */
 
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import type { InstallStreamEvent } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InstallAction } from '../../../../src/features/environments/components/InstallAction';
 import { render, screen, waitFor } from '../../../support/harness/render';
 import { installRecipe } from './fixtures';
@@ -84,7 +84,7 @@ function exitEvent(status: 'succeeded' | 'failed'): InstallStreamEvent {
 }
 
 describe('InstallAction', () => {
-  const fetchMock = vi.fn();
+  const fetchMock = jest.fn();
 
   /**
    * Requests aimed at the install endpoints. The card also reads unrelated data
@@ -105,12 +105,13 @@ describe('InstallAction', () => {
   }
 
   beforeEach(() => {
-    vi.stubGlobal('fetch', fetchMock);
+    // `vi.stubGlobal` has no Bun equivalent. `bun.setup.ts` reinstates its
+    // unreachable `fetch` after every test, so a plain assignment cannot leak.
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
   });
 
   afterEach(() => {
     fetchMock.mockReset();
-    vi.unstubAllGlobals();
   });
 
   it('renders the copyable command and issues no request when a guard refuses', async () => {

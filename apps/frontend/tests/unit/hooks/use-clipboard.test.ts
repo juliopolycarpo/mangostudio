@@ -1,26 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import { useClipboard } from '../../../src/hooks/use-clipboard';
+import { stubClipboard } from '../../support/harness/clipboard';
 import { act, renderHook } from '../../support/harness/render';
+import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
 
 describe('useClipboard', () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    useFakeTimers();
   });
 
   afterEach(() => {
-    vi.useRealTimers();
-    vi.restoreAllMocks();
+    jest.restoreAllMocks();
   });
 
-  function stubClipboardWrite(writeText: (text: string) => Promise<void>) {
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: { writeText },
-    });
-  }
-
   it('clears failed after resetAfterMs when clipboard write rejects', async () => {
-    stubClipboardWrite(() => Promise.reject(new Error('denied')));
+    stubClipboard(() => Promise.reject(new Error('denied')));
 
     const { result } = renderHook(() => useClipboard({ resetAfterMs: 1000 }));
 
@@ -33,15 +27,15 @@ describe('useClipboard', () => {
     expect(result.current.failed).toBe(true);
     expect(result.current.copied).toBe(false);
 
-    act(() => {
-      vi.advanceTimersByTime(1000);
+    await act(async () => {
+      await advanceTimersByTimeAsync(1000);
     });
 
     expect(result.current.failed).toBe(false);
   });
 
   it('clears copied after resetAfterMs when clipboard write succeeds', async () => {
-    stubClipboardWrite(() => Promise.resolve());
+    stubClipboard(() => Promise.resolve());
 
     const { result } = renderHook(() => useClipboard({ resetAfterMs: 500 }));
 
@@ -52,8 +46,8 @@ describe('useClipboard', () => {
     expect(result.current.copied).toBe(true);
     expect(result.current.failed).toBe(false);
 
-    act(() => {
-      vi.advanceTimersByTime(500);
+    await act(async () => {
+      await advanceTimersByTimeAsync(500);
     });
 
     expect(result.current.copied).toBe(false);

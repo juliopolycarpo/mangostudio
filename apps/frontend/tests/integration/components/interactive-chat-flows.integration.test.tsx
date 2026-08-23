@@ -1,24 +1,26 @@
+import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { Message, MessagePart } from '@mangostudio/shared';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChatFeed } from '../../../src/features/chat/components/ChatFeed';
-import { useChatTodos } from '../../../src/features/chat/hooks/use-chat-todos';
-import { useTextGeneration } from '../../../src/features/generation/hooks/use-text-generation';
 import {
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
 } from '../../../src/hooks/use-global-settings';
-import { respondTextStream } from '../../../src/services/generation-service';
 import { fireEvent, render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
-const { respondStreamMock } = vi.hoisted(() => ({ respondStreamMock: vi.fn() }));
+// Held as its own handle rather than reached back through the module namespace:
+// `bun test` has no `jest.mocked`.
+const respondStreamMock = jest.fn();
 
-vi.mock('../../../src/services/generation-service', async (importOriginal) => ({
-  ...(await importOriginal<object>()),
+// Import the real namespace, register the mock over it, then import the
+// subjects — `mock.module` is not hoisted and static imports are.
+const actualGenerationService = await import('../../../src/services/generation-service');
+
+mock.module('../../../src/services/generation-service', () => ({
+  ...actualGenerationService,
   respondTextStream: respondStreamMock,
 }));
 
-vi.mock('@tanstack/react-virtual', () => ({
+mock.module('@tanstack/react-virtual', () => ({
   useVirtualizer: (options: { count: number }) => ({
     getTotalSize: () => options.count * 200,
     getVirtualItems: () =>
@@ -27,9 +29,15 @@ vi.mock('@tanstack/react-virtual', () => ({
         key: index,
         start: index * 200,
       })),
-    measureElement: vi.fn(),
+    measureElement: jest.fn(),
   }),
 }));
+
+const { ChatFeed } = await import('../../../src/features/chat/components/ChatFeed');
+const { useChatTodos } = await import('../../../src/features/chat/hooks/use-chat-todos');
+const { useTextGeneration } = await import(
+  '../../../src/features/generation/hooks/use-text-generation'
+);
 
 type ElicitationPart = Extract<MessagePart, { type: 'mcp_elicitation' }>;
 
@@ -60,7 +68,7 @@ function assistantMessage(parts: MessagePart[]): Message {
 
 describe('interactive chat flow integration', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it('updates a mounted elicitation from pending to the streamed terminal state', () => {
@@ -77,7 +85,7 @@ describe('interactive chat flow integration', () => {
   });
 
   it('renders reloaded MCP media and resumes a persisted question as a user reply', () => {
-    const onQuestionSubmit = vi.fn();
+    const onQuestionSubmit = jest.fn();
     const message = assistantMessage([
       {
         type: 'mcp_media',
@@ -146,15 +154,15 @@ function TodoStreamHarness({ chatId }: { chatId: string }) {
     chats: {
       currentChatId: chatId,
       currentChat: { id: chatId, title: 'Existing chat', createdAt: 1, updatedAt: 1 },
-      createChat: vi.fn(),
-      updateChatTitle: vi.fn(),
-      loadChats: vi.fn(),
+      createChat: jest.fn(),
+      updateChatTitle: jest.fn(),
+      loadChats: jest.fn(),
     } as unknown as GenerationOptions['chats'],
     getActiveModel: () => 'test-model',
     systemPrompt: '',
     optimistic: {
-      appendOptimisticMessages: vi.fn(),
-      updateOptimisticMessage: vi.fn(),
+      appendOptimisticMessages: jest.fn(),
+      updateOptimisticMessage: jest.fn(),
     } as unknown as GenerationOptions['optimistic'],
     thinkingEnabled: true,
     reasoningEffort: 'medium',
@@ -181,8 +189,13 @@ describe('todo stream and reload integration', () => {
   beforeEach(() => {
     fetchScenario.install();
     respondStreamMock.mockReset();
-    vi.mocked(respondTextStream).mockImplementation(
-      (_request, onChunk: Parameters<typeof respondTextStream>[1]) => {
+    // The handle the factory was given, not `jest.mocked(respondTextStream)`:
+    // that helper does not exist under `bun test`.
+    respondStreamMock.mockImplementation(
+      (
+        _request: unknown,
+        onChunk: Parameters<typeof actualGenerationService.respondTextStream>[1]
+      ) => {
         onChunk({ type: 'user_message_id', messageId: 'user-1', done: false });
         onChunk({ type: 'assistant_message_id', messageId: 'assistant-1', done: false });
         onChunk({

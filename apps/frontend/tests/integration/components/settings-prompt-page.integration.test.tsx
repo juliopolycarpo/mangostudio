@@ -2,47 +2,27 @@
  * Integration tests for the Prompt settings page.
  */
 
+import { describe, expect, it, jest, mock } from 'bun:test';
 import { fireEvent, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import { PromptSettings } from '../../../src/components/settings/PromptSettings';
-import { SettingsTabs } from '../../../src/components/settings/SettingsTabs';
 import { DEFAULT_PROMPT_SETTINGS } from '../../../src/hooks/use-global-settings';
 import { render } from '../../support/harness/render';
+import { routerWithLinkStub } from '../../support/mocks/router';
 
-vi.mock('@tanstack/react-router', async () => {
-  const actual = await vi.importActual('@tanstack/react-router');
-  return {
-    ...actual,
-    Link: ({
-      to,
-      children,
-      activeProps: _activeProps,
-      inactiveProps: _inactiveProps,
-      activeOptions: _activeOptions,
-      ...props
-    }: {
-      to: string;
-      children: React.ReactNode;
-      activeProps?: unknown;
-      inactiveProps?: unknown;
-      activeOptions?: unknown;
-      [key: string]: unknown;
-    }) => (
-      <a href={to} {...props}>
-        {children}
-      </a>
-    ),
-  };
-});
+// Registered before the subjects are imported: `mock.module` is not hoisted and
+// static imports are.
+mock.module('@tanstack/react-router', await routerWithLinkStub());
+
+const { PromptSettings } = await import('../../../src/components/settings/PromptSettings');
+const { SettingsTabs } = await import('../../../src/components/settings/SettingsTabs');
 
 function createDefaultProps() {
   return {
     promptSettings: DEFAULT_PROMPT_SETTINGS,
-    onTextSystemPromptChange: vi.fn(),
-    onImageSystemPromptChange: vi.fn(),
-    onUpdateRuleFile: vi.fn(),
-    onAddCustomRule: vi.fn(),
-    onRemoveCustomRule: vi.fn(),
+    onTextSystemPromptChange: jest.fn(),
+    onImageSystemPromptChange: jest.fn(),
+    onUpdateRuleFile: jest.fn(),
+    onAddCustomRule: jest.fn(),
+    onRemoveCustomRule: jest.fn(),
   };
 }
 
@@ -91,7 +71,7 @@ describe('Settings Prompts Page — Integration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Rule' }));
 
-    expect(props.onAddCustomRule).toHaveBeenCalledOnce();
+    expect(props.onAddCustomRule).toHaveBeenCalledTimes(1);
   });
 
   it('shows injection role and frequency radio groups on fixed rules', () => {

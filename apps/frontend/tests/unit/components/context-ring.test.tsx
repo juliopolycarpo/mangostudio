@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import { ContextRing } from '@/features/sidebar/components/ContextRing';
 import { render } from '../../support/harness/render';
 

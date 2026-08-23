@@ -96,9 +96,8 @@ For container deployment details, see [`docs/operations/deployment.md`](docs/ope
    bun run dev
    ```
 
-   This starts:
-   - **API** at `http://localhost:3001` (Elysia + Kysely/SQLite)
-   - **Frontend** at `http://localhost:5173` (Vite + React)
+   This starts one server at `http://localhost:3001` (Elysia + Kysely/SQLite) that also
+   builds and serves the React frontend. There is no separate frontend port.
 
 ## Connector Configuration (Secrets)
 
@@ -231,17 +230,16 @@ mangostudio/
 
 ## Development Tooling
 
-| Tool           | Scope                                         | Primary Functionality                              |
-| -------------- | --------------------------------------------- | -------------------------------------------------- |
-| **Biome**      | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML      | Linter and formatter with unified rule sets        |
-| **dprint**     | Markdown, MDX, TOML, YAML, Dockerfile         | Pluggable formatter with WASM-based plugins        |
-| **lefthook**   | Git hooks (pre-commit)                        | Git hooks manager that runs checks on staged files |
-| **madge**      | JS/TS dependency graphs                       | Circular dependency detection across workspaces    |
-| **Knip**       | Root and workspace entry graphs               | Unused code and dependency detection               |
-| **jscpd**      | All source files                              | Copy/paste detection for code duplication alerts   |
-| **bun:test**   | Unit tests (api, shared, frontend pure logic) | Fast native test runner with LCOV coverage         |
-| **Vitest**     | Frontend React and Vite-bound tests           | jsdom, Vite plugins, coverage, and watch mode      |
-| **Playwright** | End-to-end browser smoke tests                | Chromium-based browser automation for auth flows   |
+| Tool           | Scope                                        | Primary Functionality                              |
+| -------------- | -------------------------------------------- | -------------------------------------------------- |
+| **Biome**      | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML     | Linter and formatter with unified rule sets        |
+| **dprint**     | Markdown, MDX, TOML, YAML, Dockerfile        | Pluggable formatter with WASM-based plugins        |
+| **lefthook**   | Git hooks (pre-commit)                       | Git hooks manager that runs checks on staged files |
+| **madge**      | JS/TS dependency graphs                      | Circular dependency detection across workspaces    |
+| **Knip**       | Root and workspace entry graphs              | Unused code and dependency detection               |
+| **jscpd**      | All source files                             | Copy/paste detection for code duplication alerts   |
+| **bun:test**   | Every workspace's unit and integration tests | Fast native test runner with LCOV coverage         |
+| **Playwright** | End-to-end browser smoke tests               | Chromium-based browser automation for auth flows   |
 
 These binaries are installed as devDependencies and invoked through the root `bun run` scripts. No global installation is required.
 
@@ -271,7 +269,7 @@ Files that pass formatting are re-staged automatically. All hooks must succeed f
 
 | Layer        | Technologies                                                                     |
 | ------------ | -------------------------------------------------------------------------------- |
-| **Frontend** | React 19, Vite 8, Tailwind CSS v4, TanStack Router/Query                         |
+| **Frontend** | React 19, Bun bundler, Tailwind CSS v4, TanStack Router/Query                    |
 | **API**      | Elysia, Better Auth, native rate limiting, DDD-inspired modular architecture     |
 | **Database** | SQLite via Kysely (type-safe query builder)                                      |
 | **AI**       | Multi-provider (Gemini, OpenAI, Anthropic, DeepSeek, ChatGPT, OpenAI-compatible) |

@@ -7,10 +7,10 @@
  * exactly its own block.
  */
 
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { Environment } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OverviewPage } from '../../../../src/features/environments/components/OverviewPage';
 import { screen, waitFor, within } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';

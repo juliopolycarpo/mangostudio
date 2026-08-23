@@ -48,10 +48,6 @@ updates:
         patterns:
           - typescript
           - "@types/*"
-      vitest:
-        patterns:
-          - vitest
-          - "@vitest/*"
       playwright:
         patterns:
           - "@playwright/*"

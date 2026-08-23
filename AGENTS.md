@@ -21,6 +21,7 @@ Useful docs:
 - `docs/architecture/overview.md` — workspace map and API module layering
 - `docs/architecture/hub-runtime.md` — hub/runtime ownership and protocol boundary
 - `docs/architecture/external-agents.md` — hosting vendor CLIs: ownership, discovery, permissions
+- `docs/architecture/frontend-build.md` — how the frontend bundle is built, served, and embedded
 - `docs/reference/testing.md` — test taxonomy and harness rules
 - `docs/reference/agent-playbooks.md` — detailed file maps by feature area
 - `docs/reference/releasing.md` — changelog (`bun run changelog`) and release pipeline

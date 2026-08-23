@@ -19,7 +19,7 @@
  * substituted through the registry that production itself uses.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -46,8 +46,9 @@ import {
   type ChatFixture,
   insertTestChat,
   insertTestConnector,
-  insertTestUser,
+  type UserFixture,
 } from '../../../support/factories';
+import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
 
 const hasBash = isShellAvailable('bash');
 const MODEL_ID = 'delegated-checkpoints-model';
@@ -152,6 +153,14 @@ async function enableShellForUser(userId: string): Promise<void> {
   });
 }
 
+// One user, and one Local runtime connection, for the whole file — the
+// helper's doc comment carries the rationale.
+let user: UserFixture;
+
+beforeAll(async () => {
+  user = await insertUserWithLocalRuntime();
+});
+
 beforeEach(async () => {
   tempDir = mkdtempSync(join(tmpdir(), 'delegated-checkpoints-test-'));
   try {
@@ -161,7 +170,6 @@ beforeEach(async () => {
   }
   registerProvider(new ScriptedProvider());
 
-  const user = await insertTestUser();
   chat = await insertTestChat(user.id);
   // `resolveModel` needs a connector row enabling MODEL_ID, or the turn rejects
   // the model as unavailable before any tool runs.

@@ -645,6 +645,22 @@ Open these first:
 - `apps/frontend/src/services/`
 - `apps/frontend/src/index.css`
 
+## Frontend Build, Dev Server, And Test Harness
+
+Open these first:
+
+- `docs/architecture/frontend-build.md` (how the bundle is built, served, and embedded)
+- `apps/frontend/build.ts` and `apps/frontend/bunfig.toml`
+- `apps/api/src/server/frontend-static.ts` (static assets + SPA fallback)
+- `apps/api/src/server/embedded-frontend.ts`
+- `scripts/lib/embed-frontend.ts` (binary embedding) and `scripts/test-build.ts`
+- `scripts/ci/frontend-bundle-report.ts` (per-chunk size diff against a saved baseline)
+- `scripts/lib/test-lanes.ts` (the lane registry, not just `package.json`)
+
+`docs/architecture/frontend-build.md` carries the measured traps for this section (bundler,
+dev server, embedding) and `docs/reference/testing.md`'s Frontend section carries the ones
+for the test harness. Read both before editing anything here.
+
 ## Shared Contracts, Types, And i18n
 
 Open these first:

@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { resetConfig } from '../../../src/lib/config';
 import {
-  getDefaultFrontendDir,
   getRuntimeBaseDir,
+  getSourceFrontendDir,
   isStandaloneExecutable,
 } from '../../../src/lib/runtime-paths';
 
@@ -51,7 +51,6 @@ describe('runtime paths', () => {
 
     expect(isStandaloneExecutable()).toBe(true);
     expect(getRuntimeBaseDir()).toBe(dirname(executablePath));
-    expect(getDefaultFrontendDir()).toBe(join(dirname(executablePath), 'public'));
   });
 
   symlinkTest('resolves standalone executable symlinks before locating sidecars', () => {
@@ -66,20 +65,22 @@ describe('runtime paths', () => {
     setExecPath(symlinkPath);
 
     expect(getRuntimeBaseDir()).toBe(installDir);
-    expect(getDefaultFrontendDir()).toBe(join(installDir, 'public'));
   });
 
-  it('prefers the monorepo frontend dist directory when it exists', () => {
+  it('resolves the checkout frontend dist directory', () => {
     setExecPath('/usr/bin/bun');
     const frontendDistDir = join(tempDir, 'apps', 'frontend', 'dist');
     mkdirSync(frontendDistDir, { recursive: true });
 
-    expect(getDefaultFrontendDir()).toBe(frontendDistDir);
+    expect(getSourceFrontendDir()).toBe(frontendDistDir);
   });
 
-  it('falls back to a local public directory in development', () => {
+  // Unconditional, so an unbuilt checkout names the directory the build will
+  // write to. The `<cwd>/public` fallback this replaced pointed the "no
+  // frontend found at" warning at a path nothing ever creates.
+  it('names the same directory when the frontend has not been built yet', () => {
     setExecPath('/usr/bin/bun');
 
-    expect(getDefaultFrontendDir()).toBe(join(tempDir, 'public'));
+    expect(getSourceFrontendDir()).toBe(join(tempDir, 'apps', 'frontend', 'dist'));
   });
 });

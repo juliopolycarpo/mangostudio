@@ -1,6 +1,10 @@
 import { ROOT_DIR, WORKSPACES, type WorkspaceName } from './config';
 
-export const DEV_WORKSPACES: WorkspaceName[] = ['api', 'frontend'];
+// The API serves the frontend directly in dev: `apps/api/src/dev.ts` builds
+// `apps/frontend/dist` with `Bun.build()` and Elysia serves it from disk (there
+// is no HTML-bundle route — Bun's HTML loader drops a transitive import from
+// this graph). So the frontend workspace has no dev server of its own.
+export const DEV_WORKSPACES: WorkspaceName[] = ['api'];
 
 export interface DevSelection {
   runnableWorkspaces: WorkspaceName[];
@@ -9,12 +13,25 @@ export interface DevSelection {
 
 export type TurboDevUi = 'stream' | 'tui';
 
-/** Select only workspaces that expose a dev server. // Usage: selectDevWorkspaces(['api']); */
+/**
+ * Select only workspaces that expose a dev server, redirecting an explicit
+ * `--frontend` request to `api` instead of dropping it — the API serves the
+ * frontend now, so `--frontend` alone would otherwise start nothing.
+ * // Usage: selectDevWorkspaces(['frontend']);
+ */
 export function selectDevWorkspaces(workspaces: WorkspaceName[]): DevSelection {
+  const normalized = dedupe(
+    workspaces.map((workspace) => (workspace === 'frontend' ? 'api' : workspace))
+  );
+
   return {
-    runnableWorkspaces: workspaces.filter(isDevWorkspace),
-    skippedWorkspaces: workspaces.filter((workspace) => !isDevWorkspace(workspace)),
+    runnableWorkspaces: normalized.filter(isDevWorkspace),
+    skippedWorkspaces: normalized.filter((workspace) => !isDevWorkspace(workspace)),
   };
+}
+
+function dedupe(workspaces: WorkspaceName[]): WorkspaceName[] {
+  return [...new Set(workspaces)];
 }
 
 /** Build a filtered Turbo dev command. // Usage: createTurboDevCommand(['api'], 'stream'); */

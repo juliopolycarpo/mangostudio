@@ -85,6 +85,13 @@ port = 3001
 # de pareamento não tem outra forma de imprimir o endereço que eles discam, e um
 # cabeçalho de requisição seria um palpite falsificável. Env: PUBLIC_URL.
 publicUrl = "https://seu-dominio.com"
+# Apenas para deploy dividido, em que o bundle do frontend é servido a partir de
+# uma origem diferente desta API. É somado às origens do próprio servidor, nunca
+# as substitui. Cada entrada precisa ser um scheme://host[:port] puro — caminho,
+# barra final ou porta padrão explícita falham na inicialização, porque cada
+# gate compara o cabeçalho Origin do navegador por string exata. Env:
+# ALLOWED_ORIGINS (separado por vírgulas), que substitui esta lista.
+allowedOrigins = ["https://studio.example.com"]
 
 [database]
 path = "/var/lib/mangostudio/database.sqlite"
@@ -108,6 +115,22 @@ url = "https://your-domain.com"
 - Defina `auth.secret` como uma string aleatória forte com 32 ou mais caracteres.
 - Defina `auth.url` com a URL pública da aplicação.
 - Use um reverse proxy para terminação TLS.
+
+### Deploy dividido
+
+`allowedOrigins` é só metade de um deploy dividido. Ele diz a esta API de qual origem aceitar
+requisições; o bundle também precisa saber onde a API está. Extraia
+`mangostudio-<versão>-frontend-dist.tar.gz` e edite o `config.js` ao lado do `index.html`:
+
+```js
+window.__MANGO_CONFIG__ = { apiUrl: 'https://api.example.com' };
+```
+
+Não é preciso rebuildar — o arquivo é lido no carregamento da página e tem precedência sobre
+qualquer valor embutido em tempo de build. Deixe `apiUrl` vazio (o padrão distribuído) para
+usar a origem que serviu a página, que é o que tanto uma instalação de origem única quanto o
+binário standalone querem. `MANGO_API_URL` define o mesmo valor em tempo de build, para quem
+compila o bundle por conta própria. Veja `docs/architecture/frontend-build.md`.
 
 ## Banco De Dados
 
