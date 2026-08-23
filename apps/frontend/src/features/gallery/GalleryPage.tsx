@@ -2,6 +2,8 @@ import type { GalleryItem } from '@mangostudio/shared';
 import { Download, LayoutGrid, Loader2, Maximize2, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { useI18n } from '@/hooks/use-i18n';
 import { buildGeneratedImageFilename } from '@/lib/download-filenames';
 import { useGalleryQuery } from './queries';
@@ -44,14 +46,18 @@ export function GalleryPage() {
       </div>
 
       {status === 'pending' ? (
-        <div className="flex justify-center items-center py-20">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-12">
+          {Array.from({ length: 8 }, (_, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder list
+            <Skeleton key={index} className="aspect-square rounded-2xl" />
+          ))}
         </div>
       ) : items.length === 0 ? (
-        <div className="text-center py-20 text-on-surface-variant/50 flex-1 flex flex-col items-center justify-center">
-          <LayoutGrid size={48} className="mx-auto mb-4 opacity-50" />
-          <p className="text-sm font-body">{t.gallery.empty}</p>
-        </div>
+        <EmptyState
+          icon={<LayoutGrid size={48} className="opacity-50" />}
+          title={t.gallery.empty}
+          className="flex-1 py-20"
+        />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-12">
           {items.map((item) => (

@@ -1,15 +1,16 @@
 import type { EnvironmentConnectionState } from '@mangostudio/shared/environments';
 import { Server } from 'lucide-react';
 import { useState } from 'react';
+import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useEnvironmentEntitiesQuery } from '../queries';
 
-const STATUS_DOT: Record<EnvironmentConnectionState, string> = {
-  connected: 'bg-primary',
-  connecting: 'bg-warning animate-pulse',
-  disconnected: 'bg-outline',
-  error: 'bg-error',
+const STATUS_TONE: Record<EnvironmentConnectionState, StatusDotTone> = {
+  connected: 'accent',
+  connecting: 'warning',
+  disconnected: 'neutral',
+  error: 'error',
 };
 
 interface EnvironmentSelectorProps {
@@ -58,10 +59,7 @@ export function EnvironmentSelector({
         data-state={status}
       >
         <Server size={12} className="shrink-0 text-primary/80" aria-hidden="true" />
-        <span
-          className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[status]}`}
-          aria-hidden="true"
-        />
+        <StatusDot tone={STATUS_TONE[status]} pulse={status === 'connecting'} />
         <span className="sr-only">{t.chat.input.selectEnvironment}</span>
         <select
           value={environmentId}

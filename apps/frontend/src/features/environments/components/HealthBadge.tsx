@@ -5,26 +5,23 @@
  */
 
 import type { RuntimeHealth } from '@mangostudio/shared/environments';
+import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { healthLabel } from '../format';
 
-const HEALTH_STYLES: Record<RuntimeHealth, string> = {
-  ok: 'bg-primary/10 text-primary',
-  warn: 'bg-warning/15 text-warning',
-  missing: 'bg-surface-container-highest text-on-surface-variant',
-  error: 'bg-error/10 text-error',
+const HEALTH_VARIANTS: Record<RuntimeHealth, 'accent' | 'warning' | 'neutral' | 'error'> = {
+  ok: 'accent',
+  warn: 'warning',
+  missing: 'neutral',
+  error: 'error',
 };
 
 export function HealthBadge({ health }: { health: RuntimeHealth }) {
   const { t } = useI18n();
 
   return (
-    <span
-      className={`rounded-full px-2.5 py-1 font-label text-[10px] font-bold uppercase tracking-widest ${HEALTH_STYLES[health]}`}
-      data-testid="health-badge"
-      data-health={health}
-    >
+    <Badge variant={HEALTH_VARIANTS[health]} data-testid="health-badge" data-health={health}>
       {healthLabel(t, health)}
-    </span>
+    </Badge>
   );
 }

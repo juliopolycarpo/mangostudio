@@ -22,11 +22,15 @@ import {
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Menu';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useToast } from '@/components/ui/Toast';
 import { ExternalReviewAction } from '@/features/external-agents/ExternalReviewAction';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { BranchControl } from './BranchControl';
 import { CommitForm } from './CommitForm';
@@ -98,29 +102,33 @@ export function GitPanel({ chatId }: GitPanelProps) {
         <div className="min-w-0 flex-1 text-on-surface-variant">
           <RepositoryName state={stateQuery.data} />
         </div>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon"
           onClick={() => void refresh()}
           aria-label={labels.refresh}
           title={labels.refresh}
           disabled={isFetching}
-          className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-primary"
+          className="size-7 text-on-surface-variant disabled:cursor-wait focus-visible:outline-2 focus-visible:outline-primary"
         >
-          <RefreshCw size={14} className={isFetching ? 'animate-spin' : undefined} />
-        </button>
+          <RefreshCw size={ICON_SM} className={isFetching ? 'animate-spin' : undefined} />
+        </Button>
         <Menu
           open={menuOpen}
           onOpenChange={setMenuOpen}
           trigger={(triggerProps) => (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon"
               aria-label={labels.menu.open}
               title={labels.menu.open}
-              className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface focus-visible:outline-2 focus-visible:outline-primary"
+              className="size-7 text-on-surface-variant focus-visible:outline-2 focus-visible:outline-primary"
               {...triggerProps}
             >
-              <MoreHorizontal size={14} />
-            </button>
+              <MoreHorizontal size={ICON_SM} />
+            </Button>
           )}
         >
           <MenuItem
@@ -221,52 +229,57 @@ function GitPanelContent({
 
   if (error) {
     return (
-      <PanelMessage icon={<AlertTriangle size={20} />} title={labels.loadError} tone="error">
-        <Button type="button" variant="secondary" size="sm" onClick={onRetry}>
-          {t.common.retry}
-        </Button>
-      </PanelMessage>
+      <EmptyState
+        icon={<AlertTriangle size={20} />}
+        title={labels.loadError}
+        tone="error"
+        action={
+          <Button type="button" variant="secondary" size="sm" onClick={onRetry}>
+            {t.common.retry}
+          </Button>
+        }
+      />
     );
   }
   if (loading || !state) {
     return (
-      <PanelMessage
-        icon={<RefreshCw size={20} className="animate-spin" />}
-        title={labels.loading}
-      />
+      <EmptyState icon={<RefreshCw size={20} className="animate-spin" />} title={labels.loading} />
     );
   }
 
   switch (state.state) {
     case 'git-unavailable':
       return (
-        <PanelMessage
+        <EmptyState
           icon={<AlertTriangle size={20} />}
           title={labels.unavailableTitle}
-          detail={labels.unavailableHint}
+          hint={labels.unavailableHint}
           tone="warning"
         />
       );
     case 'no-workdir':
-      return <PanelMessage icon={<FolderGit2 size={20} />} title={labels.noWorkdir} />;
+      return <EmptyState icon={<FolderGit2 size={20} />} title={labels.noWorkdir} />;
     case 'not-a-repo':
       return (
-        <PanelMessage
+        <EmptyState
           icon={<FolderGit2 size={22} />}
           title={labels.noRepositoryTitle}
-          detail={labels.noRepositoryHint}
-        >
-          <Button
-            type="button"
-            size="sm"
-            onClick={onInitialize}
-            loading={initPending}
-            disabled={initPending}
-          >
-            {initPending ? labels.initializing : labels.initialize}
-          </Button>
-          {initError ? <p className="text-xs text-error">{labels.initializeFailed}</p> : null}
-        </PanelMessage>
+          hint={labels.noRepositoryHint}
+          action={
+            <>
+              <Button
+                type="button"
+                size="sm"
+                onClick={onInitialize}
+                loading={initPending}
+                disabled={initPending}
+              >
+                {initPending ? labels.initializing : labels.initialize}
+              </Button>
+              {initError ? <p className="text-xs text-error">{labels.initializeFailed}</p> : null}
+            </>
+          }
+        />
       );
     case 'repo':
       return (
@@ -433,10 +446,10 @@ function RepositoryStatus({
               onClose={() => setDiffSelection(null)}
             />
           ) : status.clean ? (
-            <PanelMessage
+            <EmptyState
               icon={<Check size={22} />}
               title={labels.cleanTitle}
-              detail={labels.cleanHint}
+              hint={labels.cleanHint}
               tone="success"
             />
           ) : (
@@ -695,18 +708,18 @@ function GithubPrBadge({
   const label = draft
     ? t.github.states.draft
     : t.github.states[state.toLowerCase() as Lowercase<GithubPrState>];
-  const tone = draft
-    ? 'bg-warning/15 text-warning'
+  const variant = draft
+    ? ('warning' as const)
     : state === 'OPEN'
-      ? 'bg-success/15 text-success'
+      ? ('success' as const)
       : state === 'MERGED'
-        ? 'bg-primary/15 text-primary'
-        : 'bg-surface-container-high text-on-surface-variant';
+        ? ('accent' as const)
+        : ('neutral' as const);
 
   return (
-    <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${tone}`}>
+    <Badge variant={variant} className="px-1.5 py-0.5 text-[9px] tracking-normal">
       {label}
-    </span>
+    </Badge>
   );
 }
 
@@ -741,7 +754,7 @@ function ChangeGroup({
 
   return (
     <section>
-      <h3 className="mb-1.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-on-surface-variant">
+      <MicroLabel as="h3" className="mb-1.5 flex items-center gap-2 font-bold tracking-[0.12em]">
         <span>{title}</span>
         <span className="rounded-full bg-surface-container-high px-1.5 py-0.5 font-mono text-[9px] tracking-normal">
           {changes.length}
@@ -796,7 +809,7 @@ function ChangeGroup({
             {action === 'stage' ? <Plus size={13} /> : <Minus size={13} />}
           </GroupButton>
         </span>
-      </h3>
+      </MicroLabel>
       <ul className="overflow-hidden rounded-xl border border-outline-variant/15 bg-surface-container-lowest/40">
         {changes.map((change) => (
           <FileChangeRow
@@ -934,38 +947,6 @@ function changePaths(changes: readonly GitFileChange[]): string[] {
       changes.flatMap((change) => (change.oldPath ? [change.oldPath, change.path] : [change.path]))
     ),
   ];
-}
-
-function PanelMessage({
-  icon,
-  title,
-  detail,
-  tone = 'neutral',
-  children,
-}: {
-  readonly icon: ReactNode;
-  readonly title: string;
-  readonly detail?: string;
-  readonly tone?: 'neutral' | 'error' | 'warning' | 'success';
-  readonly children?: ReactNode;
-}) {
-  const toneClass = {
-    neutral: 'text-on-surface-variant',
-    error: 'text-error',
-    warning: 'text-warning',
-    success: 'text-success',
-  }[tone];
-
-  return (
-    <div className="flex min-h-40 flex-col items-center justify-center gap-3 px-3 py-6 text-center">
-      <span className={toneClass}>{icon}</span>
-      <div className="space-y-1">
-        <p className="text-sm font-semibold text-on-surface">{title}</p>
-        {detail ? <p className="text-xs leading-5 text-on-surface-variant">{detail}</p> : null}
-      </div>
-      {children}
-    </div>
-  );
 }
 
 function basename(path: string): string {
