@@ -117,19 +117,29 @@ export function RunnerSelector({
     runner.kind === 'external'
       ? externalAgents.find((agent) => agent.targetId === runner.targetId)
       : undefined;
+  // `disclosure-required` is checked on top of `externalAgentSelectable`, which
+  // deliberately leaves such a descriptor selectable so the picker can route the
+  // user into the notice. The pill answers a different question — can this runner
+  // take a turn right now — and the answer is no until the notice is accepted, so
+  // a green dot reading "signed in" would promise a send that the turn-start gate
+  // refuses. Same extra condition the composer applies.
+  const activeUsable =
+    !!activeDescriptor &&
+    externalAgentSelectable(activeDescriptor) &&
+    activeDescriptor.unavailableReason !== 'disclosure-required';
   const availability: StatusDotTone =
     runner.kind === 'mangostudio'
       ? 'accent'
-      : !activeDescriptor || !externalAgentSelectable(activeDescriptor)
+      : !activeUsable
         ? 'error'
-        : activeDescriptor.authState === 'signed-in'
+        : activeDescriptor?.authState === 'signed-in'
           ? 'success'
           : 'warning';
   const availabilityText =
     runner.kind === 'external'
-      ? !activeDescriptor || !externalAgentSelectable(activeDescriptor)
+      ? !activeUsable
         ? labels.unavailableHere
-        : activeDescriptor.authState === 'signed-in'
+        : activeDescriptor?.authState === 'signed-in'
           ? labels.signedIn
           : labels.authUnknown
       : null;
