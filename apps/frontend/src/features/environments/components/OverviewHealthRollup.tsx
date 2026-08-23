@@ -20,7 +20,7 @@ const HEALTH_ORDER: readonly RuntimeHealth[] = ['error', 'missing', 'warn', 'ok'
 
 const COUNT_STYLES: Record<RuntimeHealth, string> = {
   ok: 'text-primary',
-  warn: 'text-tertiary',
+  warn: 'text-warning',
   missing: 'text-on-surface-variant',
   error: 'text-error',
 };

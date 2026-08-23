@@ -15,7 +15,7 @@ interface FindingListProps {
 
 const SEVERITY_STYLES: Record<FindingSeverity, string> = {
   fail: 'text-error',
-  warn: 'text-tertiary',
+  warn: 'text-warning',
 };
 
 /**
