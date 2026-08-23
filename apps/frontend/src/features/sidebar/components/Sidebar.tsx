@@ -17,12 +17,16 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
-import { useToast } from '@/components/ui';
+import { Button } from '@/components/ui/Button';
 import { Logo } from '@/components/ui/Logo';
+import { MicroLabel } from '@/components/ui/MicroLabel';
+import { useToast } from '@/components/ui/Toast';
 import type { ContextInfo } from '@/features/generation/types';
 import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
 import { ContextRing } from './ContextRing';
+import { NavItem } from './NavItem';
 
 interface Props {
   currentPage: AppPage;
@@ -124,12 +128,12 @@ export function Sidebar({
     onWidthChange?.(widthRef.current);
   };
 
-  const navItemClass = (page: Exclude<AppPage, 'chat'>) =>
-    `flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-300 w-full text-left ${
-      currentPage === page
-        ? 'text-primary bg-surface-container-high'
-        : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'
-    }`;
+  const navPages = [
+    { page: 'studio', icon: Image, label: t.studio.title },
+    { page: 'gallery', icon: LayoutGrid, label: t.gallery.title },
+    { page: 'environments', icon: MonitorCog, label: t.environments.nav },
+    { page: 'settings', icon: Settings, label: t.settings.title },
+  ] as const;
 
   return (
     <>
@@ -154,85 +158,44 @@ export function Sidebar({
           <h1 className="font-headline text-lg font-semibold text-on-background tracking-tight truncate">
             {t.common.appName}
           </h1>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={onMobileClose}
-            className="ml-auto md:hidden p-2 rounded-lg hover:bg-surface-container-high transition-colors text-on-surface"
+            className="ml-auto md:hidden text-on-surface"
             aria-label={t.common.closeMenu}
           >
-            <X size={20} />
-          </button>
+            <X size={ICON_LG} />
+          </Button>
         </div>
 
         <div className="px-4 mb-4 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onNewChat}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-primary text-on-primary rounded-xl font-bold transition-transform active:scale-95 shadow-lg shadow-primary/20"
-          >
-            <Plus size={18} />
+          <Button onClick={onNewChat} className="flex-1 py-2.5">
+            <Plus size={ICON_MD} />
             <span>{t.chat.newChat}</span>
-          </button>
+          </Button>
         </div>
 
         {/* Mobile quick shortcuts */}
         <div className="px-4 mb-4 md:hidden" data-testid="mobile-shortcuts">
           <div className="grid grid-cols-4 gap-2">
-            <button
-              type="button"
-              onClick={() => handleMobileNav('studio')}
-              className={`flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-all duration-200 text-xs font-medium ${
-                currentPage === 'studio'
-                  ? 'text-primary bg-surface-container-high'
-                  : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'
-              }`}
-            >
-              <Image size={20} />
-              <span>{t.studio.title}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleMobileNav('gallery')}
-              className={`flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-all duration-200 text-xs font-medium ${
-                currentPage === 'gallery'
-                  ? 'text-primary bg-surface-container-high'
-                  : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'
-              }`}
-            >
-              <LayoutGrid size={20} />
-              <span>{t.gallery.title}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleMobileNav('environments')}
-              className={`flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-all duration-200 text-xs font-medium ${
-                currentPage === 'environments'
-                  ? 'text-primary bg-surface-container-high'
-                  : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'
-              }`}
-            >
-              <MonitorCog size={20} />
-              <span>{t.environments.nav}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleMobileNav('settings')}
-              className={`flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-all duration-200 text-xs font-medium ${
-                currentPage === 'settings'
-                  ? 'text-primary bg-surface-container-high'
-                  : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'
-              }`}
-            >
-              <Settings size={20} />
-              <span>{t.settings.title}</span>
-            </button>
+            {navPages.map(({ page, icon, label }) => (
+              <NavItem
+                key={page}
+                icon={icon}
+                label={label}
+                active={currentPage === page}
+                orientation="vertical"
+                onClick={() => handleMobileNav(page)}
+              />
+            ))}
           </div>
         </div>
 
         <nav className="flex-1 px-4 overflow-y-auto hide-scrollbar space-y-1">
-          <div className="text-xs font-label text-on-surface-variant/50 uppercase tracking-wider px-4 py-2 mt-2">
+          <MicroLabel as="div" className="px-4 py-2 mt-2 text-on-surface-variant/60">
             {t.chat.sectionLabel}
-          </div>
+          </MicroLabel>
           {chats.map((chat) => {
             const ctx = contextCache?.get(chat.id);
             const activateChat = () => {
@@ -306,38 +269,15 @@ export function Sidebar({
         </nav>
 
         <div className="p-4 mt-auto border-t border-outline-variant/10 space-y-1 hidden md:block">
-          <button
-            type="button"
-            onClick={() => handleMobileNav('studio')}
-            className={navItemClass('studio')}
-          >
-            <Image size={18} />
-            <span className="font-label font-medium text-sm">{t.studio.title}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleMobileNav('gallery')}
-            className={navItemClass('gallery')}
-          >
-            <LayoutGrid size={18} />
-            <span className="font-label font-medium text-sm">{t.gallery.title}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleMobileNav('environments')}
-            className={navItemClass('environments')}
-          >
-            <MonitorCog size={18} />
-            <span className="font-label font-medium text-sm">{t.environments.nav}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleMobileNav('settings')}
-            className={navItemClass('settings')}
-          >
-            <Settings size={18} />
-            <span className="font-label font-medium text-sm">{t.settings.title}</span>
-          </button>
+          {navPages.map(({ page, icon, label }) => (
+            <NavItem
+              key={page}
+              icon={icon}
+              label={label}
+              active={currentPage === page}
+              onClick={() => handleMobileNav(page)}
+            />
+          ))}
         </div>
 
         {onWidthChange ? (

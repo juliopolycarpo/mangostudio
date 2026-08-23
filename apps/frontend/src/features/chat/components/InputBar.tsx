@@ -26,12 +26,16 @@ import {
 import { useRef, useState } from 'react';
 import { ModelSelector } from '@/components/layout/ModelSelector';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
+import { Button } from '@/components/ui/Button';
+import { Chip } from '@/components/ui/Chip';
+import { KbdHint } from '@/components/ui/KbdHint';
 import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
 import { ExternalComposerControls } from '@/features/external-agents/ExternalComposerControls';
 import { ExternalUsageDisplay } from '@/features/external-agents/ExternalUsageDisplay';
 import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
 import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { steerExternalTurn } from '@/services/external-agent-service';
 import { CapabilityInspector } from './CapabilityInspector';
 import { McpComposerMenu } from './McpComposerMenu';
@@ -261,11 +265,11 @@ export function InputBar({
             ) : null}
 
             {onWorkdirClick ? (
-              <button
-                type="button"
+              <Chip
+                icon={<FolderOpen size={13} className="shrink-0 text-primary/80" />}
                 onClick={onWorkdirClick}
                 disabled={disabled}
-                className="flex h-7 max-w-[14rem] items-center gap-1.5 rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2.5 text-[10px] font-medium text-on-surface-variant transition-colors hover:border-primary/30 hover:text-on-surface sm:text-[11px]"
+                className="h-7 max-w-[14rem]"
                 title={workdir ?? t.workspace.chooseWorkdir}
                 aria-label={
                   workdirName
@@ -273,9 +277,8 @@ export function InputBar({
                     : t.workspace.chooseWorkdir
                 }
               >
-                <FolderOpen size={13} className="shrink-0 text-primary/80" />
-                <span className="truncate">{workdirName ?? t.workspace.chooseWorkdir}</span>
-              </button>
+                {workdirName ?? t.workspace.chooseWorkdir}
+              </Chip>
             ) : null}
             {!isExternalRunner && onSelectedAgentIdChange ? (
               <select
@@ -461,22 +464,25 @@ export function InputBar({
 
           <div className="flex items-center gap-1 pr-0.5 sm:pr-1 shrink-0">
             {!isGenerating && (
-              <button
+              <Button
                 type="button"
-                className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl text-on-surface-variant hover:bg-surface-container-high transition-all"
+                variant="ghost"
+                size="icon"
+                className="sm:size-10 text-on-surface-variant"
               >
                 <Mic size={18} className="sm:hidden" />
                 <Mic size={20} className="hidden sm:block" />
-              </button>
+              </Button>
             )}
             {isGenerating && (
-              <button
+              <Button
                 type="button"
+                variant="secondary"
                 onClick={onStop}
                 title={t.chat.input.stop}
-                className={`flex items-center justify-center rounded-xl font-bold text-xs transition-all active:scale-95 bg-surface-container-high text-on-surface hover:bg-error/20 hover:text-error shrink-0 ${
+                className={`text-xs hover:bg-error/20 hover:text-error shrink-0 ${
                   showSteerAffordance
-                    ? 'w-9 h-9 sm:w-10 sm:h-10'
+                    ? 'size-9 sm:size-10 p-0'
                     : 'h-9 sm:h-10 gap-1.5 px-3 sm:gap-2 sm:px-4'
                 }`}
               >
@@ -485,33 +491,37 @@ export function InputBar({
                 )}{' '}
                 <Square size={12} className="sm:hidden" />
                 <Square size={14} className="hidden sm:block" />
-              </button>
+              </Button>
             )}
             {/* Same button, different meaning while a steerable turn runs — see
                 docs/architecture/external-agents.md's steering section. Distinct
                 styling so nobody reads it as an ordinary send. */}
             {showSteerAffordance ? (
-              <button
+              <Button
                 type="submit"
+                variant="ghost"
                 disabled={!chatId || steering || !prompt.trim()}
                 title={t.externalAgents.steer.buttonHint}
-                className="h-9 sm:h-10 px-3 sm:px-4 rounded-xl border-2 border-primary text-primary font-bold text-xs flex items-center gap-1.5 sm:gap-2 hover:bg-primary/10 transition-all active:scale-95 disabled:opacity-50 shrink-0"
+                className="h-9 sm:h-10 px-3 sm:px-4 gap-1.5 sm:gap-2 border-2 border-primary text-primary text-xs hover:bg-primary/10 hover:text-primary shrink-0"
               >
                 <span className="hidden sm:inline">{t.externalAgents.steer.button}</span>{' '}
-                <CornerDownRight size={14} className="sm:hidden" />
-                <CornerDownRight size={16} className="hidden sm:block" />
-              </button>
+                <CornerDownRight size={ICON_SM} className="sm:hidden" />
+                <CornerDownRight size={ICON_MD} className="hidden sm:block" />
+              </Button>
             ) : !isGenerating ? (
-              <button
+              <Button
                 type="submit"
                 disabled={disabled || cannotSubmit || !prompt.trim()}
-                className="h-9 sm:h-10 px-3 sm:px-4 rounded-xl text-on-primary font-bold text-xs flex items-center gap-1.5 sm:gap-2 hover:brightness-110 transition-all active:scale-95 shadow-lg shadow-primary-container/20 disabled:opacity-50 shrink-0"
+                className="h-9 sm:h-10 px-3 sm:px-4 gap-1.5 sm:gap-2 text-xs shadow-primary-container/20 hover:brightness-110 hover:opacity-100 shrink-0"
                 style={{ background: 'var(--gradient-primary)' }}
               >
                 <span className="hidden sm:inline">{t.chat.input.send}</span>{' '}
-                <Send size={14} className="sm:hidden" />
-                <Send size={16} className="hidden sm:block" />
-              </button>
+                <Send size={ICON_SM} className="sm:hidden" />
+                <KbdHint
+                  keys="⏎"
+                  className="hidden sm:inline-flex border-transparent bg-on-primary/15 text-on-primary/90"
+                />
+              </Button>
             ) : null}
           </div>
         </form>

@@ -7,6 +7,7 @@ import {
 import { PanelRightOpen } from 'lucide-react';
 import { type Ref, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
+import { Button } from '@/components/ui/Button';
 import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import { useI18n } from '@/hooks/use-i18n';
 import { getAvailableWorkspacePanels, type RailPanelDefinition } from './panel-registry';
@@ -224,24 +225,26 @@ function PanelDock({
         const title = panelTitles[panel.id];
         const active = panel.id === activePanelId;
         return (
-          <button
+          <Button
             key={panel.id}
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={() => onSelect(panel.id)}
             aria-label={switchLabel.replace('{panel}', title)}
             aria-pressed={active}
             title={title}
-            className={`relative flex size-10 items-center justify-center rounded-xl transition-colors focus-visible:outline-2 focus-visible:outline-primary ${
+            className={`relative size-10 focus-visible:outline-2 focus-visible:outline-primary ${
               active
-                ? 'bg-primary/12 text-primary'
-                : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+                ? 'bg-primary/12 text-primary hover:bg-primary/15 hover:text-primary'
+                : 'text-on-surface-variant'
             }`}
           >
             {active ? (
               <span className="absolute -left-1 h-5 w-0.5 rounded-r-full bg-primary" />
             ) : null}
             <Icon size={18} />
-          </button>
+          </Button>
         );
       })}
     </nav>

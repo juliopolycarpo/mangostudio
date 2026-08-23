@@ -104,6 +104,7 @@ describe('InputBar — chat-only composer', () => {
           'connected'
         )
       );
+      expect(selector).toHaveAccessibleDescription('Connected');
       await user.selectOptions(selector, 'remote-dev');
 
       expect(onEnvironmentChange).toHaveBeenCalledWith('remote-dev');

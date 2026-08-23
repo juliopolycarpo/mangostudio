@@ -1,15 +1,16 @@
 import type { EnvironmentConnectionState } from '@mangostudio/shared/environments';
 import { Server } from 'lucide-react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
+import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useEnvironmentEntitiesQuery } from '../queries';
 
-const STATUS_DOT: Record<EnvironmentConnectionState, string> = {
-  connected: 'bg-primary',
-  connecting: 'bg-warning animate-pulse',
-  disconnected: 'bg-outline',
-  error: 'bg-error',
+const STATUS_TONE: Record<EnvironmentConnectionState, StatusDotTone> = {
+  connected: 'accent',
+  connecting: 'warning',
+  disconnected: 'neutral',
+  error: 'error',
 };
 
 interface EnvironmentSelectorProps {
@@ -24,6 +25,7 @@ export function EnvironmentSelector({
   onEnvironmentChange,
 }: EnvironmentSelectorProps) {
   const { t } = useI18n();
+  const statusId = useId();
   const environments = useEnvironmentEntitiesQuery();
   const [isChanging, setIsChanging] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -44,6 +46,7 @@ export function EnvironmentSelector({
 
   const unavailable = environments.isPending && !environments.data;
   const status = selected?.status.state ?? 'disconnected';
+  const statusLabel = t.environments.entities.status[status];
 
   return (
     <div className="flex items-center">
@@ -58,17 +61,17 @@ export function EnvironmentSelector({
         data-state={status}
       >
         <Server size={12} className="shrink-0 text-primary/80" aria-hidden="true" />
-        <span
-          className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[status]}`}
-          aria-hidden="true"
-        />
-        <span className="sr-only">{t.chat.input.selectEnvironment}</span>
+        <StatusDot tone={STATUS_TONE[status]} pulse={status === 'connecting'} />
+        <span id={statusId} className="sr-only">
+          {statusLabel}
+        </span>
         <select
           value={environmentId}
           onChange={(event) => void handleChange(event.target.value)}
           disabled={disabled || isChanging || unavailable || environments.isError}
           className="min-w-0 max-w-[9rem] appearance-none bg-transparent py-1 pr-2 text-inherit outline-none disabled:opacity-60"
           aria-label={t.chat.input.selectEnvironment}
+          aria-describedby={statusId}
         >
           {unavailable ||
           !environments.data?.some((environment) => environment.id === environmentId) ? (

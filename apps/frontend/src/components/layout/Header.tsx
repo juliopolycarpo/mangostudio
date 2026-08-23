@@ -1,10 +1,12 @@
 import { useNavigate } from '@tanstack/react-router';
 import { Menu, Plus, Settings } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
+import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { useI18n } from '@/hooks/use-i18n';
 import { authClient } from '@/lib/auth-client';
+import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
 
 export interface HeaderProps {
   currentPage: AppPage;
@@ -58,60 +60,60 @@ export function Header({
   return (
     <header className="bg-surface-dim flex justify-between items-center px-3 sm:px-4 md:px-6 py-3 md:py-4 w-full sticky top-0 z-40 border-b border-outline-variant/10">
       <div className="flex items-center gap-2 sm:gap-3 md:gap-4 min-w-0 flex-1">
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={onMobileMenuToggle}
-          className="md:hidden p-2 rounded-lg hover:bg-surface-container-high transition-colors text-on-surface shrink-0"
+          className="md:hidden text-on-surface shrink-0"
           aria-label={t.common.openMenu}
         >
-          <Menu size={20} />
-        </button>
+          <Menu size={ICON_LG} />
+        </Button>
         {currentPage !== 'studio' && runnerSelector ? (
           <div className="min-w-0 flex-1 max-w-[60vw] sm:max-w-none">{runnerSelector}</div>
         ) : null}
       </div>
       <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-2">
         {currentPage === 'chat' && (
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             onClick={onNewChat}
-            className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-full bg-surface-container-high hover:bg-surface-container-highest transition-colors text-sm font-medium text-on-surface active:scale-95 duration-200 shrink-0"
+            className="px-3 sm:px-4 font-medium shrink-0"
           >
-            <Plus size={16} />
+            <Plus size={ICON_MD} />
             <span className="hidden sm:inline">{t.chat.newChat}</span>
-          </button>
+          </Button>
         )}
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="icon"
           onClick={onNavigateToSettings}
-          className={`p-2 rounded-full transition-all duration-200 active:scale-95 shrink-0 ${currentPage === 'settings' ? 'bg-primary/10 text-primary' : 'bg-surface-container-high text-on-surface hover:bg-surface-container-highest cursor-pointer'}`}
+          className={`shrink-0 ${currentPage === 'settings' ? 'bg-primary/10 text-primary hover:bg-primary/15' : ''}`}
           title={t.settings.title}
         >
-          <Settings size={18} />
-        </button>
+          <Settings size={ICON_MD} />
+        </Button>
 
         {session?.user && (
           <div className="flex items-center gap-2 sm:gap-3 ml-1 sm:ml-2 pl-2 sm:pl-4 border-l border-outline-variant/20 shrink-0">
             <span className="text-sm font-medium text-on-surface hidden md:inline max-w-[120px] truncate">
               {session.user.name}
             </span>
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => void handleLogout()}
-              disabled={loggingOut}
+              loading={loggingOut}
               data-testid="logout-button"
-              className="text-xs px-2 sm:px-3 py-1.5 rounded-full bg-surface-container-high hover:bg-surface-container-highest transition-colors cursor-pointer text-on-surface disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shrink-0"
+              className="font-medium shrink-0"
             >
-              {loggingOut && (
-                <span className="w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
-              )}
               <span className="hidden sm:inline">
                 {loggingOut ? t.auth.logoutLoading : t.auth.logoutButton}
               </span>
               <span className="sm:hidden">
                 {loggingOut ? t.auth.logoutLoading : t.auth.logoutButton.slice(0, 4)}
               </span>
-            </button>
+            </Button>
           </div>
         )}
       </div>
