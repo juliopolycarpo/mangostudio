@@ -84,6 +84,69 @@ describe('useBatchedGitSummaries', () => {
     expect(result.current['chat-59']).toEqual(summaryFor('chat-59'));
   });
 
+  it('returns the same record when a caller re-renders with a fresh array of the same ids', async () => {
+    respondPerRequest();
+
+    const { result, rerender } = renderHook(
+      ({ chatIds }: { chatIds: string[] }) => useBatchedGitSummaries(chatIds),
+      { initialProps: { chatIds: ['b', 'a'] } }
+    );
+
+    await waitFor(() => expect(Object.keys(result.current)).toHaveLength(2));
+    const first = result.current;
+
+    // Pins the outcome the `combine` comment depends on: `useQueries` only
+    // shares its combined result structurally while the combine function is
+    // stable and the result is a plain object, and a Map or an inline arrow
+    // silently gives that up. Losing it re-renders every badge row on a layout
+    // that re-renders once per streamed token.
+    rerender({ chatIds: ['a', 'b'] });
+    rerender({ chatIds: ['b', 'a'] });
+
+    expect(result.current).toBe(first);
+    expect(mockBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not re-sort the ids when the caller keeps its array', async () => {
+    respondPerRequest();
+    let reads = 0;
+    // Dedupe reads the array through its iterator, so counting those counts the
+    // work the memo is there to skip.
+    const chatIds = new Proxy(['b', 'a'], {
+      get(target, key, receiver) {
+        if (key === Symbol.iterator) reads += 1;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+
+    const { result, rerender } = renderHook(
+      ({ ids }: { ids: readonly string[] }) => useBatchedGitSummaries(ids),
+      { initialProps: { ids: chatIds as readonly string[] } }
+    );
+
+    await waitFor(() => expect(Object.keys(result.current)).toHaveLength(2));
+    const settled = reads;
+    rerender({ ids: chatIds });
+    rerender({ ids: chatIds });
+
+    expect(reads).toBe(settled);
+  });
+
+  it('fetches again once the id list really changes', async () => {
+    respondPerRequest();
+
+    const { result, rerender } = renderHook(
+      ({ chatIds }: { chatIds: string[] }) => useBatchedGitSummaries(chatIds),
+      { initialProps: { chatIds: ['a'] } }
+    );
+
+    await waitFor(() => expect(result.current.a).toEqual(summaryFor('a')));
+    rerender({ chatIds: ['a', 'b'] });
+
+    await waitFor(() => expect(result.current.b).toEqual(summaryFor('b')));
+    expect(mockBatch).toHaveBeenLastCalledWith({ chatIds: ['a', 'b'] });
+  });
+
   it('resolves a failed chunk to null instead of a permanent pending state', async () => {
     mockBatch.mockResolvedValue({ data: null, error: { value: { error: 'boom' } } });
 

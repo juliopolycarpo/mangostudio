@@ -208,18 +208,7 @@ function invalidateGitSummaries(queryClient: QueryClient, chatId: string): Promi
 export function useBatchedGitSummaries(
   chatIds: readonly string[]
 ): Record<string, GitSummary | null> {
-  // Sorted, deduplicated chunks keep the query key independent of row order,
-  // so reordering the sidebar does not refetch every badge. The join is the
-  // memo dependency because callers typically pass a fresh array per render.
-  const idsKey = [...new Set(chatIds)].sort().join('\n');
-  const chunks = useMemo(() => {
-    const sorted = idsKey.length === 0 ? [] : idsKey.split('\n');
-    const result: string[][] = [];
-    for (let start = 0; start < sorted.length; start += GIT_BATCH_STATE_MAX_CHAT_IDS) {
-      result.push(sorted.slice(start, start + GIT_BATCH_STATE_MAX_CHAT_IDS));
-    }
-    return result;
-  }, [idsKey]);
+  const chunks = useChatIdChunks(chatIds);
 
   const queries = useMemo(
     () =>
@@ -261,6 +250,28 @@ export function useBatchedGitSummaries(
   );
 
   return useQueries({ queries, combine });
+}
+
+/**
+ * Sorted, deduplicated 50-id chunks. Sorting keeps the query key independent of
+ * row order, so reordering the sidebar does not refetch every badge.
+ *
+ * The memo keys on the array's identity, which is why the caller on
+ * `_authenticated.tsx` memoizes the list it passes: that layout re-renders once
+ * per streamed token, and the dedupe and sort would otherwise run over the
+ * whole list on every one of them. A caller that does pass a fresh array pays
+ * that sort but nothing worse — the record this hook returns still holds its
+ * reference through `useQueries` structural sharing.
+ */
+function useChatIdChunks(chatIds: readonly string[]): string[][] {
+  return useMemo(() => {
+    const sorted = [...new Set(chatIds)].sort();
+    const chunks: string[][] = [];
+    for (let start = 0; start < sorted.length; start += GIT_BATCH_STATE_MAX_CHAT_IDS) {
+      chunks.push(sorted.slice(start, start + GIT_BATCH_STATE_MAX_CHAT_IDS));
+    }
+    return chunks;
+  }, [chatIds]);
 }
 
 export function useGitState(chatId: string) {

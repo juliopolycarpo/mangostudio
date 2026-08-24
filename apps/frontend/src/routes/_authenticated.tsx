@@ -5,7 +5,7 @@ import {
   useNavigate,
   useRouterState,
 } from '@tanstack/react-router';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Layout } from '@/components/layout/Layout';
 import { Spinner } from '@/components/ui/Spinner';
@@ -63,11 +63,15 @@ function AuthenticatedLayout() {
   const currentPath = routerState.location.pathname;
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const commandPalette = useCommandPalette();
-  // Only chats with a workdir can have git state; the hook dedupes, sorts and
-  // chunks the ids itself, so the fresh array per render is fine.
-  const gitSummaries = useBatchedGitSummaries(
-    app.chats.filter((chat) => chat.workdir).map((chat) => chat.id)
+  // Only chats with a workdir can have git state. `app.chats` holds its
+  // identity between query updates, so memoizing here hands the hook the same
+  // array on every one of this layout's per-token re-renders and it can bail
+  // out on the reference instead of re-sorting the whole list.
+  const gitChatIds = useMemo(
+    () => app.chats.filter((chat) => chat.workdir).map((chat) => chat.id),
+    [app.chats]
   );
+  const gitSummaries = useBatchedGitSummaries(gitChatIds);
 
   // New chat keeps its own chord rather than living in the palette's registry:
   // it is the one action worth reaching without reading a list first. Some
