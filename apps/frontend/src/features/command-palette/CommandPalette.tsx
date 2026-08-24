@@ -199,10 +199,13 @@ export const CommandPalette = memo(function CommandPalette({
         // instead. Enter is one keystroke, not one per character, so it can
         // afford the rescore the list is deferring.
         //
-        // No pin needs carrying across: typing is what opened the lag window,
-        // and typing released the pin. The best match for what was actually
-        // typed is the row the palette is about to highlight anyway.
-        const item = query === deferredQuery ? activeItem : liveBestCommand(items, query);
+        // The pin comes along. Typing releases it, but the window stays open
+        // afterwards: an Arrow, Home, End or Tab landing inside it pins a row
+        // the user can see highlighted, and running the live query's best match
+        // instead would run a command they did not choose. `activeCommandIndex`
+        // resolves it against the live ranking and releases it if that ranking
+        // no longer holds the row — the same rule the render uses.
+        const item = query === deferredQuery ? activeItem : liveCommand(items, query, pinnedId);
         if (!item) return;
         event.preventDefault();
         void item.run();
@@ -338,9 +341,13 @@ export const CommandPalette = memo(function CommandPalette({
  * not caught up — which is why the list can keep deferring without Enter
  * inheriting the lag.
  */
-function liveBestCommand(items: readonly CommandItem[], query: string): CommandItem | undefined {
+function liveCommand(
+  items: readonly CommandItem[],
+  query: string,
+  pinnedId: string | null
+): CommandItem | undefined {
   const ranked = rankCommands(items, query);
-  return ranked.flat[activeCommandIndex(ranked, null)];
+  return ranked.flat[activeCommandIndex(ranked, pinnedId)];
 }
 
 /** Namespaced so two palettes on one page cannot collide on `id`. */
