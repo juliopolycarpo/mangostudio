@@ -17,18 +17,30 @@ export function useChatRouteActions({ chats, navigate }: UseChatRouteActionsPara
   }, [chats, navigate]);
 
   /**
-   * A chat that starts on a chosen runner.
+   * A chat that starts on a chosen runner, on the machine that runner came from.
    *
    * The runner is written against the id `createChat` just returned, never
    * through the selector: that one persists against whatever chat is
    * *currently* selected, and React has not observed the new one yet when this
    * resolves — so routing it that way would rewrite the runner of the chat the
    * user just left.
+   *
+   * `environmentId` is not decoration. Creation always lands on `local` — the
+   * create body has no machine field — while an external runner is only ever
+   * offered because discovery found it on some *particular* environment. Left
+   * unsaid, a vendor found on a remote box would be bound to a local chat that
+   * has no such installation, and nothing server-side rejects that pairing.
+   * Omit it for a runner that is machine-independent, which is every
+   * MangoStudio agent profile.
    */
   const handleNewChatWithRunner = useCallback(
-    async (runner: ChatRunnerConfiguration) => {
+    async (runner: ChatRunnerConfiguration, environmentId?: string) => {
       const chat = await chats.createChat();
-      await chats.updateChatRunner(chat.id, runner);
+      if (environmentId !== undefined && environmentId !== chat.environmentId) {
+        await chats.updateChatRunnerOnEnvironment(chat.id, runner, environmentId);
+      } else {
+        await chats.updateChatRunner(chat.id, runner);
+      }
       await navigate({ to: '/' });
     },
     [chats, navigate]

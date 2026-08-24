@@ -38,7 +38,15 @@ export interface ActionCommandParams {
   /** Null unless the active runner is an external one that reports usage. */
   readonly quotaRefresh: QuotaRefreshAction | null;
   readonly onNewChat: () => void | Promise<void>;
-  readonly onNewChatWithRunner: (runner: ChatRunnerConfiguration) => void | Promise<void>;
+  /**
+   * @param environmentId The machine the runner was discovered on, for the
+   *   rows where that is not the same thing as the default. Agent profiles are
+   *   the hub's own and pass nothing.
+   */
+  readonly onNewChatWithRunner: (
+    runner: ChatRunnerConfiguration,
+    environmentId?: string
+  ) => void | Promise<void>;
   readonly onToggleTheme: () => void;
   readonly onOpenWorkdirPicker: () => void;
 }
@@ -92,7 +100,14 @@ export function actionCommands({
       hint: descriptor.account?.label ?? undefined,
       keywords: descriptor.targetId,
       icon: Plus,
-      run: () => onNewChatWithRunner({ kind: 'external', targetId: descriptor.targetId }),
+      // The descriptor's own machine, not the shell's: this list is discovery's
+      // answer for one environment, and a vendor installed over there is not
+      // installed here just because a new chat starts local.
+      run: () =>
+        onNewChatWithRunner(
+          { kind: 'external', targetId: descriptor.targetId },
+          descriptor.environmentId
+        ),
     });
   }
 

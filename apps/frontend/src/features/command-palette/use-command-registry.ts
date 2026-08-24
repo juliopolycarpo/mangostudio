@@ -99,9 +99,9 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
         onRun();
         return app.handleNewChat();
       },
-      onNewChatWithRunner: (runner) => {
+      onNewChatWithRunner: (runner, environmentId) => {
         onRun();
-        return app.handleNewChatWithRunner(runner);
+        return app.handleNewChatWithRunner(runner, environmentId);
       },
       onToggleTheme: () => {
         onRun();

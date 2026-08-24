@@ -168,8 +168,10 @@ describe('actionCommands', () => {
     { id: 'explore', name: 'Explore', role: 'both' },
   ] as unknown as AgentProfile[];
 
+  // Discovery answers for one machine at a time, and the shell's list is the
+  // *current chat's* machine — which need not be the one a new chat starts on.
   const descriptors = [
-    { targetId: 'codex', account: { label: 'jc@example.com' } },
+    { targetId: 'codex', environmentId: 'env-wsl', account: { label: 'jc@example.com' } },
   ] as unknown as ExternalAgentDescriptor[];
 
   function build(overrides: Partial<Parameters<typeof actionCommands>[0]> = {}) {
@@ -196,12 +198,24 @@ describe('actionCommands', () => {
     expect(labels).toContain('New chat with Codex CLI');
   });
 
-  it('starts the new chat on the runner the row names', () => {
+  it('starts the new chat on the runner the row names, and on its machine', () => {
     const onNewChatWithRunner = jest.fn();
     build({ onNewChatWithRunner })
       .find((item) => item.id === 'action:new-chat-external:codex')
       ?.run();
-    expect(onNewChatWithRunner).toHaveBeenCalledWith({ kind: 'external', targetId: 'codex' });
+    expect(onNewChatWithRunner).toHaveBeenCalledWith(
+      { kind: 'external', targetId: 'codex' },
+      'env-wsl'
+    );
+  });
+
+  /** Agent profiles are the hub's own, so pinning one to a machine would be a lie. */
+  it('leaves an agent profile row unscoped', () => {
+    const onNewChatWithRunner = jest.fn();
+    build({ onNewChatWithRunner })
+      .find((item) => item.id === 'action:new-chat-agent:explore')
+      ?.run();
+    expect(onNewChatWithRunner).toHaveBeenCalledWith({ kind: 'mangostudio', agentId: 'explore' });
   });
 
   it('names the theme row for the state it moves to, not the one it is in', () => {

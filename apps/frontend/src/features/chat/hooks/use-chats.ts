@@ -65,6 +65,23 @@ export function useChats() {
     [updateMutation]
   );
 
+  /**
+   * Machine and runner in one write.
+   *
+   * Two sequential updates would leave the chat briefly holding a remote
+   * vendor on the local machine — a pairing nothing validates, and the state a
+   * turn submitted in that window would dispatch on.
+   */
+  const updateChatRunnerOnEnvironment = useCallback(
+    async (chatId: string, runner: ChatRunnerConfiguration, environmentId: string) => {
+      await updateMutation.mutateAsync({
+        id: chatId,
+        updates: { runner, environmentId },
+      });
+    },
+    [updateMutation]
+  );
+
   const updateChatRunnerPermissions = useCallback(
     async (chatId: string, runnerPermissions: ChatRunnerPermissions) => {
       await updateMutation.mutateAsync({ id: chatId, updates: { runnerPermissions } });
@@ -130,6 +147,7 @@ export function useChats() {
     updateChatModel,
     updateChatTitle,
     updateChatRunner,
+    updateChatRunnerOnEnvironment,
     updateChatRunnerPermissions,
     updateChatWorkdir,
     updateChatEnvironment,

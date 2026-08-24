@@ -11,12 +11,17 @@ import { useChatRouteActions } from '../../../src/hooks/use-chat-route-actions';
 import { renderHook } from '../../support/harness/render';
 
 function setup(createdId = 'chat-new') {
-  const createChat = jest.fn(async () => ({ id: createdId }) as Chat);
+  // Creation always lands on the local machine — the create body carries no
+  // environment field — which is the whole premise of the scoped variant below.
+  const createChat = jest.fn(async () => ({ id: createdId, environmentId: 'local' }) as Chat);
   const updateChatRunner = jest.fn(async () => undefined);
+  const updateChatRunnerOnEnvironment = jest.fn(async () => undefined);
   const navigate = jest.fn(async () => undefined);
-  const chats = { createChat, updateChatRunner } as unknown as Parameters<
-    typeof useChatRouteActions
-  >[0]['chats'];
+  const chats = {
+    createChat,
+    updateChatRunner,
+    updateChatRunnerOnEnvironment,
+  } as unknown as Parameters<typeof useChatRouteActions>[0]['chats'];
 
   const { result } = renderHook(() =>
     useChatRouteActions({
@@ -24,7 +29,7 @@ function setup(createdId = 'chat-new') {
       navigate: navigate as unknown as Parameters<typeof useChatRouteActions>[0]['navigate'],
     })
   );
-  return { result, createChat, updateChatRunner, navigate };
+  return { result, createChat, updateChatRunner, updateChatRunnerOnEnvironment, navigate };
 }
 
 describe('handleNewChatWithRunner', () => {
@@ -60,6 +65,50 @@ describe('handleNewChatWithRunner', () => {
       agentId: 'explore',
     });
     expect(navigate).toHaveBeenCalledWith({ to: '/' });
+  });
+
+  /**
+   * A vendor is only ever offered because discovery found it on one particular
+   * machine. Creation lands on `local`, and nothing server-side rejects a
+   * remote vendor on a local chat — so dropping the environment here binds the
+   * new chat to an installation it does not have.
+   */
+  it('binds the new chat to the machine the runner came from', async () => {
+    const { result, updateChatRunner, updateChatRunnerOnEnvironment, navigate } = setup();
+
+    await act(async () => {
+      await result.current.handleNewChatWithRunner(
+        { kind: 'external', targetId: 'codex' },
+        'env-remote'
+      );
+    });
+
+    // One write, not two: a runner stored ahead of its machine is a pairing
+    // that briefly exists and that a submitted turn would dispatch on.
+    expect(updateChatRunnerOnEnvironment).toHaveBeenCalledWith(
+      'chat-new',
+      { kind: 'external', targetId: 'codex' },
+      'env-remote'
+    );
+    expect(updateChatRunner).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith({ to: '/' });
+  });
+
+  it('leaves the machine alone when the runner was found on the one it starts in', async () => {
+    const { result, updateChatRunner, updateChatRunnerOnEnvironment } = setup();
+
+    await act(async () => {
+      await result.current.handleNewChatWithRunner(
+        { kind: 'external', targetId: 'codex' },
+        'local'
+      );
+    });
+
+    expect(updateChatRunnerOnEnvironment).not.toHaveBeenCalled();
+    expect(updateChatRunner).toHaveBeenCalledWith('chat-new', {
+      kind: 'external',
+      targetId: 'codex',
+    });
   });
 
   it('does not navigate when the chat could not be created', async () => {
