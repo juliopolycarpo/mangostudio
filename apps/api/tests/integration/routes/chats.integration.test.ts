@@ -651,7 +651,8 @@ describe('POST /chats/:id/compact', () => {
 
     const db = getDb();
     const chatId = `compact-${Date.now()}`;
-    const base = Date.now();
+    // Compact writes Date.now(); keep fixtures older so the summary sorts last.
+    const base = Date.now() - 10_000;
 
     await db
       .insertInto('chats')
