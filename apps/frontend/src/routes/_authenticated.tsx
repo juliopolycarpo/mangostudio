@@ -74,15 +74,23 @@ function AuthenticatedLayout() {
   // since the generation state lives on this layout.
   const handleNewChatRef = useRef(app.handleNewChat);
   handleNewChatRef.current = app.handleNewChat;
+  const closeCommandPalette = commandPalette.close;
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat || !isNewChatShortcut(event)) return;
       event.preventDefault();
+      // The palette shows this chord on its own new-chat row, but the chord
+      // lands here, not on the row's close-and-run wrapper — the palette input
+      // has focus and the event bubbles to the window. Closing here keeps the
+      // promise the row makes: the overlay must not stay up over the chat the
+      // chord just created. Unconditional because closing a closed palette is
+      // a bailed-out setState.
+      closeCommandPalette();
       void handleNewChatRef.current();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [closeCommandPalette]);
 
   if (!auth.isAuthenticated) {
     void navigate({ to: '/login' });
