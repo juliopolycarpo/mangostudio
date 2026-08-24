@@ -127,7 +127,13 @@ export function useFocusTrap(onEscape: () => void) {
       }
       if (event.key !== 'Tab') return;
 
-      const focusable = [...dialog.querySelectorAll<HTMLElement>(TABBABLE)];
+      // A native control keeps its selector clause regardless of `tabIndex`, so
+      // `<button tabIndex={-1}>` still matches `button:not([disabled])` — filter
+      // those back out or Tab can walk past the last real stop and out of the
+      // dialog.
+      const focusable = [...dialog.querySelectorAll<HTMLElement>(TABBABLE)].filter(
+        (element) => element.tabIndex >= 0
+      );
       const first = focusable[0];
       const last = focusable.at(-1);
       if (!first || !last) return;

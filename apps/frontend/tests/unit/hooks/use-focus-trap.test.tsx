@@ -100,3 +100,35 @@ describe('useFocusTrap with a second dialog stacked over the first', () => {
     expect(document.activeElement).toBe(topAction);
   });
 });
+
+/**
+ * A native control keeps its selector clause regardless of `tabIndex`, so
+ * `button:not([disabled])` still matches a button parked at `tabIndex={-1}` —
+ * script-focusable, not a tab stop. Left in the ring, Tab from the real last
+ * stop would land there instead of wrapping, walking focus out of the dialog.
+ */
+function DialogWithSkippedButton({ onEscape }: { onEscape: () => void }) {
+  const dialogRef = useFocusTrap(onEscape);
+  return (
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Dialog" tabIndex={-1}>
+      <button type="button">First</button>
+      <button type="button" tabIndex={-1}>
+        Skipped
+      </button>
+    </div>
+  );
+}
+
+describe('useFocusTrap with a tabIndex={-1} control after the last real stop', () => {
+  it('shift-tabs from the first stop back onto itself, not the skipped control', () => {
+    render(<DialogWithSkippedButton onEscape={jest.fn()} />);
+    const first = screen.getByRole('button', { name: 'First' });
+    const skipped = screen.getByRole('button', { name: 'Skipped' });
+
+    first.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+
+    expect(document.activeElement).toBe(first);
+    expect(document.activeElement).not.toBe(skipped);
+  });
+});
