@@ -36,11 +36,11 @@ function setup(createdId = 'chat-new') {
       holdDepth -= 1;
     }
   });
-  const holdDepthDuring = (call: jest.Mock) => {
+  const holdDepthDuring = (call: jest.Mock, resolvedValue?: unknown) => {
     let observed = -1;
     call.mockImplementation(() => {
       observed = holdDepth;
-      return Promise.resolve();
+      return Promise.resolve(resolvedValue);
     });
     return () => observed;
   };
@@ -154,7 +154,9 @@ describe('handleNewChatWithRunner', () => {
    * after it releases.
    */
   it('holds workdir defaulting across the create-and-repoint window', async () => {
-    const { result, updateChatRunnerOnEnvironment, navigate, holdDepthDuring } = setup();
+    const { result, createChat, updateChatRunnerOnEnvironment, navigate, holdDepthDuring } =
+      setup('chat-new');
+    const depthAtCreate = holdDepthDuring(createChat, { id: 'chat-new', environmentId: 'local' });
     const depthAtRepoint = holdDepthDuring(updateChatRunnerOnEnvironment);
     const depthAtNavigate = holdDepthDuring(navigate);
 
@@ -165,6 +167,7 @@ describe('handleNewChatWithRunner', () => {
       );
     });
 
+    expect(depthAtCreate()).toBe(1);
     expect(depthAtRepoint()).toBe(1);
     expect(depthAtNavigate()).toBe(0);
   });
