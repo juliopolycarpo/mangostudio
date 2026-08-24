@@ -171,6 +171,28 @@ export function useRunnerSelection({
   const workdirDefaultedChatIds = useRef(new Set<string>());
 
   /**
+   * How many multi-write chat setups are still in flight; the defaulting
+   * effect stands down while any are.
+   *
+   * Creating a chat on a remote runner is two requests — create, then repoint —
+   * and creation publishes a *local* record the effect can observe between
+   * them. Acting on it either stamps the hub default onto a chat that is about
+   * to be remote (silently the wrong project when a same-named directory exists
+   * over there), or marks the id as defaulted so the repointed chat never gets
+   * its picker. State rather than a ref so releasing the hold re-renders and
+   * the effect re-runs against the settled record.
+   */
+  const [workdirDefaultHolds, setWorkdirDefaultHolds] = useState(0);
+  const holdWorkdirDefault = useCallback(async <T>(task: () => Promise<T>): Promise<T> => {
+    setWorkdirDefaultHolds((count) => count + 1);
+    try {
+      return await task();
+    } finally {
+      setWorkdirDefaultHolds((count) => count - 1);
+    }
+  }, []);
+
+  /**
    * Binds a chat that was just created mid-submit, before its first turn opens.
    *
    * Neither of the two paths below can cover this window: `persistRunner` had
@@ -247,6 +269,10 @@ export function useRunnerSelection({
     // would write the default over whatever the server actually has — and,
     // because the id is then marked as defaulted, never retry.
     if (!currentChatId || !currentChat || currentChat.workdir) return;
+    // A held default is deferred, not skipped: the hold count is state, so its
+    // release re-runs this effect against the record the setup actually left —
+    // crucially before the id is marked as defaulted.
+    if (workdirDefaultHolds > 0) return;
     if (workdirDefaultedChatIds.current.has(currentChatId)) return;
     workdirDefaultedChatIds.current.add(currentChatId);
 
@@ -268,7 +294,14 @@ export function useRunnerSelection({
     void updateChatWorkdir(currentChatId, defaultWorkdir)
       .then(() => addRecentWorkdir(defaultWorkdir))
       .catch(() => setWorkdirPickerOpen(true));
-  }, [addRecentWorkdir, currentChat, currentChatId, defaultWorkdir, updateChatWorkdir]);
+  }, [
+    addRecentWorkdir,
+    currentChat,
+    currentChatId,
+    defaultWorkdir,
+    updateChatWorkdir,
+    workdirDefaultHolds,
+  ]);
 
   return {
     agents,
@@ -280,6 +313,7 @@ export function useRunnerSelection({
     currentWorkdir: currentChat?.workdir ?? null,
     isWorkdirPickerOpen,
     bindNewChat,
+    holdWorkdirDefault,
     whenRunnerPersisted,
     setRunnerAgentId,
     setRunnerTarget,

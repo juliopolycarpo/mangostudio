@@ -23,13 +23,44 @@ function setup(createdId = 'chat-new') {
     updateChatRunnerOnEnvironment,
   } as unknown as Parameters<typeof useChatRouteActions>[0]['chats'];
 
+  // A pass-through that keeps score, so a test can pin whether a given write
+  // happened under the hold or escaped it.
+  let holdDepth = 0;
+  const holdWorkdirDefault = jest.fn(async <T,>(task: () => Promise<T>): Promise<T> => {
+    holdDepth += 1;
+    try {
+      return await task();
+    } finally {
+      holdDepth -= 1;
+    }
+  });
+  const holdDepthDuring = (call: jest.Mock) => {
+    let observed = -1;
+    call.mockImplementation(() => {
+      observed = holdDepth;
+      return Promise.resolve();
+    });
+    return () => observed;
+  };
+
   const { result } = renderHook(() =>
     useChatRouteActions({
       chats,
       navigate: navigate as unknown as Parameters<typeof useChatRouteActions>[0]['navigate'],
+      // `jest.fn` erases the generic; the implementation above is the real
+      // pass-through shape.
+      holdWorkdirDefault: holdWorkdirDefault as <T>(task: () => Promise<T>) => Promise<T>,
     })
   );
-  return { result, createChat, updateChatRunner, updateChatRunnerOnEnvironment, navigate };
+  return {
+    result,
+    createChat,
+    updateChatRunner,
+    updateChatRunnerOnEnvironment,
+    navigate,
+    holdWorkdirDefault,
+    holdDepthDuring,
+  };
 }
 
 describe('handleNewChatWithRunner', () => {
@@ -109,6 +140,30 @@ describe('handleNewChatWithRunner', () => {
       kind: 'external',
       targetId: 'codex',
     });
+  });
+
+  /**
+   * Creation publishes and selects a local record before the repoint resolves,
+   * and the workdir-defaulting effect can observe that intermediate chat —
+   * stamping the hub default onto a chat about to be remote, or marking it as
+   * defaulted so the repointed chat never gets its picker. Both the creation
+   * and the repoint must therefore run inside the hold; navigation happens
+   * after it releases.
+   */
+  it('holds workdir defaulting across the create-and-repoint window', async () => {
+    const { result, updateChatRunnerOnEnvironment, navigate, holdDepthDuring } = setup();
+    const depthAtRepoint = holdDepthDuring(updateChatRunnerOnEnvironment);
+    const depthAtNavigate = holdDepthDuring(navigate);
+
+    await act(async () => {
+      await result.current.handleNewChatWithRunner(
+        { kind: 'external', targetId: 'codex' },
+        'env-remote'
+      );
+    });
+
+    expect(depthAtRepoint()).toBe(1);
+    expect(depthAtNavigate()).toBe(0);
   });
 
   it('does not navigate when the chat could not be created', async () => {

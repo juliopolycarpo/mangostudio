@@ -8,9 +8,18 @@ export type AppPage = 'chat' | 'environments' | 'gallery' | 'settings' | 'studio
 interface UseChatRouteActionsParams {
   readonly chats: ReturnType<typeof useChats>;
   readonly navigate: ReturnType<typeof useNavigate>;
+  /**
+   * Suspends the workdir-defaulting effect while `task` runs; see
+   * `handleNewChatWithRunner` for why creation cannot go unheld.
+   */
+  readonly holdWorkdirDefault: <T>(task: () => Promise<T>) => Promise<T>;
 }
 
-export function useChatRouteActions({ chats, navigate }: UseChatRouteActionsParams) {
+export function useChatRouteActions({
+  chats,
+  navigate,
+  holdWorkdirDefault,
+}: UseChatRouteActionsParams) {
   const handleNewChat = useCallback(async () => {
     await chats.createChat();
     await navigate({ to: '/' });
@@ -32,18 +41,29 @@ export function useChatRouteActions({ chats, navigate }: UseChatRouteActionsPara
    * has no such installation, and nothing server-side rejects that pairing.
    * Omit it for a runner that is machine-independent, which is every
    * MangoStudio agent profile.
+   *
+   * The whole sequence runs under `holdWorkdirDefault` because creation
+   * publishes and selects a *local* record before the repoint resolves, and
+   * the workdir-defaulting effect can observe that intermediate chat. Acting
+   * on it either sends the hub's default path to a chat that is about to be
+   * remote — silently the wrong project when a same-named directory exists
+   * over there — or marks the id as defaulted so the repointed chat never
+   * gets its picker. The hold releases once the repoint has landed in the
+   * cache, so the effect's first look at the chat sees its final machine.
    */
   const handleNewChatWithRunner = useCallback(
     async (runner: ChatRunnerConfiguration, environmentId?: string) => {
-      const chat = await chats.createChat();
-      if (environmentId !== undefined && environmentId !== chat.environmentId) {
-        await chats.updateChatRunnerOnEnvironment(chat.id, runner, environmentId);
-      } else {
-        await chats.updateChatRunner(chat.id, runner);
-      }
+      await holdWorkdirDefault(async () => {
+        const chat = await chats.createChat();
+        if (environmentId !== undefined && environmentId !== chat.environmentId) {
+          await chats.updateChatRunnerOnEnvironment(chat.id, runner, environmentId);
+        } else {
+          await chats.updateChatRunner(chat.id, runner);
+        }
+      });
       await navigate({ to: '/' });
     },
-    [chats, navigate]
+    [chats, holdWorkdirDefault, navigate]
   );
 
   const handleUpdateChatModel = useCallback(

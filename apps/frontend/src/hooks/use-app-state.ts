@@ -76,7 +76,11 @@ export function useAppState() {
   });
   useChatContextSync(chats.chats, textGen.seedContextInfo);
 
-  const chatActions = useChatRouteActions({ chats, navigate });
+  const chatActions = useChatRouteActions({
+    chats,
+    navigate,
+    holdWorkdirDefault: runnerSelection.holdWorkdirDefault,
+  });
   const generationControls = useGenerationControls({
     handleRespond: textGen.handleRespond,
     stopGeneration: textGen.handleStop,

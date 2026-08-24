@@ -117,6 +117,57 @@ describe('useRunnerSelection workdir binding', () => {
     expect(result.current.isWorkdirPickerOpen).toBe(false);
   });
 
+  /**
+   * `handleNewChatWithRunner` creates a *local* chat and only then repoints it
+   * to the runner's machine. The intermediate record is observable for the
+   * whole repoint request; defaulting against it would send the hub path to a
+   * chat about to be remote, and marking it would rob the repointed chat of
+   * its picker. The hold defers the effect — including the marking — until the
+   * setup settles, and the effect then acts on the record's final machine.
+   */
+  it('defers defaulting while a hold is open, then acts on the settled record', async () => {
+    const { promise: setupDone, resolve: releaseSetup } = Promise.withResolvers<void>();
+
+    const { result, rerender } = renderHook(
+      (props: { currentChat: ChatWithContext | null }) =>
+        useRunnerSelection({
+          currentChatId: CHAT.id,
+          currentChat: props.currentChat,
+          defaultWorkdir: '/srv/projects/default',
+          updateChatRunner,
+          updateChatRunnerPermissions,
+          updateChatWorkdir,
+          addRecentWorkdir,
+        }),
+      { initialProps: { currentChat: null as ChatWithContext | null } }
+    );
+
+    let held: Promise<void> = Promise.resolve();
+    act(() => {
+      held = result.current.holdWorkdirDefault(() => setupDone);
+    });
+    // Creation publishes the local record with no workdir while the repoint is
+    // still in flight — exactly the window the hold exists for.
+    rerender({ currentChat: CHAT });
+    expect(updateChatWorkdir).not.toHaveBeenCalled();
+
+    // The repoint lands in the cache before the hold releases: the update
+    // mutation writes the record in onSuccess, which runs before the awaited
+    // call resolves inside the held task.
+    rerender({ currentChat: { ...CHAT, environmentId: 'ubuntu-box' } });
+    expect(updateChatWorkdir).not.toHaveBeenCalled();
+
+    await act(async () => {
+      releaseSetup();
+      await held;
+    });
+
+    // Not marked as defaulted during the hold: the settled remote record still
+    // gets its picker, and the hub path was never sent anywhere.
+    await waitFor(() => expect(result.current.isWorkdirPickerOpen).toBe(true));
+    expect(updateChatWorkdir).not.toHaveBeenCalled();
+  });
+
   it('waits for the chat record before defaulting, so a loading chat is never overwritten', async () => {
     const { rerender } = renderHook(
       (props: { currentChat: ChatWithContext | null }) =>
