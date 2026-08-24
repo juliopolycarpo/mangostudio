@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { GitSummary } from '@mangostudio/shared/git';
+import type { ChatWorkdirRow } from '../../../../src/modules/chats/infrastructure/chat-repository';
 import {
   type GitSummaryChat,
   getBatchGitSummaries,
@@ -49,6 +50,24 @@ describe('getBatchGitSummaries', () => {
     expect(states.b).toBe(states.a as GitSummary);
     expect(states.c).toBe(states.a as GitSummary);
     expect(states.d).toEqual(summaryFor('/repo/two'));
+  });
+
+  it('takes the repository rows the route hands it', async () => {
+    // The service declares its own narrow port instead of importing the chats
+    // module, so nothing else pins the two together. Extra columns on the row
+    // are deliberately fine; a column the port needs going missing is what
+    // this catches, at typecheck rather than in the route.
+    const rows: ChatWorkdirRow[] = [{ id: 'a', workdir: '/repo/one', environmentId: 'local' }];
+
+    const states = await getBatchGitSummaries({
+      chatIds: ['a'],
+      chats: rows,
+      userId: 'user-1',
+      checkGitAvailable: gitAlwaysAvailable,
+      computeSummary: (workdir) => Promise.resolve(summaryFor(workdir)),
+    });
+
+    expect(states.a).toEqual(summaryFor('/repo/one'));
   });
 
   it('treats the same path on two environments as two repositories', async () => {

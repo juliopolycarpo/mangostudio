@@ -12,7 +12,15 @@ import { getRepoRoot, getRepoStatus } from './git-status-service';
  */
 export const WORKDIR_CONCURRENCY = 4;
 
-/** The columns the batch needs; callers pass ownership-filtered rows. */
+/**
+ * The columns the batch needs, from callers who have already filtered by
+ * ownership.
+ *
+ * Declared here rather than imported so the service keeps asking for a shape
+ * instead of depending on the chats module's rows, and so its tests need no
+ * database. `ChatWorkdirRow` is what production passes; extra columns on that
+ * row are deliberately fine, and a unit test pins that it still covers this.
+ */
 export interface GitSummaryChat {
   readonly id: string;
   readonly workdir: string | null;

@@ -169,7 +169,9 @@ export async function listByUserId(userId: string, db: Kysely<Database>): Promis
 }
 
 /** Exactly what the batched git state read consumes; narrow on purpose so a
- * corrupt runner column in one row cannot throw the whole batch away. */
+ * corrupt runner column in one row cannot throw the whole batch away. It has to
+ * keep satisfying that read's own `GitSummaryChat` port, which a unit test in
+ * the git module holds it to. */
 export type ChatWorkdirRow = Pick<
   Selectable<Database['chats']>,
   'id' | 'workdir' | 'environmentId'
