@@ -218,6 +218,16 @@ describe('WorkdirPickerDialog', () => {
     });
     await settlePendingBrowse();
 
+    // The ring wraps rather than walking out: back from the first stop lands on
+    // the dialog's own last control, not on the page behind it. The dialog fills
+    // the viewport, so anything Tab reaches out there is unreachable by mouse.
+    const dialog = screen.getByRole('dialog');
+    const close = screen.getByRole('button', { name: 'Close' });
+    close.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(close);
+
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
