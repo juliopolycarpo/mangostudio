@@ -70,6 +70,7 @@ function ChatRoute() {
           : undefined
       }
       workdir={app.currentWorkdir}
+      onSelectChat={app.handleSelectChat}
       composer={{
         runner: app.runner,
         activeModels: app.activeModels,

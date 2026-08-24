@@ -17,6 +17,23 @@ export function formatMessage(template: string, params: Record<string, string> =
   return template.replace(/\{(\w+)\}/g, (match, key: string) => params[key] ?? match);
 }
 
+const listFormatters = new Map<string, Intl.ListFormat>();
+
+/**
+ * "Claude Code, Codex and Cursor" in the active locale.
+ *
+ * `Intl` rather than joining on `', '` because the conjunction and the serial
+ * comma are both locale rules, and a hand-rolled join gets Portuguese wrong
+ * ("e", no Oxford comma) the moment the locale switches. Cached per locale for
+ * the same reason {@link formatRelativeTime}'s formatter is.
+ */
+export function formatList(items: readonly string[], locale: string): string {
+  const cached = listFormatters.get(locale);
+  const formatter = cached ?? new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' });
+  if (!cached) listFormatters.set(locale, formatter);
+  return formatter.format(items);
+}
+
 const RELATIVE_UNITS: ReadonlyArray<readonly [Intl.RelativeTimeFormatUnit, number]> = [
   ['year', 365 * 24 * 60 * 60 * 1000],
   ['month', 30 * 24 * 60 * 60 * 1000],

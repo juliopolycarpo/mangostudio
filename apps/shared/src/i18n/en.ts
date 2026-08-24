@@ -316,12 +316,6 @@ export const messages: Messages = {
       failed: 'Could not revert file changes.',
     },
     scrollToBottom: 'Scroll to bottom',
-    emptyGreeting: 'Hello, {name}!',
-    emptySubtitle: 'How can I help you today?',
-    suggestion1: 'Explain a complex concept simply',
-    suggestion2: 'Write a Python script to...',
-    suggestion3: 'Help me debug a problem',
-    suggestion4: 'Create an image',
     systemEvents: {
       chatCompacted: 'Context compacted into a summary',
       summaryHandoff: 'This chat started from a summarized handoff',

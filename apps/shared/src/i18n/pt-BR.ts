@@ -320,12 +320,6 @@ export const messages = {
       failed: 'Não foi possível reverter as alterações em arquivos.',
     },
     scrollToBottom: 'Ir para o final',
-    emptyGreeting: 'Olá, {name}!',
-    emptySubtitle: 'Como posso te ajudar hoje?',
-    suggestion1: 'Explique um conceito complexo de forma simples',
-    suggestion2: 'Escreva um script em Python para...',
-    suggestion3: 'Me ajude a depurar um problema',
-    suggestion4: 'Crie uma imagem',
     systemEvents: {
       chatCompacted: 'Contexto compactado em um resumo',
       summaryHandoff: 'Este chat começou a partir de um resumo anterior',
