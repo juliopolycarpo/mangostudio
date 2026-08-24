@@ -1,0 +1,126 @@
+/**
+ * The registry's memo, which is the palette's only per-render cost while a turn
+ * is streaming.
+ *
+ * The shell re-renders once per streamed token, and `useAppState` returns a
+ * fresh object literal each time — `useChats` under it does too, so its
+ * callbacks are new on every render however they are memoized. A memo keyed on
+ * that object rebuilds every row per token and hands the palette a new `items`
+ * identity, which reranks the whole list again. Nothing here would have
+ * changed; the work is pure waste on the latency path.
+ */
+
+import { describe, expect, it, jest, mock } from 'bun:test';
+import type { AgentProfile } from '@mangostudio/shared/agents';
+import type { Chat } from '@mangostudio/shared/chat';
+import type { CommandItem } from '@/features/command-palette/lib/command-item';
+import type { useAppState } from '@/hooks/use-app-state';
+import { AppContext } from '@/lib/app-context';
+import { act, flushAsyncRender, render } from '../../../support/harness/render';
+import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
+import { routerWithLinkStub } from '../../../support/mocks/router';
+
+// One instance for the file: the real `useNavigate` is stable across renders,
+// and a fresh mock per call would churn the memo this test is about.
+const navigate = jest.fn();
+mock.module('@tanstack/react-router', await routerWithLinkStub({ useNavigate: () => navigate }));
+
+const { useCommandRegistry } = await import(
+  '../../../../src/features/command-palette/use-command-registry'
+);
+
+type AppState = ReturnType<typeof useAppState>;
+
+// Hoisted for the same reason the real ones are memoized on the shell: these
+// stand in for query results, which keep their identity between renders.
+const chats = [
+  { id: 'c1', title: 'Plugin LSP', updatedAt: 1, runner: { kind: 'mangostudio' } },
+] as unknown as Chat[];
+const agents: AgentProfile[] = [];
+
+/**
+ * One render's worth of shell state. Deliberately rebuilt per call with the
+ * same field values — that is exactly what a streamed token produces.
+ */
+function appState(): AppState {
+  return {
+    agents,
+    chats,
+    currentChatId: 'c1',
+    currentEnvironmentId: null,
+    runner: { kind: 'mangostudio', agentId: 'default' },
+    handleSelectChat: jest.fn(),
+    handleNewChat: jest.fn(),
+    handleNewChatWithRunner: jest.fn(),
+    openWorkdirPicker: jest.fn(),
+  } as unknown as AppState;
+}
+
+/** The registry hook's own context, since the shared harness owns the wrapper. */
+function Probe({
+  app,
+  onRun,
+  seen,
+}: {
+  app: AppState;
+  onRun: () => void;
+  seen: { items: readonly CommandItem[] };
+}) {
+  return (
+    <AppContext value={app}>
+      <Registry onRun={onRun} seen={seen} />
+    </AppContext>
+  );
+}
+
+function Registry({ onRun, seen }: { onRun: () => void; seen: { items: readonly CommandItem[] } }) {
+  seen.items = useCommandRegistry(onRun).items;
+  return null;
+}
+
+async function setup() {
+  const scenario = createFetchScenario();
+  scenario.install();
+  scenario.respondWithJson('GET', '/api/environments', { body: [] });
+
+  const seen: { items: readonly CommandItem[] } = { items: [] };
+  const onRun = jest.fn();
+  const { rerender } = render(<Probe app={appState()} onRun={onRun} seen={seen} />);
+  // The environments query settles after the first render. Letting it land here
+  // keeps the assertion about the shell object rather than about a cache fill.
+  await flushAsyncRender();
+  return { scenario, seen, onRun, rerender };
+}
+
+describe('useCommandRegistry', () => {
+  it('rebuilds no rows when only the shell object identity changed', async () => {
+    const { scenario, seen, onRun, rerender } = await setup();
+    const first = seen.items;
+
+    // A token lands: same chats, same agents, brand-new `app` and brand-new
+    // handlers hanging off it.
+    act(() => {
+      rerender(<Probe app={appState()} onRun={onRun} seen={seen} />);
+    });
+
+    expect(seen.items).toBe(first);
+    scenario.restore();
+  });
+
+  it('runs the handler the shell holds now, not the one opening captured', async () => {
+    const { scenario, seen, onRun, rerender } = await setup();
+
+    // The price of keeping the memo stable: rows close over a ref rather than
+    // over the handler. A row must therefore still reach the *current* one.
+    const replacement = appState();
+    act(() => {
+      rerender(<Probe app={replacement} onRun={onRun} seen={seen} />);
+    });
+
+    seen.items.find((item) => item.id === 'session:c1')?.run();
+
+    expect(replacement.handleSelectChat).toHaveBeenCalledWith('c1');
+    expect(onRun).toHaveBeenCalledTimes(1);
+    scenario.restore();
+  });
+});

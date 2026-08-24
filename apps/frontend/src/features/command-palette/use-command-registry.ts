@@ -9,7 +9,7 @@
  */
 
 import { useNavigate } from '@tanstack/react-router';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { actionCommands } from '@/features/command-palette/sources/action-commands';
 import { environmentCommands } from '@/features/command-palette/sources/environment-commands';
@@ -46,6 +46,12 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
   const external = useExternalAgents(app.currentEnvironmentId);
   const environmentsQuery = useEnvironmentEntitiesQuery();
 
+  // The data the rows are built from, named individually so the memo below can
+  // depend on it without depending on the shell object that carries it. Each of
+  // these is a query result or derived from one, so it changes when the rows
+  // would actually differ.
+  const { agents, chats, currentChatId } = app;
+
   // The active runner's quota, on the same identity-guarded entry the header
   // pill and the selector chip share — so refreshing from the palette lights
   // their spinner instead of racing a second read of the same account.
@@ -60,15 +66,25 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
   // millisecond.
   const [nowMs] = useState(() => Date.now());
 
+  // Every handler on the shell is rebuilt on every render — `useAppState`
+  // returns a fresh literal, and `useChats` under it does too, so the callbacks
+  // cannot be stable however they are memoized. Depending on them directly
+  // would rebuild all three hundred rows once per streamed token, precisely
+  // during the latency-sensitive path. Reading them at invocation time instead
+  // keeps the memo keyed on data alone, and a row still runs the current
+  // handler rather than the one captured when the palette opened.
+  const appRef = useRef(app);
+  appRef.current = app;
+
   const items = useMemo(() => {
     const sessions = sessionCommands({
-      chats: app.chats,
+      chats,
       badgeLabels: t.sidebar.runner,
       locale,
       nowMs,
       onSelect: (chatId) => {
         onRun();
-        app.handleSelectChat(chatId);
+        appRef.current.handleSelectChat(chatId);
       },
     });
 
@@ -76,14 +92,14 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
       t,
       // Exactly the filter the runner selector applies: a subagent is not
       // something a chat can be handed to.
-      agents: app.agents.filter((agent) => agent.role === 'primary' || agent.role === 'both'),
+      agents: agents.filter((agent) => agent.role === 'primary' || agent.role === 'both'),
       externalAgents: external.agents.filter(
         (descriptor) =>
           externalAgentSelectable(descriptor) &&
           descriptor.unavailableReason !== 'disclosure-required'
       ),
       resolvedTheme,
-      hasChat: app.currentChatId !== null,
+      hasChat: currentChatId !== null,
       newChatShortcut: newChatShortcutHint(),
       quotaRefresh: quotaDescriptor
         ? {
@@ -97,11 +113,11 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
         : null,
       onNewChat: () => {
         onRun();
-        return app.handleNewChat();
+        return appRef.current.handleNewChat();
       },
       onNewChatWithRunner: (runner, environmentId) => {
         onRun();
-        return app.handleNewChatWithRunner(runner, environmentId);
+        return appRef.current.handleNewChatWithRunner(runner, environmentId);
       },
       onToggleTheme: () => {
         onRun();
@@ -113,7 +129,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
         // on the shell — so navigating first is what makes it appear when the
         // palette was opened from settings or the gallery.
         void navigate({ to: '/' });
-        app.openWorkdirPicker();
+        appRef.current.openWorkdirPicker();
       },
     });
 
@@ -136,7 +152,9 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
 
     return [...sessions, ...actions, ...navigation, ...environments];
   }, [
-    app,
+    agents,
+    chats,
+    currentChatId,
     environmentsQuery.data,
     external.agents,
     locale,

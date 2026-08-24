@@ -19,7 +19,16 @@
 
 import { Search, SearchX } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
-import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { KbdHint } from '@/components/ui/KbdHint';
 import { MicroLabel } from '@/components/ui/MicroLabel';
@@ -38,7 +47,17 @@ export interface CommandPaletteProps {
   readonly onClose: () => void;
 }
 
-export function CommandPalette({ items, isLoading = false, onClose }: CommandPaletteProps) {
+/**
+ * Memoized because its parent is a context consumer: `useCommandRegistry` reads
+ * the shell, which re-renders once per streamed token while a turn is running.
+ * A stable `items` alone would not stop that — the palette would still re-render
+ * and rerank the whole list per token with nothing about it changed.
+ */
+export const CommandPalette = memo(function CommandPalette({
+  items,
+  isLoading = false,
+  onClose,
+}: CommandPaletteProps) {
   const { t } = useI18n();
   const labels = t.commandPalette;
   const listId = useId();
@@ -275,7 +294,7 @@ export function CommandPalette({ items, isLoading = false, onClose }: CommandPal
       </motion.div>
     </div>
   );
-}
+});
 
 /**
  * The row a query would arm right now, ranked outside the deferred render.
