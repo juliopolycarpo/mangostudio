@@ -118,8 +118,10 @@ describe('sidebar git badges', () => {
     renderSidebar({ gitSummaries: GIT_SUMMARIES });
     const row = rowFor('Plugin LSP TypeScript');
     expect(within(row).getByText('feat/lsp-store')).toBeInTheDocument();
-    expect(within(row).getByTitle('3 uncommitted changes')).toBeInTheDocument();
+    expect(within(row).getByTitle('3 uncommitted change(s)')).toBeInTheDocument();
     expect(within(row).getByText('↑2 ↓1')).toBeInTheDocument();
+    // The arrows read as bare glyphs, so the drift is spelled out alongside them.
+    expect(within(row).getByText('2 ahead, 1 behind')).toBeInTheDocument();
   });
 
   it('falls back to the short detached hash and hides clean/synced indicators', () => {

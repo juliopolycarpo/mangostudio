@@ -19,13 +19,10 @@ export function GitSummaryBadge({ summary }: { summary: GitSummary }) {
     summary.changedFileCount > 0
       ? formatMessage(t.sidebar.git.dirty, { count: String(summary.changedFileCount) })
       : null;
-  const sync =
-    summary.ahead > 0 || summary.behind > 0
-      ? formatMessage(t.git.remote.syncSummary, {
-          ahead: String(summary.ahead),
-          behind: String(summary.behind),
-        })
-      : null;
+  const drifted = summary.ahead > 0 || summary.behind > 0;
+  const counts = { ahead: String(summary.ahead), behind: String(summary.behind) };
+  const sync = drifted ? formatMessage(t.git.remote.syncSummary, counts) : null;
+  const syncLabel = drifted ? formatMessage(t.sidebar.git.sync, counts) : null;
   return (
     <span className="flex min-w-0 items-center gap-1" data-testid="git-summary-badge">
       <GitBranch size={10} aria-hidden="true" className="shrink-0" />
@@ -38,7 +35,14 @@ export function GitSummaryBadge({ summary }: { summary: GitSummary }) {
           <span className="sr-only">{dirtyLabel}</span>
         </span>
       ) : null}
-      {sync ? <span className="shrink-0">{sync}</span> : null}
+      {sync ? (
+        // The glyphs carry the meaning visually and read as bare arrows aloud,
+        // so they are hidden and paired with the spelled-out count.
+        <span className="flex shrink-0 items-center" title={syncLabel ?? undefined}>
+          <span aria-hidden="true">{sync}</span>
+          <span className="sr-only">{syncLabel}</span>
+        </span>
+      ) : null}
     </span>
   );
 }
