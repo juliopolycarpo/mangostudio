@@ -191,8 +191,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
       },
       async ({ body, request, set, user }): Promise<RouteResult<GitBatchStateResponse>> => {
         const userId = user?.id ?? '';
+        // The ownership lookup is a database read, not Git. It stays outside
+        // the catch — like `resolveChatWorkdir` on every sibling route — so a
+        // storage failure is not reported (and silently unlogged) as
+        // "Git command failed".
+        const chats = await listByIdsForUser(body.chatIds, userId, getDb());
         try {
-          const chats = await listByIdsForUser(body.chatIds, userId, getDb());
           return {
             states: await getBatchGitSummaries({
               chatIds: body.chatIds,
