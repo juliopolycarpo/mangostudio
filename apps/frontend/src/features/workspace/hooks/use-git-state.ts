@@ -1,28 +1,33 @@
-import type {
-  CommitResponse,
-  DiscardPathsBody,
-  GenerateCommitMessageResponse,
-  GitBranchesResponse,
-  GitCommitDetailsResponse,
-  GitDiffResponse,
-  GitHeadMessageResponse,
-  GitHistoryResponse,
-  GitPushBody,
-  GitRepoState,
-  GitStatus,
-  InitRepoResponse,
-  StashListResponse,
+import {
+  type CommitResponse,
+  type DiscardPathsBody,
+  type GenerateCommitMessageResponse,
+  GIT_BATCH_STATE_MAX_CHAT_IDS,
+  type GitBatchStateResponse,
+  type GitBranchesResponse,
+  type GitCommitDetailsResponse,
+  type GitDiffResponse,
+  type GitHeadMessageResponse,
+  type GitHistoryResponse,
+  type GitPushBody,
+  type GitRepoState,
+  type GitStatus,
+  type GitSummary,
+  type InitRepoResponse,
+  type StashListResponse,
 } from '@mangostudio/shared/git';
 import { GIT_SCOPES, type GitScope, gitTopic } from '@mangostudio/shared/realtime';
 import {
   type QueryClient,
   queryOptions,
+  type UseQueryResult,
   useInfiniteQuery,
   useMutation,
+  useQueries,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { client } from '@/lib/api-client';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
@@ -31,6 +36,11 @@ import { githubContextKeys } from './use-github-context';
 const gitStateKeys = {
   all: ['git-state'] as const,
   detail: (chatId: string) => [...gitStateKeys.all, chatId] as const,
+};
+
+const gitSummariesKeys = {
+  all: ['git-summaries'] as const,
+  chunk: (chatIds: readonly string[]) => [...gitSummariesKeys.all, chatIds] as const,
 };
 
 const gitStashKeys = {
@@ -137,7 +147,9 @@ function gitStateQueryOptions(chatId: string) {
 }
 
 export function invalidateGitState(queryClient: QueryClient, chatId: string): Promise<void> {
-  return queryClient.invalidateQueries({ queryKey: gitStateKeys.detail(chatId) });
+  // Delegating keeps every entry point into the state scope reaching the
+  // chunk-keyed batched summaries too.
+  return invalidateGitScopes(queryClient, chatId, ['state']);
 }
 
 /**
@@ -166,9 +178,89 @@ async function invalidateGitScopes(
     diffs: [...gitDiffKeys.all, chatId],
     github: [...githubContextKeys.all, chatId],
   };
-  await Promise.all(
-    scopes.map((scope) => queryClient.invalidateQueries({ queryKey: keys[scope] }))
+  await Promise.all([
+    ...scopes.map((scope) => queryClient.invalidateQueries({ queryKey: keys[scope] })),
+    // Batched summaries are chunk-keyed, so the state scope reaches them by
+    // membership rather than by key prefix.
+    ...(scopes.includes('state') ? [invalidateGitSummaries(queryClient, chatId)] : []),
+  ]);
+}
+
+/** Invalidates only the summary chunks that contain this chat. */
+function invalidateGitSummaries(queryClient: QueryClient, chatId: string): Promise<void> {
+  return queryClient.invalidateQueries({
+    queryKey: gitSummariesKeys.all,
+    predicate: (query) => {
+      const chunk = query.queryKey[1];
+      return Array.isArray(chunk) && chunk.includes(chatId);
+    },
+  });
+}
+
+/**
+ * Slim git badges for a list of chats, fetched through the batched endpoint so
+ * N visible rows cost one request per {@link GIT_BATCH_STATE_MAX_CHAT_IDS} ids
+ * instead of an N+1 fan-out of `GET /git/state`.
+ *
+ * A missing key means the query is still loading; `null` means the server has
+ * no answer for that chat (no workdir, not a repo, or not this user's).
+ */
+export function useBatchedGitSummaries(
+  chatIds: readonly string[]
+): Record<string, GitSummary | null> {
+  // Sorted, deduplicated chunks keep the query key independent of row order,
+  // so reordering the sidebar does not refetch every badge. The join is the
+  // memo dependency because callers typically pass a fresh array per render.
+  const idsKey = [...new Set(chatIds)].sort().join('\n');
+  const chunks = useMemo(() => {
+    const sorted = idsKey.length === 0 ? [] : idsKey.split('\n');
+    const result: string[][] = [];
+    for (let start = 0; start < sorted.length; start += GIT_BATCH_STATE_MAX_CHAT_IDS) {
+      result.push(sorted.slice(start, start + GIT_BATCH_STATE_MAX_CHAT_IDS));
+    }
+    return result;
+  }, [idsKey]);
+
+  const queries = useMemo(
+    () =>
+      chunks.map((chunk) => ({
+        queryKey: gitSummariesKeys.chunk(chunk),
+        queryFn: async (): Promise<GitBatchStateResponse> => {
+          const { data, error } = await client.api.git.state.batch.post({ chatIds: chunk });
+          if (error) throw new ApiError(error.value);
+          return data as GitBatchStateResponse;
+        },
+        staleTime: 30_000,
+        // List badges have no realtime topic; focus is their freshness signal
+        // even though the query client default disables it.
+        refetchOnWindowFocus: true,
+      })),
+    [chunks]
   );
+
+  // Stable identity plus a plain object: `useQueries` only structurally shares
+  // the combined result (skipping re-renders on untouched chunks) when the
+  // combine function is referentially stable and the result is a plain
+  // array/object — a Map or an inline arrow would defeat both layers.
+  const combine = useCallback(
+    (results: UseQueryResult<GitBatchStateResponse>[]) => {
+      const summaries: Record<string, GitSummary | null> = {};
+      results.forEach((result, index) => {
+        // A settled chunk answers even when it failed: the server omits chats
+        // it has no answer for, and an errored chunk has no answers at all, so
+        // both degrade to a resolved `null` rather than a permanent spinner.
+        if (result.isPending) return;
+        const states = result.data?.states ?? {};
+        for (const chatId of chunks[index] ?? []) {
+          summaries[chatId] = states[chatId] ?? null;
+        }
+      });
+      return summaries;
+    },
+    [chunks]
+  );
+
+  return useQueries({ queries, combine });
 }
 
 export function useGitState(chatId: string) {

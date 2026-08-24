@@ -168,6 +168,31 @@ export async function listByUserId(userId: string, db: Kysely<Database>): Promis
   return rows.map(mapChatRow);
 }
 
+/** Exactly what the batched git state read consumes; narrow on purpose so a
+ * corrupt runner column in one row cannot throw the whole batch away. */
+export type ChatWorkdirRow = Pick<
+  Selectable<Database['chats']>,
+  'id' | 'workdir' | 'environmentId'
+>;
+
+/**
+ * Batch lookup filtered to one owner: ids that do not exist or belong to
+ * another user are simply absent, so callers cannot tell the two apart.
+ */
+export async function listByIdsForUser(
+  ids: readonly string[],
+  userId: string,
+  db: Kysely<Database>
+): Promise<ChatWorkdirRow[]> {
+  if (ids.length === 0) return [];
+  return await db
+    .selectFrom('chats')
+    .select(['id', 'workdir', 'environmentId'])
+    .where('id', 'in', [...ids])
+    .where('userId', '=', userId)
+    .execute();
+}
+
 export async function getById(id: string, db: Kysely<Database>): Promise<ChatRecord | undefined> {
   const row = await db.selectFrom('chats').selectAll().where('id', '=', id).executeTakeFirst();
   return row ? mapChatRow(row) : undefined;
