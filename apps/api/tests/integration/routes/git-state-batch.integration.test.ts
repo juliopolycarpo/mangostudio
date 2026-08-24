@@ -32,7 +32,7 @@ async function bindWorkdir(chatId: string, workdir: string): Promise<void> {
   await getDb().updateTable('chats').set({ workdir }).where('id', '=', chatId).execute();
 }
 
-async function runFixtureGit(cwd: string, args: readonly string[]): Promise<void> {
+async function runFixtureGit(cwd: string, args: readonly string[]): Promise<string> {
   const proc = Bun.spawn(['git', ...args], {
     cwd,
     env: {
@@ -41,12 +41,32 @@ async function runFixtureGit(cwd: string, args: readonly string[]): Promise<void
       GIT_TERMINAL_PROMPT: '0',
       LC_ALL: 'C',
     },
-    stdout: 'ignore',
+    stdout: 'pipe',
     stderr: 'pipe',
   });
-  const stderr = await new Response(proc.stderr).text();
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
   const exitCode = await proc.exited;
   if (exitCode !== 0) throw new Error(`Fixture git failed (${exitCode}): ${stderr.trim()}`);
+  return stdout.trim();
+}
+
+/** Identity and signing are forced per command so developer globals cannot fail it. */
+async function commitFixture(cwd: string, message: string): Promise<void> {
+  await runFixtureGit(cwd, ['add', '--all']);
+  await runFixtureGit(cwd, [
+    '-c',
+    'user.email=git-batch@mangostudio.test',
+    '-c',
+    'user.name=Git Batch Test',
+    '-c',
+    'commit.gpgSign=false',
+    'commit',
+    '-m',
+    message,
+  ]);
 }
 
 async function createFixtureRepo(): Promise<string> {
@@ -56,18 +76,7 @@ async function createFixtureRepo(): Promise<string> {
   // own hooks directory so global hooks cannot fail the fixture commit.
   await runFixtureGit(workdir, ['config', 'core.hooksPath', join(workdir, '.git', 'hooks')]);
   await writeFile(join(workdir, 'tracked.txt'), 'initial\n');
-  await runFixtureGit(workdir, ['add', 'tracked.txt']);
-  await runFixtureGit(workdir, [
-    '-c',
-    'user.email=git-batch@mangostudio.test',
-    '-c',
-    'user.name=Git Batch Test',
-    '-c',
-    'commit.gpgSign=false',
-    'commit',
-    '-m',
-    'initial',
-  ]);
+  await commitFixture(workdir, 'initial');
   return workdir;
 }
 
@@ -163,6 +172,64 @@ describe('POST /git/state/batch', () => {
       behind: 0,
       changedFileCount: 0,
       workdir: repo,
+    });
+  });
+
+  it.skipIf(!hasGit)('serializes a detached head and upstream drift', async () => {
+    // Every other case ships `{branch: 'main', ahead: 0, behind: 0}` with both
+    // optional keys absent, so this is the only test where `branch: null`,
+    // `detachedAt` and `upstream` cross Elysia's compiled response mirror —
+    // the one layer whose failures are invisible to `check` and `Value.Check`.
+    const tracking = await createFixtureRepo();
+    // A local ref standing in for a published branch: real upstream tracking
+    // and ahead counts, no network. Git only resolves `branch.upstream` when
+    // the remote itself is configured, so the refspec is required even though
+    // the URL is never contacted — `status` does not talk to a remote.
+    await runFixtureGit(tracking, ['config', 'remote.origin.url', tracking]);
+    await runFixtureGit(tracking, [
+      'config',
+      'remote.origin.fetch',
+      '+refs/heads/*:refs/remotes/origin/*',
+    ]);
+    await runFixtureGit(tracking, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+    await runFixtureGit(tracking, ['config', 'branch.main.remote', 'origin']);
+    await runFixtureGit(tracking, ['config', 'branch.main.merge', 'refs/heads/main']);
+    await writeFile(join(tracking, 'tracked.txt'), 'second\n');
+    await commitFixture(tracking, 'second');
+
+    const detached = await createFixtureRepo();
+    const head = await runFixtureGit(detached, ['rev-parse', 'HEAD']);
+    await runFixtureGit(detached, ['checkout', '--detach', 'HEAD']);
+
+    const user = await insertTestUser();
+    const [drifted, headless] = await Promise.all([
+      insertTestChat(user.id),
+      insertTestChat(user.id),
+    ]);
+    await Promise.all([bindWorkdir(drifted.id, tracking), bindWorkdir(headless.id, detached)]);
+    const { app, restore } = createAuthenticatedApiTestApp(user, gitRoutes);
+    restoreAuth = restore;
+
+    const response = await postBatch(app, [drifted.id, headless.id]);
+    const payload = (await response.json()) as GitBatchStateResponse;
+
+    expect(response.status).toBe(200);
+    expect(Value.Check(GitBatchStateResponseSchema, payload)).toBe(true);
+    expect(payload.states[drifted.id]).toEqual({
+      branch: 'main',
+      upstream: 'origin/main',
+      ahead: 1,
+      behind: 0,
+      changedFileCount: 0,
+      workdir: tracking,
+    });
+    expect(payload.states[headless.id]).toEqual({
+      branch: null,
+      detachedAt: head,
+      ahead: 0,
+      behind: 0,
+      changedFileCount: 0,
+      workdir: detached,
     });
   });
 
