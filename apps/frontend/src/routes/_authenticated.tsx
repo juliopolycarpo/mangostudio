@@ -19,6 +19,7 @@ import { RunnerSelectorContainer } from '@/features/external-agents/RunnerSelect
 import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
 import { appSettingsQueryOptions } from '@/features/settings/app/queries';
 import { WorkspaceBreadcrumb } from '@/features/workspace/components/WorkspaceBreadcrumb';
+import { useBatchedGitSummaries } from '@/features/workspace/hooks/use-git-state';
 import { useAppState } from '@/hooks/use-app-state';
 import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
@@ -62,6 +63,11 @@ function AuthenticatedLayout() {
   const currentPath = routerState.location.pathname;
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const commandPalette = useCommandPalette();
+  // Only chats with a workdir can have git state; the hook dedupes, sorts and
+  // chunks the ids itself, so the fresh array per render is fine.
+  const gitSummaries = useBatchedGitSummaries(
+    app.chats.filter((chat) => chat.workdir).map((chat) => chat.id)
+  );
 
   // New chat keeps its own chord rather than living in the palette's registry:
   // it is the one action worth reaching without reading a list first. Some
@@ -118,6 +124,7 @@ function AuthenticatedLayout() {
         onDeleteChat={(chatId) => void app.handleDeleteChat(chatId)}
         onNewChat={() => void app.handleNewChat()}
         contextCache={app.contextCache}
+        gitSummaries={gitSummaries}
         isMobileSidebarOpen={isMobileSidebarOpen}
         onMobileSidebarClose={() => setIsMobileSidebarOpen(false)}
         chatSidebarWidth={app.settings.workspaceSettings.chatSidebarWidth}

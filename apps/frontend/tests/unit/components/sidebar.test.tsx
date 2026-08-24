@@ -88,6 +88,66 @@ describe('sidebar grouping', () => {
   });
 });
 
+describe('sidebar git badges', () => {
+  const GIT_SUMMARIES = {
+    c1: {
+      branch: 'feat/lsp-store',
+      ahead: 2,
+      behind: 1,
+      changedFileCount: 3,
+      workdir: '/home/u/projects/mango-lsp-store',
+    },
+    c2: {
+      branch: null,
+      detachedAt: 'abc1234def5678',
+      ahead: 0,
+      behind: 0,
+      changedFileCount: 0,
+      workdir: '/home/u/projects/soak',
+    },
+    c3: null,
+  };
+
+  function rowFor(title: string): HTMLElement {
+    const row = screen.getByText(title).closest('li');
+    if (!row) throw new Error('row not found');
+    return row;
+  }
+
+  it('shows branch, dirty dot, and sync drift from the batched summary', () => {
+    renderSidebar({ gitSummaries: GIT_SUMMARIES });
+    const row = rowFor('Plugin LSP TypeScript');
+    expect(within(row).getByText('feat/lsp-store')).toBeInTheDocument();
+    expect(within(row).getByTitle('3 uncommitted changes')).toBeInTheDocument();
+    expect(within(row).getByText('↑2 ↓1')).toBeInTheDocument();
+  });
+
+  it('falls back to the short detached hash and hides clean/synced indicators', () => {
+    renderSidebar({ gitSummaries: GIT_SUMMARIES });
+    const row = rowFor('sse-soak load test');
+    expect(within(row).getByText('abc1234')).toBeInTheDocument();
+    expect(within(row).queryByTitle(/uncommitted/)).toBeNull();
+    expect(within(row).queryByText(/↑/)).toBeNull();
+  });
+
+  it('renders no badge for a chat the server has no answer for', () => {
+    renderSidebar({ gitSummaries: GIT_SUMMARIES });
+    expect(within(rowFor('Ancient refactor')).queryByTestId('git-summary-badge')).toBeNull();
+  });
+
+  it('renders no badges at all without summaries', () => {
+    renderSidebar();
+    expect(screen.queryByTestId('git-summary-badge')).toBeNull();
+  });
+
+  it('keeps the badge out of the chat-selection button accessible name', () => {
+    renderSidebar({ gitSummaries: GIT_SUMMARIES });
+    const row = rowFor('Plugin LSP TypeScript');
+    const select = within(row).getByRole('button', { name: 'Plugin LSP TypeScript' });
+    expect(select).not.toContainElement(within(row).getByTestId('git-summary-badge'));
+  });
+});
+
 describe('sidebar search', () => {
   it('filters by title and drops emptied groups', async () => {
     renderSidebar();

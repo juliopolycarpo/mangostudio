@@ -1310,6 +1310,9 @@ export const messages = {
       claude: 'claude',
       cursor: 'cursor',
     },
+    git: {
+      dirty: '{count} alterações não commitadas',
+    },
   },
 
   commandPalette: {

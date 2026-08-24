@@ -1,4 +1,5 @@
 import type { Chat } from '@mangostudio/shared';
+import type { GitSummary } from '@mangostudio/shared/git';
 import {
   CHAT_SIDEBAR_WIDTH_DEFAULT,
   CHAT_SIDEBAR_WIDTH_MAX,
@@ -37,6 +38,7 @@ import { filterChats } from '../lib/filter-chats';
 import { chatGroupLabel, groupChatsByDate } from '../lib/group-chats';
 import { runnerBadge } from '../lib/runner-badge';
 import { ContextRing } from './ContextRing';
+import { GitSummaryBadge } from './GitSummaryBadge';
 import { NavItem } from './NavItem';
 
 interface Props {
@@ -49,6 +51,12 @@ interface Props {
   onDeleteChat: (chatId: string) => void;
   onNewChat: () => void;
   contextCache?: Map<string, ContextInfo>;
+  /**
+   * Batched git badges keyed by chat id, fetched by the shell so this list
+   * stays presentational. A missing key is still loading; `null` is a chat
+   * with nothing to show (no workdir, not a repository).
+   */
+  gitSummaries?: Record<string, GitSummary | null>;
   isMobileOpen?: boolean;
   onMobileClose?: () => void;
   width?: number;
@@ -67,6 +75,7 @@ export function Sidebar({
   onDeleteChat,
   onNewChat,
   contextCache,
+  gitSummaries,
   isMobileOpen = false,
   onMobileClose,
   width = CHAT_SIDEBAR_WIDTH_DEFAULT,
@@ -282,6 +291,7 @@ export function Sidebar({
                 {group.chats.map((chat) => {
                   const ctx = contextCache?.get(chat.id);
                   const badge = runnerBadge(chat.runner, badgeLabels);
+                  const gitSummary = gitSummaries?.[chat.id] ?? null;
                   const isCurrent = currentPage === 'chat' && currentChatId === chat.id;
                   const editing = editingChatId === chat.id;
                   // Hidden from assistive tech so the select button's accessible
@@ -349,7 +359,8 @@ export function Sidebar({
                            * anything, so both stay up: the row is a full-width
                            * sheet there and has the space.
                            */}
-                          <span className="flex shrink-0 items-center gap-1.5 pr-4 font-mono text-[10px] text-on-surface-variant/70 group-hover:hidden group-focus-within:hidden">
+                          <span className="flex min-w-0 shrink-0 items-center gap-1.5 pr-4 font-mono text-[10px] text-on-surface-variant/70 group-hover:hidden group-focus-within:hidden">
+                            {gitSummary ? <GitSummaryBadge summary={gitSummary} /> : null}
                             <StatusDot tone="neutral" className={badge.dotClassName} />
                             {badge.label}
                           </span>

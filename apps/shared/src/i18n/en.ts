@@ -1291,6 +1291,9 @@ export const messages: Messages = {
       claude: 'claude',
       cursor: 'cursor',
     },
+    git: {
+      dirty: '{count} uncommitted changes',
+    },
   },
 
   commandPalette: {
