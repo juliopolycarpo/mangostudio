@@ -175,16 +175,16 @@ describe('POST /git/state/batch', () => {
     });
   });
 
-  it.skipIf(!hasGit)('serializes a detached head and upstream drift', async () => {
-    // Every other case ships `{branch: 'main', ahead: 0, behind: 0}` with both
-    // optional keys absent, so this is the only test where `branch: null`,
-    // `detachedAt` and `upstream` cross Elysia's compiled response mirror —
-    // the one layer whose failures are invisible to `check` and `Value.Check`.
+  it.skipIf(!hasGit)('serializes a detached head and a branch ahead of its upstream', async () => {
+    // Every other case ships `{branch: 'main', ahead: 0, behind: 0}` with the
+    // optional key absent, so this is the only test where `branch: null` and
+    // `detachedAt` cross Elysia's compiled response mirror — the one layer
+    // whose failures are invisible to `check` and `Value.Check`.
     const tracking = await createFixtureRepo();
-    // A local ref standing in for a published branch: real upstream tracking
-    // and ahead counts, no network. Git only resolves `branch.upstream` when
-    // the remote itself is configured, so the refspec is required even though
-    // the URL is never contacted — `status` does not talk to a remote.
+    // A local ref standing in for a published branch: real tracking and ahead
+    // counts, no network. Git only resolves the upstream when the remote itself
+    // is configured, so the refspec is required even though the URL is never
+    // contacted — `status` does not talk to a remote.
     await runFixtureGit(tracking, ['config', 'remote.origin.url', tracking]);
     await runFixtureGit(tracking, [
       'config',
@@ -215,9 +215,10 @@ describe('POST /git/state/batch', () => {
 
     expect(response.status).toBe(200);
     expect(Value.Check(GitBatchStateResponseSchema, payload)).toBe(true);
+    // `toEqual` on the whole entry is the guard against the summary regrowing a
+    // field nothing renders: the upstream's name came out for that reason.
     expect(payload.states[drifted.id]).toEqual({
       branch: 'main',
-      upstream: 'origin/main',
       ahead: 1,
       behind: 0,
       changedFileCount: 0,

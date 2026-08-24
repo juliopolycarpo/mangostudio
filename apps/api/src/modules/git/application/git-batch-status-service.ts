@@ -49,7 +49,6 @@ function toGitSummary(workdir: string, status: GitStatus): GitSummary {
   return {
     branch: status.branch.name,
     ...(status.branch.detachedAt === undefined ? {} : { detachedAt: status.branch.detachedAt }),
-    ...(status.branch.upstream === undefined ? {} : { upstream: status.branch.upstream }),
     ahead: status.branch.ahead,
     behind: status.branch.behind,
     changedFileCount: changedPaths.size,

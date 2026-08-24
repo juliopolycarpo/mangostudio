@@ -69,11 +69,14 @@ export const GitBatchStateRequestSchema = Type.Object({
  * `GitStatusSchema`: a 50-chat batch never needs per-file changes, only the
  * branch line and how much is dirty. A clean tree is `changedFileCount === 0`
  * rather than a second field that could disagree with it.
+ *
+ * The upstream's *name* is deliberately absent too — a badge shows how far a
+ * branch has drifted, not what it tracks. `GET /git/state` carries
+ * `branch.upstream` for the panel that does name it.
  */
 export const GitSummarySchema = Type.Object({
   branch: Type.Union([Type.String(), Type.Null()]),
   detachedAt: Type.Optional(Type.String()),
-  upstream: Type.Optional(Type.String()),
   ahead: Type.Integer({ minimum: 0 }),
   behind: Type.Integer({ minimum: 0 }),
   changedFileCount: Type.Integer({ minimum: 0 }),
