@@ -50,7 +50,10 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
   // depend on it without depending on the shell object that carries it. Each of
   // these is a query result or derived from one, so it changes when the rows
   // would actually differ.
-  const { agents, chats, currentChatId } = app;
+  // `isGenerating` flips at turn boundaries, not per streamed token, so keying
+  // the memo on it does not reintroduce the per-token rebuild the ref below
+  // exists to avoid.
+  const { agents, chats, currentChatId, isGenerating } = app;
 
   // The active runner's quota, on the same identity-guarded entry the header
   // pill and the selector chip share — so refreshing from the palette lights
@@ -100,6 +103,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
       ),
       resolvedTheme,
       hasChat: currentChatId !== null,
+      isGenerating,
       newChatShortcut: newChatShortcutHint(),
       quotaRefresh: quotaDescriptor
         ? {
@@ -157,6 +161,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
     currentChatId,
     environmentsQuery.data,
     external.agents,
+    isGenerating,
     locale,
     navigate,
     nowMs,

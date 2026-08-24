@@ -181,6 +181,7 @@ describe('actionCommands', () => {
       externalAgents: descriptors,
       resolvedTheme: 'dark',
       hasChat: true,
+      isGenerating: false,
       newChatShortcut: 'Ctrl+N',
       quotaRefresh: null,
       onNewChat: jest.fn(),
@@ -230,6 +231,15 @@ describe('actionCommands', () => {
   it('hides the workdir row with no chat to point it at', () => {
     expect(build({ hasChat: false }).some((item) => item.id === 'action:workdir')).toBe(false);
     expect(build({ hasChat: true }).some((item) => item.id === 'action:workdir')).toBe(true);
+  });
+
+  /**
+   * Repointing the binding mid-turn makes the hub reap the live external
+   * session with `session-lost`, which is why the composer disables its chip —
+   * the palette must not keep offering the same write.
+   */
+  it('hides the workdir row while a turn is streaming', () => {
+    expect(build({ isGenerating: true }).some((item) => item.id === 'action:workdir')).toBe(false);
   });
 
   it('offers a quota refresh only when the active runner reports one', () => {

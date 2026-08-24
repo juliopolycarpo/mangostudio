@@ -34,6 +34,12 @@ export interface ActionCommandParams {
   readonly resolvedTheme: 'dark' | 'light';
   /** False on a shell with no chat selected, which is what hides the workdir row. */
   readonly hasChat: boolean;
+  /**
+   * True while a turn is streaming. Hides the workdir row for the same reason
+   * the composer disables its workdir chip: repointing the binding mid-turn
+   * makes the hub reap the live external session with `session-lost`.
+   */
+  readonly isGenerating: boolean;
   readonly newChatShortcut: string;
   /** Null unless the active runner is an external one that reports usage. */
   readonly quotaRefresh: QuotaRefreshAction | null;
@@ -57,6 +63,7 @@ export function actionCommands({
   externalAgents,
   resolvedTheme,
   hasChat,
+  isGenerating,
   newChatShortcut,
   quotaRefresh,
   onNewChat,
@@ -130,7 +137,10 @@ export function actionCommands({
     run: onToggleTheme,
   });
 
-  if (hasChat) {
+  // Omitted rather than disabled while a turn streams: a CommandItem has no
+  // disabled affordance, and offering the row would invite exactly the write
+  // the composer's chip refuses mid-turn.
+  if (hasChat && !isGenerating) {
     items.push({
       id: 'action:workdir',
       section: 'actions',
