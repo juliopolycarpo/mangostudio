@@ -67,17 +67,38 @@ function wordPrefixIndex(haystack: string, needle: string): number {
  * The tightest run of `haystack` containing `needle`'s characters in order, or
  * null. Tightness is what separates "cmdp" matching `command palette` from the
  * same letters scattered across a paragraph.
+ *
+ * Every occurrence of the first character is a candidate start, not just the
+ * earliest one: `abc` against `abxxxxaxbc` matches from either `a`, and only the
+ * second gives the tight span the tier is scored on. Greedy-forward from a fixed
+ * start already yields that start's earliest possible end, so the shortest span
+ * overall is the shortest of those — the labels here are a handful of words, so
+ * walking the candidates costs nothing worth trading correctness for.
  */
 function subsequenceSpan(haystack: string, needle: string): number | null {
-  let cursor = 0;
-  let start = -1;
-  for (const character of needle) {
-    const found = haystack.indexOf(character, cursor);
-    if (found === -1) return null;
-    if (start === -1) start = found;
-    cursor = found + 1;
+  const [first] = needle;
+  if (first === undefined) return null;
+
+  let shortest: number | null = null;
+  for (
+    let start = haystack.indexOf(first);
+    start >= 0;
+    start = haystack.indexOf(first, start + 1)
+  ) {
+    let cursor = start;
+    for (const character of needle) {
+      const found = haystack.indexOf(character, cursor);
+      // No later start can reach it either: every search would begin further
+      // right still. Whatever was already found is the answer.
+      if (found === -1) return shortest;
+      cursor = found + 1;
+    }
+    const span = cursor - start;
+    if (shortest === null || span < shortest) shortest = span;
+    // A span the length of the needle is contiguous; nothing beats it.
+    if (shortest === needle.length) return shortest;
   }
-  return cursor - start;
+  return shortest;
 }
 
 /**

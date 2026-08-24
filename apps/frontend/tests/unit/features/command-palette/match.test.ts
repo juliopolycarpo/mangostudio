@@ -45,6 +45,17 @@ describe('matchScore', () => {
     expect(tight).toBeGreaterThan(scattered as number);
   });
 
+  it('measures the tightest span, not the one starting at the first character', () => {
+    // `abc` matches from either `a`. Scoring the earliest one spans the whole
+    // string; the later `a…b…c` is four characters wide and is what the tier is
+    // meant to reward.
+    const tightSpanLater = matchScore('abxxxxaxbc', 'abc');
+    expect(tightSpanLater).toBe(matchScore('axbc', 'abc'));
+    // Same first-character position, same length, but no second start to find —
+    // scoring from the first `a` alone would give these two the same score.
+    expect(tightSpanLater).toBeGreaterThan(matchScore('abxxxxxxxc', 'abc') as number);
+  });
+
   it('returns null when the characters are not there in order', () => {
     expect(matchScore('gallery', 'zzz')).toBeNull();
     expect(matchScore('gallery', 'yrellag')).toBeNull();
