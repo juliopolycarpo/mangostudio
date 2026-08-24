@@ -29,7 +29,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import type { CommandItem } from './lib/command-item';
-import { rankCommands } from './lib/match';
+import { activeCommandIndex, rankCommands } from './lib/match';
 
 export interface CommandPaletteProps {
   readonly items: readonly CommandItem[];
@@ -66,11 +66,7 @@ export function CommandPalette({ items, isLoading = false, onClose }: CommandPal
   // `null` means "wherever the ranking says", so a fresh query lands on the best
   // match anywhere rather than on the first row of the first section. Arrowing
   // or hovering pins it, and typing again releases it.
-  const resolvedIndex = activeIndex ?? bestIndex;
-  // Clamped rather than corrected in an effect: the list shrinks as the query
-  // narrows, and an out-of-range index would spend one render pointing at
-  // nothing — which is one render of Enter doing nothing.
-  const safeIndex = flat.length === 0 ? -1 : Math.min(resolvedIndex, flat.length - 1);
+  const safeIndex = activeCommandIndex({ groups, flat, bestIndex }, activeIndex);
   /** The active row as a movable cursor: never negative, so wrapping is honest. */
   const from = Math.max(safeIndex, 0);
   const activeItem = safeIndex >= 0 ? flat[safeIndex] : undefined;
@@ -139,11 +135,25 @@ export function CommandPalette({ items, isLoading = false, onClose }: CommandPal
         event.preventDefault();
         moveSection(event.shiftKey ? -1 : 1);
         return;
-      case 'Enter':
-        if (!activeItem) return;
+      case 'Enter': {
+        // The rendered list belongs to `deferredQuery`, which lags on purpose.
+        // On the committed render where the input already shows the new query
+        // and the ranking still describes the old one, running what is
+        // highlighted would run the *previous* query's best match — typing a
+        // route and pressing Enter straight away would open the latest session
+        // instead. Enter is one keystroke, not one per character, so it can
+        // afford the rescore the list is deferring.
+        //
+        // The cursor is dropped rather than carried across: it indexes the
+        // stale list, so it names a different row in the fresh one. The best
+        // match for what was actually typed is the row the palette is about to
+        // highlight anyway — and typing releases the cursor to it regardless.
+        const item = query === deferredQuery ? activeItem : liveBestCommand(items, query);
+        if (!item) return;
         event.preventDefault();
-        void activeItem.run();
+        void item.run();
         return;
+      }
       case 'Escape':
         event.preventDefault();
         onClose();
@@ -265,6 +275,18 @@ export function CommandPalette({ items, isLoading = false, onClose }: CommandPal
       </motion.div>
     </div>
   );
+}
+
+/**
+ * The row a query would arm right now, ranked outside the deferred render.
+ *
+ * Only Enter pays for it, and only on the renders where the deferred value has
+ * not caught up — which is why the list can keep deferring without Enter
+ * inheriting the lag.
+ */
+function liveBestCommand(items: readonly CommandItem[], query: string): CommandItem | undefined {
+  const ranked = rankCommands(items, query);
+  return ranked.flat[activeCommandIndex(ranked, null)];
 }
 
 /** Namespaced so two palettes on one page cannot collide on `id`. */

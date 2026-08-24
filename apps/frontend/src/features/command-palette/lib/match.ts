@@ -202,3 +202,20 @@ export function rankCommands(
 
   return { groups, flat, bestIndex };
 }
+
+/**
+ * Where the cursor sits in a ranking, given whatever the user pinned it to.
+ *
+ * `null` means "wherever the ranking says", which is how a fresh query lands on
+ * the best match anywhere rather than on the first row of the first section.
+ * Clamped rather than corrected in an effect: the list shrinks as a query
+ * narrows, and an index left pointing past the end is one render of Enter doing
+ * nothing. -1 when nothing matched.
+ *
+ * Shared by the render and by Enter so the two cannot disagree about which row
+ * is armed — which is the entire failure mode this is guarding.
+ */
+export function activeCommandIndex(ranked: RankedCommands, activeIndex: number | null): number {
+  if (ranked.flat.length === 0) return -1;
+  return Math.min(activeIndex ?? ranked.bestIndex, ranked.flat.length - 1);
+}

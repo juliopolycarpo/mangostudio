@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { CommandItem } from '../../../../src/features/command-palette/lib/command-item';
 import {
+  activeCommandIndex,
   matchScore,
   rankCommands,
   scoreCommand,
@@ -146,5 +147,41 @@ describe('rankCommands', () => {
   it('breaks score ties on the order the provider returned, which is recency', () => {
     const { groups } = rankCommands(registry, 'Session', { recentSessionLimit: 10 });
     expect(groups[0].items.map((entry) => entry.id)).toEqual(['s1', 's2', 's3']);
+  });
+});
+
+/**
+ * The cursor the render draws and the one Enter reads are the same function,
+ * because the palette's list lags the input on purpose: `useDeferredValue`
+ * leaves a committed render where the text is new and the ranking is not, and
+ * a second clamping rule would be a second answer to "which row is armed".
+ */
+describe('activeCommandIndex', () => {
+  const registry: CommandItem[] = [
+    item({ id: 's1', section: 'sessions', label: 'Session one' }),
+    item({ id: 'n1', section: 'navigate', label: 'Gallery' }),
+  ];
+
+  it('follows the ranking when the user has pinned nothing', () => {
+    const ranked = rankCommands(registry, 'gallery');
+    expect(activeCommandIndex(ranked, null)).toBe(ranked.bestIndex);
+    expect(ranked.flat[activeCommandIndex(ranked, null)].id).toBe('n1');
+  });
+
+  it('honours a pinned row over the ranking', () => {
+    const ranked = rankCommands(registry, '');
+    expect(activeCommandIndex(ranked, 1)).toBe(1);
+  });
+
+  /**
+   * The list shrinks as a query narrows, so a row pinned against the wider one
+   * can outlive it. Clamping is what stops Enter spending a render on nothing.
+   */
+  it('clamps a pin the query has narrowed past', () => {
+    expect(activeCommandIndex(rankCommands(registry, 'gallery'), 5)).toBe(0);
+  });
+
+  it('reports no cursor when nothing matched', () => {
+    expect(activeCommandIndex(rankCommands(registry, 'zzzqqq'), 0)).toBe(-1);
   });
 });
