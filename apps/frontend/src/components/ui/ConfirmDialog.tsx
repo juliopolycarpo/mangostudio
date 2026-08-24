@@ -20,10 +20,11 @@ interface ConfirmDialogProps {
  * Destructive-confirm overlay used by settings delete/revoke flows.
  *
  * The keyboard contract is the shared one the vendor dialogs already use: focus
- * moves in, Tab cycles the two buttons instead of walking into the page behind
- * them, Escape cancels, and focus goes back to whatever opened it. A dialog
- * gating a delete is the last place a keyboard user should be able to tab
- * straight past onto the control it is gating.
+ * moves in, Tab cycles the dialog's own controls — the two buttons plus anything
+ * `children` contributes — instead of walking into the page behind them, Escape
+ * cancels, and focus goes back to whatever opened it. A dialog gating a delete
+ * is the last place a keyboard user should be able to tab straight past onto the
+ * control it is gating.
  *
  * Usage: <ConfirmDialog title={…} description={…} entityName={name} … />
  */

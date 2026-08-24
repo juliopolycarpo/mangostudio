@@ -6,16 +6,22 @@
  * user lands on whatever was focused before, tabs straight past the dialog into
  * the page behind it, and can reach the very control the dialog is gating.
  *
- * Buttons only, deliberately. Every dialog using this puts its actions on
- * buttons, and widening the ring to links would pull a "read the vendor's
- * terms" anchor into the cycle ahead of the accept and cancel controls that
- * dismiss it.
+ * The ring is every tabbable descendant, not just the action buttons. A dialog
+ * that skips its own controls is the same bug from the other side: `ConfirmDialog`
+ * takes a checkbox through `children`, and a narrower ring leaves Shift+Tab from
+ * that checkbox falling out of the dialog entirely. The links in the vendor
+ * disclosure are in the cycle for the same reason — a trap that excludes them
+ * makes "read the terms" unreachable while the thing gating it is on screen.
  *
  * There is no shared modal primitive in this app; this is the shared piece of
  * one, kept small rather than grown into a component nobody asked for.
  */
 
 import { useEffect, useRef } from 'react';
+
+/** Tabbable, not merely focusable: `tabindex="-1"` is script focus, not a stop. */
+const TABBABLE =
+  'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function useFocusTrap(onEscape: () => void) {
   const ref = useRef<HTMLDivElement>(null);
@@ -36,7 +42,7 @@ export function useFocusTrap(onEscape: () => void) {
       }
       if (event.key !== 'Tab') return;
 
-      const focusable = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled])')];
+      const focusable = [...dialog.querySelectorAll<HTMLElement>(TABBABLE)];
       const first = focusable[0];
       const last = focusable.at(-1);
       if (!first || !last) return;

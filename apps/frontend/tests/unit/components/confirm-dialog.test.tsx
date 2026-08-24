@@ -86,6 +86,30 @@ describe('ConfirmDialog', () => {
     expect(document.activeElement).toBe(confirm);
   });
 
+  it('keeps a control passed through children inside the Tab ring', () => {
+    render(
+      <ConfirmDialog {...props}>
+        <label>
+          <input type="checkbox" /> Also delete the runtime
+        </label>
+      </ConfirmDialog>
+    );
+    const checkbox = screen.getByRole('checkbox');
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    const confirm = screen.getByRole('button', { name: 'Delete Connector' });
+
+    // The checkbox sits above the buttons, so it is the ring's first stop:
+    // backwards from it wraps to the last button rather than falling out of the
+    // dialog, and forwards from that button wraps back onto it.
+    checkbox.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(confirm);
+
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(checkbox);
+    expect(document.activeElement).not.toBe(cancel);
+  });
+
   it('returns focus to whatever opened it', () => {
     const trigger = document.createElement('button');
     document.body.append(trigger);
