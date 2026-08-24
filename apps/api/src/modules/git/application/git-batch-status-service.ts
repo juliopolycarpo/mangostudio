@@ -5,9 +5,12 @@ import { getRepoRoot, getRepoStatus } from './git-status-service';
 /**
  * Each unique workdir shells out to git (possibly over a runtime connection),
  * so a full 50-chat batch spanning many repositories is throttled rather than
- * spawned all at once.
+ * spawned all at once. Bounds one request; nothing bounds a user (see #935).
+ *
+ * Exported so the test that guards the bound names it instead of restating the
+ * number, which would otherwise have to be edited in lockstep to move it.
  */
-const WORKDIR_CONCURRENCY = 4;
+export const WORKDIR_CONCURRENCY = 4;
 
 /** The columns the batch needs; callers pass ownership-filtered rows. */
 export interface GitSummaryChat {

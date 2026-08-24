@@ -3,7 +3,11 @@ import type { GitSummary } from '@mangostudio/shared/git';
 import {
   type GitSummaryChat,
   getBatchGitSummaries,
+  WORKDIR_CONCURRENCY,
 } from '../../../../src/modules/git/application/git-batch-status-service';
+
+/** Enough workdirs that the bound has to hold some of them back. */
+const OVERSUBSCRIBED = WORKDIR_CONCURRENCY * 3;
 
 function summaryFor(workdir: string): GitSummary {
   return {
@@ -137,7 +141,9 @@ describe('getBatchGitSummaries', () => {
   it('bounds workdir concurrency', async () => {
     let inFlight = 0;
     let peak = 0;
-    const chats = Array.from({ length: 12 }, (_, index) => chat(`c${index}`, `/repo/${index}`));
+    const chats = Array.from({ length: OVERSUBSCRIBED }, (_, index) =>
+      chat(`c${index}`, `/repo/${index}`)
+    );
     await getBatchGitSummaries({
       chatIds: chats.map((entry) => entry.id),
       chats,
@@ -152,14 +158,16 @@ describe('getBatchGitSummaries', () => {
       },
     });
 
-    expect(peak).toBeLessThanOrEqual(4);
+    expect(peak).toBeLessThanOrEqual(WORKDIR_CONCURRENCY);
     expect(peak).toBeGreaterThan(1);
   });
 
   it('stops pulling new workdirs once the client hangs up', async () => {
     const controller = new AbortController();
     let computed = 0;
-    const chats = Array.from({ length: 12 }, (_, index) => chat(`c${index}`, `/repo/${index}`));
+    const chats = Array.from({ length: OVERSUBSCRIBED }, (_, index) =>
+      chat(`c${index}`, `/repo/${index}`)
+    );
     await getBatchGitSummaries({
       chatIds: chats.map((entry) => entry.id),
       chats,
@@ -175,7 +183,7 @@ describe('getBatchGitSummaries', () => {
 
     // The reads already in flight finish; nothing after them is spawned for a
     // response nobody will read.
-    expect(computed).toBeLessThanOrEqual(4);
+    expect(computed).toBeLessThanOrEqual(WORKDIR_CONCURRENCY);
     expect(computed).toBeGreaterThan(0);
   });
 });
