@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
 import { useDirectoryListing, validateWorkspacePath } from './use-directory-listing';
@@ -121,14 +122,12 @@ export function WorkdirPickerDialog({
     setManualPath(listing.data.path);
   }, [listing.data?.path]);
 
-  useEffect(() => {
-    if (!open) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, open]);
+  // The palette that opens this dialog hands off focus to it mid-exit-animation
+  // rather than after unmount, so the dialog has to take focus itself instead of
+  // relying on whatever last had it. Also traps Tab and takes Escape, replacing
+  // the old window-level Escape listener — see the hook for why a stacked
+  // overlay needs the `defaultPrevented` guard it carries.
+  const dialogRef = useFocusTrap(onClose);
 
   if (!open) return null;
 
@@ -178,10 +177,12 @@ export function WorkdirPickerDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-3 backdrop-blur-sm sm:p-6">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="workdir-picker-title"
-        className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-outline-variant/20 bg-surface-container-high shadow-2xl"
+        tabIndex={-1}
+        className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-outline-variant/20 bg-surface-container-high shadow-2xl outline-none"
       >
         <header className="flex items-start justify-between gap-4 border-b border-outline-variant/15 px-5 py-4 sm:px-6 sm:py-5">
           <div className="min-w-0 space-y-1">

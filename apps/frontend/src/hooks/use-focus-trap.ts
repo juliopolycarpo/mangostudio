@@ -15,19 +15,27 @@
  *
  * There is no shared modal primitive in this app; this is the shared piece of
  * one, kept small rather than grown into a component nobody asked for.
+ *
+ * The ref is a callback (via `useState`), not a plain `useRef`. Every current
+ * caller mounts fresh each time its dialog appears, but a caller that instead
+ * stays mounted and toggles an `open` prop internally would have its div go
+ * from absent to present on a re-render rather than a mount — a plain ref's
+ * effect, keyed only on `onEscape`, would already have run once against a null
+ * node and never fire again, so the trap would silently never engage past the
+ * first render. Keying on the node itself re-runs the effect exactly when the
+ * dialog actually appears, regardless of which pattern the caller uses.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 
 /** Tabbable, not merely focusable: `tabindex="-1"` is script focus, not a stop. */
 const TABBABLE =
   'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function useFocusTrap(onEscape: () => void) {
-  const ref = useRef<HTMLDivElement>(null);
+  const [dialog, setDialog] = useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const dialog = ref.current;
     if (!dialog) return;
     // Restored on close, so dismissing the dialog puts the user back where they
     // were rather than at the top of the document.
@@ -71,7 +79,7 @@ export function useFocusTrap(onEscape: () => void) {
       document.removeEventListener('keydown', onKeyDown);
       previouslyFocused?.focus?.();
     };
-  }, [onEscape]);
+  }, [dialog, onEscape]);
 
-  return ref;
+  return setDialog;
 }

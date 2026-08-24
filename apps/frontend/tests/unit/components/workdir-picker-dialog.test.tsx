@@ -159,4 +159,66 @@ describe('WorkdirPickerDialog', () => {
 
     await settlePendingBrowse();
   });
+
+  /**
+   * Every caller keeps this component mounted and toggles `open` rather than
+   * mounting it fresh — the palette opens it while its own overlay is still
+   * animating out. A focus trap keyed only on `onClose` would have run its
+   * effect once against the still-absent dialog and never again, so the
+   * picker would sit open with focus left on whatever was behind it.
+   */
+  it('takes focus when it opens after being mounted closed', async () => {
+    fetchScenario.respondWithJson('GET', '/api/workspace/fs', {
+      body: {
+        path: '/home/mango',
+        parent: '/home',
+        entries: [],
+        home: '/home/mango',
+        roots: ['/'],
+        separator: '/',
+      },
+    });
+
+    const trigger = document.createElement('button');
+    document.body.append(trigger);
+    trigger.focus();
+
+    const { rerender } = render(
+      <WorkdirPickerDialog open={false} onSelect={jest.fn()} onClose={jest.fn()} />
+    );
+    expect(document.activeElement).toBe(trigger);
+
+    act(() => {
+      rerender(<WorkdirPickerDialog open onSelect={jest.fn()} onClose={jest.fn()} />);
+    });
+    await settlePendingBrowse();
+
+    expect(document.activeElement).toBe(screen.getByRole('dialog'));
+    trigger.remove();
+  });
+
+  it('closes on Escape once opened this way, and keeps Tab inside it', async () => {
+    fetchScenario.respondWithJson('GET', '/api/workspace/fs', {
+      body: {
+        path: '/home/mango',
+        parent: '/home',
+        entries: [],
+        home: '/home/mango',
+        roots: ['/'],
+        separator: '/',
+      },
+    });
+
+    const onClose = jest.fn();
+    const { rerender } = render(
+      <WorkdirPickerDialog open={false} onSelect={jest.fn()} onClose={onClose} />
+    );
+    act(() => {
+      rerender(<WorkdirPickerDialog open onSelect={jest.fn()} onClose={onClose} />);
+    });
+    await settlePendingBrowse();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });
