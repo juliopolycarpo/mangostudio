@@ -119,15 +119,28 @@ export function useChats() {
     [updateMutation]
   );
 
+  /**
+   * The selection is compared inside the updater, not against the
+   * `currentChatId` this closure captured.
+   *
+   * A caller can hold a `deleteChat` from before the chat it is deleting even
+   * existed — `handleNewChatWithRunner` creates a chat, binds its runner, and
+   * deletes it again when the bind fails, all through the one `useChats` object
+   * it captured at the start. The captured `currentChatId` is then whatever was
+   * selected before creation, so the comparison misses, the doomed chat's id
+   * stays selected, and `currentChat` resolves to null on a surface with chats
+   * in the sidebar.
+   */
   const deleteChat = useCallback(
     async (chatId: string) => {
       await deleteMutation.mutateAsync(chatId);
-      if (currentChatId === chatId) {
+      setCurrentChatId((selected) => {
+        if (selected !== chatId) return selected;
         const remainingChats = chats.filter((c) => c.id !== chatId);
-        setCurrentChatId(remainingChats.length > 0 ? remainingChats[0].id : null);
-      }
+        return remainingChats.length > 0 ? remainingChats[0].id : null;
+      });
     },
-    [deleteMutation, currentChatId, chats]
+    [deleteMutation, chats]
   );
 
   const selectChat = useCallback((chatId: string) => {
