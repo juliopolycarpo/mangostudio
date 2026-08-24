@@ -8,6 +8,7 @@
  * authenticated route's loader, which is why sessions never show a skeleton.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useNavigate } from '@tanstack/react-router';
 import { useMemo, useRef, useState } from 'react';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
@@ -43,7 +44,12 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
   const { t, locale } = useI18n();
   const navigate = useNavigate();
   const { resolvedTheme, setConfig } = useTheme();
-  const external = useExternalAgents(app.currentEnvironmentId);
+  // `currentEnvironmentId` is null exactly when no chat exists, and a null id
+  // disables discovery — which would hide every "New chat with …" row from the
+  // one user who has nothing *but* those rows to start from. A new chat always
+  // starts on the local machine, so local is where its runners would have to be
+  // discovered anyway.
+  const external = useExternalAgents(app.currentEnvironmentId ?? LOCAL_ENVIRONMENT_ID);
   const environmentsQuery = useEnvironmentEntitiesQuery();
 
   // The data the rows are built from, named individually so the memo below can

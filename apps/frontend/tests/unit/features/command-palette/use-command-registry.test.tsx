@@ -82,6 +82,22 @@ async function setup() {
   const scenario = createFetchScenario();
   scenario.install();
   scenario.respondWithJson('GET', '/api/environments', { body: [] });
+  // The shell above has no environment, so discovery falls back to local — the
+  // machine a new chat starts on. What matters is that the query runs at all:
+  // a null id used to disable it and silently drop every vendor row.
+  scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
+    body: {
+      agents: [
+        {
+          targetId: 'codex',
+          environmentId: 'local',
+          installed: true,
+          authState: 'unknown',
+          capabilities: {},
+        },
+      ],
+    },
+  });
 
   const seen: { items: readonly CommandItem[] } = { items: [] };
   const onRun = jest.fn();
@@ -121,6 +137,19 @@ describe('useCommandRegistry', () => {
 
     expect(replacement.handleSelectChat).toHaveBeenCalledWith('c1');
     expect(onRun).toHaveBeenCalledTimes(1);
+    scenario.restore();
+  });
+
+  /**
+   * `currentEnvironmentId` is null exactly when no chat exists, and a null id
+   * disables the discovery query outright. Without the local fallback the
+   * account with nothing but vendor CLIs to start from saw no "New chat
+   * with …" rows until it had created an ordinary chat first.
+   */
+  it('discovers external runners on local when no chat names an environment', async () => {
+    const { scenario, seen } = await setup();
+
+    expect(seen.items.some((item) => item.id === 'action:new-chat-external:codex')).toBe(true);
     scenario.restore();
   });
 });
