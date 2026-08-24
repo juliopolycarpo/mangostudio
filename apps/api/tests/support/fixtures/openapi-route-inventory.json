@@ -77,6 +77,7 @@
   "/api/git/stash/pop": ["post"],
   "/api/git/stashes": ["get"],
   "/api/git/state": ["get"],
+  "/api/git/state/batch": ["post"],
   "/api/git/unstage": ["post"],
   "/api/github/context": ["get"],
   "/api/health": ["get"],

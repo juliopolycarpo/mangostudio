@@ -53,6 +53,46 @@ export const GitStateQuerySchema = Type.Object({
   chatId: Type.String({ minLength: 1 }),
 });
 
+/** Callers batch the rows they can see, not the whole chat history. */
+export const GIT_BATCH_STATE_MAX_CHAT_IDS = 50;
+
+export const GitBatchStateRequestSchema = Type.Object({
+  chatIds: Type.Array(Type.String({ minLength: 1 }), {
+    minItems: 1,
+    maxItems: GIT_BATCH_STATE_MAX_CHAT_IDS,
+    uniqueItems: true,
+  }),
+});
+
+/**
+ * The slim per-chat shape list surfaces render as badges. Deliberately not
+ * `GitStatusSchema`: a 50-chat batch never needs per-file changes, only the
+ * branch line and how much is dirty. A clean tree is `changedFileCount === 0`
+ * rather than a second field that could disagree with it.
+ *
+ * The upstream's *name* is deliberately absent too — a badge shows how far a
+ * branch has drifted, not what it tracks. `GET /git/state` carries
+ * `branch.upstream` for the panel that does name it.
+ */
+export const GitSummarySchema = Type.Object({
+  branch: Type.Union([Type.String(), Type.Null()]),
+  detachedAt: Type.Optional(Type.String()),
+  ahead: Type.Integer({ minimum: 0 }),
+  behind: Type.Integer({ minimum: 0 }),
+  changedFileCount: Type.Integer({ minimum: 0 }),
+  workdir: Type.String(),
+});
+
+/**
+ * A requested chat with no answer is simply absent from `states`. That covers
+ * no workdir, not a repository, Git unavailable, a transient failure reading
+ * the repository, and a chat this user cannot read — indistinguishable on
+ * purpose: a batch response must not reveal whether a foreign chat id exists.
+ */
+export const GitBatchStateResponseSchema = Type.Object({
+  states: Type.Record(Type.String({ minLength: 1 }), GitSummarySchema),
+});
+
 export const InitRepoBodySchema = Type.Object({
   chatId: Type.String({ minLength: 1 }),
 });
@@ -280,6 +320,9 @@ export type GitBranchInfo = Static<typeof GitBranchInfoSchema>;
 export type GitStatus = Static<typeof GitStatusSchema>;
 export type GitRepoState = Static<typeof GitRepoStateSchema>;
 export type GitStateQuery = Static<typeof GitStateQuerySchema>;
+export type GitBatchStateRequest = Static<typeof GitBatchStateRequestSchema>;
+export type GitSummary = Static<typeof GitSummarySchema>;
+export type GitBatchStateResponse = Static<typeof GitBatchStateResponseSchema>;
 export type InitRepoBody = Static<typeof InitRepoBodySchema>;
 export type InitRepoResponse = Static<typeof InitRepoResponseSchema>;
 export type StagePathsBody = Static<typeof StagePathsBodySchema>;

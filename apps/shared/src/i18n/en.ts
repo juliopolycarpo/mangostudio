@@ -1291,6 +1291,11 @@ export const messages: Messages = {
       claude: 'claude',
       cursor: 'cursor',
     },
+    git: {
+      dirty: '{count} uncommitted change(s)',
+      // Spells out the ↑/↓ glyphs for anyone who cannot see them.
+      sync: '{ahead} ahead, {behind} behind',
+    },
   },
 
   commandPalette: {

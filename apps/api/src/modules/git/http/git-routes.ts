@@ -13,6 +13,9 @@ import {
   GenerateCommitMessageBodySchema,
   type GenerateCommitMessageResponse,
   GenerateCommitMessageResponseSchema,
+  GitBatchStateRequestSchema,
+  type GitBatchStateResponse,
+  GitBatchStateResponseSchema,
   GitBranchesResponseSchema,
   GitCommitDetailsResponseSchema,
   GitCommitQuerySchema,
@@ -50,7 +53,7 @@ import {
   chatWorkdirConflict,
   resolveChatWorkdir,
 } from '../../chats/application/chat-workdir';
-import type { ChatRecord } from '../../chats/infrastructure/chat-repository';
+import { type ChatRecord, listByIdsForUser } from '../../chats/infrastructure/chat-repository';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
 import { modelUnavailableResponse } from '../../generation/http/model-unavailable-response';
 import {
@@ -58,6 +61,7 @@ import {
   generateCommitMessageUseCase,
   NoCommitChangesError,
 } from '../application/generate-commit-message';
+import { getBatchGitSummaries } from '../application/git-batch-status-service';
 import {
   getCommitDetails,
   getFileDiff,
@@ -171,6 +175,36 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
             userId: user?.id ?? '',
             environmentId: resolution.chat.environmentId,
           });
+        } catch (error) {
+          return gitCommandError(error, set);
+        }
+      }
+    )
+    .post(
+      '/state/batch',
+      {
+        body: GitBatchStateRequestSchema,
+        response: {
+          200: GitBatchStateResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      },
+      async ({ body, request, set, user }): Promise<RouteResult<GitBatchStateResponse>> => {
+        const userId = user?.id ?? '';
+        // The ownership lookup is a database read, not Git. It stays outside
+        // the catch — like `resolveChatWorkdir` on every sibling route — so a
+        // storage failure is not reported (and silently unlogged) as
+        // "Git command failed".
+        const chats = await listByIdsForUser(body.chatIds, userId, getDb());
+        try {
+          return {
+            states: await getBatchGitSummaries({
+              chatIds: body.chatIds,
+              chats,
+              userId,
+              signal: request.signal,
+            }),
+          };
         } catch (error) {
           return gitCommandError(error, set);
         }

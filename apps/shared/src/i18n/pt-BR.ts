@@ -1310,6 +1310,11 @@ export const messages = {
       claude: 'claude',
       cursor: 'cursor',
     },
+    git: {
+      dirty: '{count} alteração(ões) não commitada(s)',
+      // Descreve as setas ↑/↓ do resumo para quem não as enxerga.
+      sync: '{ahead} à frente, {behind} atrás',
+    },
   },
 
   commandPalette: {

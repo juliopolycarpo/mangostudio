@@ -5,7 +5,7 @@ import {
   useNavigate,
   useRouterState,
 } from '@tanstack/react-router';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Layout } from '@/components/layout/Layout';
 import { Spinner } from '@/components/ui/Spinner';
@@ -19,6 +19,7 @@ import { RunnerSelectorContainer } from '@/features/external-agents/RunnerSelect
 import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
 import { appSettingsQueryOptions } from '@/features/settings/app/queries';
 import { WorkspaceBreadcrumb } from '@/features/workspace/components/WorkspaceBreadcrumb';
+import { useBatchedGitSummaries } from '@/features/workspace/hooks/use-git-state';
 import { useAppState } from '@/hooks/use-app-state';
 import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
@@ -62,6 +63,15 @@ function AuthenticatedLayout() {
   const currentPath = routerState.location.pathname;
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const commandPalette = useCommandPalette();
+  // Only chats with a workdir can have git state. `app.chats` holds its
+  // identity between query updates, so memoizing here hands the hook the same
+  // array on every one of this layout's per-token re-renders and it can bail
+  // out on the reference instead of re-sorting the whole list.
+  const gitChatIds = useMemo(
+    () => app.chats.filter((chat) => chat.workdir).map((chat) => chat.id),
+    [app.chats]
+  );
+  const gitSummaries = useBatchedGitSummaries(gitChatIds);
 
   // New chat keeps its own chord rather than living in the palette's registry:
   // it is the one action worth reaching without reading a list first. Some
@@ -118,6 +128,7 @@ function AuthenticatedLayout() {
         onDeleteChat={(chatId) => void app.handleDeleteChat(chatId)}
         onNewChat={() => void app.handleNewChat()}
         contextCache={app.contextCache}
+        gitSummaries={gitSummaries}
         isMobileSidebarOpen={isMobileSidebarOpen}
         onMobileSidebarClose={() => setIsMobileSidebarOpen(false)}
         chatSidebarWidth={app.settings.workspaceSettings.chatSidebarWidth}

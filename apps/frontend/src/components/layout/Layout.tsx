@@ -1,4 +1,5 @@
 import type { Chat } from '@mangostudio/shared';
+import type { GitSummary } from '@mangostudio/shared/git';
 import { CHAT_SIDEBAR_WIDTH_DEFAULT } from '@mangostudio/shared/workspaces';
 import { type ReactNode, useEffect, useState } from 'react';
 import type { ContextInfo } from '@/features/generation/types';
@@ -16,6 +17,7 @@ interface LayoutProps {
   onDeleteChat: (chatId: string) => void;
   onNewChat: () => void;
   contextCache?: Map<string, ContextInfo>;
+  gitSummaries?: Record<string, GitSummary | null>;
   isMobileSidebarOpen?: boolean;
   onMobileSidebarClose?: () => void;
   chatSidebarWidth?: number;
@@ -33,6 +35,7 @@ export function Layout({
   onDeleteChat,
   onNewChat,
   contextCache,
+  gitSummaries,
   isMobileSidebarOpen = false,
   onMobileSidebarClose,
   chatSidebarWidth = CHAT_SIDEBAR_WIDTH_DEFAULT,
@@ -60,6 +63,7 @@ export function Layout({
         onDeleteChat={onDeleteChat}
         onNewChat={onNewChat}
         contextCache={contextCache}
+        gitSummaries={gitSummaries}
         isMobileOpen={isMobileSidebarOpen}
         onMobileClose={onMobileSidebarClose}
         width={chatSidebarWidth}
