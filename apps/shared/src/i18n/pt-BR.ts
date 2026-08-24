@@ -1328,6 +1328,10 @@ export const messages = {
       run: 'executar',
       sections: 'seções',
     },
+    keys: {
+      /** The legend printed on the key, which is abbreviated per locale. */
+      escape: 'Esc',
+    },
     actions: {
       newChatWith: 'Nova conversa com {runner}',
       switchToLight: 'Mudar para o tema claro',

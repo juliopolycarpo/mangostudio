@@ -1309,6 +1309,9 @@ export const messages: Messages = {
       run: 'run',
       sections: 'sections',
     },
+    keys: {
+      escape: 'Esc',
+    },
     actions: {
       newChatWith: 'New chat with {runner}',
       switchToLight: 'Switch to light theme',

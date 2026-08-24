@@ -280,7 +280,7 @@ export const CommandPalette = memo(function CommandPalette({
             placeholder={labels.placeholder}
             className="min-w-0 flex-1 bg-transparent text-sm text-on-surface outline-none placeholder:text-on-surface-variant/50"
           />
-          <KbdHint keys="Esc" />
+          <KbdHint keys={labels.keys.escape} />
         </div>
 
         <div className="app-scrollbar max-h-[55vh] min-h-0 overflow-y-auto py-2">
