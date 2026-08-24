@@ -359,7 +359,7 @@ export function Sidebar({
                            * anything, so both stay up: the row is a full-width
                            * sheet there and has the space.
                            */}
-                          <span className="flex min-w-0 shrink-0 items-center gap-1.5 pr-4 font-mono text-[10px] text-on-surface-variant/70 group-hover:hidden group-focus-within:hidden">
+                          <span className="flex shrink-0 items-center gap-1.5 pr-4 font-mono text-[10px] text-on-surface-variant/70 group-hover:hidden group-focus-within:hidden">
                             {gitSummary ? <GitSummaryBadge summary={gitSummary} /> : null}
                             <StatusDot tone="neutral" className={badge.dotClassName} />
                             {badge.label}
