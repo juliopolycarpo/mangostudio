@@ -8,7 +8,7 @@ import { describe, expect, it, jest } from 'bun:test';
 import type { Chat } from '@mangostudio/shared';
 import { act } from '@testing-library/react';
 import { useChatRouteActions } from '../../../src/hooks/use-chat-route-actions';
-import { renderHook } from '../../support/harness/render';
+import { renderHook, screen } from '../../support/harness/render';
 
 function setup(createdId = 'chat-new') {
   // Creation always lands on the local machine — the create body carries no
@@ -16,11 +16,13 @@ function setup(createdId = 'chat-new') {
   const createChat = jest.fn(async () => ({ id: createdId, environmentId: 'local' }) as Chat);
   const updateChatRunner = jest.fn(async () => undefined);
   const updateChatRunnerOnEnvironment = jest.fn(async () => undefined);
+  const deleteChat = jest.fn(async () => undefined);
   const navigate = jest.fn(async () => undefined);
   const chats = {
     createChat,
     updateChatRunner,
     updateChatRunnerOnEnvironment,
+    deleteChat,
   } as unknown as Parameters<typeof useChatRouteActions>[0]['chats'];
 
   // A pass-through that keeps score, so a test can pin whether a given write
@@ -57,6 +59,7 @@ function setup(createdId = 'chat-new') {
     createChat,
     updateChatRunner,
     updateChatRunnerOnEnvironment,
+    deleteChat,
     navigate,
     holdWorkdirDefault,
     holdDepthDuring,
@@ -178,5 +181,29 @@ describe('handleNewChatWithRunner', () => {
 
     expect(updateChatRunner).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The environment that offered the runner can vanish between opening the
+   * palette and running this — `createChat` has already published and selected
+   * a local chat by the time that write rejects. Left alone, that chat stays
+   * current with no indication anything failed, because the palette discards
+   * this promise's rejection (`void item.run()`). Rolled back and reported
+   * instead.
+   */
+  it('rolls back the chat and reports the failure when the runner cannot be bound', async () => {
+    const { result, deleteChat, navigate, updateChatRunnerOnEnvironment } = setup('chat-new');
+    updateChatRunnerOnEnvironment.mockImplementation(() => Promise.reject(new Error('gone')));
+
+    await act(async () => {
+      await result.current.handleNewChatWithRunner(
+        { kind: 'external', targetId: 'codex' },
+        'env-remote'
+      );
+    });
+
+    expect(deleteChat).toHaveBeenCalledWith('chat-new');
+    expect(navigate).not.toHaveBeenCalled();
+    expect(screen.getByText(/could not start the chat/i)).toBeTruthy();
   });
 });

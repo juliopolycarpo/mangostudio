@@ -1,7 +1,9 @@
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { useNavigate } from '@tanstack/react-router';
 import { useCallback } from 'react';
+import { useToast } from '@/components/ui/Toast';
 import type { useChats } from '@/features/chat/hooks/use-chats';
+import { useI18n } from '@/hooks/use-i18n';
 
 export type AppPage = 'chat' | 'environments' | 'gallery' | 'settings' | 'studio';
 
@@ -20,6 +22,9 @@ export function useChatRouteActions({
   navigate,
   holdWorkdirDefault,
 }: UseChatRouteActionsParams) {
+  const { t } = useI18n();
+  const { toast } = useToast();
+
   const handleNewChat = useCallback(async () => {
     await chats.createChat();
     await navigate({ to: '/' });
@@ -50,20 +55,37 @@ export function useChatRouteActions({
    * over there — or marks the id as defaulted so the repointed chat never
    * gets its picker. The hold releases once the repoint has landed in the
    * cache, so the effect's first look at the chat sees its final machine.
+   *
+   * The repoint can fail on its own — the environment discovery found the
+   * runner on can vanish between opening the palette and running this. The
+   * caller (`void item.run()` in the palette) discards that rejection, so a
+   * bare throw here would leave an orphaned local chat selected with no
+   * indication anything went wrong. Rolled back and reported instead, still
+   * inside the hold so the defaulting effect never sees the doomed chat.
    */
   const handleNewChatWithRunner = useCallback(
     async (runner: ChatRunnerConfiguration, environmentId?: string) => {
-      await holdWorkdirDefault(async () => {
+      const bound = await holdWorkdirDefault(async () => {
         const chat = await chats.createChat();
-        if (environmentId !== undefined && environmentId !== chat.environmentId) {
-          await chats.updateChatRunnerOnEnvironment(chat.id, runner, environmentId);
-        } else {
-          await chats.updateChatRunner(chat.id, runner);
+        try {
+          if (environmentId !== undefined && environmentId !== chat.environmentId) {
+            await chats.updateChatRunnerOnEnvironment(chat.id, runner, environmentId);
+          } else {
+            await chats.updateChatRunner(chat.id, runner);
+          }
+          return true;
+        } catch {
+          await chats.deleteChat(chat.id);
+          return false;
         }
       });
+      if (!bound) {
+        toast(t.chat.newChatRunnerFailed, 'error');
+        return;
+      }
       await navigate({ to: '/' });
     },
-    [chats, holdWorkdirDefault, navigate]
+    [chats, holdWorkdirDefault, navigate, t, toast]
   );
 
   const handleUpdateChatModel = useCallback(

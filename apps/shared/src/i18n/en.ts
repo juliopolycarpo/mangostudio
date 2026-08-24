@@ -30,6 +30,7 @@ export const messages: Messages = {
     newChat: 'New Chat',
     empty: 'Start a conversation',
     deleted: 'Chat deleted',
+    newChatRunnerFailed: 'Could not start the chat on that runner. Try again.',
     editTitle: 'Edit title',
     deleteTitle: 'Delete chat',
     sectionLabel: 'Chats',

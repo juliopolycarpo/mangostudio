@@ -28,6 +28,7 @@ export const messages = {
     newChat: 'Novo Chat',
     empty: 'Inicie uma conversa',
     deleted: 'Chat excluído',
+    newChatRunnerFailed: 'Não foi possível iniciar o chat nesse executor. Tente novamente.',
     editTitle: 'Editar título',
     deleteTitle: 'Excluir chat',
     sectionLabel: 'Chats',
