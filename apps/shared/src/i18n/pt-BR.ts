@@ -61,6 +61,18 @@ export const messages = {
       selectEnvironment: 'Selecionar ambiente de execução',
       environmentsLoading: 'Carregando ambientes...',
       environmentUpdateFailed: 'Não foi possível trocar o ambiente de execução.',
+      newlineHint: 'Shift+Enter para quebrar linha',
+      dropHint: 'Solte para anexar',
+      attachUploading: 'Enviando {name}…',
+      attachFailed: 'Não foi possível anexar {name}.',
+      attachNeedsChat: 'Abra um chat antes de anexar arquivos.',
+      historyRecall: 'Histórico de prompts: ↑ e ↓ com o campo vazio',
+      showControls: 'Mostrar controles do chat',
+      hideControls: 'Ocultar controles do chat',
+      workdirLabel: 'pasta',
+      agentLabel: 'agente',
+      modelLabel: 'modelo',
+      environmentLabel: 'env',
     },
     capabilities: {
       button: 'Capacidades',
@@ -319,6 +331,79 @@ export const messages = {
       summaryHandoff: 'Este chat começou a partir de um resumo anterior',
       cursorInternalToolCall: 'Cursor usou {tool}',
       externalSessionAdopted: 'Continuando uma sessão do {vendor} iniciada fora do MangoStudio',
+    },
+  },
+
+  /**
+   * O hub de estado do workspace. Vive na tela de conversa nova e, quando a
+   * rota `/home` existir, nela também — por isso é um grupo próprio em vez de
+   * mais chaves dentro de `chat`.
+   */
+  home: {
+    greeting: {
+      morning: 'Bom dia, {name}.',
+      afternoon: 'Boa tarde, {name}.',
+      evening: 'Boa noite, {name}.',
+      // A sessão nem sempre traz um nome; o cumprimento não some por isso.
+      morningAnonymous: 'Bom dia.',
+      afternoonAnonymous: 'Boa tarde.',
+      eveningAnonymous: 'Boa noite.',
+      subtitle: 'Seu workspace está pronto. Este é o estado dele agora.',
+    },
+    workspace: {
+      label: 'Workspace',
+      cleanTree: 'árvore limpa',
+      dirtyTree: '{count} arquivo(s) alterado(s)',
+      synced: 'sincronizado com origin',
+      noUpstream: 'sem upstream',
+      detached: 'HEAD desanexado em {hash}',
+      noWorkdir: 'Este chat ainda não aponta para uma pasta.',
+      chooseWorkdir: 'Escolher pasta',
+      notARepo: 'Esta pasta não é um repositório Git.',
+      unavailable: 'Git não está disponível neste ambiente.',
+    },
+    agents: {
+      label: 'Agentes',
+      empty: 'Nenhum CLI de agente detectado neste ambiente.',
+      manage: 'Gerenciar agentes',
+      quotaRefresh: 'Atualizar cota',
+    },
+    skills: {
+      label: 'Skills',
+      labelDivergent: 'Skills — {count} divergência(s)',
+      // Quem lê uma versão que os outros não confirmam, e com quem discorda.
+      divergenceBody: 'Versão diferente em {outliers} do que em {agreeing}.',
+      divergenceBodyNoMajority: '{targets} leem versões diferentes desta skill.',
+      more: 'Mais {count} skill(s) divergente(s).',
+      propagate: 'Propagar',
+      viewDiff: 'Ver diff',
+      // Deliberadamente neutro: viver em um só agente costuma ser intencional.
+      singleTarget: '{count} skill(s) vivem em apenas um agente.',
+      openLibrary: 'Abrir na biblioteca',
+    },
+    uncommitted: {
+      label: 'Trabalho não commitado',
+      changed: '{count} alterado(s)',
+      unpushed: '{count} não enviado(s)',
+      more: 'E mais {count} chat(s).',
+      open: 'Abrir {title}',
+    },
+    environments: {
+      label: 'Ambientes',
+      disconnected: 'não conectado',
+      failed: 'falhou',
+      open: 'Abrir ambientes',
+    },
+    starters: {
+      label: 'Comece por',
+      reviewChanges: 'Revise minhas alterações não commitadas',
+      commitMessage: 'Escreva a mensagem de commit para o que mudou',
+      branchSummary: 'Resuma o que mudou nesta branch',
+      explainCodebase: 'Explique este repositório para mim',
+      writeTests: 'Escreva testes para o código alterado recentemente',
+      explainConcept: 'Explique um conceito complexo de forma simples',
+      pythonScript: 'Escreva um script em Python para...',
+      debug: 'Me ajude a depurar um problema',
     },
   },
 
@@ -2939,6 +3024,8 @@ export const messages = {
     },
     permission: {
       label: 'Permissões',
+      /** A chave do chip `modo: somente leitura` no compositor. */
+      modeKey: 'modo',
       whatItCanDo: 'O que ele pode fazer',
       whoApproves: 'Quem aprova',
       unattendedLevelWarning: 'este agente pode editar e rodar qualquer coisa',

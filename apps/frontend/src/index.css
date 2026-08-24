@@ -244,6 +244,84 @@ body {
     background: var(--color-surface-container-low);
     color: var(--color-on-surface-variant);
   }
+
+  /*
+   * The composer's own chip dialect: same mono key:value reading as
+   * `.terminal-chip`, but borderless, because a dozen bordered pills in one
+   * strip reads as a toolbar rather than as the status line the screenshot
+   * draws. The affordance is the hover fill and the focus ring instead.
+   *
+   * Applied to `<button>`, `<select>` and the `<label>`-wrapped selects alike,
+   * so `focus-within` rather than `focus` carries the ring.
+   */
+  .composer-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3125rem;
+    max-width: 100%;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: 0.75rem; /* 12px */
+    line-height: 1.25rem;
+    padding: 0.0625rem 0.375rem;
+    border: 1px solid transparent;
+    border-radius: 0.375rem;
+    color: var(--color-on-surface-variant);
+    transition:
+      color 150ms ease,
+      background-color 150ms ease,
+      border-color 150ms ease;
+  }
+
+  .composer-chip:is(button, label, select):not(:disabled):hover {
+    background: var(--color-surface-container-high);
+    color: var(--color-on-surface);
+  }
+
+  .composer-chip:focus-visible,
+  .composer-chip:has(:focus-visible) {
+    outline: none;
+    border-color: color-mix(in srgb, var(--color-primary) 45%, transparent);
+    background: var(--color-surface-container-high);
+  }
+
+  /*
+   * The strip the chips sit in. Separators are a `::before` on later siblings
+   * rather than interleaved elements, because half the chips render
+   * conditionally from inside their own components — a JS interleave has to
+   * predict which of them will return null and leaves a stray `·` whenever it
+   * guesses wrong. `:not(:empty)` covers the components that render an empty
+   * wrapper instead of nothing at all.
+   */
+  .composer-chip-row {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  /*
+   * Trailing rather than leading, because the strip wraps: a `::before` on the
+   * following chip becomes the first thing on the next line, which reads as a
+   * bullet nobody typed. `:has(~ …)` picks the last *non-empty* sibling rather
+   * than `:last-child`, so a component that renders an empty wrapper does not
+   * swallow the separator before it.
+   */
+  .composer-chip-row > *:not(:empty):has(~ *:not(:empty))::after {
+    content: "·";
+    margin-inline-start: 0.25rem;
+    color: color-mix(in srgb, var(--color-on-surface-variant) 45%, transparent);
+  }
+
+  /* The value half of a `key: value` chip. The key stays muted at the call site. */
+  .composer-chip-value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-on-surface);
+  }
 }
 
 /* ── Tool identity avatars ── */

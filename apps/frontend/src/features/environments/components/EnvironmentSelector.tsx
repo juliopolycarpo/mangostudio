@@ -51,17 +51,14 @@ export function EnvironmentSelector({
   return (
     <div className="flex items-center">
       <label
-        className={`flex h-7 max-w-[13rem] items-center gap-1.5 rounded-full border bg-surface-container-lowest pl-2 text-[10px] font-medium transition-colors sm:text-[11px] ${
-          actionError
-            ? 'border-error/45 text-error'
-            : 'border-outline-variant/20 text-on-surface-variant hover:border-primary/30 hover:text-on-surface'
-        }`}
+        className={`composer-chip max-w-[13rem] ${actionError ? 'border-error/45 text-error' : ''}`}
         title={actionError ?? selected?.name ?? t.chat.input.selectEnvironment}
         data-testid="environment-selector"
         data-state={status}
       >
-        <Server size={12} className="shrink-0 text-primary/80" aria-hidden="true" />
+        <Server size={11} className="shrink-0 text-primary/80" aria-hidden="true" />
         <StatusDot tone={STATUS_TONE[status]} pulse={status === 'connecting'} />
+        <span className="shrink-0 text-on-surface-variant/70">{`${t.chat.input.environmentLabel}:`}</span>
         <span id={statusId} className="sr-only">
           {statusLabel}
         </span>
@@ -69,7 +66,7 @@ export function EnvironmentSelector({
           value={environmentId}
           onChange={(event) => void handleChange(event.target.value)}
           disabled={disabled || isChanging || unavailable || environments.isError}
-          className="min-w-0 max-w-[9rem] appearance-none bg-transparent py-1 pr-2 text-inherit outline-none disabled:opacity-60"
+          className="composer-chip-value min-w-0 max-w-[9rem] appearance-none bg-transparent text-inherit outline-none disabled:opacity-60"
           aria-label={t.chat.input.selectEnvironment}
           aria-describedby={statusId}
         >

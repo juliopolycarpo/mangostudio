@@ -44,19 +44,15 @@ export function ThinkingToggle({
   };
 
   return (
-    <div className="relative" ref={ref}>
-      <div className="flex items-center gap-1.5">
-        {/* Reasoning toggle button — pill style matching the rest of the app */}
+    <div className="relative flex items-center" ref={ref}>
+      <div className="flex items-center gap-0.5">
         <button
           type="button"
           onClick={() => onToggle(!enabled)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 ${
-            enabled
-              ? 'bg-primary/15 text-primary border border-primary/30'
-              : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest border border-transparent'
-          }`}
+          aria-pressed={enabled}
+          className={`composer-chip ${enabled ? 'border-primary/30 bg-primary/10 text-primary' : ''}`}
         >
-          <Brain size={13} />
+          <Brain size={12} className="shrink-0" />
           <span>{t.thinking.enable}</span>
         </button>
 
@@ -65,18 +61,21 @@ export function ThinkingToggle({
           <button
             type="button"
             onClick={() => setIsOpen(!isOpen)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-all duration-200 text-xs font-medium border border-outline-variant/20"
+            aria-haspopup="listbox"
+            aria-expanded={isOpen}
+            className="composer-chip"
           >
-            <span>{effortLabels[effort]}</span>
+            <span className="composer-chip-value">{effortLabels[effort]}</span>
             <ChevronDown
               size={11}
-              className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+              className={`shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
             />
           </button>
         )}
       </div>
 
-      {/* Dropdown — opens upward since it's above the input */}
+      {/* Upward: the composer sits at the foot of the viewport, so the panel
+          this used to open downward landed off the bottom of the screen. */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -84,7 +83,7 @@ export function ThinkingToggle({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 6, scale: 0.95 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="dropdown-panel absolute left-0 top-full mt-3 w-40"
+            className="dropdown-panel absolute left-0 bottom-full mb-2 w-40"
           >
             <div className="py-1">
               {efforts.map((e) => (

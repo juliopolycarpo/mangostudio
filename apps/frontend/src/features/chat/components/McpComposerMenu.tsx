@@ -108,15 +108,14 @@ export function McpComposerMenu({
         }}
         disabled={disabled}
         aria-expanded={open}
-        className={`flex items-center gap-1.5 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] sm:text-[11px] font-medium transition-all duration-200 shrink-0 ${
+        className={`terminal-chip h-7 shrink-0 transition-colors disabled:opacity-50 ${
           open
-            ? 'bg-primary text-on-primary shadow-sm'
-            : 'text-on-surface-variant hover:text-on-surface border border-outline-variant/20 hover:border-outline-variant/40'
+            ? 'border-primary/40 bg-primary/15 text-primary'
+            : 'hover:border-outline-variant hover:text-on-surface'
         }`}
         title={labels.mcpMenuButton}
       >
-        <Plug size={12} className="sm:hidden" />
-        <Plug size={13} className="hidden sm:block" />
+        <Plug size={12} className="shrink-0" />
         <span className="hidden sm:inline">MCP</span>
       </button>
 

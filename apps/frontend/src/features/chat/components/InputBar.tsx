@@ -12,40 +12,27 @@ import type {
   ExternalPermissionLevel,
   ExternalThreadUsage,
 } from '@mangostudio/shared/external-agents';
-import {
-  AlertTriangle,
-  CornerDownRight,
-  FileText,
-  FolderOpen,
-  Image,
-  Mic,
-  Send,
-  Square,
-  X,
-} from 'lucide-react';
-import { useRef, useState } from 'react';
-import { ModelSelector } from '@/components/layout/ModelSelector';
-import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
+import { AlertTriangle, CornerDownRight, FileText, Send, Square, X } from 'lucide-react';
+import { type DragEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
-import { Chip } from '@/components/ui/Chip';
 import { KbdHint } from '@/components/ui/KbdHint';
-import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
-import { ExternalComposerControls } from '@/features/external-agents/ExternalComposerControls';
-import { ExternalUsageDisplay } from '@/features/external-agents/ExternalUsageDisplay';
 import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
 import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
-import { workdirBasename } from '@/lib/paths';
 import { steerExternalTurn } from '@/services/external-agent-service';
+import { filesFromClipboard, useComposerAttachments } from '../hooks/use-composer-attachments';
+import { useComposerDraft } from '../hooks/use-composer-draft';
+import { usePromptHistory } from '../hooks/use-prompt-history';
+import { onComposerFocusRequest } from '../lib/composer-draft-store';
 import { CapabilityInspector } from './CapabilityInspector';
+import { ComposerChipRow } from './ComposerChipRow';
+import { ImageIntentToggle } from './ImageIntentToggle';
 import { McpComposerMenu } from './McpComposerMenu';
 
-function formatTokensCompact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
-  return String(n);
-}
+/** Roughly eight lines before the box stops growing and starts scrolling. */
+const TEXTAREA_MAX_HEIGHT_PX = 200;
 
 interface Props {
   onSubmit: (prompt: string, attachmentIds?: string[]) => void;
@@ -93,11 +80,6 @@ interface Props {
   }) => void;
 }
 
-/** Shared segment split; a path that is all separators falls back to itself. */
-function getWorkdirName(workdir: string): string {
-  return workdirBasename(workdir) ?? workdir;
-}
-
 export function InputBar({
   onSubmit,
   chatId = null,
@@ -139,18 +121,34 @@ export function InputBar({
   onExternalPermissionsChange,
 }: Props) {
   const { t } = useI18n();
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useComposerDraft(chatId);
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
   const [steering, setSteering] = useState(false);
   const [steerError, setSteerError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
   const pendingSteerId = useRef<string | null>(null);
-  const selectableAgents = agents.filter(
-    (agent) => agent.role === 'primary' || agent.role === 'both'
-  );
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const history = usePromptHistory(chatId);
+
   // The model moved here from the header, and it renders per runner: MangoStudio
   // always has a catalog, an external agent only when its vendor advertised one.
   const isExternalRunner = runner?.kind === 'external';
-  const workdirName = workdir ? getWorkdirName(workdir) : null;
+
+  const handleAttachments = useCallback((attachments: ChatAttachment[]) => {
+    if (attachments.length === 0) return;
+    setPendingAttachments((current) => {
+      const known = new Set(current.map((attachment) => attachment.id));
+      return [...current, ...attachments.filter((attachment) => !known.has(attachment.id))];
+    });
+  }, []);
+
+  const uploads = useComposerAttachments(chatId, handleAttachments);
+
+  useAutoGrow(textareaRef, prompt);
+
+  // The hub's prompt starters fill the composer from outside it; this is the
+  // second half of that gesture.
+  useEffect(() => onComposerFocusRequest(() => textareaRef.current?.focus()), []);
 
   /**
    * A persisted external runner that cannot start a turn right now.
@@ -190,6 +188,7 @@ export function InputBar({
     externalDescriptor?.capabilities.steering === true &&
     !externalRunnerBlocked;
   const showSteerAffordance = steerable && isGenerating === true;
+  const inputDisabled = (disabled && !showSteerAffordance) || externalRunnerBlocked || steering;
 
   const handleSteer = async (text: string) => {
     if (!chatId || steering) return;
@@ -222,11 +221,13 @@ export function InputBar({
     // this branch has to run before that check, not be exempted from it.
     if (showSteerAffordance) {
       if (!chatId || steering) return;
+      history.record(prompt);
       void handleSteer(prompt);
       return;
     }
     if (disabled || cannotSubmit) return;
     const attachmentIds = pendingAttachments.map((attachment) => attachment.id);
+    history.record(prompt);
     onSubmit(prompt, attachmentIds.length > 0 ? attachmentIds : undefined);
     setPrompt('');
     setPendingAttachments([]);
@@ -234,170 +235,49 @@ export function InputBar({
 
   const handleInsertPrompt = (text: string) => {
     if (!text) return;
-    setPrompt((current) => (current.trim() ? `${current}\n\n${text}` : text));
+    setPrompt(prompt.trim() ? `${prompt}\n\n${text}` : text);
   };
 
-  const handleAttachments = (attachments: ChatAttachment[]) => {
-    if (attachments.length === 0) return;
-    setPendingAttachments((current) => {
-      const known = new Set(current.map((attachment) => attachment.id));
-      return [...current, ...attachments.filter((attachment) => !known.has(attachment.id))];
-    });
+  /**
+   * Enter sends, Shift+Enter breaks the line, ↑/↓ walk this chat's history
+   * while the caret is at the very start (or already inside history) so they
+   * stay ordinary cursor keys in the middle of a multi-line prompt.
+   */
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // An IME candidate window uses Enter to accept a suggestion. `keyCode 229`
+    // is the fallback for browsers that do not set `isComposing` on keydown.
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      handleSubmit(event);
+      return;
+    }
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+
+    // ↑ enters history from the top of the box; ↓ only ever walks back out of
+    // it, so it never steals the key from a caret in the middle of a prompt.
+    const canRecall =
+      event.key === 'ArrowUp'
+        ? history.isRecalling || event.currentTarget.selectionStart === 0
+        : history.isRecalling;
+    if (!canRecall) return;
+
+    const recalled = history.recall(event.key === 'ArrowUp' ? 'previous' : 'next', prompt);
+    if (recalled === null) return;
+    event.preventDefault();
+    setPrompt(recalled);
+  };
+
+  const handleDrop = (event: DragEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setDragging(false);
+    uploads.upload(Array.from(event.dataTransfer.files));
   };
 
   return (
     <footer className="shrink-0 p-3 sm:p-4 md:p-6">
-      <div className="max-w-4xl mx-auto w-full">
-        <div className="flex items-center justify-between mb-2 sm:mb-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            {environmentId && onEnvironmentChange ? (
-              <EnvironmentSelector
-                environmentId={environmentId}
-                disabled={disabled || isGenerating}
-                onEnvironmentChange={onEnvironmentChange}
-              />
-            ) : null}
-
-            {!isExternalRunner && onSelectedAgentIdChange ? (
-              <label className="sr-only" htmlFor="chat-agent-selector">
-                {t.chat.input.selectAgent}
-              </label>
-            ) : null}
-
-            {onWorkdirClick ? (
-              <Chip
-                icon={<FolderOpen size={13} className="shrink-0 text-primary/80" />}
-                onClick={onWorkdirClick}
-                disabled={disabled}
-                className="h-7 max-w-[14rem]"
-                title={workdir ?? t.workspace.chooseWorkdir}
-                aria-label={
-                  workdirName
-                    ? t.workspace.changeWorkdir.replace('{name}', workdirName)
-                    : t.workspace.chooseWorkdir
-                }
-              >
-                {workdirName ?? t.workspace.chooseWorkdir}
-              </Chip>
-            ) : null}
-            {!isExternalRunner && onSelectedAgentIdChange ? (
-              <select
-                id="chat-agent-selector"
-                value={selectedAgentId}
-                onChange={(event) => onSelectedAgentIdChange(event.target.value)}
-                disabled={disabled || isAgentListLoading || selectableAgents.length === 0}
-                className="h-7 max-w-[11rem] rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2 text-[10px] sm:text-[11px] font-medium text-on-surface-variant outline-none transition-colors hover:text-on-surface focus:border-primary/40"
-                aria-label={t.chat.input.selectAgent}
-              >
-                {isAgentListLoading ? (
-                  <option value={selectedAgentId}>{t.chat.input.agentsLoading}</option>
-                ) : null}
-                {selectableAgents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name}
-                  </option>
-                ))}
-              </select>
-            ) : null}
-
-            {!isExternalRunner && modelCatalog && onModelChange ? (
-              <ModelSelector
-                activeModel={activeModel ?? ''}
-                activeModels={activeModels}
-                isDisabled={isModelSelectorDisabled || disabled === true}
-                onSelect={onModelChange}
-                modelCatalog={modelCatalog}
-                lockedProvider={lockedProvider}
-              />
-            ) : null}
-
-            {isExternalRunner &&
-            onExternalModelChange &&
-            onExternalEffortChange &&
-            onExternalPermissionsChange ? (
-              <ExternalComposerControls
-                descriptor={externalDescriptor}
-                model={externalModel}
-                effort={externalEffort}
-                level={externalLevel}
-                routing={externalRouting}
-                disabled={disabled || isGenerating}
-                onModelChange={onExternalModelChange}
-                onEffortChange={onExternalEffortChange}
-                onPermissionsChange={onExternalPermissionsChange}
-              />
-            ) : null}
-
-            {/* MangoStudio's own thinking control. An external agent's effort
-                comes from its vendor's per-model catalog instead. */}
-            {!isExternalRunner && onThinkingToggle && onReasoningEffortChange ? (
-              <ThinkingToggle
-                enabled={thinkingEnabled}
-                effort={reasoningEffort}
-                visible={reasoningVisible}
-                onToggle={onThinkingToggle}
-                onEffortChange={onReasoningEffortChange}
-              />
-            ) : null}
-
-            <McpComposerMenu
-              chatId={chatId}
-              disabled={disabled}
-              onInsertPrompt={handleInsertPrompt}
-              onAttachments={handleAttachments}
-            />
-
-            <CapabilityInspector
-              chatId={chatId}
-              disabled={disabled}
-              activeModel={activeModel}
-              selectedAgentId={selectedAgentId}
-            />
-
-            {onImageToolIntentChange && (
-              <button
-                type="button"
-                onClick={() => onImageToolIntentChange(!imageToolIntent)}
-                disabled={disabled}
-                className={`flex items-center gap-1.5 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] sm:text-[11px] font-medium transition-all duration-200 shrink-0 ${
-                  imageToolIntent
-                    ? 'bg-primary text-on-primary shadow-sm'
-                    : 'text-on-surface-variant hover:text-on-surface border border-outline-variant/20 hover:border-outline-variant/40'
-                }`}
-                title={t.chat.input.createImagesHint}
-              >
-                <Image size={12} className="sm:hidden" />
-                <Image size={13} className="hidden sm:block" />
-                <span className="hidden sm:inline">{t.chat.input.createImages}</span>
-              </button>
-            )}
-
-            {contextInfo && (
-              <span
-                className={`flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] sm:text-[11px] font-medium tabular-nums border transition-colors shrink-0 ${
-                  contextInfo.severity === 'critical'
-                    ? 'bg-error/15 text-error border-error/30'
-                    : contextInfo.severity === 'danger'
-                      ? 'bg-warning/15 text-warning border-warning/30'
-                      : contextInfo.severity === 'warning'
-                        ? 'bg-warning/10 text-warning/80 border-warning/20'
-                        : 'bg-surface-container-high text-on-surface-variant border-transparent'
-                }`}
-                title={`~${contextInfo.estimatedInputTokens.toLocaleString()} / ${contextInfo.contextLimit.toLocaleString()} tokens · ${contextInfo.mode}`}
-              >
-                <span className="sm:hidden">
-                  {formatTokensCompact(contextInfo.estimatedInputTokens)}
-                </span>
-                <span className="hidden sm:inline">
-                  {`${t.chat.context.label}: ${formatTokensCompact(contextInfo.estimatedInputTokens)} / ${formatTokensCompact(contextInfo.contextLimit)}`}
-                </span>
-              </span>
-            )}
-
-            <ExternalUsageDisplay turn={threadUsage?.last} thread={threadUsage} />
-          </div>
-        </div>
-
+      <div className="mx-auto w-full max-w-4xl">
         {externalRunnerBlocked && (
           // Named, not just disabled: "install it", "sign in", "wake that
           // machine" and "wait for discovery" are four different things to do,
@@ -418,7 +298,14 @@ export function InputBar({
           </p>
         )}
 
-        {pendingAttachments.length > 0 && (
+        {uploads.error && (
+          <p role="status" className="mb-2 flex items-center gap-1.5 text-[11px] text-error">
+            <AlertTriangle size={12} className="shrink-0" />
+            {uploads.error}
+          </p>
+        )}
+
+        {(pendingAttachments.length > 0 || uploads.uploading.length > 0) && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {pendingAttachments.map((attachment) => (
               <span
@@ -441,94 +328,206 @@ export function InputBar({
                 </button>
               </span>
             ))}
+            {uploads.uploading.map((name) => (
+              <span
+                key={name}
+                role="status"
+                className="flex items-center gap-1.5 rounded-full border border-outline-variant/20 px-2.5 py-1 text-[11px] text-on-surface-variant/70"
+              >
+                <span className="size-3 shrink-0 animate-spin rounded-full border border-current border-t-transparent" />
+                <span className="max-w-[12rem] truncate">
+                  {formatMessage(t.chat.input.attachUploading, { name })}
+                </span>
+              </span>
+            ))}
           </div>
         )}
 
         <form
           onSubmit={handleSubmit}
-          className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-1.5 sm:p-2 shadow-2xl flex items-center gap-1.5 sm:gap-2 group transition-all focus-within:ring-1 focus-within:ring-primary/30"
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={(event) => {
+            // Moving between the form's own children fires `dragleave` on the
+            // one being left; only a pointer that has actually left the form
+            // should clear the highlight.
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setDragging(false);
+            }
+          }}
+          onDrop={handleDrop}
+          data-testid="composer"
+          className={`relative flex flex-col rounded-2xl border bg-surface-container-lowest shadow-2xl transition-colors focus-within:ring-1 focus-within:ring-primary/30 ${
+            dragging ? 'border-primary/60' : 'border-outline-variant/10'
+          }`}
         >
-          <input
-            type="text"
+          <ComposerChipRow
+            disabled={disabled}
+            isGenerating={isGenerating}
+            isExternalRunner={isExternalRunner}
+            thinkingEnabled={thinkingEnabled}
+            reasoningEffort={reasoningEffort}
+            onThinkingToggle={onThinkingToggle}
+            onReasoningEffortChange={onReasoningEffortChange}
+            reasoningVisible={reasoningVisible}
+            contextInfo={contextInfo}
+            threadUsage={threadUsage}
+            activeModel={activeModel}
+            selectedAgentId={selectedAgentId}
+            agents={agents}
+            isAgentListLoading={isAgentListLoading}
+            onSelectedAgentIdChange={onSelectedAgentIdChange}
+            environmentId={environmentId}
+            onEnvironmentChange={onEnvironmentChange}
+            workdir={workdir}
+            onWorkdirClick={onWorkdirClick}
+            activeModels={activeModels}
+            modelCatalog={modelCatalog}
+            lockedProvider={lockedProvider}
+            isModelSelectorDisabled={isModelSelectorDisabled}
+            onModelChange={onModelChange}
+            externalDescriptor={externalDescriptor}
+            externalModel={externalModel}
+            externalEffort={externalEffort}
+            externalLevel={externalLevel}
+            externalRouting={externalRouting}
+            onExternalModelChange={onExternalModelChange}
+            onExternalEffortChange={onExternalEffortChange}
+            onExternalPermissionsChange={onExternalPermissionsChange}
+          />
+
+          <textarea
+            ref={textareaRef}
+            rows={1}
             value={prompt}
-            onChange={(e) => {
-              setPrompt(e.target.value);
+            onChange={(event) => {
+              setPrompt(event.target.value);
+              history.release();
               if (steerError) setSteerError(null);
+              if (uploads.error) uploads.clearError();
             }}
-            disabled={(disabled && !showSteerAffordance) || externalRunnerBlocked || steering}
-            className="flex-1 bg-transparent border-none focus:ring-0 text-sm font-body text-on-surface placeholder:text-on-surface-variant/40 py-2 outline-none min-w-0"
+            onKeyDown={handleKeyDown}
+            onPaste={(event) => {
+              const files = filesFromClipboard(event.clipboardData);
+              if (files.length === 0) return;
+              event.preventDefault();
+              uploads.upload(files);
+            }}
+            disabled={inputDisabled}
+            style={{ maxHeight: `${TEXTAREA_MAX_HEIGHT_PX}px` }}
+            className="app-scrollbar w-full resize-none bg-transparent px-3 py-2.5 font-body text-sm text-on-surface outline-none placeholder:text-on-surface-variant/40 disabled:opacity-60"
             placeholder={
               showSteerAffordance ? t.externalAgents.steer.buttonHint : t.chat.input.placeholder
             }
           />
 
-          <div className="flex items-center gap-1 pr-0.5 sm:pr-1 shrink-0">
-            {!isGenerating && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="sm:size-10 text-on-surface-variant"
-              >
-                <Mic size={18} className="sm:hidden" />
-                <Mic size={20} className="hidden sm:block" />
-              </Button>
-            )}
-            {isGenerating && (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={onStop}
-                title={t.chat.input.stop}
-                className={`text-xs hover:bg-error/20 hover:text-error shrink-0 ${
-                  showSteerAffordance
-                    ? 'size-9 sm:size-10 p-0'
-                    : 'h-9 sm:h-10 gap-1.5 px-3 sm:gap-2 sm:px-4'
-                }`}
-              >
-                {!showSteerAffordance && (
-                  <span className="hidden sm:inline">{t.chat.input.stop}</span>
-                )}{' '}
-                <Square size={12} className="sm:hidden" />
-                <Square size={14} className="hidden sm:block" />
-              </Button>
-            )}
-            {/* Same button, different meaning while a steerable turn runs — see
-                docs/architecture/external-agents.md's steering section. Distinct
-                styling so nobody reads it as an ordinary send. */}
-            {showSteerAffordance ? (
-              <Button
-                type="submit"
-                variant="ghost"
-                disabled={!chatId || steering || !prompt.trim()}
-                title={t.externalAgents.steer.buttonHint}
-                className="h-9 sm:h-10 px-3 sm:px-4 gap-1.5 sm:gap-2 border-2 border-primary text-primary text-xs hover:bg-primary/10 hover:text-primary shrink-0"
-              >
-                <span className="hidden sm:inline">{t.externalAgents.steer.button}</span>{' '}
-                <CornerDownRight size={ICON_SM} className="sm:hidden" />
-                <CornerDownRight size={ICON_MD} className="hidden sm:block" />
-              </Button>
-            ) : !isGenerating ? (
-              <Button
-                type="submit"
-                disabled={disabled || cannotSubmit || !prompt.trim()}
-                className="h-9 sm:h-10 px-3 sm:px-4 gap-1.5 sm:gap-2 text-xs shadow-primary-container/20 hover:brightness-110 hover:opacity-100 shrink-0"
-                style={{ background: 'var(--gradient-primary)' }}
-              >
-                <span className="hidden sm:inline">{t.chat.input.send}</span>{' '}
-                <Send size={ICON_SM} className="sm:hidden" />
-                <KbdHint
-                  keys="⏎"
-                  className="hidden sm:inline-flex border-transparent bg-on-primary/15 text-on-primary/90"
+          <div className="flex items-end justify-between gap-2 px-2 pb-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-1">
+              <McpComposerMenu
+                chatId={chatId}
+                disabled={disabled}
+                onInsertPrompt={handleInsertPrompt}
+                onAttachments={handleAttachments}
+              />
+              <CapabilityInspector
+                chatId={chatId}
+                disabled={disabled}
+                activeModel={activeModel}
+                selectedAgentId={selectedAgentId}
+              />
+              {onImageToolIntentChange && (
+                <ImageIntentToggle
+                  active={imageToolIntent}
+                  disabled={disabled}
+                  onChange={onImageToolIntentChange}
                 />
-              </Button>
-            ) : null}
+              )}
+            </div>
+
+            <div className="flex shrink-0 items-center gap-1">
+              {isGenerating && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={onStop}
+                  title={t.chat.input.stop}
+                  className={`text-xs hover:bg-error/20 hover:text-error shrink-0 ${
+                    showSteerAffordance ? 'size-9 p-0' : 'h-9 gap-1.5 px-3'
+                  }`}
+                >
+                  {!showSteerAffordance && (
+                    <span className="hidden sm:inline">{t.chat.input.stop}</span>
+                  )}{' '}
+                  <Square size={12} />
+                </Button>
+              )}
+              {/* Same button, different meaning while a steerable turn runs — see
+                  docs/architecture/external-agents.md's steering section. Distinct
+                  styling so nobody reads it as an ordinary send. */}
+              {showSteerAffordance ? (
+                <Button
+                  type="submit"
+                  variant="ghost"
+                  disabled={!chatId || steering || !prompt.trim()}
+                  title={t.externalAgents.steer.buttonHint}
+                  className="h-9 shrink-0 gap-1.5 border-2 border-primary px-3 text-xs text-primary hover:bg-primary/10 hover:text-primary"
+                >
+                  <span className="hidden sm:inline">{t.externalAgents.steer.button}</span>{' '}
+                  <CornerDownRight size={ICON_SM} className="sm:hidden" />
+                  <CornerDownRight size={ICON_MD} className="hidden sm:block" />
+                </Button>
+              ) : !isGenerating ? (
+                <Button
+                  type="submit"
+                  disabled={disabled || cannotSubmit || !prompt.trim()}
+                  className="h-9 shrink-0 gap-1.5 px-3 text-xs shadow-primary-container/20 hover:brightness-110 hover:opacity-100"
+                  style={{ background: 'var(--gradient-primary)' }}
+                >
+                  <span className="hidden sm:inline">{t.chat.input.send}</span>{' '}
+                  <Send size={ICON_SM} className="sm:hidden" />
+                  <KbdHint
+                    keys="⏎"
+                    className="hidden sm:inline-flex border-transparent bg-on-primary/15 text-on-primary/90"
+                  />
+                </Button>
+              ) : null}
+            </div>
           </div>
+
+          {dragging ? (
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-2xl bg-primary/10 font-mono text-xs text-primary"
+            >
+              {t.chat.input.dropHint}
+            </span>
+          ) : null}
         </form>
-        <p className="text-center text-[10px] text-on-surface-variant/40 mt-2 sm:mt-3 font-label">
+
+        <p className="mt-2 text-center font-label text-[10px] text-on-surface-variant/40 sm:mt-3">
           {t.common.disclaimer}
         </p>
       </div>
     </footer>
   );
+}
+
+/**
+ * Grows the textarea with its content up to {@link TEXTAREA_MAX_HEIGHT_PX},
+ * then lets it scroll.
+ *
+ * The height is reset to `auto` before every measurement because
+ * `scrollHeight` never reports *less* than the element's current height —
+ * without the reset the box only ever grows, and deleting a paragraph leaves a
+ * tall empty composer behind.
+ */
+function useAutoGrow(ref: React.RefObject<HTMLTextAreaElement | null>, value: string): void {
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    node.style.height = 'auto';
+    node.style.height = `${Math.min(node.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
+  }, [ref, value]);
 }

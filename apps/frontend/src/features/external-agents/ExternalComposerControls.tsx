@@ -92,8 +92,8 @@ export function ExternalComposerControls({
   return (
     <>
       {models.length > 0 ? (
-        <label className="contents">
-          <span className="sr-only">{labels.model.label}</span>
+        <label className="composer-chip max-w-[13rem]">
+          <span className="shrink-0 text-on-surface-variant/70">{`${t.chat.input.modelLabel}:`}</span>
           <select
             value={selectedModel?.id ?? ''}
             disabled={disabled}
@@ -105,7 +105,7 @@ export function ExternalComposerControls({
               onEffortChange(null);
             }}
             aria-label={labels.model.label}
-            className="h-7 max-w-[12rem] rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2 text-[10px] font-medium text-on-surface-variant outline-none transition-colors hover:text-on-surface focus:border-primary/40 sm:text-[11px]"
+            className="composer-chip-value min-w-0 max-w-[9rem] appearance-none bg-transparent text-inherit outline-none disabled:opacity-60"
           >
             {models.map((candidate) => (
               <option key={candidate.id} value={candidate.id}>
@@ -117,14 +117,14 @@ export function ExternalComposerControls({
       ) : null}
 
       {efforts.length > 0 ? (
-        <label className="contents">
-          <span className="sr-only">{labels.model.effortLabel}</span>
+        <label className="composer-chip max-w-[11rem]">
+          <span className="shrink-0 text-on-surface-variant/70">{`${labels.model.effortLabel}:`}</span>
           <select
             value={effort ?? selectedModel?.defaultReasoningEffort ?? ''}
             disabled={disabled}
             onChange={(event) => onEffortChange(event.target.value || null)}
             aria-label={labels.model.effortLabel}
-            className="h-7 max-w-[9rem] rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2 text-[10px] font-medium text-on-surface-variant outline-none transition-colors hover:text-on-surface focus:border-primary/40 sm:text-[11px]"
+            className="composer-chip-value min-w-0 max-w-[7rem] appearance-none bg-transparent text-inherit outline-none disabled:opacity-60"
           >
             {efforts.map((candidate) => (
               <option key={candidate.id} value={candidate.id}>
@@ -145,9 +145,11 @@ export function ExternalComposerControls({
 
       {/* The quiet line the user should never have to guess at: MangoStudio's
           own tool settings do not apply to a turn it is not running. */}
-      <span className="flex items-center gap-1 text-[10px] text-on-surface-variant/60 sm:text-[11px]">
+      <span className="flex min-w-0 items-center gap-1 font-mono text-[11px] text-on-surface-variant/50">
         <Cpu size={11} className="shrink-0" />
-        {labels.selector.ownership.replace('{vendor}', labels.target[descriptor.targetId])}
+        <span className="truncate">
+          {labels.selector.ownership.replace('{vendor}', labels.target[descriptor.targetId])}
+        </span>
       </span>
 
       {models.length === 0 ? (
