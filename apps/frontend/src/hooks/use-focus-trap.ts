@@ -35,6 +35,13 @@ export function useFocusTrap(onEscape: () => void) {
     dialog.focus();
 
     const onKeyDown = (event: KeyboardEvent) => {
+      // Somebody above already answered this press. The listener is on
+      // `document`, which every overlay in the app is a descendant of, so a
+      // dialog opened *over* one of these — the command palette, say — handles
+      // Escape at the React root and this listener still sees the same event on
+      // its way up. Without the guard, one press dismisses both the thing on
+      // top and the dialog it was covering.
+      if (event.defaultPrevented) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         onEscape();

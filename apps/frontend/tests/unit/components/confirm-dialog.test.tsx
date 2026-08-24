@@ -1,5 +1,6 @@
 import { describe, expect, it, jest } from 'bun:test';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { CommandPalette } from '@/features/command-palette/CommandPalette';
 import { fireEvent, render, screen } from '../../support/harness/render';
 
 describe('ConfirmDialog', () => {
@@ -108,6 +109,29 @@ describe('ConfirmDialog', () => {
     fireEvent.keyDown(document, { key: 'Tab' });
     expect(document.activeElement).toBe(checkbox);
     expect(document.activeElement).not.toBe(cancel);
+  });
+
+  /**
+   * The trap listens on `document`, which every overlay in the app sits under.
+   * A dialog opened *over* this one handles Escape at the React root, and the
+   * same event still reaches this listener on its way up — so without the
+   * `defaultPrevented` guard one press dismisses the thing on top and the
+   * dialog it was covering.
+   */
+  it('leaves an Escape another overlay already answered alone', () => {
+    const onCancel = jest.fn();
+    const onClose = jest.fn();
+    render(
+      <>
+        <ConfirmDialog {...props} onCancel={onCancel} />
+        <CommandPalette items={[]} onClose={onClose} />
+      </>
+    );
+
+    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Escape' });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onCancel).not.toHaveBeenCalled();
   });
 
   it('returns focus to whatever opened it', () => {
