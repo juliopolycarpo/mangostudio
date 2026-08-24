@@ -4,6 +4,7 @@ import type {
   ChatRunnerPermissions,
   ExternalAgentTargetId,
 } from '@mangostudio/shared/chat';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatWithContext } from '@/features/chat/queries';
@@ -249,7 +250,17 @@ export function useRunnerSelection({
     if (workdirDefaultedChatIds.current.has(currentChatId)) return;
     workdirDefaultedChatIds.current.add(currentChatId);
 
-    if (!defaultWorkdir) {
+    // The default is one path with no machine attached: it is picked in Settings
+    // against the hub, and `workspaceSettings` has no environment dimension. On
+    // another machine it is at best a path that does not exist — a doomed round
+    // trip to a runtime that may be a cold SSH dial — and at worst a *different*
+    // directory that happens to share the name, which validates and silently
+    // binds the chat to the wrong project.
+    //
+    // Ask instead. The picker browses through the chat, so it lists the
+    // machine the chat is actually on. This is also where the failing write
+    // already ended up, minus the trip.
+    if (!defaultWorkdir || currentChat.environmentId !== LOCAL_ENVIRONMENT_ID) {
       setWorkdirPickerOpen(true);
       return;
     }

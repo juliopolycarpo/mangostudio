@@ -68,6 +68,33 @@ describe('useRunnerSelection workdir binding', () => {
     await waitFor(() => expect(result.current.isWorkdirPickerOpen).toBe(true));
   });
 
+  /**
+   * `workspaceSettings.defaultWorkdir` is one path with no machine attached —
+   * it is picked in Settings against the hub. Sending it to another machine
+   * either fails after a round trip to a runtime that may be a cold dial, or,
+   * where a same-named directory happens to exist, succeeds and silently binds
+   * the chat to the wrong project.
+   */
+  it('never sends the hub default to a chat on another machine', async () => {
+    const remote = { ...CHAT, environmentId: 'ubuntu-box' };
+    const { result } = renderHook(() =>
+      useRunnerSelection({
+        currentChatId: remote.id,
+        currentChat: remote,
+        defaultWorkdir: '/srv/projects/default',
+        updateChatRunner,
+        updateChatRunnerPermissions,
+        updateChatWorkdir,
+        addRecentWorkdir,
+      })
+    );
+
+    // The picker browses through the chat, so it lists the machine the chat is
+    // on — which is what makes asking the right move rather than a fallback.
+    await waitFor(() => expect(result.current.isWorkdirPickerOpen).toBe(true));
+    expect(updateChatWorkdir).not.toHaveBeenCalled();
+  });
+
   it('binds a selected workdir, records it as recent, and closes the picker', async () => {
     const { result } = renderHook(() =>
       useRunnerSelection({
