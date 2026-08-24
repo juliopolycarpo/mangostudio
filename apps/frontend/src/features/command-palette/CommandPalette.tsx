@@ -63,8 +63,15 @@ export const CommandPalette = memo(function CommandPalette({
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
-  /** Null until the user picks a row themselves; see `resolvedIndex` below. */
-  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  /**
+   * The command id the user pinned, or null for "wherever the ranking says".
+   *
+   * An id rather than an offset because the list moves under a held cursor
+   * while sources load: discovery finishing inserts runner rows, and a numeric
+   * pin would keep its offset while the command under it changed — arming Enter
+   * on a row the user never chose.
+   */
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
   const reduceMotion = useReducedMotion();
 
   // Deferred for the same reason the sidebar's search is: every keystroke
@@ -85,7 +92,7 @@ export const CommandPalette = memo(function CommandPalette({
   // `null` means "wherever the ranking says", so a fresh query lands on the best
   // match anywhere rather than on the first row of the first section. Arrowing
   // or hovering pins it, and typing again releases it.
-  const safeIndex = activeCommandIndex({ groups, flat, bestIndex }, activeIndex);
+  const safeIndex = activeCommandIndex({ groups, flat, bestIndex }, pinnedId);
   /** The active row as a movable cursor: never negative, so wrapping is honest. */
   const from = Math.max(safeIndex, 0);
   const activeItem = safeIndex >= 0 ? flat[safeIndex] : undefined;
@@ -108,12 +115,14 @@ export const CommandPalette = memo(function CommandPalette({
     document.getElementById(activeId)?.scrollIntoView?.({ block: 'nearest' });
   }, [activeId]);
 
+  // Movement pins by id even though it thinks in offsets: the offset names a
+  // row in *this* ranking, and only the id survives the next one.
   const move = useCallback(
     (delta: number) => {
       if (flat.length === 0) return;
-      setActiveIndex((from + delta + flat.length) % flat.length);
+      setPinnedId(flat[(from + delta + flat.length) % flat.length].id);
     },
-    [flat.length, from]
+    [flat, from]
   );
 
   /** First row of the section after (or before) the active one. */
@@ -125,9 +134,9 @@ export const CommandPalette = memo(function CommandPalette({
         if (start <= from) current = index;
       }
       const next = (current + delta + sectionStarts.length) % sectionStarts.length;
-      setActiveIndex(sectionStarts[next]);
+      setPinnedId(flat[sectionStarts[next]].id);
     },
-    [sectionStarts, from]
+    [flat, sectionStarts, from]
   );
 
   const onKeyDown = (event: React.KeyboardEvent) => {
@@ -144,11 +153,11 @@ export const CommandPalette = memo(function CommandPalette({
         return;
       case 'Home':
         event.preventDefault();
-        setActiveIndex(0);
+        if (flat.length > 0) setPinnedId(flat[0].id);
         return;
       case 'End':
         event.preventDefault();
-        setActiveIndex(Math.max(flat.length - 1, 0));
+        if (flat.length > 0) setPinnedId(flat[flat.length - 1].id);
         return;
       case 'Tab':
         event.preventDefault();
@@ -163,10 +172,9 @@ export const CommandPalette = memo(function CommandPalette({
         // instead. Enter is one keystroke, not one per character, so it can
         // afford the rescore the list is deferring.
         //
-        // The cursor is dropped rather than carried across: it indexes the
-        // stale list, so it names a different row in the fresh one. The best
-        // match for what was actually typed is the row the palette is about to
-        // highlight anyway — and typing releases the cursor to it regardless.
+        // No pin needs carrying across: typing is what opened the lag window,
+        // and typing released the pin. The best match for what was actually
+        // typed is the row the palette is about to highlight anyway.
         const item = query === deferredQuery ? activeItem : liveBestCommand(items, query);
         if (!item) return;
         event.preventDefault();
@@ -234,7 +242,7 @@ export const CommandPalette = memo(function CommandPalette({
               setQuery(event.target.value);
               // Releases the cursor back to the ranking, so each new query lands
               // on its own best match rather than on wherever the last one left.
-              setActiveIndex(null);
+              setPinnedId(null);
             }}
             placeholder={labels.placeholder}
             className="min-w-0 flex-1 bg-transparent text-sm text-on-surface outline-none placeholder:text-on-surface-variant/50"
@@ -262,7 +270,7 @@ export const CommandPalette = memo(function CommandPalette({
                       id={optionId(listId, item)}
                       item={item}
                       active={index === safeIndex}
-                      onActivate={() => setActiveIndex(index)}
+                      onActivate={() => setPinnedId(item.id)}
                     />
                   );
                 })}

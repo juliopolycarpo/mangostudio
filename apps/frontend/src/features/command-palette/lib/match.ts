@@ -208,14 +208,23 @@ export function rankCommands(
  *
  * `null` means "wherever the ranking says", which is how a fresh query lands on
  * the best match anywhere rather than on the first row of the first section.
- * Clamped rather than corrected in an effect: the list shrinks as a query
- * narrows, and an index left pointing past the end is one render of Enter doing
- * nothing. -1 when nothing matched.
+ *
+ * The pin is a command id, not an offset: the list can change under a held
+ * cursor without a keystroke — discovery finishing inserts runner rows above
+ * everything below them — and a numeric pin would silently slide onto a
+ * different command, so the row Enter runs would not be the row the user chose.
+ * A pinned id the ranking no longer contains releases back to the best match,
+ * which also covers a query narrowed past the pinned row. -1 when nothing
+ * matched.
  *
  * Shared by the render and by Enter so the two cannot disagree about which row
  * is armed — which is the entire failure mode this is guarding.
  */
-export function activeCommandIndex(ranked: RankedCommands, activeIndex: number | null): number {
+export function activeCommandIndex(ranked: RankedCommands, activeId: string | null): number {
   if (ranked.flat.length === 0) return -1;
-  return Math.min(activeIndex ?? ranked.bestIndex, ranked.flat.length - 1);
+  if (activeId !== null) {
+    const pinned = ranked.flat.findIndex((item) => item.id === activeId);
+    if (pinned >= 0) return pinned;
+  }
+  return ranked.bestIndex;
 }

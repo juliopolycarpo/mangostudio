@@ -170,18 +170,42 @@ describe('activeCommandIndex', () => {
 
   it('honours a pinned row over the ranking', () => {
     const ranked = rankCommands(registry, '');
-    expect(activeCommandIndex(ranked, 1)).toBe(1);
+    expect(activeCommandIndex(ranked, 'n1')).toBe(1);
+  });
+
+  /**
+   * The list changes under a held cursor without a keystroke: sources answer
+   * late, and discovery finishing inserts runner rows above everything below
+   * them. The pin is an id precisely so the cursor follows the command rather
+   * than keeping an offset that now names a different one.
+   */
+  it('follows a pinned command when rows are inserted above it', () => {
+    const ranked = rankCommands(registry, '');
+    expect(activeCommandIndex(ranked, 'n1')).toBe(1);
+
+    const loaded = rankCommands(
+      [
+        registry[0],
+        item({ id: 'a1', section: 'actions', label: 'New chat with Codex' }),
+        item({ id: 'a2', section: 'actions', label: 'New chat with Claude Code' }),
+        registry[1],
+      ],
+      ''
+    );
+    expect(loaded.flat[activeCommandIndex(loaded, 'n1')].id).toBe('n1');
   });
 
   /**
    * The list shrinks as a query narrows, so a row pinned against the wider one
-   * can outlive it. Clamping is what stops Enter spending a render on nothing.
+   * can outlive it. Releasing to the best match is what stops Enter spending a
+   * render on nothing.
    */
-  it('clamps a pin the query has narrowed past', () => {
-    expect(activeCommandIndex(rankCommands(registry, 'gallery'), 5)).toBe(0);
+  it('releases a pin the query has narrowed past', () => {
+    const ranked = rankCommands(registry, 'gallery');
+    expect(activeCommandIndex(ranked, 's1')).toBe(ranked.bestIndex);
   });
 
   it('reports no cursor when nothing matched', () => {
-    expect(activeCommandIndex(rankCommands(registry, 'zzzqqq'), 0)).toBe(-1);
+    expect(activeCommandIndex(rankCommands(registry, 'zzzqqq'), 's1')).toBe(-1);
   });
 });
