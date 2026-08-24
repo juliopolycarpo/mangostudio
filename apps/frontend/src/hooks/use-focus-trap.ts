@@ -14,7 +14,9 @@
  * makes "read the terms" unreachable while the thing gating it is on screen.
  *
  * There is no shared modal primitive in this app; this is the shared piece of
- * one, kept small rather than grown into a component nobody asked for.
+ * one, kept small rather than grown into a component nobody asked for. What it
+ * therefore has to carry itself is which dialog is on top when two of these are
+ * open at once — see `engagedTraps`.
  *
  * The ref is a callback (via `useState`), not a plain `useRef`. Every current
  * caller mounts fresh each time its dialog appears, but a caller that instead
@@ -32,23 +34,60 @@ import { useEffect, useState } from 'react';
 const TABBABLE =
   'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+/**
+ * Every engaged trap, oldest first, so the newest one owns the keyboard.
+ *
+ * `defaultPrevented` cannot decide this on its own. These listeners are all on
+ * `document`, so they run in registration order — which is mount order, so the
+ * dialog *underneath* answers first and prevents the event before the one on
+ * top ever sees it. Escape would then close the background dialog and leave the
+ * top one up, and the background's Tab handler would keep pulling at focus that
+ * belongs to the dialog above it.
+ *
+ * The list is module-level because it is one keyboard: two hook instances in
+ * unrelated trees still have exactly one topmost dialog between them. The
+ * app-wide gates (`ExternalWorkspaceTrustGate`, `ExternalDisclosureGate`) mount
+ * over whatever page is up, so this stacking is not hypothetical — a trust
+ * prompt raised while the workdir picker is open is the reachable case.
+ */
+const engagedTraps: HTMLElement[] = [];
+
 export function useFocusTrap(onEscape: () => void) {
   const [dialog, setDialog] = useState<HTMLDivElement | null>(null);
 
+  // Keyed on the node alone. Folding this into the listener effect below would
+  // let an `onEscape` whose identity changed on a re-render pop and re-push a
+  // background dialog to the top of the stack, handing it a keyboard it is not
+  // on top of — and would re-run the focus restore on every such render.
   useEffect(() => {
     if (!dialog) return;
+    engagedTraps.push(dialog);
     // Restored on close, so dismissing the dialog puts the user back where they
     // were rather than at the top of the document.
     const previouslyFocused = document.activeElement as HTMLElement | null;
     dialog.focus();
 
+    return () => {
+      const index = engagedTraps.lastIndexOf(dialog);
+      if (index >= 0) engagedTraps.splice(index, 1);
+      previouslyFocused?.focus?.();
+    };
+  }, [dialog]);
+
+  useEffect(() => {
+    if (!dialog) return;
+
     const onKeyDown = (event: KeyboardEvent) => {
+      // A trapped dialog above this one owns the press, whether or not it has
+      // had its own listener run yet.
+      if (engagedTraps.at(-1) !== dialog) return;
       // Somebody above already answered this press. The listener is on
       // `document`, which every overlay in the app is a descendant of, so a
       // dialog opened *over* one of these — the command palette, say — handles
       // Escape at the React root and this listener still sees the same event on
-      // its way up. Without the guard, one press dismisses both the thing on
-      // top and the dialog it was covering.
+      // its way up. The palette is not itself a trap, so it is not in the stack
+      // above and this guard is the only thing that catches it: without it, one
+      // press dismisses both the thing on top and the dialog it was covering.
       if (event.defaultPrevented) return;
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -75,10 +114,7 @@ export function useFocusTrap(onEscape: () => void) {
     };
 
     document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      previouslyFocused?.focus?.();
-    };
+    return () => document.removeEventListener('keydown', onKeyDown);
   }, [dialog, onEscape]);
 
   return setDialog;
