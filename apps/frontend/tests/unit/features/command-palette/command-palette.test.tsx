@@ -227,4 +227,16 @@ describe('command palette pointer', () => {
     fireEvent.mouseDown(backdrop);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('does not let a press on the panel take focus off the input', () => {
+    renderPalette();
+    // `fireEvent` reports the dispatch result, so this asserts the default focus
+    // move was cancelled — the thing that would otherwise park focus on
+    // `document.body` and cut the panel's key handler out of every later
+    // keystroke. happy-dom does not move focus on `mousedown` at all, so
+    // asserting on `activeElement` here would pass against either version.
+    expect(fireEvent.mouseDown(screen.getByTestId('command-palette'))).toBe(false);
+    // The input is exempt: pressing into it has to place the caret.
+    expect(fireEvent.mouseDown(input())).toBe(true);
+  });
 });

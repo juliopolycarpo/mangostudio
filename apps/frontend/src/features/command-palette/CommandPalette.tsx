@@ -167,6 +167,16 @@ export function CommandPalette({ items, isLoading = false, onClose }: CommandPal
         aria-modal="true"
         aria-label={labels.title}
         onKeyDown={onKeyDown}
+        // The input is the only focusable node in the panel, so a press on any
+        // other part of it — a heading, the footer hints, the padding beside the
+        // input — would hand focus to `document.body`. `body` is an ancestor of
+        // this element, so every later keystroke would bypass `onKeyDown` and
+        // the palette would go dead to the keyboard until the input was clicked
+        // again. Suppressing the default focus move keeps the caret where every
+        // key path here expects it.
+        onMouseDown={(event) => {
+          if (event.target !== inputRef.current) event.preventDefault();
+        }}
         initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.97, y: -8 }}
         animate={reduceMotion ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
         exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.98, y: -4 }}
