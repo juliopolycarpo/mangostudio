@@ -155,4 +155,27 @@ describe('getBatchGitSummaries', () => {
     expect(peak).toBeLessThanOrEqual(4);
     expect(peak).toBeGreaterThan(1);
   });
+
+  it('stops pulling new workdirs once the client hangs up', async () => {
+    const controller = new AbortController();
+    let computed = 0;
+    const chats = Array.from({ length: 12 }, (_, index) => chat(`c${index}`, `/repo/${index}`));
+    await getBatchGitSummaries({
+      chatIds: chats.map((entry) => entry.id),
+      chats,
+      userId: 'user-1',
+      signal: controller.signal,
+      checkGitAvailable: gitAlwaysAvailable,
+      computeSummary: (workdir) => {
+        computed += 1;
+        controller.abort();
+        return Promise.resolve(summaryFor(workdir));
+      },
+    });
+
+    // The reads already in flight finish; nothing after them is spawned for a
+    // response nobody will read.
+    expect(computed).toBeLessThanOrEqual(4);
+    expect(computed).toBeGreaterThan(0);
+  });
 });

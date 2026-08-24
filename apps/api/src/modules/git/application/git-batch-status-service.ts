@@ -111,6 +111,10 @@ export async function getBatchGitSummaries(
   };
 
   await mapWithConcurrency([...groups.values()], WORKDIR_CONCURRENCY, async (group) => {
+    // The signal only reaches Git once a command is already running, so
+    // without this the worker loop keeps pulling the remaining groups and
+    // spawning Git for a response the disconnected client will never read.
+    if (input.signal?.aborted) return;
     try {
       if (!(await gitAvailable(group.selection))) return;
       const summary = await computeSummary(group.workdir, group.selection, input.signal);
