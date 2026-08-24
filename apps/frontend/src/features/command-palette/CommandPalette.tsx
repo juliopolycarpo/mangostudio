@@ -168,7 +168,10 @@ export const CommandPalette = memo(function CommandPalette({
 
   const onKeyDown = (event: React.KeyboardEvent) => {
     // An IME candidate list uses the same keys; the keystroke belongs to it.
-    if (event.nativeEvent.isComposing) return;
+    // Both signals, as in `isModChord`: some browsers report an active
+    // composition only through the legacy `keyCode`, and there Enter would
+    // commit a candidate *and* run a command.
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     switch (event.key) {
       case 'ArrowDown':
         event.preventDefault();

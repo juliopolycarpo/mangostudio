@@ -229,6 +229,14 @@ describe('command palette keyboard', () => {
     fireEvent.keyDown(input(), { key: 'Enter', isComposing: true });
     expect(runs.session).not.toHaveBeenCalled();
   });
+
+  it('leaves a composition reported only through the legacy keyCode alone', () => {
+    const { onClose } = renderPalette();
+    fireEvent.keyDown(input(), { key: 'Enter', keyCode: 229 });
+    fireEvent.keyDown(input(), { key: 'Escape', keyCode: 229 });
+    expect(runs.session).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });
 
 describe('command palette filtering', () => {
