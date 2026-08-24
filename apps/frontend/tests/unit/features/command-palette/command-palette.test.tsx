@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import { fireEvent, screen, within } from '@testing-library/react';
+import { ConfirmDialog } from '../../../../src/components/ui/ConfirmDialog';
 import { CommandPalette } from '../../../../src/features/command-palette/CommandPalette';
 import type { CommandItem } from '../../../../src/features/command-palette/lib/command-item';
 import { render } from '../../../support/harness/render';
@@ -46,6 +47,17 @@ function items(): CommandItem[] {
     },
   ];
 }
+
+/** Any `useFocusTrap` consumer; this one is the cheapest to mount. */
+const confirmProps = {
+  title: 'Delete Connector',
+  description: 'Are you sure you want to delete',
+  entityName: 'My OpenAI Key',
+  confirmLabel: 'Delete Connector',
+  cancelLabel: 'Cancel',
+  onConfirm: jest.fn(),
+  onCancel: jest.fn(),
+};
 
 function renderPalette(overrides: Partial<React.ComponentProps<typeof CommandPalette>> = {}) {
   const onClose = jest.fn();
@@ -108,6 +120,53 @@ describe('command palette shell', () => {
     expect(document.activeElement).toBe(overlay);
     trigger.remove();
     overlay.remove();
+  });
+
+  /**
+   * A gate raised by an external send lands under the palette's `z-[60]` while
+   * its focus trap takes the keyboard, so keystrokes would stop reaching the
+   * only overlay on screen. Both orderings are reachable, so the palette yields
+   * rather than the stacking order being pinned either way.
+   */
+  it('closes when a trapped dialog opens over it', () => {
+    const onClose = jest.fn();
+    const { rerender } = render(
+      <>
+        <CommandPalette items={items()} onClose={onClose} />
+        {null}
+      </>
+    );
+    expect(onClose).not.toHaveBeenCalled();
+
+    rerender(
+      <>
+        <CommandPalette items={items()} onClose={onClose} />
+        <ConfirmDialog {...confirmProps} />
+      </>
+    );
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays open when it is the palette that opened over the dialog', () => {
+    const onClose = jest.fn();
+    // The dialog engages its trap first — it is already on screen when ⌘K is
+    // pressed — which is the asymmetry that keeps this case from closing.
+    const { rerender } = render(
+      <>
+        <ConfirmDialog {...confirmProps} />
+        {null}
+      </>
+    );
+
+    rerender(
+      <>
+        <ConfirmDialog {...confirmProps} />
+        <CommandPalette items={items()} onClose={onClose} />
+      </>
+    );
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('renders one heading per non-empty section, in a fixed order', () => {

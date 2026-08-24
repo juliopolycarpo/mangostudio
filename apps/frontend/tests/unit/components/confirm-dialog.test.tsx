@@ -121,7 +121,16 @@ describe('ConfirmDialog', () => {
   it('leaves an Escape another overlay already answered alone', () => {
     const onCancel = jest.fn();
     const onClose = jest.fn();
-    render(
+    // Mounted in two steps because that is the order the app produces: the
+    // dialog is already up, and its trap engaged, when ⌘K opens the palette
+    // over it. A palette that appeared first would instead yield to the trap.
+    const { rerender } = render(
+      <>
+        <ConfirmDialog {...props} onCancel={onCancel} />
+        {null}
+      </>
+    );
+    rerender(
       <>
         <ConfirmDialog {...props} onCancel={onCancel} />
         <CommandPalette items={[]} onClose={onClose} />

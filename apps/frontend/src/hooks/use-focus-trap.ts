@@ -52,6 +52,34 @@ const TABBABLE =
  */
 const engagedTraps: HTMLElement[] = [];
 
+/** Notified whenever a trap engages — see `onFocusTrapEngaged`. */
+const engagedListeners = new Set<() => void>();
+
+/**
+ * Runs when a trapped dialog engages, for overlays that are not traps themselves.
+ *
+ * The stack above settles who owns the keyboard between two traps, but the
+ * command palette is deliberately not one: its a11y contract is the combobox
+ * one, so focus stays in its input and the trap's "focus the dialog" step would
+ * break it. That leaves it able to be *underneath* a trap in every sense except
+ * paint order — an app-wide gate (`ExternalWorkspaceTrustGate`,
+ * `ExternalDisclosureGate`) that mounts while the palette is open takes focus
+ * and the keyboard, while the palette keeps rendering over it, so keystrokes
+ * stop reaching the thing the user can see.
+ *
+ * No static z-order fixes that, because the reverse case is equally real: the
+ * palette can be opened *over* an already-open gate, and there it belongs on
+ * top. So the palette gets out of the way instead. Only a newly engaged trap
+ * notifies, which is exactly the asymmetry — a gate already open when the
+ * palette opens never fires.
+ */
+export function onFocusTrapEngaged(listener: () => void): () => void {
+  engagedListeners.add(listener);
+  return () => {
+    engagedListeners.delete(listener);
+  };
+}
+
 export function useFocusTrap(onEscape: () => void) {
   const [dialog, setDialog] = useState<HTMLDivElement | null>(null);
 
@@ -66,6 +94,9 @@ export function useFocusTrap(onEscape: () => void) {
     // were rather than at the top of the document.
     const previouslyFocused = document.activeElement as HTMLElement | null;
     dialog.focus();
+    // Copied first: a listener that closes an overlay can unsubscribe another
+    // one in the same tick, and mutating the set mid-iteration would skip it.
+    for (const listener of [...engagedListeners]) listener();
 
     return () => {
       const index = engagedTraps.lastIndexOf(dialog);

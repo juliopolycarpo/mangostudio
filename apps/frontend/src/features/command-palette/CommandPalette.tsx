@@ -34,6 +34,7 @@ import { KbdHint } from '@/components/ui/KbdHint';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { StatusDot } from '@/components/ui/StatusDot';
+import { onFocusTrapEngaged } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
@@ -124,6 +125,14 @@ export const CommandPalette = memo(function CommandPalette({
       previouslyFocused?.focus?.();
     };
   }, []);
+
+  // A trapped dialog that opens while the palette is up takes focus and the
+  // keyboard from it — an external send can raise a trust or disclosure gate at
+  // any moment — but the palette paints over it at `z-[60]`, so typing would
+  // stop affecting the only overlay the user can see. Yield to it. Opening the
+  // palette over a gate that is *already* up is the case this must not touch,
+  // and it does not: only a newly engaged trap notifies.
+  useEffect(() => onFocusTrapEngaged(onClose), [onClose]);
 
   // `block: 'nearest'` so arrowing down the list scrolls by a row rather than
   // recentering on every step. Optional call: happy-dom has no layout, and a
