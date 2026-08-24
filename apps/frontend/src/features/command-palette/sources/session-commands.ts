@@ -6,7 +6,7 @@
  * here too.
  */
 
-import type { Chat } from '@mangostudio/shared';
+import type { Chat } from '@mangostudio/shared/chat';
 import { MessageSquare } from 'lucide-react';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { chatSearchText } from '@/features/sidebar/lib/filter-chats';
