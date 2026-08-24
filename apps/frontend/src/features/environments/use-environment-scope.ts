@@ -51,11 +51,28 @@ export function validateEnvironmentSearch(raw: Record<string, unknown>): Environ
 
 /**
  * The scope params for one machine. `local` is the default, so it stays out of
- * the URL entirely — shared with the command palette so both ways of scoping
- * the umbrella produce the same address.
+ * the URL entirely — reached from outside through `environmentScopeRoute`, so
+ * both ways of scoping the umbrella produce the same address.
  */
-export function environmentScopeSearch(environmentId: string): EnvironmentScopeSearch {
+function environmentScopeSearch(environmentId: string): EnvironmentScopeSearch {
   return environmentId === LOCAL_ENVIRONMENT_ID ? {} : { environmentId };
+}
+
+/**
+ * The whole address for one machine, for callers outside the umbrella that mean
+ * "open this environment".
+ *
+ * Runtimes rather than the umbrella's landing page, because `/environments` is
+ * the one tab that does not honour the scope: the overview never calls
+ * `useEnvironmentScope`, and its sections query without an environment. Sending
+ * a scope there attaches a param nothing reads, leaving a page that still
+ * describes the local machine under a URL that names another one.
+ */
+export function environmentScopeRoute(environmentId: string): {
+  readonly to: '/environments/runtimes';
+  readonly search: EnvironmentScopeSearch;
+} {
+  return { to: '/environments/runtimes', search: environmentScopeSearch(environmentId) };
 }
 
 export function useEnvironmentScope(): EnvironmentScope {

@@ -16,7 +16,7 @@ import { environmentCommands } from '@/features/command-palette/sources/environm
 import { navigateCommands } from '@/features/command-palette/sources/navigate-commands';
 import { sessionCommands } from '@/features/command-palette/sources/session-commands';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
-import { environmentScopeSearch } from '@/features/environments/use-environment-scope';
+import { environmentScopeRoute } from '@/features/environments/use-environment-scope';
 import { useExternalAccountLimits } from '@/features/external-agents/use-external-account-limits';
 import {
   externalAgentSelectable,
@@ -130,7 +130,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
       t,
       onSelect: (environmentId) => {
         onRun();
-        void navigate({ to: '/environments', search: environmentScopeSearch(environmentId) });
+        void navigate(environmentScopeRoute(environmentId));
       },
     });
 
