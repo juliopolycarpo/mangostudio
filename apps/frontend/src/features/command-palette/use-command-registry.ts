@@ -111,16 +111,22 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
       hasChat: currentChatId !== null,
       isGenerating,
       newChatShortcut: newChatShortcutHint(),
-      quotaRefresh: quotaDescriptor
-        ? {
-            runnerLabel:
-              t.externalAgents.target[quotaDescriptor.targetId] ?? quotaDescriptor.targetId,
-            run: () => {
-              onRun();
-              quota.refresh();
-            },
-          }
-        : null,
+      // Omitted rather than disabled while already running: the shared
+      // mutation key only exposes activity through `useIsMutating`, so a
+      // second `mutate()` from this row would start a second vendor
+      // subprocess instead of joining the one in flight — the same reason
+      // the quota pill and the selector chip disable their own controls.
+      quotaRefresh:
+        quotaDescriptor && !quota.refreshing
+          ? {
+              runnerLabel:
+                t.externalAgents.target[quotaDescriptor.targetId] ?? quotaDescriptor.targetId,
+              run: () => {
+                onRun();
+                quota.refresh();
+              },
+            }
+          : null,
       onNewChat: () => {
         onRun();
         return appRef.current.handleNewChat();
@@ -173,6 +179,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
     nowMs,
     onRun,
     quota.refresh,
+    quota.refreshing,
     quotaDescriptor,
     resolvedTheme,
     setConfig,

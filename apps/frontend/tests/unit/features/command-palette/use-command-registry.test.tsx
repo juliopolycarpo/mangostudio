@@ -16,7 +16,7 @@ import type { Chat } from '@mangostudio/shared/chat';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import type { useAppState } from '@/hooks/use-app-state';
 import { AppContext } from '@/lib/app-context';
-import { act, flushAsyncRender, render } from '../../../support/harness/render';
+import { act, flushAsyncRender, render, waitFor } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 import { routerWithLinkStub } from '../../../support/mocks/router';
 
@@ -150,6 +150,97 @@ describe('useCommandRegistry', () => {
     const { scenario, seen } = await setup();
 
     expect(seen.items.some((item) => item.id === 'action:new-chat-external:codex')).toBe(true);
+    scenario.restore();
+  });
+
+  /**
+   * The mutation key only exposes activity through `useIsMutating`, not
+   * deduplication — a second `mutate()` while one is in flight starts a
+   * second vendor subprocess. Reopening the palette while a refresh from the
+   * header pill or the selector chip is still running must not offer the row
+   * a second time.
+   */
+  it('omits the quota-refresh row while its mutation is still running', async () => {
+    const scenario = createFetchScenario();
+    scenario.install();
+    scenario.respondWithJson('GET', '/api/environments', { body: [] });
+    scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
+      body: {
+        agents: [
+          {
+            targetId: 'codex',
+            environmentId: 'local',
+            installed: true,
+            authState: 'unknown',
+            capabilities: { accountUsage: true },
+          },
+        ],
+      },
+    });
+    scenario.respondWithJson(
+      'GET',
+      '/api/external-agents/codex/account-limits?environmentId=local',
+      {
+        body: {},
+      }
+    );
+
+    // Held open rather than resolved by `respondWithJson`, so the row's
+    // absence can be checked while the request is genuinely still in flight.
+    let resolveRefresh!: (response: Response) => void;
+    const refreshGate = new Promise<Response>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    const baseImplementation = scenario.fetchMock.getMockImplementation();
+    if (!baseImplementation) throw new Error('fetch scenario has no base implementation');
+    scenario.fetchMock.mockImplementation((input, init) => {
+      const method = (
+        init?.method ?? (input instanceof Request ? input.method : 'GET')
+      ).toUpperCase();
+      const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
+      if (
+        method === 'POST' &&
+        url.pathname === '/api/external-agents/codex/account-limits/refresh'
+      ) {
+        return refreshGate;
+      }
+      return baseImplementation(input, init);
+    });
+
+    const app = appState();
+    app.runner = { kind: 'external', targetId: 'codex' } as AppState['runner'];
+    const seen: { items: readonly CommandItem[] } = { items: [] };
+    const onRun = jest.fn();
+    render(<Probe app={app} onRun={onRun} seen={seen} />);
+    await flushAsyncRender();
+
+    const refreshRow = seen.items.find((item) => item.id === 'action:refresh-quota');
+    expect(refreshRow).toBeTruthy();
+
+    act(() => {
+      refreshRow?.run();
+    });
+    // `useIsMutating` announces the pending write through React Query's own
+    // cache-change notification, a macrotask after `mutate()` starts.
+    await flushAsyncRender();
+
+    expect(seen.items.some((item) => item.id === 'action:refresh-quota')).toBe(false);
+
+    await act(async () => {
+      resolveRefresh(
+        new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+      await refreshGate;
+    });
+    // React Query settles a mutation, and reads `useIsMutating` off it, through
+    // its own cache-change notification — a macrotask that a single flush is
+    // not always enough clear of.
+    await waitFor(() => {
+      expect(seen.items.some((item) => item.id === 'action:refresh-quota')).toBe(true);
+    });
     scenario.restore();
   });
 });
