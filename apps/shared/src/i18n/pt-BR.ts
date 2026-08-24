@@ -28,6 +28,7 @@ export const messages = {
     newChat: 'Novo Chat',
     empty: 'Inicie uma conversa',
     deleted: 'Chat excluído',
+    newChatRunnerFailed: 'Não foi possível iniciar o chat nesse executor. Tente novamente.',
     editTitle: 'Editar título',
     deleteTitle: 'Excluir chat',
     sectionLabel: 'Chats',
@@ -1308,6 +1309,35 @@ export const messages = {
       codex: 'codex',
       claude: 'claude',
       cursor: 'cursor',
+    },
+  },
+
+  commandPalette: {
+    title: 'Paleta de comandos',
+    open: 'Abrir paleta de comandos',
+    placeholder: 'Buscar conversas, ações e configurações…',
+    emptyHint: 'Tente um título de conversa, uma pasta, um agente ou uma aba de configurações.',
+    sections: {
+      sessions: 'Conversas',
+      actions: 'Ações',
+      navigate: 'Ir para',
+      environments: 'Ambientes',
+    },
+    hints: {
+      navigate: 'navegar',
+      run: 'executar',
+      sections: 'seções',
+    },
+    keys: {
+      /** The legend printed on the key, which is abbreviated per locale. */
+      escape: 'Esc',
+    },
+    actions: {
+      newChatWith: 'Nova conversa com {runner}',
+      switchToLight: 'Mudar para o tema claro',
+      switchToDark: 'Mudar para o tema escuro',
+      chooseWorkdir: 'Escolher diretório de trabalho',
+      refreshQuota: 'Atualizar cota do {runner}',
     },
   },
 

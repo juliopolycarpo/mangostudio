@@ -337,6 +337,31 @@ describe('useChats', () => {
       expect(result.current.currentChatId).toBeNull();
     });
 
+    it('clears a selection made after the callback was captured', async () => {
+      mockChatsQueryResult.mockReturnValue({
+        data: [CHAT_A, CHAT_B],
+        isLoading: false,
+        error: null,
+        refetch: mockLoadChats,
+      });
+
+      const { result } = renderHook(() => useChats());
+
+      // What the rollback in `handleNewChatWithRunner` does: it holds one
+      // `useChats` object across creation and deletion, so the `deleteChat` it
+      // calls predates the selection `createChat` made.
+      const staleDeleteChat = result.current.deleteChat;
+      act(() => {
+        result.current.selectChat(CHAT_B.id);
+      });
+
+      await act(async () => {
+        await staleDeleteChat(CHAT_B.id);
+      });
+
+      expect(result.current.currentChatId).toBe(CHAT_A.id);
+    });
+
     it('does not change selection when a non-current chat is deleted', async () => {
       mockChatsQueryResult.mockReturnValue({
         data: [CHAT_A, CHAT_B],

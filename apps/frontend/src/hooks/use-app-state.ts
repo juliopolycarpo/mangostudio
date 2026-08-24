@@ -76,7 +76,11 @@ export function useAppState() {
   });
   useChatContextSync(chats.chats, textGen.seedContextInfo);
 
-  const chatActions = useChatRouteActions({ chats, navigate });
+  const chatActions = useChatRouteActions({
+    chats,
+    navigate,
+    holdWorkdirDefault: runnerSelection.holdWorkdirDefault,
+  });
   const generationControls = useGenerationControls({
     handleRespond: textGen.handleRespond,
     stopGeneration: textGen.handleStop,
@@ -123,6 +127,7 @@ export function useAppState() {
     restrictToolsToWorkdirOverride: currentChat?.restrictToolsToWorkdir ?? null,
     updateChatRestrictToolsToWorkdir: chats.updateChatRestrictToolsToWorkdir,
     handleNewChat: chatActions.handleNewChat,
+    handleNewChatWithRunner: chatActions.handleNewChatWithRunner,
     handleUpdateChatModel: chatActions.handleUpdateChatModel,
     handleUpdateChatTitle: chatActions.handleUpdateChatTitle,
     handleDeleteChat: chatActions.handleDeleteChat,

@@ -68,6 +68,33 @@ describe('useRunnerSelection workdir binding', () => {
     await waitFor(() => expect(result.current.isWorkdirPickerOpen).toBe(true));
   });
 
+  /**
+   * `workspaceSettings.defaultWorkdir` is one path with no machine attached —
+   * it is picked in Settings against the hub. Sending it to another machine
+   * either fails after a round trip to a runtime that may be a cold dial, or,
+   * where a same-named directory happens to exist, succeeds and silently binds
+   * the chat to the wrong project.
+   */
+  it('never sends the hub default to a chat on another machine', async () => {
+    const remote = { ...CHAT, environmentId: 'ubuntu-box' };
+    const { result } = renderHook(() =>
+      useRunnerSelection({
+        currentChatId: remote.id,
+        currentChat: remote,
+        defaultWorkdir: '/srv/projects/default',
+        updateChatRunner,
+        updateChatRunnerPermissions,
+        updateChatWorkdir,
+        addRecentWorkdir,
+      })
+    );
+
+    // The picker browses through the chat, so it lists the machine the chat is
+    // on — which is what makes asking the right move rather than a fallback.
+    await waitFor(() => expect(result.current.isWorkdirPickerOpen).toBe(true));
+    expect(updateChatWorkdir).not.toHaveBeenCalled();
+  });
+
   it('binds a selected workdir, records it as recent, and closes the picker', async () => {
     const { result } = renderHook(() =>
       useRunnerSelection({
@@ -88,6 +115,57 @@ describe('useRunnerSelection workdir binding', () => {
     expect(updateChatWorkdir).toHaveBeenCalledWith(CHAT.id, '/srv/projects/mango');
     expect(addRecentWorkdir).toHaveBeenCalledWith('/srv/projects/mango');
     expect(result.current.isWorkdirPickerOpen).toBe(false);
+  });
+
+  /**
+   * `handleNewChatWithRunner` creates a *local* chat and only then repoints it
+   * to the runner's machine. The intermediate record is observable for the
+   * whole repoint request; defaulting against it would send the hub path to a
+   * chat about to be remote, and marking it would rob the repointed chat of
+   * its picker. The hold defers the effect — including the marking — until the
+   * setup settles, and the effect then acts on the record's final machine.
+   */
+  it('defers defaulting while a hold is open, then acts on the settled record', async () => {
+    const { promise: setupDone, resolve: releaseSetup } = Promise.withResolvers<void>();
+
+    const { result, rerender } = renderHook(
+      (props: { currentChat: ChatWithContext | null }) =>
+        useRunnerSelection({
+          currentChatId: CHAT.id,
+          currentChat: props.currentChat,
+          defaultWorkdir: '/srv/projects/default',
+          updateChatRunner,
+          updateChatRunnerPermissions,
+          updateChatWorkdir,
+          addRecentWorkdir,
+        }),
+      { initialProps: { currentChat: null as ChatWithContext | null } }
+    );
+
+    let held: Promise<void> = Promise.resolve();
+    act(() => {
+      held = result.current.holdWorkdirDefault(() => setupDone);
+    });
+    // Creation publishes the local record with no workdir while the repoint is
+    // still in flight — exactly the window the hold exists for.
+    rerender({ currentChat: CHAT });
+    expect(updateChatWorkdir).not.toHaveBeenCalled();
+
+    // The repoint lands in the cache before the hold releases: the update
+    // mutation writes the record in onSuccess, which runs before the awaited
+    // call resolves inside the held task.
+    rerender({ currentChat: { ...CHAT, environmentId: 'ubuntu-box' } });
+    expect(updateChatWorkdir).not.toHaveBeenCalled();
+
+    await act(async () => {
+      releaseSetup();
+      await held;
+    });
+
+    // Not marked as defaulted during the hold: the settled remote record still
+    // gets its picker, and the hub path was never sent anywhere.
+    await waitFor(() => expect(result.current.isWorkdirPickerOpen).toBe(true));
+    expect(updateChatWorkdir).not.toHaveBeenCalled();
   });
 
   it('waits for the chat record before defaulting, so a loading chat is never overwritten', async () => {

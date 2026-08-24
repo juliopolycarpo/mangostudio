@@ -65,6 +65,23 @@ export function useChats() {
     [updateMutation]
   );
 
+  /**
+   * Machine and runner in one write.
+   *
+   * Two sequential updates would leave the chat briefly holding a remote
+   * vendor on the local machine — a pairing nothing validates, and the state a
+   * turn submitted in that window would dispatch on.
+   */
+  const updateChatRunnerOnEnvironment = useCallback(
+    async (chatId: string, runner: ChatRunnerConfiguration, environmentId: string) => {
+      await updateMutation.mutateAsync({
+        id: chatId,
+        updates: { runner, environmentId },
+      });
+    },
+    [updateMutation]
+  );
+
   const updateChatRunnerPermissions = useCallback(
     async (chatId: string, runnerPermissions: ChatRunnerPermissions) => {
       await updateMutation.mutateAsync({ id: chatId, updates: { runnerPermissions } });
@@ -102,15 +119,28 @@ export function useChats() {
     [updateMutation]
   );
 
+  /**
+   * The selection is compared inside the updater, not against the
+   * `currentChatId` this closure captured.
+   *
+   * A caller can hold a `deleteChat` from before the chat it is deleting even
+   * existed — `handleNewChatWithRunner` creates a chat, binds its runner, and
+   * deletes it again when the bind fails, all through the one `useChats` object
+   * it captured at the start. The captured `currentChatId` is then whatever was
+   * selected before creation, so the comparison misses, the doomed chat's id
+   * stays selected, and `currentChat` resolves to null on a surface with chats
+   * in the sidebar.
+   */
   const deleteChat = useCallback(
     async (chatId: string) => {
       await deleteMutation.mutateAsync(chatId);
-      if (currentChatId === chatId) {
+      setCurrentChatId((selected) => {
+        if (selected !== chatId) return selected;
         const remainingChats = chats.filter((c) => c.id !== chatId);
-        setCurrentChatId(remainingChats.length > 0 ? remainingChats[0].id : null);
-      }
+        return remainingChats.length > 0 ? remainingChats[0].id : null;
+      });
     },
-    [deleteMutation, currentChatId, chats]
+    [deleteMutation, chats]
   );
 
   const selectChat = useCallback((chatId: string) => {
@@ -130,6 +160,7 @@ export function useChats() {
     updateChatModel,
     updateChatTitle,
     updateChatRunner,
+    updateChatRunnerOnEnvironment,
     updateChatRunnerPermissions,
     updateChatWorkdir,
     updateChatEnvironment,

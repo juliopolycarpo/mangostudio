@@ -16,6 +16,7 @@
 import { AlertTriangle } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
+import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { trustExternalWorkspace } from '@/services/external-agent-service';
 import {
@@ -127,55 +128,4 @@ function TrustDialog({ workspacePath, busy, onAccept, onCancel }: TrustDialogPro
       </div>
     </div>
   );
-}
-
-/**
- * Keyboard behaviour `aria-modal` does not supply.
- *
- * The attribute tells a screen reader the rest of the page is inert; it does
- * not move focus, keep Tab inside, or close on Escape. Without this a keyboard
- * user tabs straight past the dialog into the composer behind it — which is the
- * control this notice exists to gate.
- */
-function useFocusTrap(onEscape: () => void) {
-  const [dialog, setDialog] = useState<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!dialog) return;
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    dialog.focus();
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onEscape();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-
-      const focusable = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled])')];
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (!first || !last) return;
-
-      const active = document.activeElement;
-      if (event.shiftKey && (active === first || active === dialog)) {
-        event.preventDefault();
-        last.focus();
-        return;
-      }
-      if (!event.shiftKey && active === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      previouslyFocused?.focus?.();
-    };
-  }, [dialog, onEscape]);
-
-  return setDialog;
 }

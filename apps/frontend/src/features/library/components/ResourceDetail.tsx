@@ -18,8 +18,8 @@ import { EnvironmentScopeHeader } from '@/features/environments/components/Envir
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatMessage } from '@/lib/i18n-format';
-import { formatBytes, formatRelativeTime, hashPrefix, validInstances } from '../format';
+import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
+import { formatBytes, hashPrefix, validInstances } from '../format';
 import { useCandidateLocations } from '../hooks/use-candidate-locations';
 import {
   libraryEnvironmentSearch,

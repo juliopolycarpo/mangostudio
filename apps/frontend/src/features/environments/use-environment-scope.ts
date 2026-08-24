@@ -49,6 +49,32 @@ export function validateEnvironmentSearch(raw: Record<string, unknown>): Environ
     : {};
 }
 
+/**
+ * The scope params for one machine. `local` is the default, so it stays out of
+ * the URL entirely — reached from outside through `environmentScopeRoute`, so
+ * both ways of scoping the umbrella produce the same address.
+ */
+function environmentScopeSearch(environmentId: string): EnvironmentScopeSearch {
+  return environmentId === LOCAL_ENVIRONMENT_ID ? {} : { environmentId };
+}
+
+/**
+ * The whole address for one machine, for callers outside the umbrella that mean
+ * "open this environment".
+ *
+ * Runtimes rather than the umbrella's landing page, because `/environments` is
+ * the one tab that does not honour the scope: the overview never calls
+ * `useEnvironmentScope`, and its sections query without an environment. Sending
+ * a scope there attaches a param nothing reads, leaving a page that still
+ * describes the local machine under a URL that names another one.
+ */
+export function environmentScopeRoute(environmentId: string): {
+  readonly to: '/environments/runtimes';
+  readonly search: EnvironmentScopeSearch;
+} {
+  return { to: '/environments/runtimes', search: environmentScopeSearch(environmentId) };
+}
+
 export function useEnvironmentScope(): EnvironmentScope {
   const navigate = useNavigate();
   const search = useSearch({ strict: false }) as EnvironmentScopeSearch;
@@ -74,10 +100,10 @@ export function useEnvironmentScope(): EnvironmentScope {
         to: '.',
         search: (current: EnvironmentScopeSearch) => ({
           ...current,
-          // `local` is the default, so it stays out of the URL entirely.
-          ...(nextEnvironmentId === LOCAL_ENVIRONMENT_ID
-            ? { environmentId: undefined }
-            : { environmentId: nextEnvironmentId }),
+          // Spread over an explicit `undefined` so switching back to `local`
+          // clears the param rather than leaving the previous machine's id.
+          environmentId: undefined,
+          ...environmentScopeSearch(nextEnvironmentId),
         }),
         // Push so Back restores the machine the user was looking at before.
         replace: false,

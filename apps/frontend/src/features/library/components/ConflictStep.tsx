@@ -11,8 +11,8 @@
 
 import type { PropagationPreview, PropagationPreviewEntry } from '@mangostudio/shared/library';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatMessage } from '@/lib/i18n-format';
-import { formatBytes, formatRelativeTime } from '../format';
+import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
+import { formatBytes } from '../format';
 import { resolutionFor, type WizardDraft } from '../propagation';
 import { ContentGroupList } from './ContentGroupList';
 

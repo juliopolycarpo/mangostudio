@@ -4,6 +4,7 @@ import type {
   ChatRunnerPermissions,
   ExternalAgentTargetId,
 } from '@mangostudio/shared/chat';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatWithContext } from '@/features/chat/queries';
@@ -170,6 +171,28 @@ export function useRunnerSelection({
   const workdirDefaultedChatIds = useRef(new Set<string>());
 
   /**
+   * How many multi-write chat setups are still in flight; the defaulting
+   * effect stands down while any are.
+   *
+   * Creating a chat on a remote runner is two requests — create, then repoint —
+   * and creation publishes a *local* record the effect can observe between
+   * them. Acting on it either stamps the hub default onto a chat that is about
+   * to be remote (silently the wrong project when a same-named directory exists
+   * over there), or marks the id as defaulted so the repointed chat never gets
+   * its picker. State rather than a ref so releasing the hold re-renders and
+   * the effect re-runs against the settled record.
+   */
+  const [workdirDefaultHolds, setWorkdirDefaultHolds] = useState(0);
+  const holdWorkdirDefault = useCallback(async <T>(task: () => Promise<T>): Promise<T> => {
+    setWorkdirDefaultHolds((count) => count + 1);
+    try {
+      return await task();
+    } finally {
+      setWorkdirDefaultHolds((count) => count - 1);
+    }
+  }, []);
+
+  /**
    * Binds a chat that was just created mid-submit, before its first turn opens.
    *
    * Neither of the two paths below can cover this window: `persistRunner` had
@@ -246,10 +269,24 @@ export function useRunnerSelection({
     // would write the default over whatever the server actually has — and,
     // because the id is then marked as defaulted, never retry.
     if (!currentChatId || !currentChat || currentChat.workdir) return;
+    // A held default is deferred, not skipped: the hold count is state, so its
+    // release re-runs this effect against the record the setup actually left —
+    // crucially before the id is marked as defaulted.
+    if (workdirDefaultHolds > 0) return;
     if (workdirDefaultedChatIds.current.has(currentChatId)) return;
     workdirDefaultedChatIds.current.add(currentChatId);
 
-    if (!defaultWorkdir) {
+    // The default is one path with no machine attached: it is picked in Settings
+    // against the hub, and `workspaceSettings` has no environment dimension. On
+    // another machine it is at best a path that does not exist — a doomed round
+    // trip to a runtime that may be a cold SSH dial — and at worst a *different*
+    // directory that happens to share the name, which validates and silently
+    // binds the chat to the wrong project.
+    //
+    // Ask instead. The picker browses through the chat, so it lists the
+    // machine the chat is actually on. This is also where the failing write
+    // already ended up, minus the trip.
+    if (!defaultWorkdir || currentChat.environmentId !== LOCAL_ENVIRONMENT_ID) {
       setWorkdirPickerOpen(true);
       return;
     }
@@ -257,7 +294,14 @@ export function useRunnerSelection({
     void updateChatWorkdir(currentChatId, defaultWorkdir)
       .then(() => addRecentWorkdir(defaultWorkdir))
       .catch(() => setWorkdirPickerOpen(true));
-  }, [addRecentWorkdir, currentChat, currentChatId, defaultWorkdir, updateChatWorkdir]);
+  }, [
+    addRecentWorkdir,
+    currentChat,
+    currentChatId,
+    defaultWorkdir,
+    updateChatWorkdir,
+    workdirDefaultHolds,
+  ]);
 
   return {
     agents,
@@ -269,6 +313,7 @@ export function useRunnerSelection({
     currentWorkdir: currentChat?.workdir ?? null,
     isWorkdirPickerOpen,
     bindNewChat,
+    holdWorkdirDefault,
     whenRunnerPersisted,
     setRunnerAgentId,
     setRunnerTarget,

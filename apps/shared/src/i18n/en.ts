@@ -30,6 +30,7 @@ export const messages: Messages = {
     newChat: 'New Chat',
     empty: 'Start a conversation',
     deleted: 'Chat deleted',
+    newChatRunnerFailed: 'Could not start the chat on that runner. Try again.',
     editTitle: 'Edit title',
     deleteTitle: 'Delete chat',
     sectionLabel: 'Chats',
@@ -1289,6 +1290,34 @@ export const messages: Messages = {
       codex: 'codex',
       claude: 'claude',
       cursor: 'cursor',
+    },
+  },
+
+  commandPalette: {
+    title: 'Command palette',
+    open: 'Open command palette',
+    placeholder: 'Search sessions, actions and settings…',
+    emptyHint: 'Try a session title, a folder, an agent or a settings tab.',
+    sections: {
+      sessions: 'Sessions',
+      actions: 'Actions',
+      navigate: 'Go to',
+      environments: 'Environments',
+    },
+    hints: {
+      navigate: 'navigate',
+      run: 'run',
+      sections: 'sections',
+    },
+    keys: {
+      escape: 'Esc',
+    },
+    actions: {
+      newChatWith: 'New chat with {runner}',
+      switchToLight: 'Switch to light theme',
+      switchToDark: 'Switch to dark theme',
+      chooseWorkdir: 'Choose working directory',
+      refreshQuota: 'Refresh {runner} quota',
     },
   },
 

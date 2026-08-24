@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import type { Environment } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
 import {
   createMemoryHistory,
@@ -18,7 +19,10 @@ import {
 import userEvent from '@testing-library/user-event';
 import type { FunctionComponent } from 'react';
 import { RuntimesPage } from '../../../../src/features/environments/components/RuntimesPage';
-import { validateEnvironmentSearch } from '../../../../src/features/environments/use-environment-scope';
+import {
+  environmentScopeRoute,
+  validateEnvironmentSearch,
+} from '../../../../src/features/environments/use-environment-scope';
 import { act, render, screen, waitFor } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 import { installation, runtimeStatus } from './fixtures';
@@ -105,6 +109,24 @@ function scenarioFor(environments: readonly Environment[]) {
   });
   return scenario;
 }
+
+describe('environmentScopeRoute', () => {
+  /**
+   * The umbrella's landing page is the one tab that ignores the scope — it
+   * never calls `useEnvironmentScope`, and its index route has no
+   * `validateSearch`. Addressing a machine there would attach a param nothing
+   * reads and leave the local machine's data under another machine's URL.
+   */
+  it('never addresses a machine at the overview', () => {
+    expect(environmentScopeRoute('ubuntu').to).toBe('/environments/runtimes');
+    expect(environmentScopeRoute(LOCAL_ENVIRONMENT_ID).to).toBe('/environments/runtimes');
+  });
+
+  it('leaves the default machine out of the URL', () => {
+    expect(environmentScopeRoute('ubuntu').search).toEqual({ environmentId: 'ubuntu' });
+    expect(environmentScopeRoute(LOCAL_ENVIRONMENT_ID).search).toEqual({});
+  });
+});
 
 describe('environment-scoped toolchains', () => {
   it('hides the picker when the hub is the only machine', async () => {

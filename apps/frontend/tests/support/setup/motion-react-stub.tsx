@@ -68,3 +68,13 @@ export const motion = new Proxy({} as Record<string, ComponentType<MotionProps>>
 export function AnimatePresence({ children }: { children?: ReactNode }) {
   return <>{children}</>;
 }
+
+/**
+ * Test double for `motion/react`'s `useReducedMotion`. Always reduced: the real
+ * hook reads a media query happy-dom answers `false` to by default, and a
+ * component that branches on it should be exercised on the branch that does not
+ * depend on an animation completing.
+ */
+export function useReducedMotion(): boolean {
+  return true;
+}

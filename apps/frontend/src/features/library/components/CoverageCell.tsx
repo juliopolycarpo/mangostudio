@@ -9,8 +9,8 @@
 
 import type { LibraryLocationStatus } from '@mangostudio/shared/library';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatMessage } from '@/lib/i18n-format';
-import { CELL_GLYPHS, type CoverageCell as Cell, formatRelativeTime, hashPrefix } from '../format';
+import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
+import { CELL_GLYPHS, type CoverageCell as Cell, hashPrefix } from '../format';
 
 const STATE_TONES: Readonly<Record<Cell['state'], string>> = {
   present: 'text-primary',
