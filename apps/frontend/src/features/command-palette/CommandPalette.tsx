@@ -101,10 +101,28 @@ export const CommandPalette = memo(function CommandPalette({
   // Focus lands on the input and stays there; where it came from is restored on
   // close, so dismissing puts the user back on the control they opened it from
   // rather than at the top of the document.
+  //
+  // Unless something else has taken focus by then. A row that opens another
+  // overlay — the workdir picker — closes the palette and mounts the picker in
+  // one batch, but `AnimatePresence` keeps this component mounted through its
+  // exit animation, so this cleanup runs ~160ms *after* the picker's focus trap
+  // has already focused itself. Restoring unconditionally would then pull focus
+  // out of the dialog that just opened and park it on the pre-palette trigger,
+  // behind a modal. The input node is captured here rather than read from the
+  // ref in the cleanup: refs detach during the mutation phase, so by the time
+  // this passive cleanup runs `inputRef.current` is already null.
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    inputRef.current?.focus();
-    return () => previouslyFocused?.focus?.();
+    const input = inputRef.current;
+    input?.focus();
+    return () => {
+      const active = document.activeElement;
+      // `body` (or nothing) is where a browser parks focus when the focused
+      // input is removed; happy-dom leaves it on the detached input instead.
+      // Both mean "still ours".
+      if (active && active !== input && active !== document.body) return;
+      previouslyFocused?.focus?.();
+    };
   }, []);
 
   // `block: 'nearest'` so arrowing down the list scrolls by a row rather than

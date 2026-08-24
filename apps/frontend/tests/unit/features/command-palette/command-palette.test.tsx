@@ -91,6 +91,25 @@ describe('command palette shell', () => {
     trigger.remove();
   });
 
+  it('leaves focus alone when another overlay took it before the exit finished', () => {
+    const trigger = document.createElement('button');
+    const overlay = document.createElement('div');
+    overlay.tabIndex = -1;
+    document.body.append(trigger, overlay);
+    trigger.focus();
+
+    const { unmount } = renderPalette();
+    // What a row that opens a dialog produces: the palette is closing, but
+    // `AnimatePresence` keeps it mounted while the new dialog's trap focuses
+    // itself. Restoring on unmount would pull focus out from behind the modal.
+    overlay.focus();
+    unmount();
+
+    expect(document.activeElement).toBe(overlay);
+    trigger.remove();
+    overlay.remove();
+  });
+
   it('renders one heading per non-empty section, in a fixed order', () => {
     renderPalette();
     const headings = screen
