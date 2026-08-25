@@ -339,6 +339,7 @@ export const messages: Messages = {
   },
 
   home: {
+    nav: 'Home',
     greeting: {
       morning: 'Good morning, {name}.',
       afternoon: 'Good afternoon, {name}.',

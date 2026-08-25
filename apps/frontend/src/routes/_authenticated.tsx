@@ -14,10 +14,12 @@ import { chatListQueryOptions, messagesQueryOptions } from '@/features/chat/quer
 import { CommandPaletteHost } from '@/features/command-palette/CommandPaletteHost';
 import { useCommandPalette } from '@/features/command-palette/use-command-palette';
 import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
+import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { ExternalDisclosureGate } from '@/features/external-agents/ExternalDisclosureGate';
 import { ExternalWorkspaceTrustGate } from '@/features/external-agents/ExternalWorkspaceTrustGate';
 import { HeaderQuotaPill } from '@/features/external-agents/HeaderQuotaPill';
 import { RunnerSelectorContainer } from '@/features/external-agents/RunnerSelectorContainer';
+import { environmentAlerts } from '@/features/home/lib/environment-health';
 import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
 import { appSettingsQueryOptions } from '@/features/settings/app/queries';
 import { WorkspaceBreadcrumb } from '@/features/workspace/components/WorkspaceBreadcrumb';
@@ -74,6 +76,15 @@ function AuthenticatedLayout() {
     [app.chats]
   );
   const gitSummaries = useBatchedGitSummaries(gitChatIds);
+  // The same rule the hub's health card applies, at the one scope a nav badge
+  // can have: no chat, so no "the machine this session runs on is offline"
+  // warning — only machines that actually reported a fault. Reads the list the
+  // runner selector already holds, so the badge costs no request and no probe.
+  const environments = useEnvironmentEntitiesQuery().data;
+  const environmentAlertCount = useMemo(
+    () => environmentAlerts(environments ?? [], null).length,
+    [environments]
+  );
   // The first prompt settles the chat's identity — environment, workdir,
   // runner — so past it the header's selectors read rather than choose. The
   // lock is deliberately UI-level: the server keeps accepting repoints because
@@ -116,6 +127,7 @@ function AuthenticatedLayout() {
   }
 
   let activePage: AppPage = 'chat';
+  if (currentPath.includes('/home')) activePage = 'home';
   if (currentPath.includes('/gallery')) activePage = 'gallery';
   if (currentPath.includes('/settings')) activePage = 'settings';
   if (currentPath.includes('/studio')) activePage = 'studio';
@@ -137,6 +149,7 @@ function AuthenticatedLayout() {
         onNewChat={() => void app.handleNewChat()}
         contextCache={app.contextCache}
         gitSummaries={gitSummaries}
+        environmentAlertCount={environmentAlertCount}
         isMobileSidebarOpen={isMobileSidebarOpen}
         onMobileSidebarClose={() => setIsMobileSidebarOpen(false)}
         chatSidebarWidth={app.settings.workspaceSettings.chatSidebarWidth}

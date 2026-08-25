@@ -5,7 +5,7 @@ import { useToast } from '@/components/ui/Toast';
 import type { useChats } from '@/features/chat/hooks/use-chats';
 import { useI18n } from '@/hooks/use-i18n';
 
-export type AppPage = 'chat' | 'environments' | 'gallery' | 'settings' | 'studio';
+export type AppPage = 'home' | 'chat' | 'environments' | 'gallery' | 'settings' | 'studio';
 
 interface UseChatRouteActionsParams {
   readonly chats: ReturnType<typeof useChats>;
@@ -161,6 +161,7 @@ export function useChatRouteActions({
   const handleNavigate = useCallback(
     (page: AppPage) => {
       const routes = {
+        home: '/home',
         chat: '/',
         environments: '/environments',
         gallery: '/gallery',

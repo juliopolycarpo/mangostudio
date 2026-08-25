@@ -346,6 +346,7 @@ export const messages = {
    * mais chaves dentro de `chat`.
    */
   home: {
+    nav: 'Início',
     greeting: {
       morning: 'Bom dia, {name}.',
       afternoon: 'Boa tarde, {name}.',

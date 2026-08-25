@@ -107,12 +107,13 @@ describe('navigateCommands', () => {
   it('covers the top-level surfaces, every environments tab and every settings tab', () => {
     const paths = items.map((item) => item.hint);
     expect(paths).toContain('/');
+    expect(paths).toContain('/home');
     expect(paths).toContain('/gallery');
     expect(paths).toContain('/studio');
     expect(paths).toContain('/environments/health');
     expect(paths).toContain('/settings/external-agents');
-    // 3 surfaces + 5 environments tabs + 15 settings tabs.
-    expect(items).toHaveLength(23);
+    // 4 surfaces + 5 environments tabs + 15 settings tabs.
+    expect(items).toHaveLength(24);
   });
 
   it('qualifies a tab label with the surface it belongs to', () => {
