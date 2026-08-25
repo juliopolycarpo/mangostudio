@@ -18,8 +18,7 @@ import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
 import type { ExternalActivityPart } from '@mangostudio/shared/types';
 import {
   Ban,
-  CheckCircle,
-  ChevronDown,
+  Check,
   FileDiff,
   Globe,
   ImagePlus,
@@ -35,6 +34,11 @@ import { useState } from 'react';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatMessage } from '@/lib/i18n-format';
+import { TIMELINE_PANEL_CLASS } from './TimelineDisclosure';
+import { TimelineItem, type TimelineTone } from './TimelineItem';
+import { TimelineRow } from './TimelineRow';
+import { toneTextClass } from './ToolCallVisuals';
 
 /**
  * The icon comes from the neutral kind, never from the vendor's tool name.
@@ -69,17 +73,19 @@ function ActivityIcon({ kind, className }: { kind: ExternalActivityKind; classNa
   }
 }
 
-function statusTone(part: ExternalActivityPart): string {
-  if (part.isError || part.status === 'failed') return 'border-error/30 text-error';
-  if (part.status === 'cancelled') return 'border-outline-variant/30 text-on-surface-variant';
-  if (part.status === 'completed') return 'border-success/25 text-success';
-  return 'border-primary/30 text-primary';
+/** Same tone vocabulary a MangoStudio tool row uses, off the vendor's status. */
+function statusTone(part: ExternalActivityPart): TimelineTone {
+  if (part.isError || part.status === 'failed') return 'error';
+  if (part.status === 'cancelled') return 'muted';
+  if (part.status === 'completed') return 'success';
+  return 'active';
 }
 
-function StatusIcon({ part }: { part: ExternalActivityPart }) {
-  if (part.isError || part.status === 'failed') return <Ban size={11} className="shrink-0" />;
-  if (part.status === 'cancelled') return <Ban size={11} className="shrink-0" />;
-  if (part.status === 'completed') return <CheckCircle size={11} className="shrink-0" />;
+function StatusGlyph({ part }: { part: ExternalActivityPart }) {
+  if (part.isError || part.status === 'failed' || part.status === 'cancelled')
+    return <Ban size={11} className="shrink-0" />;
+  if (part.status === 'completed')
+    return <Check size={12} className="shrink-0" strokeWidth={2.5} />;
   return <ActivityIcon kind={part.kind} className="animate-pulse shrink-0" />;
 }
 
@@ -117,58 +123,55 @@ export function ExternalActivityBlock({ part }: ExternalActivityBlockProps) {
   // monogram are what they see — so that is the path that has to look finished.
   const identity = resolve('agent', part.targetId);
   const hasDetail = Boolean(part.detail);
+  const tone = statusTone(part);
 
   return (
-    <div className="max-w-2xl">
-      <button
-        type="button"
-        onClick={() => hasDetail && setExpanded((value) => !value)}
-        aria-expanded={hasDetail ? expanded : undefined}
-        className={`flex w-full items-center gap-2 rounded-full border bg-surface-container-lowest px-2.5 py-1 text-left text-[11px] ${statusTone(part)} ${
-          hasDetail ? 'cursor-pointer' : 'cursor-default'
-        }`}
+    <TimelineItem tone={tone}>
+      <TimelineRow
+        expanded={hasDetail ? expanded : false}
+        onToggle={() => hasDetail && setExpanded((value) => !value)}
+        disclosable={hasDetail}
+        glyph={<StatusGlyph part={part} />}
       >
+        {/* Attribution stays on the row itself: an external turn interleaves
+            several vendors' work in one transcript, and the turn header names
+            only the one that opened it. */}
         <ToolAvatar
           subjectKey={toolSubjectKey('agent', part.targetId)}
           monogram={identity.monogram}
           name={identity.name}
           image={identity.image}
-          size="xs"
+          size="2xs"
           className="shrink-0"
         />
-        <StatusIcon part={part} />
         {/* The vendor's own tool name, verbatim and inert. */}
-        <span className="font-medium text-on-surface">{part.name}</span>
+        <span className={`shrink-0 font-mono font-semibold ${toneTextClass(tone)}`}>
+          {part.name}
+        </span>
         {part.title ? (
-          <span className="min-w-0 flex-1 truncate text-on-surface-variant/80">{part.title}</span>
-        ) : (
-          <span className="min-w-0 flex-1" />
-        )}
+          <span className="truncate font-mono text-on-surface-variant/60">{part.title}</span>
+        ) : null}
         {part.truncated ? (
-          <span className="shrink-0 text-on-surface-variant/60" title={labels.truncatedHint}>
+          <span className="shrink-0 text-on-surface-variant/50" title={labels.truncatedHint}>
             <span aria-hidden>…</span>
             <span className="sr-only">{labels.truncatedHint}</span>
           </span>
         ) : null}
-        {hasDetail ? (
-          <ChevronDown
-            size={12}
-            className={`shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`}
-          />
-        ) : null}
-      </button>
+      </TimelineRow>
 
       {expanded && part.detail ? (
-        <pre className="mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-surface-container-high px-3 py-2 text-[11px] text-on-surface-variant">
+        <pre
+          className={`app-scrollbar max-h-64 overflow-auto whitespace-pre-wrap break-words p-3.5 font-mono text-xs text-on-surface-variant/70 ${TIMELINE_PANEL_CLASS}`}
+        >
           {part.detail}
         </pre>
       ) : null}
 
       {/* Attribution and outcome for a reader who cannot see the avatar or the
-          border colour that carry them visually. */}
+          tone that carry them visually. */}
       <span className="sr-only">
-        {`${labels.attribution.replace('{agent}', identity.name)} ${statusLabel(part, labels)}`}
+        {`${formatMessage(labels.attribution, { agent: identity.name })} ${statusLabel(part, labels)}`}
       </span>
-    </div>
+    </TimelineItem>
   );
 }

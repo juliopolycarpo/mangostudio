@@ -30,6 +30,17 @@ mock.module('../../../src/features/chat/components/PinnedTodoPanel', () => ({
   PinnedTodoPanel: PinnedTodoPanelStub,
 }));
 
+function WorkspaceHubStub({ chatId }: { chatId: string | null }) {
+  return <div data-testid="workspace-hub">{chatId}</div>;
+}
+
+// The empty-state hub links into the library and the environments umbrella, so
+// the real one needs a router. Stubbed for the same reason the rail is: this
+// file is about the context warning, not about what an empty chat shows.
+mock.module('../../../src/features/home/WorkspaceHub', () => ({
+  WorkspaceHub: WorkspaceHubStub,
+}));
+
 // After the mock, never before: a static import is evaluated first and would
 // bind ChatPage to the real queries and rail components.
 const { ChatPage } = await import('../../../src/features/chat/ChatPage');

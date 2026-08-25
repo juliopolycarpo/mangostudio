@@ -61,6 +61,26 @@ describe('MarkdownContent', () => {
     expect(container.querySelector('em')).toHaveTextContent('italic');
   });
 
+  it('marks the block as streaming instead of appending a caret element', () => {
+    const { container } = render(<MarkdownContentRenderer content={'first\n\nlast'} isStreaming />);
+
+    const block = container.querySelector('.markdown-content');
+    // The caret is a pseudo element on the last line's own box. A caret node of
+    // its own is a block box below the final paragraph, which is what left a
+    // blank line hanging under every streaming block.
+    expect(block).toHaveClass('markdown-content--streaming');
+    expect(block?.lastElementChild?.tagName).toBe('P');
+    expect(block?.lastElementChild).toHaveTextContent('last');
+  });
+
+  it('does not mark a settled block as streaming', () => {
+    const { container } = render(<MarkdownContentRenderer content="done" />);
+
+    expect(container.querySelector('.markdown-content')).not.toHaveClass(
+      'markdown-content--streaming'
+    );
+  });
+
   it('renders links with target="_blank" and rel="noopener noreferrer"', () => {
     render(<MarkdownContentRenderer content="[example](https://example.com)" />);
     const link = screen.getByText('example');

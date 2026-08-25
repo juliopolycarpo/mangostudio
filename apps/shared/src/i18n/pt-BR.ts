@@ -40,6 +40,8 @@ export const messages = {
       generate: 'Gerar',
       stop: 'Parar',
       placeholder: 'Pergunte ao modelo de IA...',
+      /** Usado no lugar de `placeholder` quando uma CLI de fornecedor conduz o chat. */
+      placeholderRunner: 'Enviar mensagem para o {agent}…',
       imagePlaceholder: 'Descreva sua imagem...',
       addReferenceImage: 'Adicionar imagem de referência',
       createImages: 'Criar imagens',
@@ -61,6 +63,25 @@ export const messages = {
       selectEnvironment: 'Selecionar ambiente de execução',
       environmentsLoading: 'Carregando ambientes...',
       environmentUpdateFailed: 'Não foi possível trocar o ambiente de execução.',
+      newlineHint: 'Shift+Enter para quebrar linha',
+      dropHint: 'Solte para anexar',
+      attachUploading: 'Enviando {name}…',
+      attachFailed: 'Não foi possível anexar {name}.',
+      attachNeedsChat: 'Abra um chat antes de anexar arquivos.',
+      historyRecall: 'Histórico de prompts: ↑ e ↓ com o campo vazio',
+      showControls: 'Mostrar controles do chat',
+      hideControls: 'Ocultar controles do chat',
+      agentLabel: 'agente',
+      agentLocked:
+        'Bloqueado após o primeiro turno — escolha um runner no cabeçalho para continuar em um novo chat.',
+      modelLabel: 'modelo',
+      environmentLabel: 'env',
+      /**
+       * A chave da linha de status para o esforço de raciocínio. Curta de
+       * propósito: o título `Esforço de raciocínio` do seletor é longo demais
+       * para uma faixa que já carrega outras cinco chaves.
+       */
+      effortLabel: 'esforço',
     },
     capabilities: {
       button: 'Capacidades',
@@ -192,6 +213,8 @@ export const messages = {
       label: 'Contexto',
       tokens: '~{used} / {limit} tokens',
       modeStateful: 'Stateful',
+      modeStatelessLoop: 'Loop stateless',
+      modeLabel: 'Modo',
       modeReplay: 'Replay',
       modeCompacted: 'Compactado',
       modeDegraded: 'Degradado',
@@ -308,17 +331,84 @@ export const messages = {
       failed: 'Não foi possível reverter as alterações em arquivos.',
     },
     scrollToBottom: 'Ir para o final',
-    emptyGreeting: 'Olá, {name}!',
-    emptySubtitle: 'Como posso te ajudar hoje?',
-    suggestion1: 'Explique um conceito complexo de forma simples',
-    suggestion2: 'Escreva um script em Python para...',
-    suggestion3: 'Me ajude a depurar um problema',
-    suggestion4: 'Crie uma imagem',
     systemEvents: {
       chatCompacted: 'Contexto compactado em um resumo',
       summaryHandoff: 'Este chat começou a partir de um resumo anterior',
       cursorInternalToolCall: 'Cursor usou {tool}',
       externalSessionAdopted: 'Continuando uma sessão do {vendor} iniciada fora do MangoStudio',
+    },
+  },
+
+  /**
+   * O hub de estado do workspace. Vive na tela de conversa nova e, quando a
+   * rota `/home` existir, nela também — por isso é um grupo próprio em vez de
+   * mais chaves dentro de `chat`.
+   */
+  home: {
+    greeting: {
+      morning: 'Bom dia, {name}.',
+      afternoon: 'Boa tarde, {name}.',
+      evening: 'Boa noite, {name}.',
+      // A sessão nem sempre traz um nome; o cumprimento não some por isso.
+      morningAnonymous: 'Bom dia.',
+      afternoonAnonymous: 'Boa tarde.',
+      eveningAnonymous: 'Boa noite.',
+      subtitle: 'Seu workspace está pronto. Este é o estado dele agora.',
+    },
+    workspace: {
+      label: 'Workspace',
+      cleanTree: 'árvore limpa',
+      dirtyTree: '{count} arquivo(s) alterado(s)',
+      synced: 'sincronizado com origin',
+      noUpstream: 'sem upstream',
+      detached: 'HEAD desanexado em {hash}',
+      noWorkdir: 'Este chat ainda não aponta para uma pasta.',
+      chooseWorkdir: 'Escolher pasta',
+      notARepo: 'Esta pasta não é um repositório Git.',
+      unavailable: 'Git não está disponível neste ambiente.',
+    },
+    agents: {
+      label: 'Agentes',
+      empty: 'Nenhum CLI de agente detectado neste ambiente.',
+      manage: 'Gerenciar agentes',
+      quotaRefresh: 'Atualizar cota',
+    },
+    skills: {
+      label: 'Skills',
+      labelDivergent: 'Skills — {count} divergência(s)',
+      // Quem lê uma versão que os outros não confirmam, e com quem discorda.
+      divergenceBody: 'Versão diferente em {outliers} do que em {agreeing}.',
+      divergenceBodyNoMajority: '{targets} leem versões diferentes desta skill.',
+      more: 'Mais {count} skill(s) divergente(s).',
+      propagate: 'Propagar',
+      viewDiff: 'Ver diff',
+      // Deliberadamente neutro: viver em um só agente costuma ser intencional.
+      singleTarget: '{count} skill(s) vivem em apenas um agente.',
+      openLibrary: 'Abrir na biblioteca',
+    },
+    uncommitted: {
+      label: 'Trabalho não commitado',
+      changed: '{count} alterado(s)',
+      unpushed: '{count} não enviado(s)',
+      more: 'E mais {count} chat(s).',
+      open: 'Abrir {title}',
+    },
+    environments: {
+      label: 'Ambientes',
+      disconnected: 'não conectado',
+      failed: 'falhou',
+      open: 'Abrir ambientes',
+    },
+    starters: {
+      label: 'Comece por',
+      reviewChanges: 'Revise minhas alterações não commitadas',
+      commitMessage: 'Escreva a mensagem de commit para o que mudou',
+      branchSummary: 'Resuma o que mudou nesta branch',
+      explainCodebase: 'Explique este repositório para mim',
+      writeTests: 'Escreva testes para o código alterado recentemente',
+      explainConcept: 'Explique um conceito complexo de forma simples',
+      pythonScript: 'Escreva um script em Python para...',
+      debug: 'Me ajude a depurar um problema',
     },
   },
 
@@ -1620,7 +1710,7 @@ export const messages = {
     settingsNavigation: 'Navegação de configurações',
     openMenu: 'Abrir menu',
     closeMenu: 'Fechar menu',
-    disclaimer: 'A Inteligencia Artificial pode cometer erros, verifique os resultados com cautela',
+    disclaimer: 'A IA pode cometer erros. Confira os resultados.',
     dismissToast: 'Fechar notificação',
   },
 
@@ -2852,7 +2942,11 @@ export const messages = {
       input: 'entrada',
       output: 'saída',
       total: 'total',
-      unknown: 'Uso desconhecido',
+      /** Nomeia o anel na barra do compositor; o detalhamento sai no tooltip. */
+      indicatorLabel: 'Uso de tokens',
+      contextLabel: 'Contexto',
+      contextValue: '{used}/{limit} · {percent}%',
+      contextUnknown: 'Janela de contexto desconhecida',
     },
     limits: {
       remaining: '{percent}% restante',
@@ -2939,6 +3033,8 @@ export const messages = {
     },
     permission: {
       label: 'Permissões',
+      /** A chave do chip `modo: somente leitura` no compositor. */
+      modeKey: 'modo',
       whatItCanDo: 'O que ele pode fazer',
       whoApproves: 'Quem aprova',
       unattendedLevelWarning: 'este agente pode editar e rodar qualquer coisa',
@@ -3098,10 +3194,10 @@ export const messages = {
   },
 
   thinking: {
-    label: 'Processo de raciocínio',
     labelContinued: 'Continuação do raciocínio',
     streaming: 'Pensando...',
     streamingContinued: 'Pensando novamente...',
+    thought: 'Pensou',
     toggle: 'Ver raciocínio',
     enable: 'Raciocinar',
     enabled: 'Raciocínio ativo',
@@ -3140,6 +3236,22 @@ export const messages = {
       skill: 'Skill',
       mcp: 'MCP',
       subagent: 'Subagente',
+    },
+    /** O que a chamada produziu, alinhado à direita na linha da timeline. */
+    summary: {
+      item: '{count} item',
+      items: '{count} itens',
+      file: '{count} arquivo',
+      files: '{count} arquivos',
+      line: '{count} linha',
+      lines: '{count} linhas',
+      hit: '{count} ocorrência',
+      hits: '{count} ocorrências',
+      replacement: '{count} substituição',
+      replacements: '{count} substituições',
+      call: '{count} chamada',
+      calls: '{count} chamadas',
+      exitCode: 'saída {code}',
     },
     diff: {
       opCreate: 'novo',

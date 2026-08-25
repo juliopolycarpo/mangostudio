@@ -8,10 +8,12 @@
  * catalog.
  *
  * Two groups, and one rule that shapes the whole component: **a chat has one
- * runner kind for life** (D14). A transcript that mixed owners would replay a
- * vendor's assistant text to MangoStudio's own model as its own prior output, so
- * once a chat has turns the other kind is offered as "continue in a new chat"
- * rather than disabled or — worse — silently switched.
+ * runner for life**. D14 made the *kind* immutable — a transcript that mixed
+ * owners would replay a vendor's assistant text to MangoStudio's own model as
+ * its own prior output — and the first prompt now settles the rest of the
+ * choice too: once a chat has turns, *every* other runner (another agent,
+ * another vendor) is offered as "continue in a new chat" rather than disabled
+ * or — worse — silently switched.
  *
  * Nothing here renders an executable path. Discovery does not carry one.
  */
@@ -53,7 +55,7 @@ export interface RunnerSelectorProps {
    * of that answer is derived here, from a transport the client already knows.
    */
   environmentTransportKind?: EnvironmentTransportKind;
-  /** True once the chat has turns, which is what makes the kind immutable. */
+  /** True once the chat has turns, which is what makes the runner immutable. */
   hasTurns: boolean;
   disabled?: boolean;
   onSelectAgent: (agentId: string) => void;
@@ -182,7 +184,10 @@ export function RunnerSelector({
           ) : null}
           {selectableAgents.map((agent) => {
             const active = runner.kind === 'mangostudio' && runner.agentId === agent.id;
-            const forks = hasTurns && runner.kind !== 'mangostudio';
+            // `!active`, not a kind check: with turns on record, moving to any
+            // other runner — another MangoStudio agent included — forks, while
+            // re-picking the active one stays the no-op it always was.
+            const forks = hasTurns && !active;
             return (
               <RunnerRow
                 key={agent.id}
@@ -215,7 +220,11 @@ export function RunnerSelector({
               environmentName={environmentName}
               transportKind={environmentTransportKind}
               active={runner.kind === 'external' && runner.targetId === descriptor.targetId}
-              forks={hasTurns && runner.kind !== 'external'}
+              // Same `!active` rule as the MangoStudio rows: a vendor swap
+              // (codex → claude) is as much a runner change as a kind swap.
+              forks={
+                hasTurns && !(runner.kind === 'external' && runner.targetId === descriptor.targetId)
+              }
               onSelect={(forking) => {
                 setOpen(false);
                 if (forking) {

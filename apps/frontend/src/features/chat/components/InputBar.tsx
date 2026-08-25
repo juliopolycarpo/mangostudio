@@ -1,101 +1,90 @@
-import type {
-  ModelCatalogResponse,
-  ModelOption,
-  ProviderType,
-  ReasoningEffort,
-} from '@mangostudio/shared';
-import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ChatAttachment, ChatRunnerConfiguration } from '@mangostudio/shared/chat';
-import type {
-  ExternalAgentDescriptor,
-  ExternalApprovalRouting,
-  ExternalPermissionLevel,
-  ExternalThreadUsage,
-} from '@mangostudio/shared/external-agents';
+import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
+import { AlertTriangle, CornerDownRight, FileText, Send, Square, X } from 'lucide-react';
 import {
-  AlertTriangle,
-  CornerDownRight,
-  FileText,
-  FolderOpen,
-  Image,
-  Mic,
-  Send,
-  Square,
-  X,
-} from 'lucide-react';
-import { useRef, useState } from 'react';
-import { ModelSelector } from '@/components/layout/ModelSelector';
-import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
+  type CSSProperties,
+  type DragEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Button } from '@/components/ui/Button';
-import { Chip } from '@/components/ui/Chip';
 import { KbdHint } from '@/components/ui/KbdHint';
-import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
-import { ExternalComposerControls } from '@/features/external-agents/ExternalComposerControls';
-import { ExternalUsageDisplay } from '@/features/external-agents/ExternalUsageDisplay';
 import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
-import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
-import { workdirBasename } from '@/lib/paths';
 import { steerExternalTurn } from '@/services/external-agent-service';
+import { filesFromClipboard, useComposerAttachments } from '../hooks/use-composer-attachments';
+import { useComposerDraft } from '../hooks/use-composer-draft';
+import { usePromptHistory } from '../hooks/use-prompt-history';
+import { COMPOSER_ACCENT_PROPERTY, composerAccent } from '../lib/composer-accent';
+import { onComposerFocusRequest } from '../lib/composer-draft-store';
 import { CapabilityInspector } from './CapabilityInspector';
+import { ComposerChipRow, type ComposerChipRowProps } from './ComposerChipRow';
+import { ImageIntentToggle } from './ImageIntentToggle';
 import { McpComposerMenu } from './McpComposerMenu';
 
-function formatTokensCompact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
-  return String(n);
-}
+/** Roughly eight lines before the box stops growing and starts scrolling. */
+const TEXTAREA_MAX_HEIGHT_PX = 200;
 
-interface Props {
+/**
+ * The status line's own props, which the composer only relays.
+ *
+ * Declared by subtraction rather than restated: these used to be written out
+ * three times here — in the interface, in the destructure, and in the forward —
+ * so every chip added to the status line cost four edits across two files for a
+ * component with no opinion about it. The six left out are the ones the
+ * composer itself reads.
+ */
+type ForwardedChipRowProps = Omit<
+  ComposerChipRowProps,
+  | 'isExternalRunner'
+  | 'disabled'
+  | 'isGenerating'
+  | 'activeModel'
+  | 'selectedAgentId'
+  | 'externalDescriptor'
+>;
+
+/**
+ * What the status line falls back to when the composer is mounted without a
+ * chat behind it. They live here rather than in `ComposerChipRow` because this
+ * is the boundary where the props become optional.
+ */
+const CHIP_ROW_DEFAULTS = {
+  thinkingEnabled: false,
+  reasoningEffort: 'medium',
+  reasoningVisible: false,
+  threadUsage: null,
+  agents: [],
+  isAgentListLoading: false,
+  hasTurns: false,
+  workdir: null,
+  activeModels: [],
+  isModelSelectorDisabled: false,
+  externalModel: null,
+  externalEffort: null,
+  externalLevel: 'read-only',
+  externalRouting: 'user',
+} satisfies Partial<ComposerChipRowProps>;
+
+interface Props extends Partial<ForwardedChipRowProps> {
   onSubmit: (prompt: string, attachmentIds?: string[]) => void;
   chatId?: string | null;
   disabled?: boolean;
   submitDisabled?: boolean;
   isGenerating?: boolean;
   onStop?: () => void;
-  thinkingEnabled?: boolean;
-  reasoningEffort?: ReasoningEffort;
-  onThinkingToggle?: (enabled: boolean) => void;
-  onReasoningEffortChange?: (effort: ReasoningEffort) => void;
-  reasoningVisible?: boolean;
-  contextInfo?: ContextInfo | null;
-  /** Vendor thread usage for this chat; nothing renders until a turn reports it. */
-  threadUsage?: ExternalThreadUsage | null;
   imageToolIntent?: boolean;
   onImageToolIntentChange?: (active: boolean) => void;
   activeModel?: string | null;
   selectedAgentId?: string;
-  agents?: ReadonlyArray<AgentProfile>;
-  isAgentListLoading?: boolean;
-  onSelectedAgentIdChange?: (agentId: string) => void;
-  environmentId?: string | null;
-  onEnvironmentChange?: (environmentId: string) => void | Promise<void>;
-  workdir?: string | null;
-  onWorkdirClick?: () => void;
   /** Who runs the turn. Decides which of the two control sets renders at all. */
   runner?: ChatRunnerConfiguration;
-  activeModels?: ModelOption[];
-  modelCatalog?: ModelCatalogResponse;
-  lockedProvider?: ProviderType | null;
-  isModelSelectorDisabled?: boolean;
-  onModelChange?: (model: string) => void;
   externalDescriptor?: ExternalAgentDescriptor;
-  externalModel?: string | null;
-  externalEffort?: string | null;
-  externalLevel?: ExternalPermissionLevel;
-  externalRouting?: ExternalApprovalRouting;
-  onExternalModelChange?: (model: string | null) => void;
-  onExternalEffortChange?: (effort: string | null) => void;
-  onExternalPermissionsChange?: (next: {
-    level: ExternalPermissionLevel;
-    routing: ExternalApprovalRouting;
-  }) => void;
-}
-
-/** Shared segment split; a path that is all separators falls back to itself. */
-function getWorkdirName(workdir: string): string {
-  return workdirBasename(workdir) ?? workdir;
 }
 
 export function InputBar({
@@ -105,52 +94,43 @@ export function InputBar({
   submitDisabled = false,
   isGenerating,
   onStop,
-  thinkingEnabled = false,
-  reasoningEffort = 'medium',
-  onThinkingToggle,
-  onReasoningEffortChange,
-  reasoningVisible = false,
-  contextInfo,
-  threadUsage = null,
   imageToolIntent = false,
   onImageToolIntentChange,
   activeModel = null,
   selectedAgentId = 'default',
-  agents = [],
-  isAgentListLoading = false,
-  onSelectedAgentIdChange,
-  environmentId = null,
-  onEnvironmentChange,
-  workdir = null,
-  onWorkdirClick,
   runner,
-  activeModels = [],
-  modelCatalog,
-  lockedProvider,
-  isModelSelectorDisabled = false,
-  onModelChange,
   externalDescriptor,
-  externalModel = null,
-  externalEffort = null,
-  externalLevel = 'read-only',
-  externalRouting = 'user',
-  onExternalModelChange,
-  onExternalEffortChange,
-  onExternalPermissionsChange,
+  ...chipRow
 }: Props) {
   const { t } = useI18n();
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useComposerDraft(chatId);
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
   const [steering, setSteering] = useState(false);
   const [steerError, setSteerError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
   const pendingSteerId = useRef<string | null>(null);
-  const selectableAgents = agents.filter(
-    (agent) => agent.role === 'primary' || agent.role === 'both'
-  );
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const history = usePromptHistory(chatId);
+
   // The model moved here from the header, and it renders per runner: MangoStudio
   // always has a catalog, an external agent only when its vendor advertised one.
   const isExternalRunner = runner?.kind === 'external';
-  const workdirName = workdir ? getWorkdirName(workdir) : null;
+
+  const handleAttachments = useCallback((attachments: ChatAttachment[]) => {
+    if (attachments.length === 0) return;
+    setPendingAttachments((current) => {
+      const known = new Set(current.map((attachment) => attachment.id));
+      return [...current, ...attachments.filter((attachment) => !known.has(attachment.id))];
+    });
+  }, []);
+
+  const uploads = useComposerAttachments(chatId, handleAttachments);
+
+  useAutoGrow(textareaRef, prompt);
+
+  // The hub's prompt starters fill the composer from outside it; this is the
+  // second half of that gesture.
+  useEffect(() => onComposerFocusRequest(() => textareaRef.current?.focus()), []);
 
   /**
    * A persisted external runner that cannot start a turn right now.
@@ -190,6 +170,18 @@ export function InputBar({
     externalDescriptor?.capabilities.steering === true &&
     !externalRunnerBlocked;
   const showSteerAffordance = steerable && isGenerating === true;
+  const inputDisabled = (disabled && !showSteerAffordance) || externalRunnerBlocked || steering;
+
+  // Naming the vendor here is the same courtesy the status line pays: the
+  // composer is about to hand this text to a CLI running on someone's machine,
+  // not to "the AI model". MangoStudio's own runner keeps the generic string —
+  // it has no product name to say back to the user.
+  const runnerName = runner?.kind === 'external' ? t.externalAgents.target[runner.targetId] : null;
+  const placeholder = showSteerAffordance
+    ? t.externalAgents.steer.buttonHint
+    : runnerName
+      ? formatMessage(t.chat.input.placeholderRunner, { agent: runnerName })
+      : t.chat.input.placeholder;
 
   const handleSteer = async (text: string) => {
     if (!chatId || steering) return;
@@ -222,11 +214,13 @@ export function InputBar({
     // this branch has to run before that check, not be exempted from it.
     if (showSteerAffordance) {
       if (!chatId || steering) return;
+      history.record(prompt);
       void handleSteer(prompt);
       return;
     }
     if (disabled || cannotSubmit) return;
     const attachmentIds = pendingAttachments.map((attachment) => attachment.id);
+    history.record(prompt);
     onSubmit(prompt, attachmentIds.length > 0 ? attachmentIds : undefined);
     setPrompt('');
     setPendingAttachments([]);
@@ -234,198 +228,73 @@ export function InputBar({
 
   const handleInsertPrompt = (text: string) => {
     if (!text) return;
-    setPrompt((current) => (current.trim() ? `${current}\n\n${text}` : text));
+    setPrompt(prompt.trim() ? `${prompt}\n\n${text}` : text);
   };
 
-  const handleAttachments = (attachments: ChatAttachment[]) => {
-    if (attachments.length === 0) return;
-    setPendingAttachments((current) => {
-      const known = new Set(current.map((attachment) => attachment.id));
-      return [...current, ...attachments.filter((attachment) => !known.has(attachment.id))];
-    });
+  /**
+   * Enter sends, Shift+Enter breaks the line, ↑/↓ walk this chat's history
+   * while the caret is at the very start (or already inside history) so they
+   * stay ordinary cursor keys in the middle of a multi-line prompt.
+   */
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // An IME candidate window uses Enter to accept a suggestion. `keyCode 229`
+    // is the fallback for browsers that do not set `isComposing` on keydown.
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      handleSubmit(event);
+      return;
+    }
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+
+    // ↑ enters history from the top of the box; ↓ only ever walks back out of
+    // it, so it never steals the key from a caret in the middle of a prompt.
+    const canRecall =
+      event.key === 'ArrowUp'
+        ? history.isRecalling || event.currentTarget.selectionStart === 0
+        : history.isRecalling;
+    if (!canRecall) return;
+
+    const recalled = history.recall(event.key === 'ArrowUp' ? 'previous' : 'next', prompt);
+    if (recalled === null) return;
+    event.preventDefault();
+    setPrompt(recalled);
+  };
+
+  const handleDrop = (event: DragEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setDragging(false);
+    uploads.upload(Array.from(event.dataTransfer.files));
   };
 
   return (
     <footer className="shrink-0 p-3 sm:p-4 md:p-6">
-      <div className="max-w-4xl mx-auto w-full">
-        <div className="flex items-center justify-between mb-2 sm:mb-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            {environmentId && onEnvironmentChange ? (
-              <EnvironmentSelector
-                environmentId={environmentId}
-                disabled={disabled || isGenerating}
-                onEnvironmentChange={onEnvironmentChange}
-              />
-            ) : null}
-
-            {!isExternalRunner && onSelectedAgentIdChange ? (
-              <label className="sr-only" htmlFor="chat-agent-selector">
-                {t.chat.input.selectAgent}
-              </label>
-            ) : null}
-
-            {onWorkdirClick ? (
-              <Chip
-                icon={<FolderOpen size={13} className="shrink-0 text-primary/80" />}
-                onClick={onWorkdirClick}
-                disabled={disabled}
-                className="h-7 max-w-[14rem]"
-                title={workdir ?? t.workspace.chooseWorkdir}
-                aria-label={
-                  workdirName
-                    ? t.workspace.changeWorkdir.replace('{name}', workdirName)
-                    : t.workspace.chooseWorkdir
-                }
-              >
-                {workdirName ?? t.workspace.chooseWorkdir}
-              </Chip>
-            ) : null}
-            {!isExternalRunner && onSelectedAgentIdChange ? (
-              <select
-                id="chat-agent-selector"
-                value={selectedAgentId}
-                onChange={(event) => onSelectedAgentIdChange(event.target.value)}
-                disabled={disabled || isAgentListLoading || selectableAgents.length === 0}
-                className="h-7 max-w-[11rem] rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2 text-[10px] sm:text-[11px] font-medium text-on-surface-variant outline-none transition-colors hover:text-on-surface focus:border-primary/40"
-                aria-label={t.chat.input.selectAgent}
-              >
-                {isAgentListLoading ? (
-                  <option value={selectedAgentId}>{t.chat.input.agentsLoading}</option>
-                ) : null}
-                {selectableAgents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name}
-                  </option>
-                ))}
-              </select>
-            ) : null}
-
-            {!isExternalRunner && modelCatalog && onModelChange ? (
-              <ModelSelector
-                activeModel={activeModel ?? ''}
-                activeModels={activeModels}
-                isDisabled={isModelSelectorDisabled || disabled === true}
-                onSelect={onModelChange}
-                modelCatalog={modelCatalog}
-                lockedProvider={lockedProvider}
-              />
-            ) : null}
-
-            {isExternalRunner &&
-            onExternalModelChange &&
-            onExternalEffortChange &&
-            onExternalPermissionsChange ? (
-              <ExternalComposerControls
-                descriptor={externalDescriptor}
-                model={externalModel}
-                effort={externalEffort}
-                level={externalLevel}
-                routing={externalRouting}
-                disabled={disabled || isGenerating}
-                onModelChange={onExternalModelChange}
-                onEffortChange={onExternalEffortChange}
-                onPermissionsChange={onExternalPermissionsChange}
-              />
-            ) : null}
-
-            {/* MangoStudio's own thinking control. An external agent's effort
-                comes from its vendor's per-model catalog instead. */}
-            {!isExternalRunner && onThinkingToggle && onReasoningEffortChange ? (
-              <ThinkingToggle
-                enabled={thinkingEnabled}
-                effort={reasoningEffort}
-                visible={reasoningVisible}
-                onToggle={onThinkingToggle}
-                onEffortChange={onReasoningEffortChange}
-              />
-            ) : null}
-
-            <McpComposerMenu
-              chatId={chatId}
-              disabled={disabled}
-              onInsertPrompt={handleInsertPrompt}
-              onAttachments={handleAttachments}
-            />
-
-            <CapabilityInspector
-              chatId={chatId}
-              disabled={disabled}
-              activeModel={activeModel}
-              selectedAgentId={selectedAgentId}
-            />
-
-            {onImageToolIntentChange && (
-              <button
-                type="button"
-                onClick={() => onImageToolIntentChange(!imageToolIntent)}
-                disabled={disabled}
-                className={`flex items-center gap-1.5 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] sm:text-[11px] font-medium transition-all duration-200 shrink-0 ${
-                  imageToolIntent
-                    ? 'bg-primary text-on-primary shadow-sm'
-                    : 'text-on-surface-variant hover:text-on-surface border border-outline-variant/20 hover:border-outline-variant/40'
-                }`}
-                title={t.chat.input.createImagesHint}
-              >
-                <Image size={12} className="sm:hidden" />
-                <Image size={13} className="hidden sm:block" />
-                <span className="hidden sm:inline">{t.chat.input.createImages}</span>
-              </button>
-            )}
-
-            {contextInfo && (
-              <span
-                className={`flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] sm:text-[11px] font-medium tabular-nums border transition-colors shrink-0 ${
-                  contextInfo.severity === 'critical'
-                    ? 'bg-error/15 text-error border-error/30'
-                    : contextInfo.severity === 'danger'
-                      ? 'bg-warning/15 text-warning border-warning/30'
-                      : contextInfo.severity === 'warning'
-                        ? 'bg-warning/10 text-warning/80 border-warning/20'
-                        : 'bg-surface-container-high text-on-surface-variant border-transparent'
-                }`}
-                title={`~${contextInfo.estimatedInputTokens.toLocaleString()} / ${contextInfo.contextLimit.toLocaleString()} tokens · ${contextInfo.mode}`}
-              >
-                <span className="sm:hidden">
-                  {formatTokensCompact(contextInfo.estimatedInputTokens)}
-                </span>
-                <span className="hidden sm:inline">
-                  {`${t.chat.context.label}: ${formatTokensCompact(contextInfo.estimatedInputTokens)} / ${formatTokensCompact(contextInfo.contextLimit)}`}
-                </span>
-              </span>
-            )}
-
-            <ExternalUsageDisplay turn={threadUsage?.last} thread={threadUsage} />
-          </div>
-        </div>
-
+      <div className="mx-auto w-full max-w-4xl">
         {externalRunnerBlocked && (
           // Named, not just disabled: "install it", "sign in", "wake that
           // machine" and "wait for discovery" are four different things to do,
           // and a composer that goes quiet without saying which leaves the user
           // clicking Send at nothing.
-          <p role="status" className="mb-2 flex items-center gap-1.5 text-[11px] text-warning">
-            <AlertTriangle size={12} className="shrink-0" />
+          <ComposerNotice tone="warning">
             {externalUnavailableReason
               ? `${t.externalAgents.unavailable[externalUnavailableReason]} — ${t.externalAgents.selector.unavailableHere}`
               : t.externalAgents.selector.unavailableHere}
-          </p>
+          </ComposerNotice>
         )}
 
-        {steerError && (
-          <p role="status" className="mb-2 flex items-center gap-1.5 text-[11px] text-error">
-            <AlertTriangle size={12} className="shrink-0" />
-            {steerError}
-          </p>
-        )}
+        {steerError && <ComposerNotice tone="error">{steerError}</ComposerNotice>}
 
-        {pendingAttachments.length > 0 && (
+        {uploads.error && <ComposerNotice tone="error">{uploads.error}</ComposerNotice>}
+
+        {(pendingAttachments.length > 0 || uploads.uploading.length > 0) && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {pendingAttachments.map((attachment) => (
               <span
                 key={attachment.id}
                 className="flex items-center gap-1.5 rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2.5 py-1 text-[11px] text-on-surface-variant"
               >
-                <FileText size={12} className="shrink-0 text-primary/70" />
+                <FileText size={12} className="composer-chip-icon shrink-0" />
                 <span className="max-w-[12rem] truncate">{attachment.originalName}</span>
                 <button
                   type="button"
@@ -441,94 +310,246 @@ export function InputBar({
                 </button>
               </span>
             ))}
+            {uploads.uploading.map((name) => (
+              <span
+                key={name}
+                role="status"
+                className="flex items-center gap-1.5 rounded-full border border-outline-variant/20 px-2.5 py-1 text-[11px] text-on-surface-variant/70"
+              >
+                <span className="size-3 shrink-0 animate-spin rounded-full border border-current border-t-transparent" />
+                <span className="max-w-[12rem] truncate">
+                  {formatMessage(t.chat.input.attachUploading, { name })}
+                </span>
+              </span>
+            ))}
           </div>
         )}
 
         <form
           onSubmit={handleSubmit}
-          className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-1.5 sm:p-2 shadow-2xl flex items-center gap-1.5 sm:gap-2 group transition-all focus-within:ring-1 focus-within:ring-primary/30"
-        >
-          <input
-            type="text"
-            value={prompt}
-            onChange={(e) => {
-              setPrompt(e.target.value);
-              if (steerError) setSteerError(null);
-            }}
-            disabled={(disabled && !showSteerAffordance) || externalRunnerBlocked || steering}
-            className="flex-1 bg-transparent border-none focus:ring-0 text-sm font-body text-on-surface placeholder:text-on-surface-variant/40 py-2 outline-none min-w-0"
-            placeholder={
-              showSteerAffordance ? t.externalAgents.steer.buttonHint : t.chat.input.placeholder
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={(event) => {
+            // Moving between the form's own children fires `dragleave` on the
+            // one being left; only a pointer that has actually left the form
+            // should clear the highlight.
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setDragging(false);
             }
+          }}
+          onDrop={handleDrop}
+          data-testid="composer"
+          data-dragging={dragging}
+          // The whole frame reads this one property; nothing below hard-codes a
+          // colour. See `lib/composer-accent.ts`.
+          style={{ [COMPOSER_ACCENT_PROPERTY]: composerAccent(runner) } as CSSProperties}
+          className="composer-shell shadow-2xl"
+        >
+          <ComposerChipRow
+            {...CHIP_ROW_DEFAULTS}
+            {...chipRow}
+            disabled={disabled}
+            isGenerating={isGenerating}
+            isExternalRunner={isExternalRunner}
+            activeModel={activeModel}
+            selectedAgentId={selectedAgentId}
+            externalDescriptor={externalDescriptor}
           />
 
-          <div className="flex items-center gap-1 pr-0.5 sm:pr-1 shrink-0">
-            {!isGenerating && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="sm:size-10 text-on-surface-variant"
-              >
-                <Mic size={18} className="sm:hidden" />
-                <Mic size={20} className="hidden sm:block" />
-              </Button>
-            )}
-            {isGenerating && (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={onStop}
-                title={t.chat.input.stop}
-                className={`text-xs hover:bg-error/20 hover:text-error shrink-0 ${
-                  showSteerAffordance
-                    ? 'size-9 sm:size-10 p-0'
-                    : 'h-9 sm:h-10 gap-1.5 px-3 sm:gap-2 sm:px-4'
-                }`}
-              >
-                {!showSteerAffordance && (
-                  <span className="hidden sm:inline">{t.chat.input.stop}</span>
-                )}{' '}
-                <Square size={12} className="sm:hidden" />
-                <Square size={14} className="hidden sm:block" />
-              </Button>
-            )}
-            {/* Same button, different meaning while a steerable turn runs — see
-                docs/architecture/external-agents.md's steering section. Distinct
-                styling so nobody reads it as an ordinary send. */}
-            {showSteerAffordance ? (
-              <Button
-                type="submit"
-                variant="ghost"
-                disabled={!chatId || steering || !prompt.trim()}
-                title={t.externalAgents.steer.buttonHint}
-                className="h-9 sm:h-10 px-3 sm:px-4 gap-1.5 sm:gap-2 border-2 border-primary text-primary text-xs hover:bg-primary/10 hover:text-primary shrink-0"
-              >
-                <span className="hidden sm:inline">{t.externalAgents.steer.button}</span>{' '}
-                <CornerDownRight size={ICON_SM} className="sm:hidden" />
-                <CornerDownRight size={ICON_MD} className="hidden sm:block" />
-              </Button>
-            ) : !isGenerating ? (
-              <Button
-                type="submit"
-                disabled={disabled || cannotSubmit || !prompt.trim()}
-                className="h-9 sm:h-10 px-3 sm:px-4 gap-1.5 sm:gap-2 text-xs shadow-primary-container/20 hover:brightness-110 hover:opacity-100 shrink-0"
-                style={{ background: 'var(--gradient-primary)' }}
-              >
-                <span className="hidden sm:inline">{t.chat.input.send}</span>{' '}
-                <Send size={ICON_SM} className="sm:hidden" />
-                <KbdHint
-                  keys="⏎"
-                  className="hidden sm:inline-flex border-transparent bg-on-primary/15 text-on-primary/90"
-                />
-              </Button>
-            ) : null}
+          {/* `items-start` so the prompt mark holds the first line while the
+              box grows under it, the way a shell prompt does. The padding
+              moved onto this row so the two share a text box and stay on the
+              same baseline. */}
+          <div className="flex items-start gap-2 px-3 py-2.5">
+            <span
+              aria-hidden="true"
+              className={`composer-prompt-mark ${inputDisabled ? 'opacity-50' : ''}`}
+            >
+              ❯
+            </span>
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={prompt}
+              onChange={(event) => {
+                setPrompt(event.target.value);
+                history.release();
+                if (steerError) setSteerError(null);
+                if (uploads.error) uploads.clearError();
+              }}
+              onKeyDown={handleKeyDown}
+              onPaste={(event) => {
+                const files = filesFromClipboard(event.clipboardData);
+                if (files.length === 0) return;
+                event.preventDefault();
+                uploads.upload(files);
+              }}
+              disabled={inputDisabled}
+              style={{ maxHeight: `${TEXTAREA_MAX_HEIGHT_PX}px` }}
+              className="app-scrollbar composer-input min-w-0 flex-1 resize-none bg-transparent p-0 font-body text-sm leading-5 text-on-surface outline-none placeholder:text-on-surface-variant/40 disabled:opacity-60"
+              placeholder={placeholder}
+            />
           </div>
+
+          <div className="flex items-end justify-between gap-2 px-2 pb-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-1">
+              <McpComposerMenu
+                chatId={chatId}
+                disabled={disabled}
+                onInsertPrompt={handleInsertPrompt}
+                onAttachments={handleAttachments}
+              />
+              <CapabilityInspector
+                chatId={chatId}
+                disabled={disabled}
+                activeModel={activeModel}
+                selectedAgentId={selectedAgentId}
+              />
+              {onImageToolIntentChange && (
+                <ImageIntentToggle
+                  active={imageToolIntent}
+                  disabled={disabled}
+                  onChange={onImageToolIntentChange}
+                />
+              )}
+            </div>
+
+            <div className="flex shrink-0 items-center gap-1">
+              {isGenerating && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={onStop}
+                  title={t.chat.input.stop}
+                  className={`text-xs hover:bg-error/20 hover:text-error shrink-0 ${
+                    showSteerAffordance ? 'size-9 p-0' : 'h-9 gap-1.5 px-3'
+                  }`}
+                >
+                  {!showSteerAffordance && (
+                    <span className="hidden sm:inline">{t.chat.input.stop}</span>
+                  )}{' '}
+                  <Square size={12} />
+                </Button>
+              )}
+              {/* Same button, different meaning while a steerable turn runs — see
+                  docs/architecture/external-agents.md's steering section. Distinct
+                  styling so nobody reads it as an ordinary send. */}
+              {showSteerAffordance ? (
+                <Button
+                  type="submit"
+                  variant="ghost"
+                  disabled={!chatId || steering || !prompt.trim()}
+                  title={t.externalAgents.steer.buttonHint}
+                  // Steering only ever happens on a vendor CLI, so the one
+                  // colour it must not be is MangoStudio's.
+                  style={{ borderColor: 'var(--composer-accent)', color: 'var(--composer-accent)' }}
+                  className="h-9 shrink-0 gap-1.5 rounded-full border-2 px-3.5 text-xs hover:bg-surface-container-high"
+                >
+                  <span className="hidden sm:inline">{t.externalAgents.steer.button}</span>{' '}
+                  <CornerDownRight size={ICON_SM} className="sm:hidden" />
+                  <CornerDownRight size={ICON_MD} className="hidden sm:block" />
+                </Button>
+              ) : !isGenerating ? (
+                <Button
+                  type="submit"
+                  disabled={disabled || cannotSubmit || !prompt.trim()}
+                  className="h-9 shrink-0 gap-1.5 rounded-full px-3.5 text-xs shadow-none hover:brightness-110 hover:opacity-100"
+                  // A flat fill rather than the mango gradient: the gradient
+                  // names the product, and this button belongs to whoever runs
+                  // the turn. The light theme darkens it a step — see the
+                  // `--composer-send-fill` rules in `index.css`.
+                  style={{ background: 'var(--composer-send-fill)' }}
+                >
+                  <span className="hidden sm:inline">{t.chat.input.send}</span>{' '}
+                  <Send size={ICON_SM} className="sm:hidden" />
+                  <KbdHint
+                    keys="⏎"
+                    className="hidden sm:inline-flex border-transparent bg-on-primary/15 text-on-primary/90"
+                  />
+                </Button>
+              ) : null}
+            </div>
+          </div>
+
+          {dragging ? (
+            <span
+              aria-hidden="true"
+              className="composer-drop-hint pointer-events-none absolute inset-0 flex items-center justify-center rounded-xl font-mono text-xs"
+            >
+              {t.chat.input.dropHint}
+            </span>
+          ) : null}
         </form>
-        <p className="text-center text-[10px] text-on-surface-variant/40 mt-2 sm:mt-3 font-label">
+
+        <p className="mt-2 text-center font-mono text-[10px] text-on-surface-variant/40 sm:mt-3">
           {t.common.disclaimer}
+          {/* The quiet line the user should never have to guess at: MangoStudio's
+              own tool settings do not apply to a turn it is not running. It sits
+              here rather than in the chip row so the composer keeps only the
+              controls you can act on. */}
+          {isExternalRunner && externalDescriptor ? (
+            <>
+              {' · '}
+              {formatMessage(t.externalAgents.selector.ownership, {
+                vendor: t.externalAgents.target[externalDescriptor.targetId],
+              })}
+            </>
+          ) : null}
         </p>
       </div>
     </footer>
   );
+}
+
+const NOTICE_TONE_CLASS = {
+  warning: 'text-warning',
+  error: 'text-error',
+} as const;
+
+/**
+ * A one-line problem above the composer: the runner cannot start a turn, a
+ * steer was refused, an upload failed. One component because the three read as
+ * one strip and had drifted into three copies of the same class string.
+ */
+function ComposerNotice({
+  tone,
+  children,
+}: {
+  tone: keyof typeof NOTICE_TONE_CLASS;
+  children: ReactNode;
+}) {
+  return (
+    <p
+      role="status"
+      className={`mb-2 flex items-center gap-1.5 text-[11px] ${NOTICE_TONE_CLASS[tone]}`}
+    >
+      <AlertTriangle size={12} className="shrink-0" />
+      {children}
+    </p>
+  );
+}
+
+/**
+ * Grows the textarea with its content up to {@link TEXTAREA_MAX_HEIGHT_PX},
+ * then lets it scroll.
+ *
+ * `scrollHeight` never reports *less* than the element's current height, so a
+ * prompt that got shorter has to be reset to `auto` before it is measured —
+ * otherwise the box only ever grows and deleting a paragraph leaves a tall
+ * empty composer behind. Text that got *longer* needs no reset, and skipping it
+ * there halves the forced layouts for ordinary forward typing, which is the
+ * overwhelmingly common case on the one interaction that must stay at input
+ * latency.
+ */
+function useAutoGrow(ref: React.RefObject<HTMLTextAreaElement | null>, value: string): void {
+  const previousLength = useRef(value.length);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    if (value.length < previousLength.current) node.style.height = 'auto';
+    previousLength.current = value.length;
+    node.style.height = `${Math.min(node.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
+  }, [ref, value]);
 }

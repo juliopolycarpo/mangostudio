@@ -34,13 +34,23 @@ import { LibraryPageState } from './LibraryPageState';
 import { PropagationWizard } from './PropagationWizard';
 import { RemovalWizard } from './RemovalWizard';
 
-export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }) {
+export function ResourceDetail({
+  resourceKey,
+  initialCompare = false,
+}: {
+  readonly resourceKey: string;
+  /**
+   * Opens the version comparison on arrival, for links that mean "show me what
+   * differs" — the workspace hub's divergence card is the first of them.
+   */
+  readonly initialCompare?: boolean;
+}) {
   const { t, locale } = useI18n();
   const l = t.library;
   const scope = useEnvironmentScope();
   const isLocal = scope.environmentId === LOCAL_ENVIRONMENT_ID;
   const queryClient = useQueryClient();
-  const [comparing, setComparing] = useState(false);
+  const [comparing, setComparing] = useState(initialCompare);
   const [propagating, setPropagating] = useState(false);
   const [removing, setRemoving] = useState(false);
 

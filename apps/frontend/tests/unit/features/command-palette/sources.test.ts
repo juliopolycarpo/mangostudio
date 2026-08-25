@@ -182,6 +182,7 @@ describe('actionCommands', () => {
       resolvedTheme: 'dark',
       hasChat: true,
       isGenerating: false,
+      chatHasTurns: false,
       newChatShortcut: 'Ctrl+N',
       quotaRefresh: null,
       onNewChat: jest.fn(),
@@ -240,6 +241,12 @@ describe('actionCommands', () => {
    */
   it('hides the workdir row while a turn is streaming', () => {
     expect(build({ isGenerating: true }).some((item) => item.id === 'action:workdir')).toBe(false);
+  });
+
+  // The first prompt settles the chat's folder; the palette must not stay the
+  // one surface that still offers to move it after the header stopped.
+  it('hides the workdir row once the chat has turns', () => {
+    expect(build({ chatHasTurns: true }).some((item) => item.id === 'action:workdir')).toBe(false);
   });
 
   it('offers a quota refresh only when the active runner reports one', () => {

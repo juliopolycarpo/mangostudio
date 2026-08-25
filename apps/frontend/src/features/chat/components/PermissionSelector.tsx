@@ -106,7 +106,7 @@ export function PermissionSelector({
   const unattended = active?.unattended === true;
 
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={containerRef} className="relative flex items-center">
       <button
         type="button"
         disabled={disabled}
@@ -114,18 +114,19 @@ export function PermissionSelector({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={labels.label}
-        className={`flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[10px] font-medium transition-colors sm:text-[11px] ${
-          unattended
-            ? 'border-warning/40 text-warning'
-            : 'border-outline-variant/20 text-on-surface-variant hover:text-on-surface'
-        } disabled:opacity-50`}
+        className={`composer-chip max-w-[13rem] disabled:opacity-50 ${
+          unattended ? 'border-warning/40 text-warning' : ''
+        }`}
       >
         {unattended ? (
-          <AlertTriangle size={12} className="shrink-0" />
+          <AlertTriangle size={11} className="shrink-0" />
         ) : (
-          <Lock size={12} className="shrink-0 text-primary/80" />
+          <Lock size={11} className="composer-chip-icon shrink-0" />
         )}
-        <span className="truncate">{labels.levelName[level]}</span>
+        <span className="composer-chip-key opacity-70">{`${labels.modeKey}:`}</span>
+        <span className={`composer-chip-value ${unattended ? 'text-warning' : ''}`}>
+          {labels.levelName[level]}
+        </span>
         <ChevronDown size={11} className="shrink-0" />
       </button>
 

@@ -6,6 +6,8 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatTokensCompact } from '@/lib/format-tokens';
+import { formatMessage } from '@/lib/i18n-format';
 import { ContinuationEventMarker } from './ContinuationEventMarker';
 import { ElicitationCard } from './ElicitationCard';
 import { ExternalActivityBlock } from './ExternalActivityBlock';
@@ -17,6 +19,7 @@ import { McpMediaPartBlock } from './McpMediaPartBlock';
 import { QuestionCard } from './QuestionCard';
 import { SystemEventMarker } from './SystemEventMarker';
 import { ThinkingBlock } from './ThinkingBlock';
+import { TimelineItem } from './TimelineItem';
 import { TodoListPart } from './TodoListPart';
 import { ToolCallBlock } from './ToolCallBlock';
 import { ToolCallGroupBlock } from './ToolCallGroupBlock';
@@ -55,154 +58,192 @@ export function MessageParts({
   const vendorAuthored = externalTurn !== undefined;
   return (
     <>
-      {parts.map((part, idx) => {
-        switch (part.type) {
-          case 'external_turn':
-            return null;
-          case 'external_activity':
-            return <ExternalActivityBlock key={`${part.callId}-activity`} part={part} />;
-          case 'external_approval':
-            return (
-              <ExternalApprovalCard
-                key={`${part.requestId}-approval`}
-                part={part}
-                chatId={chatId}
-              />
-            );
-          case 'external_steer':
-            return <ExternalSteerPartBlock key={`${part.clientMessageId}-steer`} part={part} />;
-          case 'thinking': {
-            const blockId = `${messageId}-thinking-${idx}`;
-            const isLastThinking =
-              isStreaming && !parts.slice(idx + 1).some((p) => p.type === 'thinking');
-            return (
-              <ThinkingBlock
-                key={blockId}
-                messageId={blockId}
-                text={part.text}
-                isStreaming={isLastThinking}
-                plainText={vendorAuthored}
-              />
-            );
-          }
-          case 'tool_call': {
-            // The question card and the todo checklist supersede the generic
-            // collapsed tool block for their calls.
-            if (part.name === ASK_USER_QUESTION_TOOL_NAME) return null;
-            if (part.name === TODO_WRITE_TOOL_NAME) return null;
-            if (consumed.has(idx)) return null;
-            const grouped = groups.get(idx);
-            if (grouped) {
+      <div className="chat-timeline min-w-0">
+        {parts.map((part, idx) => {
+          switch (part.type) {
+            case 'external_turn':
+              return null;
+            // Owns its own timeline item: the vendor's status decides the node
+            // tone, the same way a MangoStudio tool call does.
+            case 'external_activity':
+              return <ExternalActivityBlock key={`${part.callId}-activity`} part={part} />;
+            case 'external_approval':
               return (
-                <ToolCallGroupBlock
-                  key={part.toolCallId}
-                  calls={grouped}
-                  latestFileChangeId={latestFileChangeId}
+                <TimelineItem key={`${part.requestId}-approval`} variant="block">
+                  <ExternalApprovalCard part={part} chatId={chatId} />
+                </TimelineItem>
+              );
+            case 'external_steer':
+              return (
+                <TimelineItem key={`${part.clientMessageId}-steer`} variant="block">
+                  <ExternalSteerPartBlock part={part} />
+                </TimelineItem>
+              );
+            case 'thinking': {
+              const blockId = `${messageId}-thinking-${idx}`;
+              // A thought is over the moment anything follows it: the reducer
+              // clears its active index on every other kind of chunk, so the
+              // thinking part being streamed into is always the last one.
+              // Asking instead whether a *later thinking part* exists left the
+              // finished thought pulsing, expanded and uncounted for the rest
+              // of the turn.
+              return (
+                <ThinkingBlock
+                  key={blockId}
+                  messageId={blockId}
+                  text={part.text}
+                  isStreaming={isStreaming && idx === parts.length - 1}
+                  plainText={vendorAuthored}
                 />
               );
             }
-            const entry = toToolCallEntry(parts, idx, isStreaming);
-            return (
-              <ToolCallBlock
-                key={part.toolCallId}
-                name={entry.name}
-                args={entry.args}
-                result={entry.result}
-                status={entry.status}
-                execution={entry.execution}
-                isLatestFileChange={part.toolCallId === latestFileChangeId}
-              />
-            );
-          }
-          case 'tool_result':
-            return null;
-          case 'generated_image':
-            return <GeneratedImagePart key={part.imageId} part={part} />;
-          case 'mcp_media':
-            return <McpMediaPartBlock key={`${part.toolCallId}-${part.url}`} part={part} />;
-          case 'question':
-            return (
-              <QuestionCard
-                key={`${part.toolCallId}-question`}
-                part={part}
-                onSubmit={isStreaming ? undefined : onQuestionSubmit}
-              />
-            );
-          case 'mcp_elicitation':
-            return <ElicitationCard key={part.elicitationId} part={part} />;
-          case 'todo':
-            return <TodoListPart key={`${part.toolCallId}-todo`} part={part} />;
-          case 'subagent_trace':
-            return (
-              <SubagentTraceBlock
-                // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
-                key={`${messageId}-subagent-${idx}`}
-                part={part}
-              />
-            );
-          case 'text':
-            return (
-              <div
-                // Parts within a message are append-only and position-stable, so
-                // the ordinal index is a valid identity. No part-level ID exists.
-                // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
-                key={`${messageId}-text-${idx}`}
-                className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface max-w-2xl"
-              >
-                {vendorAuthored ? (
-                  <span data-vendor-text className="block whitespace-pre-wrap break-words">
-                    {part.text}
-                  </span>
-                ) : (
-                  <MarkdownContent
-                    content={part.text}
-                    isStreaming={isStreaming}
-                    copyCodeLabel={t.chat.copyCode}
-                    codeCopiedLabel={t.chat.codeCopied}
+            case 'tool_call': {
+              // The question card and the todo checklist supersede the generic
+              // collapsed tool block for their calls.
+              if (part.name === ASK_USER_QUESTION_TOOL_NAME) return null;
+              if (part.name === TODO_WRITE_TOOL_NAME) return null;
+              if (consumed.has(idx)) return null;
+              const grouped = groups.get(idx);
+              if (grouped) {
+                return (
+                  <ToolCallGroupBlock
+                    key={part.toolCallId}
+                    calls={grouped}
+                    latestFileChangeId={latestFileChangeId}
                   />
-                )}
-                {isStreaming && idx === parts.length - 1 && (
-                  <span className="inline-block w-0.5 h-[1em] bg-primary ml-0.5 align-middle animate-blink" />
-                )}
-              </div>
-            );
-          case 'system_event':
-            return (
-              <SystemEventMarker
-                // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
-                key={`${messageId}-se-${idx}`}
-                event={part.event}
-                detail={part.detail}
-              />
-            );
-          case 'continuation_transition':
-            return (
-              <ContinuationEventMarker
-                // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
-                key={`${messageId}-ct-${idx}`}
-                provider={part.provider}
-                modelName={part.modelName}
-                fromProvider={part.fromProvider}
-                fromMode={part.fromMode}
-                toMode={part.toMode}
-                reasonCode={part.reasonCode}
-                recovered={part.recovered}
-              />
-            );
-          case 'error':
-            return (
-              <div
-                // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
-                key={`${messageId}-error-${idx}`}
-                className="bg-error/10 border border-error/20 p-4 rounded-xl text-error text-sm font-body"
-              >
-                {part.text}
-              </div>
-            );
-          default:
-            return null;
-        }
-      })}
+                );
+              }
+              const entry = toToolCallEntry(parts, idx, isStreaming);
+              return (
+                <ToolCallBlock
+                  key={part.toolCallId}
+                  name={entry.name}
+                  args={entry.args}
+                  result={entry.result}
+                  status={entry.status}
+                  execution={entry.execution}
+                  isLatestFileChange={part.toolCallId === latestFileChangeId}
+                />
+              );
+            }
+            case 'tool_result':
+              return null;
+            case 'generated_image':
+              return (
+                <TimelineItem key={part.imageId} variant="block">
+                  <GeneratedImagePart part={part} />
+                </TimelineItem>
+              );
+            case 'mcp_media':
+              return (
+                <TimelineItem key={`${part.toolCallId}-${part.url}`} variant="block">
+                  <McpMediaPartBlock part={part} />
+                </TimelineItem>
+              );
+            case 'question':
+              return (
+                <TimelineItem key={`${part.toolCallId}-question`} variant="block" tone="active">
+                  <QuestionCard part={part} onSubmit={isStreaming ? undefined : onQuestionSubmit} />
+                </TimelineItem>
+              );
+            case 'mcp_elicitation':
+              return (
+                <TimelineItem key={part.elicitationId} variant="block" tone="active">
+                  <ElicitationCard part={part} />
+                </TimelineItem>
+              );
+            case 'todo':
+              return (
+                <TimelineItem key={`${part.toolCallId}-todo`} variant="block">
+                  <TodoListPart part={part} />
+                </TimelineItem>
+              );
+            case 'subagent_trace':
+              return (
+                <TimelineItem
+                  // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
+                  key={`${messageId}-subagent-${idx}`}
+                  variant="block"
+                >
+                  <SubagentTraceBlock part={part} />
+                </TimelineItem>
+              );
+            case 'text': {
+              const isStreamingIntoPart = isStreaming && idx === parts.length - 1;
+              return (
+                <TimelineItem
+                  // Parts within a message are append-only and position-stable, so
+                  // the ordinal index is a valid identity. No part-level ID exists.
+                  // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
+                  key={`${messageId}-text-${idx}`}
+                  variant="block"
+                >
+                  <div className="chat-message-body max-w-2xl font-body leading-relaxed text-on-surface">
+                    {vendorAuthored ? (
+                      <span
+                        data-vendor-text
+                        className={`block whitespace-pre-wrap break-words${isStreamingIntoPart ? ' streaming-caret' : ''}`}
+                      >
+                        {part.text}
+                      </span>
+                    ) : (
+                      <MarkdownContent
+                        content={part.text}
+                        isStreaming={isStreamingIntoPart}
+                        copyCodeLabel={t.chat.copyCode}
+                        codeCopiedLabel={t.chat.codeCopied}
+                      />
+                    )}
+                  </div>
+                </TimelineItem>
+              );
+            }
+            case 'system_event':
+              return (
+                <TimelineItem
+                  // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
+                  key={`${messageId}-se-${idx}`}
+                  variant="divider"
+                >
+                  <SystemEventMarker event={part.event} detail={part.detail} />
+                </TimelineItem>
+              );
+            case 'continuation_transition':
+              return (
+                <TimelineItem
+                  // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
+                  key={`${messageId}-ct-${idx}`}
+                  variant="divider"
+                >
+                  <ContinuationEventMarker
+                    provider={part.provider}
+                    modelName={part.modelName}
+                    fromProvider={part.fromProvider}
+                    fromMode={part.fromMode}
+                    toMode={part.toMode}
+                    reasonCode={part.reasonCode}
+                    recovered={part.recovered}
+                  />
+                </TimelineItem>
+              );
+            case 'error':
+              return (
+                <TimelineItem
+                  // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
+                  key={`${messageId}-error-${idx}`}
+                  variant="block"
+                  tone="error"
+                >
+                  <div className="max-w-2xl rounded-xl border border-error/20 bg-error/10 p-4 font-body text-sm text-error">
+                    {part.text}
+                  </div>
+                </TimelineItem>
+              );
+            default:
+              return null;
+          }
+        })}
+      </div>
       {externalTurn?.type === 'external_turn' ? (
         <ExternalTurnFooter part={externalTurn} isStreaming={isStreaming} />
       ) : null}
@@ -248,7 +289,7 @@ function ExternalTurnFooter({
   if (fields.length === 0 && !terminalNotice && !part.error) return null;
 
   return (
-    <div className="max-w-2xl space-y-1.5">
+    <div className="mt-2 max-w-2xl space-y-1.5 pl-4">
       {fields.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
           {fields.map(([label, value]) => (
@@ -275,13 +316,6 @@ function ExternalTurnFooter({
   );
 }
 
-/** Same compaction the composer's context chip uses, so one turn reads one way. */
-function formatTokensCompact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
-  return String(n);
-}
-
 function SubagentTraceBlock({ part }: { part: Extract<MessagePart, { type: 'subagent_trace' }> }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
@@ -289,7 +323,7 @@ function SubagentTraceBlock({ part }: { part: Extract<MessagePart, { type: 'suba
   const statusLabel = getSubagentStatusLabel(part.status, labels);
   const toolCountLabel =
     part.toolCallCount > 0
-      ? labels.subagentTools.replace('{count}', String(part.toolCallCount))
+      ? formatMessage(labels.subagentTools, { count: String(part.toolCallCount) })
       : labels.subagentNoTools;
 
   return (
@@ -436,5 +470,7 @@ function getSubagentTraceEventLabel(
   if (event.event === 'response_recovered') return labels.subagentLifecycleRecovered;
   if (event.event === 'response_timeout') return labels.subagentLifecycleTimeout;
   if (event.event === 'response_fallback') return labels.subagentLifecycleFallback;
-  return labels.subagentLifecycleAttempt.replace('{attempt}', String(event.attempt ?? 1));
+  return formatMessage(labels.subagentLifecycleAttempt, {
+    attempt: String(event.attempt ?? 1),
+  });
 }

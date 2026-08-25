@@ -1,3 +1,4 @@
+export { type ContextSeverity, getContextSeverity } from './context-severity';
 export type { Message } from './entities';
 export {
   type Chat,
@@ -21,6 +22,7 @@ export {
   ContextInfoSchema,
   type ContextSettings,
   ContextSettingsSchema,
+  ContextSeveritySchema,
   type CreateChatBody,
   CreateChatBodySchema,
   type CreateMessageBody,

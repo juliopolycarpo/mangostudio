@@ -11,7 +11,7 @@ describe('ThinkingBlock', () => {
   it('renders closed when not streaming', async () => {
     render(<ThinkingBlock messageId="msg-1" text="Test thought" isStreaming={false} />);
     await flushAsyncRender();
-    const button = screen.getByRole('button', { name: /Thought process/i });
+    const button = screen.getByRole('button', { name: /Thought/i });
     expect(button).toBeInTheDocument();
     expect(screen.queryByText('Test thought')).not.toBeInTheDocument();
   });
@@ -24,10 +24,44 @@ describe('ThinkingBlock', () => {
     expect(screen.getByText('Streaming thought')).toBeInTheDocument();
   });
 
+  // A thinking part carries no timestamps, so the elapsed time is measured in
+  // the component across the streaming lifecycle. A block that never streamed
+  // here — a reloaded transcript — has no duration to name and must not invent
+  // one.
+  it('names the elapsed time only for a thought it watched finish', async () => {
+    // Offset the real clock rather than freezing it: `motion` drives its exit
+    // animations off `performance.now()` too, and a constant there stalls the
+    // frame loop for the rest of the file.
+    const realNow = performance.now.bind(performance);
+    let offsetMs = 0;
+    const nowSpy = jest.spyOn(performance, 'now').mockImplementation(() => realNow() + offsetMs);
+
+    const { rerender } = render(
+      <ThinkingBlock messageId="msg-timed" text="Timed thought" isStreaming={true} />
+    );
+    await flushAsyncRender();
+
+    offsetMs = 2_400;
+    rerender(<ThinkingBlock messageId="msg-timed" text="Timed thought" isStreaming={false} />);
+    await flushAsyncRender();
+    nowSpy.mockRestore();
+
+    expect(screen.getByRole('button', { name: /Thought for 2s/i })).toBeInTheDocument();
+  });
+
+  it('says only "Thought" for a block restored without a measurement', async () => {
+    render(<ThinkingBlock messageId="msg-restored" text="Restored" isStreaming={false} />);
+    await flushAsyncRender();
+
+    const button = screen.getByRole('button');
+    expect(button).toHaveTextContent('Thought');
+    expect(button).not.toHaveTextContent(/Thought for/i);
+  });
+
   it('toggles expansion on click', async () => {
     render(<ThinkingBlock messageId="msg-3" text="Toggle thought" isStreaming={false} />);
     await flushAsyncRender();
-    const button = screen.getByRole('button', { name: /Thought process/i });
+    const button = screen.getByRole('button', { name: /Thought/i });
 
     // Initially closed
     expect(screen.queryByText('Toggle thought')).not.toBeInTheDocument();
@@ -49,7 +83,7 @@ describe('ThinkingBlock', () => {
   it('removes the thought body synchronously on collapse', async () => {
     render(<ThinkingBlock messageId="msg-collapse" text="Race thought" isStreaming={false} />);
     await flushAsyncRender();
-    const button = screen.getByRole('button', { name: /Thought process/i });
+    const button = screen.getByRole('button', { name: /Thought/i });
 
     fireEvent.click(button);
     expect(screen.getByText('Race thought')).toBeInTheDocument();

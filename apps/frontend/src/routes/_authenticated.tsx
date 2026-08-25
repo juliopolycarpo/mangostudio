@@ -9,9 +9,11 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Layout } from '@/components/layout/Layout';
 import { Spinner } from '@/components/ui/Spinner';
+import { useChatHasTurns } from '@/features/chat/hooks/use-chat-has-turns';
 import { chatListQueryOptions, messagesQueryOptions } from '@/features/chat/queries';
 import { CommandPaletteHost } from '@/features/command-palette/CommandPaletteHost';
 import { useCommandPalette } from '@/features/command-palette/use-command-palette';
+import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
 import { ExternalDisclosureGate } from '@/features/external-agents/ExternalDisclosureGate';
 import { ExternalWorkspaceTrustGate } from '@/features/external-agents/ExternalWorkspaceTrustGate';
 import { HeaderQuotaPill } from '@/features/external-agents/HeaderQuotaPill';
@@ -72,6 +74,12 @@ function AuthenticatedLayout() {
     [app.chats]
   );
   const gitSummaries = useBatchedGitSummaries(gitChatIds);
+  // The first prompt settles the chat's identity — environment, workdir,
+  // runner — so past it the header's selectors read rather than choose. The
+  // lock is deliberately UI-level: the server keeps accepting repoints because
+  // forking, session adoption and summarize-to-new-chat write through the same
+  // endpoint.
+  const chatHasTurns = useChatHasTurns(app.currentChatId);
 
   // New chat keeps its own chord rather than living in the palette's registry:
   // it is the one action worth reaching without reading a list first. Some
@@ -139,13 +147,33 @@ function AuthenticatedLayout() {
           onNewChat={() => void app.handleNewChat()}
           onNavigateToSettings={() => app.handleNavigate('settings')}
           runnerSelector={<RunnerSelectorContainer />}
+          environmentSelector={
+            // The chat's machine, moved up from the composer: it names the
+            // session rather than the turn, and the header is where the rest of
+            // the session's identity (runner, folder, branch) already lives.
+            activePage === 'chat' && app.currentChatId && app.currentEnvironmentId ? (
+              <EnvironmentSelector
+                environmentId={app.currentEnvironmentId}
+                disabled={app.isGenerating || chatHasTurns}
+                onEnvironmentChange={(environmentId) =>
+                  app.updateChatEnvironment(app.currentChatId as string, environmentId)
+                }
+              />
+            ) : undefined
+          }
           workspaceContext={
             // Gated on a workdir for the same reason the workspace rail gates the
             // Git panel on one: without it the breadcrumb still pays for a
             // `git/state` request and a realtime subscription per chat, and then
             // renders nothing because there is no repository to name.
             activePage === 'chat' && app.currentChatId && app.currentWorkdir ? (
-              <WorkspaceBreadcrumb chatId={app.currentChatId} workdir={app.currentWorkdir} />
+              <WorkspaceBreadcrumb
+                chatId={app.currentChatId}
+                workdir={app.currentWorkdir}
+                // Withheld rather than disabled once turns exist: a breadcrumb
+                // that stops being a button reads as the fact it now is.
+                {...(chatHasTurns ? {} : { onChangeWorkdir: app.openWorkdirPicker })}
+              />
             ) : undefined
           }
           quotaPill={activePage === 'chat' ? <HeaderQuotaPill /> : undefined}

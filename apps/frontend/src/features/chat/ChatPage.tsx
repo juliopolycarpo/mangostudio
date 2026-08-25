@@ -9,7 +9,7 @@ import type {
 import type { ModelUnavailableDetails } from '@mangostudio/shared/generation';
 import { isTurnCheckpointPart, type TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 import type { WorkspaceSettings } from '@mangostudio/shared/workspaces';
-import { type ComponentProps, useMemo } from 'react';
+import { type ComponentProps, useCallback, useMemo } from 'react';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
 import { WorkspaceRail } from '@/features/workspace/rail/WorkspaceRail';
 import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
@@ -20,7 +20,9 @@ import { DeprecatedModelNotice } from './components/DeprecatedModelNotice';
 import { InputBar } from './components/InputBar';
 import { InterruptedTurnNotice } from './components/InterruptedTurnNotice';
 import { PinnedTodoPanel } from './components/PinnedTodoPanel';
+import { useChatHasTurns } from './hooks/use-chat-has-turns';
 import { useChatContextControls, useChatPageMessages } from './hooks/use-chat-page-state';
+import { requestComposerFocus, setComposerDraft } from './lib/composer-draft-store';
 
 interface ChatPageProps {
   chatId: string | null;
@@ -49,9 +51,11 @@ interface ChatPageProps {
   agents?: ReadonlyArray<AgentProfile>;
   isAgentListLoading?: boolean;
   onSelectedAgentIdChange?: (agentId: string) => void;
+  /** Read-only here now: the hub names it, and the header owns changing it. */
   environmentId?: string | null;
-  onEnvironmentChange?: (environmentId: string) => void | Promise<void>;
   workdir?: string | null;
+  /** Jumping to another chat from the empty-state hub's uncommitted-work card. */
+  onSelectChat?: (chatId: string) => void;
   /** Everything the composer needs to render the right controls for the runner. */
   composer?: ComposerRunnerProps;
   workspaceSettings?: WorkspaceSettings;
@@ -153,8 +157,8 @@ export function ChatPage({
   isAgentListLoading = false,
   onSelectedAgentIdChange,
   environmentId = null,
-  onEnvironmentChange,
   workdir = null,
+  onSelectChat,
   composer,
   workspaceSettings = DEFAULT_WORKSPACE_SETTINGS,
   onWorkspacePanelWidthChange,
@@ -173,9 +177,22 @@ export function ChatPage({
   migrationRunnerAvailable = false,
 }: ChatPageProps) {
   const { messages, status } = useChatPageMessages({ chatId, seedContextInfo });
+  // Reads the same query as `messages` above; this is the conservative framing
+  // (an unloaded transcript locks) rather than a bare `messages.length > 0`.
+  const hasTurns = useChatHasTurns(chatId);
   const interruptedTurn = useMemo(() => findLatestInterruptedTurn(messages), [messages]);
   const { data: session } = authClient.useSession();
   const userName = session?.user?.name?.split(' ')[0] ?? '';
+  // A starter fills the composer instead of sending: the point of a starter is
+  // that you finish the sentence, and a one-click send spends a turn on a
+  // prompt nobody read.
+  const handleUsePrompt = useCallback(
+    (prompt: string) => {
+      setComposerDraft(chatId, prompt);
+      requestComposerFocus();
+    },
+    [chatId]
+  );
   const contextControls = useChatContextControls({
     chatId,
     contextInfo,
@@ -194,8 +211,18 @@ export function ChatPage({
             chatId={chatId}
             messages={messages}
             status={status}
-            userName={userName}
-            onSubmit={onSubmit}
+            hub={{
+              chatId,
+              userName,
+              workdir,
+              environmentId,
+              ...(composer?.runner?.kind === 'external'
+                ? { activeTargetId: composer.runner.targetId }
+                : {}),
+              ...(onOpenWorkdirPicker ? { onChooseWorkdir: onOpenWorkdirPicker } : {}),
+              ...(onSelectChat ? { onSelectChat } : {}),
+              onUsePrompt: handleUsePrompt,
+            }}
             onQuestionSubmit={
               isGenerating || disabled || contextControls.requiresDecision || isContextActionPending
                 ? undefined
@@ -258,10 +285,8 @@ export function ChatPage({
             agents={agents}
             isAgentListLoading={isAgentListLoading}
             onSelectedAgentIdChange={onSelectedAgentIdChange}
-            environmentId={environmentId}
-            onEnvironmentChange={onEnvironmentChange}
+            hasTurns={hasTurns}
             workdir={workdir}
-            onWorkdirClick={onOpenWorkdirPicker}
             {...composer}
           />
         </div>

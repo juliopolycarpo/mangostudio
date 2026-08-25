@@ -1,5 +1,4 @@
 import { describe, expect, it, jest } from 'bun:test';
-import type { Environment } from '@mangostudio/shared/environments';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { screen, waitFor } from '@testing-library/react';
@@ -18,23 +17,63 @@ function renderInputBar(overrides: Partial<React.ComponentProps<typeof InputBar>
 }
 
 describe('InputBar — chat-only composer', () => {
-  it('shows the agent selector only when onSelectedAgentIdChange is provided', () => {
-    const agents = [
-      {
-        id: 'default',
-        name: 'Default',
-        description: '',
-        kind: 'builtin',
-        role: 'primary',
-        source: { type: 'builtin' },
-        systemPrompt: '',
-        toolNames: [],
-        toolsEnabled: false,
-        subagentIds: [],
-        metadata: {},
-      },
-    ] as const;
+  /**
+   * The status-line props ride to `ComposerChipRow` through a rest spread now,
+   * and a spread keeps a key whose value is `undefined` — where a destructuring
+   * default would have replaced it. Both of these are dereferenced downstream,
+   * so a caller handing over an unsettled query used to be a crash waiting to
+   * happen rather than an empty chip.
+   */
+  it('survives status-line props handed over as explicit undefined', () => {
+    renderInputBar({
+      agents: undefined,
+      activeModels: undefined,
+      onSelectedAgentIdChange: jest.fn(),
+    });
 
+    expect(screen.getByTestId('composer')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Select agent' })).toBeInTheDocument();
+  });
+
+  // The chip row is the only thing that decides this: `ThinkingToggle` used to
+  // re-check a `visible` prop its one caller had already gated on, so the state
+  // this asserts was unreachable from inside the toggle.
+  it('offers no thinking chip when the active model has no reasoning to configure', () => {
+    const { unmount } = renderInputBar({
+      reasoningVisible: false,
+      onThinkingToggle: jest.fn(),
+      onReasoningEffortChange: jest.fn(),
+    });
+
+    expect(screen.queryByRole('button', { name: 'Thinking' })).toBeNull();
+    unmount();
+
+    renderInputBar({
+      reasoningVisible: true,
+      onThinkingToggle: jest.fn(),
+      onReasoningEffortChange: jest.fn(),
+    });
+
+    expect(screen.getByRole('button', { name: 'Thinking' })).toBeInTheDocument();
+  });
+
+  const agents = [
+    {
+      id: 'default',
+      name: 'Default',
+      description: '',
+      kind: 'builtin',
+      role: 'primary',
+      source: { type: 'builtin' },
+      systemPrompt: '',
+      toolNames: [],
+      toolsEnabled: false,
+      subagentIds: [],
+      metadata: {},
+    },
+  ] as const;
+
+  it('shows the agent selector only when onSelectedAgentIdChange is provided', () => {
     const { unmount } = renderInputBar({
       selectedAgentId: 'default',
       agents,
@@ -49,83 +88,35 @@ describe('InputBar — chat-only composer', () => {
       onSelectedAgentIdChange: jest.fn(),
     });
 
-    expect(screen.getByRole('combobox', { name: 'Select agent' })).toHaveValue('default');
+    // The chip is a button-and-listbox now, so its value is the text it shows
+    // rather than a form value.
+    expect(screen.getByRole('combobox', { name: 'Select agent' })).toHaveTextContent('Default');
   });
 
-  it('changes the chat execution environment from the composer pill', async () => {
-    const scenario = createFetchScenario();
-    const environments: Environment[] = [
-      {
-        id: 'local',
-        name: 'Local',
-        transportKind: 'in-process',
-        config: {},
-        enabled: true,
-        allowInstalls: false,
-        virtual: true,
-        createdAt: null,
-        updatedAt: null,
-        status: { state: 'connected' },
-      },
-      {
-        id: 'remote-dev',
-        name: 'Remote dev',
-        transportKind: 'ssh',
-        config: { host: 'dev.example.test' },
-        enabled: true,
-        allowInstalls: false,
-        virtual: false,
-        createdAt: 1,
-        updatedAt: 1,
-        status: { state: 'disconnected' },
-      },
-    ];
-    scenario.respondWithJson('GET', '/api/environments', { body: environments }).install();
-
-    try {
-      const user = userEvent.setup();
-      const onEnvironmentChange = jest.fn().mockResolvedValue(undefined);
-      renderInputBar({
-        chatId: 'chat-1',
-        environmentId: 'local',
-        onEnvironmentChange,
-      });
-
-      const selector = await screen.findByRole('combobox', {
-        name: 'Select execution environment',
-      });
-      expect(selector).toHaveValue('local');
-      // The pill renders before the listing lands, wearing the `disconnected`
-      // fallback and an option built from the id alone, so the connected state
-      // is only meaningful once the fetched environment backs it.
-      await waitFor(() =>
-        expect(screen.getByTestId('environment-selector')).toHaveAttribute(
-          'data-state',
-          'connected'
-        )
-      );
-      expect(selector).toHaveAccessibleDescription('Connected');
-      await user.selectOptions(selector, 'remote-dev');
-
-      expect(onEnvironmentChange).toHaveBeenCalledWith('remote-dev');
-    } finally {
-      scenario.restore();
-    }
-  });
-
-  it('shows the active workdir basename and reopens the picker', async () => {
-    const user = userEvent.setup();
-    const onWorkdirClick = jest.fn();
+  // The first prompt settles who runs the chat; from then on the chip is a
+  // fact, and switching lives in the header as "continue in a new chat".
+  it('locks the agent chip once the chat has turns and says why', () => {
     renderInputBar({
-      workdir: '/srv/projects/mangostudio',
-      onWorkdirClick,
+      selectedAgentId: 'default',
+      agents,
+      onSelectedAgentIdChange: jest.fn(),
+      hasTurns: true,
     });
 
-    const button = screen.getByRole('button', { name: 'Change working directory: mangostudio' });
-    expect(button).toHaveAttribute('title', '/srv/projects/mangostudio');
-    await user.click(button);
+    const chip = screen.getByRole('combobox', { name: 'Select agent' });
+    expect(chip).toBeDisabled();
+    expect(chip.getAttribute('title')).toContain('Locked after the first turn');
+  });
 
-    expect(onWorkdirClick).toHaveBeenCalledTimes(1);
+  // The env and dir chips moved to the header — the composer's status line
+  // must not offer either, whatever workdir the chat carries.
+  it('offers no environment or workdir control', () => {
+    renderInputBar({ workdir: '/srv/projects/mangostudio' });
+
+    expect(screen.queryByRole('combobox', { name: 'Select execution environment' })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Change working directory: mangostudio' })
+    ).toBeNull();
   });
 
   it('does not render a reference image upload button', () => {
@@ -436,5 +427,42 @@ describe('InputBar — external thread usage', () => {
     renderInputBar({});
 
     expect(screen.queryByTestId('external-usage')).toBeNull();
+  });
+});
+
+/**
+ * The composer acts as the runner, so its frame carries the runner's colour.
+ * Asserted at the one property everything else reads rather than at each
+ * border and fill, which are CSS and therefore not observable from here.
+ */
+describe('InputBar — the runner it is dressed as', () => {
+  it('hands MangoStudio chats the mango accent, so the default is unchanged', () => {
+    renderInputBar({ runner: { kind: 'mangostudio', agentId: 'default' } });
+
+    expect(screen.getByTestId('composer').style.getPropertyValue('--composer-accent')).toBe(
+      'var(--color-agent-mango)'
+    );
+  });
+
+  it('switches the whole frame to the vendor colour for an external runner', () => {
+    renderInputBar({ runner: { kind: 'external', targetId: 'codex' } });
+
+    expect(screen.getByTestId('composer').style.getPropertyValue('--composer-accent')).toBe(
+      'var(--color-agent-codex)'
+    );
+  });
+
+  it('names the vendor in the placeholder, and only the vendor', () => {
+    const { unmount } = renderInputBar({ runner: { kind: 'external', targetId: 'claude' } });
+    expect(screen.getByRole('textbox')).toHaveAttribute('placeholder', 'Message Claude Code…');
+    unmount();
+
+    // MangoStudio's own runner has no product name to say back, so it keeps
+    // the generic prompt.
+    renderInputBar({ runner: { kind: 'mangostudio', agentId: 'default' } });
+    expect(screen.getByRole('textbox')).toHaveAttribute(
+      'placeholder',
+      'Ask the AI model anything...'
+    );
   });
 });

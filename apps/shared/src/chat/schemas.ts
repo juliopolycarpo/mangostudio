@@ -71,7 +71,7 @@ const ContextModeSchema = Type.Union([
   Type.Literal('compacted'),
   Type.Literal('degraded'),
 ]);
-const ContextSeveritySchema = Type.Union([
+export const ContextSeveritySchema = Type.Union([
   Type.Literal('normal'),
   Type.Literal('info'),
   Type.Literal('warning'),

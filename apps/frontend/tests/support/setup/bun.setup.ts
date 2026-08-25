@@ -15,6 +15,8 @@
 import { afterEach, expect } from 'bun:test';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { cleanup } from '@testing-library/react';
+import { resetThinkingBlockStateForTest } from '../../../src/features/chat/components/ThinkingBlock';
+import { resetComposerDraftsForTest } from '../../../src/features/chat/lib/composer-draft-store';
 import { restoreClipboard } from '../harness/clipboard';
 import { restoreRealTimers } from '../harness/timers';
 import { resetTestSession } from './auth-client-stub';
@@ -144,4 +146,12 @@ afterEach(async () => {
   // A file that swapped `fetch` and did not put it back cannot poison the next
   // one in the shared process.
   globalThis.fetch = unreachableFetch as unknown as typeof fetch;
+  // Composer drafts and prompt history are module-level and session-scoped by
+  // design, so they outlive `cleanup()`: without this, text typed into one
+  // test's composer is still there when the next one mounts a fresh composer.
+  resetComposerDraftsForTest();
+  // Same story for a thought's expansion and its measured elapsed time, which
+  // have to survive a virtualized row unmounting mid-stream.
+  resetThinkingBlockStateForTest();
+  sessionStorage.clear();
 });

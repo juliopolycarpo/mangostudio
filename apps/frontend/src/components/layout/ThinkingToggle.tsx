@@ -1,118 +1,70 @@
 import type { ReasoningEffort } from '@mangostudio/shared';
-import { Brain, Check, ChevronDown } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
+import { Brain } from 'lucide-react';
+import { ChipSelect } from '@/components/ui/ChipSelect';
 import { useI18n } from '@/hooks/use-i18n';
 
 interface ThinkingToggleProps {
   enabled: boolean;
   effort: ReasoningEffort;
-  visible: boolean;
   onToggle: (enabled: boolean) => void;
   onEffortChange: (effort: ReasoningEffort) => void;
 }
 
-export function ThinkingToggle({
-  enabled,
-  effort,
-  visible,
-  onToggle,
-  onEffortChange,
-}: ThinkingToggleProps) {
+/**
+ * The efforts this control offers, which is not the whole vocabulary.
+ *
+ * `xhigh` and `max` exist in `ReasoningEffort` and provider settings offers
+ * them, filtered by the provider's own `supportedEfforts`. This chip has no
+ * policy to filter against, so it stays on the three every reasoning provider
+ * takes rather than offering one a provider would refuse — but it still has to
+ * *name* an effort set elsewhere, which is why the label map below covers all
+ * five while this list does not.
+ */
+const OFFERED_EFFORTS: ReasoningEffort[] = ['low', 'medium', 'high'];
+
+export function ThinkingToggle({ enabled, effort, onToggle, onEffortChange }: ThinkingToggleProps) {
   const { t } = useI18n();
-  const [isOpen, setIsOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setIsOpen(false);
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [isOpen]);
-
-  if (!visible) return null;
-
-  const efforts: ReasoningEffort[] = ['low', 'medium', 'high'];
   const effortLabels: Record<ReasoningEffort, string> = {
     low: t.thinking.effortLow,
     medium: t.thinking.effortMedium,
     high: t.thinking.effortHigh,
-    xhigh: t.thinking.effortHigh,
-    max: t.thinking.effortHigh,
+    xhigh: t.thinking.effortXHigh,
+    max: t.thinking.effortMax,
   };
 
   return (
-    <div className="relative" ref={ref}>
-      <div className="flex items-center gap-1.5">
-        {/* Reasoning toggle button — pill style matching the rest of the app */}
-        <button
-          type="button"
-          onClick={() => onToggle(!enabled)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 ${
-            enabled
-              ? 'bg-primary/15 text-primary border border-primary/30'
-              : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest border border-transparent'
-          }`}
-        >
-          <Brain size={13} />
-          <span>{t.thinking.enable}</span>
-        </button>
+    <div className="flex items-center gap-0.5">
+      <button
+        type="button"
+        onClick={() => onToggle(!enabled)}
+        aria-pressed={enabled}
+        // The on state is styled off `aria-pressed` in `index.css`, so it
+        // follows the composer's runner accent rather than the product primary.
+        className="composer-chip"
+      >
+        <Brain size={12} className="shrink-0" />
+        <span>{t.thinking.enable}</span>
+      </button>
 
-        {/* Effort selector — only visible when reasoning is on */}
-        {enabled && (
-          <button
-            type="button"
-            onClick={() => setIsOpen(!isOpen)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-all duration-200 text-xs font-medium border border-outline-variant/20"
-          >
-            <span>{effortLabels[effort]}</span>
-            <ChevronDown
-              size={11}
-              className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
-            />
-          </button>
-        )}
-      </div>
-
-      {/* Dropdown — opens upward since it's above the input */}
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: 6, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 6, scale: 0.95 }}
-            transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="dropdown-panel absolute left-0 top-full mt-3 w-40"
-          >
-            <div className="py-1">
-              {efforts.map((e) => (
-                <button
-                  key={e}
-                  type="button"
-                  onClick={() => {
-                    onEffortChange(e);
-                    setIsOpen(false);
-                  }}
-                  className="w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-primary/10 transition-colors group/item"
-                >
-                  <span
-                    className={
-                      effort === e
-                        ? 'text-primary font-medium'
-                        : 'text-on-surface group-hover/item:text-primary/90'
-                    }
-                  >
-                    {effortLabels[e]}
-                  </span>
-                  {effort === e && <Check size={14} className="text-primary" />}
-                </button>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Effort selector — only visible when reasoning is on */}
+      {enabled ? (
+        <ChipSelect
+          value={effort}
+          options={OFFERED_EFFORTS.map((candidate) => ({
+            value: candidate,
+            label: effortLabels[candidate],
+          }))}
+          onChange={(next) => onEffortChange(next as ReasoningEffort)}
+          ariaLabel={t.thinking.effort}
+          // An effort set from provider settings can sit outside the offered
+          // three; the chip has to say which one it is rather than round it
+          // down to the nearest thing in its own list.
+          placeholder={effortLabels[effort]}
+          className="max-w-[9rem]"
+          panelClassName="w-40"
+        />
+      ) : null}
     </div>
   );
 }

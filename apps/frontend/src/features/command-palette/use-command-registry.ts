@@ -11,6 +11,7 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useNavigate } from '@tanstack/react-router';
 import { useMemo, useRef, useState } from 'react';
+import { useChatHasTurns } from '@/features/chat/hooks/use-chat-has-turns';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { actionCommands } from '@/features/command-palette/sources/action-commands';
 import { environmentCommands } from '@/features/command-palette/sources/environment-commands';
@@ -60,6 +61,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
   // the memo on it does not reintroduce the per-token rebuild the ref below
   // exists to avoid.
   const { agents, chats, currentChatId, isGenerating } = app;
+  const chatHasTurns = useChatHasTurns(currentChatId);
 
   // The active runner's quota, on the same identity-guarded entry the header
   // pill and the selector chip share — so refreshing from the palette lights
@@ -110,6 +112,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
       resolvedTheme,
       hasChat: currentChatId !== null,
       isGenerating,
+      chatHasTurns,
       newChatShortcut: newChatShortcutHint(),
       // Omitted rather than disabled while already running: the shared
       // mutation key only exposes activity through `useIsMutating`, so a
@@ -170,6 +173,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
   }, [
     agents,
     chats,
+    chatHasTurns,
     currentChatId,
     environmentsQuery.data,
     external.agents,

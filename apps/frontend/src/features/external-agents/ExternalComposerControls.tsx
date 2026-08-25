@@ -21,8 +21,8 @@ import type {
   ExternalApprovalRouting,
   ExternalPermissionLevel,
 } from '@mangostudio/shared/external-agents';
-import { Cpu } from 'lucide-react';
 import { useEffect, useRef } from 'react';
+import { ChipSelect } from '@/components/ui/ChipSelect';
 import { PermissionSelector } from '@/features/chat/components/PermissionSelector';
 import { useI18n } from '@/hooks/use-i18n';
 
@@ -92,47 +92,41 @@ export function ExternalComposerControls({
   return (
     <>
       {models.length > 0 ? (
-        <label className="contents">
-          <span className="sr-only">{labels.model.label}</span>
-          <select
-            value={selectedModel?.id ?? ''}
-            disabled={disabled}
-            onChange={(event) => {
-              onModelChange(event.target.value || null);
-              // The effort vocabulary belongs to the model, so a model change
-              // invalidates it rather than carrying a value the new model may
-              // not offer.
-              onEffortChange(null);
-            }}
-            aria-label={labels.model.label}
-            className="h-7 max-w-[12rem] rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2 text-[10px] font-medium text-on-surface-variant outline-none transition-colors hover:text-on-surface focus:border-primary/40 sm:text-[11px]"
-          >
-            {models.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.displayName ?? candidate.id}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ChipSelect
+          value={selectedModel?.id ?? ''}
+          options={models.map((candidate) => ({
+            value: candidate.id,
+            label: candidate.displayName ?? candidate.id,
+          }))}
+          onChange={(next) => {
+            onModelChange(next || null);
+            // The effort vocabulary belongs to the model, so a model change
+            // invalidates it rather than carrying a value the new model may
+            // not offer.
+            onEffortChange(null);
+          }}
+          label={t.chat.input.modelLabel}
+          ariaLabel={labels.model.label}
+          disabled={disabled}
+          valueClassName="composer-chip-runner"
+          panelClassName="w-64"
+        />
       ) : null}
 
       {efforts.length > 0 ? (
-        <label className="contents">
-          <span className="sr-only">{labels.model.effortLabel}</span>
-          <select
-            value={effort ?? selectedModel?.defaultReasoningEffort ?? ''}
-            disabled={disabled}
-            onChange={(event) => onEffortChange(event.target.value || null)}
-            aria-label={labels.model.effortLabel}
-            className="h-7 max-w-[9rem] rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2 text-[10px] font-medium text-on-surface-variant outline-none transition-colors hover:text-on-surface focus:border-primary/40 sm:text-[11px]"
-          >
-            {efforts.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.displayName ?? candidate.id}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ChipSelect
+          value={effort ?? selectedModel?.defaultReasoningEffort ?? ''}
+          options={efforts.map((candidate) => ({
+            value: candidate.id,
+            label: candidate.displayName ?? candidate.id,
+          }))}
+          onChange={(next) => onEffortChange(next || null)}
+          label={t.chat.input.effortLabel}
+          ariaLabel={labels.model.effortLabel}
+          disabled={disabled}
+          className="max-w-[11rem]"
+          panelClassName="w-44"
+        />
       ) : null}
 
       <PermissionSelector
@@ -142,13 +136,6 @@ export function ExternalComposerControls({
         disabled={disabled}
         onChange={onPermissionsChange}
       />
-
-      {/* The quiet line the user should never have to guess at: MangoStudio's
-          own tool settings do not apply to a turn it is not running. */}
-      <span className="flex items-center gap-1 text-[10px] text-on-surface-variant/60 sm:text-[11px]">
-        <Cpu size={11} className="shrink-0" />
-        {labels.selector.ownership.replace('{vendor}', labels.target[descriptor.targetId])}
-      </span>
 
       {models.length === 0 ? (
         // Nothing to pick, so nothing is shown — but a reader deserves to know

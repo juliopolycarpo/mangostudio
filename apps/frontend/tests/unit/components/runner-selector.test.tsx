@@ -209,6 +209,35 @@ describe('D14 — one runner kind per chat', () => {
     });
     expect(props.onSelectAgent).not.toHaveBeenCalled();
   });
+
+  // The lock is on the runner, not just its kind: a within-kind move after the
+  // first turn is still a different runner owning the transcript.
+  it('forks another MangoStudio agent once the chat has turns, instead of switching in place', () => {
+    const { props } = renderSelector({ hasTurns: true });
+    fireEvent.click(screen.getByRole('option', { name: /Explore/ }));
+    expect(props.onForkWithRunner).toHaveBeenCalledWith({
+      kind: 'mangostudio',
+      agentId: 'explore',
+    });
+    expect(props.onSelectAgent).not.toHaveBeenCalled();
+  });
+
+  it('forks a vendor swap from an external chat with turns', () => {
+    const { props } = renderSelector({
+      runner: { kind: 'external', targetId: 'claude' },
+      externalAgents: [descriptor(), descriptor({ targetId: 'claude' })],
+      hasTurns: true,
+    });
+    fireEvent.click(codexOption());
+    expect(props.onForkWithRunner).toHaveBeenCalledWith({ kind: 'external', targetId: 'codex' });
+    expect(props.onSelectExternal).not.toHaveBeenCalled();
+  });
+
+  it('never forks on re-picking the active agent', () => {
+    const { props } = renderSelector({ hasTurns: true });
+    fireEvent.click(screen.getByRole('option', { name: /Default/ }));
+    expect(props.onForkWithRunner).not.toHaveBeenCalled();
+  });
 });
 
 /**

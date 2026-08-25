@@ -445,6 +445,13 @@ export const ExternalThreadUsageSchema = Type.Object(
   {
     last: Type.Optional(ExternalUsageSchema),
     total: Type.Optional(ExternalUsageSchema),
+    /**
+     * The window the vendor says the active model has, when it says so. It is
+     * the only denominator that makes a percentage honest, so an adapter that
+     * cannot report one must omit the field rather than guess a default — the
+     * UI reads its absence as "no percentage to show".
+     */
+    contextWindowTokens: Type.Optional(Type.Integer({ minimum: 1 })),
   },
   { additionalProperties: false }
 );

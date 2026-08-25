@@ -83,25 +83,29 @@ export function ModelSelector({
   };
 
   return (
-    <div className="relative" ref={containerRef}>
+    <div className="relative flex items-center" ref={containerRef}>
       <button
         type="button"
         onClick={handleToggle}
         disabled={isDisabled}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-label={t.chat.input.modelLabel}
+        // The open state is styled off `aria-expanded` in `index.css`, so it
+        // follows the composer's runner accent rather than the product primary.
         className={cn(
-          'flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all duration-200 border border-transparent',
-          'group hover:bg-surface-container-high active:scale-95',
-          isOpen && 'bg-surface-container-high border-primary/20',
+          'composer-chip group max-w-[13rem]',
           isDisabled && 'opacity-50 cursor-not-allowed'
         )}
       >
-        <span className="font-headline text-lg font-bold tracking-tight text-on-background group-hover:text-primary transition-colors">
+        <span className="composer-chip-key text-on-surface-variant/70">{`${t.chat.input.modelLabel}:`}</span>
+        <span className="composer-chip-value composer-chip-runner">
           {selectedModel?.displayName || placeholder}
         </span>
         <ChevronDown
           className={cn(
-            'w-4 h-4 text-on-background/40 group-hover:text-primary transition-all duration-200',
-            isOpen && 'rotate-180 text-primary'
+            'size-3 shrink-0 text-on-surface-variant/50 transition-transform duration-200',
+            isOpen && 'rotate-180 text-current'
           )}
         />
       </button>
@@ -113,7 +117,10 @@ export function ModelSelector({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.95 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="dropdown-panel absolute left-0 top-full mt-3 w-[19rem] max-h-[70vh] hide-scrollbar overflow-y-auto"
+            /* Upward: this control lives in the composer at the foot of the
+               viewport, and the downward panel it inherited from the header
+               opened off the bottom of the screen. */
+            className="dropdown-panel absolute left-0 bottom-full mb-2 w-[19rem] max-h-[60vh] hide-scrollbar overflow-y-auto"
           >
             <div className="py-2">
               {Object.keys(groups).length === 0 ? (

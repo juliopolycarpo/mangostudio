@@ -15,6 +15,7 @@ interface CodeHighlighter {
 export interface MarkdownContentProps {
   content: string;
   className?: string;
+  /** Trails the last rendered line with a blinking caret. */
   isStreaming?: boolean;
   copyCodeLabel?: string;
   codeCopiedLabel?: string;
@@ -25,6 +26,7 @@ export interface MarkdownContentProps {
 export function MarkdownContentRenderer({
   content,
   className,
+  isStreaming = false,
   copyCodeLabel,
   codeCopiedLabel,
 }: MarkdownContentProps) {
@@ -57,7 +59,7 @@ export function MarkdownContentRenderer({
   return (
     <div
       ref={containerRef}
-      className={`markdown-content ${className ?? ''}`}
+      className={`markdown-content ${isStreaming ? 'markdown-content--streaming ' : ''}${className ?? ''}`}
       // HTML is produced by `marked` with a custom renderer that only emits
       // a fixed tag set and escapes raw HTML; rendering as HTML is required
       // to surface Shiki-highlighted code blocks and safe link elements.

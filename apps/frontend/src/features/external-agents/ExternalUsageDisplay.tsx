@@ -1,23 +1,39 @@
 /**
- * Compact token figures for external turns — only fields the vendor reported.
- * Renders nothing until at least one reported field arrives (absent ≠ zero).
+ * External token usage as one ring on the composer strip.
+ *
+ * The scopes and their wording live here; the ring and its hover panel are
+ * `ContextUsageChip`, which the MangoStudio runner's own context chip draws
+ * through too — the strip should not read one way per runner.
+ *
+ * Only fields the vendor reported are shown, and a vendor that reports no
+ * window gets the compact total instead of a percentage: absent is not zero,
+ * and a made-up denominator is worse than no ring.
  */
 
 import type { ExternalThreadUsage, ExternalUsage } from '@mangostudio/shared/external-agents';
+import { externalContextUsage, externalReportedTokens } from '@mangostudio/shared/external-agents';
+import type { Messages } from '@mangostudio/shared/i18n';
+import type { ContextUsageLine } from '@/components/ui/ContextUsageChip';
+import { ContextUsageChip } from '@/components/ui/ContextUsageChip';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatTokensCompact } from '@/lib/format-tokens';
+import { formatMessage } from '@/lib/i18n-format';
 
-function formatTokensCompact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
-  return String(n);
-}
+type UsageLabels = Messages['externalAgents']['usage'];
 
-function usageFields(usage: ExternalUsage): Array<{ key: string; value: number }> {
-  const fields: Array<{ key: string; value: number }> = [];
-  if (usage.inputTokens !== undefined) fields.push({ key: 'input', value: usage.inputTokens });
-  if (usage.outputTokens !== undefined) fields.push({ key: 'output', value: usage.outputTokens });
-  if (usage.totalTokens !== undefined) fields.push({ key: 'total', value: usage.totalTokens });
-  return fields;
+/** `in 29k · out 1.2k · total 30k`, skipping whatever the vendor left out. */
+function describeUsage(usage: ExternalUsage, labels: UsageLabels): string | null {
+  const parts: string[] = [];
+  if (usage.inputTokens !== undefined) {
+    parts.push(`${labels.input} ${formatTokensCompact(usage.inputTokens)}`);
+  }
+  if (usage.outputTokens !== undefined) {
+    parts.push(`${labels.output} ${formatTokensCompact(usage.outputTokens)}`);
+  }
+  if (usage.totalTokens !== undefined) {
+    parts.push(`${labels.total} ${formatTokensCompact(usage.totalTokens)}`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
 }
 
 export function ExternalUsageDisplay({
@@ -30,51 +46,59 @@ export function ExternalUsageDisplay({
   const { t } = useI18n();
   const labels = t.externalAgents.usage;
 
-  const turnFields = turn ? usageFields(turn) : [];
-  const threadTotal = thread?.total;
-  const threadFields = threadTotal ? usageFields(threadTotal) : [];
+  const turnLine = turn ? describeUsage(turn, labels) : null;
+  const threadLine = thread?.total ? describeUsage(thread.total, labels) : null;
+  const context = externalContextUsage(thread);
 
-  if (turnFields.length === 0 && threadFields.length === 0) {
+  if (turnLine === null && threadLine === null) {
     return null;
   }
 
+  const contextLine = context
+    ? formatMessage(labels.contextValue, {
+        used: formatTokensCompact(context.usedTokens),
+        limit: formatTokensCompact(context.windowTokens),
+        percent: String(context.percent),
+      })
+    : labels.contextUnknown;
+
+  // Without a window there is no percentage to draw, so the fallback is the
+  // one figure that still means something on its own.
+  const fallbackScope = thread?.total ?? turn;
+  const fallback = fallbackScope ? externalReportedTokens(fallbackScope) : null;
+
+  const lines: ContextUsageLine[] = [];
+  if (turnLine !== null) {
+    lines.push({
+      key: 'turn',
+      label: labels.turnLabel,
+      value: turnLine,
+      testId: 'external-usage-turn',
+    });
+  }
+  if (threadLine !== null) {
+    lines.push({
+      key: 'thread',
+      label: labels.threadLabel,
+      value: threadLine,
+      testId: 'external-usage-thread',
+    });
+  }
+  lines.push({
+    key: 'context',
+    label: labels.contextLabel,
+    value: contextLine,
+    testId: 'external-usage-context',
+  });
+
   return (
-    <span
-      className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] sm:text-[11px] text-on-surface-variant/70 tabular-nums"
-      data-testid="external-usage"
-    >
-      {turnFields.length > 0 ? (
-        <span data-testid="external-usage-turn">
-          {labels.turnLabel}:{' '}
-          {turnFields
-            .map((field) => {
-              const name =
-                field.key === 'input'
-                  ? labels.input
-                  : field.key === 'output'
-                    ? labels.output
-                    : labels.total;
-              return `${name} ${formatTokensCompact(field.value)}`;
-            })
-            .join(' · ')}
-        </span>
-      ) : null}
-      {threadFields.length > 0 ? (
-        <span data-testid="external-usage-thread">
-          {labels.threadLabel}:{' '}
-          {threadFields
-            .map((field) => {
-              const name =
-                field.key === 'input'
-                  ? labels.input
-                  : field.key === 'output'
-                    ? labels.output
-                    : labels.total;
-              return `${name} ${formatTokensCompact(field.value)}`;
-            })
-            .join(' · ')}
-        </span>
-      ) : null}
-    </span>
+    <ContextUsageChip
+      ratio={context?.ratio}
+      severity={context?.severity}
+      fallback={fallback === null ? '\u2014' : formatTokensCompact(fallback)}
+      lines={lines}
+      ariaLabelPrefix={labels.indicatorLabel}
+      testId="external-usage"
+    />
   );
 }

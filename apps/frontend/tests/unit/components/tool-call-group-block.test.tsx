@@ -1,8 +1,20 @@
 import { beforeEach, describe, expect, it, jest } from 'bun:test';
+import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions';
 import { fireEvent, screen, within } from '@testing-library/react';
 import { ToolCallGroupBlock } from '@/features/chat/components/ToolCallGroupBlock';
 import type { ToolCallEntry } from '@/features/chat/components/tool-call-grouping';
 import { render } from '../../support/harness/render';
+
+function executionSnapshot(durationMs: number): ToolExecutionSnapshot {
+  return {
+    status: 'succeeded',
+    source: 'builtin',
+    queuedAt: 1_000,
+    startedAt: 1_001,
+    finishedAt: 1_001 + durationMs,
+    durationMs,
+  };
+}
 
 function entry(overrides: Partial<ToolCallEntry> = {}): ToolCallEntry {
   return {
@@ -60,7 +72,7 @@ describe('ToolCallGroupBlock', () => {
   });
 
   it('shows an error tone when any call failed', () => {
-    render(
+    const { container } = render(
       <ToolCallGroupBlock
         calls={[
           entry({ toolCallId: 't1' }),
@@ -69,7 +81,47 @@ describe('ToolCallGroupBlock', () => {
       />
     );
 
-    expect(screen.getByRole('button', { name: /\+1 more/i }).className).toContain('text-error');
+    // A collapsed run must never hide a failure behind its neighbours.
+    expect(container.querySelector('.chat-timeline-item--error')).toBeInTheDocument();
+    expect(screen.getAllByText('Read')[0].className).toContain('text-error');
+  });
+
+  it('totals the run beside the summary row', () => {
+    render(
+      <ToolCallGroupBlock
+        calls={[
+          entry({ toolCallId: 't1', execution: executionSnapshot(47) }),
+          entry({ toolCallId: 't2', execution: executionSnapshot(51) }),
+        ]}
+      />
+    );
+
+    const summary = screen.getByRole('button', { name: /\+1 more/i });
+    expect(summary).toHaveTextContent('2 files');
+    expect(summary).toHaveTextContent('98ms');
+  });
+
+  it('sums the units a search run actually returned', () => {
+    render(
+      <ToolCallGroupBlock
+        calls={[
+          entry({
+            toolCallId: 't1',
+            name: 'grep',
+            args: { pattern: 'a' },
+            result: '{"matches":[{"file":"a"},{"file":"b"}]}',
+          }),
+          entry({
+            toolCallId: 't2',
+            name: 'grep',
+            args: { pattern: 'b' },
+            result: '{"matches":[{"file":"c"}]}',
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /\+1 more/i })).toHaveTextContent('3 hits');
   });
 
   it('opens failed calls and presents their remediation without a JSON wrapper', () => {
@@ -105,15 +157,16 @@ describe('ToolCallGroupBlock', () => {
       />
     );
 
-    const summary = screen.getByRole('button');
-    expect(summary.className).toContain('text-on-surface-variant');
-    expect(summary.className).not.toContain('text-success');
+    const label = screen.getAllByText('Read')[0];
+    expect(label.className).toContain('text-on-surface-variant');
+    expect(label.className).not.toContain('text-success');
+    expect(container.querySelector('.chat-timeline-item--muted')).toBeInTheDocument();
     expect(container.querySelector('.lucide-ban')).toBeInTheDocument();
-    expect(container.querySelector('.lucide-circle-check-big')).not.toBeInTheDocument();
+    expect(container.querySelector('.lucide-check')).not.toBeInTheDocument();
   });
 
   it('shows an error tone when any call timed out', () => {
-    render(
+    const { container } = render(
       <ToolCallGroupBlock
         calls={[
           entry({ toolCallId: 't1' }),
@@ -122,11 +175,11 @@ describe('ToolCallGroupBlock', () => {
       />
     );
 
-    expect(screen.getByRole('button', { name: /\+1 more/i }).className).toContain('text-error');
+    expect(container.querySelector('.chat-timeline-item--error')).toBeInTheDocument();
   });
 
   it('shows a pending tone when any call awaits user input', () => {
-    render(
+    const { container } = render(
       <ToolCallGroupBlock
         calls={[
           entry({ toolCallId: 't1' }),
@@ -135,6 +188,7 @@ describe('ToolCallGroupBlock', () => {
       />
     );
 
-    expect(screen.getByRole('button').className).toContain('text-primary');
+    expect(screen.getAllByText('Read')[0].className).toContain('text-primary');
+    expect(container.querySelector('.chat-timeline-item--active')).toBeInTheDocument();
   });
 });

@@ -42,6 +42,8 @@ export const messages: Messages = {
       generate: 'Generate',
       stop: 'Stop',
       placeholder: 'Ask the AI model anything...',
+      /** Used instead of `placeholder` when a vendor CLI runs the chat. */
+      placeholderRunner: 'Message {agent}…',
       imagePlaceholder: 'Describe your image...',
       addReferenceImage: 'Add reference image',
       createImages: 'Create images',
@@ -63,6 +65,25 @@ export const messages: Messages = {
       selectEnvironment: 'Select execution environment',
       environmentsLoading: 'Loading environments...',
       environmentUpdateFailed: 'The execution environment could not be changed.',
+      newlineHint: 'Shift+Enter for a new line',
+      dropHint: 'Drop to attach',
+      attachUploading: 'Uploading {name}…',
+      attachFailed: 'Could not attach {name}.',
+      attachNeedsChat: 'Open a chat before attaching files.',
+      historyRecall: 'Prompt history: ↑ and ↓ while the box is empty',
+      showControls: 'Show chat controls',
+      hideControls: 'Hide chat controls',
+      agentLabel: 'agent',
+      agentLocked:
+        'Locked after the first turn — pick a runner in the header to continue in a new chat.',
+      modelLabel: 'model',
+      environmentLabel: 'env',
+      /**
+       * The status line's key for reasoning effort. Short on purpose: the
+       * picker's own `Reasoning effort` heading is too long for a strip that
+       * already carries five other keys, and squeezed the value to one letter.
+       */
+      effortLabel: 'effort',
     },
     capabilities: {
       button: 'Capabilities',
@@ -194,6 +215,8 @@ export const messages: Messages = {
       label: 'Context',
       tokens: '~{used} / {limit} tokens',
       modeStateful: 'Stateful',
+      modeStatelessLoop: 'Stateless loop',
+      modeLabel: 'Mode',
       modeReplay: 'Replay',
       modeCompacted: 'Compacted',
       modeDegraded: 'Degraded',
@@ -304,12 +327,6 @@ export const messages: Messages = {
       failed: 'Could not revert file changes.',
     },
     scrollToBottom: 'Scroll to bottom',
-    emptyGreeting: 'Hello, {name}!',
-    emptySubtitle: 'How can I help you today?',
-    suggestion1: 'Explain a complex concept simply',
-    suggestion2: 'Write a Python script to...',
-    suggestion3: 'Help me debug a problem',
-    suggestion4: 'Create an image',
     systemEvents: {
       chatCompacted: 'Context compacted into a summary',
       summaryHandoff: 'This chat started from a summarized handoff',
@@ -317,6 +334,71 @@ export const messages: Messages = {
       // The marker an adopted chat opens with. It names the vendor because the
       // history above this line is theirs and is not shown here.
       externalSessionAdopted: 'Continuing a {vendor} session started outside MangoStudio',
+    },
+  },
+
+  home: {
+    greeting: {
+      morning: 'Good morning, {name}.',
+      afternoon: 'Good afternoon, {name}.',
+      evening: 'Good evening, {name}.',
+      morningAnonymous: 'Good morning.',
+      afternoonAnonymous: 'Good afternoon.',
+      eveningAnonymous: 'Good evening.',
+      subtitle: 'Your workspace is ready. Here is where it stands.',
+    },
+    workspace: {
+      label: 'Workspace',
+      cleanTree: 'clean tree',
+      dirtyTree: '{count} file(s) changed',
+      synced: 'synced with origin',
+      noUpstream: 'no upstream',
+      detached: 'detached HEAD at {hash}',
+      noWorkdir: 'This chat does not point at a folder yet.',
+      chooseWorkdir: 'Choose a folder',
+      notARepo: 'This folder is not a Git repository.',
+      unavailable: 'Git is not available in this environment.',
+    },
+    agents: {
+      label: 'Agents',
+      empty: 'No agent CLI detected in this environment.',
+      manage: 'Manage agents',
+      quotaRefresh: 'Refresh quota',
+    },
+    skills: {
+      label: 'Skills',
+      labelDivergent: 'Skills — {count} divergence(s)',
+      divergenceBody: 'Different version in {outliers} than in {agreeing}.',
+      divergenceBodyNoMajority: '{targets} read different versions of this skill.',
+      more: '{count} more skill(s) diverge.',
+      propagate: 'Propagate',
+      viewDiff: 'View diff',
+      singleTarget: '{count} skill(s) live in a single agent.',
+      openLibrary: 'Open in the library',
+    },
+    uncommitted: {
+      label: 'Uncommitted work',
+      changed: '{count} changed',
+      unpushed: '{count} unpushed',
+      more: 'And {count} more chat(s).',
+      open: 'Open {title}',
+    },
+    environments: {
+      label: 'Environments',
+      disconnected: 'not connected',
+      failed: 'failed',
+      open: 'Open environments',
+    },
+    starters: {
+      label: 'Start with',
+      reviewChanges: 'Review my uncommitted changes',
+      commitMessage: 'Write the commit message for what changed',
+      branchSummary: 'Summarize what changed on this branch',
+      explainCodebase: 'Explain this codebase to me',
+      writeTests: 'Write tests for the code that changed recently',
+      explainConcept: 'Explain a complex concept simply',
+      pythonScript: 'Write a Python script to...',
+      debug: 'Help me debug a problem',
     },
   },
 
@@ -1596,7 +1678,7 @@ export const messages: Messages = {
     settingsNavigation: 'Settings navigation',
     openMenu: 'Open menu',
     closeMenu: 'Close menu',
-    disclaimer: 'Artificial Intelligence can make mistakes. Please double-check the results.',
+    disclaimer: 'AI can make mistakes. Double-check the results.',
     dismissToast: 'Dismiss toast',
   },
 
@@ -2855,7 +2937,11 @@ export const messages: Messages = {
       input: 'in',
       output: 'out',
       total: 'total',
-      unknown: 'Usage unknown',
+      /** Names the ring on the composer strip; the breakdown lives in its tooltip. */
+      indicatorLabel: 'Token usage',
+      contextLabel: 'Context',
+      contextValue: '{used}/{limit} · {percent}%',
+      contextUnknown: 'Context window unknown',
     },
     limits: {
       remaining: '{percent}% left',
@@ -2945,6 +3031,8 @@ export const messages: Messages = {
     },
     permission: {
       label: 'Permissions',
+      /** The key half of the composer's `mode: read-only` chip. */
+      modeKey: 'mode',
       whatItCanDo: 'What it can do',
       whoApproves: 'Who approves',
       unattendedLevelWarning: 'this agent can edit and run anything',
@@ -3106,10 +3194,10 @@ export const messages: Messages = {
   },
 
   thinking: {
-    label: 'Thought process',
     labelContinued: 'Continued thinking',
     streaming: 'Thinking...',
     streamingContinued: 'Thinking again...',
+    thought: 'Thought',
     toggle: 'View reasoning',
     enable: 'Thinking',
     enabled: 'Thinking enabled',
@@ -3148,6 +3236,22 @@ export const messages: Messages = {
       skill: 'Skill',
       mcp: 'MCP',
       subagent: 'Subagent',
+    },
+    /** What a finished call produced, shown right-aligned on the timeline row. */
+    summary: {
+      item: '{count} item',
+      items: '{count} items',
+      file: '{count} file',
+      files: '{count} files',
+      line: '{count} line',
+      lines: '{count} lines',
+      hit: '{count} hit',
+      hits: '{count} hits',
+      replacement: '{count} replacement',
+      replacements: '{count} replacements',
+      call: '{count} call',
+      calls: '{count} calls',
+      exitCode: 'exit {code}',
     },
     diff: {
       opCreate: 'new',

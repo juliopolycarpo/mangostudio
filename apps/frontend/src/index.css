@@ -87,23 +87,26 @@
       transform: translateX(100%);
     }
   }
+}
 
-  @keyframes blink {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0;
-    }
+/* Top level rather than inside `@theme`: the only consumer of `--animate-blink`
+ * is a plain CSS rule (the streaming caret in `markdown-content.css`), and
+ * keyframes declared in `@theme` are emitted for the utilities that reference
+ * the token — which would leave a caret that never blinks, past check, test
+ * and build. */
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
   }
 }
 
 /* ── Theme-aware glass & overlay tokens (dark defaults) ── */
 :root {
   --glass-bg: rgba(50, 46, 41, 0.6);
-  --glass-surface: rgba(13, 12, 10, 0.6);
-  --glass-surface-subtle: rgba(13, 12, 10, 0.5);
   --glass-elevated: rgba(26, 24, 21, 0.85);
   --glass-border: rgba(255, 246, 230, 0.1);
   --glass-ring: rgba(255, 246, 230, 0.05);
@@ -159,8 +162,6 @@
 
   /* Glass & overlay overrides */
   --glass-bg: rgba(255, 253, 248, 0.7);
-  --glass-surface: rgba(255, 253, 248, 0.65);
-  --glass-surface-subtle: rgba(255, 253, 248, 0.55);
   --glass-elevated: rgba(255, 253, 248, 0.9);
   --glass-border: rgba(40, 30, 10, 0.08);
   --glass-ring: rgba(40, 30, 10, 0.04);
@@ -177,16 +178,6 @@ body {
 .glass-panel {
   background: var(--glass-bg);
   backdrop-filter: blur(20px);
-}
-
-.glass-surface {
-  background: var(--glass-surface);
-  backdrop-filter: blur(8px);
-}
-
-.glass-surface-subtle {
-  background: var(--glass-surface-subtle);
-  backdrop-filter: blur(12px);
 }
 
 .glass-elevated {
@@ -243,6 +234,281 @@ body {
     border-radius: 0.375rem;
     background: var(--color-surface-container-low);
     color: var(--color-on-surface-variant);
+  }
+
+  /*
+   * The composer's own chip dialect: same mono key:value reading as
+   * `.terminal-chip`, but borderless, because a dozen bordered pills in one
+   * strip reads as a toolbar rather than as the status line the screenshot
+   * draws. The affordance is the hover fill and the focus ring instead.
+   *
+   * Applied to `<button>`, `<select>` and the `<label>`-wrapped selects alike,
+   * so `focus-within` rather than `focus` carries the ring.
+   */
+  .composer-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3125rem;
+    max-width: 100%;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: 0.75rem; /* 12px */
+    line-height: 1.25rem;
+    padding: 0.0625rem 0.375rem;
+    border: 1px solid transparent;
+    border-radius: 0.375rem;
+    color: var(--color-on-surface-variant);
+    transition:
+      color 150ms ease,
+      background-color 150ms ease,
+      border-color 150ms ease;
+  }
+
+  /* `:not(…, [aria-*])` rather than source order: the hover selector outranks
+   * a bare attribute one, so an open or pressed chip would drop back to the
+   * neutral fill under the pointer. */
+  .composer-chip:is(button, label, select):not(
+    :disabled,
+    [aria-expanded="true"],
+    [aria-pressed="true"]
+  ):hover {
+    background: var(--color-surface-container-high);
+    color: var(--color-on-surface);
+  }
+
+  .composer-chip:focus-visible,
+  .composer-chip:has(:focus-visible) {
+    outline: none;
+    border-color: color-mix(in srgb, var(--composer-accent, var(--color-primary)) 45%, transparent);
+    background: var(--color-surface-container-high);
+  }
+
+  .composer-chip[aria-expanded="true"],
+  .composer-chip[aria-pressed="true"] {
+    border-color: var(--composer-active-edge);
+    background: var(--composer-active-fill);
+    color: var(--composer-accent);
+  }
+
+  /*
+   * The strip the chips sit in. Separators are a `::before` on later siblings
+   * rather than interleaved elements, because half the chips render
+   * conditionally from inside their own components — a JS interleave has to
+   * predict which of them will return null and leaves a stray `·` whenever it
+   * guesses wrong. `:not(:empty)` covers the components that render an empty
+   * wrapper instead of nothing at all.
+   */
+  .composer-chip-row {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  /*
+   * Trailing rather than leading, because the strip wraps: a `::before` on the
+   * following chip becomes the first thing on the next line, which reads as a
+   * bullet nobody typed. `:has(~ …)` picks the last *non-empty* sibling rather
+   * than `:last-child`, so a component that renders an empty wrapper does not
+   * swallow the separator before it.
+   */
+  .composer-chip-row > *:not(:empty, .sr-only):has(~ *:not(:empty, .sr-only))::after {
+    content: "·";
+    margin-inline-start: 0.25rem;
+    color: color-mix(in srgb, var(--color-on-surface-variant) 45%, transparent);
+  }
+
+  /*
+   * The key half of a `key: value` chip. Lowercased here rather than in the
+   * locale files because several of these labels head a menu elsewhere, where
+   * they are correctly title-cased — `Reasoning effort` is a heading in the
+   * effort picker and a key on this strip, and only the strip wants it quiet.
+   */
+  .composer-chip-key {
+    flex-shrink: 0;
+    text-transform: lowercase;
+  }
+
+  /* The value half of a `key: value` chip. The key stays muted at the call site. */
+  .composer-chip-value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-on-surface);
+  }
+
+  /*
+   * ── The runner's colour ──
+   *
+   * The composer is the one surface that acts *as* the runner rather than as
+   * the product, so its frame wears the runner's identity colour.
+   * `--composer-accent` is set on the shell from the chat's runner — see
+   * `features/chat/lib/composer-accent.ts` — and every rule below reads it
+   * instead of `--color-primary`. A MangoStudio chat resolves it to the mango
+   * token, which *is* the primary, so the default composer is unchanged.
+   *
+   * The line is drawn at the frame and the status line. The dropdown panels
+   * these chips open keep the product's primary: they are transient, they
+   * belong to MangoStudio's own chrome rather than to the turn, and a
+   * selection tick that changes hue per chat reads as a bug.
+   */
+  .composer-shell {
+    --composer-accent: var(--color-agent-mango);
+    --composer-send-fill: var(--composer-accent);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--composer-edge);
+    border-radius: 0.75rem;
+    background: var(--color-surface-container-lowest);
+    transition:
+      border-color var(--duration-base) var(--ease-standard),
+      box-shadow var(--duration-base) var(--ease-standard);
+  }
+
+  /*
+   * ── One `color-mix()` per rule, and that is not a style preference ──
+   *
+   * The CSS bundler downlevels `color-mix()` into an opaque fallback plus an
+   * `@supports` override, and it re-emits **only the first** mixed declaration
+   * of each rule. Every mix after the first therefore ships fully opaque —
+   * which turned the status-line hairline into a solid bar and a pressed chip
+   * into a solid accent block with accent-coloured text on it. `check`, `test`
+   * and the build were all green through every one of those.
+   *
+   * So each derived tint gets its own rule. `tests/unit/stylesheet-downlevel.test.ts`
+   * asserts the built stylesheet keeps the alpha on all of them, because this
+   * is invisible from every other gate.
+   */
+  .composer-shell {
+    --composer-edge: color-mix(in srgb, var(--composer-accent) 34%, transparent);
+  }
+
+  .composer-shell {
+    --composer-edge-strong: color-mix(in srgb, var(--composer-accent) 58%, transparent);
+  }
+
+  .composer-shell {
+    --composer-ring: color-mix(in srgb, var(--composer-accent) 20%, transparent);
+  }
+
+  .composer-shell {
+    --composer-band: color-mix(in srgb, var(--composer-accent) 8%, transparent);
+  }
+
+  .composer-shell {
+    --composer-band-line: color-mix(in srgb, var(--composer-accent) 18%, transparent);
+  }
+
+  .composer-shell {
+    --composer-active-edge: color-mix(in srgb, var(--composer-accent) 40%, transparent);
+  }
+
+  .composer-shell {
+    --composer-active-fill: color-mix(in srgb, var(--composer-accent) 12%, transparent);
+  }
+
+  /* White-on-accent clears 4.5:1 at every light-theme accent once the fill is
+   * taken down a step; at full strength the mango lands at 4.3:1. The dark
+   * accents are all light enough to carry the near-black `--color-on-primary`
+   * as they are. */
+  [data-theme="light"] .composer-shell {
+    --composer-send-fill: color-mix(in srgb, var(--composer-accent) 88%, #000);
+  }
+
+  .composer-shell:focus-within,
+  .composer-shell[data-dragging="true"] {
+    border-color: var(--composer-edge-strong);
+    box-shadow: 0 0 0 1px var(--composer-ring);
+  }
+
+  /*
+   * The status line reads as a terminal's title bar: recessed, tinted toward
+   * the accent, closed off by a hairline of the same hue. The 8%/18% pair is
+   * measured off the inspiration screenshot, whose band is ~9% accent over its
+   * page ground.
+   */
+  .composer-statusline {
+    background: var(--composer-band);
+    border-bottom: 1px solid var(--composer-band-line);
+    /* One pixel inside the shell's own radius, so the band's corners sit on
+     * the border rather than cutting across it. */
+    border-radius: 0.6875rem 0.6875rem 0 0;
+  }
+
+  /*
+   * The shell prompt. `align-items: start` on its row pins it to the first
+   * line, so it stays put while the box grows downward — which is what a
+   * terminal prompt does.
+   */
+  .composer-prompt-mark {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    color: var(--composer-accent);
+    user-select: none;
+    transition: color var(--duration-base) var(--ease-standard);
+  }
+
+  /* The last terminal cue, and the only one nobody sees until they type. */
+  .composer-input {
+    caret-color: var(--composer-accent);
+  }
+
+  /* The one value on the strip that names *who* is about to answer. */
+  .composer-chip-runner {
+    color: var(--composer-accent, var(--color-on-surface));
+  }
+
+  /* Status-line glyphs — folder, server, lock — take the runner's colour too. */
+  .composer-chip-icon {
+    color: color-mix(in srgb, var(--composer-accent, var(--color-primary)) 80%, transparent);
+  }
+
+  /*
+   * The tool row under the input: `terminal-chip` in a shell dialect —
+   * fully rounded, transparent so the row reads as a footer rather than a
+   * toolbar, and lowercased the way a subcommand is written. The lowercase is
+   * presentational only: the accessible name keeps its capital, so
+   * `getByRole('button', { name: 'Capabilities' })` still finds it.
+   */
+  .composer-tool-chip {
+    border-radius: 9999px;
+    background: transparent;
+    text-transform: lowercase;
+    /* Geometry and the disabled treatment belong to the variant, not to each
+     * chip: three call sites were repeating the identical utility tail, so the
+     * row's height could only be changed in three components at once. */
+    height: 1.75rem;
+    flex-shrink: 0;
+    transition:
+      color var(--duration-base) var(--ease-standard),
+      background-color var(--duration-base) var(--ease-standard),
+      border-color var(--duration-base) var(--ease-standard);
+  }
+
+  .composer-tool-chip:disabled {
+    opacity: 0.5;
+  }
+
+  .composer-tool-chip:not(:disabled, [aria-expanded="true"], [aria-pressed="true"]):hover {
+    border-color: var(--color-outline-variant);
+    color: var(--color-on-surface);
+  }
+
+  .composer-tool-chip[aria-expanded="true"],
+  .composer-tool-chip[aria-pressed="true"] {
+    border-color: var(--composer-active-edge);
+    background: var(--composer-active-fill);
+    color: var(--composer-accent);
+  }
+
+  .composer-drop-hint {
+    background: var(--composer-active-fill);
+    color: var(--composer-accent);
   }
 }
 
@@ -376,6 +642,8 @@ pre:hover .copy-code-btn {
   --chat-font-size: 0.875rem; /* 14px — matches 'default' */
   --chat-message-gap: 3rem; /* matches 'default' density */
   --chat-padding: 1.25rem;
+  --timeline-row-gap: 0.125rem;
+  --timeline-block-gap: 0.5rem;
 }
 
 /* ── Font size presets ── */
@@ -389,23 +657,145 @@ pre:hover .copy-code-btn {
   --chat-font-size: 1rem; /* 16px */
 }
 
-/* ── Chat density presets ── */
+/* ── Chat density presets ──
+ * One block per density: the gap between turns and the gap between the steps
+ * inside a turn are the same preference, and holding them apart let a new
+ * density ship with half its values missing. */
 [data-chat-density="compact"] {
   --chat-message-gap: 1.5rem;
   --chat-padding: 0.75rem;
+  /* `0px`, not `0`: this feeds a `calc()` that adds it to a length, and a
+   * unitless zero there is invalid — the dot would drop to its static
+   * position and every node would sit half a row below its own row. */
+  --timeline-row-gap: 0px;
+  --timeline-block-gap: 0.375rem;
 }
 [data-chat-density="default"] {
   --chat-message-gap: 3rem;
   --chat-padding: 1.25rem;
+  --timeline-row-gap: 0.125rem;
+  --timeline-block-gap: 0.5rem;
 }
 [data-chat-density="comfortable"] {
   --chat-message-gap: 4rem;
   --chat-padding: 1.5rem;
+  --timeline-row-gap: 0.3125rem;
+  --timeline-block-gap: 0.75rem;
 }
 
 /* ── Chat message body text uses the font size CSS variable ── */
 .chat-message-body {
   font-size: var(--chat-font-size);
+}
+
+/* ── Assistant turn timeline ──
+ * One continuous rail down the left of an assistant turn, with a node dot per
+ * entry. The rail is drawn per item rather than once on the container so it
+ * ends exactly on the first and last dots whatever the entries turn out to be,
+ * and so a full-width divider can cut it without leaving a dangling stub.
+ *
+ * Vertical geometry is derived, not hand-tuned per call site: a row's dot sits
+ * at half a row height below the item's own top padding, which keeps the dot
+ * centred on the row even while the row is expanded and the item is tall. */
+.chat-timeline {
+  --timeline-rail-x: 0.1875rem; /* 3px — a 1px rail centred on 3.5px */
+  --timeline-dot-size: 0.4375rem; /* 7px, so its centre lands on the rail */
+  --timeline-indent: 1rem;
+  --timeline-row-height: 1.5rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-timeline-item {
+  --timeline-pad: var(--timeline-row-gap);
+  --timeline-dot-top: calc(var(--timeline-pad) + var(--timeline-row-height) / 2);
+  position: relative;
+  min-width: 0;
+  padding-left: var(--timeline-indent);
+  padding-block: var(--timeline-pad);
+}
+
+.chat-timeline-item--block {
+  --timeline-pad: var(--timeline-block-gap);
+  --timeline-dot-top: calc(var(--timeline-pad) + 0.6875rem);
+}
+
+/* Rail segment. Clipped to the dot on the outermost items so the line starts
+ * and stops on a node instead of floating past one. */
+.chat-timeline-item::before {
+  content: "";
+  position: absolute;
+  left: var(--timeline-rail-x);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  /* `--color-outline-variant` at 1px washes out against the chat surface; the
+   * rail has to read as a line without competing with the steps on it. */
+  background: color-mix(in srgb, var(--color-outline) 60%, transparent);
+}
+
+.chat-timeline-item:first-child::before {
+  top: var(--timeline-dot-top);
+}
+
+.chat-timeline-item:last-child::before {
+  bottom: calc(100% - var(--timeline-dot-top));
+}
+
+/* Node dot. Paints after the rail, so it reads as a bead on the line. */
+.chat-timeline-item::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--timeline-dot-top);
+  width: var(--timeline-dot-size);
+  height: var(--timeline-dot-size);
+  border-radius: 9999px;
+  background: var(--color-outline);
+  transform: translateY(-50%);
+}
+
+/* One `color-mix()` per rule: Tailwind's downlevelling only restates the first
+ * mixed declaration of a rule, so a second one would ship fully opaque. */
+.chat-timeline-item--success::after {
+  background: color-mix(in srgb, var(--color-success) 75%, transparent);
+}
+
+.chat-timeline-item--error::after {
+  background: var(--color-error);
+}
+
+.chat-timeline-item--active::after {
+  background: var(--color-primary);
+  animation: timeline-node-pulse 1.6s ease-in-out infinite;
+}
+
+.chat-timeline-item--muted::after {
+  background: color-mix(in srgb, var(--color-outline) 60%, transparent);
+}
+
+/* A full-bleed marker (system event, provider hand-off) cuts the rail rather
+ * than hanging off it: it belongs to the transcript, not to the turn's steps. */
+.chat-timeline-item--divider {
+  padding-left: 0;
+  padding-block: 0;
+}
+
+.chat-timeline-item--divider::before,
+.chat-timeline-item--divider::after {
+  content: none;
+}
+
+@keyframes timeline-node-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: translateY(-50%) scale(0.7);
+  }
 }
 
 /* ── Performance & accessibility utilities ── */

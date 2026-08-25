@@ -100,15 +100,10 @@ export function CapabilityInspector({
         onClick={() => setOpen((value) => !value)}
         disabled={disabled}
         aria-expanded={open}
-        className={`flex items-center gap-1.5 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] sm:text-[11px] font-medium transition-all duration-200 shrink-0 ${
-          open
-            ? 'bg-primary text-on-primary shadow-sm'
-            : 'text-on-surface-variant hover:text-on-surface border border-outline-variant/20 hover:border-outline-variant/40'
-        }`}
+        className="terminal-chip composer-tool-chip"
         title={labels.title}
       >
-        <SlidersHorizontal size={12} className="sm:hidden" />
-        <SlidersHorizontal size={13} className="hidden sm:block" />
+        <SlidersHorizontal size={12} className="shrink-0" />
         <span className="hidden sm:inline">{labels.button}</span>
       </button>
 
@@ -402,7 +397,8 @@ function enabledCountLabel(
   entries: ReadonlyArray<{ state: CapabilityState }>
 ): string {
   const enabled = entries.filter((entry) => entry.state === 'enabled').length;
-  return labels.enabledCount
-    .replace('{enabled}', String(enabled))
-    .replace('{total}', String(entries.length));
+  return formatMessage(labels.enabledCount, {
+    enabled: String(enabled),
+    total: String(entries.length),
+  });
 }

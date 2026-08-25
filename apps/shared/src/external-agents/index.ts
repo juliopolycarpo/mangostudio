@@ -177,6 +177,11 @@ export {
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from './schemas';
 export {
+  type ExternalContextUsage,
+  externalContextUsage,
+  externalReportedTokens,
+} from './usage';
+export {
   type BoundedVendorText,
   boundVendorText,
   EXTERNAL_APPROVAL_MAX_OPTIONS,

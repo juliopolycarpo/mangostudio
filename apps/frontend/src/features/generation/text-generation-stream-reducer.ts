@@ -738,6 +738,9 @@ function reduceExternalThreadUsage(state: TextGenerationStreamState, usage: Exte
         usage.total !== undefined
           ? { ...state.threadUsage?.total, ...usage.total }
           : state.threadUsage?.total,
+      // Sparse like the rest: the window is a property of the model, not of
+      // this report, so a later report that omits it must not blank the ring.
+      contextWindowTokens: usage.contextWindowTokens ?? state.threadUsage?.contextWindowTokens,
     },
   };
 }
