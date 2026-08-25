@@ -214,6 +214,8 @@ export const messages: Messages = {
       label: 'Context',
       tokens: '~{used} / {limit} tokens',
       modeStateful: 'Stateful',
+      modeStatelessLoop: 'Stateless loop',
+      modeLabel: 'Mode',
       modeReplay: 'Replay',
       modeCompacted: 'Compacted',
       modeDegraded: 'Degraded',
@@ -2934,7 +2936,6 @@ export const messages: Messages = {
       input: 'in',
       output: 'out',
       total: 'total',
-      unknown: 'Usage unknown',
       /** Names the ring on the composer strip; the breakdown lives in its tooltip. */
       indicatorLabel: 'Token usage',
       contextLabel: 'Context',

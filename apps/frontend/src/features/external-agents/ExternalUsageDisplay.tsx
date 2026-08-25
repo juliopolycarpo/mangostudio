@@ -1,11 +1,9 @@
 /**
  * External token usage as one ring on the composer strip.
  *
- * The figures used to be spelled out inline, which cost a whole wrapped line
- * of the status bar to tell you something you look at once a session. The ring
- * carries the one number that changes a decision — how full the window is —
- * and the breakdown stays a hover or a focus away, in the same `key: value`
- * dialect it always read in.
+ * The scopes and their wording live here; the ring and its hover panel are
+ * `ContextUsageChip`, which the MangoStudio runner's own context chip draws
+ * through too — the strip should not read one way per runner.
  *
  * Only fields the vendor reported are shown, and a vendor that reports no
  * window gets the compact total instead of a percentage: absent is not zero,
@@ -15,7 +13,8 @@
 import type { ExternalThreadUsage, ExternalUsage } from '@mangostudio/shared/external-agents';
 import { externalContextUsage, externalReportedTokens } from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
-import { ContextRing } from '@/components/ui/ContextRing';
+import type { ContextUsageLine } from '@/components/ui/ContextUsageChip';
+import { ContextUsageChip } from '@/components/ui/ContextUsageChip';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -68,76 +67,43 @@ export function ExternalUsageDisplay({
       })
     : labels.contextUnknown;
 
-  // The whole breakdown, for anyone who will never hover it.
-  const accessibleName = [
-    labels.indicatorLabel,
-    turnLine === null ? null : `${labels.turnLabel}: ${turnLine}`,
-    threadLine === null ? null : `${labels.threadLabel}: ${threadLine}`,
-    `${labels.contextLabel}: ${contextLine}`,
-  ]
-    .filter((line): line is string => line !== null)
-    .join('. ');
-
   // Without a window there is no percentage to draw, so the fallback is the
   // one figure that still means something on its own.
   const fallbackScope = thread?.total ?? turn;
   const fallback = fallbackScope ? externalReportedTokens(fallbackScope) : null;
 
-  return (
-    <span className="group relative inline-flex items-center" data-testid="external-usage">
-      {/* A button rather than a bare span so the panel is reachable by
-          keyboard: it opens on `:focus-within`, and nothing non-interactive
-          ever takes that focus. It has no click of its own — hover and focus
-          are the whole interaction. */}
-      <button
-        type="button"
-        aria-label={accessibleName}
-        data-testid="external-usage-indicator"
-        data-percent={context ? String(context.percent) : undefined}
-        className="composer-chip cursor-default px-1"
-      >
-        {context ? (
-          <ContextRing ratio={context.ratio} severity={context.severity} size={18} />
-        ) : (
-          <span aria-hidden="true" className="tabular-nums text-[11px]">
-            {fallback === null ? '—' : formatTokensCompact(fallback)}
-          </span>
-        )}
-      </button>
+  const lines: ContextUsageLine[] = [];
+  if (turnLine !== null) {
+    lines.push({
+      key: 'turn',
+      label: labels.turnLabel,
+      value: turnLine,
+      testId: 'external-usage-turn',
+    });
+  }
+  if (threadLine !== null) {
+    lines.push({
+      key: 'thread',
+      label: labels.threadLabel,
+      value: threadLine,
+      testId: 'external-usage-thread',
+    });
+  }
+  lines.push({
+    key: 'context',
+    label: labels.contextLabel,
+    value: contextLine,
+    testId: 'external-usage-context',
+  });
 
-      <span
-        // Hidden from assistive tech rather than wired up as a description:
-        // every word in it is already in the button's own name, and a reader
-        // that announced both would say the whole breakdown twice.
-        aria-hidden="true"
-        // Opens above and grows leftward: the strip is the composer's top edge
-        // — a panel below it would land on the textarea the user is about to
-        // type into — and usage is the strip's last chip, so anchoring left
-        // would push the panel off the right of the window.
-        // Not `.dropdown-panel`: that rule is unlayered, so its 1rem radius
-        // outranks any Tailwind utility here and reads as a pill on a panel
-        // this short.
-        className="pointer-events-none invisible absolute bottom-full right-0 z-50 mb-1.5 w-max max-w-[min(22rem,80vw)] rounded-lg border border-outline-variant/25 bg-surface-container-high px-2.5 py-2 opacity-0 shadow-lg transition-opacity duration-150 group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100"
-      >
-        <span className="flex flex-col gap-0.5 font-mono text-[11px] leading-4 text-on-surface-variant tabular-nums">
-          {turnLine === null ? null : (
-            <span data-testid="external-usage-turn">
-              <span className="opacity-70">{`${labels.turnLabel}: `}</span>
-              {turnLine}
-            </span>
-          )}
-          {threadLine === null ? null : (
-            <span data-testid="external-usage-thread">
-              <span className="opacity-70">{`${labels.threadLabel}: `}</span>
-              {threadLine}
-            </span>
-          )}
-          <span data-testid="external-usage-context">
-            <span className="opacity-70">{`${labels.contextLabel}: `}</span>
-            {contextLine}
-          </span>
-        </span>
-      </span>
-    </span>
+  return (
+    <ContextUsageChip
+      ratio={context?.ratio}
+      severity={context?.severity}
+      fallback={fallback === null ? '\u2014' : formatTokensCompact(fallback)}
+      lines={lines}
+      ariaLabelPrefix={labels.indicatorLabel}
+      testId="external-usage"
+    />
   );
 }

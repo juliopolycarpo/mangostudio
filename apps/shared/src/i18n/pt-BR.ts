@@ -212,6 +212,8 @@ export const messages = {
       label: 'Contexto',
       tokens: '~{used} / {limit} tokens',
       modeStateful: 'Stateful',
+      modeStatelessLoop: 'Loop stateless',
+      modeLabel: 'Modo',
       modeReplay: 'Replay',
       modeCompacted: 'Compactado',
       modeDegraded: 'Degradado',
@@ -2939,7 +2941,6 @@ export const messages = {
       input: 'entrada',
       output: 'saída',
       total: 'total',
-      unknown: 'Uso desconhecido',
       /** Nomeia o anel na barra do compositor; o detalhamento sai no tooltip. */
       indicatorLabel: 'Uso de tokens',
       contextLabel: 'Contexto',

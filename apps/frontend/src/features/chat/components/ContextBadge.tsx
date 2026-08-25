@@ -1,42 +1,64 @@
 /**
  * How much of the model's window this chat has spent, as a composer chip.
  *
- * Escalates through the severity the context tracker already decided; at rest
- * it reads like every other chip on the strip, which is the point — a context
- * figure that shouts at 20% teaches people to ignore it at 95%.
+ * The same ring an external agent gets, drawn from the tracker's own ratio and
+ * severity: the strip should not spell `context: 9.6k/1.0M` onto a wrapped line
+ * for one runner and draw a ring for another. Escalation is the ring's colour,
+ * and it stays quiet until the tracker says otherwise — a context figure that
+ * shouts at 20% teaches people to ignore it at 95%.
  */
 
+import { ContextUsageChip } from '@/components/ui/ContextUsageChip';
 import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatMessage } from '@/lib/i18n-format';
 
-const SEVERITY_STYLES: Readonly<Record<ContextInfo['severity'], string>> = {
-  critical: 'border-error/40 text-error',
-  danger: 'border-warning/40 text-warning',
-  warning: 'text-warning/80',
-  info: '',
-  normal: '',
-};
+type ContextLabels = ReturnType<typeof useI18n>['t']['chat']['context'];
 
-function formatTokensCompact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
-  return String(n);
+/** Every mode the tracker can report, named rather than leaked as its id. */
+function modeLabel(mode: ContextInfo['mode'], labels: ContextLabels): string {
+  switch (mode) {
+    case 'stateful':
+      return labels.modeStateful;
+    case 'stateless-loop':
+      return labels.modeStatelessLoop;
+    case 'replay':
+      return labels.modeReplay;
+    case 'compacted':
+      return labels.modeCompacted;
+    case 'degraded':
+      return labels.modeDegraded;
+  }
 }
 
 export function ContextBadge({ info }: { info: ContextInfo }) {
   const { t } = useI18n();
-  const used = formatTokensCompact(info.estimatedInputTokens);
-  const limit = formatTokensCompact(info.contextLimit);
+  const labels = t.chat.context;
 
   return (
-    <span
-      className={`composer-chip tabular-nums ${SEVERITY_STYLES[info.severity]}`}
-      data-testid="context-badge"
-      data-severity={info.severity}
-      title={`~${info.estimatedInputTokens.toLocaleString()} / ${info.contextLimit.toLocaleString()} tokens · ${info.mode}`}
-    >
-      <span className="composer-chip-key opacity-70 max-sm:hidden">{`${t.chat.context.label}:`}</span>
-      <span className="composer-chip-value text-inherit">{`${used}/${limit}`}</span>
-    </span>
+    <ContextUsageChip
+      ratio={info.estimatedUsageRatio}
+      severity={info.severity}
+      testId="context-badge"
+      lines={[
+        {
+          key: 'tokens',
+          label: labels.label,
+          // Grouped in full rather than compacted: this is the panel you opened
+          // to see the actual number, and `9.6k` is what the ring already said.
+          value: formatMessage(labels.tokens, {
+            used: info.estimatedInputTokens.toLocaleString(),
+            limit: info.contextLimit.toLocaleString(),
+          }),
+          testId: 'context-badge-tokens',
+        },
+        {
+          key: 'mode',
+          label: labels.modeLabel,
+          value: modeLabel(info.mode, labels),
+          testId: 'context-badge-mode',
+        },
+      ]}
+    />
   );
 }
