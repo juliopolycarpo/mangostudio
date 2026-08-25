@@ -46,7 +46,7 @@ import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { getRuntimeClient } from '../../../services/runtime-client';
 import { constantTimeEquals } from '../../../utils/hash';
-import { recordActivity } from '../../activity/application/record-activity';
+import { recordActivities } from '../../activity/application/record-activity';
 import { summarizeAppliedResources } from '../domain/applied-resource-summary';
 import { LibraryRequestError } from '../domain/library-request-error';
 import { backupPolicyFor } from '../infrastructure/backup-roots';
@@ -324,10 +324,10 @@ function recordAppliedActivity(
   preview: PropagationPreview,
   writeResult: PropagationApply
 ): void {
-  for (const resource of summarizeAppliedResources(preview, writeResult.applied)) {
-    void recordActivity({
-      userId,
-      kind: 'propagation_applied',
+  void recordActivities(
+    userId,
+    summarizeAppliedResources(preview, writeResult.applied).map((resource) => ({
+      kind: 'propagation_applied' as const,
       // A library resource belongs to a machine, not to a chat or a folder —
       // and `null` when this one landed on more than one of them.
       environmentId: resource.environmentId,
@@ -336,8 +336,8 @@ function recordAppliedActivity(
         resourceName: resource.slug,
         targets: resource.targets,
       },
-    });
-  }
+    }))
+  );
 }
 
 /**

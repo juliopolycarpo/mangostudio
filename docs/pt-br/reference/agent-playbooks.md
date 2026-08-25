@@ -208,7 +208,10 @@ Regras que sustentam o desenho:
 
 - A emissão é fire-and-forget. `recordActivity` nunca rejeita, e todo ponto de
   emissão chama `void recordActivity(...)`. Uma anotação que falha jamais pode
-  derrubar o trabalho que ela descreve.
+  derrubar o trabalho que ela descreve. Um ponto de emissão que produz várias
+  linhas de uma vez — a aplicação de propagação — chama
+  `recordActivities(userId, entries)`, para que o lote custe uma única
+  instrução, um único quadro de realtime e uma única passagem de retenção.
 - `kind` é gravado como texto e a rota de listagem **descarta** qualquer linha
   que não consiga revalidar. Uma união fechada na resposta mais uma linha
   ilegível derrubaria o feed inteiro, e um downgrade não pode perder linhas que

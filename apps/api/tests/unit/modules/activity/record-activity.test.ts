@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import type { ActivityEventInsert } from '../../../../src/db/types';
-import { recordActivity } from '../../../../src/modules/activity/application/record-activity';
+import {
+  recordActivities,
+  recordActivity,
+} from '../../../../src/modules/activity/application/record-activity';
 import type {
   ActivityListFilter,
   ActivityPage,
@@ -14,9 +17,13 @@ class FakeActivityRepository implements ActivityRepository {
   insertError: Error | undefined;
   pruneError: Error | undefined;
 
-  insert(row: ActivityEventInsert): Promise<void> {
+  /** Counts calls, not rows, so a test can prove a batch cost one statement. */
+  insertCalls = 0;
+
+  insertMany(rows: readonly ActivityEventInsert[]): Promise<void> {
     if (this.insertError) return Promise.reject(this.insertError);
-    this.inserted.push(row);
+    this.insertCalls += 1;
+    this.inserted.push(...rows);
     return Promise.resolve();
   }
 
@@ -140,5 +147,58 @@ describe('recordActivity', () => {
     // grows one page past its cap.
     expect(repository.inserted).toHaveLength(1);
     expect(publisher.calledFor).toEqual(['user-1']);
+  });
+});
+
+describe('recordActivities', () => {
+  it('writes a batch as one statement, one announcement, and one retention pass', async () => {
+    const repository = new FakeActivityRepository();
+    const publisher = new FakePublisher();
+
+    await recordActivities(
+      'user-1',
+      [
+        { kind: 'chat_created', payload: { title: 'One' } },
+        { kind: 'chat_created', payload: { title: 'Two' } },
+        { kind: 'chat_created', payload: { title: 'Three' } },
+      ],
+      { repository, publish: publisher.publish }
+    );
+
+    // Three rows for the reader, but one round trip and one socket frame: an
+    // apply that touched seven resources must not cost seven of each.
+    expect(repository.inserted).toHaveLength(3);
+    expect(repository.insertCalls).toBe(1);
+    expect(publisher.calledFor).toEqual(['user-1']);
+    expect(repository.prunedFor).toEqual(['user-1']);
+  });
+
+  it('gives every row in a batch its own id', async () => {
+    const repository = new FakeActivityRepository();
+
+    await recordActivities(
+      'user-1',
+      [
+        { kind: 'chat_created', payload: { title: 'One' } },
+        { kind: 'chat_created', payload: { title: 'Two' } },
+      ],
+      { repository, publish: () => undefined }
+    );
+
+    const ids = new Set(repository.inserted.map((row) => row.id));
+    expect(ids.size).toBe(2);
+  });
+
+  it('writes nothing for an empty batch', async () => {
+    const repository = new FakeActivityRepository();
+    const publisher = new FakePublisher();
+
+    // An apply that wrote no resources is not an event; it must not cost a
+    // statement or wake every open tab.
+    await recordActivities('user-1', [], { repository, publish: publisher.publish });
+
+    expect(repository.insertCalls).toBe(0);
+    expect(publisher.calledFor).toEqual([]);
+    expect(repository.prunedFor).toEqual([]);
   });
 });

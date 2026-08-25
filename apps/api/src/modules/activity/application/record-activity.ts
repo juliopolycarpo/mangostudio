@@ -30,12 +30,16 @@ type ActivityKindAndPayload = {
   };
 }[ActivityEventKind];
 
-export type RecordActivityInput = ActivityScope &
+/** One row's worth of the feed, without the account it belongs to. */
+export type RecordActivityEntry = ActivityScope &
   ActivityKindAndPayload & {
-    readonly userId: string;
     /** Injectable so a test can pin the row's position in the feed. */
     readonly createdAt?: number;
   };
+
+export type RecordActivityInput = RecordActivityEntry & {
+  readonly userId: string;
+};
 
 export interface RecordActivityDeps {
   readonly repository?: ActivityRepository;
@@ -56,38 +60,63 @@ export function recordActivity(
   input: RecordActivityInput,
   deps: RecordActivityDeps = {}
 ): Promise<void> {
-  return writeActivity(input, deps).catch((error: unknown) => {
+  const { userId, ...entry } = input;
+  return recordActivities(userId, [entry as RecordActivityEntry], deps);
+}
+
+/**
+ * Files several rows for one account as a single write.
+ *
+ * One apply can land several resources, and a row each is what the reader
+ * wants — but a statement, a socket frame, and a retention pass each is not.
+ * Callers that produce a set at once come through here so the feed costs the
+ * same whether an apply touched one resource or seven.
+ */
+export function recordActivities(
+  userId: string,
+  entries: readonly RecordActivityEntry[],
+  deps: RecordActivityDeps = {}
+): Promise<void> {
+  return writeActivities(userId, entries, deps).catch((error: unknown) => {
     // Deliberately not the diagnostic logger: that one is gated off in the
     // integration lane, which is exactly where a swallowed write would hide.
     console.error('[activity] Could not record an activity event:', error);
   });
 }
 
-async function writeActivity(input: RecordActivityInput, deps: RecordActivityDeps): Promise<void> {
-  if (input.userId.length === 0) return;
+async function writeActivities(
+  userId: string,
+  entries: readonly RecordActivityEntry[],
+  deps: RecordActivityDeps
+): Promise<void> {
+  if (userId.length === 0 || entries.length === 0) return;
 
   const repository = deps.repository ?? createActivityRepository(deps.db);
-  const createdAt = input.createdAt ?? Date.now();
-
-  await repository.insert({
+  const now = Date.now();
+  const rows = entries.map((entry) => ({
     id: generateId(),
-    userId: input.userId,
-    kind: input.kind,
-    createdAt,
-    chatId: input.chatId ?? null,
-    workdir: input.workdir ?? null,
-    environmentId: input.environmentId ?? null,
-    targetId: input.targetId ?? null,
-    payloadJson: JSON.stringify(input.payload),
-  });
+    userId,
+    kind: entry.kind,
+    createdAt: entry.createdAt ?? now,
+    chatId: entry.chatId ?? null,
+    workdir: entry.workdir ?? null,
+    environmentId: entry.environmentId ?? null,
+    targetId: entry.targetId ?? null,
+    payloadJson: JSON.stringify(entry.payload),
+  }));
 
-  // Announced before retention runs, and not behind it: the row is already
+  await repository.insertMany(rows);
+
+  // Announced before retention runs, and not behind it: the rows are already
   // durable, so a prune that fails must not also cost the reader the refresh
-  // that would have shown it. Retention is housekeeping; the notification is
+  // that would have shown them. Retention is housekeeping; the notification is
   // the feature.
-  (deps.publish ?? publishActivityInvalidation)(input.userId);
+  (deps.publish ?? publishActivityInvalidation)(userId);
 
-  await repository.prune(input.userId, createdAt).catch((error: unknown) => {
+  // Pruned against the newest row written, so a batch carrying an injected
+  // older `createdAt` cannot pull the retention cutoff backwards.
+  const prunedAt = Math.max(...rows.map((row) => row.createdAt));
+  await repository.prune(userId, prunedAt).catch((error: unknown) => {
     console.error('[activity] Could not prune the activity feed:', error);
   });
 }

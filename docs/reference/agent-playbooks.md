@@ -640,7 +640,9 @@ Rules that are load-bearing:
 
 - Emission is fire-and-forget. `recordActivity` never rejects, and every seam
   calls it as `void recordActivity(...)`. A failed note must never fail the work
-  it describes.
+  it describes. A seam that produces several rows at once — the propagation
+  apply — calls `recordActivities(userId, entries)` instead, so the batch costs
+  one statement, one realtime frame, and one retention pass.
 - `kind` is stored as text and the list route **drops** any row it cannot
   re-validate. A closed response union plus one unreadable row would otherwise
   take the whole feed down, and a downgrade must not lose rows a newer build

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { getDb } from '../../../../src/db/database';
+import type { ActivityEventInsert } from '../../../../src/db/types';
 import {
   ACTIVITY_RETENTION_MS,
   createActivityRepository,
@@ -9,6 +10,26 @@ let userSeq = 0;
 function userId(): string {
   userSeq += 1;
   return `activity-repo-user-${userSeq}`;
+}
+
+/**
+ * A row with every scope column defaulted to `null`, so each test states only
+ * the columns it is actually about — a new scope column lands here once rather
+ * than in every literal below.
+ */
+function row(
+  overrides: Partial<ActivityEventInsert> & { id: string; userId: string }
+): ActivityEventInsert {
+  return {
+    kind: 'chat_created',
+    createdAt: 1_000,
+    chatId: null,
+    workdir: null,
+    environmentId: null,
+    targetId: null,
+    payloadJson: JSON.stringify({ title: overrides.id }),
+    ...overrides,
+  };
 }
 
 afterEach(async () => {
@@ -26,28 +47,10 @@ describe('activity repository', () => {
     const repository = createActivityRepository(getDb());
     const user = userId();
     const createdAt = 1_700_000_000_000;
-    await repository.insert({
-      id: 'evt-a',
-      userId: user,
-      kind: 'chat_created',
-      createdAt,
-      chatId: null,
-      workdir: null,
-      environmentId: null,
-      targetId: null,
-      payloadJson: JSON.stringify({ title: 'A' }),
-    });
-    await repository.insert({
-      id: 'evt-b',
-      userId: user,
-      kind: 'chat_created',
-      createdAt,
-      chatId: null,
-      workdir: null,
-      environmentId: null,
-      targetId: null,
-      payloadJson: JSON.stringify({ title: 'B' }),
-    });
+    await repository.insertMany([
+      row({ id: 'evt-a', userId: user, createdAt }),
+      row({ id: 'evt-b', userId: user, createdAt }),
+    ]);
 
     const first = await repository.list({ userId: user, limit: 1 });
     expect(first.rows).toHaveLength(1);
@@ -71,28 +74,10 @@ describe('activity repository', () => {
   it('filters by since, exclusive of the boundary', async () => {
     const repository = createActivityRepository(getDb());
     const user = userId();
-    await repository.insert({
-      id: 'evt-old',
-      userId: user,
-      kind: 'chat_created',
-      createdAt: 1_000,
-      chatId: null,
-      workdir: null,
-      environmentId: null,
-      targetId: null,
-      payloadJson: JSON.stringify({ title: 'Old' }),
-    });
-    await repository.insert({
-      id: 'evt-new',
-      userId: user,
-      kind: 'chat_created',
-      createdAt: 2_000,
-      chatId: null,
-      workdir: null,
-      environmentId: null,
-      targetId: null,
-      payloadJson: JSON.stringify({ title: 'New' }),
-    });
+    await repository.insertMany([
+      row({ id: 'evt-old', userId: user, createdAt: 1_000 }),
+      row({ id: 'evt-new', userId: user, createdAt: 2_000 }),
+    ]);
 
     const page = await repository.list({ userId: user, limit: 10, since: 1_000 });
 
@@ -102,28 +87,24 @@ describe('activity repository', () => {
   it('filters by workdir', async () => {
     const repository = createActivityRepository(getDb());
     const user = userId();
-    await repository.insert({
-      id: 'evt-a',
-      userId: user,
-      kind: 'commit_created',
-      createdAt: 1_000,
-      chatId: null,
-      workdir: '/repo/a',
-      environmentId: null,
-      targetId: null,
-      payloadJson: JSON.stringify({ subject: 'a', branch: null }),
-    });
-    await repository.insert({
-      id: 'evt-b',
-      userId: user,
-      kind: 'commit_created',
-      createdAt: 2_000,
-      chatId: null,
-      workdir: '/repo/b',
-      environmentId: null,
-      targetId: null,
-      payloadJson: JSON.stringify({ subject: 'b', branch: null }),
-    });
+    await repository.insertMany([
+      row({
+        id: 'evt-a',
+        userId: user,
+        kind: 'commit_created',
+        createdAt: 1_000,
+        workdir: '/repo/a',
+        payloadJson: JSON.stringify({ subject: 'a', branch: null }),
+      }),
+      row({
+        id: 'evt-b',
+        userId: user,
+        kind: 'commit_created',
+        createdAt: 2_000,
+        workdir: '/repo/b',
+        payloadJson: JSON.stringify({ subject: 'b', branch: null }),
+      }),
+    ]);
 
     const page = await repository.list({ userId: user, limit: 10, workdir: '/repo/a' });
 
@@ -135,39 +116,11 @@ describe('activity repository', () => {
     const user = userId();
     const now = 100 * 24 * 60 * 60_000; // Far enough past epoch that "old" is not negative.
     const cutoff = now - ACTIVITY_RETENTION_MS;
-    await repository.insert({
-      id: 'evt-too-old',
-      userId: user,
-      kind: 'chat_created',
-      createdAt: cutoff - 1,
-      chatId: null,
-      workdir: null,
-      environmentId: null,
-      targetId: null,
-      payloadJson: JSON.stringify({ title: 'Too old' }),
-    });
-    await repository.insert({
-      id: 'evt-at-cutoff',
-      userId: user,
-      kind: 'chat_created',
-      createdAt: cutoff,
-      chatId: null,
-      workdir: null,
-      environmentId: null,
-      targetId: null,
-      payloadJson: JSON.stringify({ title: 'At cutoff' }),
-    });
-    await repository.insert({
-      id: 'evt-fresh',
-      userId: user,
-      kind: 'chat_created',
-      createdAt: cutoff + 1,
-      chatId: null,
-      workdir: null,
-      environmentId: null,
-      targetId: null,
-      payloadJson: JSON.stringify({ title: 'Fresh' }),
-    });
+    await repository.insertMany([
+      row({ id: 'evt-too-old', userId: user, createdAt: cutoff - 1 }),
+      row({ id: 'evt-at-cutoff', userId: user, createdAt: cutoff }),
+      row({ id: 'evt-fresh', userId: user, createdAt: cutoff + 1 }),
+    ]);
 
     await repository.prune(user, now);
 

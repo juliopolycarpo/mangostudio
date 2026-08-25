@@ -15,7 +15,7 @@ class FixedActivityRepository implements ActivityRepository {
 
   constructor(private readonly page: ActivityPage) {}
 
-  insert(): Promise<void> {
+  insertMany(): Promise<void> {
     return Promise.resolve();
   }
 

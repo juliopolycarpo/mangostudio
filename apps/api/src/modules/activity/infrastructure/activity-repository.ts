@@ -35,7 +35,11 @@ export interface ActivityPage {
 }
 
 export interface ActivityRepository {
-  insert(row: ActivityEventInsert): Promise<void>;
+  /**
+   * Appends rows for one user. Taking a list rather than a row is what lets an
+   * apply that wrote seven resources cost one statement instead of seven.
+   */
+  insertMany(rows: readonly ActivityEventInsert[]): Promise<void>;
   list(filter: ActivityListFilter): Promise<ActivityPage>;
   prune(userId: string, now: number): Promise<void>;
 }
@@ -50,8 +54,12 @@ export function createActivityRepository(injected?: Kysely<Database>): ActivityR
   const db = (): Kysely<Database> => injected ?? getDb();
 
   return {
-    async insert(row) {
-      await db().insertInto('activity_events').values(row).execute();
+    async insertMany(rows) {
+      if (rows.length === 0) return;
+      await db()
+        .insertInto('activity_events')
+        .values(rows as ActivityEventInsert[])
+        .execute();
     },
 
     async list(filter) {
