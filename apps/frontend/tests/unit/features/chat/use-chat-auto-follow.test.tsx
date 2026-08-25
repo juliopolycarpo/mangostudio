@@ -218,21 +218,29 @@ describe('useChatAutoFollow', () => {
     expect(scrollTopValue).toBe(5981);
   });
 
-  it('abandons the pending jump when the reader scrolls away during the load', () => {
-    scrollHeightValue = 964;
-    clientHeightValue = 541;
-    const { getByTestId } = render(<FeedHarness chatId="a" messages={[makeMessage('1')]} />);
+  // PageUp and Home bubble out of whatever inside the transcript has focus, so
+  // a keyboard-only reader has to disengage the follow the same way a wheel does.
+  it.each([
+    ['a wheel', (element: HTMLElement) => fireEvent.wheel(element)],
+    ['a key press', (element: HTMLElement) => fireEvent.keyDown(element, { key: 'PageUp' })],
+  ])(
+    'abandons the pending jump when %s takes the reader away during the load',
+    (_label, gesture) => {
+      scrollHeightValue = 964;
+      clientHeightValue = 541;
+      const { getByTestId } = render(<FeedHarness chatId="a" messages={[makeMessage('1')]} />);
 
-    scrollHeightValue = 5981;
-    scrollTopValue = 0;
-    fireEvent.wheel(getByTestId('scroll'));
-    fireEvent.scroll(getByTestId('scroll'));
+      scrollHeightValue = 5981;
+      scrollTopValue = 0;
+      gesture(getByTestId('scroll'));
+      fireEvent.scroll(getByTestId('scroll'));
 
-    FakeResizeObserver.resize(getByTestId('content'));
+      FakeResizeObserver.resize(getByTestId('content'));
 
-    expect(scrollTopValue).toBe(0);
-    expect(getByTestId('show-button').textContent).toBe('true');
-  });
+      expect(scrollTopValue).toBe(0);
+      expect(getByTestId('show-button').textContent).toBe('true');
+    }
+  );
 
   it('toggles the scroll button based on proximity to the bottom', () => {
     const { getByTestId } = render(<FeedHarness chatId="a" messages={[makeMessage('1')]} />);
