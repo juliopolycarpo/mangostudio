@@ -13,7 +13,14 @@ import type {
   ExternalThreadUsage,
 } from '@mangostudio/shared/external-agents';
 import { AlertTriangle, CornerDownRight, FileText, Send, Square, X } from 'lucide-react';
-import { type DragEvent, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  type DragEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Button } from '@/components/ui/Button';
 import { KbdHint } from '@/components/ui/KbdHint';
 import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
@@ -25,6 +32,7 @@ import { steerExternalTurn } from '@/services/external-agent-service';
 import { filesFromClipboard, useComposerAttachments } from '../hooks/use-composer-attachments';
 import { useComposerDraft } from '../hooks/use-composer-draft';
 import { usePromptHistory } from '../hooks/use-prompt-history';
+import { COMPOSER_ACCENT_PROPERTY, composerAccent } from '../lib/composer-accent';
 import { onComposerFocusRequest } from '../lib/composer-draft-store';
 import { CapabilityInspector } from './CapabilityInspector';
 import { ComposerChipRow } from './ComposerChipRow';
@@ -190,6 +198,17 @@ export function InputBar({
   const showSteerAffordance = steerable && isGenerating === true;
   const inputDisabled = (disabled && !showSteerAffordance) || externalRunnerBlocked || steering;
 
+  // Naming the vendor here is the same courtesy the status line pays: the
+  // composer is about to hand this text to a CLI running on someone's machine,
+  // not to "the AI model". MangoStudio's own runner keeps the generic string —
+  // it has no product name to say back to the user.
+  const runnerName = runner?.kind === 'external' ? t.externalAgents.target[runner.targetId] : null;
+  const placeholder = showSteerAffordance
+    ? t.externalAgents.steer.buttonHint
+    : runnerName
+      ? formatMessage(t.chat.input.placeholderRunner, { agent: runnerName })
+      : t.chat.input.placeholder;
+
   const handleSteer = async (text: string) => {
     if (!chatId || steering) return;
     setSteering(true);
@@ -312,7 +331,7 @@ export function InputBar({
                 key={attachment.id}
                 className="flex items-center gap-1.5 rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2.5 py-1 text-[11px] text-on-surface-variant"
               >
-                <FileText size={12} className="shrink-0 text-primary/70" />
+                <FileText size={12} className="composer-chip-icon shrink-0" />
                 <span className="max-w-[12rem] truncate">{attachment.originalName}</span>
                 <button
                   type="button"
@@ -359,9 +378,11 @@ export function InputBar({
           }}
           onDrop={handleDrop}
           data-testid="composer"
-          className={`relative flex flex-col rounded-2xl border bg-surface-container-lowest shadow-2xl transition-colors focus-within:ring-1 focus-within:ring-primary/30 ${
-            dragging ? 'border-primary/60' : 'border-outline-variant/10'
-          }`}
+          data-dragging={dragging}
+          // The whole frame reads this one property; nothing below hard-codes a
+          // colour. See `lib/composer-accent.ts`.
+          style={{ [COMPOSER_ACCENT_PROPERTY]: composerAccent(runner) } as CSSProperties}
+          className="composer-shell shadow-2xl"
         >
           <ComposerChipRow
             disabled={disabled}
@@ -398,30 +419,40 @@ export function InputBar({
             onExternalPermissionsChange={onExternalPermissionsChange}
           />
 
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            value={prompt}
-            onChange={(event) => {
-              setPrompt(event.target.value);
-              history.release();
-              if (steerError) setSteerError(null);
-              if (uploads.error) uploads.clearError();
-            }}
-            onKeyDown={handleKeyDown}
-            onPaste={(event) => {
-              const files = filesFromClipboard(event.clipboardData);
-              if (files.length === 0) return;
-              event.preventDefault();
-              uploads.upload(files);
-            }}
-            disabled={inputDisabled}
-            style={{ maxHeight: `${TEXTAREA_MAX_HEIGHT_PX}px` }}
-            className="app-scrollbar w-full resize-none bg-transparent px-3 py-2.5 font-body text-sm text-on-surface outline-none placeholder:text-on-surface-variant/40 disabled:opacity-60"
-            placeholder={
-              showSteerAffordance ? t.externalAgents.steer.buttonHint : t.chat.input.placeholder
-            }
-          />
+          {/* `items-start` so the prompt mark holds the first line while the
+              box grows under it, the way a shell prompt does. The padding
+              moved onto this row so the two share a text box and stay on the
+              same baseline. */}
+          <div className="flex items-start gap-2 px-3 py-2.5">
+            <span
+              aria-hidden="true"
+              className={`composer-prompt-mark ${inputDisabled ? 'opacity-50' : ''}`}
+            >
+              ❯
+            </span>
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={prompt}
+              onChange={(event) => {
+                setPrompt(event.target.value);
+                history.release();
+                if (steerError) setSteerError(null);
+                if (uploads.error) uploads.clearError();
+              }}
+              onKeyDown={handleKeyDown}
+              onPaste={(event) => {
+                const files = filesFromClipboard(event.clipboardData);
+                if (files.length === 0) return;
+                event.preventDefault();
+                uploads.upload(files);
+              }}
+              disabled={inputDisabled}
+              style={{ maxHeight: `${TEXTAREA_MAX_HEIGHT_PX}px` }}
+              className="app-scrollbar composer-input min-w-0 flex-1 resize-none bg-transparent p-0 font-body text-sm leading-5 text-on-surface outline-none placeholder:text-on-surface-variant/40 disabled:opacity-60"
+              placeholder={placeholder}
+            />
+          </div>
 
           <div className="flex items-end justify-between gap-2 px-2 pb-2">
             <div className="flex min-w-0 flex-wrap items-center gap-1">
@@ -472,7 +503,10 @@ export function InputBar({
                   variant="ghost"
                   disabled={!chatId || steering || !prompt.trim()}
                   title={t.externalAgents.steer.buttonHint}
-                  className="h-9 shrink-0 gap-1.5 border-2 border-primary px-3 text-xs text-primary hover:bg-primary/10 hover:text-primary"
+                  // Steering only ever happens on a vendor CLI, so the one
+                  // colour it must not be is MangoStudio's.
+                  style={{ borderColor: 'var(--composer-accent)', color: 'var(--composer-accent)' }}
+                  className="h-9 shrink-0 gap-1.5 rounded-full border-2 px-3.5 text-xs hover:bg-surface-container-high"
                 >
                   <span className="hidden sm:inline">{t.externalAgents.steer.button}</span>{' '}
                   <CornerDownRight size={ICON_SM} className="sm:hidden" />
@@ -482,8 +516,12 @@ export function InputBar({
                 <Button
                   type="submit"
                   disabled={disabled || cannotSubmit || !prompt.trim()}
-                  className="h-9 shrink-0 gap-1.5 px-3 text-xs shadow-primary-container/20 hover:brightness-110 hover:opacity-100"
-                  style={{ background: 'var(--gradient-primary)' }}
+                  className="h-9 shrink-0 gap-1.5 rounded-full px-3.5 text-xs shadow-none hover:brightness-110 hover:opacity-100"
+                  // A flat fill rather than the mango gradient: the gradient
+                  // names the product, and this button belongs to whoever runs
+                  // the turn. The light theme darkens it a step — see the
+                  // `--composer-send-fill` rules in `index.css`.
+                  style={{ background: 'var(--composer-send-fill)' }}
                 >
                   <span className="hidden sm:inline">{t.chat.input.send}</span>{' '}
                   <Send size={ICON_SM} className="sm:hidden" />
@@ -499,14 +537,14 @@ export function InputBar({
           {dragging ? (
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-2xl bg-primary/10 font-mono text-xs text-primary"
+              className="composer-drop-hint pointer-events-none absolute inset-0 flex items-center justify-center rounded-xl font-mono text-xs"
             >
               {t.chat.input.dropHint}
             </span>
           ) : null}
         </form>
 
-        <p className="mt-2 text-center font-label text-[10px] text-on-surface-variant/40 sm:mt-3">
+        <p className="mt-2 text-center font-mono text-[10px] text-on-surface-variant/40 sm:mt-3">
           {t.common.disclaimer}
         </p>
       </div>

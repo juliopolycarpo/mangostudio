@@ -50,7 +50,9 @@ export function ThinkingToggle({
           type="button"
           onClick={() => onToggle(!enabled)}
           aria-pressed={enabled}
-          className={`composer-chip ${enabled ? 'border-primary/30 bg-primary/10 text-primary' : ''}`}
+          // The on state is styled off `aria-pressed` in `index.css`, so it
+          // follows the composer's runner accent rather than the product primary.
+          className="composer-chip"
         >
           <Brain size={12} className="shrink-0" />
           <span>{t.thinking.enable}</span>

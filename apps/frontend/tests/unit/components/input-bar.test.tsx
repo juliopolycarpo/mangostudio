@@ -438,3 +438,40 @@ describe('InputBar — external thread usage', () => {
     expect(screen.queryByTestId('external-usage')).toBeNull();
   });
 });
+
+/**
+ * The composer acts as the runner, so its frame carries the runner's colour.
+ * Asserted at the one property everything else reads rather than at each
+ * border and fill, which are CSS and therefore not observable from here.
+ */
+describe('InputBar — the runner it is dressed as', () => {
+  it('hands MangoStudio chats the mango accent, so the default is unchanged', () => {
+    renderInputBar({ runner: { kind: 'mangostudio', agentId: 'default' } });
+
+    expect(screen.getByTestId('composer').style.getPropertyValue('--composer-accent')).toBe(
+      'var(--color-agent-mango)'
+    );
+  });
+
+  it('switches the whole frame to the vendor colour for an external runner', () => {
+    renderInputBar({ runner: { kind: 'external', targetId: 'codex' } });
+
+    expect(screen.getByTestId('composer').style.getPropertyValue('--composer-accent')).toBe(
+      'var(--color-agent-codex)'
+    );
+  });
+
+  it('names the vendor in the placeholder, and only the vendor', () => {
+    const { unmount } = renderInputBar({ runner: { kind: 'external', targetId: 'claude' } });
+    expect(screen.getByRole('textbox')).toHaveAttribute('placeholder', 'Message Claude Code…');
+    unmount();
+
+    // MangoStudio's own runner has no product name to say back, so it keeps
+    // the generic prompt.
+    renderInputBar({ runner: { kind: 'mangostudio', agentId: 'default' } });
+    expect(screen.getByRole('textbox')).toHaveAttribute(
+      'placeholder',
+      'Ask the AI model anything...'
+    );
+  });
+});

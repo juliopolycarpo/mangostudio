@@ -40,6 +40,8 @@ export const messages = {
       generate: 'Gerar',
       stop: 'Parar',
       placeholder: 'Pergunte ao modelo de IA...',
+      /** Usado no lugar de `placeholder` quando uma CLI de fornecedor conduz o chat. */
+      placeholderRunner: 'Enviar mensagem para o {agent}…',
       imagePlaceholder: 'Descreva sua imagem...',
       addReferenceImage: 'Adicionar imagem de referência',
       createImages: 'Criar imagens',
@@ -73,6 +75,12 @@ export const messages = {
       agentLabel: 'agente',
       modelLabel: 'modelo',
       environmentLabel: 'env',
+      /**
+       * A chave da linha de status para o esforço de raciocínio. Curta de
+       * propósito: o título `Esforço de raciocínio` do seletor é longo demais
+       * para uma faixa que já carrega outras cinco chaves.
+       */
+      effortLabel: 'esforço',
     },
     capabilities: {
       button: 'Capacidades',

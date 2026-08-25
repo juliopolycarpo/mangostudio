@@ -42,6 +42,8 @@ export const messages: Messages = {
       generate: 'Generate',
       stop: 'Stop',
       placeholder: 'Ask the AI model anything...',
+      /** Used instead of `placeholder` when a vendor CLI runs the chat. */
+      placeholderRunner: 'Message {agent}…',
       imagePlaceholder: 'Describe your image...',
       addReferenceImage: 'Add reference image',
       createImages: 'Create images',
@@ -75,6 +77,12 @@ export const messages: Messages = {
       agentLabel: 'agent',
       modelLabel: 'model',
       environmentLabel: 'env',
+      /**
+       * The status line's key for reasoning effort. Short on purpose: the
+       * picker's own `Reasoning effort` heading is too long for a strip that
+       * already carries five other keys, and squeezed the value to one letter.
+       */
+      effortLabel: 'effort',
     },
     capabilities: {
       button: 'Capabilities',

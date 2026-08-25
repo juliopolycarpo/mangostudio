@@ -91,18 +91,21 @@ export function ModelSelector({
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-label={t.chat.input.modelLabel}
+        // The open state is styled off `aria-expanded` in `index.css`, so it
+        // follows the composer's runner accent rather than the product primary.
         className={cn(
           'composer-chip group max-w-[13rem]',
-          isOpen && 'bg-surface-container-high border-primary/25',
           isDisabled && 'opacity-50 cursor-not-allowed'
         )}
       >
-        <span className="shrink-0 text-on-surface-variant/70">{`${t.chat.input.modelLabel}:`}</span>
-        <span className="composer-chip-value">{selectedModel?.displayName || placeholder}</span>
+        <span className="composer-chip-key text-on-surface-variant/70">{`${t.chat.input.modelLabel}:`}</span>
+        <span className="composer-chip-value composer-chip-runner">
+          {selectedModel?.displayName || placeholder}
+        </span>
         <ChevronDown
           className={cn(
             'size-3 shrink-0 text-on-surface-variant/50 transition-transform duration-200',
-            isOpen && 'rotate-180 text-primary'
+            isOpen && 'rotate-180 text-current'
           )}
         />
       </button>

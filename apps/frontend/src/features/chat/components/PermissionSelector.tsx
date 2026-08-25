@@ -121,9 +121,9 @@ export function PermissionSelector({
         {unattended ? (
           <AlertTriangle size={11} className="shrink-0" />
         ) : (
-          <Lock size={11} className="shrink-0 text-primary/80" />
+          <Lock size={11} className="composer-chip-icon shrink-0" />
         )}
-        <span className="shrink-0 opacity-70">{`${labels.modeKey}:`}</span>
+        <span className="composer-chip-key opacity-70">{`${labels.modeKey}:`}</span>
         <span className={`composer-chip-value ${unattended ? 'text-warning' : ''}`}>
           {labels.levelName[level]}
         </span>

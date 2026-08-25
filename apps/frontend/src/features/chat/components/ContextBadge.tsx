@@ -35,7 +35,7 @@ export function ContextBadge({ info }: { info: ContextInfo }) {
       data-severity={info.severity}
       title={`~${info.estimatedInputTokens.toLocaleString()} / ${info.contextLimit.toLocaleString()} tokens · ${info.mode}`}
     >
-      <span className="shrink-0 opacity-70 max-sm:hidden">{`${t.chat.context.label}:`}</span>
+      <span className="composer-chip-key opacity-70 max-sm:hidden">{`${t.chat.context.label}:`}</span>
       <span className="composer-chip-value text-inherit">{`${used}/${limit}`}</span>
     </span>
   );

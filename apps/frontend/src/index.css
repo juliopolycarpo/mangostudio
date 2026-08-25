@@ -273,7 +273,14 @@ body {
       border-color 150ms ease;
   }
 
-  .composer-chip:is(button, label, select):not(:disabled):hover {
+  /* `:not(…, [aria-*])` rather than source order: the hover selector outranks
+   * a bare attribute one, so an open or pressed chip would drop back to the
+   * neutral fill under the pointer. */
+  .composer-chip:is(button, label, select):not(
+    :disabled,
+    [aria-expanded="true"],
+    [aria-pressed="true"]
+  ):hover {
     background: var(--color-surface-container-high);
     color: var(--color-on-surface);
   }
@@ -281,8 +288,15 @@ body {
   .composer-chip:focus-visible,
   .composer-chip:has(:focus-visible) {
     outline: none;
-    border-color: color-mix(in srgb, var(--color-primary) 45%, transparent);
+    border-color: color-mix(in srgb, var(--composer-accent, var(--color-primary)) 45%, transparent);
     background: var(--color-surface-container-high);
+  }
+
+  .composer-chip[aria-expanded="true"],
+  .composer-chip[aria-pressed="true"] {
+    border-color: var(--composer-active-edge);
+    background: var(--composer-active-fill);
+    color: var(--composer-accent);
   }
 
   /*
@@ -308,10 +322,21 @@ body {
    * than `:last-child`, so a component that renders an empty wrapper does not
    * swallow the separator before it.
    */
-  .composer-chip-row > *:not(:empty):has(~ *:not(:empty))::after {
+  .composer-chip-row > *:not(:empty, .sr-only):has(~ *:not(:empty, .sr-only))::after {
     content: "·";
     margin-inline-start: 0.25rem;
     color: color-mix(in srgb, var(--color-on-surface-variant) 45%, transparent);
+  }
+
+  /*
+   * The key half of a `key: value` chip. Lowercased here rather than in the
+   * locale files because several of these labels head a menu elsewhere, where
+   * they are correctly title-cased — `Reasoning effort` is a heading in the
+   * effort picker and a key on this strip, and only the strip wants it quiet.
+   */
+  .composer-chip-key {
+    flex-shrink: 0;
+    text-transform: lowercase;
   }
 
   /* The value half of a `key: value` chip. The key stays muted at the call site. */
@@ -321,6 +346,165 @@ body {
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--color-on-surface);
+  }
+
+  /*
+   * ── The runner's colour ──
+   *
+   * The composer is the one surface that acts *as* the runner rather than as
+   * the product, so its frame wears the runner's identity colour.
+   * `--composer-accent` is set on the shell from the chat's runner — see
+   * `features/chat/lib/composer-accent.ts` — and every rule below reads it
+   * instead of `--color-primary`. A MangoStudio chat resolves it to the mango
+   * token, which *is* the primary, so the default composer is unchanged.
+   *
+   * The line is drawn at the frame and the status line. The dropdown panels
+   * these chips open keep the product's primary: they are transient, they
+   * belong to MangoStudio's own chrome rather than to the turn, and a
+   * selection tick that changes hue per chat reads as a bug.
+   */
+  .composer-shell {
+    --composer-accent: var(--color-agent-mango);
+    --composer-send-fill: var(--composer-accent);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--composer-edge);
+    border-radius: 0.75rem;
+    background: var(--color-surface-container-lowest);
+    transition:
+      border-color var(--duration-base) var(--ease-standard),
+      box-shadow var(--duration-base) var(--ease-standard);
+  }
+
+  /*
+   * ── One `color-mix()` per rule, and that is not a style preference ──
+   *
+   * The CSS bundler downlevels `color-mix()` into an opaque fallback plus an
+   * `@supports` override, and it re-emits **only the first** mixed declaration
+   * of each rule. Every mix after the first therefore ships fully opaque —
+   * which turned the status-line hairline into a solid bar and a pressed chip
+   * into a solid accent block with accent-coloured text on it. `check`, `test`
+   * and the build were all green through every one of those.
+   *
+   * So each derived tint gets its own rule. `tests/unit/composer-css.test.ts`
+   * asserts the built stylesheet keeps the alpha on all of them, because this
+   * is invisible from every other gate.
+   */
+  .composer-shell {
+    --composer-edge: color-mix(in srgb, var(--composer-accent) 34%, transparent);
+  }
+
+  .composer-shell {
+    --composer-edge-strong: color-mix(in srgb, var(--composer-accent) 58%, transparent);
+  }
+
+  .composer-shell {
+    --composer-ring: color-mix(in srgb, var(--composer-accent) 20%, transparent);
+  }
+
+  .composer-shell {
+    --composer-band: color-mix(in srgb, var(--composer-accent) 8%, transparent);
+  }
+
+  .composer-shell {
+    --composer-band-line: color-mix(in srgb, var(--composer-accent) 18%, transparent);
+  }
+
+  .composer-shell {
+    --composer-active-edge: color-mix(in srgb, var(--composer-accent) 40%, transparent);
+  }
+
+  .composer-shell {
+    --composer-active-fill: color-mix(in srgb, var(--composer-accent) 12%, transparent);
+  }
+
+  /* White-on-accent clears 4.5:1 at every light-theme accent once the fill is
+   * taken down a step; at full strength the mango lands at 4.3:1. The dark
+   * accents are all light enough to carry the near-black `--color-on-primary`
+   * as they are. */
+  [data-theme="light"] .composer-shell {
+    --composer-send-fill: color-mix(in srgb, var(--composer-accent) 88%, #000);
+  }
+
+  .composer-shell:focus-within,
+  .composer-shell[data-dragging="true"] {
+    border-color: var(--composer-edge-strong);
+    box-shadow: 0 0 0 1px var(--composer-ring);
+  }
+
+  /*
+   * The status line reads as a terminal's title bar: recessed, tinted toward
+   * the accent, closed off by a hairline of the same hue. The 8%/18% pair is
+   * measured off the inspiration screenshot, whose band is ~9% accent over its
+   * page ground.
+   */
+  .composer-statusline {
+    background: var(--composer-band);
+    border-bottom: 1px solid var(--composer-band-line);
+    /* One pixel inside the shell's own radius, so the band's corners sit on
+     * the border rather than cutting across it. */
+    border-radius: 0.6875rem 0.6875rem 0 0;
+  }
+
+  /*
+   * The shell prompt. `align-items: start` on its row pins it to the first
+   * line, so it stays put while the box grows downward — which is what a
+   * terminal prompt does.
+   */
+  .composer-prompt-mark {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    color: var(--composer-accent);
+    user-select: none;
+    transition: color var(--duration-base) var(--ease-standard);
+  }
+
+  /* The last terminal cue, and the only one nobody sees until they type. */
+  .composer-input {
+    caret-color: var(--composer-accent);
+  }
+
+  /* The one value on the strip that names *who* is about to answer. */
+  .composer-chip-runner {
+    color: var(--composer-accent, var(--color-on-surface));
+  }
+
+  /* Status-line glyphs — folder, server, lock — take the runner's colour too. */
+  .composer-chip-icon {
+    color: color-mix(in srgb, var(--composer-accent, var(--color-primary)) 80%, transparent);
+  }
+
+  /*
+   * The tool row under the input: `terminal-chip` in a shell dialect —
+   * fully rounded, transparent so the row reads as a footer rather than a
+   * toolbar, and lowercased the way a subcommand is written. The lowercase is
+   * presentational only: the accessible name keeps its capital, so
+   * `getByRole('button', { name: 'Capabilities' })` still finds it.
+   */
+  .composer-tool-chip {
+    border-radius: 9999px;
+    background: transparent;
+    text-transform: lowercase;
+  }
+
+  .composer-tool-chip:not(:disabled, [aria-expanded="true"], [aria-pressed="true"]):hover {
+    border-color: var(--color-outline-variant);
+    color: var(--color-on-surface);
+  }
+
+  .composer-tool-chip[aria-expanded="true"],
+  .composer-tool-chip[aria-pressed="true"] {
+    border-color: var(--composer-active-edge);
+    background: var(--composer-active-fill);
+    color: var(--composer-accent);
+  }
+
+  .composer-drop-hint {
+    background: var(--composer-active-fill);
+    color: var(--composer-accent);
   }
 }
 

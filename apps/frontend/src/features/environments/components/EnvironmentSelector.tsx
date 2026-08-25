@@ -56,9 +56,9 @@ export function EnvironmentSelector({
         data-testid="environment-selector"
         data-state={status}
       >
-        <Server size={11} className="shrink-0 text-primary/80" aria-hidden="true" />
+        <Server size={11} className="composer-chip-icon shrink-0" aria-hidden="true" />
         <StatusDot tone={STATUS_TONE[status]} pulse={status === 'connecting'} />
-        <span className="shrink-0 text-on-surface-variant/70">{`${t.chat.input.environmentLabel}:`}</span>
+        <span className="composer-chip-key text-on-surface-variant/70">{`${t.chat.input.environmentLabel}:`}</span>
         <span id={statusId} className="sr-only">
           {statusLabel}
         </span>

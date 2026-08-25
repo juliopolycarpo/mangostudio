@@ -93,7 +93,7 @@ export function ExternalComposerControls({
     <>
       {models.length > 0 ? (
         <label className="composer-chip max-w-[13rem]">
-          <span className="shrink-0 text-on-surface-variant/70">{`${t.chat.input.modelLabel}:`}</span>
+          <span className="composer-chip-key text-on-surface-variant/70">{`${t.chat.input.modelLabel}:`}</span>
           <select
             value={selectedModel?.id ?? ''}
             disabled={disabled}
@@ -105,7 +105,7 @@ export function ExternalComposerControls({
               onEffortChange(null);
             }}
             aria-label={labels.model.label}
-            className="composer-chip-value min-w-0 max-w-[9rem] appearance-none bg-transparent text-inherit outline-none disabled:opacity-60"
+            className="composer-chip-value composer-chip-runner min-w-0 max-w-[9rem] appearance-none bg-transparent outline-none disabled:opacity-60"
           >
             {models.map((candidate) => (
               <option key={candidate.id} value={candidate.id}>
@@ -118,7 +118,7 @@ export function ExternalComposerControls({
 
       {efforts.length > 0 ? (
         <label className="composer-chip max-w-[11rem]">
-          <span className="shrink-0 text-on-surface-variant/70">{`${labels.model.effortLabel}:`}</span>
+          <span className="composer-chip-key text-on-surface-variant/70">{`${t.chat.input.effortLabel}:`}</span>
           <select
             value={effort ?? selectedModel?.defaultReasoningEffort ?? ''}
             disabled={disabled}

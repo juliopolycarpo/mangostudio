@@ -82,7 +82,7 @@ export function ComposerChipRow(props: ComposerChipRowProps) {
   if (chips.length === 0) return null;
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 border-b border-outline-variant/10 px-2 py-1.5">
+    <div className="composer-statusline flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 px-2 py-1.5">
       <button
         type="button"
         onClick={() => setExpanded((open) => !open)}
@@ -165,8 +165,8 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
           }
           className="composer-chip max-w-[14rem] disabled:opacity-60"
         >
-          <FolderOpen size={11} className="shrink-0 text-primary/80" aria-hidden="true" />
-          <span className="shrink-0 text-on-surface-variant/70">{`${labels.workdirLabel}:`}</span>
+          <FolderOpen size={11} className="composer-chip-icon shrink-0" aria-hidden="true" />
+          <span className="composer-chip-key text-on-surface-variant/70">{`${labels.workdirLabel}:`}</span>
           <span className="composer-chip-value">{folder ?? t.workspace.chooseWorkdir}</span>
         </button>
       ),
@@ -181,7 +181,7 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
       key: 'agent',
       node: (
         <label className="composer-chip max-w-[13rem]">
-          <span className="shrink-0 text-on-surface-variant/70">{`${labels.agentLabel}:`}</span>
+          <span className="composer-chip-key text-on-surface-variant/70">{`${labels.agentLabel}:`}</span>
           <select
             id="chat-agent-selector"
             value={props.selectedAgentId}
@@ -229,7 +229,10 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
     chips.push({
       key: 'external-controls',
       node: (
-        <span className="flex min-w-0 flex-wrap items-center gap-1">
+        // A nested strip, not a plain wrapper: these three read as `key: value`
+        // exactly like the chips around them, and without the row class they
+        // were the only run on the line with no `·` between them.
+        <span className="composer-chip-row">
           <ExternalComposerControls
             descriptor={props.externalDescriptor}
             model={props.externalModel}

@@ -23,11 +23,7 @@ export function ImageIntentToggle({
       disabled={disabled}
       aria-pressed={active}
       title={t.chat.input.createImagesHint}
-      className={`terminal-chip h-7 shrink-0 transition-colors disabled:opacity-50 ${
-        active
-          ? 'border-primary/40 bg-primary/15 text-primary'
-          : 'hover:border-outline-variant hover:text-on-surface'
-      }`}
+      className="terminal-chip composer-tool-chip h-7 shrink-0 transition-colors disabled:opacity-50"
     >
       <Image size={12} className="shrink-0" />
       <span className="hidden sm:inline">{t.chat.input.createImages}</span>

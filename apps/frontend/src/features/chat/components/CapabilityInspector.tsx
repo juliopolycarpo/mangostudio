@@ -100,11 +100,7 @@ export function CapabilityInspector({
         onClick={() => setOpen((value) => !value)}
         disabled={disabled}
         aria-expanded={open}
-        className={`terminal-chip h-7 shrink-0 transition-colors disabled:opacity-50 ${
-          open
-            ? 'border-primary/40 bg-primary/15 text-primary'
-            : 'hover:border-outline-variant hover:text-on-surface'
-        }`}
+        className="terminal-chip composer-tool-chip h-7 shrink-0 transition-colors disabled:opacity-50"
         title={labels.title}
       >
         <SlidersHorizontal size={12} className="shrink-0" />
