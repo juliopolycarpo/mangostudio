@@ -50,6 +50,7 @@ import { externalAccountLimitsCache } from './049_external_account_limits_cache'
 import { externalSessionAdoption } from './050_external_session_adoption';
 import { messageUncheckpointedSources } from './051_message_uncheckpointed_sources';
 import { clearStaleDivergenceAcks } from './052_clear_stale_divergence_acks';
+import { activityEvents } from './053_activity_events';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -104,4 +105,5 @@ export const allMigrations = {
   '050_external_session_adoption': externalSessionAdoption,
   '051_message_uncheckpointed_sources': messageUncheckpointedSources,
   '052_clear_stale_divergence_acks': clearStaleDivergenceAcks,
+  '053_activity_events': activityEvents,
 };

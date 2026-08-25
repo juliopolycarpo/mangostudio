@@ -7,6 +7,7 @@ import {
   RuntimeRemoteError,
 } from '@mangostudio/runtime';
 import type {
+  EnvironmentConnectionState,
   EnvironmentConnectionStatus,
   EnvironmentTransportKind,
 } from '@mangostudio/shared/environments';
@@ -24,6 +25,10 @@ import { probeRuntimeSlots } from '../../cli/runtime-slot-probe';
 import { getDb } from '../../db/database';
 import { getVersion } from '../../lib/config';
 import { resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
+import {
+  type EnvironmentStateTransitionRecorder,
+  recordEnvironmentStateTransition,
+} from '../../modules/environments/application/record-environment-activity';
 import {
   assertEnvironmentConfig,
   environmentConfigFor,
@@ -143,6 +148,8 @@ export interface RuntimeConnectionManagerOptions {
   readonly resolveEnvironment: RuntimeEnvironmentResolver;
   readonly connectors: Partial<Record<EnvironmentTransportKind, RuntimeEnvironmentConnector>>;
   readonly publish?: (userId: string) => void;
+  /** Overridable so a test can assert transitions without touching the database. */
+  readonly recordTransition?: EnvironmentStateTransitionRecorder;
   /**
    * Per-transport connect deadlines, defaulting to {@link CONNECT_DEADLINE_MS}.
    * A transport with no entry is unbounded here and bounds itself. Overridable
@@ -164,8 +171,22 @@ export interface RuntimeConnectionManagerOptions {
 export type ExternalAgentsRevokedObserver = (userId: string, environmentId: string) => void;
 
 interface RuntimeConnectionEntry {
+  /** Who this connection belongs to, so a status sweep never crosses accounts. */
+  userId: string;
+  environmentId: string;
   revision: number;
   status: EnvironmentConnectionStatus;
+  /** Display name, known once a definition resolved. Falls back to the id. */
+  environmentName?: string;
+  /**
+   * The last settled state this entry reported to the activity feed.
+   *
+   * `undefined` until the first settled state is seen, which is what keeps a
+   * hub restart quiet: entries start empty, so the `disconnected → connecting →
+   * connected` walk that every environment does on the first read after a
+   * restart has nothing to diff against and reports nothing.
+   */
+  announcedState?: SettledConnectionState;
   /** Known once a definition resolved; decides whether a backoff applies. */
   transportKind?: EnvironmentTransportKind;
   connection?: ManagedRuntimeConnection;
@@ -320,6 +341,17 @@ function connectionKey(userId: string, environmentId: string): string {
 }
 
 /**
+ * The states worth remembering. `connecting` is a step on the way to one of
+ * these, so recording it would put two rows in the feed for every reconnect and
+ * neither would say anything the next one does not.
+ */
+type SettledConnectionState = Exclude<EnvironmentConnectionState, 'connecting'>;
+
+function settledState(status: EnvironmentConnectionStatus): SettledConnectionState | undefined {
+  return status.state === 'connecting' ? undefined : status.state;
+}
+
+/**
  * Backoff is a deadline rather than a timer: nothing is scheduled, so a
  * disabled, deleted, or simply unused environment never respawns on its own,
  * and there is no pending callback for shutdown to forget to cancel. The next
@@ -408,7 +440,8 @@ function failureDetail(
 export class RuntimeConnectionManager {
   readonly #connectors: RuntimeConnectionManagerOptions['connectors'];
   readonly #entries = new Map<string, RuntimeConnectionEntry>();
-  readonly #publish: (userId: string) => void;
+  readonly #publishHook: (userId: string) => void;
+  readonly #recordTransition: EnvironmentStateTransitionRecorder;
   readonly #resolveEnvironment: RuntimeEnvironmentResolver;
   readonly #connectDeadlinesMs: Partial<Record<EnvironmentTransportKind, number>>;
   #externalAgentsRevoked: ExternalAgentsRevokedObserver | undefined;
@@ -416,8 +449,40 @@ export class RuntimeConnectionManager {
   constructor(options: RuntimeConnectionManagerOptions) {
     this.#connectors = options.connectors;
     this.#connectDeadlinesMs = options.connectDeadlinesMs ?? CONNECT_DEADLINE_MS;
-    this.#publish = options.publish ?? (() => undefined);
+    this.#publishHook = options.publish ?? (() => undefined);
+    this.#recordTransition = options.recordTransition ?? recordEnvironmentStateTransition;
     this.#resolveEnvironment = options.resolveEnvironment;
+  }
+
+  /**
+   * Announces a status change to this user's tabs, and to the activity feed when
+   * the change settled somewhere new.
+   *
+   * A method rather than the injected hook itself so the ~16 sites that already
+   * call `#publish` immediately after assigning `entry.status` keep working
+   * unchanged — every one of them is a state change someone should hear about,
+   * and a second call added beside each is a second call someone will forget.
+   * The sweep is over one user's entries, which is a handful.
+   */
+  #publish(userId: string): void {
+    for (const entry of this.#entries.values()) {
+      if (entry.userId !== userId) continue;
+      const state = settledState(entry.status);
+      if (state === undefined || state === entry.announcedState) continue;
+
+      const previousState = entry.announcedState;
+      entry.announcedState = state;
+      if (previousState === undefined) continue;
+
+      this.#recordTransition({
+        userId,
+        environmentId: entry.environmentId,
+        environmentName: entry.environmentName ?? entry.environmentId,
+        previousState,
+        state,
+      });
+    }
+    this.#publishHook(userId);
   }
 
   /** Replaces any previous observer; the hub registers one at startup. */
@@ -470,6 +535,8 @@ export class RuntimeConnectionManager {
     if (current?.connecting) return await current.connecting;
 
     const entry = current ?? {
+      userId,
+      environmentId,
       revision: 0,
       status: { state: 'disconnected' as const },
       failureCount: 0,
@@ -494,6 +561,7 @@ export class RuntimeConnectionManager {
           throw unavailable(`Environment "${environmentId}" was not found.`);
         }
         entry.transportKind = definition.transportKind;
+        entry.environmentName = definition.name;
         const opening = this.#openConnection(
           definition,
           () => {
@@ -646,6 +714,8 @@ export class RuntimeConnectionManager {
 
     const key = connectionKey(userId, environmentId);
     const entry = this.#entries.get(key) ?? {
+      userId,
+      environmentId,
       revision: 0,
       status: { state: 'disconnected' as const },
       failureCount: 0,
@@ -653,6 +723,7 @@ export class RuntimeConnectionManager {
     };
     this.#entries.set(key, entry);
     entry.transportKind = definition.transportKind;
+    entry.environmentName = definition.name;
 
     const revision = ++entry.revision;
     const superseded = entry.connection;

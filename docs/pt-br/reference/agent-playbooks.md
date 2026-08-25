@@ -191,6 +191,33 @@ Abra estes arquivos primeiro:
 - `apps/frontend/src/features/gallery/GalleryPage.tsx`
 - `apps/frontend/src/features/generation/hooks/use-image-generation.ts`
 
+## Feed De Atividade
+
+O log da conta com "o que mudou desde a sua última sessão". A emissão é
+fan-in: sete módulos escrevem, um módulo lê.
+
+Abra estes arquivos primeiro:
+
+- `apps/shared/src/activity/schemas.ts` (a união fechada de `kind` e os payloads por tipo)
+- `apps/api/src/modules/activity/application/record-activity.ts` (o único escritor)
+- `apps/api/src/modules/activity/application/list-activity.ts`
+- `apps/api/src/modules/activity/infrastructure/activity-repository.ts` (paginação keyset + retenção)
+- `apps/frontend/src/features/activity/`
+
+Regras que sustentam o desenho:
+
+- A emissão é fire-and-forget. `recordActivity` nunca rejeita, e todo ponto de
+  emissão chama `void recordActivity(...)`. Uma anotação que falha jamais pode
+  derrubar o trabalho que ela descreve.
+- `kind` é gravado como texto e a rota de listagem **descarta** qualquer linha
+  que não consiga revalidar. Uma união fechada na resposta mais uma linha
+  ilegível derrubaria o feed inteiro, e um downgrade não pode perder linhas que
+  uma versão mais nova gravou.
+- Adicionar um tipo exige: a união compartilhada, um schema de payload, um ponto
+  de emissão, um teste de emissão que verifique a linha, e um caso em
+  `describeActivity` — o `switch` é exaustivo, então o frontend falha no `check`
+  até você adicionar.
+
 ## Persistência E Banco De Dados
 
 Abra estes arquivos primeiro:

@@ -49,6 +49,22 @@ Para automação fora do navegador, use chaves de API com escopo (`x-api-key`). 
 | `GET`  | `/api/chats/:chatId/messages` | Sim  | Listar mensagens do chat |
 | `POST` | `/api/chats/:chatId/messages` | Sim  | Criar uma mensagem       |
 
+## Endpoints De Atividade
+
+| Método | Path            | Auth | Finalidade                           |
+| ------ | --------------- | ---- | ------------------------------------ |
+| `GET`  | `/api/activity` | Sim  | Paginar o feed de atividade da conta |
+
+Query: `since` (epoch ms, exclusivo), `workdir`, `limit` (≤100, padrão 30),
+`cursor`. Retorna `ListActivityResponse` de `@mangostudio/shared/activity` —
+`events` do mais recente para o mais antigo, mais `nextCursor` quando ainda há
+páginas. O cursor é um token keyset opaco; não construa um.
+
+Linhas que a versão em execução não consegue revalidar contra
+`ActivityEventSchema` são omitidas de `events` em vez de derrubar a requisição,
+para que um downgrade leia o feed de uma versão mais nova sem perder o resto
+dele. A paginação continua avançando por elas.
+
 ## Endpoints De Geração
 
 | Método | Path                  | Auth | Finalidade                      |

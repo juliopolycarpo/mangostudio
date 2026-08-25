@@ -1,4 +1,5 @@
 {
+  "/api/activity/": ["get"],
   "/api/api-keys/": ["get", "post"],
   "/api/api-keys/{id}": ["delete"],
   "/api/auth/*": ["delete", "get", "head", "options", "patch", "post", "put", "trace"],

@@ -57,6 +57,22 @@ The list is kept live during streaming by the `todo_update` SSE chunk.
 | `GET`  | `/api/chats/:chatId/messages` | Yes  | List messages in a chat |
 | `POST` | `/api/chats/:chatId/messages` | Yes  | Create a message        |
 
+## Activity Endpoints
+
+| Method | Path            | Auth | Purpose                          |
+| ------ | --------------- | ---- | -------------------------------- |
+| `GET`  | `/api/activity` | Yes  | Page the account's activity feed |
+
+Query: `since` (epoch ms, exclusive), `workdir`, `limit` (≤100, default 30),
+`cursor`. Returns `ListActivityResponse` from `@mangostudio/shared/activity` —
+`events` newest-first, plus `nextCursor` when more remain. The cursor is an
+opaque keyset token; do not construct one.
+
+Rows the running build cannot re-validate against `ActivityEventSchema` are
+omitted from `events` rather than failing the request, so a downgrade reads a
+newer build's feed without losing the rest of it. Paging still advances past
+them.
+
 ## Generation Endpoints
 
 | Method | Path                  | Auth | Purpose                     |

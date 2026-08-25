@@ -49,6 +49,15 @@ export const ENVIRONMENTS_TOPIC = 'environments' as const;
  * again, one vendor subprocess per cycle, per user, without end.
  */
 export const EXTERNAL_AGENTS_TOPIC = 'external-agents' as const;
+/**
+ * "Something worth reporting happened on this account."
+ *
+ * One topic for every activity kind rather than one per producer: the feed is a
+ * single query, and the consumers that piggyback on it (the chat list, which
+ * `chat_created`/`turn_completed` already imply is stale) want the same
+ * coarse signal. Splitting it would buy nothing but frames.
+ */
+export const ACTIVITY_TOPIC = 'activity' as const;
 
 const GIT_TOPIC_PREFIX = 'git:' as const;
 const MAX_REALTIME_TOPICS_PER_MESSAGE = 32;
@@ -179,10 +188,21 @@ const RealtimeExternalAgentsInvalidateMessageSchema = Type.Object(
   { additionalProperties: false }
 );
 
+const RealtimeActivityInvalidateMessageSchema = Type.Object(
+  {
+    type: Type.Literal('invalidate'),
+    topic: Type.Literal(ACTIVITY_TOPIC),
+    /** Keeps the invalidate union ergonomic while rejecting scopes on this topic. */
+    scopes: Type.Optional(Type.Never()),
+  },
+  { additionalProperties: false }
+);
+
 export const RealtimeInvalidateMessageSchema = Type.Union([
   RealtimeSettingsInvalidateMessageSchema,
   RealtimeEnvironmentsInvalidateMessageSchema,
   RealtimeExternalAgentsInvalidateMessageSchema,
+  RealtimeActivityInvalidateMessageSchema,
   RealtimeGitInvalidateMessageSchema,
 ]);
 export type RealtimeInvalidateMessage = Static<typeof RealtimeInvalidateMessageSchema>;

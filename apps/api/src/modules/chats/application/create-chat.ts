@@ -1,6 +1,7 @@
 import type { Chat } from '@mangostudio/shared/chat';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { recordActivity } from '../../activity/application/record-activity';
 import { type CreateChatData, createChat } from '../infrastructure/chat-repository';
 import { toPublicChat } from './public-chat';
 
@@ -19,5 +20,20 @@ export async function createChatUseCase(
     model: input.model,
     userId: input.userId,
   };
-  return toPublicChat(await createChat(data, db));
+  const chat = await createChat(data, db);
+
+  void recordActivity(
+    {
+      userId: input.userId,
+      kind: 'chat_created',
+      chatId: chat.id,
+      environmentId: chat.environmentId,
+      // A chat has no workdir at creation; one is chosen later, and the turns
+      // that run in it carry it.
+      payload: { title: chat.title },
+    },
+    { db }
+  );
+
+  return toPublicChat(chat);
 }

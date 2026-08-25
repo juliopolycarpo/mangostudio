@@ -54,6 +54,7 @@ modules/<domain>/
 | `prompt-rules`      | A/H     | System prompt composition, rule file resolution                 |
 | `attachments`       | A/I     | File upload, validation, storage, provider delivery             |
 | `realtime`          | H       | Cookie-authenticated, user-scoped cache invalidation            |
+| `activity`          | A/D/H/I | Account-wide "what changed" log; many modules write, one reads  |
 
 A = Application, D = Domain, H = HTTP, I = Infrastructure
 

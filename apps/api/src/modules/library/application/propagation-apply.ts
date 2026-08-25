@@ -46,6 +46,8 @@ import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { getRuntimeClient } from '../../../services/runtime-client';
 import { constantTimeEquals } from '../../../utils/hash';
+import { recordActivity } from '../../activity/application/record-activity';
+import { summarizeAppliedResources } from '../domain/applied-resource-summary';
 import { LibraryRequestError } from '../domain/library-request-error';
 import { backupPolicyFor } from '../infrastructure/backup-roots';
 import { type BackupStoreDeps, defaultBackupStoreDeps } from '../infrastructure/backup-store';
@@ -303,7 +305,39 @@ async function runApply(
     }
   }
 
+  recordAppliedActivity(userId, preview, writeResult);
+
   return writeResult;
+}
+
+/**
+ * One feed row per resource that actually reached disk.
+ *
+ * Per resource rather than per apply because "propagated `frontend-design` to
+ * Codex and Cursor" is the sentence a user came back for; a single row saying
+ * "applied 7 changes" is a number they would have to open the library to read.
+ * A partial apply still reports what landed — those bytes are on disk either
+ * way, and the failure is already surfaced by the response.
+ */
+function recordAppliedActivity(
+  userId: string,
+  preview: PropagationPreview,
+  writeResult: PropagationApply
+): void {
+  for (const resource of summarizeAppliedResources(preview, writeResult.applied)) {
+    void recordActivity({
+      userId,
+      kind: 'propagation_applied',
+      // A library resource belongs to a machine, not to a chat or a folder —
+      // and `null` when this one landed on more than one of them.
+      environmentId: resource.environmentId,
+      payload: {
+        resourceKind: resource.kind,
+        resourceName: resource.slug,
+        targets: resource.targets,
+      },
+    });
+  }
 }
 
 /**

@@ -623,6 +623,41 @@ Open these first:
 - `apps/frontend/src/features/gallery/GalleryPage.tsx`
 - `apps/frontend/src/features/generation/hooks/use-image-generation.ts`
 
+## Activity Feed
+
+The account-wide "what changed since your last session" log. Emission is
+fan-in: seven modules append, one module reads.
+
+Open these first:
+
+- `apps/shared/src/activity/schemas.ts` (the closed `kind` union and its per-kind payloads)
+- `apps/api/src/modules/activity/application/record-activity.ts` (the only writer)
+- `apps/api/src/modules/activity/application/list-activity.ts`
+- `apps/api/src/modules/activity/infrastructure/activity-repository.ts` (keyset paging + retention)
+- `apps/frontend/src/features/activity/`
+
+Rules that are load-bearing:
+
+- Emission is fire-and-forget. `recordActivity` never rejects, and every seam
+  calls it as `void recordActivity(...)`. A failed note must never fail the work
+  it describes.
+- `kind` is stored as text and the list route **drops** any row it cannot
+  re-validate. A closed response union plus one unreadable row would otherwise
+  take the whole feed down, and a downgrade must not lose rows a newer build
+  wrote.
+- Adding a kind means: the shared union, a payload schema, one seam, an
+  emission test asserting the row, and a `describeActivity` branch — the switch
+  is exhaustive, so the frontend fails `check` until you add it.
+
+Seams (one line each, all fire-and-forget):
+`chats/application/create-chat.ts`,
+`chats/application/record-turn-activity.ts` (called by the local runner's
+`finalizeSuccessfulTurn` and the external runner's `finish`),
+`git/application/git-write-service.ts` (`commitChanges`, `pushBranch`),
+`library/application/propagation-apply.ts`,
+`external-agents/application/external-account-limits.ts`,
+`services/runtime-client/runtime-connection-manager.ts`.
+
 ## Persistence And Database
 
 Open these first:
