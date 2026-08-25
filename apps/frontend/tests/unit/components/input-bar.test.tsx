@@ -1,5 +1,4 @@
 import { describe, expect, it, jest } from 'bun:test';
-import type { Environment } from '@mangostudio/shared/environments';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { screen, waitFor } from '@testing-library/react';
@@ -30,7 +29,6 @@ describe('InputBar — chat-only composer', () => {
       agents: undefined,
       activeModels: undefined,
       onSelectedAgentIdChange: jest.fn(),
-      onWorkdirClick: jest.fn(),
     });
 
     expect(screen.getByTestId('composer')).toBeInTheDocument();
@@ -95,81 +93,15 @@ describe('InputBar — chat-only composer', () => {
     expect(screen.getByRole('combobox', { name: 'Select agent' })).toHaveTextContent('Default');
   });
 
-  it('changes the chat execution environment from the composer pill', async () => {
-    const scenario = createFetchScenario();
-    const environments: Environment[] = [
-      {
-        id: 'local',
-        name: 'Local',
-        transportKind: 'in-process',
-        config: {},
-        enabled: true,
-        allowInstalls: false,
-        virtual: true,
-        createdAt: null,
-        updatedAt: null,
-        status: { state: 'connected' },
-      },
-      {
-        id: 'remote-dev',
-        name: 'Remote dev',
-        transportKind: 'ssh',
-        config: { host: 'dev.example.test' },
-        enabled: true,
-        allowInstalls: false,
-        virtual: false,
-        createdAt: 1,
-        updatedAt: 1,
-        status: { state: 'disconnected' },
-      },
-    ];
-    scenario.respondWithJson('GET', '/api/environments', { body: environments }).install();
+  // The env and dir chips moved to the header — the composer's status line
+  // must not offer either, whatever workdir the chat carries.
+  it('offers no environment or workdir control', () => {
+    renderInputBar({ workdir: '/srv/projects/mangostudio' });
 
-    try {
-      const user = userEvent.setup();
-      const onEnvironmentChange = jest.fn().mockResolvedValue(undefined);
-      renderInputBar({
-        chatId: 'chat-1',
-        environmentId: 'local',
-        onEnvironmentChange,
-      });
-
-      const selector = await screen.findByRole('combobox', {
-        name: 'Select execution environment',
-      });
-      // The pill renders before the listing lands, wearing the `disconnected`
-      // fallback and the bare id for a name, so the connected state is only
-      // meaningful once the fetched environment backs it.
-      await waitFor(() =>
-        expect(screen.getByTestId('environment-selector')).toHaveAttribute(
-          'data-state',
-          'connected'
-        )
-      );
-      expect(selector).toHaveTextContent('Local');
-      expect(selector).toHaveAccessibleDescription('Connected');
-      await user.click(selector);
-      await user.click(await screen.findByRole('option', { name: 'Remote dev' }));
-
-      expect(onEnvironmentChange).toHaveBeenCalledWith('remote-dev');
-    } finally {
-      scenario.restore();
-    }
-  });
-
-  it('shows the active workdir basename and reopens the picker', async () => {
-    const user = userEvent.setup();
-    const onWorkdirClick = jest.fn();
-    renderInputBar({
-      workdir: '/srv/projects/mangostudio',
-      onWorkdirClick,
-    });
-
-    const button = screen.getByRole('button', { name: 'Change working directory: mangostudio' });
-    expect(button).toHaveAttribute('title', '/srv/projects/mangostudio');
-    await user.click(button);
-
-    expect(onWorkdirClick).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('combobox', { name: 'Select execution environment' })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Change working directory: mangostudio' })
+    ).toBeNull();
   });
 
   it('does not render a reference image upload button', () => {

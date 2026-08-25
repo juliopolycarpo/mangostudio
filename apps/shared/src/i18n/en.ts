@@ -73,7 +73,6 @@ export const messages: Messages = {
       historyRecall: 'Prompt history: ↑ and ↓ while the box is empty',
       showControls: 'Show chat controls',
       hideControls: 'Hide chat controls',
-      workdirLabel: 'dir',
       agentLabel: 'agent',
       modelLabel: 'model',
       environmentLabel: 'env',

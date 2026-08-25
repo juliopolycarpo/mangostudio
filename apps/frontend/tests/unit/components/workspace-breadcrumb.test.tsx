@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import { screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { WorkspaceBreadcrumbView } from '../../../src/features/workspace/components/WorkspaceBreadcrumb';
 import { render } from '../../support/harness/render';
 
@@ -38,5 +39,29 @@ describe('WorkspaceBreadcrumbView', () => {
   it('announces a dirty tree', () => {
     render(<WorkspaceBreadcrumbView basename="repo" branch="main" dirty={true} />);
     expect(screen.getByText('Uncommitted changes')).toBeInTheDocument();
+  });
+
+  // The composer's dir chip is gone; this button is where changing the folder
+  // lives now, offered only while the caller passes the handler.
+  it('opens the workdir picker from the repo segment when a handler is given', async () => {
+    const user = userEvent.setup();
+    const onChangeWorkdir = jest.fn();
+    render(
+      <WorkspaceBreadcrumbView
+        basename="repo"
+        branch="main"
+        dirty={false}
+        onChangeWorkdir={onChangeWorkdir}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Change working directory: repo' }));
+
+    expect(onChangeWorkdir).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the repo segment as plain text without a handler', () => {
+    render(<WorkspaceBreadcrumbView basename="repo" branch="main" dirty={false} />);
+    expect(screen.queryByRole('button', { name: /Change working directory/ })).toBeNull();
   });
 });

@@ -12,6 +12,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { chatListQueryOptions, messagesQueryOptions } from '@/features/chat/queries';
 import { CommandPaletteHost } from '@/features/command-palette/CommandPaletteHost';
 import { useCommandPalette } from '@/features/command-palette/use-command-palette';
+import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
 import { ExternalDisclosureGate } from '@/features/external-agents/ExternalDisclosureGate';
 import { ExternalWorkspaceTrustGate } from '@/features/external-agents/ExternalWorkspaceTrustGate';
 import { HeaderQuotaPill } from '@/features/external-agents/HeaderQuotaPill';
@@ -139,13 +140,31 @@ function AuthenticatedLayout() {
           onNewChat={() => void app.handleNewChat()}
           onNavigateToSettings={() => app.handleNavigate('settings')}
           runnerSelector={<RunnerSelectorContainer />}
+          environmentSelector={
+            // The chat's machine, moved up from the composer: it names the
+            // session rather than the turn, and the header is where the rest of
+            // the session's identity (runner, folder, branch) already lives.
+            activePage === 'chat' && app.currentChatId && app.currentEnvironmentId ? (
+              <EnvironmentSelector
+                environmentId={app.currentEnvironmentId}
+                disabled={app.isGenerating}
+                onEnvironmentChange={(environmentId) =>
+                  app.updateChatEnvironment(app.currentChatId as string, environmentId)
+                }
+              />
+            ) : undefined
+          }
           workspaceContext={
             // Gated on a workdir for the same reason the workspace rail gates the
             // Git panel on one: without it the breadcrumb still pays for a
             // `git/state` request and a realtime subscription per chat, and then
             // renders nothing because there is no repository to name.
             activePage === 'chat' && app.currentChatId && app.currentWorkdir ? (
-              <WorkspaceBreadcrumb chatId={app.currentChatId} workdir={app.currentWorkdir} />
+              <WorkspaceBreadcrumb
+                chatId={app.currentChatId}
+                workdir={app.currentWorkdir}
+                onChangeWorkdir={app.openWorkdirPicker}
+              />
             ) : undefined
           }
           quotaPill={activePage === 'chat' ? <HeaderQuotaPill /> : undefined}

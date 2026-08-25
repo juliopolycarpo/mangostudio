@@ -21,6 +21,13 @@ export interface HeaderProps {
    */
   runnerSelector?: ReactNode;
   /**
+   * The active chat's execution environment. A node for the same reason the
+   * runner selector is: the header is chrome, and environments belong to their
+   * own feature. Sits between the runner and the workspace context because the
+   * three read as one sentence: who runs it, where, in which folder.
+   */
+  environmentSelector?: ReactNode;
+  /**
    * The active chat's workspace context (`in <repo> / <branch>`). A node for
    * the same reason the runner selector is: the header is chrome, and git
    * state belongs to the workspace feature.
@@ -37,6 +44,7 @@ export function Header({
   onNewChat,
   onNavigateToSettings,
   runnerSelector,
+  environmentSelector,
   workspaceContext,
   quotaPill,
   onOpenCommandPalette,
@@ -89,6 +97,12 @@ export function Header({
             shrinking made `min-w-0` inert and the header overflowed instead. */}
         {currentPage !== 'studio' && runnerSelector ? (
           <div className="min-w-0 max-w-[60vw] sm:max-w-none">{runnerSelector}</div>
+        ) : null}
+        {/* `sm`, one step earlier than the breadcrumb: the machine is a choice
+            worth keeping reachable on small screens now that the composer no
+            longer carries it, while the breadcrumb stays informational. */}
+        {environmentSelector ? (
+          <div className="hidden shrink-0 sm:flex">{environmentSelector}</div>
         ) : null}
         {workspaceContext ? (
           <div className="hidden min-w-0 flex-1 md:flex">{workspaceContext}</div>

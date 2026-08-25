@@ -13,6 +13,7 @@ import { StatusDot } from '@/components/ui/StatusDot';
 import { useGitRealtimeInvalidation, useGitState } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
 import { branchLabel } from '@/lib/git-branch';
+import { formatMessage } from '@/lib/i18n-format';
 import { workdirBasename } from '@/lib/paths';
 
 interface WorkspaceBreadcrumbProps {
@@ -25,9 +26,19 @@ interface WorkspaceBreadcrumbProps {
    * in `null`.
    */
   workdir: string | null;
+  /**
+   * Opens the workdir picker. The breadcrumb is the workdir's home now that the
+   * composer chip is gone, so this is where changing it lives — offered only
+   * while the caller says the chat can still move.
+   */
+  onChangeWorkdir?: () => void;
 }
 
-export function WorkspaceBreadcrumb({ chatId, workdir }: WorkspaceBreadcrumbProps) {
+export function WorkspaceBreadcrumb({
+  chatId,
+  workdir,
+  onChangeWorkdir,
+}: WorkspaceBreadcrumbProps) {
   // Subscribed here as well as in the rail, because this is the mount that
   // survives: the rail unmounts when it is collapsed, on Todos and on mobile,
   // and a breadcrumb reading a query nobody invalidates goes quietly stale.
@@ -46,6 +57,7 @@ export function WorkspaceBreadcrumb({ chatId, workdir }: WorkspaceBreadcrumbProp
       basename={basename}
       branch={branch}
       dirty={repo ? !repo.status.clean : false}
+      {...(onChangeWorkdir ? { onChangeWorkdir } : {})}
     />
   );
 }
@@ -54,10 +66,12 @@ export function WorkspaceBreadcrumbView({
   basename,
   branch,
   dirty,
+  onChangeWorkdir,
 }: {
   basename: string;
   branch: string | null;
   dirty: boolean;
+  onChangeWorkdir?: () => void;
 }) {
   const { t } = useI18n();
   return (
@@ -66,7 +80,18 @@ export function WorkspaceBreadcrumbView({
       data-testid="workspace-breadcrumb"
     >
       <span className="shrink-0 text-on-surface-variant/60">{t.workspace.breadcrumbIn}</span>
-      <span className="truncate font-medium text-on-surface">{basename}</span>
+      {onChangeWorkdir ? (
+        <button
+          type="button"
+          onClick={onChangeWorkdir}
+          aria-label={formatMessage(t.workspace.changeWorkdir, { name: basename })}
+          className="truncate font-medium text-on-surface underline-offset-2 transition-colors hover:text-primary hover:underline"
+        >
+          {basename}
+        </button>
+      ) : (
+        <span className="truncate font-medium text-on-surface">{basename}</span>
+      )}
       {branch ? (
         <>
           <span className="shrink-0 text-on-surface-variant/60">/</span>

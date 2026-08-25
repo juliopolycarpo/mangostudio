@@ -71,7 +71,6 @@ export const messages = {
       historyRecall: 'Histórico de prompts: ↑ e ↓ com o campo vazio',
       showControls: 'Mostrar controles do chat',
       hideControls: 'Ocultar controles do chat',
-      workdirLabel: 'pasta',
       agentLabel: 'agente',
       modelLabel: 'modelo',
       environmentLabel: 'env',

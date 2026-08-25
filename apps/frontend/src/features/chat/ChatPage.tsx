@@ -50,8 +50,8 @@ interface ChatPageProps {
   agents?: ReadonlyArray<AgentProfile>;
   isAgentListLoading?: boolean;
   onSelectedAgentIdChange?: (agentId: string) => void;
+  /** Read-only here now: the hub names it, and the header owns changing it. */
   environmentId?: string | null;
-  onEnvironmentChange?: (environmentId: string) => void | Promise<void>;
   workdir?: string | null;
   /** Jumping to another chat from the empty-state hub's uncommitted-work card. */
   onSelectChat?: (chatId: string) => void;
@@ -156,7 +156,6 @@ export function ChatPage({
   isAgentListLoading = false,
   onSelectedAgentIdChange,
   environmentId = null,
-  onEnvironmentChange,
   workdir = null,
   onSelectChat,
   composer,
@@ -282,10 +281,7 @@ export function ChatPage({
             agents={agents}
             isAgentListLoading={isAgentListLoading}
             onSelectedAgentIdChange={onSelectedAgentIdChange}
-            environmentId={environmentId}
-            onEnvironmentChange={onEnvironmentChange}
             workdir={workdir}
-            onWorkdirClick={onOpenWorkdirPicker}
             {...composer}
           />
         </div>

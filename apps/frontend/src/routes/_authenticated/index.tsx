@@ -64,11 +64,6 @@ function ChatRoute() {
       isAgentListLoading={app.isAgentListLoading}
       onSelectedAgentIdChange={app.setSelectedAgentId}
       environmentId={app.currentEnvironmentId}
-      onEnvironmentChange={
-        app.currentChatId
-          ? (environmentId) => app.updateChatEnvironment(app.currentChatId as string, environmentId)
-          : undefined
-      }
       workdir={app.currentWorkdir}
       onSelectChat={app.handleSelectChat}
       composer={{

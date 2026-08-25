@@ -1,6 +1,7 @@
 /**
  * The composer's status line: who runs this turn, with what model, under what
- * permissions, in which folder on which machine.
+ * permissions. The session's identity — which machine and which folder — lives
+ * in the header instead, so the strip carries only the per-turn controls.
  *
  * Rendered as `key: value` chips separated by `·` rather than as a toolbar of
  * bordered pills, because that is what it is — a line you read left to right
@@ -25,17 +26,15 @@ import type {
   ExternalPermissionLevel,
   ExternalThreadUsage,
 } from '@mangostudio/shared/external-agents';
-import { ChevronDown, FolderOpen } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { Fragment, type ReactNode, useState } from 'react';
 import { ModelSelector } from '@/components/layout/ModelSelector';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 import { ChipSelect } from '@/components/ui/ChipSelect';
-import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
 import { ExternalComposerControls } from '@/features/external-agents/ExternalComposerControls';
 import { ExternalUsageDisplay } from '@/features/external-agents/ExternalUsageDisplay';
 import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatMessage } from '@/lib/i18n-format';
 import { workdirLabel } from '@/lib/paths';
 import { ContextBadge } from './ContextBadge';
 
@@ -63,10 +62,12 @@ export interface ComposerChipRowProps {
   agents?: ReadonlyArray<AgentProfile>;
   isAgentListLoading: boolean;
   onSelectedAgentIdChange?: (agentId: string) => void;
-  environmentId: string | null;
-  onEnvironmentChange?: (environmentId: string) => void | Promise<void>;
+  /**
+   * Not a control anymore — the header's breadcrumb owns changing it. Still
+   * read here because the collapsed narrow-screen summary is the one surface
+   * naming the folder on a phone, where that breadcrumb is hidden.
+   */
   workdir: string | null;
-  onWorkdirClick?: () => void;
   activeModels?: ModelOption[];
   modelCatalog?: ModelCatalogResponse;
   lockedProvider?: ProviderType | null;
@@ -146,44 +147,6 @@ function summaryText(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>[
 function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['t']): Chip[] {
   const chips: Chip[] = [];
   const labels = t.chat.input;
-
-  if (props.environmentId && props.onEnvironmentChange) {
-    chips.push({
-      key: 'environment',
-      node: (
-        <EnvironmentSelector
-          environmentId={props.environmentId}
-          disabled={props.disabled || props.isGenerating}
-          onEnvironmentChange={props.onEnvironmentChange}
-        />
-      ),
-    });
-  }
-
-  if (props.onWorkdirClick) {
-    const folder = workdirLabel(props.workdir);
-    chips.push({
-      key: 'workdir',
-      node: (
-        <button
-          type="button"
-          onClick={props.onWorkdirClick}
-          disabled={props.disabled}
-          title={props.workdir ?? t.workspace.chooseWorkdir}
-          aria-label={
-            folder
-              ? formatMessage(t.workspace.changeWorkdir, { name: folder })
-              : t.workspace.chooseWorkdir
-          }
-          className="composer-chip max-w-[14rem] disabled:opacity-60"
-        >
-          <FolderOpen size={11} className="composer-chip-icon shrink-0" aria-hidden="true" />
-          <span className="composer-chip-key text-on-surface-variant/70">{`${labels.workdirLabel}:`}</span>
-          <span className="composer-chip-value">{folder ?? t.workspace.chooseWorkdir}</span>
-        </button>
-      ),
-    });
-  }
 
   if (!props.isExternalRunner && props.onSelectedAgentIdChange) {
     const selectable = (props.agents ?? []).filter(
