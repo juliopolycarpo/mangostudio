@@ -120,7 +120,7 @@ function installScenario(overrides: ScenarioOverrides = {}) {
     .respondWithJson('POST', '/api/git/state/batch', {
       body: { states: overrides.gitBatch ?? {} },
     })
-    .respondWithJson('GET', '/api/external-agents', {
+    .respondWithJson('GET', '/api/external-agents?environmentId=local', {
       body: { environmentId: 'local', agents: overrides.agents ?? [] },
     })
     .respondWithJson('GET', '/api/environments', {

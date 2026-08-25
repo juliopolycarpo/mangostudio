@@ -372,6 +372,7 @@ export const messages = {
       empty: 'Nenhum CLI de agente detectado neste ambiente.',
       manage: 'Gerenciar agentes',
       quotaRefresh: 'Atualizar cota',
+      sessionsThisWeek: '{count} nesta semana',
     },
     skills: {
       label: 'Skills',
@@ -384,6 +385,19 @@ export const messages = {
       viewDiff: 'Ver diff',
       // Deliberadamente neutro: viver em um só agente costuma ser intencional.
       singleTarget: '{count} skill(s) vivem em apenas um agente.',
+      openLibrary: 'Abrir na biblioteca',
+    },
+    // O mesmo card varrendo todos os tipos: frases próprias, não um substantivo
+    // interpolado na cópia de skills — concordância não sobrevive a um slot.
+    library: {
+      label: 'Biblioteca',
+      labelDivergent: 'Biblioteca — {count} divergência(s)',
+      divergenceBody: 'Versão diferente em {outliers} do que em {agreeing}.',
+      divergenceBodyNoMajority: '{targets} leem versões diferentes deste recurso.',
+      more: 'Mais {count} recurso(s) divergente(s).',
+      propagate: 'Propagar',
+      viewDiff: 'Ver diff',
+      singleTarget: '{count} recurso(s) vivem em apenas um agente.',
       openLibrary: 'Abrir na biblioteca',
     },
     uncommitted: {

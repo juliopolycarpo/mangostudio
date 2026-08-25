@@ -4,16 +4,16 @@
  *
  * Every card degrades on its own — skeleton while loading, hidden on error or
  * on nothing-to-report — because none of them is a reason to stop the user from
- * typing. Composed here rather than in `ChatPage` so plan 008's `/home` route
+ * typing. Composed here rather than in `ChatPage` so the `/home` dashboard
  * can mount the same widgets against a cross-workspace scope.
  */
 
 import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents';
-import { ActivityStrip } from '@/features/activity/ActivityStrip';
+import { ACTIVITY_STRIP_ROWS, ActivityCard } from '@/features/activity/ActivityCard';
 import { AgentsCard } from './widgets/AgentsCard';
 import { EnvironmentHealthCard } from './widgets/EnvironmentHealthCard';
 import { GreetingHeader } from './widgets/GreetingHeader';
-import { SkillsDivergenceCard } from './widgets/SkillsDivergenceCard';
+import { LibraryDivergenceCard } from './widgets/LibraryDivergenceCard';
 import { SuggestedActions } from './widgets/SuggestedActions';
 import { UncommittedWorkCard } from './widgets/UncommittedWorkCard';
 import { WorkspaceCard } from './widgets/WorkspaceCard';
@@ -69,11 +69,15 @@ export function WorkspaceHub({
             className={chatId ? undefined : 'sm:col-span-2'}
           />
           <EnvironmentHealthCard activeEnvironmentId={environmentId} />
-          <SkillsDivergenceCard environmentId={environmentId} />
+          <LibraryDivergenceCard
+            environmentId={environmentId}
+            kind="skill"
+            className="sm:col-span-2"
+          />
           {onSelectChat ? (
             <UncommittedWorkCard currentChatId={chatId} onSelectChat={onSelectChat} />
           ) : null}
-          <ActivityStrip />
+          <ActivityCard limit={ACTIVITY_STRIP_ROWS} compact className="sm:col-span-2" />
         </div>
 
         <SuggestedActions chatId={chatId} onSelect={onUsePrompt} />

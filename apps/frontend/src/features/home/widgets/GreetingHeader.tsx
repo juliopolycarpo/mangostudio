@@ -5,6 +5,12 @@ import { type GreetingSlot, greetingSlot } from '../lib/greeting';
 interface GreetingHeaderProps {
   /** First name from the session. Empty when the account has no display name. */
   userName: string;
+  /**
+   * The line under the greeting. Defaults to the chat hub's, which promises
+   * what *this workspace* looks like; the dashboard promises something wider
+   * and says so rather than repeating a sentence that names one folder.
+   */
+  subtitle?: string;
   /** Injectable for tests; the greeting is a wall-clock read otherwise. */
   now?: Date;
 }
@@ -26,7 +32,7 @@ const ANONYMOUS_KEY: Readonly<Record<GreetingSlot, keyof Messages['home']['greet
  * reference design — it is the only place the surface addresses the user
  * directly, so it earns the one warm colour on the screen.
  */
-export function GreetingHeader({ userName, now = new Date() }: GreetingHeaderProps) {
+export function GreetingHeader({ userName, subtitle, now = new Date() }: GreetingHeaderProps) {
   const { t } = useI18n();
   const labels = t.home.greeting;
   const slot = greetingSlot(now);
@@ -43,7 +49,7 @@ export function GreetingHeader({ userName, now = new Date() }: GreetingHeaderPro
           labels[ANONYMOUS_KEY[slot]]
         )}
       </h2>
-      <p className="text-sm text-on-surface-variant">{labels.subtitle}</p>
+      <p className="text-sm text-on-surface-variant">{subtitle ?? labels.subtitle}</p>
     </header>
   );
 }

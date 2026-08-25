@@ -364,6 +364,7 @@ export const messages: Messages = {
       empty: 'No agent CLI detected in this environment.',
       manage: 'Manage agents',
       quotaRefresh: 'Refresh quota',
+      sessionsThisWeek: '{count} this week',
     },
     skills: {
       label: 'Skills',
@@ -374,6 +375,24 @@ export const messages: Messages = {
       propagate: 'Propagate',
       viewDiff: 'View diff',
       singleTarget: '{count} skill(s) live in a single agent.',
+      openLibrary: 'Open in the library',
+    },
+    /**
+     * The same card scanning every kind. Its own sentences rather than a noun
+     * interpolated into the skills copy: "1 skill lives in a single agent" and
+     * "1 resource lives in a single agent" agree in more languages than they
+     * disagree only by accident, and a locale cannot fix a sentence it was
+     * handed a noun to slot into.
+     */
+    library: {
+      label: 'Library',
+      labelDivergent: 'Library — {count} divergence(s)',
+      divergenceBody: 'Different version in {outliers} than in {agreeing}.',
+      divergenceBodyNoMajority: '{targets} read different versions of this resource.',
+      more: '{count} more resource(s) diverge.',
+      propagate: 'Propagate',
+      viewDiff: 'View diff',
+      singleTarget: '{count} resource(s) live in a single agent.',
       openLibrary: 'Open in the library',
     },
     uncommitted: {
