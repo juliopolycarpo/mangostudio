@@ -50,10 +50,8 @@ export function ChatFeed({
     () => new Map((checkpointData?.checkpoints ?? []).map((entry) => [entry.messageId, entry])),
     [checkpointData]
   );
-  const { parentRef, showScrollButton, handleScroll, scrollToBottom } = useChatAutoFollow(
-    chatId,
-    messages
-  );
+  const { parentRef, contentRef, showScrollButton, handleScroll, scrollToBottom } =
+    useChatAutoFollow(chatId, messages);
 
   const getScrollElement = useCallback(() => parentRef.current, [parentRef]);
   const getItemKey = useCallback((index: number) => messages[index]?.id ?? index, [messages]);
@@ -77,6 +75,7 @@ export function ChatFeed({
 
       {messages.length > 0 && (
         <div
+          ref={contentRef}
           style={{
             height: `${rowVirtualizer.getTotalSize()}px`,
             width: '100%',
