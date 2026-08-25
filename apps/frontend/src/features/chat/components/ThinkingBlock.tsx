@@ -1,19 +1,41 @@
-import { Brain, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
+import { TimelineItem } from './TimelineItem';
+import { TimelineRow } from './TimelineRow';
 
 interface ThinkingUiState {
   expanded: boolean;
   scrollTop: number;
   shouldAutoFollow: boolean;
+  /** Monotonic timestamp of the first streaming frame, while one is running. */
+  startedAt?: number;
+  /** How long the block streamed for, once it stopped. */
+  durationMs?: number;
 }
 
 const thinkingUiStateByMessage = new Map<string, ThinkingUiState>();
 
+/**
+ * Clears the per-block thinking state between tests.
+ *
+ * The map is module-level so a virtualized row keeps its expansion and its
+ * measured duration across unmount, which also means it outlives `cleanup()`.
+ *
+ * // Usage: resetThinkingBlockStateForTest()
+ */
+export function resetThinkingBlockStateForTest(): void {
+  thinkingUiStateByMessage.clear();
+}
+
 function isNearBottom(element: HTMLElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= 24;
+}
+
+/** Rounds an elapsed thought to whole seconds, floored at one. */
+function formatThinkingDuration(durationMs: number): string {
+  return `${Math.max(1, Math.round(durationMs / 1000))}s`;
 }
 
 interface ThinkingBlockProps {
@@ -28,6 +50,14 @@ interface ThinkingBlockProps {
   plainText?: boolean;
 }
 
+/**
+ * One thought, as a single timeline row that opens onto the reasoning itself.
+ *
+ * The elapsed time is measured here rather than read off the part, because a
+ * thinking part carries no timestamps: a block that streamed in this session
+ * reads "Thought for 4s", and one restored from a reloaded transcript reads
+ * "Thought". Naming a duration nobody measured would be worse than omitting it.
+ */
 export function ThinkingBlock({
   messageId,
   text,
@@ -40,9 +70,11 @@ export function ThinkingBlock({
       expanded: isStreaming,
       scrollTop: 0,
       shouldAutoFollow: isStreaming,
+      ...(isStreaming ? { startedAt: performance.now() } : {}),
     }
   );
   const [expanded, setExpanded] = useState(initialUiStateRef.current.expanded);
+  const [durationMs, setDurationMs] = useState(initialUiStateRef.current.durationMs);
   const scrollRef = useRef<HTMLDivElement>(null);
   const uiStateRef = useRef(initialUiStateRef.current);
   const previousStreamingRef = useRef(isStreaming);
@@ -62,12 +94,20 @@ export function ThinkingBlock({
     if (!previousStreamingRef.current && isStreaming) {
       // eslint-disable-next-line @eslint-react/set-state-in-effect
       setExpanded(true);
-      updateUiState({ expanded: true, shouldAutoFollow: true });
+      updateUiState({ expanded: true, shouldAutoFollow: true, startedAt: performance.now() });
     }
     if (previousStreamingRef.current && !isStreaming) {
+      const startedAt = uiStateRef.current.startedAt;
+      const elapsed = startedAt === undefined ? undefined : performance.now() - startedAt;
       // eslint-disable-next-line @eslint-react/set-state-in-effect
       setExpanded(false);
-      updateUiState({ expanded: false, shouldAutoFollow: false });
+      // eslint-disable-next-line @eslint-react/set-state-in-effect
+      if (elapsed !== undefined) setDurationMs(elapsed);
+      updateUiState({
+        expanded: false,
+        shouldAutoFollow: false,
+        ...(elapsed === undefined ? {} : { durationMs: elapsed }),
+      });
     }
     previousStreamingRef.current = isStreaming;
   }, [isStreaming, updateUiState]);
@@ -98,25 +138,26 @@ export function ThinkingBlock({
     });
   };
 
+  // `chat.feed.thoughtFor` is the same sentence an image turn already prints
+  // for its own elapsed time; a second key holding the same string would only
+  // give the two translations a way to drift apart.
+  const label = isStreaming
+    ? t.thinking.streaming
+    : durationMs === undefined
+      ? t.thinking.thought
+      : t.chat.feed.thoughtFor.replace('{time}', formatThinkingDuration(durationMs));
+
   return (
-    <div className="mb-3">
-      <button
-        type="button"
-        onClick={handleToggle}
-        className="glass-surface flex items-center gap-2 text-xs text-on-surface-variant/70
-                   py-1.5 px-3 rounded-full w-fit border border-outline-variant/20
-                   hover:border-outline-variant/40 hover:text-on-surface-variant
-                   transition-all duration-200 cursor-pointer"
-      >
-        <Brain size={11} className="text-primary/70" />
-        <span className="tracking-wide">
-          {isStreaming ? t.thinking.streaming : t.thinking.label}
+    <TimelineItem tone={isStreaming ? 'active' : 'muted'}>
+      {/* No glyph: a thought is the one step with no outcome to report, and the
+          empty status column is what sets it apart from the calls around it. */}
+      <TimelineRow expanded={expanded} onToggle={handleToggle}>
+        <span
+          className={`truncate ${isStreaming ? 'animate-pulse text-on-surface-variant' : 'text-on-surface-variant/55'}`}
+        >
+          {label}
         </span>
-        <ChevronDown
-          size={11}
-          className={`transition-transform duration-300 text-primary/50 ${expanded ? 'rotate-180' : ''}`}
-        />
-      </button>
+      </TimelineRow>
       <AnimatePresence initial={false}>
         {expanded && (
           <motion.div
@@ -125,14 +166,14 @@ export function ThinkingBlock({
             animate={{ opacity: 1, height: 'auto', y: 0 }}
             exit={{ opacity: 0, height: 0, y: -6 }}
             transition={{ duration: 0.22, ease: 'easeOut' }}
-            className="glass-surface-subtle mt-1.5 rounded-xl border border-outline-variant/15 overflow-hidden"
+            className="mt-1.5 overflow-hidden rounded-lg border border-outline-variant/15 bg-surface-container-lowest/60"
           >
             <div
               ref={scrollRef}
               onScroll={handleScroll}
-              className="p-4 max-h-48 sm:max-h-72 md:max-h-96 overflow-y-auto app-scrollbar"
+              className="app-scrollbar max-h-48 overflow-y-auto p-3.5 sm:max-h-72 md:max-h-96"
             >
-              <div className="text-xs text-on-surface-variant/60 leading-relaxed markdown-content--thinking">
+              <div className="markdown-content--thinking text-xs leading-relaxed text-on-surface-variant/60">
                 {plainText ? (
                   <span data-vendor-text className="block whitespace-pre-wrap break-words">
                     {text}
@@ -146,13 +187,13 @@ export function ThinkingBlock({
                   />
                 )}
                 {isStreaming && (
-                  <span className="inline-block w-0.5 h-[1em] bg-primary/40 ml-0.5 align-middle animate-blink" />
+                  <span className="ml-0.5 inline-block h-[1em] w-0.5 animate-blink bg-primary/40 align-middle" />
                 )}
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </TimelineItem>
   );
 }

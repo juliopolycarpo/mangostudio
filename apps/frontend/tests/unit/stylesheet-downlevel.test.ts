@@ -72,3 +72,26 @@ describe('color-mix survives the bundler', () => {
     expect(dropped).toEqual([]);
   });
 });
+
+/**
+ * The timeline's node offset is `calc(var(--timeline-*-gap) + …)`, and `calc()`
+ * refuses to add a unitless number to a length. A gap written as plain `0`
+ * therefore makes the whole `top` invalid, the dot falls to its static
+ * position, and every node sits half a row below the row it belongs to.
+ *
+ * That reproduced only under the compact density, so no default-density
+ * screenshot could catch it.
+ */
+describe('timeline density tokens', () => {
+  it('gives every gap a unit, including zero', async () => {
+    const source = (await Bun.file(STYLESHEET).text()).replace(/\/\*[\s\S]*?\*\//g, '');
+    const declarations = Array.from(
+      source.matchAll(/--timeline-(?:row|block)-gap:\s*([^;]+);/g),
+      (match) => match[1].trim()
+    );
+    expect(declarations.length).toBeGreaterThan(3);
+
+    const unitless = declarations.filter((value) => !/^-?[\d.]+(?:px|rem|em)$/.test(value));
+    expect(unitless).toEqual([]);
+  });
+});

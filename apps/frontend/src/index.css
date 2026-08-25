@@ -670,6 +670,142 @@ pre:hover .copy-code-btn {
   font-size: var(--chat-font-size);
 }
 
+/* ── Assistant turn timeline ──
+ * One continuous rail down the left of an assistant turn, with a node dot per
+ * entry. The rail is drawn per item rather than once on the container so it
+ * ends exactly on the first and last dots whatever the entries turn out to be,
+ * and so a full-width divider can cut it without leaving a dangling stub.
+ *
+ * Vertical geometry is derived, not hand-tuned per call site: a row's dot sits
+ * at half a row height below the item's own top padding, which keeps the dot
+ * centred on the row even while the row is expanded and the item is tall. */
+.chat-timeline {
+  --timeline-rail-x: 0.1875rem; /* 3px — a 1px rail centred on 3.5px */
+  --timeline-dot-size: 0.4375rem; /* 7px, so its centre lands on the rail */
+  --timeline-indent: 1rem;
+  --timeline-row-height: 1.5rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-timeline-item {
+  --timeline-pad: var(--timeline-row-gap);
+  --timeline-dot-top: calc(var(--timeline-pad) + var(--timeline-row-height) / 2);
+  position: relative;
+  min-width: 0;
+  padding-left: var(--timeline-indent);
+  padding-block: var(--timeline-pad);
+}
+
+.chat-timeline-item--block {
+  --timeline-pad: var(--timeline-block-gap);
+  --timeline-dot-top: calc(var(--timeline-pad) + 0.6875rem);
+}
+
+/* Rail segment. Clipped to the dot on the outermost items so the line starts
+ * and stops on a node instead of floating past one. */
+.chat-timeline-item::before {
+  content: "";
+  position: absolute;
+  left: var(--timeline-rail-x);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  /* `--color-outline-variant` at 1px washes out against the chat surface; the
+   * rail has to read as a line without competing with the steps on it. */
+  background: color-mix(in srgb, var(--color-outline) 60%, transparent);
+}
+
+.chat-timeline-item:first-child::before {
+  top: var(--timeline-dot-top);
+}
+
+.chat-timeline-item:last-child::before {
+  bottom: calc(100% - var(--timeline-dot-top));
+}
+
+/* Node dot. Paints after the rail, so it reads as a bead on the line. */
+.chat-timeline-item::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--timeline-dot-top);
+  width: var(--timeline-dot-size);
+  height: var(--timeline-dot-size);
+  border-radius: 9999px;
+  background: var(--color-outline);
+  transform: translateY(-50%);
+}
+
+/* One `color-mix()` per rule: Tailwind's downlevelling only restates the first
+ * mixed declaration of a rule, so a second one would ship fully opaque. */
+.chat-timeline-item--success::after {
+  background: color-mix(in srgb, var(--color-success) 75%, transparent);
+}
+
+.chat-timeline-item--error::after {
+  background: var(--color-error);
+}
+
+.chat-timeline-item--active::after {
+  background: var(--color-primary);
+  animation: timeline-node-pulse 1.6s ease-in-out infinite;
+}
+
+.chat-timeline-item--muted::after {
+  background: color-mix(in srgb, var(--color-outline) 60%, transparent);
+}
+
+/* A full-bleed marker (system event, provider hand-off) cuts the rail rather
+ * than hanging off it: it belongs to the transcript, not to the turn's steps. */
+.chat-timeline-item--divider {
+  padding-left: 0;
+  padding-block: 0;
+}
+
+.chat-timeline-item--divider::before,
+.chat-timeline-item--divider::after {
+  content: none;
+}
+
+@keyframes timeline-node-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: translateY(-50%) scale(0.7);
+  }
+}
+
+/* ── Timeline density ──
+ * Tracks the existing chat-density preference so "compact" tightens the step
+ * list the same way it tightens the gap between turns. */
+:root {
+  --timeline-row-gap: 0.125rem;
+  --timeline-block-gap: 0.5rem;
+}
+
+[data-chat-density="compact"] {
+  /* `0px`, not `0`: this feeds a `calc()` that adds it to a length, and a
+   * unitless zero there is invalid — the dot would drop to its static
+   * position and every node would sit half a row below its own row. */
+  --timeline-row-gap: 0px;
+  --timeline-block-gap: 0.375rem;
+}
+
+[data-chat-density="default"] {
+  --timeline-row-gap: 0.125rem;
+  --timeline-block-gap: 0.5rem;
+}
+
+[data-chat-density="comfortable"] {
+  --timeline-row-gap: 0.3125rem;
+  --timeline-block-gap: 0.75rem;
+}
+
 /* ── Performance & accessibility utilities ── */
 
 /* Ensure minimum touch target size on mobile */

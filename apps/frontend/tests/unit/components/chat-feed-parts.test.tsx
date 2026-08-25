@@ -58,12 +58,12 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     await flushAsyncRender();
 
-    // ThinkingBlock renders a button with "Thought process" label
+    // A settled thought renders one inline row labelled "Thought".
     const thinkingButtons = container.querySelectorAll('button');
-    const thoughtProcessButtons = Array.from(thinkingButtons).filter((btn) =>
-      btn.textContent?.includes('Thought process')
+    const thoughtRows = Array.from(thinkingButtons).filter((btn) =>
+      btn.textContent?.includes('Thought')
     );
-    expect(thoughtProcessButtons).toHaveLength(1);
+    expect(thoughtRows).toHaveLength(1);
     expect(screen.getByText('The answer is 42.')).toBeInTheDocument();
   });
 
@@ -82,10 +82,10 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     await flushAsyncRender();
 
     const thinkingButtons = container.querySelectorAll('button');
-    const thoughtProcessButtons = Array.from(thinkingButtons).filter((btn) =>
-      btn.textContent?.includes('Thought process')
+    const thoughtRows = Array.from(thinkingButtons).filter((btn) =>
+      btn.textContent?.includes('Thought')
     );
-    expect(thoughtProcessButtons).toHaveLength(2);
+    expect(thoughtRows).toHaveLength(2);
   });
 
   it('normalizes token-level interleaving into one thinking block and one text block', async () => {
@@ -104,11 +104,11 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     await flushAsyncRender();
 
     const thinkingButtons = container.querySelectorAll('button');
-    const thoughtProcessButtons = Array.from(thinkingButtons).filter((btn) =>
-      btn.textContent?.includes('Thought process')
+    const thoughtRows = Array.from(thinkingButtons).filter((btn) =>
+      btn.textContent?.includes('Thought')
     );
 
-    expect(thoughtProcessButtons).toHaveLength(1);
+    expect(thoughtRows).toHaveLength(1);
     expect(screen.getByText('Let me first explore')).toBeInTheDocument();
   });
 

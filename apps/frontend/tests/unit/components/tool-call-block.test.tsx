@@ -97,7 +97,7 @@ describe('ToolCallBlock', () => {
   });
 
   it('renders a timed_out state with error tone and status label', () => {
-    render(
+    const { container } = render(
       <ToolCallBlock
         name="bash"
         args={{ command: 'sleep 60' }}
@@ -109,7 +109,55 @@ describe('ToolCallBlock', () => {
     const button = screen.getByRole('button', { name: /Bash.*Timed out/i });
     expect(button).toHaveTextContent('Timed out');
     expect(button).toHaveTextContent('30.0s');
-    expect(button.className).toContain('text-error');
+    // The rail node and the tool's own name carry the outcome together.
+    expect(container.querySelector('.chat-timeline-item--error')).toBeInTheDocument();
+    expect(screen.getByText('Bash').className).toContain('text-error');
+  });
+
+  it('colours the tool name by outcome', () => {
+    const { container } = render(
+      <ToolCallBlock
+        name="list_directory"
+        args={{ path: '/home/polycarpo/foo' }}
+        status="succeeded"
+        result='{"path":"/home/polycarpo/foo","entries":[{"name":"a","type":"file"}]}'
+      />
+    );
+
+    expect(screen.getByText('List').className).toContain('text-success');
+    expect(container.querySelector('.chat-timeline-item--success')).toBeInTheDocument();
+  });
+
+  it('reports what a finished call produced beside its duration', () => {
+    render(
+      <ToolCallBlock
+        name="grep"
+        args={{ pattern: 'flush\\(\\)' }}
+        status="succeeded"
+        result='{"pattern":"flush","matches":[{"file":"a"},{"file":"b"},{"file":"c"}]}'
+        execution={snapshot({ durationMs: 28 })}
+      />
+    );
+
+    const button = screen.getByRole('button');
+    expect(button).toHaveTextContent('3 hits');
+    expect(button).toHaveTextContent('28ms');
+  });
+
+  it('withholds the outcome while a call is still running', () => {
+    render(
+      <ToolCallBlock
+        name="grep"
+        args={{ pattern: 'x' }}
+        status="running"
+        result='{"matches":[{"file":"a"}]}'
+        execution={snapshot({ status: 'running' })}
+      />
+    );
+
+    const button = screen.getByRole('button');
+    expect(button).not.toHaveTextContent('1 hit');
+    expect(button).not.toHaveTextContent('640ms');
   });
 
   it('shows duration and source badge from the execution snapshot', () => {

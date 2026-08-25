@@ -27,7 +27,7 @@ function AssistantMessageBody({
 
   if (msg.isGenerating) {
     return (
-      <div className="flex flex-col gap-3 py-4 pl-9">
+      <div className="flex flex-col gap-3">
         <StreamingMessageBody msg={msg} chatId={chatId} isImageTurn={isImageTurn} />
       </div>
     );
@@ -38,14 +38,16 @@ function AssistantMessageBody({
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-1">
+      <CompletedMessageBody msg={msg} chatId={chatId} onQuestionSubmit={onQuestionSubmit} />
+      {/* The turn's own cost closes it out, below the last step rather than
+          above the first one — it is not knowable until the turn is over. */}
       {msg.generationTime && (
-        <div className="flex items-center gap-2 text-xs text-on-surface-variant bg-surface-container-lowest py-2 px-3 rounded-lg w-fit border border-outline-variant/10">
-          <Sparkles size={12} className="text-primary" />
+        <div className="flex w-fit items-center gap-1.5 pl-4 text-[11px] text-on-surface-variant/50">
+          <Sparkles size={11} className="text-primary/60" />
           <span>{t.chat.feed.respondedIn.replace('{time}', msg.generationTime)}</span>
         </div>
       )}
-      <CompletedMessageBody msg={msg} chatId={chatId} onQuestionSubmit={onQuestionSubmit} />
     </div>
   );
 }
@@ -64,7 +66,7 @@ export function AssistantMessageBlock({
   onQuestionSubmit,
 }: AssistantMessageBlockProps) {
   return (
-    <div className="group flex flex-col gap-4 w-full">
+    <div className="group flex w-full flex-col gap-2">
       <AssistantMessageHeader
         msg={msg}
         isImageTurn={isImageTurn}

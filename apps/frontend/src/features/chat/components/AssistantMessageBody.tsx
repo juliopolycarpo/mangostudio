@@ -34,13 +34,13 @@ export function StreamingMessageBody({
 
   if (isImageTurn || !hasContent) {
     return (
-      <>
-        <span className="text-sm font-medium text-on-surface animate-pulse">
+      <div className="flex max-w-2xl flex-col gap-2 pl-4">
+        <span className="animate-pulse text-sm font-medium text-on-surface">
           {isImageTurn ? t.chat.feed.generatingImage : t.thinking.streaming}
         </span>
         {isImageTurn ? (
-          <div className="h-1 w-24 bg-surface-container-highest rounded-full overflow-hidden">
-            <div className="h-full bg-primary w-1/2 animate-[slide_1s_ease-in-out_infinite_alternate]"></div>
+          <div className="h-1 w-24 overflow-hidden rounded-full bg-surface-container-highest">
+            <div className="h-full w-1/2 animate-[slide_1s_ease-in-out_infinite_alternate] bg-primary"></div>
           </div>
         ) : (
           <div className="skeleton-pulse mt-1">
@@ -49,7 +49,7 @@ export function StreamingMessageBody({
             <div className="skeleton-line" />
           </div>
         )}
-      </>
+      </div>
     );
   }
 
@@ -81,8 +81,8 @@ export function CompletedMessageBody({
         onQuestionSubmit={onQuestionSubmit}
       />
       {!hasTextOrTools && (
-        <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface max-w-2xl">
-          <span className="text-on-surface-variant/50 italic">{t.chat.feed.noResponse}</span>
+        <div className="max-w-2xl pl-4 font-body text-sm leading-relaxed">
+          <span className="italic text-on-surface-variant/50">{t.chat.feed.noResponse}</span>
         </div>
       )}
     </>

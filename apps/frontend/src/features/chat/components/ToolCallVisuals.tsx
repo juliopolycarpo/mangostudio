@@ -1,3 +1,4 @@
+import type { ToolExecutionStatus } from '@mangostudio/shared/tool-executions';
 import {
   ArrowRightLeft,
   Clock,
@@ -15,6 +16,55 @@ import {
   Trash2,
   Wrench,
 } from 'lucide-react';
+import type { TimelineTone } from './TimelineItem';
+
+/**
+ * Maps a lifecycle status onto the timeline's node colour, which is also the
+ * colour the tool's own name is printed in — the rail and the label always
+ * agree about how a step ended.
+ *
+ * // Usage: toolStatusTone('failed') // => 'error'
+ */
+export function toolStatusTone(status: ToolExecutionStatus): TimelineTone {
+  switch (status) {
+    case 'succeeded':
+      return 'success';
+    case 'failed':
+    case 'timed_out':
+      return 'error';
+    case 'cancelled':
+      return 'muted';
+    default:
+      return 'active';
+  }
+}
+
+const TONE_TEXT_CLASS: Record<TimelineTone, string> = {
+  neutral: 'text-on-surface',
+  muted: 'text-on-surface-variant/70',
+  active: 'text-primary',
+  success: 'text-success',
+  error: 'text-error',
+};
+
+/**
+ * Text colour for a timeline tone, used for the tool name itself.
+ *
+ * // Usage: toneTextClass('success') // => 'text-success'
+ */
+export function toneTextClass(tone: TimelineTone): string {
+  return TONE_TEXT_CLASS[tone];
+}
+
+/**
+ * Formats a monotonic duration for a timeline row, e.g. `640ms` or `2.4s`.
+ *
+ * // Usage: formatToolDuration(640) // => '640ms'
+ */
+export function formatToolDuration(durationMs: number): string {
+  if (durationMs < 1000) return `${Math.max(0, Math.round(durationMs))}ms`;
+  return `${(durationMs / 1000).toFixed(1)}s`;
+}
 
 /**
  * Renders a per-tool icon based on the tool name.
