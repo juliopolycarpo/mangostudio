@@ -1707,7 +1707,7 @@ export const messages = {
     settingsNavigation: 'Navegação de configurações',
     openMenu: 'Abrir menu',
     closeMenu: 'Fechar menu',
-    disclaimer: 'A Inteligencia Artificial pode cometer erros, verifique os resultados com cautela',
+    disclaimer: 'A IA pode cometer erros. Confira os resultados.',
     dismissToast: 'Fechar notificação',
   },
 

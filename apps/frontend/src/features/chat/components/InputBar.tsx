@@ -546,6 +546,19 @@ export function InputBar({
 
         <p className="mt-2 text-center font-mono text-[10px] text-on-surface-variant/40 sm:mt-3">
           {t.common.disclaimer}
+          {/* The quiet line the user should never have to guess at: MangoStudio's
+              own tool settings do not apply to a turn it is not running. It sits
+              here rather than in the chip row so the composer keeps only the
+              controls you can act on. */}
+          {isExternalRunner && externalDescriptor ? (
+            <>
+              {' · '}
+              {t.externalAgents.selector.ownership.replace(
+                '{vendor}',
+                t.externalAgents.target[externalDescriptor.targetId]
+              )}
+            </>
+          ) : null}
         </p>
       </div>
     </footer>

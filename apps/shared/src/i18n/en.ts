@@ -1675,7 +1675,7 @@ export const messages: Messages = {
     settingsNavigation: 'Settings navigation',
     openMenu: 'Open menu',
     closeMenu: 'Close menu',
-    disclaimer: 'Artificial Intelligence can make mistakes. Please double-check the results.',
+    disclaimer: 'AI can make mistakes. Double-check the results.',
     dismissToast: 'Dismiss toast',
   },
 
