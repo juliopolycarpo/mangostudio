@@ -7,6 +7,7 @@ import { useMemo, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatTokensCompact } from '@/lib/format-tokens';
+import { formatMessage } from '@/lib/i18n-format';
 import { ContinuationEventMarker } from './ContinuationEventMarker';
 import { ElicitationCard } from './ElicitationCard';
 import { ExternalActivityBlock } from './ExternalActivityBlock';
@@ -316,7 +317,7 @@ function SubagentTraceBlock({ part }: { part: Extract<MessagePart, { type: 'suba
   const statusLabel = getSubagentStatusLabel(part.status, labels);
   const toolCountLabel =
     part.toolCallCount > 0
-      ? labels.subagentTools.replace('{count}', String(part.toolCallCount))
+      ? formatMessage(labels.subagentTools, { count: String(part.toolCallCount) })
       : labels.subagentNoTools;
 
   return (
@@ -463,5 +464,7 @@ function getSubagentTraceEventLabel(
   if (event.event === 'response_recovered') return labels.subagentLifecycleRecovered;
   if (event.event === 'response_timeout') return labels.subagentLifecycleTimeout;
   if (event.event === 'response_fallback') return labels.subagentLifecycleFallback;
-  return labels.subagentLifecycleAttempt.replace('{attempt}', String(event.attempt ?? 1));
+  return formatMessage(labels.subagentLifecycleAttempt, {
+    attempt: String(event.attempt ?? 1),
+  });
 }

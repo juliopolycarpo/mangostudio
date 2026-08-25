@@ -2,6 +2,7 @@ import type { Message } from '@mangostudio/shared';
 import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpoints';
 import { Sparkles } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatMessage } from '@/lib/i18n-format';
 import { AssistantImageTurn } from './AssistantImageTurn';
 import { CompletedMessageBody, StreamingMessageBody } from './AssistantMessageBody';
 import { AssistantMessageHeader } from './AssistantMessageHeader';
@@ -45,7 +46,7 @@ function AssistantMessageBody({
       {msg.generationTime && (
         <div className="flex w-fit items-center gap-1.5 pl-4 text-[11px] text-on-surface-variant/50">
           <Sparkles size={11} className="text-primary/60" />
-          <span>{t.chat.feed.respondedIn.replace('{time}', msg.generationTime)}</span>
+          <span>{formatMessage(t.chat.feed.respondedIn, { time: msg.generationTime })}</span>
         </div>
       )}
     </div>

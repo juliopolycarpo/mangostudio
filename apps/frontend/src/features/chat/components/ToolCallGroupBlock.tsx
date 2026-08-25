@@ -6,6 +6,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { useChatDisplaySettings } from '@/hooks/use-chat-display-settings';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatMessage } from '@/lib/i18n-format';
 import { isFileChangeTool } from './file-change-preview';
 import { TimelineDisclosure } from './TimelineDisclosure';
 import { TimelineItem } from './TimelineItem';
@@ -52,10 +53,10 @@ export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCal
   const labels = t.tools.labels as Record<string, string> | undefined;
   const label = labels?.[name] ?? name;
   const firstHint = getToolHint(name, calls[0].args, (count) =>
-    t.tools.moreCount.replace('{count}', String(count))
+    formatMessage(t.tools.moreCount, { count: String(count) })
   );
   const moreCount = calls.length - 1;
-  const moreLabel = t.tools.moreCount.replace('{count}', String(moreCount));
+  const moreLabel = formatMessage(t.tools.moreCount, { count: String(moreCount) });
 
   const status = groupStatus(calls);
   const tone = toolStatusTone(status);

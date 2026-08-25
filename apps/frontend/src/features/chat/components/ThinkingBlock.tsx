@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatMessage } from '@/lib/i18n-format';
 import { TimelineDisclosure } from './TimelineDisclosure';
 import { TimelineItem } from './TimelineItem';
 import { TimelineRow } from './TimelineRow';
@@ -145,7 +146,7 @@ export function ThinkingBlock({
     ? t.thinking.streaming
     : durationMs === undefined
       ? t.thinking.thought
-      : t.chat.feed.thoughtFor.replace('{time}', formatThinkingDuration(durationMs));
+      : formatMessage(t.chat.feed.thoughtFor, { time: formatThinkingDuration(durationMs) });
 
   return (
     <TimelineItem tone={isStreaming ? 'active' : 'muted'}>

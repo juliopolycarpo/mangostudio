@@ -492,10 +492,9 @@ export function InputBar({
           {isExternalRunner && externalDescriptor ? (
             <>
               {' · '}
-              {t.externalAgents.selector.ownership.replace(
-                '{vendor}',
-                t.externalAgents.target[externalDescriptor.targetId]
-              )}
+              {formatMessage(t.externalAgents.selector.ownership, {
+                vendor: t.externalAgents.target[externalDescriptor.targetId],
+              })}
             </>
           ) : null}
         </p>

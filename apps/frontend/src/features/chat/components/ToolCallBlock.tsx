@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useChatDisplaySettings } from '@/hooks/use-chat-display-settings';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatMessage } from '@/lib/i18n-format';
 import { FileChangePreviewBody } from './FileChangePreview';
 import { buildFileChangePreview, isFileChangeTool } from './file-change-preview';
 import { TimelineDisclosure } from './TimelineDisclosure';
@@ -70,7 +71,7 @@ export function ToolCallBlock({
   const labels = t.tools.labels as Record<string, string> | undefined;
   const label = labels?.[name] ?? name;
   const hint = getToolHint(name, args, (count) =>
-    t.tools.moreCount.replace('{count}', String(count))
+    formatMessage(t.tools.moreCount, { count: String(count) })
   );
   const source = execution?.source ?? inferToolExecutionSource(name);
   // Non-nominal outcomes and the awaiting state are called out explicitly;

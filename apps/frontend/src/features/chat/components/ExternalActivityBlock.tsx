@@ -34,6 +34,7 @@ import { useState } from 'react';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatMessage } from '@/lib/i18n-format';
 import { TIMELINE_PANEL_CLASS } from './TimelineDisclosure';
 import { TimelineItem, type TimelineTone } from './TimelineItem';
 import { TimelineRow } from './TimelineRow';
@@ -169,7 +170,7 @@ export function ExternalActivityBlock({ part }: ExternalActivityBlockProps) {
       {/* Attribution and outcome for a reader who cannot see the avatar or the
           tone that carry them visually. */}
       <span className="sr-only">
-        {`${labels.attribution.replace('{agent}', identity.name)} ${statusLabel(part, labels)}`}
+        {`${formatMessage(labels.attribution, { agent: identity.name })} ${statusLabel(part, labels)}`}
       </span>
     </TimelineItem>
   );

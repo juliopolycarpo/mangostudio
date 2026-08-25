@@ -397,7 +397,8 @@ function enabledCountLabel(
   entries: ReadonlyArray<{ state: CapabilityState }>
 ): string {
   const enabled = entries.filter((entry) => entry.state === 'enabled').length;
-  return labels.enabledCount
-    .replace('{enabled}', String(enabled))
-    .replace('{total}', String(entries.length));
+  return formatMessage(labels.enabledCount, {
+    enabled: String(enabled),
+    total: String(entries.length),
+  });
 }
