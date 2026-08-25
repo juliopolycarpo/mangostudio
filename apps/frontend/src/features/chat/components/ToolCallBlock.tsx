@@ -4,24 +4,28 @@ import {
   type ToolExecutionSnapshot,
   type ToolExecutionStatus,
 } from '@mangostudio/shared/tool-executions';
-import { AlertCircle, Ban, Check, Copy, TimerOff, UserRound } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
+import { Check, Copy } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useChatDisplaySettings } from '@/hooks/use-chat-display-settings';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 import { FileChangePreviewBody } from './FileChangePreview';
 import { buildFileChangePreview, isFileChangeTool } from './file-change-preview';
+import { TimelineDisclosure } from './TimelineDisclosure';
 import { TimelineItem } from './TimelineItem';
 import { TimelineRow } from './TimelineRow';
 import {
   formatToolDuration,
   getToolHint,
-  ToolIcon,
+  StatusGlyph,
   toneTextClass,
   toolStatusTone,
 } from './ToolCallVisuals';
-import { formatToolSummary, getToolResultSummary } from './tool-result-summary';
+import {
+  formatToolSummary,
+  parseToolResult,
+  summarizeParsedToolResult,
+} from './tool-result-summary';
 
 interface ToolCallBlockProps {
   name: string;
@@ -31,28 +35,6 @@ interface ToolCallBlockProps {
   execution?: ToolExecutionSnapshot;
   /** True when this call is the message's most recent file mutation. */
   isLatestFileChange?: boolean;
-}
-
-/**
- * The status glyph. Terminal states get a verdict mark; a call still in flight
- * gets its own tool icon, which is the only place tool identity is drawn — a
- * settled row is identified by its name alone.
- */
-function StatusGlyph({ status, name }: { status: ToolExecutionStatus; name: string }) {
-  switch (status) {
-    case 'succeeded':
-      return <Check size={12} className="shrink-0" strokeWidth={2.5} />;
-    case 'failed':
-      return <AlertCircle size={11} className="shrink-0" />;
-    case 'timed_out':
-      return <TimerOff size={11} className="shrink-0" />;
-    case 'cancelled':
-      return <Ban size={11} className="shrink-0" />;
-    case 'awaiting_user':
-      return <UserRound size={11} className="shrink-0" />;
-    default:
-      return <ToolIcon toolName={name} className="animate-pulse shrink-0" />;
-  }
 }
 
 export function ToolCallBlock({
@@ -100,20 +82,19 @@ export function ToolCallBlock({
   const tone = toolStatusTone(status);
   const isActive = isActiveToolExecutionStatus(status);
   const duration = execution?.durationMs;
+  // Parsed once and shared: the outcome on the row and the raw body below it
+  // read the same payload, and a result is the largest string in a transcript.
+  const parsedResult = useMemo(() => parseToolResult(result), [result]);
   const summary = useMemo(
-    () => (isActive ? null : getToolResultSummary(name, result, args)),
-    [isActive, name, result, args]
+    () => (isActive ? null : summarizeParsedToolResult(name, parsedResult, args)),
+    [isActive, name, parsedResult, args]
   );
-
-  let parsedResult: unknown = null;
-  if (result) {
-    try {
-      parsedResult = JSON.parse(result);
-    } catch {
-      parsedResult = result;
-    }
-  }
-  const displayedResult = formatToolResult(parsedResult, isError);
+  // Only the disclosed body reads this, and re-serializing an unopened result
+  // on every stream frame is work nobody can see.
+  const displayedResult = useMemo(
+    () => (expanded ? formatToolResult(parsedResult, isError) : null),
+    [expanded, parsedResult, isError]
+  );
 
   useEffect(() => {
     if (isError) setExpanded(true);
@@ -158,67 +139,56 @@ export function ToolCallBlock({
         )}
       </TimelineRow>
 
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div
-            key="tool-body"
-            initial={{ opacity: 0, height: 0, y: -4 }}
-            animate={{ opacity: 1, height: 'auto', y: 0 }}
-            exit={{ opacity: 0, height: 0, y: -6 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="mt-1.5 overflow-hidden rounded-lg border border-outline-variant/15 bg-surface-container-lowest/60"
-          >
-            <div className="app-scrollbar max-h-48 space-y-3 overflow-y-auto p-3.5 font-mono text-xs sm:max-h-72 md:max-h-96">
-              {preview !== null && (
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => setShowRaw((v) => !v)}
-                    className="cursor-pointer text-[10px] uppercase tracking-wider text-on-surface-variant/50 transition-colors duration-200 hover:text-on-surface-variant"
-                  >
-                    {showRaw ? t.tools.diff.hideRaw : t.tools.diff.showRaw}
-                  </button>
-                </div>
-              )}
-              {preview !== null && !showRaw && <FileChangePreviewBody preview={preview} />}
-              {(preview === null || showRaw) && Object.keys(args).length > 0 && (
-                <div>
-                  <p className="mb-1 text-[10px] uppercase tracking-wider text-on-surface-variant/50">
-                    {t.tools.argsLabel}
-                  </p>
-                  <pre className="whitespace-pre-wrap leading-relaxed text-on-surface-variant/70">
-                    {JSON.stringify(args, null, 2)}
-                  </pre>
-                </div>
-              )}
-              {(preview === null || showRaw) && displayedResult !== null && (
-                <div>
-                  <div className="mb-1 flex items-center justify-between">
-                    <p
-                      className={`text-[10px] uppercase tracking-wider ${isError ? 'text-error/50' : 'text-on-surface-variant/50'}`}
-                    >
-                      {isError ? t.tools.errorLabel : t.tools.resultLabel}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => void handleCopyResult()}
-                      title={copied ? t.tools.resultCopied : t.tools.copyResult}
-                      className="cursor-pointer text-on-surface-variant opacity-60 transition-opacity duration-200 hover:opacity-100"
-                    >
-                      {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-                    </button>
-                  </div>
-                  <pre
-                    className={`whitespace-pre-wrap leading-relaxed ${isError ? 'text-error/80' : 'text-on-surface-variant/70'}`}
-                  >
-                    {displayedResult}
-                  </pre>
-                </div>
-              )}
+      <TimelineDisclosure open={expanded}>
+        <div className="app-scrollbar max-h-48 space-y-3 overflow-y-auto p-3.5 font-mono text-xs sm:max-h-72 md:max-h-96">
+          {preview !== null && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowRaw((v) => !v)}
+                className="cursor-pointer text-[10px] uppercase tracking-wider text-on-surface-variant/50 transition-colors duration-200 hover:text-on-surface-variant"
+              >
+                {showRaw ? t.tools.diff.hideRaw : t.tools.diff.showRaw}
+              </button>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          )}
+          {preview !== null && !showRaw && <FileChangePreviewBody preview={preview} />}
+          {(preview === null || showRaw) && Object.keys(args).length > 0 && (
+            <div>
+              <p className="mb-1 text-[10px] uppercase tracking-wider text-on-surface-variant/50">
+                {t.tools.argsLabel}
+              </p>
+              <pre className="whitespace-pre-wrap leading-relaxed text-on-surface-variant/70">
+                {JSON.stringify(args, null, 2)}
+              </pre>
+            </div>
+          )}
+          {(preview === null || showRaw) && displayedResult !== null && (
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <p
+                  className={`text-[10px] uppercase tracking-wider ${isError ? 'text-error/50' : 'text-on-surface-variant/50'}`}
+                >
+                  {isError ? t.tools.errorLabel : t.tools.resultLabel}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleCopyResult()}
+                  title={copied ? t.tools.resultCopied : t.tools.copyResult}
+                  className="cursor-pointer text-on-surface-variant opacity-60 transition-opacity duration-200 hover:opacity-100"
+                >
+                  {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
+                </button>
+              </div>
+              <pre
+                className={`whitespace-pre-wrap leading-relaxed ${isError ? 'text-error/80' : 'text-on-surface-variant/70'}`}
+              >
+                {displayedResult}
+              </pre>
+            </div>
+          )}
+        </div>
+      </TimelineDisclosure>
     </TimelineItem>
   );
 }

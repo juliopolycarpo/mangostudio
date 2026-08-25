@@ -1,4 +1,5 @@
 import type { Messages } from '@mangostudio/shared/i18n';
+import { formatMessage } from '@/lib/i18n-format';
 
 type SummaryLabels = Messages['tools']['summary'];
 
@@ -44,19 +45,29 @@ function lineCount(value: unknown): number | null {
 }
 
 /**
- * Parses a tool result payload, tolerating the plain strings and partial
- * objects a still-streaming or legacy call leaves behind.
+ * Parses a tool result payload once, tolerating the plain strings a
+ * still-streaming or legacy call leaves behind by handing them back as-is.
+ *
+ * Exported because a rendered tool row needs the same value twice — for its
+ * one-line outcome and for the raw body it discloses — and a result payload is
+ * the largest string in the transcript.
+ *
+ * Usage: parseToolResult('{"matches":[]}') // => { matches: [] }
  */
-function parseResult(result: string | null | undefined): Record<string, unknown> | null {
+export function parseToolResult(result: string | null | undefined): unknown {
   if (!result) return null;
   try {
-    const parsed: unknown = JSON.parse(result);
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
+    return JSON.parse(result);
   } catch {
-    return null;
+    return result;
   }
+}
+
+/** The parsed payload as a plain object, or null for any other shape. */
+function asRecord(parsed: unknown): Record<string, unknown> | null {
+  return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : null;
 }
 
 /**
@@ -74,7 +85,21 @@ export function getToolResultSummary(
   result: string | null | undefined,
   args: Record<string, unknown> = {}
 ): ToolResultSummary | null {
-  const payload = parseResult(result);
+  return summarizeParsedToolResult(name, parseToolResult(result), args);
+}
+
+/**
+ * {@link getToolResultSummary} against an already-parsed payload, for a caller
+ * that also renders the raw result and must not parse it twice.
+ *
+ * Usage: summarizeParsedToolResult('grep', parsed, args)
+ */
+export function summarizeParsedToolResult(
+  name: string,
+  parsed: unknown,
+  args: Record<string, unknown> = {}
+): ToolResultSummary | null {
+  const payload = asRecord(parsed);
 
   switch (name) {
     case 'list_directory': {
@@ -177,8 +202,8 @@ const PLURAL_KEY: Record<ToolSummaryUnit, keyof SummaryLabels> = {
  */
 export function formatToolSummary(summary: ToolResultSummary, labels: SummaryLabels): string {
   if (summary.kind === 'exit') {
-    return labels.exitCode.replace('{code}', String(summary.code));
+    return formatMessage(labels.exitCode, { code: String(summary.code) });
   }
   const key = summary.count === 1 ? summary.unit : PLURAL_KEY[summary.unit];
-  return labels[key].replace('{count}', summary.count.toLocaleString());
+  return formatMessage(labels[key], { count: summary.count.toLocaleString() });
 }

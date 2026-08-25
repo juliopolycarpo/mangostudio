@@ -3,19 +3,18 @@ import {
   isActiveToolExecutionStatus,
   type ToolExecutionStatus,
 } from '@mangostudio/shared/tool-executions';
-import { AlertCircle, Ban, Check } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useMemo, useState } from 'react';
 import { useChatDisplaySettings } from '@/hooks/use-chat-display-settings';
 import { useI18n } from '@/hooks/use-i18n';
 import { isFileChangeTool } from './file-change-preview';
+import { TimelineDisclosure } from './TimelineDisclosure';
 import { TimelineItem } from './TimelineItem';
 import { TimelineRow } from './TimelineRow';
 import { ToolCallBlock } from './ToolCallBlock';
 import {
   formatToolDuration,
   getToolHint,
-  ToolIcon,
+  StatusGlyph,
   toneTextClass,
   toolStatusTone,
 } from './ToolCallVisuals';
@@ -68,21 +67,35 @@ export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCal
   const holdsExpandedPreview = holdsPreviewToExpand(calls, latestFileChangeId, display);
   const [expanded, setExpanded] = useState(anyError || holdsExpandedPreview);
 
+  /**
+   * What the summary actually depends on, as something stable across frames.
+   *
+   * `planToolGroups` rebuilds `calls` from scratch on every stream token, so a
+   * memo keyed on the array itself memoizes nothing — and `getToolGroupSummary`
+   * re-`JSON.parse`s every member's result, which for a run of greps is the
+   * largest string in the transcript. This tracks the three things that can
+   * change the answer without touching any of the payloads: `length` is O(1) on
+   * a string, so nothing here reads the results themselves.
+   */
+  const callSignature = calls
+    .map((call) => `${call.toolCallId}:${call.status}:${call.result?.length ?? 0}`)
+    .join('|');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: callSignature stands in for the per-frame identity of `calls`
   const summary = useMemo(
     () => (isActive ? null : getToolGroupSummary(name, calls)),
-    [isActive, name, calls]
+    [isActive, name, callSignature]
   );
   // Wall-clock is not recoverable from a group (the calls may have overlapped),
   // so this is the run's total work, which is what the per-call rows also show.
-  const duration = useMemo(() => {
-    if (isActive) return null;
-    const measured = calls
-      .map((call) => call.execution?.durationMs)
-      .filter((value): value is number => typeof value === 'number');
-    return measured.length === calls.length && measured.length > 0
+  // Not memoized: it is arithmetic over a handful of numbers, and a memo would
+  // have to guess at when a duration lands relative to its call's status.
+  const measured = calls
+    .map((call) => call.execution?.durationMs)
+    .filter((value): value is number => typeof value === 'number');
+  const duration =
+    !isActive && measured.length === calls.length && measured.length > 0
       ? measured.reduce((sum, value) => sum + value, 0)
       : null;
-  }, [isActive, calls]);
 
   useEffect(() => {
     if (anyError || holdsExpandedPreview) setExpanded(true);
@@ -93,7 +106,7 @@ export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCal
       <TimelineRow
         expanded={expanded}
         onToggle={() => setExpanded((v) => !v)}
-        glyph={<GroupGlyph status={status} name={name} />}
+        glyph={<StatusGlyph status={status} name={name} />}
         summary={summary ? formatToolSummary(summary, t.tools.summary) : null}
         duration={duration === null ? null : formatToolDuration(duration)}
       >
@@ -108,39 +121,22 @@ export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCal
         )}
       </TimelineRow>
 
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div
-            key="group-body"
-            initial={{ opacity: 0, height: 0, y: -4 }}
-            animate={{ opacity: 1, height: 'auto', y: 0 }}
-            exit={{ opacity: 0, height: 0, y: -6 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="chat-timeline mt-1"
-          >
-            {calls.map((call) => (
-              <ToolCallBlock
-                key={call.toolCallId}
-                name={call.name}
-                args={call.args}
-                result={call.result}
-                status={call.status}
-                execution={call.execution}
-                isLatestFileChange={call.toolCallId === latestFileChangeId}
-              />
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* A group opens onto a nested rail, not onto a card. */}
+      <TimelineDisclosure open={expanded} className="chat-timeline mt-1">
+        {calls.map((call) => (
+          <ToolCallBlock
+            key={call.toolCallId}
+            name={call.name}
+            args={call.args}
+            result={call.result}
+            status={call.status}
+            execution={call.execution}
+            isLatestFileChange={call.toolCallId === latestFileChangeId}
+          />
+        ))}
+      </TimelineDisclosure>
     </TimelineItem>
   );
-}
-
-function GroupGlyph({ status, name }: { status: ToolExecutionStatus; name: string }) {
-  if (status === 'failed') return <AlertCircle size={11} className="shrink-0" />;
-  if (status === 'running') return <ToolIcon toolName={name} className="animate-pulse shrink-0" />;
-  if (status === 'cancelled') return <Ban size={11} className="shrink-0" />;
-  return <Check size={12} className="shrink-0" strokeWidth={2.5} />;
 }
 
 /**

@@ -34,6 +34,7 @@ import { useState } from 'react';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
+import { TIMELINE_PANEL_CLASS } from './TimelineDisclosure';
 import { TimelineItem, type TimelineTone } from './TimelineItem';
 import { TimelineRow } from './TimelineRow';
 import { toneTextClass } from './ToolCallVisuals';
@@ -80,8 +81,8 @@ function statusTone(part: ExternalActivityPart): TimelineTone {
 }
 
 function StatusGlyph({ part }: { part: ExternalActivityPart }) {
-  if (part.isError || part.status === 'failed') return <Ban size={11} className="shrink-0" />;
-  if (part.status === 'cancelled') return <Ban size={11} className="shrink-0" />;
+  if (part.isError || part.status === 'failed' || part.status === 'cancelled')
+    return <Ban size={11} className="shrink-0" />;
   if (part.status === 'completed')
     return <Check size={12} className="shrink-0" strokeWidth={2.5} />;
   return <ActivityIcon kind={part.kind} className="animate-pulse shrink-0" />;
@@ -158,7 +159,9 @@ export function ExternalActivityBlock({ part }: ExternalActivityBlockProps) {
       </TimelineRow>
 
       {expanded && part.detail ? (
-        <pre className="app-scrollbar mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-outline-variant/15 bg-surface-container-lowest/60 p-3.5 font-mono text-xs text-on-surface-variant/70">
+        <pre
+          className={`app-scrollbar max-h-64 overflow-auto whitespace-pre-wrap break-words p-3.5 font-mono text-xs text-on-surface-variant/70 ${TIMELINE_PANEL_CLASS}`}
+        >
           {part.detail}
         </pre>
       ) : null}

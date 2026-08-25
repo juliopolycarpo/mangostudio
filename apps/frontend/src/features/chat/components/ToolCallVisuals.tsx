@@ -1,6 +1,9 @@
 import type { ToolExecutionStatus } from '@mangostudio/shared/tool-executions';
 import {
+  AlertCircle,
   ArrowRightLeft,
+  Ban,
+  Check,
   Clock,
   FileDiff,
   FileEdit,
@@ -13,7 +16,9 @@ import {
   Replace,
   Search,
   Terminal,
+  TimerOff,
   Trash2,
+  UserRound,
   Wrench,
 } from 'lucide-react';
 import type { TimelineTone } from './TimelineItem';
@@ -67,12 +72,43 @@ export function formatToolDuration(durationMs: number): string {
 }
 
 /**
+ * The status glyph every tool row draws. Terminal states get a verdict mark; a
+ * call still in flight gets its own tool icon, which is the only place tool
+ * identity is drawn — a settled row is identified by its name alone.
+ *
+ * Lives here rather than in either block because a collapsed group and the
+ * calls inside it sit on the same rail: two glyph tables would let the run's
+ * verdict mark drift from its members'.
+ *
+ * // Usage: <StatusGlyph status="failed" name="grep" />
+ */
+export function StatusGlyph({ status, name }: { status: ToolExecutionStatus; name: string }) {
+  switch (status) {
+    case 'succeeded':
+      return <Check size={12} className="shrink-0" strokeWidth={2.5} />;
+    case 'failed':
+      return <AlertCircle size={11} className="shrink-0" />;
+    case 'timed_out':
+      return <TimerOff size={11} className="shrink-0" />;
+    case 'cancelled':
+      return <Ban size={11} className="shrink-0" />;
+    case 'awaiting_user':
+      return <UserRound size={11} className="shrink-0" />;
+    default:
+      return <ToolIcon toolName={name} className="animate-pulse shrink-0" />;
+  }
+}
+
+/**
  * Renders a per-tool icon based on the tool name.
  * Falls back to the generic Wrench icon for unknown tools.
  *
+ * Internal: the status glyph is the only thing that draws tool identity, and it
+ * lives in this module.
+ *
  * // Usage: <ToolIcon toolName="read_file" className="shrink-0" />
  */
-export function ToolIcon({ toolName, className }: { toolName: string; className?: string }) {
+function ToolIcon({ toolName, className }: { toolName: string; className?: string }) {
   const size = 11;
   switch (toolName) {
     case 'list_directory':

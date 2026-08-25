@@ -1,7 +1,7 @@
-import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
+import { TimelineDisclosure } from './TimelineDisclosure';
 import { TimelineItem } from './TimelineItem';
 import { TimelineRow } from './TimelineRow';
 
@@ -158,42 +158,31 @@ export function ThinkingBlock({
           {label}
         </span>
       </TimelineRow>
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div
-            key="thinking-body"
-            initial={{ opacity: 0, height: 0, y: -4 }}
-            animate={{ opacity: 1, height: 'auto', y: 0 }}
-            exit={{ opacity: 0, height: 0, y: -6 }}
-            transition={{ duration: 0.22, ease: 'easeOut' }}
-            className="mt-1.5 overflow-hidden rounded-lg border border-outline-variant/15 bg-surface-container-lowest/60"
-          >
-            <div
-              ref={scrollRef}
-              onScroll={handleScroll}
-              className="app-scrollbar max-h-48 overflow-y-auto p-3.5 sm:max-h-72 md:max-h-96"
-            >
-              <div className="markdown-content--thinking text-xs leading-relaxed text-on-surface-variant/60">
-                {plainText ? (
-                  <span data-vendor-text className="block whitespace-pre-wrap break-words">
-                    {text}
-                  </span>
-                ) : (
-                  <MarkdownContent
-                    content={text}
-                    isStreaming={isStreaming}
-                    copyCodeLabel={t.chat.copyCode}
-                    codeCopiedLabel={t.chat.codeCopied}
-                  />
-                )}
-                {isStreaming && (
-                  <span className="ml-0.5 inline-block h-[1em] w-0.5 animate-blink bg-primary/40 align-middle" />
-                )}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <TimelineDisclosure open={expanded}>
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="app-scrollbar max-h-48 overflow-y-auto p-3.5 sm:max-h-72 md:max-h-96"
+        >
+          <div className="markdown-content--thinking text-xs leading-relaxed text-on-surface-variant/60">
+            {plainText ? (
+              <span data-vendor-text className="block whitespace-pre-wrap break-words">
+                {text}
+              </span>
+            ) : (
+              <MarkdownContent
+                content={text}
+                isStreaming={isStreaming}
+                copyCodeLabel={t.chat.copyCode}
+                codeCopiedLabel={t.chat.codeCopied}
+              />
+            )}
+            {isStreaming && (
+              <span className="ml-0.5 inline-block h-[1em] w-0.5 animate-blink bg-primary/40 align-middle" />
+            )}
+          </div>
+        </div>
+      </TimelineDisclosure>
     </TimelineItem>
   );
 }
