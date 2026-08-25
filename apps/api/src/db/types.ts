@@ -493,7 +493,7 @@ interface ExternalAccountLimitsCacheTable {
 interface ActivityEventsTable {
   id: string;
   userId: string;
-  /** One of `ACTIVITY_EVENT_KINDS`; stored as text so an unknown kind survives a downgrade. */
+  /** An `ActivityEventKind`; stored as text so an unknown kind survives a downgrade. */
   kind: string;
   createdAt: number;
   chatId: string | null;

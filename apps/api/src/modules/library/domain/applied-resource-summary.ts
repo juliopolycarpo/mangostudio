@@ -38,13 +38,9 @@ export function summarizeAppliedResources(
 ): AppliedResourceSummary[] {
   const writtenLocations = new Map<string, Set<string>>();
   for (const row of applied) {
-    const locations = writtenLocations.get(row.resourceKey);
-    if (locations) locations.add(destinationKey(row.environmentId, row.locationId));
-    else
-      writtenLocations.set(
-        row.resourceKey,
-        new Set([destinationKey(row.environmentId, row.locationId)])
-      );
+    const locations = writtenLocations.get(row.resourceKey) ?? new Set<string>();
+    locations.add(destinationKey(row.environmentId, row.locationId));
+    writtenLocations.set(row.resourceKey, locations);
   }
 
   const summaries: AppliedResourceSummary[] = [];

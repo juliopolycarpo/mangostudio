@@ -27,11 +27,6 @@ export const ActivityEventKindSchema = Type.Union([
 
 export type ActivityEventKind = Static<typeof ActivityEventKindSchema>;
 
-/** Stable order for the wire, the UI legend, and exhaustiveness tests. */
-export const ACTIVITY_EVENT_KINDS: readonly ActivityEventKind[] = ActivityEventKindSchema.anyOf.map(
-  (literal) => literal.const
-);
-
 /**
  * Scoping columns every event carries, indexed rather than buried in `payload`
  * so the feed can filter on them.
