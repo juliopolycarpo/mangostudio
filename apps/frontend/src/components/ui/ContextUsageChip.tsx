@@ -8,6 +8,7 @@
  * a session.
  */
 
+import type { ContextSeverity } from '@mangostudio/shared/chat';
 import type { ReactNode } from 'react';
 import { ContextRing } from './ContextRing';
 
@@ -21,7 +22,7 @@ export interface ContextUsageLine {
 interface ContextUsageChipProps {
   /** Omitted when nothing reports a window, which is when `fallback` shows instead. */
   readonly ratio?: number | null;
-  readonly severity?: string;
+  readonly severity?: ContextSeverity;
   /** Stands in for the ring when there is no ratio to draw. */
   readonly fallback?: ReactNode;
   readonly lines: readonly ContextUsageLine[];

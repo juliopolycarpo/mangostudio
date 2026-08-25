@@ -1,9 +1,23 @@
+import type { ContextSeverity } from '@mangostudio/shared/chat';
 import { useI18n } from '@/hooks/use-i18n';
 
 interface ContextRingProps {
   ratio: number;
-  severity: string;
+  severity: ContextSeverity;
 }
+
+/**
+ * Arc colour per band. A record rather than a ternary chain so adding a sixth
+ * band to the schema is a type error here instead of a ring that silently
+ * stays green.
+ */
+const SEVERITY_STROKE: Record<ContextSeverity, string> = {
+  normal: 'stroke-primary',
+  info: 'stroke-primary',
+  warning: 'stroke-warning',
+  danger: 'stroke-error',
+  critical: 'stroke-error',
+};
 
 /**
  * Tiny circular progress ring for context usage.
@@ -25,12 +39,7 @@ export function ContextRing({ ratio, severity }: ContextRingProps) {
   const offset = circumference * (1 - Math.min(ratio, 1));
   const pct = Math.round(ratio * 100);
 
-  const color =
-    severity === 'critical' || severity === 'danger'
-      ? 'stroke-error'
-      : severity === 'warning'
-        ? 'stroke-warning'
-        : 'stroke-primary';
+  const color = SEVERITY_STROKE[severity];
 
   return (
     <div

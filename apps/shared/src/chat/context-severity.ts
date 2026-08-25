@@ -8,8 +8,16 @@
  * them.
  */
 
-/** Threshold category for UI display. */
-export type ContextSeverity = 'normal' | 'info' | 'warning' | 'danger' | 'critical';
+import type { Static } from 'typebox';
+import type { ContextSeveritySchema } from './schemas';
+
+/**
+ * Threshold category for UI display.
+ *
+ * Derived from the schema that already carries it on `ContextInfo`, so the
+ * wire shape and the band this file computes cannot name different sets.
+ */
+export type ContextSeverity = Static<typeof ContextSeveritySchema>;
 
 /**
  * Product defaults:

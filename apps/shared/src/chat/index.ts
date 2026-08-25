@@ -22,6 +22,7 @@ export {
   ContextInfoSchema,
   type ContextSettings,
   ContextSettingsSchema,
+  ContextSeveritySchema,
   type CreateChatBody,
   CreateChatBodySchema,
   type CreateMessageBody,
