@@ -177,10 +177,12 @@ describe('useChatAutoFollow', () => {
       <FeedHarness chatId="a" messages={[makeMessage('1', { isGenerating: true, text: 'a' })]} />
     );
 
-    // Simulate scrolling up: far from the bottom.
+    // Simulate scrolling up: far from the bottom. The wheel is what makes it a
+    // reader rather than the browser re-clamping a re-laid-out transcript.
     scrollTopValue = 0;
     scrollHeightValue = 1000;
     clientHeightValue = 400;
+    fireEvent.wheel(getByTestId('scroll'));
     fireEvent.scroll(getByTestId('scroll'));
     expect(getByTestId('show-button').textContent).toBe('true');
 
@@ -193,11 +195,51 @@ describe('useChatAutoFollow', () => {
     expect(scrollTopValue).toBe(0);
   });
 
+  it('finishes an initial jump that the first paint could not complete', () => {
+    // A virtualizer that has measured six rows of forty reports a fraction of
+    // the real height, so the opening jump lands thousands of pixels short.
+    scrollHeightValue = 964;
+    clientHeightValue = 541;
+    const { getByTestId, rerender } = render(
+      <FeedHarness chatId="a" messages={[makeMessage('1')]} />
+    );
+    expect(scrollTopValue).toBe(964);
+
+    // The browser then re-clamps the position as the rows mount and re-lay out.
+    // No gesture preceded it, so it is layout moving the view, not the reader.
+    scrollHeightValue = 5981;
+    scrollTopValue = 0;
+    fireEvent.scroll(getByTestId('scroll'));
+    expect(getByTestId('show-button').textContent).toBe('false');
+
+    rerender(<FeedHarness chatId="a" messages={[makeMessage('1')]} />);
+    FakeResizeObserver.resize(getByTestId('content'));
+
+    expect(scrollTopValue).toBe(5981);
+  });
+
+  it('abandons the pending jump when the reader scrolls away during the load', () => {
+    scrollHeightValue = 964;
+    clientHeightValue = 541;
+    const { getByTestId } = render(<FeedHarness chatId="a" messages={[makeMessage('1')]} />);
+
+    scrollHeightValue = 5981;
+    scrollTopValue = 0;
+    fireEvent.wheel(getByTestId('scroll'));
+    fireEvent.scroll(getByTestId('scroll'));
+
+    FakeResizeObserver.resize(getByTestId('content'));
+
+    expect(scrollTopValue).toBe(0);
+    expect(getByTestId('show-button').textContent).toBe('true');
+  });
+
   it('toggles the scroll button based on proximity to the bottom', () => {
     const { getByTestId } = render(<FeedHarness chatId="a" messages={[makeMessage('1')]} />);
     const scroll = getByTestId('scroll');
 
     scrollTopValue = 0; // gap 600 → far from bottom
+    fireEvent.wheel(scroll);
     fireEvent.scroll(scroll);
     expect(getByTestId('show-button').textContent).toBe('true');
 
@@ -229,6 +271,7 @@ describe('useChatAutoFollow', () => {
     );
 
     scrollTopValue = 0;
+    fireEvent.wheel(getByTestId('scroll'));
     fireEvent.scroll(getByTestId('scroll'));
 
     scrollHeightValue = 2600;
@@ -265,6 +308,7 @@ describe('useChatAutoFollow', () => {
 
     // Scroll away so the button shows.
     scrollTopValue = 0;
+    fireEvent.wheel(scroll);
     fireEvent.scroll(scroll);
     expect(getByTestId('show-button').textContent).toBe('true');
 
