@@ -17,8 +17,6 @@ export interface EnvironmentAlert {
   readonly environmentId: string;
   readonly name: string;
   readonly severity: 'error' | 'warning';
-  /** Present when the runtime named a cause the card can render. */
-  readonly errorCode?: string;
 }
 
 /**
@@ -31,7 +29,7 @@ export function environmentAlerts(
   const alerts: EnvironmentAlert[] = [];
   for (const environment of environments) {
     if (!environment.enabled) continue;
-    const { state, errorCode } = environment.status;
+    const { state } = environment.status;
     const severity =
       state === 'error'
         ? 'error'
@@ -39,12 +37,7 @@ export function environmentAlerts(
           ? 'warning'
           : null;
     if (severity === null) continue;
-    alerts.push({
-      environmentId: environment.id,
-      name: environment.name,
-      severity,
-      ...(errorCode ? { errorCode } : {}),
-    });
+    alerts.push({ environmentId: environment.id, name: environment.name, severity });
   }
   // Faults first, then alphabetically, so the list is stable across refetches.
   return alerts.sort(

@@ -10,6 +10,7 @@
 import { describe, expect, it, jest } from 'bun:test';
 import type { Chat } from '@mangostudio/shared';
 import type { Environment } from '@mangostudio/shared/environments';
+import { createMockChat } from '@mangostudio/shared/test-utils';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { WorkspaceHub, type WorkspaceHubProps } from '../../../src/features/home/WorkspaceHub';
@@ -32,21 +33,22 @@ const LOCAL_ENVIRONMENT: Environment = {
   status: { state: 'connected' },
 };
 
+/**
+ * Only the fields the hub reads are named; everything else comes from the
+ * shared factory, so a new `Chat` field does not have to be added here too.
+ * The timestamps are fixed rather than faker's `now` because the uncommitted
+ * work list is ordered by them.
+ */
 function chat(id: string, title: string): Chat {
-  return {
+  return createMockChat({
     id,
     title,
     createdAt: 1,
     updatedAt: 1,
-    model: null,
     textModel: null,
     imageModel: null,
-    runner: { kind: 'mangostudio', agentId: 'default' },
-    runnerPermissions: {},
     workdir: '/srv/projects/mango',
-    environmentId: 'local',
-    restrictToolsToWorkdir: null,
-  };
+  });
 }
 
 function skillInstance(locationId: string, contentHash: string) {

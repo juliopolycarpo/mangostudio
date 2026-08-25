@@ -6,13 +6,17 @@
  * selector already holds, so it costs no request and never triggers a probe.
  */
 
+import type { Environment } from '@mangostudio/shared/environments';
 import { Link } from '@tanstack/react-router';
+import { useMemo } from 'react';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { environmentScopeRoute } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
 import { environmentAlerts } from '../lib/environment-health';
+
+const NO_ENVIRONMENTS: readonly Environment[] = [];
 
 interface EnvironmentHealthCardProps {
   /** The chat's machine — the only one whose being offline is worth a warning. */
@@ -22,8 +26,13 @@ interface EnvironmentHealthCardProps {
 export function EnvironmentHealthCard({ activeEnvironmentId }: EnvironmentHealthCardProps) {
   const { t } = useI18n();
   const labels = t.home.environments;
-  const environments = useEnvironmentEntitiesQuery().data ?? [];
-  const alerts = environmentAlerts(environments, activeEnvironmentId);
+  const environments = useEnvironmentEntitiesQuery().data ?? NO_ENVIRONMENTS;
+  // Filters and sorts the whole environment list; the status pushes that change
+  // it arrive over a socket, not on every render of the hub around it.
+  const alerts = useMemo(
+    () => environmentAlerts(environments, activeEnvironmentId),
+    [environments, activeEnvironmentId]
+  );
 
   if (alerts.length === 0) return null;
 

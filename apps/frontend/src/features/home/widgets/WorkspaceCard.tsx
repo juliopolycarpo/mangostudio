@@ -14,7 +14,7 @@ import type { StatusDotTone } from '@/components/ui/StatusDot';
 import { useGitState } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { workdirBasename } from '@/lib/paths';
+import { workdirLabel } from '@/lib/paths';
 import { HubSkeletonLines } from './HubSkeletonLines';
 
 interface WorkspaceCardProps {
@@ -33,7 +33,7 @@ export function WorkspaceCard({ chatId, workdir, onChooseWorkdir }: WorkspaceCar
   // below is a discriminant check.
   const state: GitRepoState | undefined = gitState.data;
 
-  const folder = workdir ? (workdirBasename(workdir) ?? workdir) : null;
+  const folder = workdirLabel(workdir);
 
   return (
     <SectionCard label={labels.label} tone={cardTone(state)}>
@@ -43,7 +43,7 @@ export function WorkspaceCard({ chatId, workdir, onChooseWorkdir }: WorkspaceCar
         </p>
       ) : null}
 
-      {gitState.isPending && folder ? <HubSkeletonLines lines={2} /> : null}
+      {gitState.isPending && folder ? <HubSkeletonLines /> : null}
 
       {state?.state === 'repo' ? <RepoLines status={state.status} /> : null}
 

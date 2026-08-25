@@ -4,6 +4,7 @@ import type { Environment } from '@mangostudio/shared/environments';
 import type { GitRepoState, GitSummary } from '@mangostudio/shared/git';
 import { en, ptBR } from '@mangostudio/shared/i18n';
 import type { LibraryCoverage, LibraryResource } from '@mangostudio/shared/library';
+import { createMockChat } from '@mangostudio/shared/test-utils';
 import { environmentAlerts } from '../../../../src/features/home/lib/environment-health';
 import { greetingSlot } from '../../../../src/features/home/lib/greeting';
 import {
@@ -217,21 +218,22 @@ describe('environmentAlerts', () => {
   });
 });
 
+/**
+ * Only the fields these helpers read are named; everything else comes from the
+ * shared factory, so a new `Chat` field does not have to be added here too.
+ * The timestamps are fixed rather than faker's `now` because the uncommitted
+ * work list is ordered by them.
+ */
 function chat(id: string, title = id): Chat {
-  return {
+  return createMockChat({
     id,
     title,
     createdAt: 1,
     updatedAt: 1,
-    model: null,
     textModel: null,
     imageModel: null,
-    runner: { kind: 'mangostudio', agentId: 'default' },
-    runnerPermissions: {},
     workdir: '/srv/projects/mango',
-    environmentId: 'local',
-    restrictToolsToWorkdir: null,
-  };
+  });
 }
 
 function summary(overrides: Partial<GitSummary> = {}): GitSummary {

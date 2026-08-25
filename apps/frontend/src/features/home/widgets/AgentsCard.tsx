@@ -20,6 +20,7 @@ import { ExternalAccountLimitsChip } from '@/features/external-agents/ExternalAc
 import { useExternalAccountLimits } from '@/features/external-agents/use-external-account-limits';
 import { useExternalAgents } from '@/features/external-agents/useExternalAgents';
 import { useI18n } from '@/hooks/use-i18n';
+import { agentIdentityTokens } from '@/lib/agent-identity';
 import { HubSkeletonLines } from './HubSkeletonLines';
 
 interface AgentsCardProps {
@@ -28,13 +29,6 @@ interface AgentsCardProps {
   activeTargetId?: ExternalAgentTargetId;
   className?: string;
 }
-
-/** Harness identity, from the `--color-agent-*` tokens the sidebar rows use. */
-const TARGET_DOT: Readonly<Record<string, string>> = {
-  codex: 'bg-agent-codex',
-  claude: 'bg-agent-claude',
-  cursor: 'bg-agent-cursor',
-};
 
 const UNAVAILABLE_DOT: Readonly<Record<'warning' | 'error', string>> = {
   warning: 'bg-warning',
@@ -61,7 +55,7 @@ export function AgentsCard({ environmentId, activeTargetId, className }: AgentsC
         </Link>
       }
     >
-      {external.isLoading ? <HubSkeletonLines lines={2} /> : null}
+      {external.isLoading ? <HubSkeletonLines /> : null}
 
       {!external.isLoading && external.agents.length === 0 ? (
         <p className="text-xs text-on-surface-variant">{labels.empty}</p>
@@ -107,9 +101,7 @@ function AgentPill({ descriptor }: { descriptor: ExternalAgentDescriptor }) {
       <span
         aria-hidden="true"
         className={`inline-block size-1.5 shrink-0 rounded-full ${
-          problem
-            ? UNAVAILABLE_DOT[problem]
-            : (TARGET_DOT[descriptor.targetId] ?? 'bg-agent-generic')
+          problem ? UNAVAILABLE_DOT[problem] : agentIdentityTokens(descriptor.targetId).dotClass
         }`}
       />
       {/* The harness name never truncates and the version always may: a vendor

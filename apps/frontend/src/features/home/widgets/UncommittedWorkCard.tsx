@@ -18,6 +18,8 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { uncommittedWork } from '../lib/uncommitted-work';
 
+const NO_CHATS: readonly Chat[] = [];
+
 interface UncommittedWorkCardProps {
   /** Excluded from the list: this chat's own state is already on screen. */
   currentChatId: string | null;
@@ -27,7 +29,9 @@ interface UncommittedWorkCardProps {
 export function UncommittedWorkCard({ currentChatId, onSelectChat }: UncommittedWorkCardProps) {
   const { t } = useI18n();
   const labels = t.home.uncommitted;
-  const chats: readonly Chat[] = useQuery(chatListQueryOptions()).data ?? [];
+  // One shared empty array, not a fresh `?? []`: an unsettled query would
+  // otherwise hand every render a new identity and defeat the memo below.
+  const chats: readonly Chat[] = useQuery(chatListQueryOptions()).data ?? NO_CHATS;
   // Memoized for the same reason the layout's caller is: this list feeds a
   // `useQueries` whose chunking keys on the array's identity.
   const gitChatIds = useMemo(
@@ -35,7 +39,12 @@ export function UncommittedWorkCard({ currentChatId, onSelectChat }: Uncommitted
     [chats]
   );
   const summaries = useBatchedGitSummaries(gitChatIds);
-  const work = uncommittedWork(chats, summaries, currentChatId);
+  // Walks every chat in the account, so it is not something to redo on a
+  // render that changed neither the sessions nor their git state.
+  const work = useMemo(
+    () => uncommittedWork(chats, summaries, currentChatId),
+    [chats, summaries, currentChatId]
+  );
 
   if (work.rows.length === 0) return null;
 

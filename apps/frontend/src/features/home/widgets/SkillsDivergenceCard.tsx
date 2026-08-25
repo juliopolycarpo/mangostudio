@@ -12,6 +12,7 @@
 import type { LibraryTargetId } from '@mangostudio/shared/library';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
+import { useMemo } from 'react';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { libraryEnvironmentSearch, libraryResourcesQueryOptions } from '@/features/library/queries';
 import { useI18n } from '@/hooks/use-i18n';
@@ -30,9 +31,11 @@ export function SkillsDivergenceCard({ environmentId }: SkillsDivergenceCardProp
   // hub's only optional one: it has no resting state worth a skeleton, and a
   // placeholder that resolves to "nothing to report" is pure layout churn.
   const { data } = useQuery(libraryResourcesQueryOptions('skill', scope));
-  if (!data) return null;
+  // Two passes over every skill in the library, plus a sort and a per-resource
+  // description — none of which changes until the scan itself does.
+  const summary = useMemo(() => (data ? summarizeSkillsDivergence(data.resources) : null), [data]);
 
-  const summary = summarizeSkillsDivergence(data.resources);
+  if (!summary) return null;
   if (!summary.headline && summary.singleTargetCount === 0) return null;
 
   const search = libraryEnvironmentSearch(scope);
