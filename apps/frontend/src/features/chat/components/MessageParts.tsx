@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatTokensCompact } from '@/lib/format-tokens';
 import { ContinuationEventMarker } from './ContinuationEventMarker';
 import { ElicitationCard } from './ElicitationCard';
 import { ExternalActivityBlock } from './ExternalActivityBlock';
@@ -306,13 +307,6 @@ function ExternalTurnFooter({
       ) : null}
     </div>
   );
-}
-
-/** Same compaction the composer's context chip uses, so one turn reads one way. */
-function formatTokensCompact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
-  return String(n);
 }
 
 function SubagentTraceBlock({ part }: { part: Extract<MessagePart, { type: 'subagent_trace' }> }) {

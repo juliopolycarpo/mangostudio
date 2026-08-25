@@ -16,15 +16,10 @@ import type { Messages } from '@mangostudio/shared/i18n';
 import type { ContextUsageLine } from '@/components/ui/ContextUsageChip';
 import { ContextUsageChip } from '@/components/ui/ContextUsageChip';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatTokensCompact } from '@/lib/format-tokens';
 import { formatMessage } from '@/lib/i18n-format';
 
 type UsageLabels = Messages['externalAgents']['usage'];
-
-function formatTokensCompact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
-  return String(n);
-}
 
 /** `in 29k · out 1.2k · total 30k`, skipping whatever the vendor left out. */
 function describeUsage(usage: ExternalUsage, labels: UsageLabels): string | null {
