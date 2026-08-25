@@ -34,6 +34,7 @@ import { GENERATE_IMAGE_TOOL_NAME } from '../../../services/tools/builtin/genera
 import type { WorkdirPolicy } from '../../../services/tools/types';
 import { generateId } from '../../../utils/id';
 import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
+import { recordTurnCompletedActivity } from '../../chats/application/record-turn-activity';
 import { loadHistory, loadRichHistory } from '../../messages/infrastructure/message-repository';
 import {
   finalizeCheckpointedAiResponse,
@@ -979,6 +980,7 @@ export async function* finalizeSuccessfulTurn(
   if (!finalized) return;
 
   await updateChatAfterTurn(chatId, aiTimestamp, db);
+  void recordTurnCompletedActivity(userId, chatId, db);
 
   yield { type: 'done', messageId: aiMsgId, generationTime };
 }

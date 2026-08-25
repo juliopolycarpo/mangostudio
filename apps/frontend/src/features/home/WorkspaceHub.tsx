@@ -9,6 +9,7 @@
  */
 
 import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents';
+import { ActivityStrip } from '@/features/activity/ActivityStrip';
 import { AgentsCard } from './widgets/AgentsCard';
 import { EnvironmentHealthCard } from './widgets/EnvironmentHealthCard';
 import { GreetingHeader } from './widgets/GreetingHeader';
@@ -72,6 +73,7 @@ export function WorkspaceHub({
           {onSelectChat ? (
             <UncommittedWorkCard currentChatId={chatId} onSelectChat={onSelectChat} />
           ) : null}
+          <ActivityStrip />
         </div>
 
         <SuggestedActions chatId={chatId} onSelect={onUsePrompt} />

@@ -490,6 +490,20 @@ interface ExternalAccountLimitsCacheTable {
   updatedAt: number;
 }
 
+interface ActivityEventsTable {
+  id: string;
+  userId: string;
+  /** An `ActivityEventKind`; stored as text so an unknown kind survives a downgrade. */
+  kind: string;
+  createdAt: number;
+  chatId: string | null;
+  workdir: string | null;
+  environmentId: string | null;
+  targetId: string | null;
+  /** JSON: the kind-specific payload from `ActivityEventSchema`. */
+  payloadJson: string;
+}
+
 /** Root Kysely Database interface. */
 export interface Database {
   chats: ChatsTable;
@@ -523,6 +537,7 @@ export interface Database {
   external_session_adoption_leases: ExternalSessionAdoptionLeasesTable;
   external_agent_disclosures: ExternalAgentDisclosuresTable;
   external_account_limits_cache: ExternalAccountLimitsCacheTable;
+  activity_events: ActivityEventsTable;
 }
 
 export type GeneratedImageSelect = Selectable<GeneratedImagesTable>;
@@ -566,3 +581,6 @@ export type LibraryBackupSelect = Selectable<LibraryBackupsTable>;
 export type LibraryBackupInsert = Insertable<LibraryBackupsTable>;
 
 export type ToolIdentitySelect = Selectable<UserToolIdentitiesTable>;
+
+export type ActivityEventSelect = Selectable<ActivityEventsTable>;
+export type ActivityEventInsert = Insertable<ActivityEventsTable>;

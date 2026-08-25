@@ -1,6 +1,7 @@
 import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { ERROR_CODES, type ErrorCode } from '@mangostudio/shared/errors';
 import {
+  ACTIVITY_TOPIC,
   ENVIRONMENTS_TOPIC,
   EXTERNAL_AGENTS_TOPIC,
   parseGitTopic,
@@ -46,6 +47,7 @@ const USER_SCOPED_TOPICS: ReadonlySet<string> = new Set<string>([
   SETTINGS_TOPIC,
   ENVIRONMENTS_TOPIC,
   EXTERNAL_AGENTS_TOPIC,
+  ACTIVITY_TOPIC,
 ]);
 
 function isUserScopedTopic(topic: string): boolean {

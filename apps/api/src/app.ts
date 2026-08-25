@@ -12,6 +12,7 @@ import { Elysia, NotFound } from 'elysia';
 import { websocket } from 'elysia/websocket';
 import { getConfig } from './lib/config';
 import { createDiagnosticLogger } from './lib/logger';
+import { activityRoutes } from './modules/activity/http/activity-routes';
 import { apiKeyRoutes } from './modules/api-keys/http/api-key-routes';
 import { chatRoutes } from './modules/chats/http/chat-routes';
 import { environmentRoutes } from './modules/environments/http/environment-routes';
@@ -94,6 +95,7 @@ const api = new Elysia({ prefix: '/api' })
   // a machine credential, not a session cookie.
   .use(runtimeSocketRoutes)
   .use(chatRoutes)
+  .use(activityRoutes)
   .use(environmentRoutes)
   .use(externalAgentRoutes)
   .use(externalAgentTurnRoutes)

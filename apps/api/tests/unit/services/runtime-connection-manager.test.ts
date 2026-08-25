@@ -13,6 +13,7 @@ import {
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { getDb } from '../../../src/db/database';
 import { getVersion } from '../../../src/lib/config';
+import type { EnvironmentStateTransition } from '../../../src/modules/environments/application/record-environment-activity';
 import { capabilityManifestFromHealth } from '../../../src/services/runtime-client/manifest-from-health';
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
@@ -1315,5 +1316,71 @@ describe('connectWslRuntime', () => {
     expect(error).toBeInstanceOf(RuntimeRemoteError);
     expect(error.message).toContain('WSL could not be started');
     expect(error.message).not.toContain('Reinstall MangoStudio');
+  });
+});
+
+describe('RuntimeConnectionManager — activity transitions', () => {
+  it('records nothing for the first settled state after a fresh manager (the hub-restart guard)', async () => {
+    const transitions: EnvironmentStateTransition[] = [];
+    let finishConnect: ((connection: ManagedRuntimeConnection) => void) | undefined;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: () =>
+          new Promise((resolve) => {
+            finishConnect = resolve;
+          }),
+      },
+      recordTransition: (transition) => transitions.push(transition),
+    });
+
+    const connecting = manager.connect('user-1', 'devbox');
+    await Promise.resolve();
+    await Promise.resolve();
+    // `connecting` settles to `undefined`: a step, not an outcome.
+    expect(manager.getStatus('user-1', 'devbox').state).toBe('connecting');
+    expect(transitions).toEqual([]);
+
+    finishConnect?.(fakeConnection(() => undefined));
+    await connecting;
+
+    // The first settled state this entry ever reports has nothing to diff
+    // against, so it must not be announced as a transition.
+    expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
+    expect(transitions).toEqual([]);
+  });
+
+  it('records exactly one connected → disconnected transition, named from the definition', async () => {
+    const transitions: EnvironmentStateTransition[] = [];
+    let finishConnect: ((connection: ManagedRuntimeConnection) => void) | undefined;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve({ ...definition(), name: 'Devbox display name' }),
+      connectors: {
+        stdio: () =>
+          new Promise((resolve) => {
+            finishConnect = resolve;
+          }),
+      },
+      recordTransition: (transition) => transitions.push(transition),
+    });
+
+    const connecting = manager.connect('user-1', 'devbox');
+    await Promise.resolve();
+    await Promise.resolve();
+    finishConnect?.(fakeConnection(() => undefined));
+    await connecting;
+    expect(transitions).toEqual([]);
+
+    manager.disconnect('user-1', 'devbox');
+
+    expect(transitions).toEqual([
+      {
+        userId: 'user-1',
+        environmentId: 'devbox',
+        environmentName: 'Devbox display name',
+        previousState: 'connected',
+        state: 'disconnected',
+      },
+    ]);
   });
 });

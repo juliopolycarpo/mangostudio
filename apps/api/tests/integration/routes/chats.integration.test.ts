@@ -219,6 +219,39 @@ describe('POST /chats', () => {
     expect(body).not.toHaveProperty('lastContextState');
   });
 
+  it('writes a chat_created activity row scoped to the new chat', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/chats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Activity Chat' }),
+      })
+    );
+    const body = (await response.json()) as { id: string };
+    // The write is fire-and-forget from the use case; one macrotask turn is
+    // enough for bun:sqlite's synchronous driver to have settled it.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const row = await getDb()
+      .selectFrom('activity_events')
+      .selectAll()
+      .where('userId', '=', TEST_USER.id)
+      .where('chatId', '=', body.id)
+      .where('kind', '=', 'chat_created')
+      .executeTakeFirst();
+
+    expect(row).toBeDefined();
+    expect(JSON.parse(row?.payloadJson ?? '{}')).toEqual({ title: 'Activity Chat' });
+
+    await getDb()
+      .deleteFrom('activity_events')
+      .where('id', '=', row?.id ?? '')
+      .execute();
+  });
+
   it('does not accept client-supplied id in body', async () => {
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
     restoreAuth = restore;

@@ -911,3 +911,59 @@ describe('Git write routes', () => {
     expect(state.status.branch.name).toBe('feat/remote-only');
   });
 });
+
+describe('Git write routes — activity emission', () => {
+  it.skipIf(!hasGit)('a commit writes a commit_created row naming the branch', async () => {
+    const workdir = await createTempRepo();
+    await writeFile(join(workdir, 'tracked.txt'), 'content\n');
+    const { app, chatId, user } = await createRouteFixture(workdir);
+    await postJson(app, '/git/stage', { chatId, all: true });
+
+    const committed = await postJson(app, '/git/commit', { chatId, title: 'activity commit' });
+    expect(committed.status).toBe(200);
+
+    const branch = await runFixtureGit(workdir, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    const row = await getDb()
+      .selectFrom('activity_events')
+      .selectAll()
+      .where('userId', '=', user.id)
+      .where('kind', '=', 'commit_created')
+      .executeTakeFirst();
+
+    expect(row).toBeDefined();
+    expect(row?.chatId).toBe(chatId);
+    expect(row?.workdir).toBe(workdir);
+    const payload = JSON.parse(row?.payloadJson ?? '{}');
+    expect(payload.subject).toBe('activity commit');
+    expect(payload.branch).toBe(branch);
+  });
+
+  it.skipIf(!hasGit)('a push writes a branch_pushed row naming the branch and remote', async () => {
+    const remote = await realpath(await mkdtemp(join(tmpdir(), 'mango-git-activity-remote-')));
+    tempDirs.push(remote);
+    await runFixtureGit(remote, ['init', '--bare', '--initial-branch=main']);
+
+    const workdir = await createTempRepo();
+    await writeFile(join(workdir, 'tracked.txt'), 'content\n');
+    await runFixtureGit(workdir, ['add', 'tracked.txt']);
+    await runFixtureGit(workdir, ['commit', '-m', 'initial']);
+    await runFixtureGit(workdir, ['branch', '-M', 'main']);
+    await runFixtureGit(workdir, ['remote', 'add', 'origin', remote]);
+
+    const { app, chatId, user } = await createRouteFixture(workdir);
+    const pushed = await postJson(app, '/git/push', { chatId });
+    expect(pushed.status).toBe(200);
+
+    const row = await getDb()
+      .selectFrom('activity_events')
+      .selectAll()
+      .where('userId', '=', user.id)
+      .where('kind', '=', 'branch_pushed')
+      .executeTakeFirst();
+
+    expect(row).toBeDefined();
+    expect(row?.chatId).toBe(chatId);
+    expect(row?.workdir).toBe(workdir);
+    expect(JSON.parse(row?.payloadJson ?? '{}')).toEqual({ branch: 'main', remote: 'origin' });
+  });
+});

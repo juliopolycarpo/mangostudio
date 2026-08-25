@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import Value from 'typebox/value';
 import {
+  ACTIVITY_TOPIC,
   ENVIRONMENTS_TOPIC,
   EXTERNAL_AGENTS_TOPIC,
   GIT_SCOPES,
@@ -23,6 +24,7 @@ describe('realtime topic helpers', () => {
     // background probe learned something better about a machine that did not.
     expect(EXTERNAL_AGENTS_TOPIC).toBe('external-agents');
     expect(EXTERNAL_AGENTS_TOPIC).not.toBe(ENVIRONMENTS_TOPIC);
+    expect(ACTIVITY_TOPIC).toBe('activity');
     expect(gitTopic('chat-abc')).toBe('git:chat-abc');
     expect(parseGitTopic(gitTopic('chat-abc'))).toBe('chat-abc');
     expect(parseGitTopic('settings')).toBeUndefined();
@@ -153,6 +155,21 @@ describe('realtime server messages', () => {
         topic: EXTERNAL_AGENTS_TOPIC,
       })
     ).toBe(true);
+    expect(
+      Value.Check(RealtimeServerMessageSchema, {
+        type: 'invalidate',
+        topic: ACTIVITY_TOPIC,
+      })
+    ).toBe(true);
+    // The union carries no scopes for this topic: the whole feed is what
+    // changed, and there is nothing narrower to name.
+    expect(
+      Value.Check(RealtimeServerMessageSchema, {
+        type: 'invalidate',
+        topic: ACTIVITY_TOPIC,
+        scopes: ['whatever'],
+      })
+    ).toBe(false);
     expect(
       Value.Check(RealtimeServerMessageSchema, {
         type: 'invalidate',

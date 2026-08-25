@@ -15,6 +15,8 @@ import type {
 import { getDb } from '../../../db/database';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getRuntimeClient } from '../../../services/runtime-client';
+import { recordActivity } from '../../activity/application/record-activity';
+import { quotaActivityDelta } from '../domain/quota-activity';
 import {
   type ExternalAccountLimitsCacheKey,
   readExternalAccountLimitsCache,
@@ -68,7 +70,7 @@ export async function refreshExternalAccountLimits(
       targetId: input.targetId,
       vendorAccountFingerprint: input.vendorAccountFingerprint,
     };
-    await writeExternalAccountLimitsCache(key, result.limits, getDb());
+    await persistExternalAccountLimits(key, result.limits);
     return result.limits;
   } catch (error) {
     logger.warn('Account-limits refresh failed', {
@@ -85,7 +87,35 @@ export async function cacheExternalAccountLimits(
   key: ExternalAccountLimitsCacheKey,
   limits: ExternalAccountLimits
 ): Promise<void> {
-  await writeExternalAccountLimitsCache(key, limits, getDb());
+  await persistExternalAccountLimits(key, limits);
+}
+
+/**
+ * The single write path for a quota snapshot, so the manual refresh and the
+ * live-turn observation cannot disagree about what a change is.
+ *
+ * Reading the previous row before overwriting it is what makes the activity
+ * event a *delta* rather than a reading — the plan's whole reason for the kind,
+ * given the agents card already shows current quota.
+ */
+async function persistExternalAccountLimits(
+  key: ExternalAccountLimitsCacheKey,
+  limits: ExternalAccountLimits
+): Promise<void> {
+  const db = getDb();
+  const previous = await readExternalAccountLimitsCache(key, db);
+  await writeExternalAccountLimitsCache(key, limits, db);
+
+  const delta = quotaActivityDelta(previous, limits);
+  if (!delta) return;
+
+  void recordActivity({
+    userId: key.userId,
+    kind: 'quota_refreshed',
+    environmentId: key.environmentId,
+    targetId: key.targetId,
+    payload: { target: key.targetId, ...delta },
+  });
 }
 
 /**

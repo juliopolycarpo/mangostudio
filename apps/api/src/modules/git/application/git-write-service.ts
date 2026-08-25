@@ -19,6 +19,7 @@ import type {
   StashSaveBody,
   UnstagePathsBody,
 } from '@mangostudio/shared/git';
+import { recordActivity } from '../../activity/application/record-activity';
 import {
   parseBranchList,
   parseCheckoutBlockedPaths,
@@ -411,15 +412,25 @@ export function commitChanges(
           { cwd: root, signal, timeoutMs: COMMIT_TIMEOUT_MS }
         );
 
-        const result = await runSelectedGit(runtime, ['log', '-1', '--format=%H%x00%s'], {
+        // `%D` rides along so the activity row can name the branch without a
+        // second round trip on a path the user is waiting on.
+        const result = await runSelectedGit(runtime, ['log', '-1', '--format=%H%x00%s%x00%D'], {
           cwd: root,
           signal,
         });
-        const separator = result.stdout.indexOf('\0');
-        return {
-          hash: result.stdout.slice(0, separator).trim(),
-          subject: result.stdout.slice(separator + 1).trim(),
-        };
+        const [hash = '', subject = '', decoration = ''] = result.stdout.split('\0');
+        const commit = { hash: hash.trim(), subject: subject.trim() };
+
+        void recordActivity({
+          userId: invalidationTarget.userId,
+          kind: 'commit_created',
+          chatId: invalidationTarget.chatId,
+          workdir,
+          environmentId: invalidationTarget.environmentId,
+          payload: { subject: commit.subject, branch: headBranchName(decoration) },
+        });
+
+        return commit;
       },
       mapCommitFailure
     )
@@ -853,21 +864,46 @@ export function pushBranch(
           ERROR_CODES.VALIDATION
         );
       }
+      // Named before the args are built so both paths agree on which remote the
+      // activity row reports, and so the upstream path still costs no `git remote`.
+      const remote = status.branch.upstream
+        ? upstreamRemote(status.branch.upstream)
+        : await defaultPushRemote(root, runtime, signal);
       const args = status.branch.upstream
         ? ['push', ...(input.force === 'with-lease' ? ['--force-with-lease'] : [])]
-        : [
-            'push',
-            '--set-upstream',
-            await defaultPushRemote(root, runtime, signal),
-            `refs/heads/${status.branch.name}`,
-          ];
+        : ['push', '--set-upstream', remote, `refs/heads/${status.branch.name}`];
       await runSelectedGit(runtime, args, {
         cwd: root,
         signal,
         timeoutMs: REMOTE_TIMEOUT_MS,
       });
+
+      void recordActivity({
+        userId: invalidationTarget.userId,
+        kind: 'branch_pushed',
+        chatId: invalidationTarget.chatId,
+        workdir,
+        environmentId: invalidationTarget.environmentId,
+        payload: { branch: status.branch.name, remote },
+      });
     }
   );
+}
+
+/** `origin/feat/x` names the remote `origin`; a remote name cannot contain a slash. */
+function upstreamRemote(upstream: string): string {
+  const separator = upstream.indexOf('/');
+  return separator === -1 ? upstream : upstream.slice(0, separator);
+}
+
+/**
+ * The local branch out of `git log`'s `%D` decoration, or `null` when HEAD is
+ * detached or points at no ref — `HEAD -> feat/x, origin/feat/x` against a bare
+ * `HEAD, tag: v1`.
+ */
+function headBranchName(decoration: string): string | null {
+  const match = /HEAD -> ([^,]+)/.exec(decoration);
+  return match?.[1]?.trim() || null;
 }
 
 function runRemoteMutation(

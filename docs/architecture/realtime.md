@@ -85,7 +85,14 @@ source of truth and refresh relevant queries after `subscribed` (and after
 | -------------- | -------------------------------- | ----------------------------------------------------------------------- |
 | `settings`     | Any authenticated cookie session | `app`, `provider`, `tool`, `tool-identity`                              |
 | `environments` | Any authenticated cookie session | None                                                                    |
+| `activity`     | Any authenticated cookie session | None                                                                    |
 | `git:<chatId>` | The user must own `<chatId>`     | `state`, `stashes`, `branches`, `history`, `commits`, `diffs`, `github` |
+
+`activity` is one topic for every activity kind rather than one per producer.
+The feed is a single query, so a per-kind topic would only ever fan back into
+the same invalidation. It is published from the activity recorder
+(`apps/api/src/modules/activity/application/record-activity.ts`), not from the
+seven emission seams, so a new kind cannot ship a row nobody is told about.
 
 Foreign Git topics remain unsubscribed and return the same non-enumerating
 `NOT_FOUND` response as an unavailable topic. Unknown topic grammars return

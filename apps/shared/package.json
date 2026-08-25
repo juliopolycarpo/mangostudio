@@ -16,6 +16,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./activity": "./src/activity/index.ts",
     "./chat": "./src/chat/index.ts",
     "./generation": "./src/generation/index.ts",
     "./app-settings": "./src/app-settings/index.ts",

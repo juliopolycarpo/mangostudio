@@ -90,7 +90,15 @@ HTTP como fonte da verdade e atualizar as queries relevantes depois de
 | -------------- | -------------------------------------- | ----------------------------------------------------------------------- |
 | `settings`     | Qualquer sessão autenticada por cookie | `app`, `provider`, `tool`, `tool-identity`                              |
 | `environments` | Qualquer sessão autenticada por cookie | Nenhum                                                                  |
+| `activity`     | Qualquer sessão autenticada por cookie | Nenhum                                                                  |
 | `git:<chatId>` | O usuário deve ser dono de `<chatId>`  | `state`, `stashes`, `branches`, `history`, `commits`, `diffs`, `github` |
+
+`activity` é um único tópico para todos os tipos de evento, em vez de um por
+produtor. O feed é uma única consulta, portanto um tópico por tipo apenas
+convergiria de volta para a mesma invalidação. Ele é publicado pelo registrador
+de atividade (`apps/api/src/modules/activity/application/record-activity.ts`), e
+não pelos sete pontos de emissão, para que um novo tipo não consiga gravar uma
+linha sobre a qual ninguém é avisado.
 
 Tópicos Git de outro usuário permanecem sem assinatura e retornam a mesma
 resposta `NOT_FOUND`, sem enumeração, de um tópico indisponível. Gramáticas de

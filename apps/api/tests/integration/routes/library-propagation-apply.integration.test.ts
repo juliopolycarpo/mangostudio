@@ -379,6 +379,68 @@ describe('propagation apply — writing and verifying', () => {
   });
 });
 
+describe('propagation apply — activity emission', () => {
+  /** Fire-and-forget from `runApply`; one macrotask turn is enough for
+   * bun:sqlite's synchronous driver to have settled the write. */
+  function flushActivity(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  it('writes a propagation_applied row per resource that reached disk', async () => {
+    writeSkill('mango-skills', 'winner\n');
+    makeDirectories('claude-skills');
+    const currentUserId = userId();
+
+    const { taken, request, entry } = await previewSkill();
+    const result = await applyLibraryPropagation(
+      currentUserId,
+      toRequest(taken, request, [adoptAll(entry, winnerFrom(entry, 'mango-skills'))]),
+      applyDeps()
+    );
+    expect(result.applied.length).toBeGreaterThan(0);
+    await flushActivity();
+
+    const rows = await getDb()
+      .selectFrom('activity_events')
+      .selectAll()
+      .where('userId', '=', currentUserId)
+      .where('kind', '=', 'propagation_applied')
+      .execute();
+
+    expect(rows).toHaveLength(1);
+    const payload = JSON.parse(rows[0]?.payloadJson ?? '{}');
+    expect(payload).toMatchObject({ resourceKind: 'skill', resourceName: 'gh' });
+    expect(Array.isArray(payload.targets)).toBe(true);
+    expect(payload.targets.length).toBeGreaterThan(0);
+  });
+
+  it('writes no row when every destination is already in sync', async () => {
+    for (const locationId of SKILL_LOCATIONS) {
+      writeSkill(locationId, 'winner\n');
+    }
+    const currentUserId = userId();
+
+    const { taken, request, entry } = await previewSkill();
+    const result = await applyLibraryPropagation(
+      currentUserId,
+      toRequest(taken, request, [adoptAll(entry, winnerFrom(entry, 'mango-skills'))]),
+      applyDeps()
+    );
+    // Nothing to write: every destination already holds the winning bytes.
+    expect(result.applied).toEqual([]);
+    await flushActivity();
+
+    const rows = await getDb()
+      .selectFrom('activity_events')
+      .selectAll()
+      .where('userId', '=', currentUserId)
+      .where('kind', '=', 'propagation_applied')
+      .execute();
+
+    expect(rows).toEqual([]);
+  });
+});
+
 describe('propagation apply — all-or-nothing', () => {
   /** Fails the write aimed at one location, after earlier ones have landed. */
   function failingAt(locationId: LibraryLocationId): Partial<PropagationApplyDeps> {

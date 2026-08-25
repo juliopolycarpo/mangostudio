@@ -53,6 +53,7 @@ modules/<domain>/
 | `prompt-rules`      | A/H     | Composição de prompts de sistema e resolução de arquivos de regra                  |
 | `attachments`       | A/I     | Upload de arquivos, validação, storage e entrega ao provedor                       |
 | `realtime`          | H       | Invalidação de cache por cookie e limitada ao usuário                              |
+| `activity`          | A/D/H/I | O log de "o que mudou" da conta; sete módulos escrevem, um lê                      |
 
 A = Application, D = Domain, H = HTTP, I = Infrastructure
 
