@@ -129,6 +129,9 @@ function installScenario(overrides: ScenarioOverrides = {}) {
     .respondWithJson('GET', '/api/library/resources?kind=skill', {
       body: { resources: overrides.skills ?? [], unreadableEntries: [] },
     })
+    .respondWithJson('GET', '/api/activity?limit=5', {
+      body: { events: [] },
+    })
     .install();
   return scenario;
 }
