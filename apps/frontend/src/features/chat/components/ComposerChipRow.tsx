@@ -29,6 +29,7 @@ import { ChevronDown, FolderOpen } from 'lucide-react';
 import { Fragment, type ReactNode, useState } from 'react';
 import { ModelSelector } from '@/components/layout/ModelSelector';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
+import { ChipSelect } from '@/components/ui/ChipSelect';
 import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
 import { ExternalComposerControls } from '@/features/external-agents/ExternalComposerControls';
 import { ExternalUsageDisplay } from '@/features/external-agents/ExternalUsageDisplay';
@@ -180,26 +181,17 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
     chips.push({
       key: 'agent',
       node: (
-        <label className="composer-chip max-w-[13rem]">
-          <span className="composer-chip-key text-on-surface-variant/70">{`${labels.agentLabel}:`}</span>
-          <select
-            id="chat-agent-selector"
-            value={props.selectedAgentId}
-            onChange={(event) => props.onSelectedAgentIdChange?.(event.target.value)}
-            disabled={props.disabled || props.isAgentListLoading || selectable.length === 0}
-            className="composer-chip-value min-w-0 max-w-[9rem] appearance-none bg-transparent text-inherit outline-none disabled:opacity-60"
-            aria-label={labels.selectAgent}
-          >
-            {props.isAgentListLoading ? (
-              <option value={props.selectedAgentId}>{labels.agentsLoading}</option>
-            ) : null}
-            {selectable.map((agent) => (
-              <option key={agent.id} value={agent.id}>
-                {agent.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ChipSelect
+          value={props.selectedAgentId}
+          options={selectable.map((agent) => ({ value: agent.id, label: agent.name }))}
+          onChange={(agentId) => props.onSelectedAgentIdChange?.(agentId)}
+          label={labels.agentLabel}
+          ariaLabel={labels.selectAgent}
+          disabled={props.disabled || props.isAgentListLoading || selectable.length === 0}
+          // The chip renders before the listing lands, and the id it was given
+          // is not a name anyone would recognise.
+          placeholder={props.isAgentListLoading ? labels.agentsLoading : props.selectedAgentId}
+        />
       ),
     });
   }

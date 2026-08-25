@@ -9,6 +9,8 @@
 import { describe, expect, it, jest } from 'bun:test';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
+import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { ExternalComposerControls } from '../../../src/features/external-agents/ExternalComposerControls';
 import { render } from '../../support/harness/render';
 
@@ -89,5 +91,43 @@ describe('ExternalComposerControls model reconciliation', () => {
     const { props } = renderControls({ descriptor: descriptor(undefined), model: 'gpt-5' });
 
     expect(props.onModelChange).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The effort vocabulary is the selected model's, not a global one, and it is
+ * picked from the composer's own dropdown rather than the platform's.
+ */
+describe('ExternalComposerControls effort picker', () => {
+  const CODEX_MODELS: ExternalAgentDescriptor['models'] = [
+    {
+      id: 'gpt-5-codex',
+      displayName: 'GPT-5 Codex',
+      isDefault: true,
+      defaultReasoningEffort: 'medium',
+      supportedReasoningEfforts: [
+        { id: 'low', displayName: 'low' },
+        { id: 'high', displayName: 'high' },
+      ],
+    },
+    { id: 'gpt-5', displayName: 'GPT-5' },
+  ];
+
+  it('offers the selected model efforts and reports the pick', async () => {
+    const user = userEvent.setup();
+    const { props } = renderControls({ descriptor: descriptor(CODEX_MODELS) });
+
+    const picker = screen.getByRole('combobox', { name: 'Reasoning effort' });
+    expect(picker).toHaveTextContent('effort:medium');
+    await user.click(picker);
+    await user.click(screen.getByRole('option', { name: 'high' }));
+
+    expect(props.onEffortChange).toHaveBeenCalledWith('high');
+  });
+
+  it('renders no effort chip for a model that advertises none', () => {
+    renderControls({ descriptor: descriptor(CODEX_MODELS), model: 'gpt-5' });
+
+    expect(screen.queryByRole('combobox', { name: 'Reasoning effort' })).toBeNull();
   });
 });

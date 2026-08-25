@@ -49,7 +49,9 @@ describe('InputBar — chat-only composer', () => {
       onSelectedAgentIdChange: jest.fn(),
     });
 
-    expect(screen.getByRole('combobox', { name: 'Select agent' })).toHaveValue('default');
+    // The chip is a button-and-listbox now, so its value is the text it shows
+    // rather than a form value.
+    expect(screen.getByRole('combobox', { name: 'Select agent' })).toHaveTextContent('Default');
   });
 
   it('changes the chat execution environment from the composer pill', async () => {
@@ -94,18 +96,19 @@ describe('InputBar — chat-only composer', () => {
       const selector = await screen.findByRole('combobox', {
         name: 'Select execution environment',
       });
-      expect(selector).toHaveValue('local');
       // The pill renders before the listing lands, wearing the `disconnected`
-      // fallback and an option built from the id alone, so the connected state
-      // is only meaningful once the fetched environment backs it.
+      // fallback and the bare id for a name, so the connected state is only
+      // meaningful once the fetched environment backs it.
       await waitFor(() =>
         expect(screen.getByTestId('environment-selector')).toHaveAttribute(
           'data-state',
           'connected'
         )
       );
+      expect(selector).toHaveTextContent('Local');
       expect(selector).toHaveAccessibleDescription('Connected');
-      await user.selectOptions(selector, 'remote-dev');
+      await user.click(selector);
+      await user.click(await screen.findByRole('option', { name: 'Remote dev' }));
 
       expect(onEnvironmentChange).toHaveBeenCalledWith('remote-dev');
     } finally {

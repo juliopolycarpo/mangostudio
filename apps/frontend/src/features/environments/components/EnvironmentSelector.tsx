@@ -1,6 +1,7 @@
 import type { EnvironmentConnectionState } from '@mangostudio/shared/environments';
 import { Server } from 'lucide-react';
 import { useId, useState } from 'react';
+import { ChipSelect } from '@/components/ui/ChipSelect';
 import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -50,39 +51,31 @@ export function EnvironmentSelector({
 
   return (
     <div className="flex items-center">
-      <label
-        className={`composer-chip max-w-[13rem] ${actionError ? 'border-error/45 text-error' : ''}`}
+      <span id={statusId} className="sr-only">
+        {statusLabel}
+      </span>
+      <ChipSelect
+        value={environmentId}
+        options={(environments.data ?? []).map((environment) => ({
+          value: environment.id,
+          label: environment.name,
+          disabled: !environment.enabled,
+        }))}
+        onChange={(nextEnvironmentId) => void handleChange(nextEnvironmentId)}
+        label={t.chat.input.environmentLabel}
+        ariaLabel={t.chat.input.selectEnvironment}
+        disabled={disabled || isChanging || unavailable || environments.isError}
+        // The chip renders before the listing lands; until it does the only
+        // name for the current environment is its id.
+        placeholder={unavailable ? t.chat.input.environmentsLoading : environmentId}
+        icon={<Server size={11} className="composer-chip-icon shrink-0" aria-hidden="true" />}
+        adornment={<StatusDot tone={STATUS_TONE[status]} pulse={status === 'connecting'} />}
         title={actionError ?? selected?.name ?? t.chat.input.selectEnvironment}
-        data-testid="environment-selector"
-        data-state={status}
-      >
-        <Server size={11} className="composer-chip-icon shrink-0" aria-hidden="true" />
-        <StatusDot tone={STATUS_TONE[status]} pulse={status === 'connecting'} />
-        <span className="composer-chip-key text-on-surface-variant/70">{`${t.chat.input.environmentLabel}:`}</span>
-        <span id={statusId} className="sr-only">
-          {statusLabel}
-        </span>
-        <select
-          value={environmentId}
-          onChange={(event) => void handleChange(event.target.value)}
-          disabled={disabled || isChanging || unavailable || environments.isError}
-          className="composer-chip-value min-w-0 max-w-[9rem] appearance-none bg-transparent text-inherit outline-none disabled:opacity-60"
-          aria-label={t.chat.input.selectEnvironment}
-          aria-describedby={statusId}
-        >
-          {unavailable ||
-          !environments.data?.some((environment) => environment.id === environmentId) ? (
-            <option value={environmentId}>
-              {unavailable ? t.chat.input.environmentsLoading : environmentId}
-            </option>
-          ) : null}
-          {environments.data?.map((environment) => (
-            <option key={environment.id} value={environment.id} disabled={!environment.enabled}>
-              {environment.name}
-            </option>
-          ))}
-        </select>
-      </label>
+        describedBy={statusId}
+        className={actionError ? 'border-error/45 text-error' : undefined}
+        testId="environment-selector"
+        dataState={status}
+      />
       {actionError ? (
         <span className="sr-only" role="alert">
           {actionError}
