@@ -12,6 +12,7 @@ import type { GitRepoState } from '@mangostudio/shared/git';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useGitRealtimeInvalidation, useGitState } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
+import { branchLabel } from '@/lib/git-branch';
 import { workdirBasename } from '@/lib/paths';
 
 interface WorkspaceBreadcrumbProps {
@@ -39,9 +40,7 @@ export function WorkspaceBreadcrumb({ chatId, workdir }: WorkspaceBreadcrumbProp
   const repo = state?.state === 'repo' ? state : null;
   const basename = workdirBasename(repo?.workdir ?? workdir);
   if (!basename) return null;
-  const branch = repo
-    ? (repo.status.branch.name ?? repo.status.branch.detachedAt?.slice(0, 7) ?? null)
-    : null;
+  const branch = repo ? branchLabel(repo.status.branch.name, repo.status.branch.detachedAt) : null;
   return (
     <WorkspaceBreadcrumbView
       basename={basename}

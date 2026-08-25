@@ -9,11 +9,12 @@ import type { GitSummary } from '@mangostudio/shared/git';
 import { GitBranch } from 'lucide-react';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useI18n } from '@/hooks/use-i18n';
+import { branchLabel } from '@/lib/git-branch';
 import { formatMessage } from '@/lib/i18n-format';
 
 export function GitSummaryBadge({ summary }: { summary: GitSummary }) {
   const { t } = useI18n();
-  const branch = summary.branch ?? summary.detachedAt?.slice(0, 7) ?? null;
+  const branch = branchLabel(summary.branch, summary.detachedAt);
   if (!branch) return null;
   const dirtyLabel =
     summary.changedFileCount > 0

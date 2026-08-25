@@ -13,6 +13,7 @@
 
 import type { Chat } from '@mangostudio/shared';
 import type { GitSummary } from '@mangostudio/shared/git';
+import { branchLabel } from '@/lib/git-branch';
 
 interface UncommittedChat {
   readonly chatId: string;
@@ -51,7 +52,7 @@ export function uncommittedWork(
     dirty.push({
       chatId: chat.id,
       title: chat.title,
-      branch: summary.branch ?? summary.detachedAt?.slice(0, 7) ?? null,
+      branch: branchLabel(summary.branch, summary.detachedAt),
       changedFileCount: summary.changedFileCount,
       ahead: summary.ahead,
     });

@@ -9,27 +9,15 @@
  * A MangoStudio chat resolves to the mango token — the hue the composer has
  * always had — so the default is unchanged and only a chat handed to a vendor
  * CLI looks different.
- *
- * Returned as a `var()` reference rather than a literal colour so the value
- * keeps tracking the theme: every one of these tokens has a light-mode
- * override, and a resolved hex would freeze the dark one in place.
  */
 
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+import { agentIdentityTokens, MANGO_IDENTITY } from '@/lib/agent-identity';
 
 /** The property `.composer-shell` and everything under it read. */
 export const COMPOSER_ACCENT_PROPERTY = '--composer-accent';
 
-const EXTERNAL_ACCENT_TOKENS: Readonly<Record<string, string>> = {
-  codex: '--color-agent-codex',
-  claude: '--color-agent-claude',
-  cursor: '--color-agent-cursor',
-};
-
 export function composerAccent(runner?: ChatRunnerConfiguration): string {
-  if (!runner || runner.kind === 'mangostudio') return 'var(--color-agent-mango)';
-  // A target this bundle predates still gets a composer, in the neutral
-  // harness colour rather than in MangoStudio's — whoever is running the turn,
-  // it is not us.
-  return `var(${EXTERNAL_ACCENT_TOKENS[runner.targetId] ?? '--color-agent-generic'})`;
+  if (!runner || runner.kind === 'mangostudio') return MANGO_IDENTITY.colorVar;
+  return agentIdentityTokens(runner.targetId).colorVar;
 }

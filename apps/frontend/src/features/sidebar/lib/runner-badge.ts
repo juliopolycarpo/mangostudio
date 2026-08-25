@@ -5,6 +5,7 @@
  */
 
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+import { agentIdentityTokens, MANGO_IDENTITY } from '@/lib/agent-identity';
 
 export interface RunnerBadgeLabels {
   mango: string;
@@ -19,23 +20,17 @@ export interface RunnerBadge {
   dotClassName: string;
 }
 
-const EXTERNAL_DOTS: Record<string, string> = {
-  codex: 'bg-agent-codex',
-  claude: 'bg-agent-claude',
-  cursor: 'bg-agent-cursor',
-};
-
 export function runnerBadge(
   runner: ChatRunnerConfiguration,
   labels: RunnerBadgeLabels
 ): RunnerBadge {
   if (runner.kind === 'mangostudio') {
-    return { label: labels.mango, dotClassName: 'bg-agent-mango' };
+    return { label: labels.mango, dotClassName: MANGO_IDENTITY.dotClass };
   }
   // A target this bundle predates still gets a row: its raw id and the
   // generic dot, instead of a crash or a blank.
   return {
     label: labels[runner.targetId] ?? runner.targetId,
-    dotClassName: EXTERNAL_DOTS[runner.targetId] ?? 'bg-agent-generic',
+    dotClassName: agentIdentityTokens(runner.targetId).dotClass,
   };
 }
