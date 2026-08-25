@@ -87,15 +87,20 @@
       transform: translateX(100%);
     }
   }
+}
 
-  @keyframes blink {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0;
-    }
+/* Top level rather than inside `@theme`: the only consumer of `--animate-blink`
+ * is a plain CSS rule (the streaming caret in `markdown-content.css`), and
+ * keyframes declared in `@theme` are emitted for the utilities that reference
+ * the token — which would leave a caret that never blinks, past check, test
+ * and build. */
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
   }
 }
 

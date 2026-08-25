@@ -112,6 +112,28 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(screen.getByText('Let me first explore')).toBeInTheDocument();
   });
 
+  it('settles a thought as soon as the turn streams past it', async () => {
+    const parts: MessagePart[] = [
+      { type: 'thinking', text: 'weighing it up' },
+      { type: 'text', text: 'Here is the answer.' },
+    ];
+    const msg = makeMessage({ parts, isGenerating: true });
+
+    const { container } = render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
+
+    // Only the part being streamed into carries the caret. Asking whether a
+    // later *thinking* part existed kept the finished thought expanded and
+    // pulsing — with its own caret — for the rest of the turn.
+    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+    expect(screen.getByText('Thought')).toBeInTheDocument();
+    expect(container.querySelectorAll('.markdown-content--streaming')).toHaveLength(1);
+    expect(container.querySelector('.markdown-content--streaming')).toHaveTextContent(
+      'Here is the answer.'
+    );
+  });
+
   it('renders tool call block with pending state when no matching result', async () => {
     const parts: MessagePart[] = [
       { type: 'tool_call', toolCallId: 'c2', name: 'calculator', args: { expr: '2+2' } },

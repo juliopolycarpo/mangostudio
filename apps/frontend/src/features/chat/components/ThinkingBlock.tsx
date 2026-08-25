@@ -167,7 +167,10 @@ export function ThinkingBlock({
         >
           <div className="markdown-content--thinking text-xs leading-relaxed text-on-surface-variant/60">
             {plainText ? (
-              <span data-vendor-text className="block whitespace-pre-wrap break-words">
+              <span
+                data-vendor-text
+                className={`block whitespace-pre-wrap break-words${isStreaming ? ' streaming-caret' : ''}`}
+              >
                 {text}
               </span>
             ) : (
@@ -177,9 +180,6 @@ export function ThinkingBlock({
                 copyCodeLabel={t.chat.copyCode}
                 codeCopiedLabel={t.chat.codeCopied}
               />
-            )}
-            {isStreaming && (
-              <span className="ml-0.5 inline-block h-[1em] w-0.5 animate-blink bg-primary/40 align-middle" />
             )}
           </div>
         </div>

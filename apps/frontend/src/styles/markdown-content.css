@@ -195,3 +195,38 @@
 .markdown-content--thinking .markdown-content pre.shiki {
   background: unset;
 }
+
+/* ── Streaming caret ──
+ *
+ * The caret has to be a pseudo element on the last line's own box. Rendered as
+ * a sibling of `.markdown-content` it sits *below* the final paragraph, because
+ * both are block boxes — which left a blank line hanging under every streaming
+ * block for as long as the stream ran. */
+
+.streaming-caret::after,
+.markdown-content--streaming > :last-child::after,
+.markdown-content--streaming > :is(ul, ol):last-child > li:last-child::after,
+.markdown-content--streaming > blockquote:last-child > :last-child::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 0.125rem;
+  vertical-align: text-bottom;
+  /* Inherited from the block being streamed into, so a thought's caret is as
+   * quiet as the prose it trails. */
+  background: var(--streaming-caret-color, var(--color-primary));
+  animation: var(--animate-blink);
+}
+
+/* A list or a quote opens a line *under* its last line rather than trailing it,
+ * so the caret hops down to whatever holds that line. Code blocks and tables
+ * have no line to trail at all: inside `<pre>` the caret would land in the
+ * highlighted source, next to the copy button. */
+.markdown-content--streaming > :is(ul, ol, blockquote, pre, table):last-child::after {
+  content: none;
+}
+
+.markdown-content--thinking {
+  --streaming-caret-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
+}

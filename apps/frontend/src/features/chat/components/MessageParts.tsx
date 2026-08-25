@@ -81,14 +81,18 @@ export function MessageParts({
               );
             case 'thinking': {
               const blockId = `${messageId}-thinking-${idx}`;
-              const isLastThinking =
-                isStreaming && !parts.slice(idx + 1).some((p) => p.type === 'thinking');
+              // A thought is over the moment anything follows it: the reducer
+              // clears its active index on every other kind of chunk, so the
+              // thinking part being streamed into is always the last one.
+              // Asking instead whether a *later thinking part* exists left the
+              // finished thought pulsing, expanded and uncounted for the rest
+              // of the turn.
               return (
                 <ThinkingBlock
                   key={blockId}
                   messageId={blockId}
                   text={part.text}
-                  isStreaming={isLastThinking}
+                  isStreaming={isStreaming && idx === parts.length - 1}
                   plainText={vendorAuthored}
                 />
               );
@@ -164,7 +168,8 @@ export function MessageParts({
                   <SubagentTraceBlock part={part} />
                 </TimelineItem>
               );
-            case 'text':
+            case 'text': {
+              const isStreamingIntoPart = isStreaming && idx === parts.length - 1;
               return (
                 <TimelineItem
                   // Parts within a message are append-only and position-stable, so
@@ -175,23 +180,24 @@ export function MessageParts({
                 >
                   <div className="chat-message-body max-w-2xl font-body leading-relaxed text-on-surface">
                     {vendorAuthored ? (
-                      <span data-vendor-text className="block whitespace-pre-wrap break-words">
+                      <span
+                        data-vendor-text
+                        className={`block whitespace-pre-wrap break-words${isStreamingIntoPart ? ' streaming-caret' : ''}`}
+                      >
                         {part.text}
                       </span>
                     ) : (
                       <MarkdownContent
                         content={part.text}
-                        isStreaming={isStreaming}
+                        isStreaming={isStreamingIntoPart}
                         copyCodeLabel={t.chat.copyCode}
                         codeCopiedLabel={t.chat.codeCopied}
                       />
                     )}
-                    {isStreaming && idx === parts.length - 1 && (
-                      <span className="ml-0.5 inline-block h-[1em] w-0.5 animate-blink bg-primary align-middle" />
-                    )}
                   </div>
                 </TimelineItem>
               );
+            }
             case 'system_event':
               return (
                 <TimelineItem
