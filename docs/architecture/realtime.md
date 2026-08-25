@@ -89,9 +89,8 @@ source of truth and refresh relevant queries after `subscribed` (and after
 | `git:<chatId>` | The user must own `<chatId>`     | `state`, `stashes`, `branches`, `history`, `commits`, `diffs`, `github` |
 
 `activity` is one topic for every activity kind rather than one per producer.
-The feed is a single query, and the consumers that ride along — the chat list,
-which `chat_created` and `turn_completed` already imply is stale — want the same
-coarse signal. It is published from the activity recorder
+The feed is a single query, so a per-kind topic would only ever fan back into
+the same invalidation. It is published from the activity recorder
 (`apps/api/src/modules/activity/application/record-activity.ts`), not from the
 seven emission seams, so a new kind cannot ship a row nobody is told about.
 

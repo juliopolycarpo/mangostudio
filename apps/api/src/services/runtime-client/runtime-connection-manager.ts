@@ -462,7 +462,10 @@ export class RuntimeConnectionManager {
    * call `#publish` immediately after assigning `entry.status` keep working
    * unchanged — every one of them is a state change someone should hear about,
    * and a second call added beside each is a second call someone will forget.
-   * The sweep is over one user's entries, which is a handful.
+   *
+   * The loop walks every entry in the process and skips the ones belonging to
+   * other accounts; it filters rather than scopes. On a hub holding a handful of
+   * connections that is cheaper than the second index it would take to avoid.
    */
   #publish(userId: string): void {
     for (const entry of this.#entries.values()) {
