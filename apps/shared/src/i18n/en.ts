@@ -3193,7 +3193,6 @@ export const messages: Messages = {
   },
 
   thinking: {
-    label: 'Thought process',
     labelContinued: 'Continued thinking',
     streaming: 'Thinking...',
     streamingContinued: 'Thinking again...',

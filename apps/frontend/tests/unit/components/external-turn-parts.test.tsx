@@ -83,7 +83,35 @@ beforeEach(() => {
   answerExternalApproval.mockResolvedValue({ status: 'accepted' });
 });
 
-describe('external activity pill', () => {
+describe('external activity row', () => {
+  // A vendor turn renders on the same rail as a MangoStudio one, or a Codex
+  // transcript reads as a different product from the chat it is sitting in.
+  it('sits on the timeline with a node toned by the vendor status', () => {
+    const { container } = renderParts([
+      turnPart(),
+      activityPart({ callId: 'a', status: 'completed' }),
+      activityPart({ callId: 'b', status: 'running' }),
+      activityPart({ callId: 'c', status: 'failed', isError: true }),
+      activityPart({ callId: 'd', status: 'cancelled' }),
+    ]);
+
+    expect(container.querySelectorAll('.chat-timeline-item--success')).toHaveLength(1);
+    expect(container.querySelectorAll('.chat-timeline-item--active')).toHaveLength(1);
+    expect(container.querySelectorAll('.chat-timeline-item--error')).toHaveLength(1);
+    expect(container.querySelectorAll('.chat-timeline-item--muted')).toHaveLength(1);
+  });
+
+  it('colours the vendor tool name by the same outcome', () => {
+    renderParts([turnPart(), activityPart({ name: 'commandExecution', status: 'failed' })]);
+    expect(screen.getByText('commandExecution').className).toContain('text-error');
+  });
+
+  // A row with nothing to open must not advertise a disclosure it cannot honour.
+  it('drops the disclosure for an activity with no detail', () => {
+    renderParts([turnPart(), activityPart({ detail: undefined })]);
+    expect(screen.getByRole('button')).not.toHaveAttribute('aria-expanded');
+  });
+
   it("shows the vendor's own tool name verbatim", () => {
     renderParts([turnPart(), activityPart({ name: 'my_weird.tool-NAME' })]);
     expect(screen.getByText('my_weird.tool-NAME')).toBeInTheDocument();

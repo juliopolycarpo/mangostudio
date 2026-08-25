@@ -18,7 +18,7 @@
 import { type CSSProperties, useState } from 'react';
 import { toolAvatarPalette } from './tool-avatar-palette';
 
-export type ToolAvatarSize = 'xs' | 'sm' | 'md' | 'lg';
+export type ToolAvatarSize = '2xs' | 'xs' | 'sm' | 'md' | 'lg';
 
 /**
  * A resolved image address and how it must be requested. Lives with the
@@ -31,6 +31,8 @@ export interface ToolImageDisplay {
 }
 
 const SIZE_CLASS: Record<ToolAvatarSize, string> = {
+  /** Inline in a chat timeline row, where a 20px avatar outweighs the status glyph. */
+  '2xs': 'size-4 rounded-sm text-[8px]',
   /** Dense lists — the capability inspector, where rows are 11px tall text. */
   xs: 'size-5 rounded-md text-[9px]',
   sm: 'size-6 rounded-lg text-[10px]',

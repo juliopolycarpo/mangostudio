@@ -61,12 +61,10 @@ export function MessageParts({
           switch (part.type) {
             case 'external_turn':
               return null;
+            // Owns its own timeline item: the vendor's status decides the node
+            // tone, the same way a MangoStudio tool call does.
             case 'external_activity':
-              return (
-                <TimelineItem key={`${part.callId}-activity`} variant="block">
-                  <ExternalActivityBlock part={part} />
-                </TimelineItem>
-              );
+              return <ExternalActivityBlock key={`${part.callId}-activity`} part={part} />;
             case 'external_approval':
               return (
                 <TimelineItem key={`${part.requestId}-approval`} variant="block">

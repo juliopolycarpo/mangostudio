@@ -3193,7 +3193,6 @@ export const messages = {
   },
 
   thinking: {
-    label: 'Processo de raciocínio',
     labelContinued: 'Continuação do raciocínio',
     streaming: 'Pensando...',
     streamingContinued: 'Pensando novamente...',

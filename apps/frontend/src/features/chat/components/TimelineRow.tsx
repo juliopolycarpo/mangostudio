@@ -12,6 +12,11 @@ interface TimelineRowProps {
   summary?: string | null;
   /** Right-aligned elapsed time, e.g. `33ms`. */
   duration?: string | null;
+  /**
+   * False for a row with nothing to open — it keeps the chevron's width so the
+   * column edges still line up, but drops the affordance and the toggle.
+   */
+  disclosable?: boolean;
 }
 
 /**
@@ -31,17 +36,19 @@ export function TimelineRow({
   children,
   summary,
   duration,
+  disclosable = true,
 }: TimelineRowProps) {
   const hasMeta = Boolean(summary) || Boolean(duration);
 
   return (
     <button
       type="button"
-      aria-expanded={expanded}
+      aria-expanded={disclosable ? expanded : undefined}
       onClick={onToggle}
-      className="group/row -ml-1.5 flex w-full min-h-(--timeline-row-height) cursor-pointer items-center
-                 gap-2 rounded-md px-1.5 text-left text-xs transition-colors
-                 duration-(--duration-quick) hover:bg-surface-container-low"
+      className={`group/row -ml-1.5 flex w-full min-h-(--timeline-row-height) items-center gap-2
+                  rounded-md px-1.5 text-left text-xs transition-colors
+                  duration-(--duration-quick)
+                  ${disclosable ? 'cursor-pointer hover:bg-surface-container-low' : 'cursor-default'}`}
     >
       <span className="flex w-3 shrink-0 items-center justify-center">{glyph}</span>
       {children}
@@ -52,13 +59,17 @@ export function TimelineRow({
           {duration && <span>{duration}</span>}
         </span>
       )}
-      <ChevronDown
-        size={11}
-        aria-hidden="true"
-        className={`shrink-0 text-on-surface-variant/40 transition-all duration-(--duration-base)
-                    ${hasMeta ? '' : 'ml-auto'}
-                    ${expanded ? 'rotate-180 opacity-100' : 'opacity-0 group-hover/row:opacity-100'}`}
-      />
+      {disclosable ? (
+        <ChevronDown
+          size={11}
+          aria-hidden="true"
+          className={`shrink-0 text-on-surface-variant/40 transition-all duration-(--duration-base)
+                      ${hasMeta ? '' : 'ml-auto'}
+                      ${expanded ? 'rotate-180 opacity-100' : 'opacity-0 group-hover/row:opacity-100'}`}
+        />
+      ) : (
+        <span aria-hidden="true" className={`w-[11px] shrink-0 ${hasMeta ? '' : 'ml-auto'}`} />
+      )}
     </button>
   );
 }

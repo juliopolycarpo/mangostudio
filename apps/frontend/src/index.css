@@ -102,8 +102,6 @@
 /* ── Theme-aware glass & overlay tokens (dark defaults) ── */
 :root {
   --glass-bg: rgba(50, 46, 41, 0.6);
-  --glass-surface: rgba(13, 12, 10, 0.6);
-  --glass-surface-subtle: rgba(13, 12, 10, 0.5);
   --glass-elevated: rgba(26, 24, 21, 0.85);
   --glass-border: rgba(255, 246, 230, 0.1);
   --glass-ring: rgba(255, 246, 230, 0.05);
@@ -159,8 +157,6 @@
 
   /* Glass & overlay overrides */
   --glass-bg: rgba(255, 253, 248, 0.7);
-  --glass-surface: rgba(255, 253, 248, 0.65);
-  --glass-surface-subtle: rgba(255, 253, 248, 0.55);
   --glass-elevated: rgba(255, 253, 248, 0.9);
   --glass-border: rgba(40, 30, 10, 0.08);
   --glass-ring: rgba(40, 30, 10, 0.04);
@@ -177,16 +173,6 @@ body {
 .glass-panel {
   background: var(--glass-bg);
   backdrop-filter: blur(20px);
-}
-
-.glass-surface {
-  background: var(--glass-surface);
-  backdrop-filter: blur(8px);
-}
-
-.glass-surface-subtle {
-  background: var(--glass-surface-subtle);
-  backdrop-filter: blur(12px);
 }
 
 .glass-elevated {
