@@ -18,7 +18,6 @@ function renderToggle(overrides: Partial<React.ComponentProps<typeof ThinkingTog
   const props: React.ComponentProps<typeof ThinkingToggle> = {
     enabled: true,
     effort: 'medium',
-    visible: true,
     onToggle: jest.fn(),
     onEffortChange: jest.fn(),
     ...overrides,
@@ -27,12 +26,6 @@ function renderToggle(overrides: Partial<React.ComponentProps<typeof ThinkingTog
 }
 
 describe('ThinkingToggle', () => {
-  it('renders nothing when the active model has no reasoning to configure', () => {
-    renderToggle({ visible: false });
-
-    expect(screen.queryByRole('button', { name: 'Thinking' })).toBeNull();
-  });
-
   it('hides the effort chip until thinking is on', () => {
     renderToggle({ enabled: false });
 

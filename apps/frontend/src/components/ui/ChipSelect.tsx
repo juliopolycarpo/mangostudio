@@ -49,7 +49,6 @@ export interface ChipSelectProps {
   readonly className?: string;
   readonly valueClassName?: string;
   readonly panelClassName?: string;
-  readonly placement?: 'up' | 'down';
   readonly testId?: string;
   readonly dataState?: string;
 }
@@ -69,7 +68,6 @@ export function ChipSelect({
   className,
   valueClassName,
   panelClassName = 'w-56',
-  placement = 'up',
   testId,
   dataState,
 }: ChipSelectProps) {
@@ -199,13 +197,14 @@ export function ChipSelect({
       <AnimatePresence>
         {open ? (
           <motion.div
-            initial={{ opacity: 0, y: placement === 'up' ? 6 : -6, scale: 0.95 }}
+            initial={{ opacity: 0, y: 6, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: placement === 'up' ? 6 : -6, scale: 0.95 }}
+            exit={{ opacity: 0, y: 6, scale: 0.95 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
             className={cn(
-              'dropdown-panel absolute left-0 max-h-[50vh] overflow-y-auto hide-scrollbar py-1',
-              placement === 'up' ? 'bottom-full mb-2' : 'top-full mt-2',
+              // Always opens upward: every chip sits on the composer's status
+              // strip at the foot of the viewport.
+              'dropdown-panel absolute left-0 bottom-full mb-2 max-h-[50vh] overflow-y-auto hide-scrollbar py-1',
               panelClassName
             )}
           >

@@ -35,8 +35,12 @@ import { ExternalComposerControls } from '@/features/external-agents/ExternalCom
 import { ExternalUsageDisplay } from '@/features/external-agents/ExternalUsageDisplay';
 import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
-import { workdirBasename } from '@/lib/paths';
+import { formatMessage } from '@/lib/i18n-format';
+import { workdirLabel } from '@/lib/paths';
 import { ContextBadge } from './ContextBadge';
+
+/** Shared empty list, so an absent catalog does not allocate per render. */
+const NO_MODELS: ModelOption[] = [];
 
 export interface ComposerChipRowProps {
   disabled?: boolean;
@@ -51,14 +55,19 @@ export interface ComposerChipRowProps {
   threadUsage?: ExternalThreadUsage | null;
   activeModel: string | null;
   selectedAgentId: string;
-  agents: ReadonlyArray<AgentProfile>;
+  /**
+   * Optional because a spread forwards an explicitly-`undefined` key rather
+   * than falling back to a default, and both of the arrays here are
+   * dereferenced without a guard.
+   */
+  agents?: ReadonlyArray<AgentProfile>;
   isAgentListLoading: boolean;
   onSelectedAgentIdChange?: (agentId: string) => void;
   environmentId: string | null;
   onEnvironmentChange?: (environmentId: string) => void | Promise<void>;
   workdir: string | null;
   onWorkdirClick?: () => void;
-  activeModels: ModelOption[];
+  activeModels?: ModelOption[];
   modelCatalog?: ModelCatalogResponse;
   lockedProvider?: ProviderType | null;
   isModelSelectorDisabled: boolean;
@@ -128,9 +137,9 @@ function summaryText(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>[
   const model =
     (props.isExternalRunner
       ? props.externalModel
-      : props.activeModels.find((option) => option.modelId === props.activeModel)?.displayName) ||
+      : props.activeModels?.find((option) => option.modelId === props.activeModel)?.displayName) ||
     (props.isExternalRunner ? t.externalAgents.model.vendorDefault : t.models.loading);
-  const folder = props.workdir ? (workdirBasename(props.workdir) ?? props.workdir) : null;
+  const folder = workdirLabel(props.workdir);
   return folder ? `${model} · ${folder}` : model;
 }
 
@@ -152,7 +161,7 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
   }
 
   if (props.onWorkdirClick) {
-    const folder = props.workdir ? (workdirBasename(props.workdir) ?? props.workdir) : null;
+    const folder = workdirLabel(props.workdir);
     chips.push({
       key: 'workdir',
       node: (
@@ -162,7 +171,9 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
           disabled={props.disabled}
           title={props.workdir ?? t.workspace.chooseWorkdir}
           aria-label={
-            folder ? t.workspace.changeWorkdir.replace('{name}', folder) : t.workspace.chooseWorkdir
+            folder
+              ? formatMessage(t.workspace.changeWorkdir, { name: folder })
+              : t.workspace.chooseWorkdir
           }
           className="composer-chip max-w-[14rem] disabled:opacity-60"
         >
@@ -175,7 +186,7 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
   }
 
   if (!props.isExternalRunner && props.onSelectedAgentIdChange) {
-    const selectable = props.agents.filter(
+    const selectable = (props.agents ?? []).filter(
       (agent) => agent.role === 'primary' || agent.role === 'both'
     );
     chips.push({
@@ -202,7 +213,7 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
       node: (
         <ModelSelector
           activeModel={props.activeModel ?? ''}
-          activeModels={props.activeModels}
+          activeModels={props.activeModels ?? NO_MODELS}
           isDisabled={props.isModelSelectorDisabled || props.disabled === true}
           onSelect={props.onModelChange}
           modelCatalog={props.modelCatalog}
@@ -255,7 +266,6 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
         <ThinkingToggle
           enabled={props.thinkingEnabled}
           effort={props.reasoningEffort}
-          visible={props.reasoningVisible}
           onToggle={props.onThinkingToggle}
           onEffortChange={props.onReasoningEffortChange}
         />

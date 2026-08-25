@@ -373,7 +373,7 @@ body {
    * into a solid accent block with accent-coloured text on it. `check`, `test`
    * and the build were all green through every one of those.
    *
-   * So each derived tint gets its own rule. `tests/unit/composer-css.test.ts`
+   * So each derived tint gets its own rule. `tests/unit/stylesheet-downlevel.test.ts`
    * asserts the built stylesheet keeps the alpha on all of them, because this
    * is invisible from every other gate.
    */
@@ -474,6 +474,19 @@ body {
     border-radius: 9999px;
     background: transparent;
     text-transform: lowercase;
+    /* Geometry and the disabled treatment belong to the variant, not to each
+     * chip: three call sites were repeating the identical utility tail, so the
+     * row's height could only be changed in three components at once. */
+    height: 1.75rem;
+    flex-shrink: 0;
+    transition:
+      color var(--duration-base) var(--ease-standard),
+      background-color var(--duration-base) var(--ease-standard),
+      border-color var(--duration-base) var(--ease-standard);
+  }
+
+  .composer-tool-chip:disabled {
+    opacity: 0.5;
   }
 
   .composer-tool-chip:not(:disabled, [aria-expanded="true"], [aria-pressed="true"]):hover {
@@ -624,6 +637,8 @@ pre:hover .copy-code-btn {
   --chat-font-size: 0.875rem; /* 14px — matches 'default' */
   --chat-message-gap: 3rem; /* matches 'default' density */
   --chat-padding: 1.25rem;
+  --timeline-row-gap: 0.125rem;
+  --timeline-block-gap: 0.5rem;
 }
 
 /* ── Font size presets ── */
@@ -637,18 +652,30 @@ pre:hover .copy-code-btn {
   --chat-font-size: 1rem; /* 16px */
 }
 
-/* ── Chat density presets ── */
+/* ── Chat density presets ──
+ * One block per density: the gap between turns and the gap between the steps
+ * inside a turn are the same preference, and holding them apart let a new
+ * density ship with half its values missing. */
 [data-chat-density="compact"] {
   --chat-message-gap: 1.5rem;
   --chat-padding: 0.75rem;
+  /* `0px`, not `0`: this feeds a `calc()` that adds it to a length, and a
+   * unitless zero there is invalid — the dot would drop to its static
+   * position and every node would sit half a row below its own row. */
+  --timeline-row-gap: 0px;
+  --timeline-block-gap: 0.375rem;
 }
 [data-chat-density="default"] {
   --chat-message-gap: 3rem;
   --chat-padding: 1.25rem;
+  --timeline-row-gap: 0.125rem;
+  --timeline-block-gap: 0.5rem;
 }
 [data-chat-density="comfortable"] {
   --chat-message-gap: 4rem;
   --chat-padding: 1.5rem;
+  --timeline-row-gap: 0.3125rem;
+  --timeline-block-gap: 0.75rem;
 }
 
 /* ── Chat message body text uses the font size CSS variable ── */
@@ -764,32 +791,6 @@ pre:hover .copy-code-btn {
     opacity: 0.45;
     transform: translateY(-50%) scale(0.7);
   }
-}
-
-/* ── Timeline density ──
- * Tracks the existing chat-density preference so "compact" tightens the step
- * list the same way it tightens the gap between turns. */
-:root {
-  --timeline-row-gap: 0.125rem;
-  --timeline-block-gap: 0.5rem;
-}
-
-[data-chat-density="compact"] {
-  /* `0px`, not `0`: this feeds a `calc()` that adds it to a length, and a
-   * unitless zero there is invalid — the dot would drop to its static
-   * position and every node would sit half a row below its own row. */
-  --timeline-row-gap: 0px;
-  --timeline-block-gap: 0.375rem;
-}
-
-[data-chat-density="default"] {
-  --timeline-row-gap: 0.125rem;
-  --timeline-block-gap: 0.5rem;
-}
-
-[data-chat-density="comfortable"] {
-  --timeline-row-gap: 0.3125rem;
-  --timeline-block-gap: 0.75rem;
 }
 
 /* ── Performance & accessibility utilities ── */

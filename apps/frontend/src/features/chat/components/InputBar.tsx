@@ -1,21 +1,10 @@
-import type {
-  ModelCatalogResponse,
-  ModelOption,
-  ProviderType,
-  ReasoningEffort,
-} from '@mangostudio/shared';
-import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ChatAttachment, ChatRunnerConfiguration } from '@mangostudio/shared/chat';
-import type {
-  ExternalAgentDescriptor,
-  ExternalApprovalRouting,
-  ExternalPermissionLevel,
-  ExternalThreadUsage,
-} from '@mangostudio/shared/external-agents';
+import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { AlertTriangle, CornerDownRight, FileText, Send, Square, X } from 'lucide-react';
 import {
   type CSSProperties,
   type DragEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useRef,
@@ -24,7 +13,6 @@ import {
 import { Button } from '@/components/ui/Button';
 import { KbdHint } from '@/components/ui/KbdHint';
 import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
-import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
@@ -35,57 +23,68 @@ import { usePromptHistory } from '../hooks/use-prompt-history';
 import { COMPOSER_ACCENT_PROPERTY, composerAccent } from '../lib/composer-accent';
 import { onComposerFocusRequest } from '../lib/composer-draft-store';
 import { CapabilityInspector } from './CapabilityInspector';
-import { ComposerChipRow } from './ComposerChipRow';
+import { ComposerChipRow, type ComposerChipRowProps } from './ComposerChipRow';
 import { ImageIntentToggle } from './ImageIntentToggle';
 import { McpComposerMenu } from './McpComposerMenu';
 
 /** Roughly eight lines before the box stops growing and starts scrolling. */
 const TEXTAREA_MAX_HEIGHT_PX = 200;
 
-interface Props {
+/**
+ * The status line's own props, which the composer only relays.
+ *
+ * Declared by subtraction rather than restated: these used to be written out
+ * three times here — in the interface, in the destructure, and in the forward —
+ * so every chip added to the status line cost four edits across two files for a
+ * component with no opinion about it. The six left out are the ones the
+ * composer itself reads.
+ */
+type ForwardedChipRowProps = Omit<
+  ComposerChipRowProps,
+  | 'isExternalRunner'
+  | 'disabled'
+  | 'isGenerating'
+  | 'activeModel'
+  | 'selectedAgentId'
+  | 'externalDescriptor'
+>;
+
+/**
+ * What the status line falls back to when the composer is mounted without a
+ * chat behind it. They live here rather than in `ComposerChipRow` because this
+ * is the boundary where the props become optional.
+ */
+const CHIP_ROW_DEFAULTS = {
+  thinkingEnabled: false,
+  reasoningEffort: 'medium',
+  reasoningVisible: false,
+  threadUsage: null,
+  agents: [],
+  isAgentListLoading: false,
+  environmentId: null,
+  workdir: null,
+  activeModels: [],
+  isModelSelectorDisabled: false,
+  externalModel: null,
+  externalEffort: null,
+  externalLevel: 'read-only',
+  externalRouting: 'user',
+} satisfies Partial<ComposerChipRowProps>;
+
+interface Props extends Partial<ForwardedChipRowProps> {
   onSubmit: (prompt: string, attachmentIds?: string[]) => void;
   chatId?: string | null;
   disabled?: boolean;
   submitDisabled?: boolean;
   isGenerating?: boolean;
   onStop?: () => void;
-  thinkingEnabled?: boolean;
-  reasoningEffort?: ReasoningEffort;
-  onThinkingToggle?: (enabled: boolean) => void;
-  onReasoningEffortChange?: (effort: ReasoningEffort) => void;
-  reasoningVisible?: boolean;
-  contextInfo?: ContextInfo | null;
-  /** Vendor thread usage for this chat; nothing renders until a turn reports it. */
-  threadUsage?: ExternalThreadUsage | null;
   imageToolIntent?: boolean;
   onImageToolIntentChange?: (active: boolean) => void;
   activeModel?: string | null;
   selectedAgentId?: string;
-  agents?: ReadonlyArray<AgentProfile>;
-  isAgentListLoading?: boolean;
-  onSelectedAgentIdChange?: (agentId: string) => void;
-  environmentId?: string | null;
-  onEnvironmentChange?: (environmentId: string) => void | Promise<void>;
-  workdir?: string | null;
-  onWorkdirClick?: () => void;
   /** Who runs the turn. Decides which of the two control sets renders at all. */
   runner?: ChatRunnerConfiguration;
-  activeModels?: ModelOption[];
-  modelCatalog?: ModelCatalogResponse;
-  lockedProvider?: ProviderType | null;
-  isModelSelectorDisabled?: boolean;
-  onModelChange?: (model: string) => void;
   externalDescriptor?: ExternalAgentDescriptor;
-  externalModel?: string | null;
-  externalEffort?: string | null;
-  externalLevel?: ExternalPermissionLevel;
-  externalRouting?: ExternalApprovalRouting;
-  onExternalModelChange?: (model: string | null) => void;
-  onExternalEffortChange?: (effort: string | null) => void;
-  onExternalPermissionsChange?: (next: {
-    level: ExternalPermissionLevel;
-    routing: ExternalApprovalRouting;
-  }) => void;
 }
 
 export function InputBar({
@@ -95,38 +94,13 @@ export function InputBar({
   submitDisabled = false,
   isGenerating,
   onStop,
-  thinkingEnabled = false,
-  reasoningEffort = 'medium',
-  onThinkingToggle,
-  onReasoningEffortChange,
-  reasoningVisible = false,
-  contextInfo,
-  threadUsage = null,
   imageToolIntent = false,
   onImageToolIntentChange,
   activeModel = null,
   selectedAgentId = 'default',
-  agents = [],
-  isAgentListLoading = false,
-  onSelectedAgentIdChange,
-  environmentId = null,
-  onEnvironmentChange,
-  workdir = null,
-  onWorkdirClick,
   runner,
-  activeModels = [],
-  modelCatalog,
-  lockedProvider,
-  isModelSelectorDisabled = false,
-  onModelChange,
   externalDescriptor,
-  externalModel = null,
-  externalEffort = null,
-  externalLevel = 'read-only',
-  externalRouting = 'user',
-  onExternalModelChange,
-  onExternalEffortChange,
-  onExternalPermissionsChange,
+  ...chipRow
 }: Props) {
   const { t } = useI18n();
   const [prompt, setPrompt] = useComposerDraft(chatId);
@@ -302,27 +276,16 @@ export function InputBar({
           // machine" and "wait for discovery" are four different things to do,
           // and a composer that goes quiet without saying which leaves the user
           // clicking Send at nothing.
-          <p role="status" className="mb-2 flex items-center gap-1.5 text-[11px] text-warning">
-            <AlertTriangle size={12} className="shrink-0" />
+          <ComposerNotice tone="warning">
             {externalUnavailableReason
               ? `${t.externalAgents.unavailable[externalUnavailableReason]} — ${t.externalAgents.selector.unavailableHere}`
               : t.externalAgents.selector.unavailableHere}
-          </p>
+          </ComposerNotice>
         )}
 
-        {steerError && (
-          <p role="status" className="mb-2 flex items-center gap-1.5 text-[11px] text-error">
-            <AlertTriangle size={12} className="shrink-0" />
-            {steerError}
-          </p>
-        )}
+        {steerError && <ComposerNotice tone="error">{steerError}</ComposerNotice>}
 
-        {uploads.error && (
-          <p role="status" className="mb-2 flex items-center gap-1.5 text-[11px] text-error">
-            <AlertTriangle size={12} className="shrink-0" />
-            {uploads.error}
-          </p>
-        )}
+        {uploads.error && <ComposerNotice tone="error">{uploads.error}</ComposerNotice>}
 
         {(pendingAttachments.length > 0 || uploads.uploading.length > 0) && (
           <div className="mb-2 flex flex-wrap gap-1.5">
@@ -385,38 +348,14 @@ export function InputBar({
           className="composer-shell shadow-2xl"
         >
           <ComposerChipRow
+            {...CHIP_ROW_DEFAULTS}
+            {...chipRow}
             disabled={disabled}
             isGenerating={isGenerating}
             isExternalRunner={isExternalRunner}
-            thinkingEnabled={thinkingEnabled}
-            reasoningEffort={reasoningEffort}
-            onThinkingToggle={onThinkingToggle}
-            onReasoningEffortChange={onReasoningEffortChange}
-            reasoningVisible={reasoningVisible}
-            contextInfo={contextInfo}
-            threadUsage={threadUsage}
             activeModel={activeModel}
             selectedAgentId={selectedAgentId}
-            agents={agents}
-            isAgentListLoading={isAgentListLoading}
-            onSelectedAgentIdChange={onSelectedAgentIdChange}
-            environmentId={environmentId}
-            onEnvironmentChange={onEnvironmentChange}
-            workdir={workdir}
-            onWorkdirClick={onWorkdirClick}
-            activeModels={activeModels}
-            modelCatalog={modelCatalog}
-            lockedProvider={lockedProvider}
-            isModelSelectorDisabled={isModelSelectorDisabled}
-            onModelChange={onModelChange}
             externalDescriptor={externalDescriptor}
-            externalModel={externalModel}
-            externalEffort={externalEffort}
-            externalLevel={externalLevel}
-            externalRouting={externalRouting}
-            onExternalModelChange={onExternalModelChange}
-            onExternalEffortChange={onExternalEffortChange}
-            onExternalPermissionsChange={onExternalPermissionsChange}
           />
 
           {/* `items-start` so the prompt mark holds the first line while the
@@ -565,20 +504,53 @@ export function InputBar({
   );
 }
 
+const NOTICE_TONE_CLASS = {
+  warning: 'text-warning',
+  error: 'text-error',
+} as const;
+
+/**
+ * A one-line problem above the composer: the runner cannot start a turn, a
+ * steer was refused, an upload failed. One component because the three read as
+ * one strip and had drifted into three copies of the same class string.
+ */
+function ComposerNotice({
+  tone,
+  children,
+}: {
+  tone: keyof typeof NOTICE_TONE_CLASS;
+  children: ReactNode;
+}) {
+  return (
+    <p
+      role="status"
+      className={`mb-2 flex items-center gap-1.5 text-[11px] ${NOTICE_TONE_CLASS[tone]}`}
+    >
+      <AlertTriangle size={12} className="shrink-0" />
+      {children}
+    </p>
+  );
+}
+
 /**
  * Grows the textarea with its content up to {@link TEXTAREA_MAX_HEIGHT_PX},
  * then lets it scroll.
  *
- * The height is reset to `auto` before every measurement because
- * `scrollHeight` never reports *less* than the element's current height —
- * without the reset the box only ever grows, and deleting a paragraph leaves a
- * tall empty composer behind.
+ * `scrollHeight` never reports *less* than the element's current height, so a
+ * prompt that got shorter has to be reset to `auto` before it is measured —
+ * otherwise the box only ever grows and deleting a paragraph leaves a tall
+ * empty composer behind. Text that got *longer* needs no reset, and skipping it
+ * there halves the forced layouts for ordinary forward typing, which is the
+ * overwhelmingly common case on the one interaction that must stay at input
+ * latency.
  */
 function useAutoGrow(ref: React.RefObject<HTMLTextAreaElement | null>, value: string): void {
+  const previousLength = useRef(value.length);
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
-    node.style.height = 'auto';
+    if (value.length < previousLength.current) node.style.height = 'auto';
+    previousLength.current = value.length;
     node.style.height = `${Math.min(node.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
   }, [ref, value]);
 }

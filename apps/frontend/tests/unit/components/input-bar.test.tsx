@@ -18,6 +18,47 @@ function renderInputBar(overrides: Partial<React.ComponentProps<typeof InputBar>
 }
 
 describe('InputBar — chat-only composer', () => {
+  /**
+   * The status-line props ride to `ComposerChipRow` through a rest spread now,
+   * and a spread keeps a key whose value is `undefined` — where a destructuring
+   * default would have replaced it. Both of these are dereferenced downstream,
+   * so a caller handing over an unsettled query used to be a crash waiting to
+   * happen rather than an empty chip.
+   */
+  it('survives status-line props handed over as explicit undefined', () => {
+    renderInputBar({
+      agents: undefined,
+      activeModels: undefined,
+      onSelectedAgentIdChange: jest.fn(),
+      onWorkdirClick: jest.fn(),
+    });
+
+    expect(screen.getByTestId('composer')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Select agent' })).toBeInTheDocument();
+  });
+
+  // The chip row is the only thing that decides this: `ThinkingToggle` used to
+  // re-check a `visible` prop its one caller had already gated on, so the state
+  // this asserts was unreachable from inside the toggle.
+  it('offers no thinking chip when the active model has no reasoning to configure', () => {
+    const { unmount } = renderInputBar({
+      reasoningVisible: false,
+      onThinkingToggle: jest.fn(),
+      onReasoningEffortChange: jest.fn(),
+    });
+
+    expect(screen.queryByRole('button', { name: 'Thinking' })).toBeNull();
+    unmount();
+
+    renderInputBar({
+      reasoningVisible: true,
+      onThinkingToggle: jest.fn(),
+      onReasoningEffortChange: jest.fn(),
+    });
+
+    expect(screen.getByRole('button', { name: 'Thinking' })).toBeInTheDocument();
+  });
+
   it('shows the agent selector only when onSelectedAgentIdChange is provided', () => {
     const agents = [
       {

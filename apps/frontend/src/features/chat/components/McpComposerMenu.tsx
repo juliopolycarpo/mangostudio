@@ -108,7 +108,7 @@ export function McpComposerMenu({
         }}
         disabled={disabled}
         aria-expanded={open}
-        className="terminal-chip composer-tool-chip h-7 shrink-0 transition-colors disabled:opacity-50"
+        className="terminal-chip composer-tool-chip"
         title={labels.mcpMenuButton}
       >
         <Plug size={12} className="shrink-0" />

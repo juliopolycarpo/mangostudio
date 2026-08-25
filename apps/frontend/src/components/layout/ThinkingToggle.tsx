@@ -6,7 +6,6 @@ import { useI18n } from '@/hooks/use-i18n';
 interface ThinkingToggleProps {
   enabled: boolean;
   effort: ReasoningEffort;
-  visible: boolean;
   onToggle: (enabled: boolean) => void;
   onEffortChange: (effort: ReasoningEffort) => void;
 }
@@ -23,16 +22,8 @@ interface ThinkingToggleProps {
  */
 const OFFERED_EFFORTS: ReasoningEffort[] = ['low', 'medium', 'high'];
 
-export function ThinkingToggle({
-  enabled,
-  effort,
-  visible,
-  onToggle,
-  onEffortChange,
-}: ThinkingToggleProps) {
+export function ThinkingToggle({ enabled, effort, onToggle, onEffortChange }: ThinkingToggleProps) {
   const { t } = useI18n();
-
-  if (!visible) return null;
 
   const effortLabels: Record<ReasoningEffort, string> = {
     low: t.thinking.effortLow,
