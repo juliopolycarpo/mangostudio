@@ -21,6 +21,7 @@ import {
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
 import { Button } from '@/components/ui/Button';
+import { ContextRing } from '@/components/ui/ContextRing';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { KbdHint } from '@/components/ui/KbdHint';
 import { Logo } from '@/components/ui/Logo';
@@ -37,7 +38,6 @@ import { useLocalDayStart } from '../hooks/use-local-day-start';
 import { filterChats } from '../lib/filter-chats';
 import { chatGroupLabel, groupChatsByDate } from '../lib/group-chats';
 import { runnerBadge } from '../lib/runner-badge';
-import { ContextRing } from './ContextRing';
 import { GitSummaryBadge } from './GitSummaryBadge';
 import { NavItem } from './NavItem';
 

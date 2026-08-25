@@ -3,13 +3,20 @@ import { useI18n } from '@/hooks/use-i18n';
 interface ContextRingProps {
   ratio: number;
   severity: string;
+  /** Outer diameter in px. The composer wants a quieter ring than the sidebar's. */
+  size?: number;
 }
 
-/** Tiny circular progress ring for context usage. */
-export function ContextRing({ ratio, severity }: ContextRingProps) {
+/**
+ * Tiny circular progress ring for context usage.
+ *
+ * Callers that already name the ring — a button with its own `aria-label`, or
+ * an `aria-hidden` wrapper — swallow the SVG `<title>` below, which is what
+ * both of the current call sites do.
+ */
+export function ContextRing({ ratio, severity, size = 20 }: ContextRingProps) {
   const { t } = useI18n();
-  const size = 20;
-  const stroke = 2.5;
+  const stroke = size <= 16 ? 2 : 2.5;
   const r = (size - stroke) / 2;
   const circumference = 2 * Math.PI * r;
   const offset = circumference * (1 - Math.min(ratio, 1));

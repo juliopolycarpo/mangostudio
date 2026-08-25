@@ -274,10 +274,24 @@ export class CodexTurnReducer {
     if (!this.#belongsToTurn(params)) return NOTHING;
     const last = mapTokenUsage(params.tokenUsage.last);
     const total = mapTokenUsage(params.tokenUsage.total);
+    // `null` here means Codex does not know the active model's window — a
+    // routed or unrecognised model. Omitted rather than zeroed: the contract
+    // reads an absent window as "no percentage to show", and a 0 would be a
+    // division by zero dressed up as data.
+    const contextWindow = params.tokenUsage.modelContextWindow;
     return {
       events: [
         { type: 'usage', usage: last },
-        { type: 'thread_usage', usage: { last, total } },
+        {
+          type: 'thread_usage',
+          usage: {
+            last,
+            total,
+            ...(contextWindow !== null && contextWindow > 0
+              ? { contextWindowTokens: contextWindow }
+              : {}),
+          },
+        },
       ],
       finished: false,
     };

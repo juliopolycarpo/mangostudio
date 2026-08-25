@@ -2935,6 +2935,11 @@ export const messages: Messages = {
       output: 'out',
       total: 'total',
       unknown: 'Usage unknown',
+      /** Names the ring on the composer strip; the breakdown lives in its tooltip. */
+      indicatorLabel: 'Token usage',
+      contextLabel: 'Context',
+      contextValue: '{used}/{limit} · {percent}%',
+      contextUnknown: 'Context window unknown',
     },
     limits: {
       remaining: '{percent}% left',

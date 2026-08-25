@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { ContextRing } from '@/features/sidebar/components/ContextRing';
+import { ContextRing } from '@/components/ui/ContextRing';
 import { render } from '../../support/harness/render';
 
 describe('ContextRing', () => {

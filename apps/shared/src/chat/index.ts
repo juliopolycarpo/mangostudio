@@ -1,3 +1,4 @@
+export { type ContextSeverity, getContextSeverity } from './context-severity';
 export type { Message } from './entities';
 export {
   type Chat,

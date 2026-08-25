@@ -5,8 +5,14 @@
  * severity bands for UI display, and action recommendations.
  */
 
+import { type ContextSeverity, getContextSeverity } from '@mangostudio/shared/chat';
 import { parseJsonWith } from '../../../lib/safe-parse';
 import type { ChatTurnContext, ToolDefinition } from '../types';
+
+// The bands live in shared because the composer colours an external agent's
+// context ring from the same numbers; re-exported here so every existing
+// caller keeps its import path.
+export { type ContextSeverity, getContextSeverity };
 
 /**
  * Continuation modes visible to the user.
@@ -24,9 +30,6 @@ export type ContinuationDisplayMode =
   | 'replay'
   | 'compacted'
   | 'degraded';
-
-/** Threshold category for UI display. */
-export type ContextSeverity = 'normal' | 'info' | 'warning' | 'danger' | 'critical';
 
 const CONTINUATION_DISPLAY_MODES = new Set<string>([
   'stateful',
@@ -360,12 +363,4 @@ export function recommendContextAction(snapshot: ContextSnapshot): ContextAction
     return 'compact_then_continue';
   }
   return 'hard_stop';
-}
-
-export function getContextSeverity(ratio: number): ContextSeverity {
-  if (ratio < 0.7) return 'normal';
-  if (ratio < 0.85) return 'info';
-  if (ratio < 0.92) return 'warning';
-  if (ratio < 0.97) return 'danger';
-  return 'critical';
 }

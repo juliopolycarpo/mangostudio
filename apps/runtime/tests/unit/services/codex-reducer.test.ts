@@ -102,6 +102,7 @@ describe('codex reducer — the captured real turn', () => {
             reasoningTokens: 0,
             totalTokens: 21_431,
           },
+          contextWindowTokens: 258_400,
         },
       },
       { type: 'completed' },
@@ -419,6 +420,27 @@ describe('codex reducer — failures', () => {
     // The real failure was downstream: a `callId` of undefined threw inside
     // normalization, which the supervisor turns into a dead turn.
     expect(() => events.map(normalizeExternalAgentEvent)).not.toThrow();
+  });
+
+  it('omits the context window when Codex does not know the model it routed to', () => {
+    const withWindow = replay([['thread/tokenUsage/updated', tokenUsageUpdated()]]);
+    expect(withWindow.find((event) => event.type === 'thread_usage')).toMatchObject({
+      usage: { contextWindowTokens: 272_000 },
+    });
+
+    const unknown = tokenUsageUpdated();
+    const events = replay([
+      [
+        'thread/tokenUsage/updated',
+        { ...unknown, tokenUsage: { ...unknown.tokenUsage, modelContextWindow: null } },
+      ],
+    ]);
+    const threadUsage = events.find((event) => event.type === 'thread_usage');
+    // Absent, not zero: the composer reads a missing window as "no percentage
+    // to show", and a 0 would divide the ring by nothing.
+    expect(threadUsage && 'usage' in threadUsage ? threadUsage.usage : {}).not.toHaveProperty(
+      'contextWindowTokens'
+    );
   });
 
   it('ignores an unknown additive notification instead of throwing', () => {

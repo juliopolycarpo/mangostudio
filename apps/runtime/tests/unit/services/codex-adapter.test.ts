@@ -329,6 +329,7 @@ describe('codex adapter — turns', () => {
             reasoningTokens: 0,
             totalTokens: 21_431,
           },
+          contextWindowTokens: 272_000,
         },
       },
       { type: 'completed' },

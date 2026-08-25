@@ -2940,6 +2940,11 @@ export const messages = {
       output: 'saída',
       total: 'total',
       unknown: 'Uso desconhecido',
+      /** Nomeia o anel na barra do compositor; o detalhamento sai no tooltip. */
+      indicatorLabel: 'Uso de tokens',
+      contextLabel: 'Contexto',
+      contextValue: '{used}/{limit} · {percent}%',
+      contextUnknown: 'Janela de contexto desconhecida',
     },
     limits: {
       remaining: '{percent}% restante',

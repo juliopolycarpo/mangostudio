@@ -22,6 +22,53 @@ describe('ExternalUsageDisplay', () => {
     expect(queryByText(/1280|1\.3k/)).toBeNull();
   });
 
+  it('draws the ring from the last request against the reported window', () => {
+    const { container } = render(
+      <ExternalUsageDisplay
+        turn={{ inputTokens: 29_000, outputTokens: 1_200, totalTokens: 30_000 }}
+        thread={{
+          last: { inputTokens: 29_000, outputTokens: 1_200, totalTokens: 30_000 },
+          total: { totalTokens: 118_000 },
+          contextWindowTokens: 272_000,
+        }}
+      />
+    );
+    const indicator = container.querySelector('[data-testid="external-usage-indicator"]');
+    // 30k of 272k — the cumulative 118k must not reach the denominator.
+    expect(indicator?.getAttribute('data-percent')).toBe('11');
+    expect(indicator?.querySelector('svg')).toBeTruthy();
+    expect(
+      container.querySelector('[data-testid="external-usage-context"]')?.textContent
+    ).toContain('30k/272k');
+  });
+
+  it('keeps the figures out of the strip until the indicator is hovered or focused', () => {
+    const { container } = render(
+      <ExternalUsageDisplay
+        turn={{ totalTokens: 30_000 }}
+        thread={{ last: { totalTokens: 30_000 }, contextWindowTokens: 272_000 }}
+      />
+    );
+    const panel = container.querySelector('[data-testid="external-usage-turn"]')?.parentElement
+      ?.parentElement;
+    expect(panel?.className).toContain('invisible');
+    expect(panel?.className).toContain('group-hover:visible');
+    expect(panel?.className).toContain('group-focus-within:visible');
+  });
+
+  it('falls back to a total instead of a percentage when no window is reported', () => {
+    const { container } = render(
+      <ExternalUsageDisplay
+        turn={{ totalTokens: 30_000 }}
+        thread={{ total: { totalTokens: 118_000 } }}
+      />
+    );
+    const indicator = container.querySelector('[data-testid="external-usage-indicator"]');
+    expect(indicator?.getAttribute('data-percent')).toBeNull();
+    expect(indicator?.querySelector('svg')).toBeNull();
+    expect(indicator?.textContent).toContain('118k');
+  });
+
   it('renders cumulative totals from threadUsage when mounted', () => {
     const threadUsage = {
       last: { inputTokens: 100, outputTokens: 40 },
