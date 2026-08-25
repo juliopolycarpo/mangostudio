@@ -57,23 +57,23 @@ describe('InputBar — chat-only composer', () => {
     expect(screen.getByRole('button', { name: 'Thinking' })).toBeInTheDocument();
   });
 
-  it('shows the agent selector only when onSelectedAgentIdChange is provided', () => {
-    const agents = [
-      {
-        id: 'default',
-        name: 'Default',
-        description: '',
-        kind: 'builtin',
-        role: 'primary',
-        source: { type: 'builtin' },
-        systemPrompt: '',
-        toolNames: [],
-        toolsEnabled: false,
-        subagentIds: [],
-        metadata: {},
-      },
-    ] as const;
+  const agents = [
+    {
+      id: 'default',
+      name: 'Default',
+      description: '',
+      kind: 'builtin',
+      role: 'primary',
+      source: { type: 'builtin' },
+      systemPrompt: '',
+      toolNames: [],
+      toolsEnabled: false,
+      subagentIds: [],
+      metadata: {},
+    },
+  ] as const;
 
+  it('shows the agent selector only when onSelectedAgentIdChange is provided', () => {
     const { unmount } = renderInputBar({
       selectedAgentId: 'default',
       agents,
@@ -91,6 +91,21 @@ describe('InputBar — chat-only composer', () => {
     // The chip is a button-and-listbox now, so its value is the text it shows
     // rather than a form value.
     expect(screen.getByRole('combobox', { name: 'Select agent' })).toHaveTextContent('Default');
+  });
+
+  // The first prompt settles who runs the chat; from then on the chip is a
+  // fact, and switching lives in the header as "continue in a new chat".
+  it('locks the agent chip once the chat has turns and says why', () => {
+    renderInputBar({
+      selectedAgentId: 'default',
+      agents,
+      onSelectedAgentIdChange: jest.fn(),
+      hasTurns: true,
+    });
+
+    const chip = screen.getByRole('combobox', { name: 'Select agent' });
+    expect(chip).toBeDisabled();
+    expect(chip.getAttribute('title')).toContain('Locked after the first turn');
   });
 
   // The env and dir chips moved to the header — the composer's status line

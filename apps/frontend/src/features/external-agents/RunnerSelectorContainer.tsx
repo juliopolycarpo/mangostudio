@@ -18,7 +18,7 @@ import { useState } from 'react';
 import { RunnerSelector } from '@/components/layout/RunnerSelector';
 import { useToast } from '@/components/ui/Toast';
 import { ExternalDisclosureDialog } from '@/features/chat/components/ExternalDisclosureDialog';
-import { useMessagesQuery } from '@/features/chat/queries';
+import { useChatHasTurns } from '@/features/chat/hooks/use-chat-has-turns';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
@@ -35,7 +35,7 @@ export function RunnerSelectorContainer() {
   const environments = useEnvironmentEntitiesQuery();
   const external = useExternalAgents(app.currentEnvironmentId);
   const disclosures = useExternalDisclosures();
-  const messages = useMessagesQuery(app.currentChatId);
+  const hasTurns = useChatHasTurns(app.currentChatId);
   const [pendingDisclosure, setPendingDisclosure] = useState<ExternalAgentDescriptor | null>(null);
   const [isAccepting, setAccepting] = useState(false);
   const [isPickingSession, setPickingSession] = useState(false);
@@ -47,19 +47,6 @@ export function RunnerSelectorContainer() {
     (candidate) => candidate.id === app.currentEnvironmentId
   );
   const environmentName = environment?.name ?? app.currentEnvironmentId ?? '';
-
-  // D14 turns on whether the chat already carries turns, so a new, empty chat can
-  // still be pointed at either kind without a fork.
-  //
-  // An *unloaded* transcript is not an empty one. `useMessagesQuery` answers
-  // `undefined` both for a chat with no turns and for one whose turns have not
-  // arrived yet, and reading the second as the first would switch an existing
-  // chat's runner kind in place — the one thing D14 exists to prevent, since the
-  // transcript that survives the switch was produced by the other owner. So an
-  // existing chat requires a fork until its transcript says otherwise. A chat
-  // that has no id yet has no turns by construction, and its query never runs.
-  const transcriptIsEmpty = messages.data?.pages.every((page) => page.messages.length === 0);
-  const hasTurns = app.currentChatId ? transcriptIsEmpty !== true : false;
 
   const activate = (descriptor: ExternalAgentDescriptor) => {
     app.setRunnerTarget(descriptor.targetId);

@@ -72,6 +72,8 @@ export const messages = {
       showControls: 'Mostrar controles do chat',
       hideControls: 'Ocultar controles do chat',
       agentLabel: 'agente',
+      agentLocked:
+        'Bloqueado após o primeiro turno — escolha um runner no cabeçalho para continuar em um novo chat.',
       modelLabel: 'modelo',
       environmentLabel: 'env',
       /**

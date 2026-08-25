@@ -63,6 +63,12 @@ export interface ComposerChipRowProps {
   isAgentListLoading: boolean;
   onSelectedAgentIdChange?: (agentId: string) => void;
   /**
+   * True once the chat has turns, which locks the agent chip: the first prompt
+   * settles who runs this chat, and switching from here on means continuing in
+   * a new chat — an offer the header's runner selector makes, not this strip.
+   */
+  hasTurns: boolean;
+  /**
    * Not a control anymore — the header's breadcrumb owns changing it. Still
    * read here because the collapsed narrow-screen summary is the one surface
    * naming the folder on a phone, where that breadcrumb is hidden.
@@ -161,7 +167,10 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
           onChange={(agentId) => props.onSelectedAgentIdChange?.(agentId)}
           label={labels.agentLabel}
           ariaLabel={labels.selectAgent}
-          disabled={props.disabled || props.isAgentListLoading || selectable.length === 0}
+          disabled={
+            props.disabled || props.hasTurns || props.isAgentListLoading || selectable.length === 0
+          }
+          {...(props.hasTurns ? { title: labels.agentLocked } : {})}
           // The chip renders before the listing lands, and the id it was given
           // is not a name anyone would recognise.
           placeholder={props.isAgentListLoading ? labels.agentsLoading : props.selectedAgentId}

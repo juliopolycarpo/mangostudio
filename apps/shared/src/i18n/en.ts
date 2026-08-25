@@ -74,6 +74,8 @@ export const messages: Messages = {
       showControls: 'Show chat controls',
       hideControls: 'Hide chat controls',
       agentLabel: 'agent',
+      agentLocked:
+        'Locked after the first turn — pick a runner in the header to continue in a new chat.',
       modelLabel: 'model',
       environmentLabel: 'env',
       /**

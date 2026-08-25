@@ -20,6 +20,7 @@ import { DeprecatedModelNotice } from './components/DeprecatedModelNotice';
 import { InputBar } from './components/InputBar';
 import { InterruptedTurnNotice } from './components/InterruptedTurnNotice';
 import { PinnedTodoPanel } from './components/PinnedTodoPanel';
+import { useChatHasTurns } from './hooks/use-chat-has-turns';
 import { useChatContextControls, useChatPageMessages } from './hooks/use-chat-page-state';
 import { requestComposerFocus, setComposerDraft } from './lib/composer-draft-store';
 
@@ -176,6 +177,9 @@ export function ChatPage({
   migrationRunnerAvailable = false,
 }: ChatPageProps) {
   const { messages, status } = useChatPageMessages({ chatId, seedContextInfo });
+  // Reads the same query as `messages` above; this is the conservative framing
+  // (an unloaded transcript locks) rather than a bare `messages.length > 0`.
+  const hasTurns = useChatHasTurns(chatId);
   const interruptedTurn = useMemo(() => findLatestInterruptedTurn(messages), [messages]);
   const { data: session } = authClient.useSession();
   const userName = session?.user?.name?.split(' ')[0] ?? '';
@@ -281,6 +285,7 @@ export function ChatPage({
             agents={agents}
             isAgentListLoading={isAgentListLoading}
             onSelectedAgentIdChange={onSelectedAgentIdChange}
+            hasTurns={hasTurns}
             workdir={workdir}
             {...composer}
           />

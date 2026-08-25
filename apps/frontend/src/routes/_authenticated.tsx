@@ -9,6 +9,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Layout } from '@/components/layout/Layout';
 import { Spinner } from '@/components/ui/Spinner';
+import { useChatHasTurns } from '@/features/chat/hooks/use-chat-has-turns';
 import { chatListQueryOptions, messagesQueryOptions } from '@/features/chat/queries';
 import { CommandPaletteHost } from '@/features/command-palette/CommandPaletteHost';
 import { useCommandPalette } from '@/features/command-palette/use-command-palette';
@@ -73,6 +74,12 @@ function AuthenticatedLayout() {
     [app.chats]
   );
   const gitSummaries = useBatchedGitSummaries(gitChatIds);
+  // The first prompt settles the chat's identity — environment, workdir,
+  // runner — so past it the header's selectors read rather than choose. The
+  // lock is deliberately UI-level: the server keeps accepting repoints because
+  // forking, session adoption and summarize-to-new-chat write through the same
+  // endpoint.
+  const chatHasTurns = useChatHasTurns(app.currentChatId);
 
   // New chat keeps its own chord rather than living in the palette's registry:
   // it is the one action worth reaching without reading a list first. Some
@@ -147,7 +154,7 @@ function AuthenticatedLayout() {
             activePage === 'chat' && app.currentChatId && app.currentEnvironmentId ? (
               <EnvironmentSelector
                 environmentId={app.currentEnvironmentId}
-                disabled={app.isGenerating}
+                disabled={app.isGenerating || chatHasTurns}
                 onEnvironmentChange={(environmentId) =>
                   app.updateChatEnvironment(app.currentChatId as string, environmentId)
                 }
@@ -163,7 +170,9 @@ function AuthenticatedLayout() {
               <WorkspaceBreadcrumb
                 chatId={app.currentChatId}
                 workdir={app.currentWorkdir}
-                onChangeWorkdir={app.openWorkdirPicker}
+                // Withheld rather than disabled once turns exist: a breadcrumb
+                // that stops being a button reads as the fact it now is.
+                {...(chatHasTurns ? {} : { onChangeWorkdir: app.openWorkdirPicker })}
               />
             ) : undefined
           }

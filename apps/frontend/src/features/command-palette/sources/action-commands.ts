@@ -40,6 +40,12 @@ export interface ActionCommandParams {
    * makes the hub reap the live external session with `session-lost`.
    */
   readonly isGenerating: boolean;
+  /**
+   * True once the active chat has turns, at which point its workdir is settled.
+   * This gate is what keeps the palette from being the one surface that still
+   * repoints a locked chat's folder after the header stopped offering it.
+   */
+  readonly chatHasTurns: boolean;
   readonly newChatShortcut: string;
   /** Null unless the active runner is an external one that reports usage. */
   readonly quotaRefresh: QuotaRefreshAction | null;
@@ -64,6 +70,7 @@ export function actionCommands({
   resolvedTheme,
   hasChat,
   isGenerating,
+  chatHasTurns,
   newChatShortcut,
   quotaRefresh,
   onNewChat,
@@ -137,10 +144,10 @@ export function actionCommands({
     run: onToggleTheme,
   });
 
-  // Omitted rather than disabled while a turn streams: a CommandItem has no
-  // disabled affordance, and offering the row would invite exactly the write
-  // the composer's chip refuses mid-turn.
-  if (hasChat && !isGenerating) {
+  // Omitted rather than disabled while a turn streams or once turns exist: a
+  // CommandItem has no disabled affordance, and offering the row would invite
+  // exactly the write the header's breadcrumb withholds on a settled chat.
+  if (hasChat && !isGenerating && !chatHasTurns) {
     items.push({
       id: 'action:workdir',
       section: 'actions',

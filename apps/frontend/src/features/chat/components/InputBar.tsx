@@ -61,6 +61,7 @@ const CHIP_ROW_DEFAULTS = {
   threadUsage: null,
   agents: [],
   isAgentListLoading: false,
+  hasTurns: false,
   workdir: null,
   activeModels: [],
   isModelSelectorDisabled: false,
