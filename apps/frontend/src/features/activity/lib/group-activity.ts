@@ -9,6 +9,7 @@
  */
 
 import type { ActivityEvent } from '@mangostudio/shared/activity';
+import { startOfLocalDay } from '@/features/sidebar/lib/group-chats';
 
 export interface ActivityDayGroup {
   readonly key: string;
@@ -18,11 +19,6 @@ export interface ActivityDayGroup {
 }
 
 const DAY_MS = 86_400_000;
-
-function startOfLocalDay(ms: number): Date {
-  const date = new Date(ms);
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
 
 /**
  * Buckets events by local calendar day, preserving the input's order inside
@@ -36,8 +32,9 @@ export function groupActivityByDay(
   now: Date
 ): ActivityDayGroup[] {
   const today = startOfLocalDay(now.getTime());
+  // A `Map` iterates in insertion order, so the order groups are first seen in
+  // is the order they come back in — no second list to keep in step with it.
   const groups = new Map<string, ActivityDayGroup>();
-  const order: string[] = [];
 
   for (const event of events) {
     const day = startOfLocalDay(event.createdAt);
@@ -51,15 +48,10 @@ export function groupActivityByDay(
       existing.events.push(event);
       continue;
     }
-    order.push(key);
     groups.set(key, { key, kind, dayStartMs: day.getTime(), events: [event] });
   }
 
-  return order.map((key) => {
-    const group = groups.get(key);
-    if (!group) throw new Error(`activity group vanished for key ${key}`);
-    return group;
-  });
+  return [...groups.values()];
 }
 
 /**

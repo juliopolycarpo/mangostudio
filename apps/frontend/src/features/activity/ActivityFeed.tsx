@@ -65,8 +65,10 @@ export function ActivityFeed({
   }
 
   const groups = groupActivityByDay(rows, new Date());
-  const dividerIndex = findLastSeenBoundary(rows, lastSeenAt);
-  let index = -1;
+  // Resolved to an identity rather than a running index: the divider belongs to
+  // one row, and `rows[-1]` is `undefined`, so "no divider" falls out for free
+  // without the grouping having to agree on a flat ordering.
+  const dividerEventId = rows[findLastSeenBoundary(rows, lastSeenAt)]?.id;
 
   return (
     <div className="space-y-4">
@@ -77,8 +79,7 @@ export function ActivityFeed({
           </p>
           <ul className="space-y-2">
             {group.events.map((event) => {
-              index += 1;
-              const showDivider = index === dividerIndex;
+              const showDivider = event.id === dividerEventId;
               return (
                 <li key={event.id}>
                   {showDivider ? (
