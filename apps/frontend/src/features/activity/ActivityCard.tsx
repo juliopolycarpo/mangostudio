@@ -26,6 +26,13 @@ import { useActivity } from './useActivity';
 /** More than this beside a composer and the strip stops being a glance. */
 export const ACTIVITY_STRIP_ROWS = 5;
 
+/**
+ * The dashboard column's page. One page, never a second: the feed is a
+ * cross-account query and the point of the column is the last day or two, not
+ * scrollable history — `/environments` and the sidebar own going further back.
+ */
+export const ACTIVITY_PANEL_ROWS = 15;
+
 export interface ActivityCardProps {
   /** Page size, which is also the row cap. Bounded on purpose: page one only. */
   readonly limit: number;

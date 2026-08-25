@@ -31,6 +31,7 @@ export const messages: Messages = {
     empty: 'Start a conversation',
     deleted: 'Chat deleted',
     newChatRunnerFailed: 'Could not start the chat on that runner. Try again.',
+    newChatWorkdirFailed: 'Could not start the chat in that folder. Try again.',
     editTitle: 'Edit title',
     deleteTitle: 'Delete chat',
     sectionLabel: 'Chats',
@@ -346,6 +347,33 @@ export const messages: Messages = {
       afternoonAnonymous: 'Good afternoon.',
       eveningAnonymous: 'Good evening.',
       subtitle: 'Your workspace is ready. Here is where it stands.',
+      dashboardSubtitle: 'Every workspace, machine and agent on this account.',
+    },
+    workspaces: {
+      label: 'Workspaces',
+      clean: 'clean tree',
+      dirty: '{count} changed',
+      sessions: '{count} session(s)',
+      noSessions: 'No session here yet',
+      continueLatest: 'Continue',
+      continueSession: 'Continue {title}',
+      newChatHere: 'New chat here',
+      newChatHereIn: 'New chat in {folder}',
+      more: 'And {count} more folder(s).',
+      empty: 'No folders yet. Start a chat and point it at a project to see it here.',
+    },
+    machines: {
+      label: 'Machines',
+      // Not "Open environments": the fault card beside this one already uses
+      // that, and two links with one name on one screen is a coin toss.
+      open: 'Manage machines',
+      navAlerts: '{count} alert(s)',
+    },
+    toolchain: {
+      label: 'Toolchain',
+      open: 'Open health',
+      empty: 'Nothing detected on this machine yet.',
+      allClear: 'Everything the toolchain reports is ready.',
     },
     workspace: {
       label: 'Workspace',

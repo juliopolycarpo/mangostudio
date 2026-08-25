@@ -20,6 +20,18 @@ export interface RunnerBadge {
   dotClassName: string;
 }
 
+/**
+ * Which harness a runner is, as one string — `mangostudio` or the vendor's
+ * target id. The discriminant collapse the badge already did, named so the
+ * surfaces that count sessions per harness key on the same thing the surfaces
+ * that colour them do.
+ *
+ * // Usage: runnerKey(chat.runner) // => 'codex'
+ */
+export function runnerKey(runner: ChatRunnerConfiguration): string {
+  return runner.kind === 'mangostudio' ? 'mangostudio' : runner.targetId;
+}
+
 export function runnerBadge(
   runner: ChatRunnerConfiguration,
   labels: RunnerBadgeLabels

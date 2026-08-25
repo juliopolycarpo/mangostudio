@@ -15,6 +15,7 @@ import { Route as SignupRouteImport } from './routes/signup'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedEnvironmentsRouteImport } from './routes/_authenticated/environments'
 import { Route as AuthenticatedGalleryRouteImport } from './routes/_authenticated/gallery'
+import { Route as AuthenticatedHomeRouteImport } from './routes/_authenticated/home'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedStudioRouteImport } from './routes/_authenticated/studio'
 import { Route as AuthenticatedEnvironmentsIndexRouteImport } from './routes/_authenticated/environments/index'
@@ -83,6 +84,11 @@ const AuthenticatedEnvironmentsRoute =
 const AuthenticatedGalleryRoute = AuthenticatedGalleryRouteImport.update({
   id: '/gallery',
   path: '/gallery',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedHomeRoute = AuthenticatedHomeRouteImport.update({
+  id: '/home',
+  path: '/home',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
 const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
@@ -324,6 +330,7 @@ export interface FileRoutesByFullPath {
   '/signup': typeof SignupRoute
   '/environments': typeof AuthenticatedEnvironmentsRouteWithChildren
   '/gallery': typeof AuthenticatedGalleryRoute
+  '/home': typeof AuthenticatedHomeRoute
   '/settings': typeof AuthenticatedSettingsRouteWithChildren
   '/studio': typeof AuthenticatedStudioRoute
   '/environments/agents': typeof AuthenticatedEnvironmentsAgentsRoute
@@ -368,6 +375,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/gallery': typeof AuthenticatedGalleryRoute
+  '/home': typeof AuthenticatedHomeRoute
   '/studio': typeof AuthenticatedStudioRoute
   '/': typeof AuthenticatedIndexRoute
   '/environments/agents': typeof AuthenticatedEnvironmentsAgentsRoute
@@ -413,6 +421,7 @@ export interface FileRoutesById {
   '/signup': typeof SignupRoute
   '/_authenticated/environments': typeof AuthenticatedEnvironmentsRouteWithChildren
   '/_authenticated/gallery': typeof AuthenticatedGalleryRoute
+  '/_authenticated/home': typeof AuthenticatedHomeRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRouteWithChildren
   '/_authenticated/studio': typeof AuthenticatedStudioRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
@@ -462,6 +471,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/environments'
     | '/gallery'
+    | '/home'
     | '/settings'
     | '/studio'
     | '/environments/agents'
@@ -506,6 +516,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/gallery'
+    | '/home'
     | '/studio'
     | '/'
     | '/environments/agents'
@@ -550,6 +561,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/_authenticated/environments'
     | '/_authenticated/gallery'
+    | '/_authenticated/home'
     | '/_authenticated/settings'
     | '/_authenticated/studio'
     | '/_authenticated/'
@@ -640,6 +652,13 @@ declare module '@tanstack/react-router' {
       path: '/gallery'
       fullPath: '/gallery'
       preLoaderRoute: typeof AuthenticatedGalleryRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/home': {
+      id: '/_authenticated/home'
+      path: '/home'
+      fullPath: '/home'
+      preLoaderRoute: typeof AuthenticatedHomeRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/settings': {
@@ -1041,6 +1060,7 @@ const AuthenticatedSettingsRouteWithChildren =
 interface AuthenticatedRouteChildren {
   AuthenticatedEnvironmentsRoute: typeof AuthenticatedEnvironmentsRouteWithChildren
   AuthenticatedGalleryRoute: typeof AuthenticatedGalleryRoute
+  AuthenticatedHomeRoute: typeof AuthenticatedHomeRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRouteWithChildren
   AuthenticatedStudioRoute: typeof AuthenticatedStudioRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
@@ -1056,6 +1076,7 @@ interface AuthenticatedRouteChildren {
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedEnvironmentsRoute: AuthenticatedEnvironmentsRouteWithChildren,
   AuthenticatedGalleryRoute: AuthenticatedGalleryRoute,
+  AuthenticatedHomeRoute: AuthenticatedHomeRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRouteWithChildren,
   AuthenticatedStudioRoute: AuthenticatedStudioRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,

@@ -16,12 +16,15 @@ function setup(createdId = 'chat-new') {
   const createChat = jest.fn(async () => ({ id: createdId, environmentId: 'local' }) as Chat);
   const updateChatRunner = jest.fn(async () => undefined);
   const updateChatRunnerOnEnvironment = jest.fn(async () => undefined);
+  const updateChatWorkdir = jest.fn(async () => undefined);
   const deleteChat = jest.fn(async () => undefined);
   const navigate = jest.fn(async () => undefined);
+  const addRecentWorkdir = jest.fn();
   const chats = {
     createChat,
     updateChatRunner,
     updateChatRunnerOnEnvironment,
+    updateChatWorkdir,
     deleteChat,
   } as unknown as Parameters<typeof useChatRouteActions>[0]['chats'];
 
@@ -52,6 +55,7 @@ function setup(createdId = 'chat-new') {
       // `jest.fn` erases the generic; the implementation above is the real
       // pass-through shape.
       holdWorkdirDefault: holdWorkdirDefault as <T>(task: () => Promise<T>) => Promise<T>,
+      addRecentWorkdir,
     })
   );
   return {
@@ -59,8 +63,10 @@ function setup(createdId = 'chat-new') {
     createChat,
     updateChatRunner,
     updateChatRunnerOnEnvironment,
+    updateChatWorkdir,
     deleteChat,
     navigate,
+    addRecentWorkdir,
     holdWorkdirDefault,
     holdDepthDuring,
   };
@@ -206,6 +212,58 @@ describe('handleNewChatWithRunner', () => {
     });
 
     expect(deleteChat).toHaveBeenCalledWith('chat-new');
+    expect(navigate).not.toHaveBeenCalled();
+    expect(screen.getByText(/could not start the chat/i)).toBeTruthy();
+  });
+});
+
+describe('handleNewChatInWorkdir', () => {
+  it('points the new chat at the folder and remembers it', async () => {
+    const { result, createChat, updateChatWorkdir, addRecentWorkdir, navigate } = setup('chat-new');
+
+    await act(async () => {
+      await result.current.handleNewChatInWorkdir('/srv/projects/mango');
+    });
+
+    expect(createChat).toHaveBeenCalledTimes(1);
+    expect(updateChatWorkdir).toHaveBeenCalledWith('chat-new', '/srv/projects/mango');
+    expect(addRecentWorkdir).toHaveBeenCalledWith('/srv/projects/mango');
+    expect(navigate).toHaveBeenCalledWith({ to: '/' });
+  });
+
+  /**
+   * Creation publishes a chat with no folder before the repoint lands, and the
+   * defaulting effect can observe it. Acting on that intermediate record either
+   * stamps the configured default folder onto a chat that is about to point
+   * somewhere else, or marks the id as defaulted so the repointed one never
+   * gets its picker.
+   */
+  it('holds workdir defaulting across the create-and-repoint window', async () => {
+    const { result, createChat, updateChatWorkdir, navigate, holdDepthDuring } = setup('chat-new');
+    const depthAtCreate = holdDepthDuring(createChat, { id: 'chat-new', environmentId: 'local' });
+    const depthAtRepoint = holdDepthDuring(updateChatWorkdir);
+    const depthAtNavigate = holdDepthDuring(navigate);
+
+    await act(async () => {
+      await result.current.handleNewChatInWorkdir('/srv/projects/mango');
+    });
+
+    expect(depthAtCreate()).toBe(1);
+    expect(depthAtRepoint()).toBe(1);
+    expect(depthAtNavigate()).toBe(0);
+  });
+
+  it('rolls back the chat and reports the failure when the folder cannot be bound', async () => {
+    const { result, deleteChat, addRecentWorkdir, navigate, updateChatWorkdir } = setup('chat-new');
+    updateChatWorkdir.mockImplementation(() => Promise.reject(new Error('gone')));
+
+    await act(async () => {
+      await result.current.handleNewChatInWorkdir('/srv/projects/mango');
+    });
+
+    expect(deleteChat).toHaveBeenCalledWith('chat-new');
+    // Nothing was opened there, so nothing about the folder became recent.
+    expect(addRecentWorkdir).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
     expect(screen.getByText(/could not start the chat/i)).toBeTruthy();
   });
