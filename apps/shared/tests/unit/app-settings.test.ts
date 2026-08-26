@@ -146,11 +146,39 @@ describe('normalizeWorkspaceSettings', () => {
       ...DEFAULT_WORKSPACE_SETTINGS,
       chatSidebarWidth: CHAT_SIDEBAR_WIDTH_MAX,
       sidePanel: {
-        visiblePanelIds: ['todos'],
+        // The stored order is the ledger of panels these settings have heard
+        // of, and it names only `todos` — so `git` is new here and backfills
+        // into visibility as well as into the order.
+        visiblePanelIds: ['todos', 'git'],
         panelOrder: ['todos', 'git'],
         width: WORKSPACE_PANEL_WIDTH_MAX,
       },
     });
+  });
+
+  it('shows a newly shipped panel to users whose settings predate it', () => {
+    const legacy = normalizeWorkspaceSettings({
+      sidePanel: { visiblePanelIds: ['todos'], panelOrder: ['todos'] },
+    });
+
+    expect(legacy.sidePanel.visiblePanelIds).toEqual(['todos', 'git']);
+    expect(legacy.sidePanel.panelOrder).toEqual(['todos', 'git']);
+  });
+
+  it('keeps respecting a panel the user hid in a build that knew about it', () => {
+    const hidden = normalizeWorkspaceSettings({
+      sidePanel: { visiblePanelIds: ['git'], panelOrder: ['git', 'todos'] },
+    });
+
+    expect(hidden.sidePanel.visiblePanelIds).toEqual(['git']);
+    expect(hidden.sidePanel.panelOrder).toEqual(['git', 'todos']);
+  });
+
+  it('backfills everything when the stored order cannot act as a ledger', () => {
+    const orderless = normalizeWorkspaceSettings({ sidePanel: { visiblePanelIds: ['todos'] } });
+
+    expect(orderless.sidePanel.visiblePanelIds).toEqual(['todos', 'git']);
+    expect(orderless.sidePanel.panelOrder).toEqual(DEFAULT_WORKSPACE_SETTINGS.sidePanel.panelOrder);
   });
 
   it('falls back invalid fields independently', () => {

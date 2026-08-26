@@ -523,17 +523,21 @@ export function normalizeWorkspaceSettings(value: unknown): WorkspaceSettings {
     : [];
 
   const sidePanel = isRecord(value.sidePanel) ? value.sidePanel : {};
-  const visiblePanelIds = normalizeWorkspacePanelIds(
-    sidePanel.visiblePanelIds,
-    DEFAULT_WORKSPACE_SETTINGS.sidePanel.visiblePanelIds
+  const knownPanelIds = storedPanelIdLedger(sidePanel.panelOrder);
+  const visiblePanelIds = withUnknownPanelIds(
+    normalizeWorkspacePanelIds(
+      sidePanel.visiblePanelIds,
+      DEFAULT_WORKSPACE_SETTINGS.sidePanel.visiblePanelIds
+    ),
+    knownPanelIds
   );
-  const panelOrder = normalizeWorkspacePanelIds(
-    sidePanel.panelOrder,
-    DEFAULT_WORKSPACE_SETTINGS.sidePanel.panelOrder
+  const panelOrder = withUnknownPanelIds(
+    normalizeWorkspacePanelIds(
+      sidePanel.panelOrder,
+      DEFAULT_WORKSPACE_SETTINGS.sidePanel.panelOrder
+    ),
+    knownPanelIds
   );
-  for (const panelId of WORKSPACE_PANEL_IDS) {
-    if (!panelOrder.includes(panelId)) panelOrder.push(panelId);
-  }
 
   return {
     defaultWorkdir: typeof value.defaultWorkdir === 'string' ? value.defaultWorkdir : '',
@@ -575,6 +579,59 @@ function normalizeWorkspacePanelIds(
       )
     )
   );
+}
+
+/**
+ * The set of panel ids the *stored* settings have ever heard of.
+ *
+ * Backfilling a newly shipped panel needs to tell two cases apart that look
+ * identical in `visiblePanelIds`: an id the user deliberately hid, and an id
+ * that did not exist when these settings were last written. Get it wrong in one
+ * direction and every upgrade ships a panel nobody can find; get it wrong in the
+ * other and hiding a panel becomes impossible, because the normalizer runs on
+ * every read and would resurrect it immediately.
+ *
+ * `panelOrder` is what distinguishes them. It has always been backfilled with
+ * every known id on read, so any blob this normalizer has ever written carries
+ * the complete list of panels that existed at that moment — it is a ledger, not
+ * just an ordering. An id missing from the stored order is therefore one the
+ * settings have never seen, and an id present in the order but absent from
+ * `visiblePanelIds` is one the user turned off on purpose.
+ *
+ * When the stored order is unusable (absent, or not an array — a shape this
+ * normalizer never writes) the ledger is empty and every id counts as new, so
+ * the backfill wins. That is the deliberate choice: a user who has to re-hide
+ * one panel is a smaller failure than a panel that ships hidden for everyone
+ * who already uses the app.
+ */
+function storedPanelIdLedger(storedPanelOrder: unknown): ReadonlySet<WorkspacePanelId> {
+  if (!Array.isArray(storedPanelOrder)) return new Set();
+
+  return new Set(
+    storedPanelOrder.filter(
+      (panelId): panelId is WorkspacePanelId =>
+        typeof panelId === 'string' && WORKSPACE_PANEL_IDS.includes(panelId as WorkspacePanelId)
+    )
+  );
+}
+
+/**
+ * Appends every panel id the stored settings never knew about, preserving the
+ * caller's order and its de-duplication.
+ *
+ * Usage:
+ *   withUnknownPanelIds(['todos'], new Set(['git', 'todos'])); // ['todos', 'github']
+ */
+function withUnknownPanelIds(
+  panelIds: WorkspacePanelId[],
+  knownPanelIds: ReadonlySet<WorkspacePanelId>
+): WorkspacePanelId[] {
+  const present = new Set(panelIds);
+  const missing = WORKSPACE_PANEL_IDS.filter(
+    (panelId) => !knownPanelIds.has(panelId) && !present.has(panelId)
+  );
+
+  return [...panelIds, ...missing];
 }
 
 function isDiffPreviewMode(value: unknown): value is DiffPreviewMode {
