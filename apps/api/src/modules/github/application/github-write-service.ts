@@ -127,8 +127,14 @@ export function createGithubWriteService(
     if (resolution.state !== 'ok') return resolution;
 
     await client.run(command, { number }, target(request));
-    const pr = await readSummary(request, number);
+    // The mutation already landed on GitHub or the working tree at this
+    // point; only the convenience readback below can still fail. Settling
+    // first means an aborted, timed-out, or unparseable readback still leaves
+    // the cache and realtime subscribers correct, instead of quietly keeping
+    // the pre-mutation state and inviting a retry of something that already
+    // happened.
     settle(request, operation);
+    const pr = await readSummary(request, number);
     return { state: 'ok', pr };
   }
 
@@ -160,9 +166,13 @@ export function createGithubWriteService(
         target(request)
       );
 
+      // Same ordering as runPrAction, and for the same reason: gh pr create
+      // already opened the pull request by the time this line runs, so
+      // settling before parsing its URL and reading it back keeps a
+      // malformed readback from masking a mutation that already succeeded.
+      settle(request, 'create');
       const number = parsePullRequestNumber(created.stdout);
       const pr = await readSummary(request, number);
-      settle(request, 'create');
       return { state: 'ok', repo: resolution.repo, pr };
     },
 

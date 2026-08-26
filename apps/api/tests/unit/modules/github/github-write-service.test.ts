@@ -139,6 +139,76 @@ describe('GitHub write service', () => {
     }
   });
 
+  it('settles the cache and realtime state even when the readback after the mutation fails', async () => {
+    // pr.ready / pr.checkout already changed something on GitHub or the
+    // working tree by the time the convenience pr.view-summary readback runs.
+    // If that readback is what aborts, times out, or returns unparseable
+    // output, the cache and realtime subscribers must not be left holding the
+    // pre-mutation state — that would report a failure for a write that
+    // already succeeded, and invite the caller to retry it.
+    for (const [action, operation] of [
+      ['markPullRequestReady', 'ready'],
+      ['checkoutPullRequest', 'checkout'],
+    ] as const) {
+      const client = new FakeGithubCli({
+        stdout: { 'repo.view': repoOutput },
+        respond: { 'pr.view-summary': () => Promise.reject(new Error('runtime aborted')) },
+      });
+      const cache = createGithubCache();
+      const published: Published[] = [];
+      const writes = createGithubWriteService({
+        client,
+        cache,
+        currentBranch: () => Promise.resolve('feat/panel'),
+        pullRequestTemplate: () => Promise.resolve(''),
+        publish: (target, op) => published.push({ chatId: target.chatId, operation: op }),
+      });
+
+      const before = await cache.read({ ...SELECTION, subject: 'inbox' }, 'v', () =>
+        Promise.resolve({})
+      );
+
+      await expect(writes[action](REQUEST, { chatId: 'chat-1', number: 7 })).rejects.toBeInstanceOf(
+        Error
+      );
+
+      expect(published).toEqual([{ chatId: 'chat-1', operation }]);
+      const after = await cache.read({ ...SELECTION, subject: 'inbox' }, 'v', () =>
+        Promise.resolve({})
+      );
+      expect(after).not.toBe(before);
+    }
+  });
+
+  it('settles the cache and realtime state even when gh pr create prints an unparseable URL', async () => {
+    const client = new FakeGithubCli({
+      stdout: { 'repo.view': repoOutput, 'pr.create': 'Warning: something else entirely' },
+    });
+    const cache = createGithubCache();
+    const published: Published[] = [];
+    const writes = createGithubWriteService({
+      client,
+      cache,
+      currentBranch: () => Promise.resolve('feat/panel'),
+      pullRequestTemplate: () => Promise.resolve(''),
+      publish: (target, op) => published.push({ chatId: target.chatId, operation: op }),
+    });
+
+    const before = await cache.read({ ...SELECTION, subject: 'inbox' }, 'v', () =>
+      Promise.resolve({})
+    );
+
+    await expect(
+      writes.createPullRequest(REQUEST, { chatId: 'chat-1', title: 'T' })
+    ).rejects.toBeInstanceOf(GithubOutputError);
+
+    expect(published).toEqual([{ chatId: 'chat-1', operation: 'create' }]);
+    const after = await cache.read({ ...SELECTION, subject: 'inbox' }, 'v', () =>
+      Promise.resolve({})
+    );
+    expect(after).not.toBe(before);
+  });
+
   it('drops the cached reads for that machine, so the list cannot lag the action', async () => {
     const client = createClient();
     const cache = createGithubCache();
