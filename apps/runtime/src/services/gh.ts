@@ -99,8 +99,8 @@ const READ_SUBCOMMANDS: ReadonlySet<string> = new Set([
 const WRITE_SUBCOMMANDS: ReadonlySet<string> = new Set(['pr create', 'pr ready', 'pr checkout']);
 
 /**
- * Flags refused on every subcommand, plus the short aliases that only mean
- * these things on the subcommand they are listed under.
+ * Flags refused on every subcommand, plus the short aliases — those refused
+ * everywhere, and the one that only means a refused flag where gh says it does.
  *
  * Naming a subcommand is not the same as bounding it: the allowlists above key
  * on the first one or two tokens, and everything after that is gh's to
@@ -118,10 +118,15 @@ const WRITE_SUBCOMMANDS: ReadonlySet<string> = new Set(['pr create', 'pr ready',
  * machine the person is looking at. Harmless on a headless host and a genuine
  * surprise on a desktop one, and either way it is an effect, not a read.
  *
- * The short aliases have to be scoped, because gh reuses letters across
- * subcommands: `-t` is `--show-token` on `auth status` but `--title` on
- * `pr create`, and `-w` is `--web` on the view commands but `--watch` on
- * `pr checks`. Refusing them globally would forbid opening a pull request.
+ * The short aliases split two ways, and the split is what the letters actually
+ * mean rather than which subcommands happen to be listed here. `-w` is
+ * `--web` on *every* gh subcommand that defines it — `repo view`, `pr view`,
+ * `pr list`, `pr checks`, `issue list`, `search prs` and `pr create` alike, and
+ * `gh pr checks` spells its watch mode `--watch` with no short alias — so it is
+ * refused globally. `-t` cannot be: gh spells `--show-token` `-t` on
+ * `auth status` and `--title` `-t` on `pr create`, so refusing that letter
+ * everywhere would forbid opening a pull request. Only genuinely overloaded
+ * letters get a per-subcommand entry.
  *
  * This is a denylist, unlike the `gh api` flags below, and that is the weaker
  * shape — it has to be right about every spelling, forever. It is used here
@@ -131,10 +136,12 @@ const WRITE_SUBCOMMANDS: ReadonlySet<string> = new Set(['pr create', 'pr ready',
  */
 const REFUSED_FLAGS: ReadonlySet<string> = new Set(['--show-token', '--web']);
 
+/** Letters that mean the same refused flag on every subcommand that has them. */
+const GLOBAL_REFUSED_SHORT_LETTERS: ReadonlySet<string> = new Set(['w']);
+
+/** Letters gh overloads, refused only where they spell a refused flag. */
 const REFUSED_SHORT_FLAGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  ['auth status', new Set(['-t'])],
-  ['repo view', new Set(['-w'])],
-  ['pr view', new Set(['-w'])],
+  ['auth status', new Set(['t'])],
 ]);
 
 /**
@@ -433,10 +440,7 @@ function assertNoRefusedFlag(
   subcommand: string,
   args: readonly string[]
 ): void {
-  const refusedShort = REFUSED_SHORT_FLAGS.get(subcommand);
-  const refusedShortLetters = refusedShort
-    ? new Set([...refusedShort].map((flag) => flag.slice(1)))
-    : undefined;
+  const scoped = REFUSED_SHORT_FLAGS.get(subcommand);
 
   for (const arg of args) {
     if (arg.startsWith('--')) {
@@ -446,13 +450,36 @@ function assertNoRefusedFlag(
         `${method} refuses "gh ${subcommand} ${flag}": it discloses credentials or acts outside this call.`
       );
     }
-    if (!refusedShortLetters || !arg.startsWith('-') || arg === '-') continue;
-    const cluster = arg.includes('=') ? arg.slice(1, arg.indexOf('=')) : arg.slice(1);
-    if (![...cluster].some((letter) => refusedShortLetters.has(letter))) continue;
+    const cluster = shortFlagCluster(arg);
+    if (cluster === null) continue;
+    const refused = [...cluster].some(
+      (letter) => GLOBAL_REFUSED_SHORT_LETTERS.has(letter) || scoped?.has(letter) === true
+    );
+    if (!refused) continue;
     throw new RuntimeToolArgumentError(
       `${method} refuses "gh ${subcommand} ${arg}": it discloses credentials or acts outside this call.`
     );
   }
+}
+
+/**
+ * The letters of a short-flag cluster (`-w`, `-at`, `-t=true`), or `null` when
+ * the token is not one.
+ *
+ * The shape test is what keeps free text out of the scan. Refusing `-w`
+ * globally means every argument of every subcommand reaches this function,
+ * including operands a subcommand takes verbatim — a `pr create` body sent as
+ * its own argv element rather than as `--body=`, say. `- what changed` starts
+ * with a dash and contains a `w`, and it is a markdown bullet, not `--web`;
+ * pflag would not read it as a flag either, since a cluster is letters up to
+ * the end of the token or an `=`.
+ *
+ * @example
+ * shortFlagCluster('-at'); // 'at'
+ * shortFlagCluster('- what changed'); // null
+ */
+function shortFlagCluster(arg: string): string | null {
+  return /^-([A-Za-z]+)(?:=|$)/.exec(arg)?.[1] ?? null;
 }
 
 /** The first one or two argv tokens, which is what names a `gh` subcommand. */

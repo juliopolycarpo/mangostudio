@@ -195,6 +195,27 @@ describe('gh credential and side-effect flags', () => {
   });
 
   /**
+   * `-w` is `--web` on every gh subcommand that defines it, not only on the two
+   * view commands — `gh pr checks` spells its watch mode `--watch` with no
+   * short alias, and `pr list`, `issue list`, `search prs` and `pr create` all
+   * take `-w, --web`. Scoping the letter to `repo view` / `pr view` left four
+   * allowlisted reads and one write able to open a browser on the runtime host.
+   */
+  it('refuses the browser short flag on every subcommand that defines it', async () => {
+    for (const args of [
+      ['pr', 'list', '-w'],
+      ['pr', 'checks', '123', '-w'],
+      ['issue', 'list', '-w'],
+      ['search', 'prs', '-w'],
+    ]) {
+      expect(await refusal(() => execGh({ args, cwd }))).toBeInstanceOf(RuntimeToolArgumentError);
+    }
+    expect(await refusal(() => mutateGh({ args: ['pr', 'create', '-w'], cwd }))).toBeInstanceOf(
+      RuntimeToolArgumentError
+    );
+  });
+
+  /**
    * gh's flag parser (pflag) clusters single-letter boolean flags together
    * and accepts `=` on a short flag too, so `-at` means `-a -t` and `-t=true`
    * is `-t` with an explicit value. Both spellings have to be refused, not
@@ -212,18 +233,33 @@ describe('gh credential and side-effect flags', () => {
 
   /**
    * gh reuses short letters across subcommands: `-t` is `--show-token` on
-   * `auth status` but `--title` on `pr create`, and `-w` is `--web` on the view
-   * commands but `--watch` on `pr checks`. A global short-flag denylist would
-   * forbid opening a pull request, so the scoping is load-bearing rather than
-   * incidental.
+   * `auth status` but `--title` on `pr create`. That overload is why `-t` is
+   * scoped rather than refused globally the way `-w` is — refusing the letter
+   * everywhere would forbid opening a pull request.
    */
   it.skipIf(isWindows)(
     'still accepts the same letters where they mean something else',
     async () => {
       await expectAccepted(mutateGh, ['pr', 'create', '-t', 'A title', '--body=Some body']);
-      await expectAccepted(execGh, ['pr', 'checks', '123', '-w']);
     }
   );
+
+  /**
+   * Refusing `-w` on every subcommand puts every argument in the scan's path,
+   * operands included. A pull request body sent as its own argv element can
+   * open on a markdown bullet, and `- what changed` is not a flag cluster: it
+   * starts with a dash and contains a `w`, which was enough to refuse it while
+   * the scan matched on any dash-prefixed token.
+   */
+  it.skipIf(isWindows)('reads free text as an operand rather than a flag cluster', async () => {
+    await expectAccepted(mutateGh, [
+      'pr',
+      'create',
+      '--title=Add the panel',
+      '--body',
+      '- what changed\n- why',
+    ]);
+  });
 });
 
 describe('gh api graphql pinning', () => {
