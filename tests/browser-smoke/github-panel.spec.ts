@@ -11,15 +11,34 @@ test('github rail panel renders and obeys its visibility setting', async ({ page
   const consoleErrors: string[] = [];
   page.on('pageerror', (error) => consoleErrors.push(error.message));
 
-  // A fresh account every run. Reusing one gets 429'd by Better Auth after a
-  // handful of rapid loads, and the shell then falls back to "Something went
-  // wrong!" — which reads exactly like a broken panel and is not one.
+  // A fresh account every run. Reusing one gets 429'd, and the shell then falls
+  // back to "Something went wrong!" — which reads exactly like a broken panel
+  // and is not one.
+  //
+  // The limiter is per IP, not per account (`rate-limit-policy.ts`: the auth
+  // bucket is 120/minute), and on CI every spec in this suite shares localhost.
+  // So a unique address is necessary and not sufficient: a re-run of any spec
+  // ahead of this one can spend the budget before this one signs up. Naming
+  // that case is the point of the check below — without it the failure surfaces
+  // 90 seconds later as "New Chat was never found", which sends the next reader
+  // looking at the panel instead of at the limiter.
   await page.goto('/signup');
   await page.locator('#name').fill('GitHub Panel Smoke');
   await page.locator('#email').fill(uniqueEmail());
   await page.locator('#password').fill('smoke-pass-123');
   await page.locator('form#signup-form button[type="submit"]').click();
-  await expect(page).not.toHaveURL(/\/signup/, { timeout: 10_000 });
+
+  const rateLimited = page.getByText(/too many requests/i);
+  await expect
+    .poll(
+      async () => ((await rateLimited.count()) > 0 ? 'rate-limited' : new URL(page.url()).pathname),
+      { timeout: 15_000 }
+    )
+    .not.toBe('/signup');
+  expect(
+    await rateLimited.count(),
+    'signup was rate limited — the shared auth budget for this suite is spent, not a panel fault'
+  ).toBe(0);
 
   // The rail only exists on the chat surface and only once a chat does.
   // Scoped to `main` because the sidebar carries a second button with the same
@@ -60,7 +79,19 @@ test('github rail panel renders and obeys its visibility setting', async ({ page
   // Turning the panel off in settings must remove it from the rail — the
   // cheapest end-to-end proof that the settings normalizer and the registry
   // agree on the panel id.
+  // Settings edits are applied to the query cache first and PUT after a
+  // debounce, so a click that lands before the initial GET resolves is undone
+  // by that response overwriting the cache — the checkbox visibly springs back.
+  // Locally the GET is instant and this never shows; on a cold runner it is the
+  // difference between a green spec and "clicking the checkbox did not change
+  // its state". Waiting for the read settles it before touching anything.
+  const settingsLoaded = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'GET' && response.url().includes('/api/settings/app')
+  );
   await page.goto('/settings/general');
+  await settingsLoaded;
+
   const toggle = page.getByRole('checkbox', { name: 'Show GitHub', exact: true });
   await expect(toggle).toBeChecked({ timeout: 15_000 });
   // The write has to reach the server before the reload below, or the chat
@@ -69,8 +100,12 @@ test('github rail panel renders and obeys its visibility setting', async ({ page
     (response) =>
       response.request().method() === 'PUT' && response.url().includes('/api/settings/app')
   );
-  await toggle.uncheck();
-  await expect(toggle).not.toBeChecked();
+  // `click` rather than `uncheck`: uncheck verifies the new state itself, on the
+  // action timeout, and reports a race against the debounced write as an
+  // unhelpful "did not change its state". The explicit assertion below says
+  // which half failed.
+  await toggle.click();
+  await expect(toggle).not.toBeChecked({ timeout: 10_000 });
   await saved;
 
   await page.goto('/');
