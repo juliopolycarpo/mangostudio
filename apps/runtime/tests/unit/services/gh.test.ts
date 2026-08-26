@@ -195,6 +195,22 @@ describe('gh credential and side-effect flags', () => {
   });
 
   /**
+   * gh's flag parser (pflag) clusters single-letter boolean flags together
+   * and accepts `=` on a short flag too, so `-at` means `-a -t` and `-t=true`
+   * is `-t` with an explicit value. Both spellings have to be refused, not
+   * just the bare `-t` token.
+   */
+  it('refuses a clustered or valued short flag that would print the stored token', async () => {
+    for (const args of [
+      ['auth', 'status', '-at'],
+      ['auth', 'status', '-ta'],
+      ['auth', 'status', '-t=true'],
+    ]) {
+      expect(await refusal(() => execGh({ args, cwd }))).toBeInstanceOf(RuntimeToolArgumentError);
+    }
+  });
+
+  /**
    * gh reuses short letters across subcommands: `-t` is `--show-token` on
    * `auth status` but `--title` on `pr create`, and `-w` is `--web` on the view
    * commands but `--watch` on `pr checks`. A global short-flag denylist would

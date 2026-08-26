@@ -419,8 +419,14 @@ function assertAllowedSubcommand(
  * Refuses the flags that would turn an allowlisted subcommand into a token
  * disclosure or a side effect on the runtime's own desktop.
  *
- * Both spellings are checked: gh accepts `--web` and `--web=true` alike, so
- * matching only the bare token would leave the `=` form open.
+ * Long flags are matched on the bare token: gh accepts `--web` and
+ * `--web=true` alike, so matching only the bare token would leave the `=`
+ * form open. Short flags need more than that, because gh's underlying flag
+ * parser (pflag) clusters single-letter boolean flags together and accepts
+ * `=` on them too: `-at` means `-a -t`, and `-t=true` is `-t` with an
+ * explicit value. Matching the argv token verbatim against `-t` misses both,
+ * so a refused letter is checked against every letter in a short-flag
+ * cluster instead.
  */
 function assertNoRefusedFlag(
   method: 'gh.exec' | 'gh.mutate',
@@ -428,12 +434,23 @@ function assertNoRefusedFlag(
   args: readonly string[]
 ): void {
   const refusedShort = REFUSED_SHORT_FLAGS.get(subcommand);
+  const refusedShortLetters = refusedShort
+    ? new Set([...refusedShort].map((flag) => flag.slice(1)))
+    : undefined;
 
   for (const arg of args) {
-    const flag = arg.startsWith('--') && arg.includes('=') ? arg.slice(0, arg.indexOf('=')) : arg;
-    if (!REFUSED_FLAGS.has(flag) && !refusedShort?.has(flag)) continue;
+    if (arg.startsWith('--')) {
+      const flag = arg.includes('=') ? arg.slice(0, arg.indexOf('=')) : arg;
+      if (!REFUSED_FLAGS.has(flag)) continue;
+      throw new RuntimeToolArgumentError(
+        `${method} refuses "gh ${subcommand} ${flag}": it discloses credentials or acts outside this call.`
+      );
+    }
+    if (!refusedShortLetters || !arg.startsWith('-') || arg === '-') continue;
+    const cluster = arg.includes('=') ? arg.slice(1, arg.indexOf('=')) : arg.slice(1);
+    if (![...cluster].some((letter) => refusedShortLetters.has(letter))) continue;
     throw new RuntimeToolArgumentError(
-      `${method} refuses "gh ${subcommand} ${flag}": it discloses credentials or acts outside this call.`
+      `${method} refuses "gh ${subcommand} ${arg}": it discloses credentials or acts outside this call.`
     );
   }
 }
