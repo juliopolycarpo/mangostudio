@@ -22,6 +22,7 @@ import {
   ArrowUp,
   FolderGit2,
   FolderOpen,
+  GitPullRequest,
   ListTodo,
   PanelLeft,
   PanelRight,
@@ -104,10 +105,12 @@ export function GeneralSettings({
   const workspace = t.workspace;
   const panelLabels: Readonly<Record<WorkspacePanelId, string>> = {
     git: t.git.title,
+    github: t.github.title,
     todos: t.chat.todo.title,
   };
   const panelIcons = {
     git: FolderGit2,
+    github: GitPullRequest,
     todos: ListTodo,
   } satisfies Readonly<Record<WorkspacePanelId, typeof FolderGit2>>;
   const [isWorkdirPickerOpen, setWorkdirPickerOpen] = useState(false);

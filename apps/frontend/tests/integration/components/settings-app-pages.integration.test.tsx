@@ -325,13 +325,16 @@ describe('app settings pages integration', () => {
         },
       },
     };
+    // Both lists start from the full default panel set, so they list every
+    // shipped panel: hiding `git` leaves the rest visible, and moving the task
+    // list up swaps it past `github` rather than past `git`.
     const visibilitySettings: AppSettings = {
       ...initialSettings,
       workspaceSettings: {
         ...initialSettings.workspaceSettings,
         sidePanel: {
-          visiblePanelIds: ['todos'],
-          panelOrder: ['git', 'todos'],
+          visiblePanelIds: ['github', 'todos'],
+          panelOrder: ['git', 'github', 'todos'],
           width: 420,
         },
       },
@@ -342,7 +345,7 @@ describe('app settings pages integration', () => {
         ...visibilitySettings.workspaceSettings,
         sidePanel: {
           ...visibilitySettings.workspaceSettings.sidePanel,
-          panelOrder: ['todos', 'git'],
+          panelOrder: ['git', 'todos', 'github'],
         },
       },
     };

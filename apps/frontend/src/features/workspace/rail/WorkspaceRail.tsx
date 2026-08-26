@@ -30,6 +30,7 @@ export function WorkspaceRail({ chatId, workdir, settings, onWidthChange }: Work
   const todos = todosQuery.data?.todos ?? [];
   const panelTitles: Readonly<Record<WorkspacePanelId, string>> = {
     git: t.git.title,
+    github: t.github.title,
     todos: t.chat.todo.title,
   };
   const availablePanels = useMemo(

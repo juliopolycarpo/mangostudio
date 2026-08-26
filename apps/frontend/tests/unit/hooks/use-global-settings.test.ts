@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { AppSettings, AppSettingsPutBody } from '@mangostudio/shared/app-settings';
 import { DEFAULT_APP_SETTINGS, MAX_TOOL_ITERATIONS_MAX } from '@mangostudio/shared/app-settings';
 import { en } from '@mangostudio/shared/i18n';
+import type { WorkspacePanelSettings } from '@mangostudio/shared/workspaces';
 import { act, renderHook, screen, waitFor } from '../../support/harness/render';
 import {
   advanceTimersByTimeAsync,
@@ -301,26 +302,27 @@ describe('useGlobalSettings', () => {
       result.current.setChatSidebarWidth(10_000);
     });
 
+    // Hiding `git` leaves the other two visible, and moving `todos` up swaps it
+    // past `github`. Both lists start from the full default panel set, so they
+    // grow whenever a panel ships.
+    const expectedSidePanel: WorkspacePanelSettings = {
+      visiblePanelIds: ['github', 'todos'],
+      panelOrder: ['git', 'todos', 'github'],
+      width: 640,
+    };
+
     await waitFor(() =>
       expect(result.current.workspaceSettings).toEqual({
         ...DEFAULT_APP_SETTINGS.workspaceSettings,
         chatSidebarWidth: 420,
-        sidePanel: {
-          visiblePanelIds: ['todos'],
-          panelOrder: ['todos', 'git'],
-          width: 640,
-        },
+        sidePanel: expectedSidePanel,
       })
     );
     await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
     expect(mockPut.mock.calls[0]?.[0].workspaceSettings).toEqual({
       ...DEFAULT_APP_SETTINGS.workspaceSettings,
       chatSidebarWidth: 420,
-      sidePanel: {
-        visiblePanelIds: ['todos'],
-        panelOrder: ['todos', 'git'],
-        width: 640,
-      },
+      sidePanel: expectedSidePanel,
     });
   });
 
