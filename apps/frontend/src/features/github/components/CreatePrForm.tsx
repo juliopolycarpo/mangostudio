@@ -144,7 +144,16 @@ export function CreatePrForm({ chatId, needsPush, defaultTitle, onDone }: Create
         <Button type="submit" size="sm" disabled={!title.trim() || mutation.isPending}>
           {needsPush ? t.github.actions.pushAndCreatePr : t.github.createPr.submit}
         </Button>
-        <Button type="button" variant="ghost" size="sm" onClick={onDone}>
+        {/* Disabled while submitting: onDone only closes the form, it does not
+            abort the push or create request, so an enabled Cancel would let a
+            pull request appear moments after the form it was made in vanished. */}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onDone}
+          disabled={mutation.isPending}
+        >
           {t.github.createPr.cancel}
         </Button>
       </div>
