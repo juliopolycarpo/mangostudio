@@ -19,6 +19,10 @@ import type {
   GithubPrActionResponse,
   GithubPrSummary,
 } from '@mangostudio/shared/github';
+import {
+  requireRepoRoot as requireRepoRootDefault,
+  withMutationLock as withMutationLockDefault,
+} from '../../git/application/git-write-service';
 import { GhPrSummaryOutputSchema, GithubOutputError, readGhOutput } from '../domain/gh-output';
 import { toPrSummary } from '../domain/github-normalizers';
 import {
@@ -70,6 +74,12 @@ export interface GithubWriteServiceOptions {
   /** Injected so a test can supply a template without a filesystem. */
   readonly pullRequestTemplate?: (request: GithubWriteRequest) => Promise<string>;
   readonly publish?: typeof publishGithubWriteInvalidation;
+  /**
+   * Injected so a test can serialize a checkout without a real git checkout
+   * or the runtime connection `requireRepoRoot` resolves it through.
+   */
+  readonly requireRepoRoot?: typeof requireRepoRootDefault;
+  readonly withMutationLock?: typeof withMutationLockDefault;
 }
 
 /**
@@ -90,6 +100,8 @@ export function createGithubWriteService(
     options.pullRequestTemplate ??
     ((request: GithubWriteRequest) => readPullRequestTemplate(request, request.chatId));
   const publish = options.publish ?? publishGithubWriteInvalidation;
+  const requireRepoRoot = options.requireRepoRoot ?? requireRepoRootDefault;
+  const withMutationLock = options.withMutationLock ?? withMutationLockDefault;
 
   const target = (request: GithubWriteRequest): GhCommandTarget => ({
     cwd: request.workdir,
@@ -126,7 +138,18 @@ export function createGithubWriteService(
     const resolution = await resolveRepo(request.workdir, request.selection, request.signal);
     if (resolution.state !== 'ok') return resolution;
 
-    await client.run(command, { number }, target(request));
+    const runMutation = () => client.run(command, { number }, target(request));
+    // `pr checkout` fetches a ref and switches the working tree, exactly what
+    // the git write service's own mutations do — and it runs outside their
+    // queue unless it takes the same lock. Serializing it here is what stops
+    // a checkout from racing a stage, commit, branch switch, or worktree
+    // operation on the same repository against a moving index or working tree.
+    if (command === 'pr.checkout') {
+      const root = await requireRepoRoot(request.workdir, request.signal, request.selection);
+      await withMutationLock(request.selection.environmentId, root, runMutation);
+    } else {
+      await runMutation();
+    }
     // The mutation already landed on GitHub or the working tree at this
     // point; only the convenience readback below can still fail. Settling
     // first means an aborted, timed-out, or unparseable readback still leaves

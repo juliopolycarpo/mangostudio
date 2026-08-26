@@ -36,6 +36,20 @@ interface Published {
   readonly operation: GithubWriteOperation;
 }
 
+/**
+ * `requireRepoRoot` and `withMutationLock` reach the runtime connection and
+ * a shared queue keyed by (environment, root) respectively — real for the
+ * checkout lock, but exactly what a unit test for the write service itself
+ * should not have to stand up. `withMutationLock` here just runs the
+ * mutation directly, since these tests are not the ones asserting ordering
+ * against a concurrent git write.
+ */
+const noopRepoRootDeps = {
+  requireRepoRoot: () => Promise.resolve('/remote/repo'),
+  withMutationLock: <T>(_environmentId: string, _scope: string, mutation: () => Promise<T>) =>
+    mutation(),
+};
+
 function createService(client: FakeGithubCli, published: Published[] = []) {
   return createGithubWriteService({
     client,
@@ -43,6 +57,7 @@ function createService(client: FakeGithubCli, published: Published[] = []) {
     currentBranch: () => Promise.resolve('feat/panel'),
     pullRequestTemplate: () => Promise.resolve('## Summary\n\n## Test Plan\n- [ ] `bun run check`'),
     publish: (target, operation) => published.push({ chatId: target.chatId, operation }),
+    ...noopRepoRootDeps,
   });
 }
 
@@ -162,6 +177,7 @@ describe('GitHub write service', () => {
         currentBranch: () => Promise.resolve('feat/panel'),
         pullRequestTemplate: () => Promise.resolve(''),
         publish: (target, op) => published.push({ chatId: target.chatId, operation: op }),
+        ...noopRepoRootDeps,
       });
 
       const before = await cache.read({ ...SELECTION, subject: 'inbox' }, 'v', () =>
@@ -192,6 +208,7 @@ describe('GitHub write service', () => {
       currentBranch: () => Promise.resolve('feat/panel'),
       pullRequestTemplate: () => Promise.resolve(''),
       publish: (target, op) => published.push({ chatId: target.chatId, operation: op }),
+      ...noopRepoRootDeps,
     });
 
     const before = await cache.read({ ...SELECTION, subject: 'inbox' }, 'v', () =>
@@ -223,6 +240,7 @@ describe('GitHub write service', () => {
       currentBranch: () => Promise.resolve('feat/panel'),
       pullRequestTemplate: () => Promise.resolve(''),
       publish: () => undefined,
+      ...noopRepoRootDeps,
     });
 
     const listOnce = () =>
@@ -267,5 +285,35 @@ describe('GitHub write service', () => {
     await expect(
       writes.createPullRequest(REQUEST, { chatId: 'chat-1', title: 'T' })
     ).rejects.toBeInstanceOf(GithubOutputError);
+  });
+
+  /**
+   * `gh pr checkout` fetches a ref and switches the working tree, exactly
+   * what the git write service's own mutations do — so it has to take the
+   * same repository-scoped lock they do, or a concurrent stage, commit, or
+   * worktree operation can race it. `pr ready` never touches the working
+   * tree, so it must not pay for a lock it does not need.
+   */
+  it('serializes a checkout through the resolved repository root, not a ready', async () => {
+    const client = createClient();
+    const lockCalls: Array<{ environmentId: string; scope: string }> = [];
+    const writes = createGithubWriteService({
+      client,
+      cache: createGithubCache(),
+      currentBranch: () => Promise.resolve('feat/panel'),
+      pullRequestTemplate: () => Promise.resolve(''),
+      publish: () => undefined,
+      requireRepoRoot: () => Promise.resolve('/remote/repo-root'),
+      withMutationLock: (environmentId, scope, mutation) => {
+        lockCalls.push({ environmentId, scope });
+        return mutation();
+      },
+    });
+
+    await writes.checkoutPullRequest(REQUEST, { chatId: 'chat-1', number: 7 });
+    expect(lockCalls).toEqual([{ environmentId: 'devbox', scope: '/remote/repo-root' }]);
+
+    await writes.markPullRequestReady(REQUEST, { chatId: 'chat-1', number: 7 });
+    expect(lockCalls).toEqual([{ environmentId: 'devbox', scope: '/remote/repo-root' }]);
   });
 });
