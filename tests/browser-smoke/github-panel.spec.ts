@@ -79,18 +79,16 @@ test('github rail panel renders and obeys its visibility setting', async ({ page
   // Turning the panel off in settings must remove it from the rail — the
   // cheapest end-to-end proof that the settings normalizer and the registry
   // agree on the panel id.
-  // Settings edits are applied to the query cache first and PUT after a
-  // debounce, so a click that lands before the initial GET resolves is undone
-  // by that response overwriting the cache — the checkbox visibly springs back.
-  // Locally the GET is instant and this never shows; on a cold runner it is the
-  // difference between a green spec and "clicking the checkbox did not change
-  // its state". Waiting for the read settles it before touching anything.
-  const settingsLoaded = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'GET' && response.url().includes('/api/settings/app')
-  );
-  await page.goto('/settings/general');
-  await settingsLoaded;
+  //
+  // Navigated in-app rather than with `goto`. Every full load re-bootstraps the
+  // shell — session, settings, chats, environments, agents — and the API's
+  // `general` bucket is 100 requests a minute *per IP*, which on CI is one IP
+  // for the whole suite. This spec was the sixth to sign up and pushed the
+  // suite over it, and the spec that ran next died on "too many requests"
+  // looking like its own feature had broken. Client-side navigation costs a
+  // route's queries instead of an application's.
+  await page.getByRole('complementary').getByRole('button', { name: 'Settings' }).click();
+  await expect(page).toHaveURL(/\/settings/, { timeout: 15_000 });
 
   const toggle = page.getByRole('checkbox', { name: 'Show GitHub', exact: true });
   await expect(toggle).toBeChecked({ timeout: 15_000 });
@@ -108,10 +106,23 @@ test('github rail panel renders and obeys its visibility setting', async ({ page
   await expect(toggle).not.toBeChecked({ timeout: 10_000 });
   await saved;
 
-  await page.goto('/');
-  await expect(page.getByRole('button', { name: 'Show GitHub panel' })).toHaveCount(0, {
+  // Back to the chat in-app, for the same budget reason as above. The rail
+  // re-derives its panels from the settings the toggle just wrote, and those
+  // went through `normalizeWorkspaceSettings` on the way in — so a normalizer
+  // that backfilled a panel the user had explicitly hidden would put the icon
+  // straight back here, which is the regression this assertion exists for.
+  await page.getByRole('navigation', { name: 'Chats' }).getByRole('button').first().click();
+
+  // Assert we are actually back on the chat surface before asserting an absence.
+  // This chat has no folder and no todos, so `git` and `todos` are unavailable
+  // regardless — GitHub was the only panel the rail could offer it. That makes
+  // "no GitHub button" true on every other route in the app too, and an absence
+  // assertion that holds everywhere proves nothing.
+  await expect(page.getByRole('textbox', { name: /Ask the AI model anything/i })).toBeVisible({
     timeout: 15_000,
   });
+  await expect(page.getByTestId('github-panel')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Show GitHub panel' })).toHaveCount(0);
 
   expect(consoleErrors).toEqual([]);
 });
