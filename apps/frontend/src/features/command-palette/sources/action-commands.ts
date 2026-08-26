@@ -68,6 +68,13 @@ export interface ActionCommandParams {
    * fire-and-forget event, so it has to be mounted before the request is made.
    */
   readonly onOpenGithubPanel: () => void | Promise<void>;
+  /**
+   * Navigates to the chat surface, opens the GitHub panel, and asks it to
+   * switch to the pull requests tab with the create form open — what the row
+   * labeled "Create pull request" promises rather than a second "open the
+   * panel" affordance.
+   */
+  readonly onCreateGithubPr: () => void | Promise<void>;
 }
 
 export function actionCommands({
@@ -85,6 +92,7 @@ export function actionCommands({
   onToggleTheme,
   onOpenWorkdirPicker,
   onOpenGithubPanel,
+  onCreateGithubPr,
 }: ActionCommandParams): CommandItem[] {
   const labels = t.commandPalette.actions;
 
@@ -196,7 +204,7 @@ export function actionCommands({
         // the same sentence; the row runs the same affordance the panel does.
         label: t.github.actions.createPr,
         icon: GitPullRequest,
-        run: onOpenGithubPanel,
+        run: onCreateGithubPr,
       },
       {
         id: 'action:github-review-requests',

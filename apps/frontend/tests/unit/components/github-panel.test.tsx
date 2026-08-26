@@ -13,7 +13,8 @@
 import { describe, expect, it } from 'bun:test';
 import { screen } from '@testing-library/react';
 import { GithubPanel } from '../../../src/features/github/components/GithubPanel';
-import { flushAsyncRender } from '../../support/harness/render';
+import { requestGithubCreatePr } from '../../../src/features/github/lib/github-panel-request';
+import { act, flushAsyncRender } from '../../support/harness/render';
 import { renderWithRouter } from '../../support/harness/render-with-router';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
@@ -222,6 +223,27 @@ describe('GithubPanel', () => {
       // waiting — neither section is a reason to blank the other.
       expect(await screen.findByText('This repository has no remote.')).toBeVisible();
       expect(screen.getByText('Nothing is waiting on your review.')).toBeVisible();
+    } finally {
+      scenario.restore();
+    }
+  });
+
+  /**
+   * The command palette's "Create pull request" row reaches the panel through
+   * this same channel. It has to open the form itself, not just the panel —
+   * otherwise the row runs the same generic "open the panel" affordance a
+   * sibling row already offers, under a label that promises more.
+   */
+  it('opens the create-pull-request form on a create-pr request', async () => {
+    const { scenario } = await renderPanel();
+    try {
+      expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
+
+      act(() => {
+        requestGithubCreatePr();
+      });
+
+      expect(await screen.findByLabelText('Title')).toBeVisible();
     } finally {
       scenario.restore();
     }

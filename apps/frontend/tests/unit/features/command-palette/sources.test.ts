@@ -191,6 +191,7 @@ describe('actionCommands', () => {
       onToggleTheme: jest.fn(),
       onOpenWorkdirPicker: jest.fn(),
       onOpenGithubPanel: jest.fn(),
+      onCreateGithubPr: jest.fn(),
       ...overrides,
     });
   }
@@ -257,5 +258,21 @@ describe('actionCommands', () => {
     expect(withQuota.find((item) => item.id === 'action:refresh-quota')?.label).toBe(
       'Refresh Codex quota'
     );
+  });
+
+  /**
+   * The row is labeled "Create pull request", not "Open GitHub panel" — it
+   * has to run the affordance its own label promises, not the generic one a
+   * sibling row already offers.
+   */
+  it('runs the create-pull-request action from the row of that name, not the generic open', () => {
+    const onOpenGithubPanel = jest.fn();
+    const onCreateGithubPr = jest.fn();
+    const items = build({ onOpenGithubPanel, onCreateGithubPr });
+
+    items.find((item) => item.id === 'action:github-create-pr')?.run();
+
+    expect(onCreateGithubPr).toHaveBeenCalledTimes(1);
+    expect(onOpenGithubPanel).not.toHaveBeenCalled();
   });
 });

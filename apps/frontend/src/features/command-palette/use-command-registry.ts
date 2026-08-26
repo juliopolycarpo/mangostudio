@@ -24,6 +24,7 @@ import {
   externalAgentSelectable,
   useExternalAgents,
 } from '@/features/external-agents/useExternalAgents';
+import { requestGithubCreatePr } from '@/features/github/lib/github-panel-request';
 import { requestRailPanel } from '@/features/workspace/rail/rail-panel-request';
 import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
@@ -161,6 +162,15 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
         // into an empty listener set and silently leave the rail on `git`.
         await navigate({ to: '/' });
         requestRailPanel('github');
+      },
+      onCreateGithubPr: async () => {
+        onRun();
+        // Same ordering as onOpenGithubPanel, for the same reason — both
+        // requests are fire-and-forget events the panel can only hear once it
+        // is mounted, which navigating is what guarantees.
+        await navigate({ to: '/' });
+        requestRailPanel('github');
+        requestGithubCreatePr();
       },
     });
 

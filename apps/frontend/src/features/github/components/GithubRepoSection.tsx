@@ -6,7 +6,7 @@ import type {
 import { type UseQueryResult, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FolderOpen, GitPullRequest, Plus, RefreshCw } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
@@ -17,6 +17,7 @@ import { resolveApiErrorMessage } from '@/lib/utils';
 import { checkoutPullRequest } from '../api';
 import { useIssueToNewChat } from '../hooks/use-issue-to-new-chat';
 import { type GithubPanelPrefs, ISSUE_FILTERS, PR_FILTERS } from '../lib/github-panel-prefs';
+import { onGithubCreatePrRequest } from '../lib/github-panel-request';
 import { githubIssuesQueryOptions, githubPrsQueryOptions } from '../queries';
 import { CreatePrForm } from './CreatePrForm';
 import { GithubIssueRow } from './GithubIssueRow';
@@ -68,6 +69,21 @@ export function GithubRepoSection({
   const { t } = useI18n();
   const [tab, setTab] = useState<RepoTab>('prs');
   const [selectedPr, setSelectedPr] = useState<number | null>(null);
+  // Owned here rather than by `PrsPane`, which owns `creating` itself: a
+  // request can arrive while `PrsPane` is not even mounted yet (the tab was
+  // on issues), so the flag has to survive the tab switch that mounts it.
+  // `PrsPane` clears it once it has opened the form.
+  const [pendingCreatePr, setPendingCreatePr] = useState(false);
+
+  useEffect(
+    () =>
+      onGithubCreatePrRequest(() => {
+        setTab('prs');
+        setSelectedPr(null);
+        setPendingCreatePr(true);
+      }),
+    []
+  );
 
   const prsQuery = useQuery({
     ...githubPrsQueryOptions(chatId, prefs.prFilter),
@@ -119,6 +135,8 @@ export function GithubRepoSection({
               prefs={prefs}
               onPrefsChange={onPrefsChange}
               query={prsQuery}
+              openCreateForm={pendingCreatePr}
+              onCreateFormOpened={() => setPendingCreatePr(false)}
             />
           ) : (
             <IssuesPane
@@ -220,6 +238,8 @@ function PrsPane({
   prefs,
   onPrefsChange,
   query,
+  openCreateForm,
+  onCreateFormOpened,
 }: {
   readonly chatId: string;
   readonly branchName: string | null;
@@ -229,6 +249,9 @@ function PrsPane({
   readonly prefs: GithubPanelPrefs;
   readonly onPrefsChange: (prefs: GithubPanelPrefs) => void;
   readonly query: UseQueryResult<GithubPrsResponse, Error>;
+  /** True for one render: a `requestGithubCreatePr` reached this pane already mounted. */
+  readonly openCreateForm: boolean;
+  readonly onCreateFormOpened: () => void;
 }) {
   const { t } = useI18n();
   const { toast } = useToast();
@@ -238,6 +261,12 @@ function PrsPane({
   // unmounts with this pane either way; a flag that outlived it brought the
   // form back empty, discarding the draft while still looking like it was open.
   const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    if (!openCreateForm) return;
+    setCreating(true);
+    onCreateFormOpened();
+  }, [openCreateForm, onCreateFormOpened]);
 
   const checkout = useMutation({
     mutationFn: (number: number) => checkoutPullRequest({ chatId, number }),
