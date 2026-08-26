@@ -68,7 +68,6 @@ export function GithubRepoSection({
   const { t } = useI18n();
   const [tab, setTab] = useState<RepoTab>('prs');
   const [selectedPr, setSelectedPr] = useState<number | null>(null);
-  const [creating, setCreating] = useState(false);
 
   const prsQuery = useQuery({
     ...githubPrsQueryOptions(chatId, prefs.prFilter),
@@ -115,8 +114,6 @@ export function GithubRepoSection({
               chatId={chatId}
               branchName={branchName}
               needsPush={needsPush}
-              creating={creating}
-              onCreatingChange={setCreating}
               selectedPr={selectedPr}
               onSelectPr={setSelectedPr}
               prefs={prefs}
@@ -218,8 +215,6 @@ function PrsPane({
   chatId,
   branchName,
   needsPush,
-  creating,
-  onCreatingChange,
   selectedPr,
   onSelectPr,
   prefs,
@@ -229,8 +224,6 @@ function PrsPane({
   readonly chatId: string;
   readonly branchName: string | null;
   readonly needsPush: boolean;
-  readonly creating: boolean;
-  readonly onCreatingChange: (creating: boolean) => void;
   readonly selectedPr: number | null;
   readonly onSelectPr: (number: number | null) => void;
   readonly prefs: GithubPanelPrefs;
@@ -240,6 +233,11 @@ function PrsPane({
   const { t } = useI18n();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  // Owned here rather than by the section above, so leaving the tab closes the
+  // form. `CreatePrForm` holds the typed title and body in its own state and
+  // unmounts with this pane either way; a flag that outlived it brought the
+  // form back empty, discarding the draft while still looking like it was open.
+  const [creating, setCreating] = useState(false);
 
   const checkout = useMutation({
     mutationFn: (number: number) => checkoutPullRequest({ chatId, number }),
@@ -278,14 +276,14 @@ function PrsPane({
           chatId={chatId}
           needsPush={needsPush}
           defaultTitle={branchName ?? ''}
-          onDone={() => onCreatingChange(false)}
+          onDone={() => setCreating(false)}
         />
       ) : (
         <Button
           type="button"
           variant="secondary"
           size="sm"
-          onClick={() => onCreatingChange(true)}
+          onClick={() => setCreating(true)}
           className="w-full"
         >
           <Plus size={ICON_SM} />
