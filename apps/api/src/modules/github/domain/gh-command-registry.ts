@@ -74,6 +74,16 @@ const GH_SEARCH_PR_FIELDS = 'number,title,url,state,isDraft,updatedAt,author,lab
 const PR_CHECKS_ACCEPTED_EXIT_CODES: readonly number[] = [1, 8];
 
 /**
+ * `gh pr checkout` fetches a ref and switches the working tree onto it, which
+ * is the same work `git worktree add` does — and that one is given 60s in
+ * `git-worktree-service.ts` for exactly this reason. Without an override it
+ * would inherit the runtime's 15s read default and be SIGKILLed mid-fetch on a
+ * large pull request or a slow network, leaving a half-fetched repository and a
+ * panel that never learned the branch moved.
+ */
+const PR_CHECKOUT_TIMEOUT_MS = 60_000;
+
+/**
  * Page size, matching the contract's own cap. Redeclared here rather than
  * imported because the contract keeps it private: this is the argv-side bound,
  * and a slot has to validate whatever reaches it, not whatever an HTTP layer
@@ -127,6 +137,8 @@ export interface GhCommandSpec<P> {
   readonly mutation: boolean;
   /** Non-zero exits this command uses to report rather than to fail. */
   readonly acceptedExitCodes?: readonly number[];
+  /** Overrides the runtime's default read timeout for a command that does real work. */
+  readonly timeoutMs?: number;
   /** Pure. The only code in the hub permitted to build a `gh` argv. */
   readonly argv: (params: P) => readonly string[];
 }
@@ -319,6 +331,7 @@ const GH_COMMANDS = {
     id: 'pr.checkout',
     params: PrRefParamsSchema,
     mutation: true,
+    timeoutMs: PR_CHECKOUT_TIMEOUT_MS,
     argv: (params: Static<typeof PrRefParamsSchema>) => ['pr', 'checkout', String(params.number)],
   },
 } as const;

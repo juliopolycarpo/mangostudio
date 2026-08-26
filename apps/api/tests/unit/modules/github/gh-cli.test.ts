@@ -329,6 +329,29 @@ describe('gh command facade', () => {
     ]);
   });
 
+  /**
+   * `gh pr checkout` fetches a ref and switches the working tree, which the
+   * git module already gives 60s for under `worktree add`. Left to the
+   * runtime's 15s read default it was SIGKILLed mid-fetch on a large pull
+   * request, and only the reads may fall back to that default.
+   */
+  it('gives a checkout the runtime the headroom its spec asks for', async () => {
+    const timeouts: Array<number | undefined> = [];
+    const cli = createGhCli({
+      runner: (_args, runOptions) => {
+        timeouts.push(runOptions.timeoutMs);
+        return Promise.resolve({ stdout: '', stderr: '', exitCode: 0 });
+      },
+      probeCwd: () => Promise.resolve('/remote/home'),
+    });
+    const target = { cwd: '/remote/repo', selection: { userId: 'u', environmentId: 'devbox' } };
+
+    await cli.run('pr.checkout', { number: 42 }, target);
+    await cli.run('pr.list', { filter: 'open', limit: 20 }, target);
+
+    expect(timeouts).toEqual([60_000, undefined]);
+  });
+
   it('validates slots before any argv reaches the runtime', async () => {
     let invoked = false;
     const cli = createGhCli({

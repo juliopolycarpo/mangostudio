@@ -328,6 +328,7 @@ export function createGhCli(options: CreateGhCliOptions = {}): GithubCli {
         userId: target.selection.userId,
         environmentId: target.selection.environmentId,
         mutation: spec.mutation,
+        ...(spec.timeoutMs === undefined ? {} : { timeoutMs: spec.timeoutMs }),
         ...(spec.acceptedExitCodes ? { acceptedExitCodes: spec.acceptedExitCodes } : {}),
         ...(target.signal ? { signal: target.signal } : {}),
       });
