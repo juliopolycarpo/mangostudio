@@ -99,13 +99,14 @@ const DEFAULT_STDOUT = {
       repository: {
         pullRequest: {
           reviewThreads: {
+            totalCount: 1,
             nodes: [
               {
                 isResolved: false,
                 isOutdated: true,
                 path: 'apps/api/src/x.ts',
                 line: null,
-                comments: { nodes: [{ author: null, body: 'gone' }] },
+                comments: { totalCount: 1, nodes: [{ author: null, body: 'gone' }] },
               },
             ],
           },
@@ -157,6 +158,13 @@ function createPanelPlugin(overrides: FakeGithubCliOptions = {}) {
         currentBranch: () => Promise.resolve('feat/panel'),
         pullRequestTemplate: () => Promise.resolve('## Summary'),
         publish: () => undefined,
+        // `pr checkout` resolves the repository root through the real git
+        // write service to take its mutation lock, which would otherwise
+        // spawn a real `git rev-parse` against `/remote/repo` — a workdir this
+        // route-shape test never backs with an actual checkout. The lock
+        // itself is `git-write-service.test.ts`'s job, not this file's.
+        requireRepoRoot: () => Promise.resolve('/remote/repo'),
+        withMutationLock: (_environmentId, _scope, mutation) => mutation(),
       }),
     }),
   };
