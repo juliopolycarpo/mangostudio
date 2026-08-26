@@ -194,17 +194,33 @@ function ChecksBlock({ chatId, number }: { readonly chatId: string; readonly num
     <div className="space-y-1">
       <MicroLabel as="h4">{t.github.panel.checks}</MicroLabel>
       <ul className="space-y-0.5">
-        {query.data.checks.map((check) => (
-          <li key={`${check.workflow}/${check.name}`} className="flex items-center gap-1.5">
+        {/* Indexed keys because none of gh's own fields identify a row: `name`
+            and `workflow` are both optional and normalized to '', and a matrix
+            job repeats the same pair across several runs — so a composite key
+            collides on exactly the pull requests with the most checks. */}
+        {query.data.checks.map((check, index) => (
+          <li
+            key={`${index}:${check.workflow}/${check.name}`}
+            className="flex items-center gap-1.5"
+          >
             <StatusDot tone={CHECK_TONES[check.bucket]} />
-            <a
-              href={check.link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="min-w-0 flex-1 truncate text-[10px] text-on-surface hover:text-primary"
-            >
-              {check.name}
-            </a>
+            {/* A check with no link is ordinary — gh omits it on a queued run —
+                and `href=""` would resolve to this page, so an empty link is
+                plain text rather than an anchor that reloads the app. */}
+            {check.link ? (
+              <a
+                href={check.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="min-w-0 flex-1 truncate text-[10px] text-on-surface hover:text-primary"
+              >
+                {check.name}
+              </a>
+            ) : (
+              <span className="min-w-0 flex-1 truncate text-[10px] text-on-surface">
+                {check.name}
+              </span>
+            )}
             <span className="shrink-0 text-[10px] text-on-surface-variant">
               {t.github.checkBucket[check.bucket]}
             </span>
