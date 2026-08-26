@@ -379,11 +379,19 @@ export const GithubInboxItemSchema = Type.Object({
  * `review-requested` becomes `--search=review-requested:@me`. Were the field a
  * `Type.String()`, a query parameter would reach argv verbatim on a CLI that can
  * push branches, merge pull requests, and delete repositories.
+ *
+ * `all` is the only member that is not a view somebody browses. The other three
+ * all resolve to `--state=open`, so none of them can answer "is this branch's
+ * pull request merged" — and that is precisely the question the branch list
+ * asks before offering to delete a branch. `all` maps to `--state=all` and
+ * exists for that annotation: a merged branch is visibly safe to delete only if
+ * closed and merged pull requests are reachable at all.
  */
 export const GithubPrFilterSchema = Type.Union([
   Type.Literal('open'),
   Type.Literal('mine'),
   Type.Literal('review-requested'),
+  Type.Literal('all'),
 ]);
 
 /** Closed for the same reason as `GithubPrFilterSchema`: it selects gh flags. */

@@ -136,11 +136,19 @@ function flagValue(name: string, value: string | number): string {
   return `--${name}=${value}`;
 }
 
-/** `mine` and `review-requested` pick argv from here; the query string never does. */
+/**
+ * `mine` and `review-requested` pick argv from here; the query string never does.
+ *
+ * `--state` lives in this map rather than beside `pr list` because `all` is the
+ * one filter that changes it. The three open views keep the state token first so
+ * their argv is byte-identical to when it was hardcoded — a filter is a choice of
+ * flags, and this is the only table that gets to make it.
+ */
 const PR_FILTER_ARGV: Record<GithubPrFilter, readonly string[]> = {
-  open: [],
-  mine: ['--author=@me'],
-  'review-requested': ['--search=review-requested:@me'],
+  open: ['--state=open'],
+  mine: ['--state=open', '--author=@me'],
+  'review-requested': ['--state=open', '--search=review-requested:@me'],
+  all: ['--state=all'],
 };
 
 const ISSUE_FILTER_ARGV: Record<GithubIssueFilter, readonly string[]> = {
@@ -175,7 +183,6 @@ const GH_COMMANDS = {
     argv: (params: Static<typeof PrListParamsSchema>) => [
       'pr',
       'list',
-      '--state=open',
       ...PR_FILTER_ARGV[params.filter],
       flagValue('limit', params.limit),
       '--json',

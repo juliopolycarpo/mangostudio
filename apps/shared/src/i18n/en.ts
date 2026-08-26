@@ -1866,6 +1866,7 @@ export const messages: Messages = {
       open: 'Open',
       mine: 'Mine',
       'review-requested': 'Review requested',
+      all: 'All',
     },
     issueFilter: {
       open: 'Open',

@@ -1893,6 +1893,7 @@ export const messages = {
       open: 'Abertos',
       mine: 'Meus',
       'review-requested': 'Revisão solicitada',
+      all: 'Todos',
     },
     issueFilter: {
       open: 'Abertas',

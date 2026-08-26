@@ -105,6 +105,11 @@ describe('gh command registry', () => {
     expect(buildGhCommandArgv('pr.list', { filter: 'review-requested', limit: 5 })).toContain(
       '--search=review-requested:@me'
     );
+    // The one filter that widens the state: the branch list annotates a merged
+    // branch as safe to delete, which no `--state=open` view can ever report.
+    const allArgv = buildGhCommandArgv('pr.list', { filter: 'all', limit: 5 });
+    expect(allArgv).toContain('--state=all');
+    expect(allArgv).not.toContain('--state=open');
     expect(buildGhCommandArgv('issue.list', { filter: 'assigned', limit: 5 })).toContain(
       '--assignee=@me'
     );
