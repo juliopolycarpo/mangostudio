@@ -1726,11 +1726,164 @@ export const messages: Messages = {
     noPr: 'No pull request for this branch.',
     defaultBranch: 'Default branch: {branch}',
     refs: '{base} ← {head}',
+    /**
+     * The Git panel's badge vocabulary, keyed lowercase because its one caller
+     * indexes it with `state.toLowerCase()` and it carries `draft`, which is not
+     * a pull request state at all. `prState` below is the enum-keyed block the
+     * GitHub panel uses; consolidating the two is a frontend follow-up.
+     */
     states: {
       open: 'Open',
       closed: 'Closed',
       merged: 'Merged',
       draft: 'Draft',
+    },
+
+    panel: {
+      inbox: 'Waiting on you',
+      inboxHint: 'Pull requests across every repository that are waiting for your review.',
+      repo: 'This repo',
+      prs: 'Pull requests',
+      issues: 'Issues',
+      checks: 'Checks',
+      reviewComments: 'Review comments',
+    },
+
+    /**
+     * Keyed by the wire value of the four not-connected states so the panel can
+     * index straight off the response instead of switching on it. One sentence
+     * per state, and one hint that says what to do about it.
+     */
+    connection: {
+      'gh-not-installed': 'GitHub CLI is not installed where this chat runs.',
+      'not-authenticated': 'GitHub CLI is not signed in where this chat runs.',
+      'no-remote': 'This repository has no remote.',
+      'not-a-github-remote': 'This repository does not have a GitHub remote.',
+    },
+    connectionHint: {
+      'gh-not-installed': 'Install gh on that machine, then refresh.',
+      'not-authenticated': 'Run gh auth login on that machine, then refresh.',
+      'no-remote': 'Add a remote with git remote add origin, then refresh.',
+      'not-a-github-remote': 'The GitHub panel only reads repositories hosted on GitHub.',
+    },
+
+    empty: {
+      prs: 'No pull requests match this filter.',
+      issues: 'No issues match this filter.',
+      inbox: 'Nothing is waiting on your review.',
+      checks: 'This pull request runs no checks.',
+      threads: 'No review comments on this pull request.',
+    },
+
+    prState: {
+      OPEN: 'Open',
+      CLOSED: 'Closed',
+      MERGED: 'Merged',
+    },
+    issueState: {
+      OPEN: 'Open',
+      CLOSED: 'Closed',
+    },
+    reviewDecision: {
+      APPROVED: 'Approved',
+      CHANGES_REQUESTED: 'Changes requested',
+      REVIEW_REQUIRED: 'Review required',
+    },
+    /** Lives outside `reviewDecision`: "none" is a null, not a member of the union. */
+    reviewDecisionNone: 'No review yet',
+    reviewState: {
+      APPROVED: 'Approved',
+      CHANGES_REQUESTED: 'Changes requested',
+      COMMENTED: 'Commented',
+      DISMISSED: 'Dismissed',
+      PENDING: 'Pending',
+    },
+    checkBucket: {
+      pass: 'Passed',
+      fail: 'Failed',
+      pending: 'Running',
+      skipping: 'Skipped',
+      cancel: 'Cancelled',
+    },
+    mergeState: {
+      BEHIND: 'Behind the base branch',
+      BLOCKED: 'Merge blocked',
+      CLEAN: 'Ready to merge',
+      DIRTY: 'Conflicts with the base branch',
+      DRAFT: 'Still a draft',
+      HAS_HOOKS: 'Ready to merge, with repository hooks',
+      UNKNOWN: 'Merge state unknown',
+      UNSTABLE: 'Mergeable, but checks are failing',
+    },
+    mergeable: {
+      MERGEABLE: 'No conflicts',
+      CONFLICTING: 'Has conflicts',
+      UNKNOWN: 'Checking for conflicts',
+    },
+    prFilter: {
+      open: 'Open',
+      mine: 'Mine',
+      'review-requested': 'Review requested',
+    },
+    issueFilter: {
+      open: 'Open',
+      assigned: 'Assigned to me',
+      mine: 'Created by me',
+    },
+
+    row: {
+      number: '#{number}',
+      draft: 'Draft',
+      author: 'by {author}',
+      bot: 'bot',
+      diffStat: '+{additions} / -{deletions} across {files} files',
+      checksSummary: '{passed} passed, {failed} failed, {pending} running',
+      assignees: 'Assigned to {assignees}',
+      unassigned: 'Unassigned',
+      labels: 'Labels',
+    },
+
+    actions: {
+      openInBrowser: 'Open in browser',
+      copyUrl: 'Copy URL',
+      copyReference: 'Copy owner/repo#123',
+      copied: 'Copied to the clipboard.',
+      pasteReference: 'Paste the reference into the message',
+      reviewCommentsToComposer: 'Send review comments to the composer',
+      issueToNewChat: 'Start a new chat from this issue',
+      createPr: 'Create pull request',
+      markReady: 'Mark ready for review',
+      checkout: 'Check out this branch',
+      refresh: 'Refresh',
+    },
+
+    createPr: {
+      title: 'Create pull request',
+      titleLabel: 'Title',
+      titlePlaceholder: 'Describe the change in one line',
+      bodyLabel: 'Description',
+      bodyPlaceholder: 'What changed, and why',
+      baseLabel: 'Base branch',
+      draftLabel: 'Create as a draft',
+      submit: 'Create pull request',
+      cancel: 'Cancel',
+      success: 'Pull request #{number} created.',
+      error: 'The pull request could not be created.',
+    },
+
+    staleness: {
+      updated: 'Updated {relative}',
+      justNow: 'just now',
+      refreshing: 'Refreshing...',
+    },
+
+    errors: {
+      prs: 'Pull requests could not be loaded.',
+      issues: 'Issues could not be loaded.',
+      inbox: 'Your review queue could not be loaded.',
+      checks: 'Checks could not be loaded.',
+      threads: 'Review comments could not be loaded.',
+      action: 'The GitHub action failed.',
     },
   },
 

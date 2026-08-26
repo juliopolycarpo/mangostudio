@@ -1752,11 +1752,165 @@ export const messages = {
     noPr: 'Nenhum pull request para esta branch.',
     defaultBranch: 'Branch padrão: {branch}',
     refs: '{base} ← {head}',
+    /**
+     * O vocabulário de badges do painel Git, com chaves em minúsculas porque o
+     * único consumidor indexa com `state.toLowerCase()` e o bloco carrega
+     * `draft`, que não é um estado de pull request. `prState` abaixo é o bloco
+     * com as chaves do enum, usado pelo painel do GitHub; unificar os dois é um
+     * follow-up do frontend.
+     */
     states: {
       open: 'Aberto',
       closed: 'Fechado',
       merged: 'Integrado',
       draft: 'Rascunho',
+    },
+
+    panel: {
+      inbox: 'Esperando por você',
+      inboxHint: 'Pull requests de todos os repositórios que aguardam a sua revisão.',
+      repo: 'Neste repositório',
+      prs: 'Pull requests',
+      issues: 'Issues',
+      checks: 'Verificações',
+      reviewComments: 'Comentários de revisão',
+    },
+
+    /**
+     * Chaveado pelo valor de rede dos quatro estados de "sem conexão", para o
+     * painel indexar direto pela resposta em vez de fazer um switch. Uma frase
+     * por estado e uma dica dizendo o que fazer a respeito.
+     */
+    connection: {
+      'gh-not-installed': 'A CLI do GitHub não está instalada onde este chat roda.',
+      'not-authenticated': 'A CLI do GitHub não está autenticada onde este chat roda.',
+      'no-remote': 'Este repositório não tem remoto configurado.',
+      'not-a-github-remote': 'Este repositório não tem um remoto no GitHub.',
+    },
+    connectionHint: {
+      'gh-not-installed': 'Instale o gh naquela máquina e atualize.',
+      'not-authenticated': 'Execute gh auth login naquela máquina e atualize.',
+      'no-remote': 'Adicione um remoto com git remote add origin e atualize.',
+      'not-a-github-remote': 'O painel do GitHub só lê repositórios hospedados no GitHub.',
+    },
+
+    empty: {
+      prs: 'Nenhum pull request corresponde a este filtro.',
+      issues: 'Nenhuma issue corresponde a este filtro.',
+      inbox: 'Nada aguardando a sua revisão.',
+      checks: 'Este pull request não executa verificações.',
+      threads: 'Nenhum comentário de revisão neste pull request.',
+    },
+
+    prState: {
+      OPEN: 'Aberto',
+      CLOSED: 'Fechado',
+      MERGED: 'Integrado',
+    },
+    issueState: {
+      OPEN: 'Aberta',
+      CLOSED: 'Fechada',
+    },
+    reviewDecision: {
+      APPROVED: 'Aprovado',
+      CHANGES_REQUESTED: 'Mudanças solicitadas',
+      REVIEW_REQUIRED: 'Revisão necessária',
+    },
+    /** Fica fora de `reviewDecision`: "nenhuma" é um null, não um membro da união. */
+    reviewDecisionNone: 'Ainda sem revisão',
+    reviewState: {
+      APPROVED: 'Aprovada',
+      CHANGES_REQUESTED: 'Mudanças solicitadas',
+      COMMENTED: 'Comentada',
+      DISMISSED: 'Descartada',
+      PENDING: 'Pendente',
+    },
+    checkBucket: {
+      pass: 'Passou',
+      fail: 'Falhou',
+      pending: 'Em execução',
+      skipping: 'Ignorada',
+      cancel: 'Cancelada',
+    },
+    mergeState: {
+      BEHIND: 'Atrás da branch base',
+      BLOCKED: 'Merge bloqueado',
+      CLEAN: 'Pronto para integrar',
+      DIRTY: 'Conflita com a branch base',
+      DRAFT: 'Ainda é rascunho',
+      HAS_HOOKS: 'Pronto para integrar, com hooks do repositório',
+      UNKNOWN: 'Estado do merge desconhecido',
+      UNSTABLE: 'Pode ser integrado, mas há verificações falhando',
+    },
+    mergeable: {
+      MERGEABLE: 'Sem conflitos',
+      CONFLICTING: 'Com conflitos',
+      UNKNOWN: 'Verificando conflitos',
+    },
+    prFilter: {
+      open: 'Abertos',
+      mine: 'Meus',
+      'review-requested': 'Revisão solicitada',
+    },
+    issueFilter: {
+      open: 'Abertas',
+      assigned: 'Atribuídas a mim',
+      mine: 'Criadas por mim',
+    },
+
+    row: {
+      number: '#{number}',
+      draft: 'Rascunho',
+      author: 'por {author}',
+      bot: 'bot',
+      diffStat: '+{additions} / -{deletions} em {files} arquivos',
+      checksSummary: '{passed} passaram, {failed} falharam, {pending} em execução',
+      assignees: 'Atribuída a {assignees}',
+      unassigned: 'Sem responsável',
+      labels: 'Labels',
+    },
+
+    actions: {
+      openInBrowser: 'Abrir no navegador',
+      copyUrl: 'Copiar URL',
+      copyReference: 'Copiar owner/repo#123',
+      copied: 'Copiado para a área de transferência.',
+      pasteReference: 'Colar a referência na mensagem',
+      reviewCommentsToComposer: 'Enviar os comentários de revisão para o compositor',
+      issueToNewChat: 'Abrir um novo chat a partir desta issue',
+      createPr: 'Criar pull request',
+      markReady: 'Marcar como pronto para revisão',
+      checkout: 'Fazer checkout desta branch',
+      refresh: 'Atualizar',
+    },
+
+    createPr: {
+      title: 'Criar pull request',
+      titleLabel: 'Título',
+      titlePlaceholder: 'Descreva a mudança em uma linha',
+      bodyLabel: 'Descrição',
+      bodyPlaceholder: 'O que mudou e por quê',
+      baseLabel: 'Branch base',
+      draftLabel: 'Criar como rascunho',
+      submit: 'Criar pull request',
+      cancel: 'Cancelar',
+      success: 'Pull request #{number} criado.',
+      error: 'Não foi possível criar o pull request.',
+    },
+
+    staleness: {
+      updated: 'Atualizado {relative}',
+      justNow: 'agora mesmo',
+      refreshing: 'Atualizando...',
+    },
+
+    errors: {
+      prs: 'Não foi possível carregar os pull requests.',
+      issues: 'Não foi possível carregar as issues.',
+      inbox: 'Não foi possível carregar a sua fila de revisões.',
+      checks: 'Não foi possível carregar as verificações.',
+      threads: 'Não foi possível carregar os comentários de revisão.',
+      action: 'A ação do GitHub falhou.',
     },
   },
 
