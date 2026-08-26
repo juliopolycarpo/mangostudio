@@ -1,6 +1,8 @@
 import type {
   GithubIssueFilter,
+  GithubIssuesResponse,
   GithubPrFilter,
+  GithubPrsResponse,
   GithubUnavailableState,
 } from '@mangostudio/shared/github';
 import { type UseQueryResult, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -242,10 +244,7 @@ function PrsPane({
   readonly onSelectPr: (number: number | null) => void;
   readonly prefs: GithubPanelPrefs;
   readonly onPrefsChange: (prefs: GithubPanelPrefs) => void;
-  readonly query: UseQueryResult<
-    Awaited<ReturnType<NonNullable<ReturnType<typeof githubPrsQueryOptions>['queryFn']>>>,
-    Error
-  >;
+  readonly query: UseQueryResult<GithubPrsResponse, Error>;
 }) {
   const { t } = useI18n();
   const { toast } = useToast();
@@ -325,10 +324,7 @@ function IssuesPane({
   readonly workdir: string;
   readonly prefs: GithubPanelPrefs;
   readonly onPrefsChange: (prefs: GithubPanelPrefs) => void;
-  readonly query: UseQueryResult<
-    Awaited<ReturnType<NonNullable<ReturnType<typeof githubIssuesQueryOptions>['queryFn']>>>,
-    Error
-  >;
+  readonly query: UseQueryResult<GithubIssuesResponse, Error>;
 }) {
   const { t } = useI18n();
   const startChat = useIssueToNewChat(chatId, workdir);
