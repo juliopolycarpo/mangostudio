@@ -6,6 +6,13 @@ import {
 } from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { getRuntimeClient } from '../../../services/runtime-client';
+import {
+  detailBoolean,
+  detailExitCode,
+  detailString,
+  detailStringArray,
+  isAbortError,
+} from '../../../services/runtime-client/remote-error-details';
 
 export interface GitRuntimeSelection {
   readonly userId: string;
@@ -152,29 +159,4 @@ function mapGitFailure(args: readonly string[], error: unknown): GitCliError {
     return new GitCliError(args, null, error.message);
   }
   return new GitCliError(args, null, 'Git command failed.');
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
-}
-
-function detailString(error: RuntimeRemoteError, key: string): string | undefined {
-  const value = error.details?.[key];
-  return typeof value === 'string' ? value : undefined;
-}
-
-function detailBoolean(error: RuntimeRemoteError, key: string): boolean {
-  return error.details?.[key] === true;
-}
-
-function detailExitCode(error: RuntimeRemoteError): number | null {
-  const value = error.details?.exitCode;
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  return null;
-}
-
-function detailStringArray(error: RuntimeRemoteError, key: string): string[] | undefined {
-  const value = error.details?.[key];
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) return undefined;
-  return value;
 }
