@@ -179,7 +179,17 @@ export function invalidateAllGitScopes(queryClient: QueryClient, chatId: string)
   return invalidateGitScopes(queryClient, chatId, GIT_SCOPES);
 }
 
-async function invalidateGitScopes(
+/**
+ * Refetches exactly the Git slices a write can have changed.
+ *
+ * Exported for writes that live outside this module but move the same refs —
+ * `gh pr checkout` is one — so they can name their scopes from
+ * {@link gitWriteScopes} instead of invalidating the whole query client.
+ *
+ * @example
+ * await invalidateGitScopes(queryClient, chatId, gitWriteScopes.checkoutRemote);
+ */
+export async function invalidateGitScopes(
   queryClient: QueryClient,
   chatId: string,
   scopes: readonly GitScope[]

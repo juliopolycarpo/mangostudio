@@ -10,13 +10,14 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
+import { gitWriteScopes, invalidateGitScopes } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { checkoutPullRequest } from '../api';
 import { useIssueToNewChat } from '../hooks/use-issue-to-new-chat';
 import { type GithubPanelPrefs, ISSUE_FILTERS, PR_FILTERS } from '../lib/github-panel-prefs';
-import { githubIssuesQueryOptions, githubPrsQueryOptions } from '../queries';
+import { githubIssuesQueryOptions, githubKeys, githubPrsQueryOptions } from '../queries';
 import { CreatePrForm } from './CreatePrForm';
 import { GithubIssueRow } from './GithubIssueRow';
 import { GithubNotConnected } from './GithubNotConnected';
@@ -249,7 +250,13 @@ function PrsPane({
       }
       // The branch just changed under the chat, so every branch-scoped read —
       // the Git panel's state included — is now answering about the old ref.
-      await queryClient.invalidateQueries();
+      // `gh pr checkout` fetches a ref and switches onto it, which is what
+      // `checkoutRemote` already describes, so it reuses that scope list rather
+      // than declaring a parallel one that would drift from it.
+      await Promise.all([
+        invalidateGitScopes(queryClient, chatId, gitWriteScopes.checkoutRemote),
+        queryClient.invalidateQueries({ queryKey: githubKeys.all }),
+      ]);
     },
     onError: (error) => toast(resolveApiErrorMessage(error, t.github.errors.action), 'error'),
   });
