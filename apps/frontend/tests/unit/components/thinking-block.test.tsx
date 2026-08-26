@@ -36,12 +36,18 @@ describe('ThinkingBlock', () => {
     let offsetMs = 0;
     const nowSpy = jest.spyOn(performance, 'now').mockImplementation(() => realNow() + offsetMs);
 
+    // Stamp before mount so the stop-path offset can target 2s from this
+    // origin, not from "now plus a constant". A fixed +2400ms jump only had
+    // a 100ms budget before `Math.round(ms / 1000)` became 3s; the first
+    // flush (lazy markdown on a loaded event loop) regularly spent more than
+    // that in CI.
+    const originMs = realNow();
     const { rerender } = render(
       <ThinkingBlock messageId="msg-timed" text="Timed thought" isStreaming={true} />
     );
     await flushAsyncRender();
 
-    offsetMs = 2_400;
+    offsetMs = originMs + 2_000 - realNow();
     rerender(<ThinkingBlock messageId="msg-timed" text="Timed thought" isStreaming={false} />);
     await flushAsyncRender();
     nowSpy.mockRestore();
