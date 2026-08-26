@@ -26,13 +26,16 @@ import {
   detailStringArray,
   isAbortError,
 } from '../../../services/runtime-client/remote-error-details';
+import {
+  buildGhCommandArgv,
+  GH_COMMAND_SPECS,
+  type GhCommandId,
+  type GhCommandParams,
+} from '../domain/gh-command-registry';
 import { createEnvironmentProbeCache, type ProbeEnvironmentKey } from './environment-probe-cache';
 
 const PROBE_TIMEOUT_MS = 5_000;
 const PROBE_CACHE_TTL_MS = 60_000;
-
-const GH_REPO_FIELDS = 'nameWithOwner,defaultBranchRef,url';
-const GH_PR_FIELDS = 'number,title,state,isDraft,url,headRefName,baseRefName';
 
 /** Which machine a `gh` call runs on. Defaults to this user's local runtime. */
 export type GhRuntimeSelection = ProbeEnvironmentKey;
@@ -57,6 +60,15 @@ export interface RunGhOptions {
    * method and refuses a mismatch — it only fails the call.
    */
   readonly mutation?: boolean;
+  /**
+   * Non-zero exits this command uses to report rather than to fail.
+   *
+   * Forwarded to the runtime, which owns the exit-code check. `gh pr checks`
+   * needs it: it exits 1 on a failing check and 8 on a pending one while still
+   * printing the JSON, so without this every red or running pull request would
+   * be a 500 on a read-only panel.
+   */
+  readonly acceptedExitCodes?: readonly number[];
 }
 
 export interface GhCommandResult {
@@ -91,18 +103,29 @@ export class GhCliError extends Error {
   }
 }
 
+/** Where one command runs: a directory, on a machine, for a request. */
+export interface GhCommandTarget {
+  readonly cwd: string;
+  readonly selection: GhRuntimeSelection;
+  readonly signal?: AbortSignal;
+}
+
 export interface GithubCli {
   readonly isAvailable: (selection: GhRuntimeSelection) => Promise<boolean>;
   readonly isAuthenticated: (selection: GhRuntimeSelection) => Promise<boolean>;
-  readonly viewRepo: (
-    cwd: string,
-    selection: GhRuntimeSelection,
-    signal?: AbortSignal
-  ) => Promise<GhCommandResult>;
-  readonly viewCurrentPr: (
-    cwd: string,
-    selection: GhRuntimeSelection,
-    signal?: AbortSignal
+  /**
+   * Runs one registered command.
+   *
+   * There is no per-command method on this facade any more, and that is the
+   * point: a method per command is a second place to spell argv, and the
+   * registry exists so there is only one. The spec also decides `gh.exec` vs
+   * `gh.mutate` and which non-zero exits are reportable, so a caller cannot get
+   * either wrong by forgetting an option.
+   */
+  readonly run: <I extends GhCommandId>(
+    id: I,
+    params: GhCommandParams<I>,
+    target: GhCommandTarget
   ) => Promise<GhCommandResult>;
 }
 
@@ -147,7 +170,12 @@ export async function runGh(
     const runtime = await getRuntimeClient(options.userId, options.environmentId);
     const call = options.mutation ? runtime.gh.mutate : runtime.gh.exec;
     result = await call(
-      { args, cwd: options.cwd, timeoutMs: options.timeoutMs },
+      {
+        args,
+        cwd: options.cwd,
+        timeoutMs: options.timeoutMs,
+        acceptedExitCodes: options.acceptedExitCodes,
+      },
       { signal: options.signal }
     );
   } catch (error) {
@@ -213,7 +241,7 @@ export async function isGhAvailable(
 export function createGhCli(options: CreateGhCliOptions = {}): GithubCli {
   const execute = options.runner ?? runGh;
   const available = options.available ?? isGhAvailable;
-  const probeCwd = options.probeCwd ?? runtimeHomeDir;
+  const probeCwd = options.probeCwd ?? resolveGhHomeCwd;
 
   // `gh auth status` answers for a whole machine, not a directory: it works
   // outside any repository, and its answer cannot vary between two workdirs on
@@ -222,7 +250,7 @@ export function createGhCli(options: CreateGhCliOptions = {}): GithubCli {
   // than once per workdir against a cwd the caller happened to supply.
   const isAuthenticated = createEnvironmentProbeCache({
     probe: async (selection) =>
-      await execute(['auth', 'status'], {
+      await execute(buildGhCommandArgv('auth.status', {}), {
         cwd: await probeCwd(selection),
         userId: selection.userId,
         environmentId: selection.environmentId,
@@ -232,28 +260,39 @@ export function createGhCli(options: CreateGhCliOptions = {}): GithubCli {
     ttlMs: options.probeCacheTtlMs ?? PROBE_CACHE_TTL_MS,
   });
 
-  const read =
-    (args: readonly string[]) =>
-    (cwd: string, selection: GhRuntimeSelection, signal?: AbortSignal) =>
-      execute(args, {
-        cwd,
-        userId: selection.userId,
-        environmentId: selection.environmentId,
-        ...(signal ? { signal } : {}),
-      });
-
   return {
     isAvailable: available,
     isAuthenticated,
-    viewRepo: read(['repo', 'view', '--json', GH_REPO_FIELDS]),
-    viewCurrentPr: read(['pr', 'view', '--json', GH_PR_FIELDS]),
+    // Async so a slot that fails its contract rejects like every other failure
+    // on this facade, rather than throwing synchronously into a caller that is
+    // only prepared for a rejected promise.
+    async run(id, params, target) {
+      const spec = GH_COMMAND_SPECS[id];
+      return await execute(buildGhCommandArgv(id, params), {
+        cwd: target.cwd,
+        userId: target.selection.userId,
+        environmentId: target.selection.environmentId,
+        mutation: spec.mutation,
+        ...(spec.acceptedExitCodes ? { acceptedExitCodes: spec.acceptedExitCodes } : {}),
+        ...(target.signal ? { signal: target.signal } : {}),
+      });
+    },
   };
 }
 
 export const ghCli = createGhCli();
 
-/** The selected runtime's own home directory, which exists on that machine. */
-async function runtimeHomeDir(selection: GhRuntimeSelection): Promise<string> {
+/**
+ * The selected runtime's own home directory, which exists on that machine.
+ *
+ * The cwd for every `gh` call that is about an account rather than a checkout —
+ * `auth status` and the cross-repo inbox search both work outside a repository,
+ * but `Bun.spawn` still needs a directory that exists over there.
+ *
+ * @example
+ * const cwd = await resolveGhHomeCwd({ userId, environmentId });
+ */
+export async function resolveGhHomeCwd(selection: GhRuntimeSelection): Promise<string> {
   const runtime = await getRuntimeClient(selection.userId, selection.environmentId);
   return runtime.manifest.homeDir;
 }

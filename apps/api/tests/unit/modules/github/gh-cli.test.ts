@@ -148,6 +148,51 @@ describe('hub gh CLI facade', () => {
     expect(runtime.calls[0]?.method).toBe('mutate');
   });
 
+  it('forwards the exit codes a command uses to report rather than to fail', async () => {
+    // `gh pr checks` exits 1 on a failing check and 8 on a pending one while
+    // still printing its JSON. The runtime owns the exit-code check, so the
+    // hub has to say which ones are reportable or every red pull request 500s.
+    const received: Array<readonly number[] | undefined> = [];
+    setRuntimeConnectionManagerForTests(
+      new RuntimeConnectionManager({
+        resolveEnvironment: (userId, environmentId) =>
+          Promise.resolve({
+            id: environmentId,
+            userId,
+            name: 'Remote',
+            transportKind: 'stdio',
+            config: {},
+            enabled: true,
+          }),
+        connectors: {
+          stdio: () =>
+            Promise.resolve({
+              client: {
+                manifest: TEST_MANIFEST,
+                gh: {
+                  exec: (params: { acceptedExitCodes?: readonly number[] }) => {
+                    received.push(params.acceptedExitCodes);
+                    return Promise.resolve({ stdout: '[]', stderr: '', exitCode: 8 });
+                  },
+                  mutate: () => Promise.reject(new Error('not a mutation')),
+                },
+              } as unknown as RuntimeClient,
+              close: () => undefined,
+            }),
+        },
+      })
+    );
+
+    await runGh(['pr', 'checks', '42'], {
+      cwd: '/remote/repo',
+      userId: 'user-1',
+      environmentId: 'devbox',
+      acceptedExitCodes: [1, 8],
+    });
+
+    expect(received).toEqual([[1, 8]]);
+  });
+
   it('maps a remote gh_execution failure back onto GhCliError', async () => {
     const runtime = new FakeGhRuntime(TEST_MANIFEST, () =>
       Promise.reject(
@@ -233,8 +278,8 @@ describe('gh command facade', () => {
     const selection = { userId: 'user-1', environmentId: 'devbox' };
 
     await cli.isAuthenticated(selection);
-    await cli.viewRepo('/remote/repo', selection);
-    await cli.viewCurrentPr('/remote/repo', selection);
+    await cli.run('repo.view', {}, { cwd: '/remote/repo', selection });
+    await cli.run('pr.view-current', {}, { cwd: '/remote/repo', selection });
 
     expect(calls).toEqual([
       { args: ['auth', 'status'], cwd: '/remote/home', environmentId: 'devbox' },
@@ -249,6 +294,55 @@ describe('gh command facade', () => {
         environmentId: 'devbox',
       },
     ]);
+  });
+
+  it('takes the runtime method and the accepted exit codes from the spec', async () => {
+    // Neither is a caller's option any more: the registry says which half of
+    // `gh` a command belongs to and which non-zero exits it uses to report, so
+    // a route cannot get either wrong by forgetting to pass one.
+    const options: Array<{ mutation?: boolean; acceptedExitCodes?: readonly number[] }> = [];
+    const cli = createGhCli({
+      runner: (_args, runOptions) => {
+        options.push({
+          mutation: runOptions.mutation,
+          acceptedExitCodes: runOptions.acceptedExitCodes,
+        });
+        return Promise.resolve({ stdout: '', stderr: '', exitCode: 0 });
+      },
+      probeCwd: () => Promise.resolve('/remote/home'),
+    });
+    const target = { cwd: '/remote/repo', selection: { userId: 'u', environmentId: 'devbox' } };
+
+    await cli.run('pr.list', { filter: 'open', limit: 20 }, target);
+    await cli.run('pr.checks', { number: 42 }, target);
+    await cli.run('pr.create', { title: 'T', body: '', head: 'feat/x', draft: false }, target);
+
+    expect(options).toEqual([
+      { mutation: false, acceptedExitCodes: undefined },
+      { mutation: false, acceptedExitCodes: [1, 8] },
+      { mutation: true, acceptedExitCodes: undefined },
+    ]);
+  });
+
+  it('validates slots before any argv reaches the runtime', async () => {
+    let invoked = false;
+    const cli = createGhCli({
+      runner: () => {
+        invoked = true;
+        return Promise.resolve({ stdout: '', stderr: '', exitCode: 0 });
+      },
+      probeCwd: () => Promise.resolve('/remote/home'),
+    });
+
+    await expect(
+      cli.run(
+        'pr.list',
+        // @ts-expect-error the point of the test: an unknown filter must not run.
+        { filter: '--author=attacker', limit: 20 },
+        { cwd: '/remote/repo', selection: { userId: 'u', environmentId: 'devbox' } }
+      )
+    ).rejects.toBeInstanceOf(TypeError);
+    expect(invoked).toBe(false);
   });
 
   it('probes authentication from the runtime home, never from the caller workdir', async () => {
