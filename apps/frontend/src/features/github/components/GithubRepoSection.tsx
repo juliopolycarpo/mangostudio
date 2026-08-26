@@ -17,7 +17,7 @@ import { resolveApiErrorMessage } from '@/lib/utils';
 import { checkoutPullRequest } from '../api';
 import { useIssueToNewChat } from '../hooks/use-issue-to-new-chat';
 import { type GithubPanelPrefs, ISSUE_FILTERS, PR_FILTERS } from '../lib/github-panel-prefs';
-import { githubIssuesQueryOptions, githubKeys, githubPrsQueryOptions } from '../queries';
+import { githubIssuesQueryOptions, githubPrsQueryOptions } from '../queries';
 import { CreatePrForm } from './CreatePrForm';
 import { GithubIssueRow } from './GithubIssueRow';
 import { GithubNotConnected } from './GithubNotConnected';
@@ -250,11 +250,10 @@ function PrsPane({
       // the Git panel's state included — is now answering about the old ref.
       // `gh pr checkout` fetches a ref and switches onto it, which is what
       // `checkoutRemote` already describes, so it reuses that scope list rather
-      // than declaring a parallel one that would drift from it.
-      await Promise.all([
-        invalidateGitScopes(queryClient, chatId, gitWriteScopes.checkoutRemote),
-        queryClient.invalidateQueries({ queryKey: githubKeys.all }),
-      ]);
+      // than declaring a parallel one that would drift from it. That scope
+      // list includes `github`, which `invalidateGitScopes` already resolves
+      // to `githubKeys.all` too, so this needs no separate call of its own.
+      await invalidateGitScopes(queryClient, chatId, gitWriteScopes.checkoutRemote);
     },
     onError: (error) => toast(resolveApiErrorMessage(error, t.github.errors.action), 'error'),
   });

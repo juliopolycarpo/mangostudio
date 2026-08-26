@@ -31,6 +31,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo } from 'react';
+import { githubKeys } from '@/features/github/queries';
 import { client } from '@/lib/api-client';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
@@ -213,6 +214,17 @@ export async function invalidateGitScopes(
     // server publishes the same scope for both.
     ...(scopes.includes('branches')
       ? [queryClient.invalidateQueries({ queryKey: gitWorktreeKeys.detail(chatId) })]
+      : []),
+    // `githubContextKeys` above is the small branch-scoped context widget;
+    // the PR/issue/check/thread reads the GitHub panel itself renders live
+    // under `githubKeys`, unscoped by chat because that is how every other
+    // caller already invalidates them (see GithubRepoSection's own checkout
+    // handler). Without this, a same-client write still looks right — it
+    // invalidates `githubKeys` explicitly alongside this call — but a second
+    // mounted client reachable only through this `git:<chatId>` event would
+    // keep showing the pre-write panel state indefinitely.
+    ...(scopes.includes('github')
+      ? [queryClient.invalidateQueries({ queryKey: githubKeys.all })]
       : []),
   ]);
 }
