@@ -80,6 +80,7 @@
   "/api/git/state": ["get"],
   "/api/git/state/batch": ["post"],
   "/api/git/unstage": ["post"],
+  "/api/git/worktrees": ["delete", "get", "post"],
   "/api/github/context": ["get"],
   "/api/health": ["get"],
   "/api/library/divergence/acks": ["get", "post"],

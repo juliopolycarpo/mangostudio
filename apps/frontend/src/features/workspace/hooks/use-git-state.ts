@@ -1,4 +1,5 @@
 import {
+  type AddWorktreeBody,
   type CommitResponse,
   type DiscardPathsBody,
   type GenerateCommitMessageResponse,
@@ -13,7 +14,9 @@ import {
   type GitRepoState,
   type GitStatus,
   type GitSummary,
+  type GitWorktreeListResponse,
   type InitRepoResponse,
+  type RemoveWorktreeBody,
   type StashListResponse,
 } from '@mangostudio/shared/git';
 import { GIT_SCOPES, type GitScope, gitTopic } from '@mangostudio/shared/realtime';
@@ -68,6 +71,11 @@ const gitCommitKeys = {
   detail: (chatId: string, hash: string) => [...gitCommitKeys.all, chatId, hash] as const,
 };
 
+const gitWorktreeKeys = {
+  all: ['git-worktrees'] as const,
+  detail: (chatId: string) => [...gitWorktreeKeys.all, chatId] as const,
+};
+
 const gitDiffKeys = {
   all: ['git-diff'] as const,
   detail: (chatId: string, input: GitDiffInput) =>
@@ -101,6 +109,11 @@ export const gitWriteScopes = {
   fetch: ['state', 'branches', 'github'],
   pull: ['state', 'branches', 'history', 'commits', 'diffs', 'github'],
   push: ['state', 'branches', 'github'],
+  // Adding or removing a worktree leaves this chat's own tree alone, so neither
+  // publishes `state`. Both ride `branches`, which is the scope the worktree
+  // cache hangs off — see `invalidateGitScopes`.
+  worktreeAdd: ['branches'],
+  worktreeRemove: ['branches'],
 } as const satisfies Record<string, readonly GitScope[]>;
 
 type GitPathSelection = { paths: string[] } | { all: true };
@@ -128,6 +141,8 @@ interface DeleteBranchInput {
   name: string;
   force?: boolean;
 }
+export type AddWorktreeInput = Omit<AddWorktreeBody, 'chatId'>;
+export type RemoveWorktreeInput = Omit<RemoveWorktreeBody, 'chatId'>;
 export interface GitDiffInput {
   path: string;
   staged?: boolean;
@@ -183,6 +198,12 @@ async function invalidateGitScopes(
     // Batched summaries are chunk-keyed, so the state scope reaches them by
     // membership rather than by key prefix.
     ...(scopes.includes('state') ? [invalidateGitSummaries(queryClient, chatId)] : []),
+    // Worktrees share the `branches` scope rather than owning one: which branch
+    // is checked out where is exactly what a worktree write changes, and the
+    // server publishes the same scope for both.
+    ...(scopes.includes('branches')
+      ? [queryClient.invalidateQueries({ queryKey: gitWorktreeKeys.detail(chatId) })]
+      : []),
   ]);
 }
 
@@ -608,5 +629,53 @@ export function useGitHeadMessage(chatId: string, enabled: boolean) {
       if (error) throw new ApiError(error.value);
       return data as GitHeadMessageResponse;
     },
+  });
+}
+
+/**
+ * Every worktree of the chat's repository.
+ *
+ * No polling: worktrees change through this panel or through a terminal, and
+ * the panel's manual refresh plus the `branches` invalidation cover both. The
+ * stale window matches the rest of the panel's reads.
+ *
+ * @example
+ * const { data } = useGitWorktrees(chatId); // data?.worktrees
+ */
+export function useGitWorktrees(chatId: string) {
+  return useQuery({
+    queryKey: gitWorktreeKeys.detail(chatId),
+    queryFn: async (): Promise<GitWorktreeListResponse> => {
+      const { data, error } = await client.api.git.worktrees.get({ query: { chatId } });
+      if (error) throw new ApiError(error.value);
+      return data as GitWorktreeListResponse;
+    },
+    staleTime: 30_000,
+  });
+}
+
+/** Creates a worktree; resolves with the repository's refreshed worktree list. */
+export function useAddWorktree(chatId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: AddWorktreeInput): Promise<GitWorktreeListResponse> => {
+      const { data, error } = await client.api.git.worktrees.post({ chatId, ...input });
+      if (error) throw new ApiError(error.value);
+      return data as GitWorktreeListResponse;
+    },
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.worktreeAdd),
+  });
+}
+
+/** Removes a worktree; resolves with the repository's refreshed worktree list. */
+export function useRemoveWorktree(chatId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: RemoveWorktreeInput): Promise<GitWorktreeListResponse> => {
+      const { data, error } = await client.api.git.worktrees.delete({ chatId, ...input });
+      if (error) throw new ApiError(error.value);
+      return data as GitWorktreeListResponse;
+    },
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.worktreeRemove),
   });
 }

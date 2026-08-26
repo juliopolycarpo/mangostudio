@@ -6,6 +6,7 @@ import type {
   GitHeadMessageResponse,
   GitHistoryResponse,
   GitRepoState,
+  GitWorktreeListResponse,
 } from '@mangostudio/shared/git';
 import type { GithubContext } from '@mangostudio/shared/github';
 import { screen, waitFor } from '@testing-library/react';
@@ -53,6 +54,11 @@ const hooks = {
   githubLoading: false,
   githubFetching: false,
   githubRefetch: jest.fn(),
+  worktrees: { worktrees: [] } as GitWorktreeListResponse,
+  worktreesError: null as Error | null,
+  worktreesRefetch: jest.fn(),
+  worktreeAdd: jest.fn(),
+  worktreeRemove: jest.fn(),
 };
 
 mock.module('../../../src/features/workspace/hooks/use-github-context', () => ({
@@ -113,6 +119,15 @@ mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
   }),
   useGitCommit: () => ({ data: hooks.commitDetails, isLoading: false, error: null }),
   useGitDiff: () => ({ data: hooks.diff, isLoading: false, error: null }),
+  useGitWorktrees: () => ({
+    data: hooks.worktrees,
+    error: hooks.worktreesError,
+    isLoading: false,
+    isFetching: false,
+    refetch: hooks.worktreesRefetch,
+  }),
+  useAddWorktree: () => ({ mutateAsync: hooks.worktreeAdd, isPending: false }),
+  useRemoveWorktree: () => ({ mutateAsync: hooks.worktreeRemove, isPending: false }),
 }));
 
 // Below the mocks, never as a static import: those are evaluated first and the
@@ -180,6 +195,11 @@ beforeEach(() => {
   hooks.githubLoading = false;
   hooks.githubFetching = false;
   hooks.githubRefetch.mockReset();
+  hooks.worktrees = { worktrees: [] };
+  hooks.worktreesError = null;
+  hooks.worktreesRefetch.mockReset();
+  hooks.worktreeAdd.mockReset();
+  hooks.worktreeRemove.mockReset();
   sessionStorage.clear();
   localStorage.clear();
 });

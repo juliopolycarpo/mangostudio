@@ -34,6 +34,12 @@ export const gitWriteScopes = {
   fetch: ['state', 'branches', 'github'],
   pull: ['state', 'branches', 'history', 'commits', 'diffs', 'github'],
   push: ['state', 'branches', 'github'],
+  // A worktree add or remove leaves the calling chat's own tree untouched, so
+  // neither publishes `state`. Both ride the `branches` scope rather than a
+  // scope of their own: which branch is checked out where is exactly what they
+  // change, and the frontend hangs its worktree cache off the same scope.
+  worktreeAdd: ['branches'],
+  worktreeRemove: ['branches'],
 } as const satisfies Record<string, readonly GitScope[]>;
 
 export type GitWriteOperation = keyof typeof gitWriteScopes;

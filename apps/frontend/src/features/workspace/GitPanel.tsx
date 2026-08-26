@@ -50,6 +50,7 @@ import { useGithubContext } from './hooks/use-github-context';
 import { RemoteActions } from './RemoteActions';
 import { RepositoryHistory } from './RepositoryHistory';
 import { StashSheet } from './StashSheet';
+import { WorktreeSection } from './WorktreeSection';
 
 interface GitPanelProps {
   readonly chatId: string;
@@ -289,6 +290,7 @@ function GitPanelContent({
           key={chatId}
           chatId={chatId}
           status={state.status}
+          repoRoot={state.root}
           githubContext={githubContext}
           githubLoading={githubLoading}
           githubError={githubError}
@@ -301,6 +303,7 @@ function GitPanelContent({
 function RepositoryStatus({
   chatId,
   status,
+  repoRoot,
   githubContext,
   githubLoading,
   githubError,
@@ -308,6 +311,7 @@ function RepositoryStatus({
 }: {
   readonly chatId: string;
   readonly status: GitStatus;
+  readonly repoRoot: string;
   readonly githubContext: GithubContext | undefined;
   readonly githubLoading: boolean;
   readonly githubError: Error | null;
@@ -499,6 +503,8 @@ function RepositoryStatus({
           )}
         </>
       )}
+
+      <WorktreeSection chatId={chatId} repoRoot={repoRoot} />
 
       <GithubSection
         context={githubContext}

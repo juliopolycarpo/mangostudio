@@ -314,6 +314,72 @@ export const GitHeadMessageResponseSchema = Type.Object({
   body: Type.String(),
 });
 
+/**
+ * A filesystem path on the machine that owns the repository, not a repository
+ * pathspec: a worktree deliberately lives outside the repository root, so the
+ * containment rules that guard `GitPathsSchema` do not apply here. The cap is
+ * a sanity bound on what a caller may type, well above every platform's own
+ * `PATH_MAX`.
+ */
+const GitWorktreePathSchema = Type.String({ minLength: 1, maxLength: 4096 });
+
+/**
+ * A single entry of `git worktree list`.
+ *
+ * `head` and `branch` are both nullable, for two different reasons: a bare
+ * repository's entry carries neither, and a detached worktree carries a commit
+ * but no branch. `branch` holds the short name (`feat/x`) rather than the
+ * `refs/heads/feat/x` Git prints, so it matches `GitBranchSchema.name` — but it
+ * is capped like a ref rather than like a branch name, because a ref Git
+ * already accepted must render in the panel instead of failing validation.
+ *
+ * The lock and prune reasons are free text Git echoes back, and both are absent
+ * rather than empty when the state applies without one.
+ */
+export const GitWorktreeSchema = Type.Object({
+  path: GitWorktreePathSchema,
+  head: Type.Union([GitCommitHashSchema, Type.Null()]),
+  branch: Type.Union([Type.String({ minLength: 1, maxLength: 512 }), Type.Null()]),
+  isMain: Type.Boolean(),
+  isBare: Type.Boolean(),
+  isDetached: Type.Boolean(),
+  isLocked: Type.Boolean(),
+  lockReason: Type.Optional(Type.String()),
+  isPrunable: Type.Boolean(),
+  prunableReason: Type.Optional(Type.String()),
+});
+
+export const GitWorktreeListResponseSchema = Type.Object({
+  worktrees: ReadonlyArraySchema(GitWorktreeSchema),
+});
+
+/**
+ * The two shapes of `git worktree add`, as a closed union rather than a
+ * `branch` plus a `createBranch` flag: the mode picks the Git command
+ * (`worktree add -b <branch> -- <path>` against `worktree add -- <path>
+ * <branch>`), and a bag of optional fields would let a caller ask for a
+ * combination neither command can express.
+ */
+function addWorktreeVariantSchema<Mode extends string>(mode: Mode) {
+  return Type.Object({
+    chatId: Type.String({ minLength: 1 }),
+    path: GitWorktreePathSchema,
+    mode: Type.Literal(mode),
+    branch: GitBranchNameSchema,
+  });
+}
+
+export const AddWorktreeBodySchema = Type.Union([
+  addWorktreeVariantSchema('existing-branch'),
+  addWorktreeVariantSchema('new-branch'),
+]);
+
+export const RemoveWorktreeBodySchema = Type.Object({
+  chatId: Type.String({ minLength: 1 }),
+  path: GitWorktreePathSchema,
+  force: Type.Optional(Type.Boolean()),
+});
+
 export type GitFileStatus = Static<typeof GitFileStatusSchema>;
 export type GitFileChange = Static<typeof GitFileChangeSchema>;
 export type GitBranchInfo = Static<typeof GitBranchInfoSchema>;
@@ -358,3 +424,7 @@ export type GitFetchBody = Static<typeof GitFetchBodySchema>;
 export type GitRemoteBody = Static<typeof GitRemoteBodySchema>;
 export type GitPushBody = Static<typeof GitPushBodySchema>;
 export type GitHeadMessageResponse = Static<typeof GitHeadMessageResponseSchema>;
+export type GitWorktree = Static<typeof GitWorktreeSchema>;
+export type GitWorktreeListResponse = Static<typeof GitWorktreeListResponseSchema>;
+export type AddWorktreeBody = Static<typeof AddWorktreeBodySchema>;
+export type RemoveWorktreeBody = Static<typeof RemoveWorktreeBodySchema>;

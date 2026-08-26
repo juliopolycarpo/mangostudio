@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  AddWorktreeBodySchema,
   CommitBodySchema,
   CreateBranchBodySchema,
   DeleteBranchBodySchema,
@@ -10,6 +11,8 @@ import {
   GitHeadMessageResponseSchema,
   GitHistoryQuerySchema,
   GitPushBodySchema,
+  GitWorktreeSchema,
+  RemoveWorktreeBodySchema,
   RenameBranchBodySchema,
   StagePathsBodySchema,
   StashApplyBodySchema,
@@ -144,6 +147,70 @@ describe('Git write contracts', () => {
     expect(Value.Check(GitPushBodySchema, { chatId: 'chat-1', force: 'with-lease' })).toBe(true);
     expect(Value.Check(GitPushBodySchema, { chatId: 'chat-1', force: true })).toBe(false);
     expect(Value.Check(GitPushBodySchema, { chatId: 'chat-1', force: 'force' })).toBe(false);
+  });
+
+  it('accepts the two worktree add shapes and nothing between them', () => {
+    const base = { chatId: 'chat-1', path: '/work/feature', branch: 'feat/panel' };
+
+    expect(Value.Check(AddWorktreeBodySchema, { ...base, mode: 'new-branch' })).toBe(true);
+    expect(Value.Check(AddWorktreeBodySchema, { ...base, mode: 'existing-branch' })).toBe(true);
+
+    // The union is closed: no mode, an invented mode, or a branchless request
+    // are all shapes neither Git command could be built from.
+    expect(Value.Check(AddWorktreeBodySchema, base)).toBe(false);
+    expect(Value.Check(AddWorktreeBodySchema, { ...base, mode: 'detach' })).toBe(false);
+    expect(
+      Value.Check(AddWorktreeBodySchema, {
+        chatId: 'chat-1',
+        path: '/work/feature',
+        mode: 'new-branch',
+      })
+    ).toBe(false);
+    expect(Value.Check(AddWorktreeBodySchema, { ...base, mode: 'new-branch', path: '' })).toBe(
+      false
+    );
+  });
+
+  it('makes force optional on a worktree removal but the path required', () => {
+    expect(Value.Check(RemoveWorktreeBodySchema, { chatId: 'chat-1', path: '/work/x' })).toBe(true);
+    expect(
+      Value.Check(RemoveWorktreeBodySchema, { chatId: 'chat-1', path: '/work/x', force: true })
+    ).toBe(true);
+    expect(Value.Check(RemoveWorktreeBodySchema, { chatId: 'chat-1' })).toBe(false);
+    expect(Value.Check(RemoveWorktreeBodySchema, { chatId: 'chat-1', path: '' })).toBe(false);
+  });
+
+  it('lets a worktree report no HEAD and no branch, as a bare or detached one does', () => {
+    const linked = {
+      path: '/work/feature',
+      head: '0a44a0f9bbf9a15117d5bbc4d543442f2b169d87',
+      branch: 'feat/panel',
+      isMain: false,
+      isBare: false,
+      isDetached: false,
+      isLocked: false,
+      isPrunable: false,
+    };
+
+    expect(Value.Check(GitWorktreeSchema, linked)).toBe(true);
+    expect(
+      Value.Check(GitWorktreeSchema, { ...linked, head: null, branch: null, isBare: true })
+    ).toBe(true);
+    expect(
+      Value.Check(GitWorktreeSchema, {
+        ...linked,
+        branch: null,
+        isDetached: true,
+        isLocked: true,
+        lockReason: 'held for review',
+        isPrunable: true,
+        prunableReason: 'gitdir file points to non-existent location',
+      })
+    ).toBe(true);
+
+    expect(Value.Check(GitWorktreeSchema, { ...linked, head: 'nothex' })).toBe(false);
+    expect(Value.Check(GitWorktreeSchema, { ...linked, branch: '' })).toBe(false);
+    expect(Value.Check(GitWorktreeSchema, { ...linked, path: '' })).toBe(false);
   });
 
   it('describes the HEAD message used to prefill an amend', () => {

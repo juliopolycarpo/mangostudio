@@ -4,6 +4,7 @@ import {
   ERROR_CODES,
 } from '@mangostudio/shared/errors';
 import {
+  AddWorktreeBodySchema,
   CheckoutRemoteBranchBodySchema,
   CommitBodySchema,
   CommitResponseSchema,
@@ -31,9 +32,11 @@ import {
   GitRepoStateSchema,
   GitStateQuerySchema,
   GitStatusSchema,
+  GitWorktreeListResponseSchema,
   InitRepoBodySchema,
   type InitRepoResponse,
   InitRepoResponseSchema,
+  RemoveWorktreeBodySchema,
   RenameBranchBodySchema,
   StagePathsBodySchema,
   StashApplyBodySchema,
@@ -70,6 +73,7 @@ import {
 } from '../application/git-navigation-service';
 import type { GitInvalidationTarget } from '../application/git-realtime-service';
 import { getRepoState } from '../application/git-status-service';
+import { addWorktree, listWorktrees, removeWorktree } from '../application/git-worktree-service';
 import {
   checkoutRemoteBranch,
   commitChanges,
@@ -752,6 +756,85 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         if ('error' in resolved) return resolved.error;
         try {
           return await renameBranch(
+            resolved.workdir,
+            body,
+            resolved.invalidationTarget,
+            request.signal
+          );
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      }
+    )
+    .get(
+      '/worktrees',
+      {
+        query: GitStateQuerySchema,
+        response: {
+          200: GitWorktreeListResponseSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      },
+      async ({ query, request, set, user }) => {
+        const resolved = await routeWorkdir(query.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await listWorktrees(resolved.workdir, request.signal, resolved.invalidationTarget);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      }
+    )
+    .post(
+      '/worktrees',
+      {
+        body: AddWorktreeBodySchema,
+        response: {
+          200: GitWorktreeListResponseSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      },
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await addWorktree(
+            resolved.workdir,
+            body,
+            resolved.invalidationTarget,
+            request.signal
+          );
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      }
+    )
+    .delete(
+      '/worktrees',
+      {
+        body: RemoveWorktreeBodySchema,
+        response: {
+          200: GitWorktreeListResponseSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      },
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await removeWorktree(
             resolved.workdir,
             body,
             resolved.invalidationTarget,
