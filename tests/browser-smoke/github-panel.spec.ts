@@ -22,10 +22,21 @@ test('github rail panel renders and obeys its visibility setting', async ({ page
   await expect(page).not.toHaveURL(/\/signup/, { timeout: 10_000 });
 
   // The rail only exists on the chat surface and only once a chat does.
-  // Scoped to the header banner because the sidebar carries a second button
-  // with the same label, and an unscoped locator is a strict-mode violation
-  // that would kill the spec before it reaches the panel.
-  await page.getByRole('banner').getByRole('button', { name: 'New Chat' }).click();
+  // Scoped to `main` because the sidebar carries a second button with the same
+  // label, and an unscoped locator is a strict-mode violation that would kill
+  // the spec before it reaches the panel. The chat header is a plain element
+  // rather than a <header>, so it has no `banner` role to scope to.
+  await page.getByRole('main').getByRole('button', { name: 'New Chat' }).click();
+
+  // A brand-new chat on an account with no default working directory opens the
+  // folder picker by itself (see `use-runner-selection`), and it is a modal — it
+  // covers the rail and swallows the click below. Dismissing it is also what
+  // sets up the one deterministic assertion further down: the chat stays
+  // unbound, so "This repo" has nothing to ask GitHub about.
+  const workdirPicker = page.getByRole('dialog', { name: 'Working directory' });
+  await expect(workdirPicker).toBeVisible({ timeout: 15_000 });
+  await page.keyboard.press('Escape');
+  await expect(workdirPicker).toBeHidden({ timeout: 10_000 });
 
   const railButton = page.getByRole('button', { name: 'Show GitHub panel' });
   await expect(railButton).toBeVisible({ timeout: 15_000 });
