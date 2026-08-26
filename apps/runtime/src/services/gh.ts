@@ -57,6 +57,12 @@ const GH_ENV_KEYS = [
   'no_proxy',
   'SSL_CERT_FILE',
   'SSL_CERT_DIR',
+  // `pr checkout` shells out to `git fetch`, which needs the SSH agent socket
+  // to authenticate an `ssh://`/`git@` remote the same way `buildGitEnvironment`
+  // already forwards it for direct Git calls. It is a socket path, not a
+  // credential, so carrying it does not reintroduce what the token exclusion
+  // below guards against.
+  'SSH_AUTH_SOCK',
   // Deliberately absent: GH_TOKEN, GITHUB_TOKEN, GH_ENTERPRISE_TOKEN and every
   // other credential variable. `gh` reads its own keyring/config; forwarding a
   // token would let this process's environment authenticate as somebody else
