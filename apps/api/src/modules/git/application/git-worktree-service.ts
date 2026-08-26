@@ -5,6 +5,7 @@ import type {
   GitWorktreeListResponse,
   RemoveWorktreeBody,
 } from '@mangostudio/shared/git';
+import { getRuntimeClient } from '../../../services/runtime-client';
 import { resolveGitCommonDir } from '../domain/git-common-dir';
 import {
   buildWorktreeAddArgs,
@@ -12,7 +13,11 @@ import {
   GitWorktreeArgumentError,
 } from '../domain/worktree-command';
 import { parseWorktreeList } from '../domain/worktree-parser';
-import { findWorktree, isSameWorktreePath } from '../domain/worktree-selection';
+import {
+  findWorktree,
+  isSameWorktreePath,
+  type WorktreePathSemantics,
+} from '../domain/worktree-selection';
 import { GitCliError, type GitRuntimeSelection, runGit } from '../infrastructure/git-cli';
 import { type GitInvalidationTarget, publishGitWriteInvalidation } from './git-realtime-service';
 import {
@@ -109,7 +114,11 @@ export function removeWorktree(
     'worktreeRemove',
     async (root, selection) => {
       const { worktrees } = await readWorktreeList(root, signal, selection);
-      const worktree = findWorktree(worktrees, root, input.path);
+      // The target machine's path semantics, not the hub's: these are paths on
+      // that filesystem, and comparing them through `node:path` here would
+      // match nothing at all whenever the two platforms disagree.
+      const paths = await readTargetPaths(selection);
+      const worktree = findWorktree(worktrees, root, input.path, paths);
       if (!worktree) {
         throw new GitWriteError(
           `Worktree was not found: ${input.path}`,
@@ -117,7 +126,7 @@ export function removeWorktree(
           ERROR_CODES.NOT_FOUND
         );
       }
-      refuseUnremovableWorktree(worktree, root);
+      refuseUnremovableWorktree(worktree, root, paths);
       // Git's own canonical path goes on the command line, not the caller's
       // spelling of it: the entry has already been identified, and re-sending
       // an approximate path would let Git resolve it to a different worktree.
@@ -145,11 +154,15 @@ export function removeWorktree(
  * already refuses it without `--force` and knows far better than a second
  * status read here whether the tree is dirty.
  */
-function refuseUnremovableWorktree(worktree: GitWorktree, root: string): void {
+function refuseUnremovableWorktree(
+  worktree: GitWorktree,
+  root: string,
+  paths: WorktreePathSemantics
+): void {
   if (worktree.isMain) {
     throw new GitWriteError('The main worktree cannot be removed.', 409, ERROR_CODES.CONFLICT);
   }
-  if (isSameWorktreePath(worktree.path, root)) {
+  if (isSameWorktreePath(worktree.path, root, paths)) {
     throw new GitWriteError(
       'This chat is working in that worktree. Point it elsewhere before removing it.',
       409,
@@ -209,6 +222,12 @@ async function readWorktreeList(
     ...selection,
   });
   return { worktrees: parseWorktreeList(result.stdout) };
+}
+
+/** How the machine that owns the repository writes and compares its own paths. */
+async function readTargetPaths(selection: GitRuntimeSelection): Promise<WorktreePathSemantics> {
+  const runtime = await getRuntimeClient(selection.userId, selection.environmentId);
+  return runtime.paths;
 }
 
 /** The absolute administrative directory every worktree of this repository shares. */
