@@ -6,7 +6,11 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { useToast } from '@/components/ui/Toast';
-import { requestComposerFocus, setComposerDraft } from '@/features/chat/lib/composer-draft-store';
+import {
+  getComposerDraft,
+  requestComposerFocus,
+  setComposerDraft,
+} from '@/features/chat/lib/composer-draft-store';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
@@ -247,7 +251,10 @@ function ReviewThreadsAction({
   }
 
   const send = () => {
-    setComposerDraft(chatId, task);
+    // Appended rather than assigned, the same reasoning as the row menu's
+    // paste-reference action: the composer may already hold unsent text, and
+    // this task list is something to add to it, not overwrite.
+    setComposerDraft(chatId, appendTask(chatId, task));
     requestComposerFocus();
   };
 
@@ -257,4 +264,17 @@ function ReviewThreadsAction({
       {t.github.actions.reviewCommentsToComposer}
     </Button>
   );
+}
+
+/**
+ * Reads the draft at call time rather than at render time, the same reasoning
+ * `appendReference` in `use-github-quick-actions` uses: the composer may have
+ * gained a sentence since this row was painted. A blank line separates the two
+ * rather than a space — `task` is itself a heading followed by a numbered
+ * list, so joining it onto the end of a sentence would run a paragraph break
+ * into the middle of a line.
+ */
+export function appendTask(chatId: string, task: string): string {
+  const current = getComposerDraft(chatId);
+  return current ? `${current.replace(/\s+$/, '')}\n\n${task}` : task;
 }
