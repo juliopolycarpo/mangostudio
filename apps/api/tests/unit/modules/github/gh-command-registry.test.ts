@@ -92,7 +92,7 @@ describe('gh command registry', () => {
   });
 
   it('builds the documented argv for every read', () => {
-    expect(argvFor('auth.status')).toEqual(['auth', 'status']);
+    expect(argvFor('auth.status')).toEqual(['auth', 'status', '--json', 'hosts']);
     expect(argvFor('pr.list')).toEqual([
       'pr',
       'list',

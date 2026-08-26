@@ -162,7 +162,14 @@ const GH_COMMANDS = {
     id: 'auth.status',
     params: NoParamsSchema,
     mutation: false,
-    argv: () => ['auth', 'status'],
+    // Bare `gh auth status` exits 1 when *any* configured account or host has
+    // stale credentials, even one the panel never uses — the check is for a
+    // whole machine, not the account this repository is about. `--json`
+    // reports every account's health without that all-or-nothing exit code
+    // (gh always exits 0 for this shape unless the call itself is fatal), so
+    // `isGhAccountHealthy` in `gh-cli.ts` can decide from the intended active
+    // account instead of the process's exit code.
+    argv: () => ['auth', 'status', '--json', 'hosts'],
   },
   'repo.view': {
     id: 'repo.view',

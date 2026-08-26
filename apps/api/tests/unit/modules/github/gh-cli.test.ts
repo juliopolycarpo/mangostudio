@@ -37,6 +37,11 @@ const TEST_MANIFEST: RuntimeCapabilityManifest = {
 /** A manifest from a runtime released before the `gh` probe existed. */
 const OLDER_MANIFEST: RuntimeCapabilityManifest = (({ gh: _gh, ...rest }) => rest)(TEST_MANIFEST);
 
+/** `gh auth status --json hosts` stdout for one healthy, active account. */
+const AUTHENTICATED_STDOUT = JSON.stringify({
+  hosts: { 'github.com': [{ active: true, state: 'success', login: 'octocat' }] },
+});
+
 interface GhCall {
   readonly method: 'exec' | 'mutate';
   readonly args: readonly string[];
@@ -282,7 +287,7 @@ describe('gh command facade', () => {
     await cli.run('pr.view-current', {}, { cwd: '/remote/repo', selection });
 
     expect(calls).toEqual([
-      { args: ['auth', 'status'], cwd: '/remote/home', environmentId: 'devbox' },
+      { args: ['auth', 'status', '--json', 'hosts'], cwd: '/remote/home', environmentId: 'devbox' },
       {
         args: ['repo', 'view', '--json', 'nameWithOwner,defaultBranchRef,url'],
         cwd: '/remote/repo',
@@ -371,7 +376,7 @@ describe('gh command facade', () => {
       runner: (_args, options) => {
         probedEnvironments.push(options.environmentId ?? 'unknown');
         return options.environmentId === 'devbox'
-          ? Promise.resolve({ stdout: '', stderr: '', exitCode: 0 })
+          ? Promise.resolve({ stdout: AUTHENTICATED_STDOUT, stderr: '', exitCode: 0 })
           : Promise.reject(new Error('not logged in'));
       },
       probeCwd: () => Promise.resolve('/remote/home'),
@@ -391,7 +396,7 @@ describe('gh command facade', () => {
       runner: () => {
         probes += 1;
         return authenticated
-          ? Promise.resolve({ stdout: '', stderr: '', exitCode: 0 })
+          ? Promise.resolve({ stdout: AUTHENTICATED_STDOUT, stderr: '', exitCode: 0 })
           : Promise.reject(new Error('not logged in'));
       },
       probeCwd: () => Promise.resolve('/remote/home'),
@@ -411,13 +416,65 @@ describe('gh command facade', () => {
     expect(probes).toBe(2);
   });
 
+  /**
+   * Bare `gh auth status` exits 1 when *any* configured account or host has
+   * stale credentials, even one this repository's active account never uses.
+   * The `--json` shape always exits 0, so authentication is read from the
+   * active account's own health instead — a stale, inactive account must not
+   * flip a healthy one to unauthenticated.
+   */
+  it('stays authenticated when an unrelated inactive account is stale', async () => {
+    const cli = createGhCli({
+      runner: () =>
+        Promise.resolve({
+          stdout: JSON.stringify({
+            hosts: {
+              'github.com': [{ active: true, state: 'success', login: 'octocat' }],
+              'github.example.com': [{ active: false, state: 'error', login: 'stale-account' }],
+            },
+          }),
+          stderr: 'X Failed to log in to github.example.com account stale-account',
+          exitCode: 0,
+        }),
+      probeCwd: () => Promise.resolve('/remote/home'),
+    });
+
+    expect(await cli.isAuthenticated({ userId: 'user-1', environmentId: 'devbox' })).toBe(true);
+  });
+
+  it('is unauthenticated when the active account itself is unhealthy', async () => {
+    const cli = createGhCli({
+      runner: () =>
+        Promise.resolve({
+          stdout: JSON.stringify({
+            hosts: { 'github.com': [{ active: true, state: 'error', login: 'octocat' }] },
+          }),
+          stderr: '',
+          exitCode: 0,
+        }),
+      probeCwd: () => Promise.resolve('/remote/home'),
+    });
+
+    expect(await cli.isAuthenticated({ userId: 'user-1', environmentId: 'devbox' })).toBe(false);
+  });
+
+  it('is unauthenticated when no host has any account', async () => {
+    const cli = createGhCli({
+      runner: () =>
+        Promise.resolve({ stdout: JSON.stringify({ hosts: {} }), stderr: '', exitCode: 0 }),
+      probeCwd: () => Promise.resolve('/remote/home'),
+    });
+
+    expect(await cli.isAuthenticated({ userId: 'user-1', environmentId: 'devbox' })).toBe(false);
+  });
+
   it('single-flights concurrent authentication probes', async () => {
     let probes = 0;
     const cli = createGhCli({
       runner: async () => {
         probes += 1;
         await Promise.resolve();
-        return { stdout: '', stderr: '', exitCode: 0 };
+        return { stdout: AUTHENTICATED_STDOUT, stderr: '', exitCode: 0 };
       },
       probeCwd: () => Promise.resolve('/remote/home'),
     });

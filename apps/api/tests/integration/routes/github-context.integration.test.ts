@@ -64,8 +64,12 @@ case "$*" in
     printf '%s\\n' 'https://github.com/cli/cli/releases/tag/v2.97.0'
     exit 0
     ;;
-  "auth status")
-    ${scenario.authenticated === false ? "printf '%s\\n' 'not logged in' >&2\n    exit 1" : 'exit 0'}
+  "auth status --json hosts")
+    ${
+      scenario.authenticated === false
+        ? "printf '%s\\n' 'not logged in' >&2\n    printf '%s\\n' '{\"hosts\":{}}'\n    exit 0"
+        : 'printf \'%s\\n\' \'{"hosts":{"github.example":[{"active":true,"state":"success"}]}}\'\n    exit 0'
+    }
     ;;
   "repo view --json nameWithOwner,defaultBranchRef,url")
     ${shellResult(scenario.repoStdout ?? repoOutput, scenario.repoStderr)}

@@ -228,6 +228,45 @@ export async function isGhAvailable(
   }
 }
 
+/** One account's entry under a host in `gh auth status --json hosts`. */
+interface GhAuthStatusAccount {
+  readonly active?: boolean;
+  readonly state?: string;
+}
+
+/**
+ * Reads whether *this repository's* account is authenticated from
+ * `gh auth status --json hosts` output, rather than from the process's exit
+ * code.
+ *
+ * A host can carry several accounts, only one of which is active per host,
+ * and a machine can have several hosts configured. This checks every host's
+ * active account rather than one named host, because the registry has no
+ * per-repo host to scope it to yet — but it is still narrower than the exit
+ * code, which fails on *any* account anywhere, active or not.
+ *
+ * `state` is undefined for hosts on gh versions that predate the field, so an
+ * active account with no `state` is treated as healthy rather than unknown.
+ *
+ * @example
+ * isGhAccountHealthy('{"hosts":{"github.com":[{"active":true,"state":"success"}]}}'); // true
+ */
+function isGhAccountHealthy(stdout: string): boolean {
+  let hosts: Record<string, readonly GhAuthStatusAccount[]>;
+  try {
+    hosts =
+      (JSON.parse(stdout) as { hosts?: Record<string, readonly GhAuthStatusAccount[]> }).hosts ??
+      {};
+  } catch {
+    return false;
+  }
+  return Object.values(hosts).some((accounts) =>
+    accounts.some(
+      (account) => account.active && (account.state === undefined || account.state === 'success')
+    )
+  );
+}
+
 /**
  * Creates the typed command facade and owns the authentication probe cache.
  *
@@ -248,14 +287,30 @@ export function createGhCli(options: CreateGhCliOptions = {}): GithubCli {
   // one host. So it is probed once per environment, from that runtime's home
   // directory — a path the manifest already proves exists over there — rather
   // than once per workdir against a cwd the caller happened to supply.
+  //
+  // The probe cache turns a rejected promise into a cached `false`, so a
+  // healthy-or-not verdict has to come from *throwing* here, not from the
+  // command's own exit code: the `--json` shape gh auth status runs with
+  // exits 0 even when no account is authenticated at all.
   const isAuthenticated = createEnvironmentProbeCache({
-    probe: async (selection) =>
-      await execute(buildGhCommandArgv('auth.status', {}), {
+    probe: async (selection) => {
+      const result = await execute(buildGhCommandArgv('auth.status', {}), {
         cwd: await probeCwd(selection),
         userId: selection.userId,
         environmentId: selection.environmentId,
         timeoutMs: PROBE_TIMEOUT_MS,
-      }),
+      });
+      if (!isGhAccountHealthy(result.stdout)) {
+        throw new GhCliError(
+          ['auth', 'status'],
+          result.exitCode,
+          result.stderr,
+          false,
+          result.stdout
+        );
+      }
+      return result;
+    },
     now: options.now ?? Date.now,
     ttlMs: options.probeCacheTtlMs ?? PROBE_CACHE_TTL_MS,
   });
