@@ -52,8 +52,14 @@ const GH_REPO_FIELDS = 'nameWithOwner,defaultBranchRef,url';
 const GH_PR_CONTEXT_FIELDS = 'number,title,state,isDraft,url,headRefName,baseRefName';
 const GH_PR_SUMMARY_FIELDS =
   'number,title,url,state,isDraft,headRefName,baseRefName,updatedAt,author,labels,reviewDecision,statusCheckRollup';
+// `isDraft` is selected rather than inferred from `mergeStateStatus`. That field
+// is computed asynchronously and requires push access, so it answers `UNKNOWN`
+// on a first read and `BLOCKED` on a draft with a failing required check —
+// `gh pr view 940 --json isDraft,mergeStateStatus` on this repository returns
+// `{"isDraft":true,"mergeStateStatus":"BLOCKED"}`. Reading draftness off it hid
+// "Mark ready for review" on the pull requests that need it.
 const GH_PR_DETAIL_FIELDS =
-  'number,title,body,url,reviewDecision,mergeStateStatus,mergeable,changedFiles,additions,deletions,latestReviews,labels';
+  'number,title,body,url,isDraft,reviewDecision,mergeStateStatus,mergeable,changedFiles,additions,deletions,latestReviews,labels';
 const GH_PR_CHECK_FIELDS = 'name,state,bucket,link,workflow,description,startedAt,completedAt';
 const GH_ISSUE_FIELDS = 'number,title,url,state,updatedAt,author,labels,assignees';
 const GH_SEARCH_PR_FIELDS = 'number,title,url,state,isDraft,updatedAt,author,labels,repository';

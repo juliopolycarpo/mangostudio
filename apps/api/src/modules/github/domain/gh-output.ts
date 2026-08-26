@@ -74,6 +74,7 @@ export const GhPrDetailOutputSchema = Type.Object({
   title: Type.String(),
   body: Type.String(),
   url: Type.String(),
+  isDraft: Type.Boolean(),
   reviewDecision: Type.Optional(Type.String()),
   mergeStateStatus: Type.Optional(Type.String()),
   mergeable: Type.Optional(Type.String()),

@@ -160,6 +160,7 @@ export function toPrDetail(row: GhPrDetailOutput): GithubPrDetail {
     title: row.title,
     body: row.body,
     url: row.url,
+    isDraft: row.isDraft,
     reviewDecision: toReviewDecision(row.reviewDecision),
     mergeStateStatus: oneOf(MERGE_STATE_STATUSES, row.mergeStateStatus ?? '') ?? 'UNKNOWN',
     mergeable: oneOf(MERGEABLE_STATES, row.mergeable ?? '') ?? 'UNKNOWN',

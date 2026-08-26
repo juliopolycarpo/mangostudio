@@ -112,6 +112,7 @@ const prDetail = {
   title: 'Expose GitHub context',
   body: 'Adds the panel contracts.',
   url: 'https://github.example/mango/mangostudio/pull/42',
+  isDraft: false,
   reviewDecision: 'APPROVED',
   mergeStateStatus: 'CLEAN',
   mergeable: 'MERGEABLE',

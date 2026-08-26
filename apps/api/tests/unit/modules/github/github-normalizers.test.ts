@@ -118,6 +118,7 @@ describe('gh output normalizers', () => {
       title: 'Add the panel',
       body: 'why',
       url: 'https://github.example/mango/mangostudio/pull/7',
+      isDraft: false,
       reviewDecision: '',
       mergeStateStatus: 'SOMETHING_NEW',
       mergeable: 'SOMETHING_NEW',
@@ -133,6 +134,34 @@ describe('gh output normalizers', () => {
     expect(detail.mergeable).toBe('UNKNOWN');
     expect(detail.reviewDecision).toBeNull();
     expect(detail.latestReviews[0]?.author).toBeNull();
+  });
+
+  /**
+   * `mergeStateStatus` is computed asynchronously and requires push access, so
+   * GitHub answers `BLOCKED` or `UNKNOWN` for a draft as readily as `DRAFT` —
+   * `gh pr view 940 --json isDraft,mergeStateStatus` on this repository returns
+   * `{"isDraft":true,"mergeStateStatus":"BLOCKED"}`. Draftness therefore has to
+   * come from `isDraft`, or the panel hides "mark ready for review" on exactly
+   * the pull requests that need it.
+   */
+  it('carries draftness from isDraft rather than from the merge state', () => {
+    const draft = toPrDetail({
+      number: 940,
+      title: 'Add the panel',
+      body: 'why',
+      url: 'https://github.example/mango/mangostudio/pull/940',
+      isDraft: true,
+      reviewDecision: '',
+      mergeStateStatus: 'BLOCKED',
+      mergeable: 'MERGEABLE',
+      changedFiles: 3,
+      additions: 10,
+      deletions: 2,
+      latestReviews: [],
+      labels: [],
+    });
+    expect(draft.isDraft).toBe(true);
+    expect(draft.mergeStateStatus).toBe('BLOCKED');
   });
 
   it('upper-cases inbox rows so one vocabulary reaches the panel', () => {

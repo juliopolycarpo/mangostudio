@@ -283,6 +283,13 @@ export const GithubPrDetailSchema = Type.Object({
   title: Type.String(),
   body: Type.String(),
   url: Type.String(),
+  /**
+   * Carried in its own right rather than read off `mergeStateStatus`. That field
+   * is computed asynchronously and needs push access, so a draft pull request
+   * reports `BLOCKED` or `UNKNOWN` there as often as it reports `DRAFT` — and a
+   * "mark ready" affordance derived from it disappears on real drafts.
+   */
+  isDraft: Type.Boolean(),
   reviewDecision: NullableReviewDecisionSchema,
   mergeStateStatus: GithubMergeStateStatusSchema,
   mergeable: GithubMergeableStateSchema,

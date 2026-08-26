@@ -118,9 +118,7 @@ function DetailBody({ chatId, number }: { readonly chatId: string; readonly numb
         </p>
       </div>
 
-      {/* `GithubPrDetail` carries no `isDraft`; `gh pr view` reports draftness
-          through the merge state instead, and `DRAFT` is what it reports. */}
-      <MarkReadyAction chatId={chatId} number={number} isDraft={pr.mergeStateStatus === 'DRAFT'} />
+      <MarkReadyAction chatId={chatId} number={number} isDraft={pr.isDraft} />
       <ChecksBlock chatId={chatId} number={number} />
       <ReviewThreadsAction chatId={chatId} number={number} />
     </div>

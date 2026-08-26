@@ -73,6 +73,7 @@ const DEFAULT_STDOUT = {
     title: 'Add the panel',
     body: 'why',
     url: 'https://github.example/mango/mangostudio/pull/7',
+    isDraft: true,
     reviewDecision: '',
     mergeStateStatus: 'CLEAN',
     mergeable: 'MERGEABLE',
@@ -281,7 +282,10 @@ describe('GitHub panel reads', () => {
     );
     expect(detail).toMatchObject({
       state: 'ok',
-      pr: { number: 7, reviewDecision: null, mergeStateStatus: 'CLEAN' },
+      // `isDraft` travels in its own right: the fixture is a draft whose merge
+      // state is `CLEAN`, which is the pairing GitHub actually returns and the
+      // one that used to hide "mark ready for review".
+      pr: { number: 7, isDraft: true, reviewDecision: null, mergeStateStatus: 'CLEAN' },
     });
 
     const checks = await expectSchemaValid(
