@@ -21,9 +21,7 @@ import {
   GithubMergeableStateSchema,
   GithubMergeStateStatusSchema,
   GithubPrFilterSchema,
-  GithubPrStateSchema,
   GithubReviewDecisionSchema,
-  GithubReviewStateSchema,
 } from '../../src/github';
 import { en, ptBR } from '../../src/i18n';
 import {
@@ -159,11 +157,6 @@ const ENUM_COVERAGE = [
     // The GitHub panel renders every one of gh's vocabularies as a chip or a
     // filter tab. A member with no sentence is a blank badge on a row that
     // otherwise looks fine, so each union is pinned to its block here.
-    path: 'github.prState',
-    values: literalValues(GithubPrStateSchema),
-    blocks: [en.github.prState, ptBR.github.prState],
-  },
-  {
     path: 'github.issueState',
     values: literalValues(GithubIssueStateSchema),
     blocks: [en.github.issueState, ptBR.github.issueState],
@@ -174,11 +167,6 @@ const ENUM_COVERAGE = [
     path: 'github.reviewDecision',
     values: literalValues(GithubReviewDecisionSchema),
     blocks: [en.github.reviewDecision, ptBR.github.reviewDecision],
-  },
-  {
-    path: 'github.reviewState',
-    values: literalValues(GithubReviewStateSchema),
-    blocks: [en.github.reviewState, ptBR.github.reviewState],
   },
   {
     path: 'github.checkBucket',

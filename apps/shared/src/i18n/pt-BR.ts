@@ -1799,19 +1799,10 @@ export const messages = {
   github: {
     title: 'GitHub',
     loading: 'Lendo o contexto do GitHub...',
-    loadError: 'Não foi possível ler o contexto do GitHub.',
-    installHint:
-      'Instale a GitHub CLI no servidor para ver o contexto do repositório e do pull request.',
-    authHint: 'Execute gh auth login no servidor para conectar o GitHub.',
-    noPr: 'Nenhum pull request para esta branch.',
-    defaultBranch: 'Branch padrão: {branch}',
-    refs: '{base} ← {head}',
     /**
-     * O vocabulário de badges do painel Git, com chaves em minúsculas porque o
+     * O vocabulário de badges de pull request, com chaves em minúsculas porque o
      * único consumidor indexa com `state.toLowerCase()` e o bloco carrega
-     * `draft`, que não é um estado de pull request. `prState` abaixo é o bloco
-     * com as chaves do enum, usado pelo painel do GitHub; unificar os dois é um
-     * follow-up do frontend.
+     * `draft`, que não é um estado de pull request.
      */
     states: {
       open: 'Aberto',
@@ -1822,7 +1813,6 @@ export const messages = {
 
     panel: {
       inbox: 'Esperando por você',
-      inboxHint: 'Pull requests de todos os repositórios que aguardam a sua revisão.',
       repo: 'Neste repositório',
       prs: 'Pull requests',
       issues: 'Issues',
@@ -1877,11 +1867,6 @@ export const messages = {
       threads: 'Nenhum comentário de revisão neste pull request.',
     },
 
-    prState: {
-      OPEN: 'Aberto',
-      CLOSED: 'Fechado',
-      MERGED: 'Integrado',
-    },
     issueState: {
       OPEN: 'Aberta',
       CLOSED: 'Fechada',
@@ -1893,13 +1878,6 @@ export const messages = {
     },
     /** Fica fora de `reviewDecision`: "nenhuma" é um null, não um membro da união. */
     reviewDecisionNone: 'Ainda sem revisão',
-    reviewState: {
-      APPROVED: 'Aprovada',
-      CHANGES_REQUESTED: 'Mudanças solicitadas',
-      COMMENTED: 'Comentada',
-      DISMISSED: 'Descartada',
-      PENDING: 'Pendente',
-    },
     checkBucket: {
       pass: 'Passou',
       fail: 'Falhou',
@@ -1940,7 +1918,6 @@ export const messages = {
       author: 'por {author}',
       bot: 'bot',
       diffStat: '+{additions} / -{deletions} em {files} arquivos',
-      checksSummary: '{passed} passaram, {failed} falharam, {pending} em execução',
       assignees: 'Atribuída a {assignees}',
       unassigned: 'Sem responsável',
       labels: 'Labels',
@@ -1967,7 +1944,6 @@ export const messages = {
       titlePlaceholder: 'Descreva a mudança em uma linha',
       bodyLabel: 'Descrição',
       bodyPlaceholder: 'O que mudou e por quê',
-      baseLabel: 'Branch base',
       draftLabel: 'Criar como rascunho',
       submit: 'Criar pull request',
       cancel: 'Cancelar',
@@ -1993,7 +1969,6 @@ export const messages = {
 
     staleness: {
       updated: 'Atualizado {relative}',
-      justNow: 'agora mesmo',
       refreshing: 'Atualizando...',
     },
 

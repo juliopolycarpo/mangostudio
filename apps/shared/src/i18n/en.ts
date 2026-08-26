@@ -1774,17 +1774,10 @@ export const messages: Messages = {
   github: {
     title: 'GitHub',
     loading: 'Reading GitHub context...',
-    loadError: 'GitHub context could not be read.',
-    installHint: 'Install GitHub CLI on the server to see repository and pull request context.',
-    authHint: 'Run gh auth login on the server to connect GitHub.',
-    noPr: 'No pull request for this branch.',
-    defaultBranch: 'Default branch: {branch}',
-    refs: '{base} ← {head}',
     /**
-     * The Git panel's badge vocabulary, keyed lowercase because its one caller
+     * The pull request badge vocabulary, keyed lowercase because its one caller
      * indexes it with `state.toLowerCase()` and it carries `draft`, which is not
-     * a pull request state at all. `prState` below is the enum-keyed block the
-     * GitHub panel uses; consolidating the two is a frontend follow-up.
+     * a pull request state at all.
      */
     states: {
       open: 'Open',
@@ -1795,7 +1788,6 @@ export const messages: Messages = {
 
     panel: {
       inbox: 'Waiting on you',
-      inboxHint: 'Pull requests across every repository that are waiting for your review.',
       repo: 'This repo',
       prs: 'Pull requests',
       issues: 'Issues',
@@ -1850,11 +1842,6 @@ export const messages: Messages = {
       threads: 'No review comments on this pull request.',
     },
 
-    prState: {
-      OPEN: 'Open',
-      CLOSED: 'Closed',
-      MERGED: 'Merged',
-    },
     issueState: {
       OPEN: 'Open',
       CLOSED: 'Closed',
@@ -1866,13 +1853,6 @@ export const messages: Messages = {
     },
     /** Lives outside `reviewDecision`: "none" is a null, not a member of the union. */
     reviewDecisionNone: 'No review yet',
-    reviewState: {
-      APPROVED: 'Approved',
-      CHANGES_REQUESTED: 'Changes requested',
-      COMMENTED: 'Commented',
-      DISMISSED: 'Dismissed',
-      PENDING: 'Pending',
-    },
     checkBucket: {
       pass: 'Passed',
       fail: 'Failed',
@@ -1913,7 +1893,6 @@ export const messages: Messages = {
       author: 'by {author}',
       bot: 'bot',
       diffStat: '+{additions} / -{deletions} across {files} files',
-      checksSummary: '{passed} passed, {failed} failed, {pending} running',
       assignees: 'Assigned to {assignees}',
       unassigned: 'Unassigned',
       labels: 'Labels',
@@ -1940,7 +1919,6 @@ export const messages: Messages = {
       titlePlaceholder: 'Describe the change in one line',
       bodyLabel: 'Description',
       bodyPlaceholder: 'What changed, and why',
-      baseLabel: 'Base branch',
       draftLabel: 'Create as a draft',
       submit: 'Create pull request',
       cancel: 'Cancel',
@@ -1966,7 +1944,6 @@ export const messages: Messages = {
 
     staleness: {
       updated: 'Updated {relative}',
-      justNow: 'just now',
       refreshing: 'Refreshing...',
     },
 
