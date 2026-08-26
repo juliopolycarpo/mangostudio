@@ -61,13 +61,24 @@ export class GitWriteError extends Error {
   }
 }
 
-/** Serializes index mutations for one repository while allowing other repos to proceed. */
-async function withMutationLock<T>(
+/**
+ * Serializes index mutations for one repository while allowing other repos to
+ * proceed.
+ *
+ * `scope` is the path the mutation contends on, and it is not always the
+ * repository root. Every worktree of a repository has its own `index` and its
+ * own `index.lock`, so ordinary index mutations are genuinely independent and
+ * key on the root. `git worktree add` and `git worktree remove` mutate the
+ * administrative state under the shared common directory instead, so
+ * `git-worktree-service.ts` passes that directory here and serializes against
+ * every worktree of the same repository through this one queue map.
+ */
+export async function withMutationLock<T>(
   environmentId: string,
-  root: string,
+  scope: string,
   mutation: () => Promise<T>
 ): Promise<T> {
-  const key = `${environmentId}:${root}`;
+  const key = `${environmentId}:${scope}`;
   const previous = mutationQueues.get(key) ?? Promise.resolve();
   let release!: () => void;
   const current = new Promise<void>((resolve) => {
@@ -124,11 +135,13 @@ async function currentRepoState(
   };
 }
 
-function commandDetail(error: GitCliError): string | undefined {
+/** The line worth showing a user, whichever stream Git chose to write it on. */
+export function commandDetail(error: GitCliError): string | undefined {
   return error.stderr || error.stdout || undefined;
 }
 
-function combinedCommandOutput(error: GitCliError): string {
+/** Both streams together, for failure classification that must not miss a match. */
+export function combinedCommandOutput(error: GitCliError): string {
   return [error.stderr, error.stdout].filter(Boolean).join('\n');
 }
 
