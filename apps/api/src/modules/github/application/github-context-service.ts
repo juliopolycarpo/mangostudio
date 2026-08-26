@@ -2,7 +2,12 @@ import type { GithubContext, GithubPr, GithubRepo } from '@mangostudio/shared/gi
 import { GithubPrSchema } from '@mangostudio/shared/github';
 import Type, { type Static, type TSchema } from 'typebox';
 import Value from 'typebox/value';
-import { GhCliError, type GithubCli, ghCli } from '../infrastructure/gh-cli';
+import {
+  GhCliError,
+  type GhRuntimeSelection,
+  type GithubCli,
+  ghCli,
+} from '../infrastructure/gh-cli';
 
 const GhRepoOutputSchema = Type.Object({
   nameWithOwner: Type.String(),
@@ -24,16 +29,29 @@ export class GithubContextError extends Error {
   }
 }
 
-export type GetGithubContext = (workdir: string, signal?: AbortSignal) => Promise<GithubContext>;
+/**
+ * Resolves GitHub context for a workdir *on a given machine*.
+ *
+ * The selection is not optional and is not defaulted here. A chat pinned to a
+ * WSL, SSH, or container environment has a workdir that only exists over there,
+ * and running `gh` anywhere else answers about the wrong filesystem and the
+ * wrong GitHub account — so the caller that knows which environment the chat
+ * belongs to has to say.
+ */
+export type GetGithubContext = (
+  workdir: string,
+  selection: GhRuntimeSelection,
+  signal?: AbortSignal
+) => Promise<GithubContext>;
 
 export function createGithubContextService(client: GithubCli): GetGithubContext {
-  return async (workdir, signal) => {
-    if (!(await client.isAvailable(workdir))) return { state: 'gh-not-installed' };
-    if (!(await client.isAuthenticated(workdir))) return { state: 'not-authenticated' };
+  return async (workdir, selection, signal) => {
+    if (!(await client.isAvailable(selection))) return { state: 'gh-not-installed' };
+    if (!(await client.isAuthenticated(selection))) return { state: 'not-authenticated' };
 
     let repo: GithubRepo;
     try {
-      const result = await client.viewRepo(workdir, signal);
+      const result = await client.viewRepo(workdir, selection, signal);
       const output = parseGhOutput(result.stdout, GhRepoOutputSchema, 'repo view');
       repo = {
         nameWithOwner: output.nameWithOwner,
@@ -50,7 +68,7 @@ export function createGithubContextService(client: GithubCli): GetGithubContext 
 
     let pr: GithubPr | null;
     try {
-      const result = await client.viewCurrentPr(workdir, signal);
+      const result = await client.viewCurrentPr(workdir, selection, signal);
       pr = parseGhOutput(result.stdout, GithubPrSchema, 'pr view');
     } catch (error) {
       if (matchesGhError(error, NO_PULL_REQUEST_PATTERN)) pr = null;

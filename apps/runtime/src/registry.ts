@@ -14,6 +14,7 @@ import {
 } from './services/external-agents/supervisor';
 import { runtimeFsService } from './services/fs';
 import { closeGrepPool } from './services/fs/grep-scanner';
+import { execGh, mutateGh } from './services/gh';
 import { execGit } from './services/git';
 import { createInstallService } from './services/install';
 import { libraryService } from './services/library/service';
@@ -125,6 +126,8 @@ export function createRuntimeMethodHandlers(
         runShellCommand({ ...params, signal: context.signal })
       ),
       handler('git.exec', (params, context) => execGit(params, context.signal)),
+      handler('gh.exec', (params, context) => execGh(params, context.signal)),
+      handler('gh.mutate', (params, context) => mutateGh(params, context.signal)),
       handler('snapshot.capture', (params, context) =>
         captureFileSnapshot(params.path, context.signal)
       ),

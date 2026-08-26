@@ -1004,9 +1004,36 @@ the declaration is what keeps the gap legible rather than silent.
 
 Add a runtime operation as one coherent change:
 
-1. Define its serializable parameters and result in `apps/runtime/src/methods.ts`.
+1. Define its serializable parameters and result in `apps/runtime/src/methods.ts`, and add the
+   method to `RuntimeMethodMap`.
 2. Register a runtime handler and keep host effects inside `apps/runtime/src/services/`.
-3. Expose the typed call through `apps/api/src/services/runtime-client/`.
-4. Keep authorization, product policy, and durable persistence in the API.
-5. Test the handler directly and test any cancellation or error translation at the API
+3. Decide what governs it in `RUNTIME_METHOD_CAPABILITIES` (`apps/runtime/src/consent-gate.ts`).
+   The table is keyed by `RuntimeMethod`, so this is a type error rather than an option — and
+   the answer is a *set*: a method that both reads a domain and causes effects names both
+   capabilities, or the profile that refuses the second still runs it. The gate dispatches on
+   the method name and never sees params, so a read/write split has to be two methods.
+4. Expose the typed call through `apps/api/src/services/runtime-client/`.
+5. Keep authorization, product policy, and durable persistence in the API.
+6. Test the handler directly and test any cancellation or error translation at the API
    boundary.
+
+A method that also announces a **capability** — a binary it needs, a feature it can only
+offer on some machines — has two more legs, and forgetting either ships green:
+
+7. Add the field to `RuntimeCapabilityManifestSchema`
+   (`apps/shared/src/runtime-protocol/schemas.ts`) as `Type.Optional`, and populate it from
+   `createLocalRuntimeManifest` (`apps/runtime/src/manifest.ts`). Required would fail decode
+   for every older peer; document whether absent means granted or unavailable, because the
+   two readings already coexist in that schema — the original `features` keys mean granted,
+   `externalAgents` and `gh` mean unavailable.
+8. Add the same field to `RuntimeHealthReportSchema` (`apps/shared/src/runtime-home/`), emit it
+   from `apps/runtime/src/health.ts`, and carry it in `capabilityManifestFromHealth`
+   (`apps/api/src/services/runtime-client/manifest-from-health.ts`). **This is the leg that
+   fails silently.** The hub rebuilds a remote peer's manifest from `runtime.health` after any
+   consent change and cannot probe another machine, so a capability that travelled only on
+   `hello` disappears on the first refresh — with nothing logged and every test still passing.
+   Assert it in `manifest-from-health.test.ts`.
+
+`RUNTIME_PROTOCOL_VERSION` does not move for an additive method. Only major and minor are
+compared, and an older runtime answers `METHOD_UNSUPPORTED` — a normal decodeable outcome.
+Frame envelopes are closed (`additionalProperties: false`), so nothing may be added to them.

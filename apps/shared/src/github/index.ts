@@ -1,4 +1,9 @@
 export {
+  GITHUB_PR_REVIEW_THREADS_QUERY,
+  isPinnedGithubGraphqlDocument,
+  PINNED_GITHUB_GRAPHQL_DOCUMENTS,
+} from './graphql-documents';
+export {
   GITHUB_LIST_LIMIT_DEFAULT,
   type GithubActor,
   GithubActorSchema,

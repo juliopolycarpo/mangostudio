@@ -74,6 +74,31 @@ describe('summarizeAuditArgs', () => {
     });
   });
 
+  it('records only the subcommand for gh, never the prose in its argv', () => {
+    // `gh pr create --title ... --body ...` carries whatever a user wrote, and
+    // the scrubber below is best-effort pattern matching on free-form English.
+    // Two tokens name the operation, which is what the audit line is for.
+    const summary = summarizeAuditArgs('gh.mutate', {
+      cwd: '/repo',
+      args: ['pr', 'create', '--title', 'Rotate the SECRET_PAYLOAD key', '--body', 'internal'],
+    });
+
+    expect(summary).toEqual({ cwd: '/repo', args: ['pr', 'create'] });
+    expect(JSON.stringify(summary)).not.toContain('SECRET_PAYLOAD');
+    expect(summarizeAuditArgs('gh.exec', { cwd: '/repo', args: ['--version'] })).toEqual({
+      cwd: '/repo',
+      args: ['--version'],
+    });
+  });
+
+  it('still records the full argv for git, which composes its own', () => {
+    // Only `gh.*` and `mcp.*` opt into argv summaries; git.exec argv is code-
+    // defined and is deliberately not promoted onto the audit line at all.
+    expect(summarizeAuditArgs('git.exec', { cwd: '/repo', args: ['status'] })).toEqual({
+      cwd: '/repo',
+    });
+  });
+
   it('redacts credential-shaped tokens inside command and argv', () => {
     expect(
       summarizeAuditArgs('shell.run', {

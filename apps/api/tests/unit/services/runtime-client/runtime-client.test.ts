@@ -173,6 +173,68 @@ describe('RuntimeClient', () => {
     }
   });
 
+  it('routes each half of the gh facade to its own protocol method', async () => {
+    // The read/write split lives in the method name — the runtime's consent
+    // gate never sees params — so a facade that sent both halves to one method
+    // would silently let a read-only machine run a write.
+    const received: [string, unknown][] = [];
+    const record =
+      (method: string): RuntimeMethodHandler =>
+      (params) => {
+        received.push([method, params]);
+        return Promise.resolve({ stdout: '', stderr: '', exitCode: 0 });
+      };
+    const handlers = new Map<string, RuntimeMethodHandler>([
+      ['gh.exec', record('gh.exec')],
+      ['gh.mutate', record('gh.mutate')],
+    ]);
+    const host = new RuntimeHost({ runtimeVersion: 'runtime-test', manifest, handlers });
+    const connection = await connectInProcessRuntime(host, {
+      hubVersion: 'hub-test',
+      validateFrames: true,
+    });
+    const client = new RuntimeClient(connection.client);
+
+    try {
+      await client.gh.exec({ args: ['pr', 'view'], cwd: '/repo' });
+      await client.gh.mutate({ args: ['pr', 'create', '--fill'], cwd: '/repo' });
+    } finally {
+      await connection.close();
+    }
+
+    expect(received).toEqual([
+      ['gh.exec', { args: ['pr', 'view'], cwd: '/repo' }],
+      ['gh.mutate', { args: ['pr', 'create', '--fill'], cwd: '/repo' }],
+    ]);
+  });
+
+  it('routes git.exec through the same multiplexer as its gh siblings', async () => {
+    const received: [string, unknown][] = [];
+    const handlers = new Map<string, RuntimeMethodHandler>([
+      [
+        'git.exec',
+        (params) => {
+          received.push(['git.exec', params]);
+          return Promise.resolve({ stdout: 'ok', stderr: '', exitCode: 0 });
+        },
+      ],
+    ]);
+    const host = new RuntimeHost({ runtimeVersion: 'runtime-test', manifest, handlers });
+    const connection = await connectInProcessRuntime(host, {
+      hubVersion: 'hub-test',
+      validateFrames: true,
+    });
+    const client = new RuntimeClient(connection.client);
+
+    try {
+      await client.git.exec({ args: ['status'], cwd: '/repo' });
+    } finally {
+      await connection.close();
+    }
+
+    expect(received).toEqual([['git.exec', { args: ['status'], cwd: '/repo' }]]);
+  });
+
   it('inherits request timeout translation for external-agent methods', async () => {
     const handlers = new Map<string, RuntimeMethodHandler>([
       [

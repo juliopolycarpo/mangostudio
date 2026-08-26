@@ -47,7 +47,14 @@ export function createGithubRoutes(resolveContext: GetGithubContext = getGithubC
         if (resolution.state !== 'ok') return chatAccessDenied(resolution, set);
 
         try {
-          return await resolveContext(resolution.workdir, request.signal);
+          // The environment is the whole point of this call. `gh` runs on the
+          // machine the chat is pinned to, because the workdir above is a path
+          // on that machine and the GitHub account is that machine's.
+          return await resolveContext(
+            resolution.workdir,
+            { userId: user?.id ?? '', environmentId: resolution.chat.environmentId },
+            request.signal
+          );
         } catch (error) {
           if (error instanceof GhCliError) {
             // A cancelled request is the client hanging up, not a server fault worth logging.

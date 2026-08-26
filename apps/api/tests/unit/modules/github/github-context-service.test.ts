@@ -3,7 +3,11 @@ import {
   createGithubContextService,
   GithubContextError,
 } from '../../../../src/modules/github/application/github-context-service';
-import { GhCliError, type GithubCli } from '../../../../src/modules/github/infrastructure/gh-cli';
+import {
+  GhCliError,
+  type GhRuntimeSelection,
+  type GithubCli,
+} from '../../../../src/modules/github/infrastructure/gh-cli';
 
 const repoOutput = JSON.stringify({
   nameWithOwner: 'mango/mangostudio',
@@ -21,6 +25,9 @@ const prOutput = JSON.stringify({
 });
 const result = (stdout: string) => ({ stdout, stderr: '', exitCode: 0 });
 
+/** The machine a chat is pinned to; every call below has to carry it. */
+const REMOTE: GhRuntimeSelection = { userId: 'user-1', environmentId: 'devbox' };
+
 function fakeCli(overrides: Partial<GithubCli> = {}): GithubCli {
   return {
     isAvailable: () => Promise.resolve(true),
@@ -36,12 +43,12 @@ describe('GitHub context service', () => {
     const unavailable = createGithubContextService(
       fakeCli({ isAvailable: () => Promise.resolve(false) })
     );
-    await expect(unavailable('/repo')).resolves.toEqual({ state: 'gh-not-installed' });
+    await expect(unavailable('/repo', REMOTE)).resolves.toEqual({ state: 'gh-not-installed' });
 
     const unauthenticated = createGithubContextService(
       fakeCli({ isAuthenticated: () => Promise.resolve(false) })
     );
-    await expect(unauthenticated('/repo')).resolves.toEqual({ state: 'not-authenticated' });
+    await expect(unauthenticated('/repo', REMOTE)).resolves.toEqual({ state: 'not-authenticated' });
   });
 
   it('maps repository discovery errors to stable context states', async () => {
@@ -50,7 +57,7 @@ describe('GitHub context service', () => {
         viewRepo: () => Promise.reject(new GhCliError(['repo', 'view'], 1, 'no git remotes found')),
       })
     );
-    await expect(noRemote('/repo')).resolves.toEqual({ state: 'no-remote' });
+    await expect(noRemote('/repo', REMOTE)).resolves.toEqual({ state: 'no-remote' });
 
     const notGithub = createGithubContextService(
       fakeCli({
@@ -64,12 +71,12 @@ describe('GitHub context service', () => {
           ),
       })
     );
-    await expect(notGithub('/repo')).resolves.toEqual({ state: 'not-a-github-remote' });
+    await expect(notGithub('/repo', REMOTE)).resolves.toEqual({ state: 'not-a-github-remote' });
   });
 
   it('returns repository context with and without a branch pull request', async () => {
     const withPr = createGithubContextService(fakeCli());
-    await expect(withPr('/repo')).resolves.toEqual({
+    await expect(withPr('/repo', REMOTE)).resolves.toEqual({
       state: 'ok',
       repo: {
         nameWithOwner: 'mango/mangostudio',
@@ -87,23 +94,57 @@ describe('GitHub context service', () => {
           ),
       })
     );
-    await expect(withoutPr('/repo')).resolves.toMatchObject({ state: 'ok', pr: null });
+    await expect(withoutPr('/repo', REMOTE)).resolves.toMatchObject({ state: 'ok', pr: null });
   });
 
   it('rejects malformed and schema-incompatible JSON as typed output errors', async () => {
     const malformed = createGithubContextService(
       fakeCli({ viewRepo: () => Promise.resolve(result('{not-json')) })
     );
-    await expect(malformed('/repo')).rejects.toBeInstanceOf(GithubContextError);
+    await expect(malformed('/repo', REMOTE)).rejects.toBeInstanceOf(GithubContextError);
 
     const invalidPr = createGithubContextService(
       fakeCli({ viewCurrentPr: () => Promise.resolve(result('{"number":0}')) })
     );
-    await expect(invalidPr('/repo')).rejects.toMatchObject({
+    await expect(invalidPr('/repo', REMOTE)).rejects.toMatchObject({
       name: 'GithubContextError',
       code: 'GH_OUTPUT_INVALID',
       command: 'pr view',
     });
+  });
+
+  it('runs gh on the environment the chat is pinned to', async () => {
+    // The bug this service used to have: it knew a workdir and nothing about
+    // whose machine that path was on, so a chat pinned to WSL, SSH, or a
+    // container ran gh against the hub's filesystem and the hub's gh account.
+    const seen: Array<{ workdir?: string; selection: GhRuntimeSelection }> = [];
+    const service = createGithubContextService(
+      fakeCli({
+        isAvailable: (selection) => {
+          seen.push({ selection });
+          return Promise.resolve(true);
+        },
+        isAuthenticated: (selection) => {
+          seen.push({ selection });
+          return Promise.resolve(true);
+        },
+        viewRepo: (workdir, selection) => {
+          seen.push({ workdir, selection });
+          return Promise.resolve(result(repoOutput));
+        },
+        viewCurrentPr: (workdir, selection) => {
+          seen.push({ workdir, selection });
+          return Promise.resolve(result(prOutput));
+        },
+      })
+    );
+
+    await service('/remote/repo', REMOTE);
+
+    expect(seen).toHaveLength(4);
+    for (const call of seen) expect(call.selection).toEqual(REMOTE);
+    expect(seen[2]?.workdir).toBe('/remote/repo');
+    expect(seen[3]?.workdir).toBe('/remote/repo');
   });
 
   it('does not downgrade unexpected gh failures into normal states', async () => {
@@ -111,6 +152,6 @@ describe('GitHub context service', () => {
     const service = createGithubContextService(
       fakeCli({ viewRepo: () => Promise.reject(failure) })
     );
-    await expect(service('/repo')).rejects.toBe(failure);
+    await expect(service('/repo', REMOTE)).rejects.toBe(failure);
   });
 });

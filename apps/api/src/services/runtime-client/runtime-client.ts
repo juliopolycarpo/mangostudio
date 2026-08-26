@@ -34,6 +34,8 @@ import {
   type RuntimeDeleteFileResult,
   type RuntimeEditFileParams,
   type RuntimeEditFileResult,
+  type RuntimeGhExecParams,
+  type RuntimeGhExecResult,
   type RuntimeGitExecParams,
   type RuntimeGitExecResult,
   type RuntimeGlobParams,
@@ -189,6 +191,21 @@ interface RuntimeGitClient {
     params: RuntimeGitExecParams,
     options?: RuntimeRequestOptions
   ): Promise<RuntimeGitExecResult>;
+}
+
+/**
+ * Two calls with one shape, because the runtime's consent gate reads the method
+ * name and never the parameters: `exec` runs the read-only subcommands under
+ * `git` consent, `mutate` runs the writing ones and additionally needs `shell`.
+ * Choosing the wrong one here does not widen anything — the runtime keeps its
+ * own allowlist per method and refuses the mismatch.
+ */
+interface RuntimeGhClient {
+  exec(params: RuntimeGhExecParams, options?: RuntimeRequestOptions): Promise<RuntimeGhExecResult>;
+  mutate(
+    params: RuntimeGhExecParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeGhExecResult>;
 }
 
 interface RuntimeSnapshotClient {
@@ -412,6 +429,7 @@ export class RuntimeClient {
   readonly fs: RuntimeFsClient;
   readonly shell: RuntimeShellClient;
   readonly git: RuntimeGitClient;
+  readonly gh: RuntimeGhClient;
   readonly install: RuntimeInstallClient;
   readonly update: RuntimeUpdateClient;
   readonly mcp: RuntimeMcpClient;
@@ -448,6 +466,10 @@ export class RuntimeClient {
     };
     this.git = {
       exec: (params, options) => this.request('git.exec', params, options),
+    };
+    this.gh = {
+      exec: (params, options) => this.request('gh.exec', params, options),
+      mutate: (params, options) => this.request('gh.mutate', params, options),
     };
     this.mcp = {
       connect: (params, options) => this.request('mcp.connect', params, options),

@@ -38,6 +38,37 @@ describe('capabilityManifestFromHealth', () => {
     expect(manifest.shells).toEqual([]);
   });
 
+  it('carries gh across a refresh, which is the leg that silently drops it', () => {
+    // The hub rebuilds a remote peer's manifest from health after every consent
+    // change and cannot probe another machine. A `gh` that reached the hub only
+    // on `hello` would disappear here, and the panel would go dark for reasons
+    // nothing logs.
+    const report: RuntimeHealthReport = {
+      ...baseReport,
+      gh: { available: true, version: '2.97.0' },
+      profile: 'full',
+      allow: RUNTIME_CONSENT_PRESETS.full,
+    };
+    expect(capabilityManifestFromHealth(report).gh).toEqual({
+      available: true,
+      version: '2.97.0',
+    });
+  });
+
+  it('leaves gh absent for a peer that never reported it', () => {
+    // Absent means unavailable, and it has to stay *absent* rather than become
+    // `{ available: false }`: a hub that manufactures a negative answer cannot
+    // later tell "this runtime has no gh" from "this runtime is too old to say".
+    const report: RuntimeHealthReport = {
+      ...baseReport,
+      profile: 'full',
+      allow: RUNTIME_CONSENT_PRESETS.full,
+    };
+    const manifest = capabilityManifestFromHealth(report);
+    expect(manifest.gh).toBeUndefined();
+    expect('gh' in manifest).toBe(false);
+  });
+
   it('preserves runtime targets and an explicit isolation attestation across refreshes', () => {
     const report: RuntimeHealthReport = {
       ...baseReport,

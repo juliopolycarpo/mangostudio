@@ -95,6 +95,10 @@ export async function collectRuntimeHealth(
     homeDir: manifest.homeDir,
     shells: [...manifest.shells],
     git: manifest.git,
+    // Carried on the report, not only on `hello`: the hub rebuilds a remote
+    // peer's manifest from health after every consent change, so a `gh` that
+    // travelled on the handshake alone would disappear on the first refresh.
+    ...(manifest.gh ? { gh: manifest.gh } : {}),
     lastError: error,
     audit: config.audit,
     ...(auditError ? { auditError } : {}),

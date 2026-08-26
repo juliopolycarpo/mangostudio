@@ -113,6 +113,23 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
     available: Type.Boolean(),
     version: Type.Optional(Type.String({ minLength: 1 })),
   }),
+  /**
+   * The GitHub CLI on the target machine, for `gh.exec` / `gh.mutate`.
+   *
+   * Optional, and absent means **unavailable** — the `externalAgents` reading,
+   * not the original `features` reading where absent means granted. A runtime
+   * built before this key existed did not merely forget to answer: it never
+   * ran the probe and does not carry the handlers, so treating silence as "yes"
+   * would send it a method it will only refuse with `METHOD_UNSUPPORTED`.
+   * Making the key required instead would fail decode for every older peer,
+   * which costs the whole connection to learn one optional tool is missing.
+   */
+  gh: Type.Optional(
+    Type.Object({
+      available: Type.Boolean(),
+      version: Type.Optional(Type.String({ minLength: 1 })),
+    })
+  ),
   features: Type.Object({
     tools: Type.Boolean(),
     git: Type.Boolean(),

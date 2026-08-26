@@ -405,6 +405,23 @@ export const RuntimeHealthReportSchema = Type.Object({
     version: Type.Optional(Type.String({ maxLength: 64 })),
   }),
   /**
+   * The GitHub CLI on this machine. Optional for the same reason `audit` is —
+   * a required key would 500 the lifecycle view for every runtime released
+   * before the probe existed — and absent means unavailable rather than
+   * unknown: that peer ships no `gh.*` handler to call either way.
+   *
+   * This is also the leg that keeps `gh` alive across a consent change. The hub
+   * rebuilds a remote peer's manifest from this report (it cannot probe another
+   * machine), so a `gh` that reached the hub only through `hello` would vanish
+   * on the first health refresh.
+   */
+  gh: Type.Optional(
+    Type.Object({
+      available: Type.Boolean(),
+      version: Type.Optional(Type.String({ maxLength: 64 })),
+    })
+  ),
+  /**
    * What went wrong reading the home, when something did. A `runtime.json` this
    * process could not parse is the case worth naming: silently treating it as
    * absent would turn a corrupt consent file into an open one.
