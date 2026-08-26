@@ -12,7 +12,7 @@
  * distinguishing anything after the first month.
  */
 
-import type { Chat } from '@mangostudio/shared';
+import type { Chat } from '@mangostudio/shared/chat';
 import { runnerKey } from '@/features/sidebar/lib/runner-badge';
 
 /** The window the card reports over. */
