@@ -9,15 +9,12 @@
  * container look authenticated.
  */
 
+import { createReadinessCache } from '../../../services/providers/core/readiness-cache';
+
 /** Identifies the runtime a probe ran against. */
 export interface ProbeEnvironmentKey {
   readonly userId: string;
   readonly environmentId: string;
-}
-
-interface CacheEntry {
-  readonly value: boolean;
-  readonly expiresAt: number;
 }
 
 export interface EnvironmentProbeCacheOptions {
@@ -41,31 +38,18 @@ export interface EnvironmentProbeCacheOptions {
 export function createEnvironmentProbeCache(
   options: EnvironmentProbeCacheOptions
 ): (key: ProbeEnvironmentKey) => Promise<boolean> {
-  const cache = new Map<string, CacheEntry>();
-  const inFlight = new Map<string, Promise<boolean>>();
+  // The TTL and the in-flight deduplication are `createReadinessCache`'s job,
+  // the same one `github-cache.ts` reuses it for. Folding the rejection into
+  // `false` inside the loader rather than around the cache is what makes a
+  // failure cache and expire on the same clock as a success: the cache only
+  // ever sees a resolved boolean.
+  const cache = createReadinessCache<boolean>({ ttlMs: options.ttlMs, now: options.now });
 
-  return (key) => {
-    const id = `${key.userId}:${key.environmentId}`;
-    const cached = cache.get(id);
-    if (cached && options.now() < cached.expiresAt) return Promise.resolve(cached.value);
-
-    const existing = inFlight.get(id);
-    if (existing) return existing;
-
-    const pending = options
-      .probe(key)
-      .then(
+  return (key) =>
+    cache.get(`${key.userId}:${key.environmentId}`, () =>
+      options.probe(key).then(
         () => true,
         () => false
       )
-      .then((value) => {
-        cache.set(id, { value, expiresAt: options.now() + options.ttlMs });
-        return value;
-      })
-      .finally(() => {
-        inFlight.delete(id);
-      });
-    inFlight.set(id, pending);
-    return pending;
-  };
+    );
 }
