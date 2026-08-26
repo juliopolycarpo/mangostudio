@@ -118,7 +118,7 @@ async function installGhShim(script: string): Promise<void> {
 
 async function createGithubPlugin(scenario?: ShimScenario) {
   await installGhShim(scenario ? shimScript(scenario) : UNUSABLE_SHIM);
-  return createGithubRoutes(createGithubContextService(createGhCli()));
+  return createGithubRoutes({ resolveContext: createGithubContextService(createGhCli()) });
 }
 
 async function bindWorkdir(chatId: string, workdir: string): Promise<void> {
