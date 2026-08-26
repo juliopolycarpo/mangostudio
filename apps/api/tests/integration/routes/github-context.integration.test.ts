@@ -206,6 +206,16 @@ describe('GitHub context routes', () => {
     }> = [
       { scenario: { authenticated: false }, expected: 'not-authenticated' },
       { scenario: { repoStderr: 'no git remotes found' }, expected: 'no-remote' },
+      // The ordinary case, not an exotic one: a chat binds to whatever folder
+      // the user picked, and most folders are not checkouts at all. This used
+      // to fall through the ladder and answer 500.
+      {
+        scenario: {
+          repoStderr:
+            'failed to run git: fatal: not a git repository (or any of the parent directories): .git',
+        },
+        expected: 'no-remote',
+      },
       {
         scenario: {
           repoStderr:

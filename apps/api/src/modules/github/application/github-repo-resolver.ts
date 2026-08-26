@@ -13,7 +13,21 @@ import type { GithubRepo, GithubUnavailableState } from '@mangostudio/shared/git
 import { GhRepoOutputSchema, readGhOutput } from '../domain/gh-output';
 import { GhCliError, type GhRuntimeSelection, type GithubCli } from '../infrastructure/gh-cli';
 
-const NO_REMOTE_PATTERN = /no git remotes found/i;
+/**
+ * Both ways a folder can have no GitHub remote to talk about.
+ *
+ * A checkout with no remote configured says "no git remotes found". A folder
+ * that is not a repository at all says "not a git repository", and that is the
+ * ordinary case rather than the exotic one: a chat binds to whatever directory
+ * the user picked, and most directories are not checkouts. Leaving it to fall
+ * through made the panel answer 500 for the most common folder there is.
+ *
+ * Both map to `no-remote`, which already means "this folder has nothing to ask
+ * GitHub about". A separate state for "not even a repository" would be a second
+ * spelling of one condition, and the panel would owe both branches an identical
+ * empty view — the day they stop matching is the day nobody notices.
+ */
+const NO_REMOTE_PATTERN = /no git remotes found|not a git repository/i;
 const NOT_GITHUB_REMOTE_PATTERN =
   /(?:none of the git remotes.*known GitHub host|not a GitHub repository)/i;
 
