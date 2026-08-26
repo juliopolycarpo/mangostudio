@@ -1,7 +1,5 @@
 import type {
-  GithubIssueFilter,
   GithubIssuesResponse,
-  GithubPrFilter,
   GithubPrsResponse,
   GithubUnavailableState,
 } from '@mangostudio/shared/github';
@@ -17,7 +15,7 @@ import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { checkoutPullRequest } from '../api';
 import { useIssueToNewChat } from '../hooks/use-issue-to-new-chat';
-import type { GithubPanelPrefs } from '../lib/github-panel-prefs';
+import { type GithubPanelPrefs, ISSUE_FILTERS, PR_FILTERS } from '../lib/github-panel-prefs';
 import { githubIssuesQueryOptions, githubPrsQueryOptions } from '../queries';
 import { CreatePrForm } from './CreatePrForm';
 import { GithubIssueRow } from './GithubIssueRow';
@@ -32,14 +30,6 @@ const GITHUB_REPO_TESTID = 'github-repo-section';
 
 /** The two lists this section can show. A tab is UI state, not a server filter. */
 type RepoTab = 'prs' | 'issues';
-
-/**
- * The browsable pull-request filters. `all` is deliberately absent: it exists
- * for the branch list's merged-branch annotation, and a view full of long-closed
- * pull requests is not one anybody scrolls through on purpose.
- */
-const PR_FILTERS: readonly GithubPrFilter[] = ['open', 'mine', 'review-requested'];
-const ISSUE_FILTERS: readonly GithubIssueFilter[] = ['open', 'assigned', 'mine'];
 
 interface GithubRepoSectionProps {
   readonly chatId: string;

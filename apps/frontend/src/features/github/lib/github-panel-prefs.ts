@@ -30,12 +30,17 @@ const DEFAULT_PREFS: GithubPanelPrefs = {
 };
 
 /**
+ * The browsable filters: the tabs the panel renders, and the only values this
+ * module will restore from storage. One list serves both, because a filter the
+ * panel offers but storage rejects resets itself on every reload, and one
+ * storage accepts but the panel omits is unreachable.
+ *
  * `all` is deliberately absent: it is the branch list's annotation filter, not
  * a view somebody browses, and restoring it as a remembered choice would show
  * a panel full of long-merged pull requests on open.
  */
-const PR_FILTERS: readonly GithubPrFilter[] = ['open', 'mine', 'review-requested'];
-const ISSUE_FILTERS: readonly GithubIssueFilter[] = ['open', 'assigned', 'mine'];
+export const PR_FILTERS: readonly GithubPrFilter[] = ['open', 'mine', 'review-requested'];
+export const ISSUE_FILTERS: readonly GithubIssueFilter[] = ['open', 'assigned', 'mine'];
 
 /**
  * Reads the remembered panel preferences, falling back per field.
