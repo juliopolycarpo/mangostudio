@@ -39,7 +39,9 @@ function HomeRoute() {
       harnessSessions={harnessSessions}
       onSelectChat={app.handleSelectChat}
       onNewChat={() => void app.handleNewChat()}
-      onNewChatInWorkdir={(workdir) => void app.handleNewChatInWorkdir(workdir)}
+      onNewChatInWorkdir={(workdir, environmentId) =>
+        void app.handleNewChatInWorkdir(workdir, environmentId)
+      }
     />
   );
 }

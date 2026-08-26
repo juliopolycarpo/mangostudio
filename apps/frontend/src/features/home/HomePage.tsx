@@ -41,7 +41,7 @@ export interface HomePageProps {
   readonly harnessSessions: Readonly<Record<string, number>>;
   readonly onSelectChat: (chatId: string) => void;
   readonly onNewChat: () => void;
-  readonly onNewChatInWorkdir: (workdir: string) => void;
+  readonly onNewChatInWorkdir: (workdir: string, environmentId: string) => void;
 }
 
 export function HomePage({

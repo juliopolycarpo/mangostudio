@@ -10,7 +10,7 @@
  * inside a request that was going out anyway.
  */
 
-import type { Chat } from '@mangostudio/shared';
+import type { Chat } from '@mangostudio/shared/chat';
 import { useQuery } from '@tanstack/react-query';
 import { FolderGit2, GitBranch, MessageSquarePlus, Play } from 'lucide-react';
 import { useMemo } from 'react';
@@ -32,7 +32,7 @@ interface WorkspacesGridProps {
   /** Folders the picker remembers, so one chosen but never used still shows. */
   readonly recentWorkdirs: readonly string[];
   readonly onSelectChat: (chatId: string) => void;
-  readonly onNewChatInWorkdir: (workdir: string) => void;
+  readonly onNewChatInWorkdir: (workdir: string, environmentId: string) => void;
   /** The empty account's way in: no folders, no sessions, nothing to resume. */
   readonly onNewChat: () => void;
 }
@@ -75,7 +75,7 @@ export function WorkspacesGrid({
       ) : (
         <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           {groups.map((group) => (
-            <li key={group.workdir}>
+            <li key={group.key}>
               <WorkspaceTile
                 group={group}
                 summary={
@@ -122,7 +122,7 @@ interface WorkspaceTileProps {
   /** Absent while the batch is in flight; `null` when the server has no answer. */
   readonly summary: ReturnType<typeof useBatchedGitSummaries>[string] | undefined;
   readonly onSelectChat: (chatId: string) => void;
-  readonly onNewChatInWorkdir: (workdir: string) => void;
+  readonly onNewChatInWorkdir: (workdir: string, environmentId: string) => void;
 }
 
 function WorkspaceTile({ group, summary, onSelectChat, onNewChatInWorkdir }: WorkspaceTileProps) {
@@ -209,7 +209,7 @@ function WorkspaceTile({ group, summary, onSelectChat, onNewChatInWorkdir }: Wor
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => onNewChatInWorkdir(group.workdir)}
+          onClick={() => onNewChatInWorkdir(group.workdir, group.environmentId)}
           className="gap-1.5"
           aria-label={formatMessage(labels.newChatHereIn, { folder: group.name })}
         >

@@ -266,7 +266,7 @@ describe('HomePage', () => {
       expect(props.onSelectChat).toHaveBeenCalledWith('chat-1');
 
       await user.click(screen.getByRole('button', { name: 'New chat in mango' }));
-      expect(props.onNewChatInWorkdir).toHaveBeenCalledWith('/srv/projects/mango');
+      expect(props.onNewChatInWorkdir).toHaveBeenCalledWith('/srv/projects/mango', 'local');
     } finally {
       scenario.restore();
     }

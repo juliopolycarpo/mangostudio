@@ -1,4 +1,5 @@
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { useNavigate } from '@tanstack/react-router';
 import { useCallback } from 'react';
 import { useToast } from '@/components/ui/Toast';
@@ -105,14 +106,23 @@ export function useChatRouteActions({
    * fires this from a click handler and discards the rejection, so a bare throw
    * would leave an orphaned chat selected with nothing on screen saying why.
    *
-   * // Usage: handleNewChatInWorkdir('/srv/projects/mango')
+   * `environmentId` is the folder's machine, not decoration: creation always
+   * lands on `local`, and a workspace tile can represent a folder on any
+   * environment. Left unsaid, "new chat here" on a remote tile would bind the
+   * folder to the local machine instead of the one it actually lives on.
+   *
+   * // Usage: handleNewChatInWorkdir('/srv/projects/mango', 'local')
    */
   const handleNewChatInWorkdir = useCallback(
-    async (workdir: string) => {
+    async (workdir: string, environmentId: string) => {
       const bound = await holdWorkdirDefault(async () => {
         const chat = await chats.createChat();
         try {
-          await chats.updateChatWorkdir(chat.id, workdir);
+          if (environmentId !== chat.environmentId) {
+            await chats.updateChatWorkdirOnEnvironment(chat.id, workdir, environmentId);
+          } else {
+            await chats.updateChatWorkdir(chat.id, workdir);
+          }
           return true;
         } catch {
           await chats.deleteChat(chat.id);
@@ -123,7 +133,9 @@ export function useChatRouteActions({
         toast(t.chat.newChatWorkdirFailed, 'error');
         return;
       }
-      addRecentWorkdir(workdir);
+      // The picker only ever browses the hub's own filesystem, so a folder on
+      // another machine has no business in its recent list.
+      if (environmentId === LOCAL_ENVIRONMENT_ID) addRecentWorkdir(workdir);
       await navigate({ to: '/' });
     },
     [addRecentWorkdir, chats, holdWorkdirDefault, navigate, t, toast]

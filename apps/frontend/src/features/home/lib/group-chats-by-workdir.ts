@@ -2,10 +2,11 @@
  * The account's folders, assembled from the sessions that point at them.
  *
  * There is no Workspace entity behind this and there is deliberately not going
- * to be one: a "workspace" is every chat that shares a `workdir`, plus the
- * folders the picker remembers but nobody has opened a session in yet. The
- * grouping is composition over data the app already holds, so a folder appears
- * the moment a chat points at it and disappears when the last one stops.
+ * to be one: a "workspace" is every chat that shares an `environmentId` and a
+ * `workdir`, plus the folders the picker remembers but nobody has opened a
+ * session in yet. The grouping is composition over data the app already
+ * holds, so a folder appears the moment a chat points at it and disappears
+ * when the last one stops.
  *
  * Order is the chat list's own order — the server returns it `updatedAt desc`,
  * so first appearance is last activity. Nothing here re-sorts by a timestamp,
@@ -13,14 +14,23 @@
  * reason the list arrived in this order.
  */
 
-import type { Chat } from '@mangostudio/shared';
-import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+import type { Chat, ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { runnerKey } from '@/features/sidebar/lib/runner-badge';
 import { workdirLabel } from '@/lib/paths';
 
 export interface WorkspaceGroup {
-  /** The exact `chat.workdir` string, and the group's identity. */
+  /** `environmentId` + `workdir`, unique across groups; usable as a list key. */
+  readonly key: string;
+  /** The exact `chat.workdir` string. */
   readonly workdir: string;
+  /**
+   * The environment the group's chats run on. The workdir picker browses the
+   * hub's own filesystem, so a remembered-only folder — nobody has a session
+   * in it yet — is pinned to {@link LOCAL_ENVIRONMENT_ID}, same as a chat
+   * created against it would be.
+   */
+  readonly environmentId: string;
   /** Folder name for display, falling back to the path when it has no segment. */
   readonly name: string;
   /**
@@ -50,10 +60,20 @@ export const WORKSPACE_GROUP_LIMIT = 6;
 
 interface MutableGroup {
   workdir: string;
+  environmentId: string;
   representativeChatId: string | null;
   representativeTitle: string | null;
   sessionCount: number;
   runners: ChatRunnerConfiguration[];
+}
+
+/**
+ * Identity key: same path on two environments is two different folders.
+ * `JSON.stringify` over a tuple, not a delimited string, so no separator
+ * choice needs to stay disjoint from every possible id or path.
+ */
+function groupKey(environmentId: string, workdir: string): string {
+  return JSON.stringify([environmentId, workdir]);
 }
 
 function addRunner(group: MutableGroup, runner: ChatRunnerConfiguration): void {
@@ -64,7 +84,9 @@ function addRunner(group: MutableGroup, runner: ChatRunnerConfiguration): void {
 
 function seal(group: MutableGroup): WorkspaceGroup {
   return {
+    key: groupKey(group.environmentId, group.workdir),
     workdir: group.workdir,
+    environmentId: group.environmentId,
     // `workdirLabel` never returns null for a non-empty path; the fallback is
     // for the empty string, which is not a folder anything can be grouped by.
     name: workdirLabel(group.workdir) ?? group.workdir,
@@ -90,11 +112,12 @@ export function groupChatsByWorkdir(
   chats: readonly Chat[],
   recentWorkdirs: readonly string[]
 ): WorkspaceGroups {
-  const byWorkdir = new Map<string, MutableGroup>();
+  const byKey = new Map<string, MutableGroup>();
 
   for (const chat of chats) {
     if (!chat.workdir) continue;
-    const existing = byWorkdir.get(chat.workdir);
+    const key = groupKey(chat.environmentId, chat.workdir);
+    const existing = byKey.get(key);
     if (existing) {
       existing.sessionCount += 1;
       addRunner(existing, chat.runner);
@@ -104,18 +127,22 @@ export function groupChatsByWorkdir(
     // representative and the head of the runner list.
     const group: MutableGroup = {
       workdir: chat.workdir,
+      environmentId: chat.environmentId,
       representativeChatId: chat.id,
       representativeTitle: chat.title,
       sessionCount: 1,
       runners: [chat.runner],
     };
-    byWorkdir.set(chat.workdir, group);
+    byKey.set(key, group);
   }
 
   for (const workdir of recentWorkdirs) {
-    if (!workdir || byWorkdir.has(workdir)) continue;
-    byWorkdir.set(workdir, {
+    if (!workdir) continue;
+    const key = groupKey(LOCAL_ENVIRONMENT_ID, workdir);
+    if (byKey.has(key)) continue;
+    byKey.set(key, {
       workdir,
+      environmentId: LOCAL_ENVIRONMENT_ID,
       representativeChatId: null,
       representativeTitle: null,
       sessionCount: 0,
@@ -125,7 +152,7 @@ export function groupChatsByWorkdir(
 
   // A `Map` iterates in insertion order, so chat groups come out ahead of the
   // remembered-only ones without a second pass to keep the two lists in step.
-  const groups = [...byWorkdir.values()].map(seal);
+  const groups = [...byKey.values()].map(seal);
   return {
     groups: groups.slice(0, WORKSPACE_GROUP_LIMIT),
     overflowCount: Math.max(0, groups.length - WORKSPACE_GROUP_LIMIT),

@@ -17,6 +17,7 @@ function setup(createdId = 'chat-new') {
   const updateChatRunner = jest.fn(async () => undefined);
   const updateChatRunnerOnEnvironment = jest.fn(async () => undefined);
   const updateChatWorkdir = jest.fn(async () => undefined);
+  const updateChatWorkdirOnEnvironment = jest.fn(async () => undefined);
   const deleteChat = jest.fn(async () => undefined);
   const navigate = jest.fn(async () => undefined);
   const addRecentWorkdir = jest.fn();
@@ -25,6 +26,7 @@ function setup(createdId = 'chat-new') {
     updateChatRunner,
     updateChatRunnerOnEnvironment,
     updateChatWorkdir,
+    updateChatWorkdirOnEnvironment,
     deleteChat,
   } as unknown as Parameters<typeof useChatRouteActions>[0]['chats'];
 
@@ -64,6 +66,7 @@ function setup(createdId = 'chat-new') {
     updateChatRunner,
     updateChatRunnerOnEnvironment,
     updateChatWorkdir,
+    updateChatWorkdirOnEnvironment,
     deleteChat,
     navigate,
     addRecentWorkdir,
@@ -222,13 +225,57 @@ describe('handleNewChatInWorkdir', () => {
     const { result, createChat, updateChatWorkdir, addRecentWorkdir, navigate } = setup('chat-new');
 
     await act(async () => {
-      await result.current.handleNewChatInWorkdir('/srv/projects/mango');
+      await result.current.handleNewChatInWorkdir('/srv/projects/mango', 'local');
     });
 
     expect(createChat).toHaveBeenCalledTimes(1);
     expect(updateChatWorkdir).toHaveBeenCalledWith('chat-new', '/srv/projects/mango');
     expect(addRecentWorkdir).toHaveBeenCalledWith('/srv/projects/mango');
     expect(navigate).toHaveBeenCalledWith({ to: '/' });
+  });
+
+  /**
+   * A workspace tile can represent a folder on any environment. Creation
+   * lands on `local`, and nothing server-side rejects a remote folder on a
+   * local chat — so dropping the environment here binds the folder to a
+   * machine that may not even have it.
+   */
+  it('binds the new chat to the folder’s machine', async () => {
+    const {
+      result,
+      updateChatWorkdirOnEnvironment,
+      updateChatWorkdir,
+      addRecentWorkdir,
+      navigate,
+    } = setup('chat-new');
+
+    await act(async () => {
+      await result.current.handleNewChatInWorkdir('/srv/projects/mango', 'env-remote');
+    });
+
+    // One write, not two: a folder stored ahead of its machine is a pairing
+    // that briefly exists and that a submitted turn would dispatch on.
+    expect(updateChatWorkdirOnEnvironment).toHaveBeenCalledWith(
+      'chat-new',
+      '/srv/projects/mango',
+      'env-remote'
+    );
+    expect(updateChatWorkdir).not.toHaveBeenCalled();
+    // The picker only browses the hub's own filesystem, so a remote folder
+    // never becomes a local recent.
+    expect(addRecentWorkdir).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith({ to: '/' });
+  });
+
+  it('leaves the machine alone when the folder is on the one it starts in', async () => {
+    const { result, updateChatWorkdir, updateChatWorkdirOnEnvironment } = setup('chat-new');
+
+    await act(async () => {
+      await result.current.handleNewChatInWorkdir('/srv/projects/mango', 'local');
+    });
+
+    expect(updateChatWorkdirOnEnvironment).not.toHaveBeenCalled();
+    expect(updateChatWorkdir).toHaveBeenCalledWith('chat-new', '/srv/projects/mango');
   });
 
   /**
@@ -245,7 +292,7 @@ describe('handleNewChatInWorkdir', () => {
     const depthAtNavigate = holdDepthDuring(navigate);
 
     await act(async () => {
-      await result.current.handleNewChatInWorkdir('/srv/projects/mango');
+      await result.current.handleNewChatInWorkdir('/srv/projects/mango', 'local');
     });
 
     expect(depthAtCreate()).toBe(1);
@@ -258,7 +305,7 @@ describe('handleNewChatInWorkdir', () => {
     updateChatWorkdir.mockImplementation(() => Promise.reject(new Error('gone')));
 
     await act(async () => {
-      await result.current.handleNewChatInWorkdir('/srv/projects/mango');
+      await result.current.handleNewChatInWorkdir('/srv/projects/mango', 'local');
     });
 
     expect(deleteChat).toHaveBeenCalledWith('chat-new');

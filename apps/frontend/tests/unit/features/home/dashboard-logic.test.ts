@@ -118,6 +118,43 @@ describe('groupChatsByWorkdir', () => {
     expect(groups).toHaveLength(WORKSPACE_GROUP_LIMIT);
     expect(overflowCount).toBe(2);
   });
+
+  /**
+   * The same path on two machines is two different repositories. Merging them
+   * on `workdir` alone would hide one folder and report the survivor's Git
+   * state, session count, and runners as if they belonged to a single one —
+   * the Git batch service already keys on environment plus workdir for this
+   * reason.
+   */
+  it('keeps folders with the same path on different machines apart', () => {
+    const { groups } = groupChatsByWorkdir(
+      [
+        chat({ id: 'a', workdir: '/workspace/project', environmentId: 'local' }),
+        chat({ id: 'b', workdir: '/workspace/project', environmentId: 'env-remote' }),
+      ],
+      []
+    );
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0].environmentId).toBe('local');
+    expect(groups[0].sessionCount).toBe(1);
+    expect(groups[1].environmentId).toBe('env-remote');
+    expect(groups[1].sessionCount).toBe(1);
+  });
+
+  it('pins a remembered-only folder to the local machine, the only one the picker browses', () => {
+    const { groups } = groupChatsByWorkdir([], ['/srv/notes']);
+    expect(groups[0].environmentId).toBe('local');
+  });
+
+  it('does not merge a remembered folder into a session on the same path elsewhere', () => {
+    const { groups } = groupChatsByWorkdir(
+      [chat({ id: 'a', workdir: '/workspace/project', environmentId: 'env-remote' })],
+      ['/workspace/project']
+    );
+
+    expect(groups).toHaveLength(2);
+  });
 });
 
 describe('harnessSessionCounts', () => {
