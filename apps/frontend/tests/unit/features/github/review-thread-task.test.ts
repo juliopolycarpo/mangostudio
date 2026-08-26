@@ -106,4 +106,33 @@ describe('reviewThreadsToTask', () => {
     expect(reviewThreadsToTask([thread({ isResolved: true })], 'o/r#1', labels)).toBe('');
     expect(reviewThreadsToTask([], 'o/r#1', labels)).toBe('');
   });
+
+  /**
+   * The pinned GraphQL document never paginates, so a PR with more threads or
+   * comments than its fixed pages silently cuts them — an agent told "these
+   * are the unresolved review comments" from that partial list would act on
+   * less than actually exists. `truncated` is how the caller learns the list
+   * might not be everything.
+   */
+  describe('when the list is truncated', () => {
+    it('appends a note after the numbered list', () => {
+      const task = reviewThreadsToTask([thread({ path: 'a.ts', line: 7 })], 'o/r#1', labels, true);
+
+      expect(task).toContain('1. a.ts:7');
+      expect(task).toContain('check o/r#1 on GitHub for the rest');
+    });
+
+    it('still says so when every thread on the fetched page is settled', () => {
+      const task = reviewThreadsToTask([thread({ isResolved: true })], 'o/r#1', labels, true);
+
+      expect(task).not.toBe('');
+      expect(task).toContain('check o/r#1 on GitHub for the rest');
+    });
+
+    it('adds nothing when nothing was cut off', () => {
+      const task = reviewThreadsToTask([thread({ path: 'a.ts', line: 7 })], 'o/r#1', labels, false);
+
+      expect(task).not.toContain('on GitHub for the rest');
+    });
+  });
 });

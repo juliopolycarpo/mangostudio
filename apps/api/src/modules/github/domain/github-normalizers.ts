@@ -214,9 +214,21 @@ export function toInboxItems(rows: GhSearchPrListOutput): GithubInboxItem[] {
   }));
 }
 
-/** The pinned GraphQL document's response as the contract's thread list. */
-export function toReviewThreads(payload: GhReviewThreadsOutput): GithubReviewThread[] {
-  return payload.data.repository.pullRequest.reviewThreads.nodes.map((thread) => ({
+/**
+ * The pinned GraphQL document's response as the contract's thread list.
+ *
+ * `truncated` is true when the document's fixed `first: 50` / `first: 20`
+ * pages cut something off — a thread beyond the first 50, or a comment beyond
+ * a thread's first 20 — which `totalCount` on each connection says without
+ * needing to paginate either one. Silently returning a partial list here would
+ * hand an agent an "unresolved review comments" task that reads as complete.
+ */
+export function toReviewThreads(payload: GhReviewThreadsOutput): {
+  threads: GithubReviewThread[];
+  truncated: boolean;
+} {
+  const reviewThreads = payload.data.repository.pullRequest.reviewThreads;
+  const threads = reviewThreads.nodes.map((thread) => ({
     isResolved: thread.isResolved,
     isOutdated: thread.isOutdated,
     path: thread.path,
@@ -228,6 +240,10 @@ export function toReviewThreads(payload: GhReviewThreadsOutput): GithubReviewThr
       body: comment.body,
     })),
   }));
+  const truncated =
+    reviewThreads.totalCount > reviewThreads.nodes.length ||
+    reviewThreads.nodes.some((thread) => thread.comments.totalCount > thread.comments.nodes.length);
+  return { threads, truncated };
 }
 
 function toLatestReview(review: {

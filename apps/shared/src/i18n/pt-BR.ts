@@ -1966,6 +1966,8 @@ export const messages = {
       noLine: '{path}',
       comment: '{author}: {body}',
       unknownAuthor: 'alguém',
+      truncated:
+        'Este pull request tem mais conversas de revisão ou comentários do que couberam aqui — confira {reference} no GitHub para ver o restante.',
     },
 
     staleness: {

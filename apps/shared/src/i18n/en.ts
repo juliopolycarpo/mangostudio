@@ -1941,6 +1941,8 @@ export const messages: Messages = {
       noLine: '{path}',
       comment: '{author}: {body}',
       unknownAuthor: 'someone',
+      truncated:
+        'This pull request has more review threads or comments than fit here — check {reference} on GitHub for the rest.',
     },
 
     staleness: {

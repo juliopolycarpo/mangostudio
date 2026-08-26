@@ -171,18 +171,19 @@ describe('gh output normalizers', () => {
   });
 
   it('carries a null line on an outdated review thread', () => {
-    const threads = toReviewThreads({
+    const result = toReviewThreads({
       data: {
         repository: {
           pullRequest: {
             reviewThreads: {
+              totalCount: 1,
               nodes: [
                 {
                   isResolved: false,
                   isOutdated: true,
                   path: 'apps/api/src/x.ts',
                   line: null,
-                  comments: { nodes: [{ author: null, body: 'gone' }] },
+                  comments: { totalCount: 1, nodes: [{ author: null, body: 'gone' }] },
                 },
               ],
             },
@@ -190,15 +191,58 @@ describe('gh output normalizers', () => {
         },
       },
     });
-    expect(threads).toEqual([
-      {
-        isResolved: false,
-        isOutdated: true,
-        path: 'apps/api/src/x.ts',
-        line: null,
-        comments: [{ author: null, body: 'gone' }],
+    expect(result).toEqual({
+      threads: [
+        {
+          isResolved: false,
+          isOutdated: true,
+          path: 'apps/api/src/x.ts',
+          line: null,
+          comments: [{ author: null, body: 'gone' }],
+        },
+      ],
+      truncated: false,
+    });
+  });
+
+  /**
+   * `totalCount` on either connection outrunning what the fixed page actually
+   * returned is the only signal the pinned document gives that a thread or a
+   * comment was cut off, since it never paginates.
+   */
+  it('reports truncation when totalCount outruns either fixed page', () => {
+    const threadTruncated = toReviewThreads({
+      data: {
+        repository: {
+          pullRequest: {
+            reviewThreads: { totalCount: 51, nodes: [] },
+          },
+        },
       },
-    ]);
+    });
+    expect(threadTruncated.truncated).toBe(true);
+
+    const commentTruncated = toReviewThreads({
+      data: {
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              totalCount: 1,
+              nodes: [
+                {
+                  isResolved: false,
+                  isOutdated: false,
+                  path: 'apps/api/src/x.ts',
+                  line: 10,
+                  comments: { totalCount: 21, nodes: [{ author: null, body: 'first' }] },
+                },
+              ],
+            },
+          },
+        },
+      },
+    });
+    expect(commentTruncated.truncated).toBe(true);
   });
 });
 

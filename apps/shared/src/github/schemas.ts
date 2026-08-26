@@ -545,6 +545,12 @@ export const GithubPrThreadsResponseSchema = Type.Union([
     cachedAt: CachedAtSchema,
     repo: GithubRepoSchema,
     threads: Type.Array(GithubReviewThreadSchema),
+    /**
+     * True when the pinned document's fixed pages cut something off: a
+     * thread beyond the first 50, or a comment beyond a thread's first 20.
+     * `threads` is never silently incomplete without this saying so.
+     */
+    truncated: Type.Boolean(),
   }),
 ]);
 

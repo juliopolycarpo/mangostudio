@@ -145,6 +145,7 @@ export const GhReviewThreadsOutputSchema = Type.Object({
     repository: Type.Object({
       pullRequest: Type.Object({
         reviewThreads: Type.Object({
+          totalCount: Type.Integer(),
           nodes: Type.Array(
             Type.Object({
               isResolved: Type.Boolean(),
@@ -152,6 +153,7 @@ export const GhReviewThreadsOutputSchema = Type.Object({
               path: Type.String(),
               line: Type.Union([Type.Integer(), Type.Null()]),
               comments: Type.Object({
+                totalCount: Type.Integer(),
                 nodes: Type.Array(
                   Type.Object({
                     author: GhNullableActorSchema,

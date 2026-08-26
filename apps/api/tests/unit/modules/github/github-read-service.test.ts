@@ -237,13 +237,17 @@ describe('GitHub read service', () => {
             repository: {
               pullRequest: {
                 reviewThreads: {
+                  totalCount: 1,
                   nodes: [
                     {
                       isResolved: false,
                       isOutdated: true,
                       path: 'a.ts',
                       line: null,
-                      comments: { nodes: [{ author: { login: 'octocat' }, body: 'hi' }] },
+                      comments: {
+                        totalCount: 1,
+                        nodes: [{ author: { login: 'octocat' }, body: 'hi' }],
+                      },
                     },
                   ],
                 },
@@ -257,7 +261,11 @@ describe('GitHub read service', () => {
 
     const response = await reads.getReviewThreads({ ...repoRequest, number: 7 });
 
-    expect(response).toMatchObject({ state: 'ok', threads: [{ line: null, isOutdated: true }] });
+    expect(response).toMatchObject({
+      state: 'ok',
+      threads: [{ line: null, isOutdated: true }],
+      truncated: false,
+    });
     expect(client.calls.at(-1)?.params).toEqual({
       owner: 'mango',
       name: 'mangostudio',

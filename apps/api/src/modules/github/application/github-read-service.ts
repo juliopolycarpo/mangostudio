@@ -240,14 +240,12 @@ export function createGithubReadService(options: GithubReadServiceOptions = {}):
           { owner, name, number: request.number },
           target(request)
         );
-        return {
-          threads: readGhOutput(
-            'pr.review-threads',
-            result.stdout,
-            GhReviewThreadsOutputSchema,
-            toReviewThreads
-          ),
-        };
+        return readGhOutput(
+          'pr.review-threads',
+          result.stdout,
+          GhReviewThreadsOutputSchema,
+          toReviewThreads
+        );
       }),
 
     getInbox: readInbox,

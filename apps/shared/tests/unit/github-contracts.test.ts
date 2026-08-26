@@ -451,6 +451,7 @@ describe('GitHub panel responses', () => {
         cachedAt: 1,
         repo,
         threads: [reviewThread],
+        truncated: false,
       })
     ).toBe(true);
   });

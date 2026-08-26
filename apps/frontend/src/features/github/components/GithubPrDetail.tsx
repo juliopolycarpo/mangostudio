@@ -240,7 +240,8 @@ function ReviewThreadsAction({
   const task = reviewThreadsToTask(
     query.data.threads,
     `${query.data.repo.nameWithOwner}#${number}`,
-    t.github.reviewTask
+    t.github.reviewTask,
+    query.data.truncated
   );
 
   // Empty means every thread is resolved or outdated, which is a different

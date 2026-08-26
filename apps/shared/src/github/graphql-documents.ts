@@ -28,17 +28,27 @@
  * otherwise breaks on ordinary data rather than on an edge case: `line` is
  * `null` for an outdated thread — the diff moved out from under it — and
  * `author` is null for a comment whose account was deleted.
+ *
+ * `first: 50` and `first: 20` are fixed pages, not cursors — this is a pinned
+ * document, so paginating either connection would mean shipping and pinning a
+ * second query per subsequent page. A PR with more threads, or a thread with
+ * more comments, than that silently truncates rather than paginating, and the
+ * result is handed to an agent as this PR's unresolved review work. `totalCount`
+ * on both connections is what lets the caller tell a complete list from a cut
+ * one and say so, instead of a threshold nobody agreed to being a silent floor.
  */
 export const GITHUB_PR_REVIEW_THREADS_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       reviewThreads(first: 50) {
+        totalCount
         nodes {
           isResolved
           isOutdated
           path
           line
           comments(first: 20) {
+            totalCount
             nodes { author { login } body }
           }
         }

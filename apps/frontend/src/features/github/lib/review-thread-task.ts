@@ -38,8 +38,16 @@ export function openReviewThreads(
 /**
  * Formats open review threads as a numbered task list for the composer.
  *
- * Returns an empty string when nothing is open, so the caller has one condition
- * to test rather than a heading with no items under it.
+ * Returns an empty string when nothing is open and the list is not
+ * truncated, so the caller has one condition to test rather than a heading
+ * with no items under it.
+ *
+ * @param truncated True when the pinned GraphQL document's fixed pages cut
+ *   off a thread or a comment — see `GITHUB_PR_REVIEW_THREADS_QUERY`. An
+ *   agent told "these are the unresolved review comments" from a silently
+ *   partial list would act on less than actually exists; a note naming the
+ *   gap is appended instead, even when what did arrive is otherwise empty,
+ *   since a truncated empty page is not the same claim as a real one.
  *
  * @example
  * reviewThreadsToTask(threads, 'mango/studio#942', t.github.reviewTask);
@@ -48,14 +56,18 @@ export function openReviewThreads(
 export function reviewThreadsToTask(
   threads: readonly GithubReviewThread[],
   reference: string,
-  labels: ReviewTaskLabels
+  labels: ReviewTaskLabels,
+  truncated = false
 ): string {
   const open = openReviewThreads(threads);
-  if (open.length === 0) return '';
+  const truncatedNote = truncated ? formatMessage(labels.truncated, { reference }) : null;
+
+  if (open.length === 0) return truncatedNote ?? '';
 
   const heading = formatMessage(labels.heading, { reference });
   const items = open.map((thread, index) => formatThread(thread, index + 1, labels));
-  return `${heading}\n\n${items.join('\n\n')}`;
+  const body = `${heading}\n\n${items.join('\n\n')}`;
+  return truncatedNote ? `${body}\n\n${truncatedNote}` : body;
 }
 
 /** `path:line`, or just the path on a thread GitHub anchored to a whole file. */
