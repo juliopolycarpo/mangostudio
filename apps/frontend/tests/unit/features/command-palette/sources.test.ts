@@ -190,6 +190,7 @@ describe('actionCommands', () => {
       onNewChatWithRunner: jest.fn(),
       onToggleTheme: jest.fn(),
       onOpenWorkdirPicker: jest.fn(),
+      onOpenGithubPanel: jest.fn(),
       ...overrides,
     });
   }

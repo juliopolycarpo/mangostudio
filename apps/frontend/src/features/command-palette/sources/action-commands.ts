@@ -15,7 +15,7 @@ import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
-import { FolderOpen, Moon, Plus, RefreshCw, Sun } from 'lucide-react';
+import { FolderOpen, GitPullRequest, Moon, Plus, RefreshCw, Sun } from 'lucide-react';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -61,6 +61,13 @@ export interface ActionCommandParams {
   ) => void | Promise<void>;
   readonly onToggleTheme: () => void;
   readonly onOpenWorkdirPicker: () => void;
+  /**
+   * Navigates to the chat surface and asks its rail for the GitHub panel.
+   *
+   * Async because the two halves are ordered: the rail hears the request as a
+   * fire-and-forget event, so it has to be mounted before the request is made.
+   */
+  readonly onOpenGithubPanel: () => void | Promise<void>;
 }
 
 export function actionCommands({
@@ -77,6 +84,7 @@ export function actionCommands({
   onNewChatWithRunner,
   onToggleTheme,
   onOpenWorkdirPicker,
+  onOpenGithubPanel,
 }: ActionCommandParams): CommandItem[] {
   const labels = t.commandPalette.actions;
 
@@ -165,6 +173,40 @@ export function actionCommands({
       icon: RefreshCw,
       run: quotaRefresh.run,
     });
+  }
+
+  // The rail has no keyboard shortcut for switching panels — `lib/keyboard.ts`
+  // has only mod+K and mod+N — so these three rows are the GitHub panel's
+  // entire shortcut story rather than a nicety. All of them need a chat,
+  // because the rail only exists on the chat surface.
+  if (hasChat) {
+    items.push(
+      {
+        id: 'action:github-panel',
+        section: 'actions',
+        label: labels.openGithubPanel,
+        keywords: t.github.title,
+        icon: GitPullRequest,
+        run: onOpenGithubPanel,
+      },
+      {
+        id: 'action:github-create-pr',
+        section: 'actions',
+        // Reuses the panel's own wording rather than a second translation of
+        // the same sentence; the row runs the same affordance the panel does.
+        label: t.github.actions.createPr,
+        icon: GitPullRequest,
+        run: onOpenGithubPanel,
+      },
+      {
+        id: 'action:github-review-requests',
+        section: 'actions',
+        label: labels.reviewRequests,
+        keywords: t.github.panel.inbox,
+        icon: GitPullRequest,
+        run: onOpenGithubPanel,
+      }
+    );
   }
 
   return items;

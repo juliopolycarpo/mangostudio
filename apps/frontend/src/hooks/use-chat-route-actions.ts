@@ -111,11 +111,16 @@ export function useChatRouteActions({
    * environment. Left unsaid, "new chat here" on a remote tile would bind the
    * folder to the local machine instead of the one it actually lives on.
    *
+   * Returns the new chat's id, or null when the binding failed and the chat was
+   * rolled back. Callers that only wanted the navigation ignore it; the GitHub
+   * panel's "start a chat from this issue" needs it, because seeding a composer
+   * draft means naming the conversation the draft belongs to.
+   *
    * // Usage: handleNewChatInWorkdir('/srv/projects/mango', 'local')
    */
   const handleNewChatInWorkdir = useCallback(
-    async (workdir: string, environmentId: string) => {
-      const bound = await holdWorkdirDefault(async () => {
+    async (workdir: string, environmentId: string): Promise<string | null> => {
+      const boundChatId = await holdWorkdirDefault(async () => {
         const chat = await chats.createChat();
         try {
           if (environmentId !== chat.environmentId) {
@@ -123,20 +128,21 @@ export function useChatRouteActions({
           } else {
             await chats.updateChatWorkdir(chat.id, workdir);
           }
-          return true;
+          return chat.id;
         } catch {
           await chats.deleteChat(chat.id);
-          return false;
+          return null;
         }
       });
-      if (!bound) {
+      if (!boundChatId) {
         toast(t.chat.newChatWorkdirFailed, 'error');
-        return;
+        return null;
       }
       // The picker only ever browses the hub's own filesystem, so a folder on
       // another machine has no business in its recent list.
       if (environmentId === LOCAL_ENVIRONMENT_ID) addRecentWorkdir(workdir);
       await navigate({ to: '/' });
+      return boundChatId;
     },
     [addRecentWorkdir, chats, holdWorkdirDefault, navigate, t, toast]
   );

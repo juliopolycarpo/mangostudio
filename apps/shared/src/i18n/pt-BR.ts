@@ -383,6 +383,14 @@ export const messages = {
       empty: 'Nada detectado nesta máquina ainda.',
       allClear: 'Tudo que o toolchain reporta está pronto.',
     },
+    /**
+     * O card só aparece quando há revisões esperando, então não existe chave de
+     * estado vazio: um card vazio é a coisa que o painel promete não mostrar.
+     */
+    github: {
+      label: 'Revisões esperando',
+      row: '{repo} #{number}',
+    },
     workspace: {
       label: 'Workspace',
       cleanTree: 'árvore limpa',
@@ -1494,6 +1502,10 @@ export const messages = {
       switchToDark: 'Mudar para o tema escuro',
       chooseWorkdir: 'Escolher diretório de trabalho',
       refreshQuota: 'Atualizar cota do {runner}',
+      // A trilha não tem atalho de teclado para trocar de painel, então a
+      // paleta é o caminho acessível — não uma conveniência.
+      openGithubPanel: 'Abrir o painel do GitHub',
+      reviewRequests: 'Revisões esperando por mim',
     },
   },
 
@@ -1816,6 +1828,27 @@ export const messages = {
       issues: 'Issues',
       checks: 'Verificações',
       reviewComments: 'Comentários de revisão',
+      noWorkdir: 'Aponte este chat para uma pasta para ver os pull requests e as issues dela.',
+      open: 'Abrir o painel do GitHub',
+      back: 'Voltar para a lista',
+      branchChip: '#{number} · {status}',
+    },
+
+    /** Resumo de uma linha das verificações, para o chip do painel Repositório. */
+    chip: {
+      checksFailing: 'verificações falhando',
+      checksRunning: 'verificações em execução',
+      checksPassing: 'verificações passaram',
+      noChecks: 'sem verificações',
+    },
+
+    /**
+     * Anotação por branch na lista de branches. Só `MERGED` ganha uma frase
+     * própria: é o único estado em que apagar a branch local é seguro sem
+     * perder trabalho.
+     */
+    branchPr: {
+      safeToDelete: 'integrado — seguro apagar',
     },
 
     /**
@@ -1925,6 +1958,7 @@ export const messages = {
       markReady: 'Marcar como pronto para revisão',
       checkout: 'Fazer checkout desta branch',
       refresh: 'Atualizar',
+      pushAndCreatePr: 'Publicar a branch e criar o pull request',
     },
 
     createPr: {
@@ -1939,6 +1973,22 @@ export const messages = {
       cancel: 'Cancelar',
       success: 'Pull request #{number} criado.',
       error: 'Não foi possível criar o pull request.',
+      pushHint:
+        'Esta branch ainda não existe no remoto. Ela será publicada antes de o pull request ser aberto.',
+      pushError: 'Não foi possível publicar a branch, então o pull request não foi criado.',
+    },
+
+    /**
+     * O texto que a ação "comentários de revisão" escreve no compositor. Fica
+     * no i18n como qualquer outra frase visível: é uma mensagem que a pessoa lê
+     * e edita antes de enviar, não um formato de rede.
+     */
+    reviewTask: {
+      heading: 'Resolva estes comentários de revisão ainda abertos em {reference}:',
+      withLine: '{path}:{line}',
+      noLine: '{path}',
+      comment: '{author}: {body}',
+      unknownAuthor: 'alguém',
     },
 
     staleness: {

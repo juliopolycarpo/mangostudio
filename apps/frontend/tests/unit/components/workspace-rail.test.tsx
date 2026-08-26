@@ -26,6 +26,17 @@ function GitPanelStub({ chatId }: { chatId: string }) {
 
 mock.module('../../../src/features/workspace/GitPanel', () => ({ GitPanel: GitPanelStub }));
 
+// Stubbed for the same reason as the Git panel: the registry imports it
+// eagerly, so without this every rail test would mount the real GitHub panel
+// and its queries just to click between dock buttons.
+function GithubPanelStub({ chatId }: { chatId: string }) {
+  return <div data-testid="github-panel-content">{chatId}</div>;
+}
+
+mock.module('../../../src/features/github/components/GithubPanel', () => ({
+  GithubPanel: GithubPanelStub,
+}));
+
 // Below the mocks, never as a static import: those are evaluated first and the
 // rail would bind the real todo hook and the real git panel.
 const { WorkspaceRail } = await import('../../../src/features/workspace/rail/WorkspaceRail');

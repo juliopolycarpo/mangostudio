@@ -26,6 +26,7 @@ import { ACTIVITY_PANEL_ROWS, ActivityCard } from '@/features/activity/ActivityC
 import { useI18n } from '@/hooks/use-i18n';
 import { AgentsCard } from './widgets/AgentsCard';
 import { EnvironmentHealthCard } from './widgets/EnvironmentHealthCard';
+import { GithubInboxCard } from './widgets/GithubInboxCard';
 import { GreetingHeader } from './widgets/GreetingHeader';
 import { LibraryDivergenceCard } from './widgets/LibraryDivergenceCard';
 import { MachinesCard } from './widgets/MachinesCard';
@@ -89,6 +90,9 @@ export function HomePage({
                 warning and leaves the fault list, which is exactly right on a
                 surface that is not a chat. */}
             <EnvironmentHealthCard activeEnvironmentId={null} />
+            {/* Silent unless somebody is waiting on a review, which is the same
+                bargain every other card on this column makes. */}
+            <GithubInboxCard />
             <ActivityCard limit={ACTIVITY_PANEL_ROWS} />
             <MachinesCard />
             <ToolchainHealthCard />

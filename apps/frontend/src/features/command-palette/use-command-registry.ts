@@ -24,6 +24,7 @@ import {
   externalAgentSelectable,
   useExternalAgents,
 } from '@/features/external-agents/useExternalAgents';
+import { requestRailPanel } from '@/features/workspace/rail/rail-panel-request';
 import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
 import { useApp } from '@/lib/app-context';
@@ -149,6 +150,17 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
         // palette was opened from settings or the gallery.
         void navigate({ to: '/' });
         appRef.current.openWorkdirPicker();
+      },
+      onOpenGithubPanel: async () => {
+        onRun();
+        // Awaited, unlike the workdir picker's navigation beside it, and the
+        // difference matters. That one sets a flag on the shell, which the chat
+        // surface reads whenever it mounts. This is a fire-and-forget event the
+        // rail can only hear if it is already mounted — so running it against
+        // an unawaited `navigate` from settings or the gallery would broadcast
+        // into an empty listener set and silently leave the rail on `git`.
+        await navigate({ to: '/' });
+        requestRailPanel('github');
       },
     });
 

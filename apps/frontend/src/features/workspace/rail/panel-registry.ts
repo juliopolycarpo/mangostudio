@@ -1,7 +1,8 @@
 import type { TodoList } from '@mangostudio/shared/todos';
 import type { WorkspacePanelId, WorkspacePanelSettings } from '@mangostudio/shared/workspaces';
-import { FolderGit2, ListTodo, type LucideIcon } from 'lucide-react';
+import { FolderGit2, GitPullRequest, ListTodo, type LucideIcon } from 'lucide-react';
 import type { ComponentType } from 'react';
+import { GithubPanel } from '@/features/github/components/GithubPanel';
 import { GitPanel } from '../GitPanel';
 import { TodoRailPanel } from './TodoRailPanel';
 
@@ -13,6 +14,13 @@ export interface RailPanelAvailabilityState {
 
 interface RailPanelContentProps {
   readonly chatId: string;
+  /**
+   * The chat's folder, for panels that show one half of themselves without it.
+   * The GitHub panel needs it as *data* rather than as an availability gate —
+   * its review queue is not repo-scoped, so it renders with or without a
+   * checkout and says so in the half that is.
+   */
+  readonly workdir: string | null;
   readonly todos: TodoList;
 }
 
@@ -29,6 +37,18 @@ export const WORKSPACE_PANEL_REGISTRY: readonly RailPanelDefinition[] = [
     icon: FolderGit2,
     availability: ({ chatId, workdir }) => Boolean(chatId && workdir),
     component: GitPanel,
+  },
+  {
+    // Available on `chatId` alone, unlike `git`. The panel's upper half is the
+    // cross-repository review queue, which is about the person and not about a
+    // checkout — requiring a workdir would hide a full inbox from anybody whose
+    // chat has no folder bound yet. The repository half gates itself.
+    id: 'github',
+    // lucide-react removed its brand icons, so there is no `Github` to import;
+    // `GitPullRequest` is what the rest of this codebase already uses for it.
+    icon: GitPullRequest,
+    availability: ({ chatId }) => Boolean(chatId),
+    component: GithubPanel,
   },
   {
     id: 'todos',

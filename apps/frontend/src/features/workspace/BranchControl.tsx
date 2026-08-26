@@ -5,6 +5,7 @@ import { type FormEvent, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Menu, MenuItem } from '@/components/ui/Menu';
 import { useToast } from '@/components/ui/Toast';
+import { BranchPrTag, useBranchPrAnnotations } from '@/features/github/components/BranchPrTag';
 import { useI18n } from '@/hooks/use-i18n';
 import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
 import {
@@ -30,6 +31,7 @@ export function BranchControl({
   const { toast } = useToast();
   const labels = t.git.branch;
   const branches = useGitBranches(chatId);
+  const prAnnotations = useBranchPrAnnotations(chatId);
   const switchMutation = useSwitchBranch(chatId);
   const createMutation = useCreateBranch(chatId);
   const checkoutRemoteMutation = useCheckoutRemoteBranch(chatId);
@@ -216,6 +218,10 @@ export function BranchControl({
                         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-on-surface">
                           {item.name}
                         </span>
+                        {/* Which pull request this branch became, and whether
+                            it is merged — so "delete" is an informed click
+                            rather than a guess. */}
+                        <BranchPrTag annotation={prAnnotations.get(item.name)} />
                         {item.current ? <Check size={13} className="text-primary" /> : null}
                       </button>
                       <Menu

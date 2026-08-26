@@ -376,6 +376,14 @@ export const messages: Messages = {
       empty: 'Nothing detected on this machine yet.',
       allClear: 'Everything the toolchain reports is ready.',
     },
+    /**
+     * The card only appears when reviews are waiting, so there is no empty-state
+     * key: an empty card is the one thing this dashboard promises not to show.
+     */
+    github: {
+      label: 'Reviews waiting',
+      row: '{repo} #{number}',
+    },
     workspace: {
       label: 'Workspace',
       cleanTree: 'clean tree',
@@ -1472,6 +1480,10 @@ export const messages: Messages = {
       switchToDark: 'Switch to dark theme',
       chooseWorkdir: 'Choose working directory',
       refreshQuota: 'Refresh {runner} quota',
+      // The rail has no keyboard shortcut for switching panels, so the palette
+      // is the accessible path — not a nicety.
+      openGithubPanel: 'Open GitHub panel',
+      reviewRequests: 'Review requests waiting on me',
     },
   },
 
@@ -1789,6 +1801,27 @@ export const messages: Messages = {
       issues: 'Issues',
       checks: 'Checks',
       reviewComments: 'Review comments',
+      noWorkdir: 'Point this chat at a folder to see its pull requests and issues.',
+      open: 'Open the GitHub panel',
+      back: 'Back to the list',
+      branchChip: '#{number} · {status}',
+    },
+
+    /** One-line check summary, for the Repository panel's branch chip. */
+    chip: {
+      checksFailing: 'checks failing',
+      checksRunning: 'checks running',
+      checksPassing: 'checks passing',
+      noChecks: 'no checks',
+    },
+
+    /**
+     * Per-branch annotation in the branch list. Only `MERGED` earns a sentence
+     * of its own: it is the one state in which deleting the local branch is
+     * safe without losing work.
+     */
+    branchPr: {
+      safeToDelete: 'merged — safe to delete',
     },
 
     /**
@@ -1898,6 +1931,7 @@ export const messages: Messages = {
       markReady: 'Mark ready for review',
       checkout: 'Check out this branch',
       refresh: 'Refresh',
+      pushAndCreatePr: 'Push the branch and create the pull request',
     },
 
     createPr: {
@@ -1912,6 +1946,22 @@ export const messages: Messages = {
       cancel: 'Cancel',
       success: 'Pull request #{number} created.',
       error: 'The pull request could not be created.',
+      pushHint:
+        'This branch does not exist on the remote yet. It will be pushed before the pull request is opened.',
+      pushError: 'The branch could not be pushed, so no pull request was created.',
+    },
+
+    /**
+     * The text the "review comments" action writes into the composer. It lives
+     * in i18n like any other visible sentence: it is a message somebody reads
+     * and edits before sending, not a wire format.
+     */
+    reviewTask: {
+      heading: 'Address these unresolved review comments on {reference}:',
+      withLine: '{path}:{line}',
+      noLine: '{path}',
+      comment: '{author}: {body}',
+      unknownAuthor: 'someone',
     },
 
     staleness: {
