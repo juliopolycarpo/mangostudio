@@ -1952,6 +1952,7 @@ export const messages = {
       pushHint:
         'Esta branch ainda não existe no remoto. Ela será publicada antes de o pull request ser aberto.',
       pushError: 'Não foi possível publicar a branch, então o pull request não foi criado.',
+      noBranch: 'Faça checkout de uma branch para criar um pull request.',
     },
 
     /**

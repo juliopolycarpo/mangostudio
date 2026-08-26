@@ -77,11 +77,14 @@ const GIT_REPO_STATE = {
 interface ScenarioOverrides {
   readonly inbox?: unknown;
   readonly prs?: unknown;
+  readonly gitState?: unknown;
 }
 
 function installScenario(overrides: ScenarioOverrides = {}) {
   return createFetchScenario()
-    .respondWithJson('GET', `/api/git/state?chatId=${CHAT_ID}`, { body: GIT_REPO_STATE })
+    .respondWithJson('GET', `/api/git/state?chatId=${CHAT_ID}`, {
+      body: overrides.gitState ?? GIT_REPO_STATE,
+    })
     .respondWithJson('GET', '/api/github/inbox', {
       body: overrides.inbox ?? { state: 'ok', cachedAt: Date.now(), items: [] },
     })
@@ -244,6 +247,36 @@ describe('GithubPanel', () => {
       });
 
       expect(await screen.findByLabelText('Title')).toBeVisible();
+    } finally {
+      scenario.restore();
+    }
+  });
+
+  /**
+   * A detached checkout has no branch for `readCurrentBranch()` to name, and
+   * `gh pr create` needs one to push. Offering the button anyway means a form
+   * fully filled out fails with a generic server error instead of never
+   * appearing in the first place.
+   */
+  it('explains rather than offers pull request creation on a detached checkout', async () => {
+    const { scenario } = await renderPanel({
+      gitState: {
+        ...GIT_REPO_STATE,
+        status: {
+          ...GIT_REPO_STATE.status,
+          branch: { name: null, detachedAt: 'abc1234', ahead: 0, behind: 0 },
+        },
+      },
+    });
+    try {
+      expect(await screen.findByText('Check out a branch to create a pull request.')).toBeVisible();
+      expect(screen.queryByRole('button', { name: 'Create pull request' })).not.toBeInTheDocument();
+
+      act(() => {
+        requestGithubCreatePr();
+      });
+
+      expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
     } finally {
       scenario.restore();
     }

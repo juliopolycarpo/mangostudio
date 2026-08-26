@@ -264,9 +264,12 @@ function PrsPane({
 
   useEffect(() => {
     if (!openCreateForm) return;
-    setCreating(true);
+    // A detached checkout has no branch for `readCurrentBranch()` to name, and
+    // `gh pr create` needs one — opening the form here would only trade the
+    // button's own gate below for a submit that fails with a generic error.
+    if (branchName) setCreating(true);
     onCreateFormOpened();
-  }, [openCreateForm, onCreateFormOpened]);
+  }, [openCreateForm, onCreateFormOpened, branchName]);
 
   const checkout = useMutation({
     mutationFn: (number: number) => checkoutPullRequest({ chatId, number }),
@@ -306,7 +309,7 @@ function PrsPane({
           defaultTitle={branchName ?? ''}
           onDone={() => setCreating(false)}
         />
-      ) : (
+      ) : branchName ? (
         <Button
           type="button"
           variant="secondary"
@@ -317,6 +320,14 @@ function PrsPane({
           <Plus size={ICON_SM} />
           {t.github.actions.createPr}
         </Button>
+      ) : (
+        // A detached HEAD (or a checkout `readCurrentBranch()` otherwise
+        // cannot name) has no branch for `gh pr create` to push, and the
+        // command fails with a generic server error rather than explaining
+        // why — so this state is caught here instead.
+        <p className="text-[10px] leading-4 text-on-surface-variant">
+          {t.github.createPr.noBranch}
+        </p>
       )}
       <ListGate query={query} errorLabel={t.github.errors.prs} emptyLabel={t.github.empty.prs}>
         {(payload) =>

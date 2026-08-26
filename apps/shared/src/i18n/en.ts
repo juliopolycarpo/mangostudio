@@ -1927,6 +1927,7 @@ export const messages: Messages = {
       pushHint:
         'This branch does not exist on the remote yet. It will be pushed before the pull request is opened.',
       pushError: 'The branch could not be pushed, so no pull request was created.',
+      noBranch: 'Check out a branch to create a pull request.',
     },
 
     /**
