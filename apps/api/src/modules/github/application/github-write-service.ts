@@ -137,11 +137,17 @@ export function createGithubWriteService(
       const resolution = await resolveRepo(request.workdir, request.selection, request.signal);
       if (resolution.state !== 'ok') return resolution;
 
-      const head = await currentBranch(request);
+      // Two independent round trips to a runtime that may be a container or
+      // another machine — a branch read and a template file read — so they go
+      // out together rather than one after the other.
+      //
       // Empty is a legitimate body and still passed as `--body=`: omitting the
       // flag is what sends gh to the interactive editor, which cannot open
       // under `GH_PROMPT_DISABLED=1`.
-      const prBody = body.body ?? (await pullRequestTemplate(request));
+      const [head, prBody] = await Promise.all([
+        currentBranch(request),
+        body.body ?? pullRequestTemplate(request),
+      ]);
       const created = await client.run(
         'pr.create',
         {
