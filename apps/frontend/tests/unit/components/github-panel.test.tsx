@@ -253,6 +253,25 @@ describe('GithubPanel', () => {
   });
 
   /**
+   * The palette handler fires `requestRailPanel('github')` and
+   * `requestGithubCreatePr()` back to back, synchronously — the rail's own
+   * state update hasn't committed yet, so this panel isn't mounted, and no
+   * listener is on the channel, when the request goes out. Without a latch
+   * the request is simply dropped: the panel opens on the pull requests tab
+   * with the form closed, contradicting the row's own label.
+   */
+  it('opens the create-pull-request form on a request that arrived before the panel mounted', async () => {
+    requestGithubCreatePr();
+
+    const { scenario } = await renderPanel();
+    try {
+      expect(await screen.findByLabelText('Title')).toBeVisible();
+    } finally {
+      scenario.restore();
+    }
+  });
+
+  /**
    * A detached checkout has no branch for `readCurrentBranch()` to name, and
    * `gh pr create` needs one to push. Offering the button anyway means a form
    * fully filled out fails with a generic server error instead of never

@@ -71,6 +71,7 @@ export function GithubPanel({ chatId, workdir }: GithubPanelProps) {
         // branch prompts for where to push, and prompts are disabled.
         needsPush={Boolean(branch?.name) && !branch?.upstream}
         branchName={branch?.name ?? null}
+        branchLoading={gitState.isLoading}
         prefs={prefs}
         onPrefsChange={updatePrefs}
       />

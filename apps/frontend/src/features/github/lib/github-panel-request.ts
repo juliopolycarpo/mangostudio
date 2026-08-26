@@ -11,32 +11,48 @@
  * module-level channel avoids that, on the same reasoning as
  * `rail-panel-request` and `composer-draft-store`.
  *
- * Fire-and-forget, like the sibling channels: a request while no GitHub panel
- * is mounted is dropped, not queued.
+ * Unlike those siblings, a request here is allowed to arrive before the
+ * GitHub panel is mounted: the palette action pairs this with
+ * `requestRailPanel('github')`, whose own state update hasn't committed yet
+ * when this fires, so `GithubRepoSection` isn't subscribed until the next
+ * render. A one-shot latch covers that gap — a request with no listener
+ * mounted is held, and replayed to the first listener that subscribes, then
+ * cleared. A request while a listener *is* already mounted is delivered
+ * directly and never latched, so a later remount doesn't replay a stale one.
  */
 
 const listeners = new Set<() => void>();
+let pending = false;
 
 /**
  * Asks the mounted GitHub panel to switch to the pull requests tab and open
- * the create-pull-request form.
+ * the create-pull-request form. Latched if no panel is mounted yet.
  *
  * @example
  * requestRailPanel('github');
  * requestGithubCreatePr();
  */
 export function requestGithubCreatePr(): void {
+  if (listeners.size === 0) {
+    pending = true;
+    return;
+  }
   for (const listener of listeners) listener();
 }
 
 /**
- * Subscribes to create-pull-request requests.
+ * Subscribes to create-pull-request requests. Immediately replays a request
+ * that latched before this call, consuming it.
  *
  * @example
  * useEffect(() => onGithubCreatePrRequest(openCreateForm), [openCreateForm]);
  */
 export function onGithubCreatePrRequest(listener: () => void): () => void {
   listeners.add(listener);
+  if (pending) {
+    pending = false;
+    listener();
+  }
   return () => {
     listeners.delete(listener);
   };

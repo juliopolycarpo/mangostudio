@@ -39,6 +39,8 @@ interface GithubRepoSectionProps {
   /** True when the branch has no upstream, so creating a PR must push first. */
   readonly needsPush: boolean;
   readonly branchName: string | null;
+  /** True while the git query that fills `branchName` is still in flight. */
+  readonly branchLoading: boolean;
   readonly prefs: GithubPanelPrefs;
   readonly onPrefsChange: (prefs: GithubPanelPrefs) => void;
 }
@@ -63,6 +65,7 @@ export function GithubRepoSection({
   workdir,
   needsPush,
   branchName,
+  branchLoading,
   prefs,
   onPrefsChange,
 }: GithubRepoSectionProps) {
@@ -129,6 +132,7 @@ export function GithubRepoSection({
             <PrsPane
               chatId={chatId}
               branchName={branchName}
+              branchLoading={branchLoading}
               needsPush={needsPush}
               selectedPr={selectedPr}
               onSelectPr={setSelectedPr}
@@ -232,6 +236,7 @@ function FilterBar<T extends string>({
 function PrsPane({
   chatId,
   branchName,
+  branchLoading,
   needsPush,
   selectedPr,
   onSelectPr,
@@ -243,6 +248,7 @@ function PrsPane({
 }: {
   readonly chatId: string;
   readonly branchName: string | null;
+  readonly branchLoading: boolean;
   readonly needsPush: boolean;
   readonly selectedPr: number | null;
   readonly onSelectPr: (number: number | null) => void;
@@ -264,12 +270,17 @@ function PrsPane({
 
   useEffect(() => {
     if (!openCreateForm) return;
+    // A request that arrived before the git query settled can't yet tell a
+    // detached checkout from a branch that just hasn't loaded — consuming it
+    // here would open nothing and never get another chance. Wait for the
+    // query so the outcome below is a real answer, not a guess mid-flight.
+    if (branchLoading) return;
     // A detached checkout has no branch for `readCurrentBranch()` to name, and
     // `gh pr create` needs one — opening the form here would only trade the
     // button's own gate below for a submit that fails with a generic error.
     if (branchName) setCreating(true);
     onCreateFormOpened();
-  }, [openCreateForm, onCreateFormOpened, branchName]);
+  }, [openCreateForm, onCreateFormOpened, branchName, branchLoading]);
 
   const checkout = useMutation({
     mutationFn: (number: number) => checkoutPullRequest({ chatId, number }),
