@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:tes
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import { fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { requestRailPanel } from '../../../src/features/workspace/rail/rail-panel-request';
 import { railCollapsedStorageKey } from '../../../src/features/workspace/rail/rail-state';
-import { render, screen } from '../../support/harness/render';
+import { act, render, screen } from '../../support/harness/render';
 
 const mocks = {
   todos: [
@@ -156,5 +157,25 @@ describe('WorkspaceRail', () => {
 
     await user.click(screen.getByRole('button', { name: 'Close agent side panel' }));
     expect(screen.queryByRole('dialog', { name: 'Agent side panel' })).not.toBeInTheDocument();
+  });
+
+  /**
+   * The command palette and the Repository panel's branch chip request a
+   * panel through this same channel on desktop and mobile alike. On desktop
+   * that only has to pick the panel; on mobile the rail is a drawer gated on
+   * its own open state, so the request has to open that too or the picked
+   * panel renders behind a closed drawer nobody sees.
+   */
+  it('opens the mobile drawer for a panel requested from outside the rail', () => {
+    setDesktopMediaQuery(false);
+    renderRail();
+
+    expect(screen.queryByRole('dialog', { name: 'Agent side panel' })).not.toBeInTheDocument();
+    act(() => {
+      requestRailPanel('github');
+    });
+
+    expect(screen.getByRole('dialog', { name: 'Agent side panel' })).toBeVisible();
+    expect(screen.getByTestId('github-panel-content')).toBeVisible();
   });
 });

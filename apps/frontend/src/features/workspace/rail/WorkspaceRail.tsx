@@ -92,8 +92,12 @@ export function WorkspaceRail({ chatId, workdir, settings, onWidthChange }: Work
       // through `setCollapsed`, which is declared below this callback.
       setCollapsedState(false);
       writeRailCollapsed(chatId, false);
+      // Below the desktop breakpoint the rail renders as a drawer gated on
+      // `mobileOpen` rather than `collapsed`, so an external request that only
+      // cleared `collapsed` picked a panel nothing on screen showed.
+      if (!isDesktop) setMobileOpen(true);
     },
-    [chatId]
+    [chatId, isDesktop]
   );
 
   // The rail has no keyboard shortcut for switching panels, so the command
