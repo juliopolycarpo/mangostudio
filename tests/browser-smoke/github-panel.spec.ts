@@ -60,24 +60,50 @@ test('github rail panel renders and obeys its visibility setting', async ({ page
   // suite over it, and the spec that ran next died on "too many requests"
   // looking like its own feature had broken. Client-side navigation costs a
   // route's queries instead of an application's.
+  //
+  // `GeneralSettingsRoute` renders straight from `app.settings.workspaceSettings`,
+  // which serves the hook's defaults until the read resolves — so the checkbox
+  // exists with a made-up value before the real one arrives, and the state below
+  // is read rather than assumed. Armed before the click and tolerant of never
+  // firing: an in-app navigation is usually served from the query cache, and no
+  // request at all means the settings were already settled.
+  const settingsRead = page
+    .waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' && response.url().includes('/api/settings/app'),
+      { timeout: 5_000 }
+    )
+    .catch(() => undefined);
   await page.getByRole('complementary').getByRole('button', { name: 'Settings' }).click();
   await expect(page).toHaveURL(/\/settings/, { timeout: 15_000 });
 
   const toggle = page.getByRole('checkbox', { name: 'Show GitHub', exact: true });
-  await expect(toggle).toBeChecked({ timeout: 15_000 });
-  // The write has to reach the server before the reload below, or the chat
-  // surface re-reads the old settings and the assertion races a round trip.
-  const saved = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'PUT' && response.url().includes('/api/settings/app')
-  );
-  // `click` rather than `uncheck`: uncheck verifies the new state itself, on the
-  // action timeout, and reports a race against the debounced write as an
-  // unhelpful "did not change its state". The explicit assertion below says
-  // which half failed.
-  await toggle.click();
-  await expect(toggle).not.toBeChecked({ timeout: 10_000 });
-  await saved;
+  await expect(toggle).toBeVisible({ timeout: 15_000 });
+  await settingsRead;
+
+  /**
+   * `click` rather than `check`/`uncheck`: those verify the new state
+   * themselves, on the action timeout, and report a race against the debounced
+   * write as an unhelpful "did not change its state". The explicit assertion
+   * here says which half failed. The write also has to reach the server before
+   * the navigation that follows, or the chat surface re-reads the old settings.
+   */
+  const setPanelVisible = async (visible: boolean) => {
+    if ((await toggle.isChecked()) === visible) return;
+    const saved = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'PUT' && response.url().includes('/api/settings/app')
+    );
+    await toggle.click();
+    await expect(toggle).toBeChecked({ checked: visible, timeout: 10_000 });
+    await saved;
+  };
+
+  // The account is shared by the whole suite and survives a retry, so this spec
+  // cannot assume it starts from the default. Asserting `toBeChecked` here
+  // instead would fail every CI retry of a run that got past the toggle below.
+  await setPanelVisible(true);
+  await setPanelVisible(false);
 
   // Back to the chat in-app, for the same budget reason as above. The rail
   // re-derives its panels from the settings the toggle just wrote, and those
