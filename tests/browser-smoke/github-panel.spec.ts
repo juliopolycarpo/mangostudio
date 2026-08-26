@@ -1,44 +1,17 @@
 import { expect, test } from '@playwright/test';
 
-const uniqueEmail = () => `github-panel-smoke-${Date.now()}@test.local`;
-
 test('github rail panel renders and obeys its visibility setting', async ({ page }) => {
-  // Signup plus a cold `gh` call on the runtime costs more than the 30s project
-  // default, so the per-step waits below fail on their own assertion rather
-  // than dying of the suite timeout.
+  // A cold `gh` call on the runtime costs more than the 30s project default, so
+  // the per-step waits below fail on their own assertion rather than dying of
+  // the suite timeout.
   test.setTimeout(90_000);
 
   const consoleErrors: string[] = [];
   page.on('pageerror', (error) => consoleErrors.push(error.message));
 
-  // A fresh account every run. Reusing one gets 429'd, and the shell then falls
-  // back to "Something went wrong!" — which reads exactly like a broken panel
-  // and is not one.
-  //
-  // The limiter is per IP, not per account (`rate-limit-policy.ts`: the auth
-  // bucket is 120/minute), and on CI every spec in this suite shares localhost.
-  // So a unique address is necessary and not sufficient: a re-run of any spec
-  // ahead of this one can spend the budget before this one signs up. Naming
-  // that case is the point of the check below — without it the failure surfaces
-  // 90 seconds later as "New Chat was never found", which sends the next reader
-  // looking at the panel instead of at the limiter.
-  await page.goto('/signup');
-  await page.locator('#name').fill('GitHub Panel Smoke');
-  await page.locator('#email').fill(uniqueEmail());
-  await page.locator('#password').fill('smoke-pass-123');
-  await page.locator('form#signup-form button[type="submit"]').click();
-
-  const rateLimited = page.getByText(/too many requests/i);
-  await expect
-    .poll(
-      async () => ((await rateLimited.count()) > 0 ? 'rate-limited' : new URL(page.url()).pathname),
-      { timeout: 15_000 }
-    )
-    .not.toBe('/signup');
-  expect(
-    await rateLimited.count(),
-    'signup was rate limited — the shared auth budget for this suite is spent, not a panel fault'
-  ).toBe(0);
+  // The session comes from the suite's shared `storageState`, so this opens
+  // straight onto the authenticated shell.
+  await page.goto('/');
 
   // The rail only exists on the chat surface and only once a chat does.
   // Scoped to `main` because the sidebar carries a second button with the same

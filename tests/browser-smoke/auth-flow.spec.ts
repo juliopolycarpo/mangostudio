@@ -2,6 +2,11 @@ import { expect, test } from '@playwright/test';
 
 const uniqueEmail = () => `smoke-${Date.now()}@test.local`;
 
+// The suite shares one signed-in account so it stays inside the API's per-IP
+// rate limit. This file is the exception on purpose: signing up, logging out
+// and logging back in cannot start from a session that already exists.
+test.use({ storageState: { cookies: [], origins: [] } });
+
 test('login page renders', async ({ page }) => {
   await page.goto('/login');
   await expect(page).toHaveURL(/\/login/);
