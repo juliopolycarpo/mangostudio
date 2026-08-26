@@ -80,6 +80,7 @@ export function useAppState() {
     chats,
     navigate,
     holdWorkdirDefault: runnerSelection.holdWorkdirDefault,
+    addRecentWorkdir: settings.addRecentWorkdir,
   });
   const generationControls = useGenerationControls({
     handleRespond: textGen.handleRespond,
@@ -128,6 +129,7 @@ export function useAppState() {
     updateChatRestrictToolsToWorkdir: chats.updateChatRestrictToolsToWorkdir,
     handleNewChat: chatActions.handleNewChat,
     handleNewChatWithRunner: chatActions.handleNewChatWithRunner,
+    handleNewChatInWorkdir: chatActions.handleNewChatInWorkdir,
     handleUpdateChatModel: chatActions.handleUpdateChatModel,
     handleUpdateChatTitle: chatActions.handleUpdateChatTitle,
     handleDeleteChat: chatActions.handleDeleteChat,

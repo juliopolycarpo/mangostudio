@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { ActivityEvent } from '@mangostudio/shared/activity';
 import { screen } from '@testing-library/react';
-import { ActivityStrip } from '../../../../src/features/activity/ActivityStrip';
+import { ActivityCard } from '../../../../src/features/activity/ActivityCard';
 import { flushAsyncRender, render } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 
@@ -26,7 +26,7 @@ function chatCreated(id: string, title: string, createdAt: number): ActivityEven
   };
 }
 
-describe('ActivityStrip', () => {
+describe('ActivityCard', () => {
   it('renders the newest events', async () => {
     const scenario = createFetchScenario();
     scenario
@@ -35,7 +35,7 @@ describe('ActivityStrip', () => {
       })
       .install();
     try {
-      render(<ActivityStrip />);
+      render(<ActivityCard limit={5} compact />);
       expect(await screen.findByText('Started Refactor the git panel')).toBeInTheDocument();
     } finally {
       scenario.restore();
@@ -46,7 +46,7 @@ describe('ActivityStrip', () => {
     const scenario = createFetchScenario();
     scenario.respondWithJson('GET', ACTIVITY_PATH, { body: { events: [] } }).install();
     try {
-      render(<ActivityStrip />);
+      render(<ActivityCard limit={5} compact />);
       await flushAsyncRender();
       expect(screen.queryByRole('heading', { name: 'Activity' })).toBeNull();
     } finally {
@@ -59,7 +59,7 @@ describe('ActivityStrip', () => {
     // No registered response: the request rejects.
     scenario.install();
     try {
-      render(<ActivityStrip />);
+      render(<ActivityCard limit={5} compact />);
       await flushAsyncRender();
       expect(screen.queryByRole('heading', { name: 'Activity' })).toBeNull();
     } finally {
@@ -83,7 +83,7 @@ describe('ActivityStrip', () => {
       })
       .install();
     try {
-      render(<ActivityStrip />);
+      render(<ActivityCard limit={5} compact />);
       expect(await screen.findByText('Started Old news')).toBeInTheDocument();
       expect(screen.queryByText(/\bnew$/)).toBeNull();
     } finally {

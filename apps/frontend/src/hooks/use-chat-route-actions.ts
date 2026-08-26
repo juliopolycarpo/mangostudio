@@ -1,11 +1,12 @@
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { useNavigate } from '@tanstack/react-router';
 import { useCallback } from 'react';
 import { useToast } from '@/components/ui/Toast';
 import type { useChats } from '@/features/chat/hooks/use-chats';
 import { useI18n } from '@/hooks/use-i18n';
 
-export type AppPage = 'chat' | 'environments' | 'gallery' | 'settings' | 'studio';
+export type AppPage = 'home' | 'chat' | 'environments' | 'gallery' | 'settings' | 'studio';
 
 interface UseChatRouteActionsParams {
   readonly chats: ReturnType<typeof useChats>;
@@ -15,12 +16,15 @@ interface UseChatRouteActionsParams {
    * `handleNewChatWithRunner` for why creation cannot go unheld.
    */
   readonly holdWorkdirDefault: <T>(task: () => Promise<T>) => Promise<T>;
+  /** Moves a folder to the front of the picker's recent list. */
+  readonly addRecentWorkdir: (workdir: string) => void;
 }
 
 export function useChatRouteActions({
   chats,
   navigate,
   holdWorkdirDefault,
+  addRecentWorkdir,
 }: UseChatRouteActionsParams) {
   const { t } = useI18n();
   const { toast } = useToast();
@@ -88,6 +92,55 @@ export function useChatRouteActions({
     [chats, holdWorkdirDefault, navigate, t, toast]
   );
 
+  /**
+   * A chat that starts in a folder somebody picked off the dashboard.
+   *
+   * Held for the same reason `handleNewChatWithRunner` is: creation publishes
+   * and selects a record with no workdir before the repoint lands, and the
+   * defaulting effect can observe that intermediate chat. Acting on it stamps
+   * the configured default folder onto a chat that is one request away from
+   * pointing somewhere else, or marks the id as defaulted so the repointed chat
+   * never gets its picker. The hold releases once the workdir is in the cache.
+   *
+   * Rolled back and reported on failure, again like the runner path: the caller
+   * fires this from a click handler and discards the rejection, so a bare throw
+   * would leave an orphaned chat selected with nothing on screen saying why.
+   *
+   * `environmentId` is the folder's machine, not decoration: creation always
+   * lands on `local`, and a workspace tile can represent a folder on any
+   * environment. Left unsaid, "new chat here" on a remote tile would bind the
+   * folder to the local machine instead of the one it actually lives on.
+   *
+   * // Usage: handleNewChatInWorkdir('/srv/projects/mango', 'local')
+   */
+  const handleNewChatInWorkdir = useCallback(
+    async (workdir: string, environmentId: string) => {
+      const bound = await holdWorkdirDefault(async () => {
+        const chat = await chats.createChat();
+        try {
+          if (environmentId !== chat.environmentId) {
+            await chats.updateChatWorkdirOnEnvironment(chat.id, workdir, environmentId);
+          } else {
+            await chats.updateChatWorkdir(chat.id, workdir);
+          }
+          return true;
+        } catch {
+          await chats.deleteChat(chat.id);
+          return false;
+        }
+      });
+      if (!bound) {
+        toast(t.chat.newChatWorkdirFailed, 'error');
+        return;
+      }
+      // The picker only ever browses the hub's own filesystem, so a folder on
+      // another machine has no business in its recent list.
+      if (environmentId === LOCAL_ENVIRONMENT_ID) addRecentWorkdir(workdir);
+      await navigate({ to: '/' });
+    },
+    [addRecentWorkdir, chats, holdWorkdirDefault, navigate, t, toast]
+  );
+
   const handleUpdateChatModel = useCallback(
     async (chatId: string, model: string) => {
       await chats.updateChatModel(chatId, 'textModel', model);
@@ -120,6 +173,7 @@ export function useChatRouteActions({
   const handleNavigate = useCallback(
     (page: AppPage) => {
       const routes = {
+        home: '/home',
         chat: '/',
         environments: '/environments',
         gallery: '/gallery',
@@ -134,6 +188,7 @@ export function useChatRouteActions({
   return {
     handleNewChat,
     handleNewChatWithRunner,
+    handleNewChatInWorkdir,
     handleUpdateChatModel,
     handleSelectChat,
     handleUpdateChatTitle,

@@ -29,6 +29,7 @@ export const messages = {
     empty: 'Inicie uma conversa',
     deleted: 'Chat excluído',
     newChatRunnerFailed: 'Não foi possível iniciar o chat nesse executor. Tente novamente.',
+    newChatWorkdirFailed: 'Não foi possível iniciar o chat nessa pasta. Tente novamente.',
     editTitle: 'Editar título',
     deleteTitle: 'Excluir chat',
     sectionLabel: 'Chats',
@@ -345,6 +346,7 @@ export const messages = {
    * mais chaves dentro de `chat`.
    */
   home: {
+    nav: 'Início',
     greeting: {
       morning: 'Bom dia, {name}.',
       afternoon: 'Boa tarde, {name}.',
@@ -354,6 +356,32 @@ export const messages = {
       afternoonAnonymous: 'Boa tarde.',
       eveningAnonymous: 'Boa noite.',
       subtitle: 'Seu workspace está pronto. Este é o estado dele agora.',
+      dashboardSubtitle: 'Todos os workspaces, máquinas e agentes desta conta.',
+    },
+    workspaces: {
+      label: 'Workspaces',
+      clean: 'árvore limpa',
+      dirty: '{count} alterado(s)',
+      sessions: '{count} sessão(ões)',
+      noSessions: 'Nenhuma sessão aqui ainda',
+      continueLatest: 'Continuar',
+      continueSession: 'Continuar {title}',
+      newChatHere: 'Nova conversa aqui',
+      newChatHereIn: 'Nova conversa em {folder}',
+      more: 'E mais {count} pasta(s).',
+      empty: 'Nenhuma pasta ainda. Inicie uma conversa e aponte-a para um projeto.',
+    },
+    machines: {
+      label: 'Máquinas',
+      // Não "Abrir ambientes": o card de falhas ao lado já usa esse rótulo.
+      open: 'Gerenciar máquinas',
+      navAlerts: '{count} aviso(s)',
+    },
+    toolchain: {
+      label: 'Toolchain',
+      open: 'Abrir saúde',
+      empty: 'Nada detectado nesta máquina ainda.',
+      allClear: 'Tudo que o toolchain reporta está pronto.',
     },
     workspace: {
       label: 'Workspace',
@@ -372,6 +400,7 @@ export const messages = {
       empty: 'Nenhum CLI de agente detectado neste ambiente.',
       manage: 'Gerenciar agentes',
       quotaRefresh: 'Atualizar cota',
+      sessionsThisWeek: '{count} nesta semana',
     },
     skills: {
       label: 'Skills',
@@ -384,6 +413,19 @@ export const messages = {
       viewDiff: 'Ver diff',
       // Deliberadamente neutro: viver em um só agente costuma ser intencional.
       singleTarget: '{count} skill(s) vivem em apenas um agente.',
+      openLibrary: 'Abrir na biblioteca',
+    },
+    // O mesmo card varrendo todos os tipos: frases próprias, não um substantivo
+    // interpolado na cópia de skills — concordância não sobrevive a um slot.
+    library: {
+      label: 'Biblioteca',
+      labelDivergent: 'Biblioteca — {count} divergência(s)',
+      divergenceBody: 'Versão diferente em {outliers} do que em {agreeing}.',
+      divergenceBodyNoMajority: '{targets} leem versões diferentes deste recurso.',
+      more: 'Mais {count} recurso(s) divergente(s).',
+      propagate: 'Propagar',
+      viewDiff: 'Ver diff',
+      singleTarget: '{count} recurso(s) vivem em apenas um agente.',
       openLibrary: 'Abrir na biblioteca',
     },
     uncommitted: {

@@ -13,7 +13,7 @@ import { type ComponentProps, useCallback, useMemo } from 'react';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
 import { WorkspaceRail } from '@/features/workspace/rail/WorkspaceRail';
 import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
-import { authClient } from '@/lib/auth-client';
+import { useUserFirstName } from '@/hooks/use-user-first-name';
 import { ChatPageContent } from './components/ChatPageContent';
 import { ChatContextDecisionNotice, ChatFallbackNotice } from './components/ChatPageNotices';
 import { DeprecatedModelNotice } from './components/DeprecatedModelNotice';
@@ -181,8 +181,7 @@ export function ChatPage({
   // (an unloaded transcript locks) rather than a bare `messages.length > 0`.
   const hasTurns = useChatHasTurns(chatId);
   const interruptedTurn = useMemo(() => findLatestInterruptedTurn(messages), [messages]);
-  const { data: session } = authClient.useSession();
-  const userName = session?.user?.name?.split(' ')[0] ?? '';
+  const userName = useUserFirstName();
   // A starter fills the composer instead of sending: the point of a starter is
   // that you finish the sentence, and a one-click send spends a turn on a
   // prompt nobody read.

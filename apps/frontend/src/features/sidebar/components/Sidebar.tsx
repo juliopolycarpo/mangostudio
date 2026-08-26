@@ -7,6 +7,7 @@ import {
 } from '@mangostudio/shared/workspaces';
 import {
   Image,
+  LayoutDashboard,
   LayoutGrid,
   MessageSquare,
   MonitorCog,
@@ -57,6 +58,12 @@ interface Props {
    * with nothing to show (no workdir, not a repository).
    */
   gitSummaries?: Record<string, GitSummary | null>;
+  /**
+   * Machines needing attention right now, badged on the environments entry.
+   * Counted by the shell for the same reason the git badges are fetched there:
+   * this list stays a view over what it is handed.
+   */
+  environmentAlertCount?: number;
   isMobileOpen?: boolean;
   onMobileClose?: () => void;
   width?: number;
@@ -76,6 +83,7 @@ export function Sidebar({
   onNewChat,
   contextCache,
   gitSummaries,
+  environmentAlertCount = 0,
   isMobileOpen = false,
   onMobileClose,
   width = CHAT_SIDEBAR_WIDTH_DEFAULT,
@@ -149,11 +157,23 @@ export function Sidebar({
   };
 
   const navPages = [
+    { page: 'home', icon: LayoutDashboard, label: t.home.nav },
     { page: 'studio', icon: Image, label: t.studio.title },
     { page: 'gallery', icon: LayoutGrid, label: t.gallery.title },
     { page: 'environments', icon: MonitorCog, label: t.environments.nav },
     { page: 'settings', icon: Settings, label: t.settings.title },
   ] as const;
+  // Only the environments entry carries one today; a map rather than a
+  // conditional at each call site so the two nav renders below cannot drift on
+  // which entries are badged.
+  const navBadges: Partial<Record<AppPage, string>> =
+    environmentAlertCount > 0
+      ? {
+          environments: formatMessage(t.home.machines.navAlerts, {
+            count: String(environmentAlertCount),
+          }),
+        }
+      : {};
 
   const badgeLabels = t.sidebar.runner;
   const groupLabels = t.sidebar.groups;
@@ -257,7 +277,7 @@ export function Sidebar({
 
         {/* Mobile quick shortcuts */}
         <div className="px-4 mb-4 md:hidden" data-testid="mobile-shortcuts">
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             {navPages.map(({ page, icon, label }) => (
               <NavItem
                 key={page}
@@ -404,6 +424,7 @@ export function Sidebar({
               icon={icon}
               label={label}
               active={currentPage === page}
+              {...(navBadges[page] ? { badgeLabel: navBadges[page] } : {})}
               onClick={() => handleMobileNav(page)}
             />
           ))}

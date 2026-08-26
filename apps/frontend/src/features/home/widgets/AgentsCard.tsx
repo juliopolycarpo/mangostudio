@@ -21,12 +21,20 @@ import { useExternalAccountLimits } from '@/features/external-agents/use-externa
 import { useExternalAgents } from '@/features/external-agents/useExternalAgents';
 import { useI18n } from '@/hooks/use-i18n';
 import { agentIdentityTokens } from '@/lib/agent-identity';
+import { formatMessage } from '@/lib/i18n-format';
 import { HubSkeletonLines } from './HubSkeletonLines';
 
 interface AgentsCardProps {
   environmentId: string | null;
   /** The chat's runner, when it is an external one — decides whose quota shows. */
   activeTargetId?: ExternalAgentTargetId;
+  /**
+   * Sessions per harness over the reporting window, keyed the way
+   * `runnerKey` keys them. Passed in rather than derived here so the card stays
+   * a view of discovery: a chat-scoped surface has no reason to count sessions,
+   * and the dashboard already holds the list to count them from.
+   */
+  sessionCounts?: Readonly<Record<string, number>>;
   className?: string;
 }
 
@@ -35,7 +43,12 @@ const UNAVAILABLE_DOT: Readonly<Record<'warning' | 'error', string>> = {
   error: 'bg-error',
 };
 
-export function AgentsCard({ environmentId, activeTargetId, className }: AgentsCardProps) {
+export function AgentsCard({
+  environmentId,
+  activeTargetId,
+  sessionCounts,
+  className,
+}: AgentsCardProps) {
   const { t } = useI18n();
   const labels = t.home.agents;
   const external = useExternalAgents(environmentId);
@@ -65,7 +78,7 @@ export function AgentsCard({ environmentId, activeTargetId, className }: AgentsC
         <ul className="flex flex-wrap gap-1.5">
           {external.agents.map((agent) => (
             <li key={agent.targetId}>
-              <AgentPill descriptor={agent} />
+              <AgentPill descriptor={agent} sessionCount={sessionCounts?.[agent.targetId]} />
             </li>
           ))}
         </ul>
@@ -80,11 +93,24 @@ export function AgentsCard({ environmentId, activeTargetId, className }: AgentsC
   );
 }
 
-function AgentPill({ descriptor }: { descriptor: ExternalAgentDescriptor }) {
+function AgentPill({
+  descriptor,
+  sessionCount,
+}: {
+  descriptor: ExternalAgentDescriptor;
+  sessionCount: number | undefined;
+}) {
   const { t } = useI18n();
   const name = t.externalAgents.target[descriptor.targetId];
   const note = availabilityNote(descriptor, t);
   const problem = availabilityProblem(descriptor);
+  // A harness with no session in the window is simply not annotated: "0 this
+  // week" is a row of noughts across a fresh account's card, and the absence
+  // says the same thing more quietly.
+  const usage =
+    sessionCount !== undefined && sessionCount > 0
+      ? formatMessage(t.home.agents.sessionsThisWeek, { count: String(sessionCount) })
+      : null;
 
   return (
     <span
@@ -110,6 +136,14 @@ function AgentPill({ descriptor }: { descriptor: ExternalAgentDescriptor }) {
       <span className="shrink-0 text-on-surface">{name}</span>
       {descriptor.version ? (
         <span className="min-w-0 truncate text-on-surface-variant/60">{descriptor.version}</span>
+      ) : null}
+      {usage ? (
+        <span
+          className="shrink-0 border-l border-outline-variant/20 pl-1.5 text-on-surface-variant/70"
+          data-testid="hub-agent-sessions"
+        >
+          {usage}
+        </span>
       ) : null}
       <span className="sr-only">{note}</span>
     </span>

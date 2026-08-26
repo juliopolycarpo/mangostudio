@@ -7,12 +7,12 @@ import type { LibraryCoverage, LibraryResource } from '@mangostudio/shared/libra
 import { createMockChat } from '@mangostudio/shared/test-utils';
 import { environmentAlerts } from '../../../../src/features/home/lib/environment-health';
 import { greetingSlot } from '../../../../src/features/home/lib/greeting';
+import { summarizeLibraryDivergence } from '../../../../src/features/home/lib/library-divergence';
 import {
   PROMPT_STARTER_IDS,
   promptStarterIds,
   starterContext,
 } from '../../../../src/features/home/lib/prompt-starters';
-import { summarizeSkillsDivergence } from '../../../../src/features/home/lib/skills-divergence';
 import {
   UNCOMMITTED_WORK_LIMIT,
   uncommittedWork,
@@ -136,12 +136,13 @@ function singleTargetSkill(slug: string): LibraryResource {
   };
 }
 
-describe('summarizeSkillsDivergence', () => {
+describe('summarizeLibraryDivergence', () => {
   it('names the outlier and who it disagrees with', () => {
-    const summary = summarizeSkillsDivergence([divergentSkill()]);
+    const summary = summarizeLibraryDivergence([divergentSkill()]);
     expect(summary.headline).toEqual({
       key: 'skill:frontend-design',
       slug: 'frontend-design',
+      kind: 'skill',
       outliers: ['cursor'],
       agreeing: ['claude', 'codex'],
     });
@@ -149,7 +150,7 @@ describe('summarizeSkillsDivergence', () => {
   });
 
   it('counts single-harness skills without treating them as divergence', () => {
-    const summary = summarizeSkillsDivergence([
+    const summary = summarizeLibraryDivergence([
       singleTargetSkill('deploy-notes'),
       singleTargetSkill('release-checklist'),
     ]);
@@ -166,8 +167,8 @@ describe('summarizeSkillsDivergence', () => {
     });
     const alpha = renamed('alpha');
     const zeta = renamed('zeta');
-    expect(summarizeSkillsDivergence([zeta, alpha]).headline?.slug).toBe('alpha');
-    expect(summarizeSkillsDivergence([alpha, zeta]).headline?.slug).toBe('alpha');
+    expect(summarizeLibraryDivergence([zeta, alpha]).headline?.slug).toBe('alpha');
+    expect(summarizeLibraryDivergence([alpha, zeta]).headline?.slug).toBe('alpha');
   });
 });
 

@@ -99,6 +99,22 @@ export function useChats() {
     [updateMutation]
   );
 
+  /**
+   * Machine and folder in one write, for the same reason
+   * `updateChatRunnerOnEnvironment` bundles machine and runner: two sequential
+   * updates would leave the chat briefly pointing at a folder on the machine
+   * it is about to leave, a pairing nothing validates.
+   */
+  const updateChatWorkdirOnEnvironment = useCallback(
+    async (chatId: string, workdir: string, environmentId: string) => {
+      await updateMutation.mutateAsync({
+        id: chatId,
+        updates: { workdir, environmentId },
+      });
+    },
+    [updateMutation]
+  );
+
   const updateChatEnvironment = useCallback(
     async (chatId: string, environmentId: string) => {
       await updateMutation.mutateAsync({
@@ -163,6 +179,7 @@ export function useChats() {
     updateChatRunnerOnEnvironment,
     updateChatRunnerPermissions,
     updateChatWorkdir,
+    updateChatWorkdirOnEnvironment,
     updateChatEnvironment,
     updateChatRestrictToolsToWorkdir,
     deleteChat,
