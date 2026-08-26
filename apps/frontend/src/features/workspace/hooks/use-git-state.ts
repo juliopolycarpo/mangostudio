@@ -676,6 +676,24 @@ export function useGitWorktrees(chatId: string) {
   });
 }
 
+/**
+ * Both worktree writes answer with the repository's refreshed list — the server
+ * re-reads it inside the mutation lock — so the response is seeded into the
+ * cache before the scopes are invalidated. The invalidation still revalidates
+ * in the background, but the rows update from the answer the write already
+ * carried instead of showing the pre-write list until a second
+ * `git worktree list` returns from the runtime.
+ */
+function settleWorktreeWrite(
+  queryClient: QueryClient,
+  chatId: string,
+  worktrees: GitWorktreeListResponse,
+  scopes: readonly GitScope[]
+): Promise<void> {
+  queryClient.setQueryData(gitWorktreeKeys.detail(chatId), worktrees);
+  return invalidateGitScopes(queryClient, chatId, scopes);
+}
+
 /** Creates a worktree; resolves with the repository's refreshed worktree list. */
 export function useAddWorktree(chatId: string) {
   const queryClient = useQueryClient();
@@ -685,7 +703,8 @@ export function useAddWorktree(chatId: string) {
       if (error) throw new ApiError(error.value);
       return data as GitWorktreeListResponse;
     },
-    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.worktreeAdd),
+    onSuccess: (worktrees) =>
+      settleWorktreeWrite(queryClient, chatId, worktrees, gitWriteScopes.worktreeAdd),
   });
 }
 
@@ -698,6 +717,7 @@ export function useRemoveWorktree(chatId: string) {
       if (error) throw new ApiError(error.value);
       return data as GitWorktreeListResponse;
     },
-    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.worktreeRemove),
+    onSuccess: (worktrees) =>
+      settleWorktreeWrite(queryClient, chatId, worktrees, gitWriteScopes.worktreeRemove),
   });
 }
