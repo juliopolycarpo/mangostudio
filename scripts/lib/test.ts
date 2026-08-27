@@ -9,10 +9,17 @@ export interface TestShard {
   readonly count: number;
 }
 
-/** Build a filtered Turbo test-lane command. // Usage: createTurboTestCommand('test:unit', ['api']); */
+/**
+ * Build a filtered Turbo test-lane command. `--log-order=stream` is
+ * load-bearing on CI, not cosmetic: Turbo's default there buffers a task's
+ * whole log until the task exits, so a `bun test` invocation that hangs
+ * (oven-sh/bun#39709) leaves a job log with nothing from the lane that hung.
+ * Streaming means the last line in the log is from the file that wedged.
+ * // Usage: createTurboTestCommand('test:unit', ['api']);
+ */
 export function createTurboTestCommand(task: TestLaneTask, workspaces: WorkspaceName[]): string[] {
   const filters = workspaces.map((workspace) => `--filter=${WORKSPACES[workspace].packageName}`);
-  return ['turbo', 'run', task, '--ui=stream', ...filters];
+  return ['turbo', 'run', task, '--ui=stream', '--log-order=stream', ...filters];
 }
 
 /**
@@ -23,9 +30,15 @@ export function createTurboTestCommand(task: TestLaneTask, workspaces: Workspace
  * // Usage: createTurboTestCommand('test:coverage', shardedCoverageWorkspaces());
  */
 export function shardedCoverageWorkspaces(): WorkspaceName[] {
-  return TEST_LANES.filter((lane) => lane.sharded && lane.workspace !== 'root').map(
-    (lane) => lane.workspace as WorkspaceName
-  );
+  // De-duplicated: a workspace with several sharded lanes (api's unit and
+  // integration) is still one turbo filter.
+  return [
+    ...new Set(
+      TEST_LANES.filter((lane) => lane.sharded && lane.workspace !== 'root').map(
+        (lane) => lane.workspace as WorkspaceName
+      )
+    ),
+  ];
 }
 
 /**

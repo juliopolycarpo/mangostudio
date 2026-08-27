@@ -10,7 +10,13 @@
 
 import type { WorkspaceName } from './config';
 
-export type TestLaneId = 'root' | 'api' | 'shared' | 'runtime' | 'frontend';
+export type TestLaneId =
+  | 'root'
+  | 'api-unit'
+  | 'api-integration'
+  | 'shared'
+  | 'runtime'
+  | 'frontend';
 
 /**
  * Total-coverage floors, in percent, enforced by
@@ -48,6 +54,13 @@ export interface TestLane {
    * lane's own cwd, so every lane needs a separate one.
    */
   readonly timingsPath?: string;
+  /**
+   * Repo-relative LCOV slice this lane writes, set only where a workspace owns
+   * more than one lane and the slices have to be merged into the single file
+   * `SHARDED_LCOV_PATHS` names. A single-lane workspace writes that file
+   * directly from its own coverage dir, with nothing to merge.
+   */
+  readonly lcovPath?: string;
   /** Repo-relative manifest declaring the lane's coverage script. */
   readonly manifest: string;
   /** Script key inside that manifest. */
@@ -89,14 +102,43 @@ export const TEST_LANES: readonly TestLane[] = [
     manifest: 'package.json',
     coverageScript: 'test:scripts',
   },
+  // The api workspace is two lanes, not one, because its two suites need
+  // opposite isolation settings. Unit keeps `--parallel=1` (= one worker,
+  // `--isolate`): dropping isolation there costs 172 failures (measured; see
+  // docs/reference/testing.md). Integration runs with no `--parallel` at all —
+  // it passes without isolation by design, and Bun's isolate machinery is what
+  // intermittently wedges the whole invocation in CI (oven-sh/bun#39709 — the
+  // runner never exits, or `spawnSync` stalls inside isolate workers), so the
+  // spawn-heavy integration files stay out of it until oven-sh/bun#38008
+  // ships. Each lane writes its own LCOV slice, and the api `test:coverage`
+  // script delegates to scripts/ci/run-workspace-coverage.ts, which runs both
+  // lanes whatever the earlier one did and merges the slices into the single
+  // `coverage/api/lcov.info` the coverage readers expect. That is one more merge hop than the other
+  // workspaces take, and merge-lcov-shards.ts is not strictly associative —
+  // its "shape" record is whichever input covered the most lines, so a
+  // pre-merged pair can win a shape a flat merge would have given to a
+  // per-shard record. The drift is the same kind and order the sharded merge
+  // already documents (lines flat, functions approximate), not a new class of
+  // error.
   {
-    id: 'api',
+    id: 'api-unit',
     workspace: 'api',
     sharded: true,
-    junitPath: `${JUNIT_DIR}/api.xml`,
-    timingsPath: `${TIMINGS_DIR}/api.json`,
+    junitPath: `${JUNIT_DIR}/api-unit.xml`,
+    timingsPath: `${TIMINGS_DIR}/api-unit.json`,
+    lcovPath: '.mango/artifacts/coverage/api-unit/lcov.info',
     manifest: 'apps/api/package.json',
-    coverageScript: 'test:coverage',
+    coverageScript: 'test:coverage:unit',
+  },
+  {
+    id: 'api-integration',
+    workspace: 'api',
+    sharded: true,
+    junitPath: `${JUNIT_DIR}/api-integration.xml`,
+    timingsPath: `${TIMINGS_DIR}/api-integration.json`,
+    lcovPath: '.mango/artifacts/coverage/api-integration/lcov.info',
+    manifest: 'apps/api/package.json',
+    coverageScript: 'test:coverage:integration',
   },
   {
     id: 'shared',
@@ -139,9 +181,11 @@ export const TEST_LANES: readonly TestLane[] = [
 
 /**
  * Workspaces whose LCOV the merge job stages back into the checkout from the
- * per-job artifacts. The sharded lanes need the real merge in
- * `merge-lcov-shards.ts`; the frontend contributes exactly one file from its
- * own job, for which the merge degenerates to a copy.
+ * per-job artifacts, keyed by workspace. The sharded lanes need the real
+ * merge in `merge-lcov-shards.ts`; the frontend contributes exactly one file
+ * from its own job, for which the merge degenerates to a copy. The api entry
+ * is one path even though the workspace is two lanes: its `test:coverage`
+ * script merges the per-lane slices into this file before the shard uploads.
  */
 export const SHARDED_LCOV_PATHS: Readonly<Record<string, string>> = {
   api: '.mango/artifacts/coverage/api/lcov.info',

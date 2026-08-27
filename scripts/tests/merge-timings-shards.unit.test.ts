@@ -44,7 +44,7 @@ const stageShards = async (
 
 describe('mergeLaneSlices', () => {
   it('unions the slices when the shards partitioned the lane', () => {
-    const { merged, problem } = mergeLaneSlices('api', [
+    const { merged, problem } = mergeLaneSlices('api-unit', [
       slice({ 'tests/unit/a.test.ts': 10, 'tests/unit/c.test.ts': 30 }),
       slice({ 'tests/unit/b.test.ts': 20 }),
     ]);
@@ -61,7 +61,7 @@ describe('mergeLaneSlices', () => {
   // timings files both claim the same file, so between them they never run
   // something else — and both still exit 0.
   it('reports a file claimed by two shards', () => {
-    const { problem } = mergeLaneSlices('api', [
+    const { problem } = mergeLaneSlices('api-unit', [
       slice({ 'tests/unit/a.test.ts': 10, 'tests/unit/b.test.ts': 20 }),
       slice({ 'tests/unit/b.test.ts': 21, 'tests/unit/c.test.ts': 30 }),
     ]);
@@ -71,7 +71,7 @@ describe('mergeLaneSlices', () => {
   });
 
   it('names every duplicate, not just the first', () => {
-    const { problem } = mergeLaneSlices('api', [
+    const { problem } = mergeLaneSlices('api-unit', [
       slice({ a: 1, b: 2, c: 3 }),
       slice({ a: 1, c: 3 }),
     ]);
@@ -82,17 +82,17 @@ describe('mergeLaneSlices', () => {
 describe('mergeTimingsShards', () => {
   it('writes one merged file per lane that reported', async () => {
     const { root, out } = await stageShards([
-      { name: 'test-shard-1', lane: 'api', files: { 'tests/unit/a.test.ts': 10 } },
-      { name: 'test-shard-2', lane: 'api', files: { 'tests/unit/b.test.ts': 20 } },
+      { name: 'test-shard-1', lane: 'api-unit', files: { 'tests/unit/a.test.ts': 10 } },
+      { name: 'test-shard-2', lane: 'api-unit', files: { 'tests/unit/b.test.ts': 20 } },
     ]);
 
     const result = await mergeTimingsShards(root, out);
 
     expect(result.problems).toEqual([]);
     expect(result.lanes).toHaveLength(1);
-    expect(result.lanes[0]).toMatchObject({ lane: 'api', shards: 2, files: 2, totalMs: 30 });
+    expect(result.lanes[0]).toMatchObject({ lane: 'api-unit', shards: 2, files: 2, totalMs: 30 });
 
-    const written = (await Bun.file(join(out, 'api.json')).json()) as TimingsFile;
+    const written = (await Bun.file(join(out, 'api-unit.json')).json()) as TimingsFile;
     expect(written.version).toBe(1);
     expect(Object.keys(written.files).sort()).toEqual([
       'tests/unit/a.test.ts',
@@ -102,14 +102,14 @@ describe('mergeTimingsShards', () => {
 
   it('surfaces a cross-shard duplicate as a problem', async () => {
     const { root, out } = await stageShards([
-      { name: 'test-shard-1', lane: 'api', files: { 'tests/unit/a.test.ts': 10 } },
-      { name: 'test-shard-2', lane: 'api', files: { 'tests/unit/a.test.ts': 11 } },
+      { name: 'test-shard-1', lane: 'api-unit', files: { 'tests/unit/a.test.ts': 10 } },
+      { name: 'test-shard-2', lane: 'api-unit', files: { 'tests/unit/a.test.ts': 11 } },
     ]);
 
     const result = await mergeTimingsShards(root, out);
 
     expect(result.problems).toHaveLength(1);
-    expect(result.problems[0]).toMatchObject({ lane: 'api', kind: 'duplicate' });
+    expect(result.problems[0]).toMatchObject({ lane: 'api-unit', kind: 'duplicate' });
   });
 
   // A cold cache and a lane that legitimately has nothing on most shards look
@@ -117,12 +117,12 @@ describe('mergeTimingsShards', () => {
   // round-robin split when the file is missing.
   it('skips a lane no shard reported rather than writing an empty file', async () => {
     const { root, out } = await stageShards([
-      { name: 'test-shard-1', lane: 'api', files: { 'tests/unit/a.test.ts': 10 } },
+      { name: 'test-shard-1', lane: 'api-unit', files: { 'tests/unit/a.test.ts': 10 } },
     ]);
 
     const result = await mergeTimingsShards(root, out);
 
-    expect(result.lanes.map((lane) => lane.lane)).toEqual(['api']);
+    expect(result.lanes.map((lane) => lane.lane)).toEqual(['api-unit']);
     expect(await Bun.file(join(out, 'runtime.json')).exists()).toBe(false);
   });
 
@@ -131,20 +131,20 @@ describe('mergeTimingsShards', () => {
   // shrink the partition rather than fail the run that produced it.
   it('reports a malformed slice as a problem instead of silently dropping it', async () => {
     const { root, out } = await stageShards([
-      { name: 'test-shard-1', lane: 'api', files: { 'tests/unit/a.test.ts': 10 } },
+      { name: 'test-shard-1', lane: 'api-unit', files: { 'tests/unit/a.test.ts': 10 } },
     ]);
     const bad = join(root, 'test-shard-2', TIMINGS_DIR);
     await mkdir(bad, { recursive: true });
-    await writeFile(join(bad, 'api.json'), '{"version":2,"files":{}}');
+    await writeFile(join(bad, 'api-unit.json'), '{"version":2,"files":{}}');
     const badJunit = join(root, 'test-shard-2', JUNIT_DIR);
     await mkdir(badJunit, { recursive: true });
-    await writeFile(join(badJunit, 'api.xml'), '<testsuite/>');
+    await writeFile(join(badJunit, 'api-unit.xml'), '<testsuite/>');
 
     const result = await mergeTimingsShards(root, out);
 
     expect(result.problems).toHaveLength(1);
-    expect(result.problems[0]).toMatchObject({ lane: 'api', kind: 'malformed' });
-    expect(result.problems[0]?.files).toEqual([join(bad, 'api.json')]);
+    expect(result.problems[0]).toMatchObject({ lane: 'api-unit', kind: 'malformed' });
+    expect(result.problems[0]?.files).toEqual([join(bad, 'api-unit.json')]);
     // The remaining valid shard still merges so the file is available for
     // debugging; `problems` is what fails the CI step, not a missing output.
     expect(result.lanes[0]).toMatchObject({ shards: 1, files: 1 });
@@ -155,20 +155,20 @@ describe('mergeTimingsShards', () => {
   // numeric indices in as if they were file paths.
   it('rejects an array-shaped files field as malformed', async () => {
     const { root, out } = await stageShards([
-      { name: 'test-shard-1', lane: 'api', files: { 'tests/unit/a.test.ts': 10 } },
+      { name: 'test-shard-1', lane: 'api-unit', files: { 'tests/unit/a.test.ts': 10 } },
     ]);
     const bad = join(root, 'test-shard-2', TIMINGS_DIR);
     await mkdir(bad, { recursive: true });
-    await writeFile(join(bad, 'api.json'), '{"version":1,"files":[]}');
+    await writeFile(join(bad, 'api-unit.json'), '{"version":1,"files":[]}');
     const badJunit = join(root, 'test-shard-2', JUNIT_DIR);
     await mkdir(badJunit, { recursive: true });
-    await writeFile(join(badJunit, 'api.xml'), '<testsuite/>');
+    await writeFile(join(badJunit, 'api-unit.xml'), '<testsuite/>');
 
     const result = await mergeTimingsShards(root, out);
 
     expect(result.problems).toHaveLength(1);
-    expect(result.problems[0]).toMatchObject({ lane: 'api', kind: 'malformed' });
-    expect(result.problems[0]?.files).toEqual([join(bad, 'api.json')]);
+    expect(result.problems[0]).toMatchObject({ lane: 'api-unit', kind: 'malformed' });
+    expect(result.problems[0]?.files).toEqual([join(bad, 'api-unit.json')]);
     expect(result.lanes[0]).toMatchObject({ shards: 1, files: 1 });
   });
 
@@ -184,7 +184,7 @@ describe('mergeTimingsShards', () => {
   // the coverage merge's.
   it('ignores the failure-log artifact directories', async () => {
     const { root, out } = await stageShards([
-      { name: 'test-shard-1', lane: 'api', files: { 'tests/unit/a.test.ts': 10 } },
+      { name: 'test-shard-1', lane: 'api-unit', files: { 'tests/unit/a.test.ts': 10 } },
     ]);
     await mkdir(join(root, 'test-shard-1-log'), { recursive: true });
     await writeFile(join(root, 'test-shard-1-log', 'coverage-run.log'), 'log');
@@ -192,16 +192,16 @@ describe('mergeTimingsShards', () => {
     const result = await mergeTimingsShards(root, out);
 
     expect(result.problems).toEqual([]);
-    expect(result.lanes[0]).toMatchObject({ lane: 'api', shards: 1, files: 1 });
+    expect(result.lanes[0]).toMatchObject({ lane: 'api-unit', shards: 1, files: 1 });
   });
 
   it('discards a restored baseline the shard never touched', async () => {
     const { root, out } = await stageShards([
-      { name: 'test-shard-1', lane: 'api', files: { 'tests/unit/a.test.ts': 10 } },
-      { name: 'test-shard-2', lane: 'api', files: { 'tests/unit/b.test.ts': 20 } },
+      { name: 'test-shard-1', lane: 'api-unit', files: { 'tests/unit/a.test.ts': 10 } },
+      { name: 'test-shard-2', lane: 'api-unit', files: { 'tests/unit/b.test.ts': 20 } },
       {
         name: 'test-shard-3',
-        lane: 'api',
+        lane: 'api-unit',
         files: { 'tests/unit/a.test.ts': 10, 'tests/unit/b.test.ts': 20 },
         junit: false,
       },
@@ -210,6 +210,6 @@ describe('mergeTimingsShards', () => {
     const result = await mergeTimingsShards(root, out);
 
     expect(result.problems).toEqual([]);
-    expect(result.lanes[0]).toMatchObject({ lane: 'api', shards: 2, files: 2 });
+    expect(result.lanes[0]).toMatchObject({ lane: 'api-unit', shards: 2, files: 2 });
   });
 });

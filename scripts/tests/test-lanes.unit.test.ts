@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { ALL_WORKSPACE_NAMES, ROOT_DIR } from '../lib/config';
 import { parseShard, shardedCoverageWorkspaces, testLaneEnv } from '../lib/test';
@@ -48,6 +48,21 @@ describe('test lane declarations', () => {
     }
   );
 
+  // Same pinning as the JUnit and timings paths, for the merge step's inputs:
+  // `lcovPath` is what run-workspace-coverage.ts merges, `--coverage-dir` is
+  // what actually gets written. Drift means merging a slice nothing produced,
+  // which reports one lane's coverage as the whole workspace's — on a run
+  // where every job still exits 0.
+  it.each(TEST_LANES.filter((lane) => lane.lcovPath))(
+    'the $id lane writes LCOV where the lane table says it does',
+    async (lane) => {
+      const scripts = await readScripts(lane.manifest);
+      const dir = dirname(lane.lcovPath as string);
+      const expected = lane.manifest === 'package.json' ? dir : `../../${dir}`;
+      expect(scripts[lane.coverageScript]).toContain(`--coverage-dir=${expected}`);
+    }
+  );
+
   // The inverse direction: a lane that opts out must not carry the flags, or it
   // writes a slice the merge step then treats as authoritative for a lane it is
   // not balancing.
@@ -87,14 +102,19 @@ describe('test lane declarations', () => {
     }
   );
 
-  it('covers every workspace lane in the staged-LCOV table', () => {
-    const laneIds = new Set(
-      TEST_LANES.filter((lane) => lane.workspace !== 'root').map((lane) => lane.id)
+  // Keyed by workspace, not lane: the api workspace is two lanes whose LCOV
+  // slices its own `test:coverage` script merges into the one staged file.
+  it('covers every workspace in the staged-LCOV table', () => {
+    const workspaces = new Set(
+      TEST_LANES.filter((lane) => lane.workspace !== 'root').map((lane) => lane.workspace)
     );
-    expect(new Set(Object.keys(SHARDED_LCOV_PATHS))).toEqual(laneIds);
+    expect(new Set(Object.keys(SHARDED_LCOV_PATHS))).toEqual(workspaces);
   });
 
-  it('has one lane per workspace plus root, with unique JUnit paths', () => {
+  // Every workspace has at least one lane (api has two), and no two lanes
+  // share a JUnit path — the second half is what stops one lane from
+  // overwriting another's report and halving the reported test count.
+  it('covers every workspace plus root, with unique JUnit paths', () => {
     const covered = new Set(TEST_LANES.map((lane) => lane.workspace));
     expect(covered).toEqual(new Set(['root', ...ALL_WORKSPACE_NAMES]));
     expect(new Set(TEST_LANES.map((lane) => lane.junitPath)).size).toBe(TEST_LANES.length);
@@ -120,6 +140,60 @@ describe('test lane declarations', () => {
       );
     }
   );
+});
+
+describe('api lanes', () => {
+  // The two api suites need opposite isolation settings, which is why the
+  // workspace is two lanes at all. Unit without isolation is 172 failures
+  // (measured on 1.4.0); integration inside Bun's isolate machinery is the
+  // intermittent runner hang (oven-sh/bun#39709) that burned CI's
+  // timeout-minutes. Pin both directions so neither flag drifts onto the
+  // other lane.
+  it('keeps the unit lane isolated and never --no-isolate', async () => {
+    const scripts = await readScripts(laneById('api-unit').manifest);
+    const script = scripts[laneById('api-unit').coverageScript];
+    expect(script).toContain('--parallel=1');
+    expect(script).not.toContain('--no-isolate');
+    expect(script).toContain('tests/unit');
+    expect(script).not.toContain('tests/integration');
+  });
+
+  it('keeps the integration lane out of isolate mode', async () => {
+    const scripts = await readScripts(laneById('api-integration').manifest);
+    const script = scripts[laneById('api-integration').coverageScript];
+    expect(script).not.toContain('--parallel');
+    expect(script).not.toContain('--isolate');
+    expect(script).toContain('tests/integration');
+    expect(script).not.toContain('tests/unit');
+  });
+
+  // `test:coverage` delegates to the orchestrator rather than chaining the two
+  // lanes and the merge with `&&`. A chain lets one failing unit test skip the
+  // integration lane *and* the merge, so a red shard uploads no integration
+  // JUnit and no api LCOV at all — and when the failure is shared across the
+  // shards, the merge job dies on a missing input instead of reporting the
+  // test failures. Pinned as an absence of `&&` because that is the shape the
+  // next person reaching for a second lane would copy.
+  it('runs both lanes through the coverage orchestrator, not an && chain', async () => {
+    const scripts = await readScripts('apps/api/package.json');
+    const script = scripts['test:coverage'];
+    expect(script).toContain('run-workspace-coverage.ts');
+    expect(script).toContain('--workspace=api');
+    expect(script).not.toContain('&&');
+  });
+
+  // Two lanes sharing a coverage directory would have the second overwrite the
+  // first, and a slice pointed at the staged file would make the merge read its
+  // own output as an input. The lane-table-to-manifest pin is in the registry
+  // suite above; this pins the pair is distinct in the first place.
+  it('gives each lane its own LCOV slice, separate from the staged file', () => {
+    const slices = TEST_LANES.filter((lane) => lane.workspace === 'api').map(
+      (lane) => lane.lcovPath
+    );
+    expect(slices).toHaveLength(2);
+    expect(new Set(slices).size).toBe(2);
+    expect(slices).not.toContain(SHARDED_LCOV_PATHS.api);
+  });
 });
 
 describe('frontend lane', () => {

@@ -90,7 +90,7 @@ describe('parseJunitXml', () => {
 
 describe('buildTestSuiteStats', () => {
   const green: readonly LaneResult[] = [
-    laneResult('api', counts({ tests: 10, passed: 10 })),
+    laneResult('api-unit', counts({ tests: 10, passed: 10 })),
     laneResult('root', counts({ tests: 4, passed: 4 })),
     laneResult('frontend', counts({ tests: 8, passed: 8 })),
   ];
@@ -113,7 +113,7 @@ describe('buildTestSuiteStats', () => {
     const stats = buildTestSuiteStats(
       [
         laneResult(
-          'api',
+          'api-unit',
           counts({
             tests: 10,
             passed: 8,
@@ -171,7 +171,7 @@ describe('buildTestSuiteStats', () => {
   it('sets parseMiss when a configured lane wrote no JUnit report on a green exit', () => {
     const stats = buildTestSuiteStats(
       [
-        laneResult('api', counts({ tests: 0, passed: 0 }), 0),
+        laneResult('api-unit', counts({ tests: 0, passed: 0 }), 0),
         laneResult('root', counts({ tests: 4, passed: 4 })),
       ],
       { errors: 0, headlines: [] },

@@ -27,6 +27,7 @@ describe('test script', () => {
       'run',
       'test:unit',
       '--ui=stream',
+      '--log-order=stream',
       '--filter=@mangostudio/api',
       '--filter=@mangostudio/shared',
     ]);

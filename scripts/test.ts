@@ -21,7 +21,17 @@ import {
 } from './lib/test';
 import { JUNIT_DIR, TIMINGS_DIR } from './lib/test-lanes';
 
-const ROOT_SCRIPTS_TEST_COMMAND = ['turbo', 'run', '//#test:scripts', '--ui=stream'];
+// `--log-order=stream` for the same reason createTurboTestCommand carries it:
+// this lane runs concurrently with the workspace fan-out inside the same
+// watchdogged CI step, and Turbo's CI default buffers a task's log until it
+// exits — so a lane that never exits contributes nothing to the job log.
+const ROOT_SCRIPTS_TEST_COMMAND = [
+  'turbo',
+  'run',
+  '//#test:scripts',
+  '--ui=stream',
+  '--log-order=stream',
+];
 
 function printHelp(): never {
   console.log(`Usage: bun run test [lane flags]

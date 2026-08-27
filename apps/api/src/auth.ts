@@ -27,7 +27,17 @@ function createAuthInstance() {
       autoSignIn: true,
     },
 
-    trustedOrigins: config.corsOrigins,
+    // A function, not `config.corsOrigins`: `getAuth()` memoizes this instance,
+    // so an array captured here binds Better Auth's origin gate to whatever
+    // config was live at the first call — under the shared-module-graph
+    // integration lane, whichever test file reached `getAuth()` first. Better
+    // Auth re-invokes this per request (dist/auth/base.mjs resolves the handler
+    // context's trusted origins from it), so an origin the config gains after
+    // initialization is honoured. Note the narrowing direction is weaker: the
+    // origin-check middleware unions this result with the list it resolved at
+    // context creation, so an origin *removed* after init stays trusted on that
+    // path until the process restarts.
+    trustedOrigins: () => getConfig().corsOrigins,
 
     session: {
       cookieCache: {

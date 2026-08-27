@@ -1,4 +1,10 @@
 [test]
 preload = ["./tests/support/setup/preload.ts"]
 coverageReporter = ["lcov"]
-coverageDir = "../../.mango/artifacts/coverage/api"
+# No `coverageDir` here, deliberately: this workspace's coverage lane is two
+# invocations (unit isolated, integration not — see scripts/lib/test-lanes.ts)
+# writing to separate directories via `--coverage-dir`, and a bunfig
+# `coverageDir` silently wins over that CLI flag (measured on Bun 1.4.0), which
+# would make the second invocation overwrite the first's slice. The coverage
+# scripts pass the flag explicitly; a bare `bun test --coverage` falls back to
+# an untracked ./coverage.
