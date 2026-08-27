@@ -136,7 +136,7 @@ export function useSettingsRealtimeInvalidation(): void {
 
   useEffect(() => () => cancelDeferredAppRefresh(deferredAppRefreshRef), []);
 
-  useRealtimeInvalidation(SETTINGS_TOPIC, (signal) =>
+  useRealtimeInvalidation(SETTINGS_TOPIC, 'settings-sections', (signal) =>
     invalidateEventScopes(
       queryClient,
       deferredAppRefreshRef,

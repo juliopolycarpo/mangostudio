@@ -80,7 +80,7 @@ function environmentEntitiesQueryOptions() {
 
 export function useEnvironmentEntitiesQuery() {
   const queryClient = useQueryClient();
-  useRealtimeInvalidation(ENVIRONMENTS_TOPIC, async () => {
+  useRealtimeInvalidation(ENVIRONMENTS_TOPIC, 'environment-entities', async () => {
     await queryClient.invalidateQueries({ queryKey: environmentKeys.entities() });
     // Pairing state moves on the same events: a runtime dialing in stamps its
     // credential as seen, and rotating or revoking one drops what it had

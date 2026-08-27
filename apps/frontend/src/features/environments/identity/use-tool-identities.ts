@@ -29,7 +29,7 @@ const EMPTY_IDENTITIES: ToolIdentityMap = {};
 function useToolIdentityRealtime(): void {
   const queryClient = useQueryClient();
 
-  useRealtimeInvalidation(SETTINGS_TOPIC, (signal) => {
+  useRealtimeInvalidation(SETTINGS_TOPIC, 'tool-identities', (signal) => {
     // A subscription acknowledgement covers everything: events published while
     // the socket was down are not replayed, so the ack is the only barrier.
     const scopes: readonly SettingsScope[] | undefined =
