@@ -16,24 +16,53 @@ import { loadConfigForTest } from '../../../src/lib/config';
 import { settingsRoutes } from '../../../src/routes/settings';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
-const TEST_USER = {
-  id: 'agent-settings-user',
-  name: 'Agent Settings User',
-  email: 'agent-settings@mangostudio.test',
-};
-
-const OTHER_USER = {
-  id: 'agent-settings-other-user',
-  name: 'Other Agent Settings User',
-  email: 'other-agent-settings@mangostudio.test',
-};
-
 const TEST_AUTH_SECRET = 'test-secret-at-least-32-characters-long';
+
+interface TestIdentity {
+  readonly id: string;
+  readonly name: string;
+  readonly email: string;
+}
+
+/**
+ * Fresh identities per test, because the rows these tests write are keyed by
+ * user and nothing truncates them in between.
+ *
+ * Every settings route here persists per-user state into the shared in-memory
+ * database — `user_app_settings`, `user_tool_settings`, and the built-in agent
+ * overrides a `PUT` saves — and `setupTestEnvironment()` migrates that database
+ * once per process. Isolation does not help: `--isolate` gives each *file* a
+ * fresh module graph, not each test. With fixed ids the file was therefore
+ * order-dependent, and in one direction it failed: run "updates built-in
+ * default settings per user" first and its persisted `default` override is what
+ * "synthesizes default from legacy app settings and enabled tools" then reads,
+ * so the assertion on `Legacy chat prompt` gets `Persisted chat prompt`.
+ * Reproduced with `bun test --randomize --seed=2` (also 4, 5, 6; 1, 3, 7, 8 are
+ * clean), and it is what the randomized-order nightly has reported every night
+ * since that workflow landed.
+ *
+ * A fresh id per test namespaces the rows instead of enumerating the tables to
+ * truncate, so a test that starts writing a new one cannot reopen the hole.
+ */
+let identitySeq = 0;
+let testUser: TestIdentity;
+let otherUser: TestIdentity;
 
 let restoreAuth: (() => void) | null = null;
 let agentsDir: string;
 
 beforeEach(() => {
+  identitySeq += 1;
+  testUser = {
+    id: `agent-settings-user-${identitySeq}`,
+    name: 'Agent Settings User',
+    email: `agent-settings-${identitySeq}@mangostudio.test`,
+  };
+  otherUser = {
+    id: `agent-settings-other-user-${identitySeq}`,
+    name: 'Other Agent Settings User',
+    email: `other-agent-settings-${identitySeq}@mangostudio.test`,
+  };
   agentsDir = mkdtempSync(join(tmpdir(), 'mango-agent-routes-'));
   loadConfigForTest({
     agents: { dir: agentsDir },
@@ -49,7 +78,7 @@ afterEach(() => {
 
 describe('settings agents routes', () => {
   it('lists built-in default and explore agents for authenticated users', async () => {
-    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    const { app, restore } = createAuthenticatedApiTestApp(testUser, settingsRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(new Request('http://localhost/settings/agents'));
@@ -71,8 +100,8 @@ describe('settings agents routes', () => {
     await getDb()
       .insertInto('user_app_settings')
       .values({
-        id: 'agent-legacy-app-settings',
-        userId: TEST_USER.id,
+        id: `agent-legacy-app-settings-${identitySeq}`,
+        userId: testUser.id,
         settingsJson: JSON.stringify({
           ...DEFAULT_APP_SETTINGS,
           promptSettings: {
@@ -90,8 +119,8 @@ describe('settings agents routes', () => {
     await getDb()
       .insertInto('user_tool_settings')
       .values({
-        id: 'agent-disabled-tool',
-        userId: TEST_USER.id,
+        id: `agent-disabled-tool-${identitySeq}`,
+        userId: testUser.id,
         toolName: 'generate_image',
         enabled: 0,
         parametersJson: '{}',
@@ -99,7 +128,7 @@ describe('settings agents routes', () => {
         updatedAt: Date.now(),
       })
       .execute();
-    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    const { app, restore } = createAuthenticatedApiTestApp(testUser, settingsRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(new Request('http://localhost/settings/agents/default'));
@@ -119,7 +148,7 @@ describe('settings agents routes', () => {
   });
 
   it('updates built-in default settings per user', async () => {
-    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    const { app, restore } = createAuthenticatedApiTestApp(testUser, settingsRoutes);
     restoreAuth = restore;
 
     const update = await app.handle(
@@ -151,7 +180,7 @@ describe('settings agents routes', () => {
     });
 
     restoreAuth?.();
-    const other = createAuthenticatedApiTestApp(OTHER_USER, settingsRoutes);
+    const other = createAuthenticatedApiTestApp(otherUser, settingsRoutes);
     restoreAuth = other.restore;
 
     const otherResponse = await other.app.handle(
@@ -164,7 +193,7 @@ describe('settings agents routes', () => {
   });
 
   it('updates built-in explore settings per user and returns the saved profile in the list endpoint', async () => {
-    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    const { app, restore } = createAuthenticatedApiTestApp(testUser, settingsRoutes);
     restoreAuth = restore;
 
     const update = await app.handle(
@@ -203,7 +232,7 @@ describe('settings agents routes', () => {
     );
 
     restoreAuth?.();
-    const other = createAuthenticatedApiTestApp(OTHER_USER, settingsRoutes);
+    const other = createAuthenticatedApiTestApp(otherUser, settingsRoutes);
     restoreAuth = other.restore;
 
     const otherListResponse = await other.app.handle(
@@ -218,7 +247,7 @@ describe('settings agents routes', () => {
   });
 
   it('creates, reads, updates, and deletes markdown-backed user agents', async () => {
-    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    const { app, restore } = createAuthenticatedApiTestApp(testUser, settingsRoutes);
     restoreAuth = restore;
 
     const create = await app.handle(
@@ -277,7 +306,7 @@ describe('settings agents routes', () => {
   });
 
   it('previews markdown and returns typed validation errors', async () => {
-    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    const { app, restore } = createAuthenticatedApiTestApp(testUser, settingsRoutes);
     restoreAuth = restore;
 
     const preview = await app.handle(
