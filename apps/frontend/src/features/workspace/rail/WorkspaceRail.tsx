@@ -12,6 +12,7 @@ import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import { useI18n } from '@/hooks/use-i18n';
 import { getAvailableWorkspacePanels, type RailPanelDefinition } from './panel-registry';
 import { RailPanel } from './RailPanel';
+import { onRailPanelRequest } from './rail-panel-request';
 import { readRailCollapsed, writeRailCollapsed } from './rail-state';
 
 const DESKTOP_RAIL_QUERY = '(min-width: 1024px)';
@@ -30,6 +31,7 @@ export function WorkspaceRail({ chatId, workdir, settings, onWidthChange }: Work
   const todos = todosQuery.data?.todos ?? [];
   const panelTitles: Readonly<Record<WorkspacePanelId, string>> = {
     git: t.git.title,
+    github: t.github.title,
     todos: t.chat.todo.title,
   };
   const availablePanels = useMemo(
@@ -82,10 +84,27 @@ export function WorkspaceRail({ chatId, workdir, settings, onWidthChange }: Work
     writeRailCollapsed(chatId, nextCollapsed);
   };
 
-  const selectPanel = (panelId: WorkspacePanelId) => {
-    setActivePanelId(panelId);
-    if (collapsed) setCollapsed(false);
-  };
+  const selectPanel = useCallback(
+    (panelId: WorkspacePanelId) => {
+      setActivePanelId(panelId);
+      // Selecting a panel is a request to *see* it, so a collapsed rail opens.
+      // Written through the same storage as the collapse button rather than
+      // through `setCollapsed`, which is declared below this callback.
+      setCollapsedState(false);
+      writeRailCollapsed(chatId, false);
+      // Below the desktop breakpoint the rail renders as a drawer gated on
+      // `mobileOpen` rather than `collapsed`, so an external request that only
+      // cleared `collapsed` picked a panel nothing on screen showed.
+      if (!isDesktop) setMobileOpen(true);
+    },
+    [chatId, isDesktop]
+  );
+
+  // The rail has no keyboard shortcut for switching panels, so the command
+  // palette and the Repository panel's branch chip are how a panel gets opened
+  // from outside. Requests arriving while a panel is not available are dropped
+  // by the effect below that re-selects the first available one.
+  useEffect(() => onRailPanelRequest(selectPanel), [selectPanel]);
 
   // EdgeResizeHandle already clamps and rounds against the same bounds.
   const resize = (nextWidth: number) => {
@@ -118,7 +137,7 @@ export function WorkspaceRail({ chatId, workdir, settings, onWidthChange }: Work
       }
       onClose={onClose}
     >
-      <ActivePanelContent chatId={chatId} todos={todos} />
+      <ActivePanelContent chatId={chatId} workdir={workdir} todos={todos} />
     </RailPanel>
   );
 

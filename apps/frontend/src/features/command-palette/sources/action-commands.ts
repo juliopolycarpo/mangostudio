@@ -15,7 +15,7 @@ import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
-import { FolderOpen, Moon, Plus, RefreshCw, Sun } from 'lucide-react';
+import { FolderOpen, GitPullRequest, Moon, Plus, RefreshCw, Sun } from 'lucide-react';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -34,6 +34,13 @@ export interface ActionCommandParams {
   readonly resolvedTheme: 'dark' | 'light';
   /** False on a shell with no chat selected, which is what hides the workdir row. */
   readonly hasChat: boolean;
+  /**
+   * False once the user removes the GitHub panel from the rail in settings.
+   * The rows below open the rail's GitHub panel, and the rail drops a hidden
+   * panel — so without this gate they promise GitHub and deliver whichever
+   * panel is first in the order.
+   */
+  readonly githubPanelVisible: boolean;
   /**
    * True while a turn is streaming. Hides the workdir row for the same reason
    * the composer disables its workdir chip: repointing the binding mid-turn
@@ -61,6 +68,20 @@ export interface ActionCommandParams {
   ) => void | Promise<void>;
   readonly onToggleTheme: () => void;
   readonly onOpenWorkdirPicker: () => void;
+  /**
+   * Navigates to the chat surface and asks its rail for the GitHub panel.
+   *
+   * Async because the two halves are ordered: the rail hears the request as a
+   * fire-and-forget event, so it has to be mounted before the request is made.
+   */
+  readonly onOpenGithubPanel: () => void | Promise<void>;
+  /**
+   * Navigates to the chat surface, opens the GitHub panel, and asks it to
+   * switch to the pull requests tab with the create form open — what the row
+   * labeled "Create pull request" promises rather than a second "open the
+   * panel" affordance.
+   */
+  readonly onCreateGithubPr: () => void | Promise<void>;
 }
 
 export function actionCommands({
@@ -69,6 +90,7 @@ export function actionCommands({
   externalAgents,
   resolvedTheme,
   hasChat,
+  githubPanelVisible,
   isGenerating,
   chatHasTurns,
   newChatShortcut,
@@ -77,6 +99,8 @@ export function actionCommands({
   onNewChatWithRunner,
   onToggleTheme,
   onOpenWorkdirPicker,
+  onOpenGithubPanel,
+  onCreateGithubPr,
 }: ActionCommandParams): CommandItem[] {
   const labels = t.commandPalette.actions;
 
@@ -165,6 +189,41 @@ export function actionCommands({
       icon: RefreshCw,
       run: quotaRefresh.run,
     });
+  }
+
+  // The rail has no keyboard shortcut for switching panels — `lib/keyboard.ts`
+  // has only mod+K and mod+N — so these three rows are the GitHub panel's
+  // entire shortcut story rather than a nicety. All of them need a chat,
+  // because the rail only exists on the chat surface, and all of them need the
+  // panel itself: hidden, it is not in the rail for these rows to select.
+  if (hasChat && githubPanelVisible) {
+    items.push(
+      {
+        id: 'action:github-panel',
+        section: 'actions',
+        label: labels.openGithubPanel,
+        keywords: t.github.title,
+        icon: GitPullRequest,
+        run: onOpenGithubPanel,
+      },
+      {
+        id: 'action:github-create-pr',
+        section: 'actions',
+        // Reuses the panel's own wording rather than a second translation of
+        // the same sentence; the row runs the same affordance the panel does.
+        label: t.github.actions.createPr,
+        icon: GitPullRequest,
+        run: onCreateGithubPr,
+      },
+      {
+        id: 'action:github-review-requests',
+        section: 'actions',
+        label: labels.reviewRequests,
+        keywords: t.github.panel.inbox,
+        icon: GitPullRequest,
+        run: onOpenGithubPanel,
+      }
+    );
   }
 
   return items;

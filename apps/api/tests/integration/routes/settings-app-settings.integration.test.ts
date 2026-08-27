@@ -63,8 +63,12 @@ describe('settings app settings routes', () => {
           workspaceSettings: {
             ...DEFAULT_APP_SETTINGS.workspaceSettings,
             sidePanel: {
+              // A complete panel list: the normalizer backfills any id this blob
+              // has never seen, so an incomplete order would echo back widened
+              // and this round-trip assertion would fail for a reason it is not
+              // testing.
               visiblePanelIds: ['todos'],
-              panelOrder: ['todos', 'git'],
+              panelOrder: ['todos', 'git', 'github'],
               width: 420,
             },
           },
@@ -101,7 +105,7 @@ describe('settings app settings routes', () => {
       workspaceSettings: {
         sidePanel: {
           visiblePanelIds: ['todos'],
-          panelOrder: ['todos', 'git'],
+          panelOrder: ['todos', 'git', 'github'],
           width: 420,
         },
       },

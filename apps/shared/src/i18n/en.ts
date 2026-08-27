@@ -376,6 +376,14 @@ export const messages: Messages = {
       empty: 'Nothing detected on this machine yet.',
       allClear: 'Everything the toolchain reports is ready.',
     },
+    /**
+     * The card only appears when reviews are waiting, so there is no empty-state
+     * key: an empty card is the one thing this dashboard promises not to show.
+     */
+    github: {
+      label: 'Reviews waiting',
+      row: '{repo} #{number}',
+    },
     workspace: {
       label: 'Workspace',
       cleanTree: 'clean tree',
@@ -1472,6 +1480,10 @@ export const messages: Messages = {
       switchToDark: 'Switch to dark theme',
       chooseWorkdir: 'Choose working directory',
       refreshQuota: 'Refresh {runner} quota',
+      // The rail has no keyboard shortcut for switching panels, so the palette
+      // is the accessible path — not a nicety.
+      openGithubPanel: 'Open GitHub panel',
+      reviewRequests: 'Review requests waiting on me',
     },
   },
 
@@ -1715,22 +1727,236 @@ export const messages: Messages = {
       actionError: 'The stash action failed.',
       close: 'Close stashes',
     },
+    worktrees: {
+      title: 'Worktrees',
+      loading: 'Reading worktrees...',
+      loadError: 'Could not read the worktrees of this repository.',
+      empty: 'This repository has only its main worktree.',
+      refresh: 'Refresh worktrees',
+      add: 'Add worktree',
+      addTitle: 'New worktree',
+      pathLabel: 'Worktree path',
+      pathHint: 'Absolute, or relative to the repository root.',
+      pathPlaceholder: '../feature-panel',
+      branchLabel: 'Branch',
+      branchPlaceholder: 'feat/panel',
+      modeLabel: 'Branch to check out',
+      modeNew: 'Create a new branch',
+      modeExisting: 'Use an existing branch',
+      submit: 'Create worktree',
+      submitting: 'Creating...',
+      cancel: 'Cancel',
+      added: 'Worktree created at {path}.',
+      open: 'Worktree at {path}',
+      remove: 'Remove',
+      removeLabel: 'Remove the worktree at {path}',
+      removeTitle: 'Remove this worktree?',
+      removeHint:
+        'Deletes the working directory from disk. The branch and its commits stay in the repository.',
+      removeConfirm: 'Remove worktree',
+      removeCancel: 'Keep worktree',
+      removed: 'Worktree removed.',
+      force: 'Discard uncommitted work in that worktree',
+      actionError: 'The worktree action failed.',
+      badges: {
+        main: 'Main',
+        current: 'This chat',
+        detached: 'Detached',
+        locked: 'Locked',
+        prunable: 'Prunable',
+      },
+      lockedReason: 'Locked: {reason}',
+      prunableReason: 'Prunable: {reason}',
+      detached: 'Detached at {commit}',
+    },
   },
 
   github: {
     title: 'GitHub',
     loading: 'Reading GitHub context...',
-    loadError: 'GitHub context could not be read.',
-    installHint: 'Install GitHub CLI on the server to see repository and pull request context.',
-    authHint: 'Run gh auth login on the server to connect GitHub.',
-    noPr: 'No pull request for this branch.',
-    defaultBranch: 'Default branch: {branch}',
-    refs: '{base} ← {head}',
+    /**
+     * The pull request badge vocabulary, keyed lowercase because its one caller
+     * indexes it with `state.toLowerCase()` and it carries `draft`, which is not
+     * a pull request state at all.
+     */
     states: {
       open: 'Open',
       closed: 'Closed',
       merged: 'Merged',
       draft: 'Draft',
+    },
+
+    panel: {
+      inbox: 'Waiting on you',
+      repo: 'This repo',
+      prs: 'Pull requests',
+      issues: 'Issues',
+      checks: 'Checks',
+      reviewComments: 'Review comments',
+      noWorkdir: 'Point this chat at a folder to see its pull requests and issues.',
+      open: 'Open the GitHub panel',
+      back: 'Back to the list',
+      branchChip: '#{number} · {status}',
+    },
+
+    /** One-line check summary, for the Repository panel's branch chip. */
+    chip: {
+      checksFailing: 'checks failing',
+      checksRunning: 'checks running',
+      checksPassing: 'checks passing',
+      noChecks: 'no checks',
+    },
+
+    /**
+     * Per-branch annotation in the branch list. Only `MERGED` earns a sentence
+     * of its own. Says the pull request merged, not that deleting the branch
+     * is safe — Git's own refusal on an unmerged tip is what decides that.
+     */
+    branchPr: {
+      merged: 'merged',
+    },
+
+    /**
+     * Keyed by the wire value of the four not-connected states so the panel can
+     * index straight off the response instead of switching on it. One sentence
+     * per state, and one hint that says what to do about it.
+     */
+    connection: {
+      'gh-not-installed': 'GitHub CLI is not installed where this chat runs.',
+      'not-authenticated': 'GitHub CLI is not signed in where this chat runs.',
+      'no-remote': 'This repository has no remote.',
+      'not-a-github-remote': 'This repository does not have a GitHub remote.',
+    },
+    connectionHint: {
+      'gh-not-installed': 'Install gh on that machine, then refresh.',
+      'not-authenticated': 'Run gh auth login on that machine, then refresh.',
+      'no-remote': 'Add a remote with git remote add origin, then refresh.',
+      'not-a-github-remote': 'The GitHub panel only reads repositories hosted on GitHub.',
+    },
+
+    empty: {
+      prs: 'No pull requests match this filter.',
+      issues: 'No issues match this filter.',
+      inbox: 'Nothing is waiting on your review.',
+      checks: 'This pull request runs no checks.',
+      threads: 'No review comments on this pull request.',
+    },
+
+    issueState: {
+      OPEN: 'Open',
+      CLOSED: 'Closed',
+    },
+    reviewDecision: {
+      APPROVED: 'Approved',
+      CHANGES_REQUESTED: 'Changes requested',
+      REVIEW_REQUIRED: 'Review required',
+    },
+    /** Lives outside `reviewDecision`: "none" is a null, not a member of the union. */
+    reviewDecisionNone: 'No review yet',
+    checkBucket: {
+      pass: 'Passed',
+      fail: 'Failed',
+      pending: 'Running',
+      skipping: 'Skipped',
+      cancel: 'Cancelled',
+    },
+    mergeState: {
+      BEHIND: 'Behind the base branch',
+      BLOCKED: 'Merge blocked',
+      CLEAN: 'Ready to merge',
+      DIRTY: 'Conflicts with the base branch',
+      DRAFT: 'Still a draft',
+      HAS_HOOKS: 'Ready to merge, with repository hooks',
+      UNKNOWN: 'Merge state unknown',
+      UNSTABLE: 'Mergeable, but checks are failing',
+    },
+    mergeable: {
+      MERGEABLE: 'No conflicts',
+      CONFLICTING: 'Has conflicts',
+      UNKNOWN: 'Checking for conflicts',
+    },
+    prFilter: {
+      open: 'Open',
+      mine: 'Mine',
+      'review-requested': 'Review requested',
+      all: 'All',
+    },
+    issueFilter: {
+      open: 'Open',
+      assigned: 'Assigned to me',
+      mine: 'Created by me',
+    },
+
+    row: {
+      number: '#{number}',
+      draft: 'Draft',
+      author: 'by {author}',
+      bot: 'bot',
+      diffStat: '+{additions} / -{deletions} across {files} files',
+      assignees: 'Assigned to {assignees}',
+      unassigned: 'Unassigned',
+      labels: 'Labels',
+    },
+
+    actions: {
+      openInBrowser: 'Open in browser',
+      copyUrl: 'Copy URL',
+      copyReference: 'Copy owner/repo#123',
+      copied: 'Copied to the clipboard.',
+      pasteReference: 'Paste the reference into the message',
+      reviewCommentsToComposer: 'Send review comments to the composer',
+      issueToNewChat: 'Start a new chat from this issue',
+      createPr: 'Create pull request',
+      markReady: 'Mark ready for review',
+      checkout: 'Check out this branch',
+      refresh: 'Refresh',
+      pushAndCreatePr: 'Push the branch and create the pull request',
+    },
+
+    createPr: {
+      title: 'Create pull request',
+      titleLabel: 'Title',
+      titlePlaceholder: 'Describe the change in one line',
+      bodyLabel: 'Description',
+      bodyPlaceholder: 'What changed, and why',
+      draftLabel: 'Create as a draft',
+      submit: 'Create pull request',
+      cancel: 'Cancel',
+      success: 'Pull request #{number} created.',
+      error: 'The pull request could not be created.',
+      pushHint:
+        'This branch does not exist on the remote yet. It will be pushed before the pull request is opened.',
+      pushError: 'The branch could not be pushed, so no pull request was created.',
+      noBranch: 'Check out a branch to create a pull request.',
+    },
+
+    /**
+     * The text the "review comments" action writes into the composer. It lives
+     * in i18n like any other visible sentence: it is a message somebody reads
+     * and edits before sending, not a wire format.
+     */
+    reviewTask: {
+      heading: 'Address these unresolved review comments on {reference}:',
+      withLine: '{path}:{line}',
+      noLine: '{path}',
+      comment: '{author}: {body}',
+      unknownAuthor: 'someone',
+      truncated:
+        'This pull request has more review threads or comments than fit here — check {reference} on GitHub for the rest.',
+    },
+
+    staleness: {
+      updated: 'Updated {relative}',
+      refreshing: 'Refreshing...',
+    },
+
+    errors: {
+      prs: 'Pull requests could not be loaded.',
+      issues: 'Issues could not be loaded.',
+      inbox: 'Your review queue could not be loaded.',
+      checks: 'Checks could not be loaded.',
+      threads: 'Review comments could not be loaded.',
+      action: 'The GitHub action failed.',
     },
   },
 

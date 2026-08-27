@@ -12,6 +12,7 @@ import { dirname } from 'node:path';
 import { type RuntimeSlot, runtimeSlotAuditLogPath } from '@mangostudio/shared/runtime-home';
 import type { RuntimeHubIdentity } from '@mangostudio/shared/runtime-protocol';
 import { loadRuntimeConfig } from './config';
+import { summarizeGhSubcommand } from './services/gh';
 
 export type RuntimeAuditOutcome = 'ok' | 'denied' | 'error';
 
@@ -279,6 +280,16 @@ export function summarizeAuditArgs(
   }
   if (Array.isArray(source.args) && method.startsWith('mcp.')) {
     out.args = summarizeArgv(source.args);
+  }
+  // `gh.*` is deliberately not routed through `summarizeArgv`. That helper
+  // keeps up to ARGV_SUMMARY_LIMIT truncated entries and scrubs by pattern,
+  // which is the right trade for an MCP argv — but `gh pr create --title ...
+  // --body ...` carries prose somebody wrote, and best-effort scrubbing of
+  // free-form English is not a promise worth making in an audit file. Two
+  // tokens name the operation, and naming the operation is what the log is
+  // for; `cwd` above already says where it happened.
+  if (Array.isArray(source.args) && method.startsWith('gh.')) {
+    out.args = summarizeGhSubcommand(source.args);
   }
 
   // Never promote env / headers / secrets / content / token-shaped keys.

@@ -6,6 +6,7 @@ import type {
   GitHeadMessageResponse,
   GitHistoryResponse,
   GitRepoState,
+  GitWorktreeListResponse,
 } from '@mangostudio/shared/git';
 import type { GithubContext } from '@mangostudio/shared/github';
 import { screen, waitFor } from '@testing-library/react';
@@ -53,6 +54,11 @@ const hooks = {
   githubLoading: false,
   githubFetching: false,
   githubRefetch: jest.fn(),
+  worktrees: { worktrees: [] } as GitWorktreeListResponse,
+  worktreesError: null as Error | null,
+  worktreesRefetch: jest.fn(),
+  worktreeAdd: jest.fn(),
+  worktreeRemove: jest.fn(),
 };
 
 mock.module('../../../src/features/workspace/hooks/use-github-context', () => ({
@@ -113,6 +119,15 @@ mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
   }),
   useGitCommit: () => ({ data: hooks.commitDetails, isLoading: false, error: null }),
   useGitDiff: () => ({ data: hooks.diff, isLoading: false, error: null }),
+  useGitWorktrees: () => ({
+    data: hooks.worktrees,
+    error: hooks.worktreesError,
+    isLoading: false,
+    isFetching: false,
+    refetch: hooks.worktreesRefetch,
+  }),
+  useAddWorktree: () => ({ mutateAsync: hooks.worktreeAdd, isPending: false }),
+  useRemoveWorktree: () => ({ mutateAsync: hooks.worktreeRemove, isPending: false }),
 }));
 
 // Below the mocks, never as a static import: those are evaluated first and the
@@ -180,6 +195,11 @@ beforeEach(() => {
   hooks.githubLoading = false;
   hooks.githubFetching = false;
   hooks.githubRefetch.mockReset();
+  hooks.worktrees = { worktrees: [] };
+  hooks.worktreesError = null;
+  hooks.worktreesRefetch.mockReset();
+  hooks.worktreeAdd.mockReset();
+  hooks.worktreeRemove.mockReset();
   sessionStorage.clear();
   localStorage.clear();
 });
@@ -380,8 +400,7 @@ describe('GitPanel', () => {
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeDisabled();
   });
 
-  it('links the GitHub repository and current pull request', async () => {
-    const user = userEvent.setup();
+  it('reduces the branch pull request to a one-line chip', async () => {
     hooks.data = repoState({
       status: {
         branch: { name: 'feat/github-context', ahead: 0, behind: 0 },
@@ -411,37 +430,35 @@ describe('GitPanel', () => {
     };
 
     render(<Panel />);
-    // The card is collapsed by default so it cannot push the commit box down.
-    await user.click(screen.getByText('GitHub'));
 
-    expect(screen.getByRole('link', { name: 'mango/mangostudio' })).toHaveAttribute(
-      'href',
-      'https://github.example/mango/mangostudio'
-    );
-    expect(screen.getByRole('link', { name: '#42 Expose GitHub context' })).toHaveAttribute(
-      'href',
-      'https://github.example/mango/mangostudio/pull/42'
-    );
+    // What used to sit here was a second, smaller GitHub panel — repository
+    // name, default branch, install and auth hints, its own error and loading
+    // states. All of that now has a panel of its own, so the Git panel keeps
+    // only the fact it still needs: this branch has a pull request, and here is
+    // its state. Checks read "no checks" because nothing answered the checks
+    // query in this harness, which is the honest rendering of not knowing.
+    expect(await screen.findByText('#42 · no checks')).toBeVisible();
     expect(screen.getByText('Open')).toBeVisible();
-    expect(screen.getByText('main ← feat/github-context')).toBeVisible();
+    // The details the panel no longer duplicates.
+    expect(screen.queryByText('mango/mangostudio')).not.toBeInTheDocument();
+    expect(screen.queryByText('main ← feat/github-context')).not.toBeInTheDocument();
   });
 
-  it('shows actionable gh setup hints and hides non-GitHub remotes', async () => {
-    const user = userEvent.setup();
+  it('shows no pull request chip when there is nothing to link to', () => {
     hooks.data = repoState();
-    hooks.githubData = { state: 'gh-not-installed' };
 
+    // Every not-connected state, and "connected but this branch has no pull
+    // request", collapse to the same rendering here: silence. The GitHub panel
+    // is what explains a missing CLI now, and an empty GitHub heading inside a
+    // panel about the working tree is pure furniture.
     const { rerender } = render(<Panel />);
-    await user.click(screen.getByText('GitHub'));
-    expect(screen.getByText(/Install GitHub CLI/)).toBeVisible();
+    expect(screen.queryByText(/·/)).not.toBeInTheDocument();
 
-    hooks.githubData = { state: 'not-authenticated' };
-    rerender(<Panel />);
-    expect(screen.getByText(/gh auth login/)).toBeVisible();
-
-    hooks.githubData = { state: 'not-a-github-remote' };
-    rerender(<Panel />);
-    expect(screen.queryByText('GitHub')).not.toBeInTheDocument();
+    for (const state of ['gh-not-installed', 'not-authenticated', 'not-a-github-remote'] as const) {
+      hooks.githubData = { state };
+      rerender(<Panel />);
+      expect(screen.queryByText('GitHub')).not.toBeInTheDocument();
+    }
   });
 
   it('initializes a working directory that is not a repository', async () => {

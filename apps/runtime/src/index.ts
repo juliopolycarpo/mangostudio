@@ -100,6 +100,14 @@ export {
   readFileWithObservedMtime,
 } from './services/fs-utils';
 export {
+  buildGhArgv,
+  buildGhEnvironment,
+  execGh,
+  GhExecutionError,
+  mutateGh,
+  summarizeGhSubcommand,
+} from './services/gh';
+export {
   buildGitArgv,
   buildGitEnvironment,
   execGit,

@@ -57,6 +57,8 @@ const EXPECTED_WRITE_SCOPES = {
   fetch: ['state', 'branches', 'github'],
   pull: ['state', 'branches', 'history', 'commits', 'diffs', 'github'],
   push: ['state', 'branches', 'github'],
+  worktreeAdd: ['branches'],
+  worktreeRemove: ['branches'],
 } as const satisfies Record<GitWriteOperation, readonly GitScope[]>;
 
 async function createTempRepo(): Promise<string> {

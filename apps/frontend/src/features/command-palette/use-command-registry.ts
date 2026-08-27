@@ -24,6 +24,9 @@ import {
   externalAgentSelectable,
   useExternalAgents,
 } from '@/features/external-agents/useExternalAgents';
+import { requestGithubCreatePr } from '@/features/github/lib/github-panel-request';
+import { isWorkspacePanelVisible } from '@/features/workspace/rail/panel-registry';
+import { requestRailPanel } from '@/features/workspace/rail/rail-panel-request';
 import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
 import { useApp } from '@/lib/app-context';
@@ -62,6 +65,13 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
   // exists to avoid.
   const { agents, chats, currentChatId, isGenerating } = app;
   const chatHasTurns = useChatHasTurns(currentChatId);
+  // Settings, not availability: the panel's own gate is a chat, which the rows
+  // already require. Read here rather than passed in, because the palette is
+  // mounted beside the rail and not by it.
+  const githubPanelVisible = isWorkspacePanelVisible(
+    'github',
+    app.settings.workspaceSettings.sidePanel
+  );
 
   // The active runner's quota, on the same identity-guarded entry the header
   // pill and the selector chip share — so refreshing from the palette lights
@@ -111,6 +121,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
       ),
       resolvedTheme,
       hasChat: currentChatId !== null,
+      githubPanelVisible,
       isGenerating,
       chatHasTurns,
       newChatShortcut: newChatShortcutHint(),
@@ -150,6 +161,26 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
         void navigate({ to: '/' });
         appRef.current.openWorkdirPicker();
       },
+      onOpenGithubPanel: async () => {
+        onRun();
+        // Awaited, unlike the workdir picker's navigation beside it, and the
+        // difference matters. That one sets a flag on the shell, which the chat
+        // surface reads whenever it mounts. This is a fire-and-forget event the
+        // rail can only hear if it is already mounted — so running it against
+        // an unawaited `navigate` from settings or the gallery would broadcast
+        // into an empty listener set and silently leave the rail on `git`.
+        await navigate({ to: '/' });
+        requestRailPanel('github');
+      },
+      onCreateGithubPr: async () => {
+        onRun();
+        // Same ordering as onOpenGithubPanel, for the same reason — both
+        // requests are fire-and-forget events the panel can only hear once it
+        // is mounted, which navigating is what guarantees.
+        await navigate({ to: '/' });
+        requestRailPanel('github');
+        requestGithubCreatePr();
+      },
     });
 
     const navigation = navigateCommands({
@@ -177,6 +208,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
     currentChatId,
     environmentsQuery.data,
     external.agents,
+    githubPanelVisible,
     isGenerating,
     locale,
     navigate,

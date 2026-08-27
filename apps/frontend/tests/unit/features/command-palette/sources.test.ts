@@ -182,6 +182,7 @@ describe('actionCommands', () => {
       externalAgents: descriptors,
       resolvedTheme: 'dark',
       hasChat: true,
+      githubPanelVisible: true,
       isGenerating: false,
       chatHasTurns: false,
       newChatShortcut: 'Ctrl+N',
@@ -190,6 +191,8 @@ describe('actionCommands', () => {
       onNewChatWithRunner: jest.fn(),
       onToggleTheme: jest.fn(),
       onOpenWorkdirPicker: jest.fn(),
+      onOpenGithubPanel: jest.fn(),
+      onCreateGithubPr: jest.fn(),
       ...overrides,
     });
   }
@@ -256,5 +259,33 @@ describe('actionCommands', () => {
     expect(withQuota.find((item) => item.id === 'action:refresh-quota')?.label).toBe(
       'Refresh Codex quota'
     );
+  });
+
+  /**
+   * The row is labeled "Create pull request", not "Open GitHub panel" — it
+   * has to run the affordance its own label promises, not the generic one a
+   * sibling row already offers.
+   */
+  it('runs the create-pull-request action from the row of that name, not the generic open', () => {
+    const onOpenGithubPanel = jest.fn();
+    const onCreateGithubPr = jest.fn();
+    const items = build({ onOpenGithubPanel, onCreateGithubPr });
+
+    items.find((item) => item.id === 'action:github-create-pr')?.run();
+
+    expect(onCreateGithubPr).toHaveBeenCalledTimes(1);
+    expect(onOpenGithubPanel).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The rail drops a panel the user hid, so these rows would select whichever
+   * panel is first in the order — and the create request would latch, opening
+   * the form unbidden the day the panel comes back.
+   */
+  it('hides every GitHub row when the panel is not in the rail', () => {
+    const ids = build({ githubPanelVisible: false }).map((item) => item.id);
+    expect(ids).not.toContain('action:github-panel');
+    expect(ids).not.toContain('action:github-create-pr');
+    expect(ids).not.toContain('action:github-review-requests');
   });
 });

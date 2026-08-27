@@ -49,6 +49,17 @@ describe('RUNTIME_METHOD_CAPABILITIES', () => {
     }
   });
 
+  it('splits gh so a read-only machine cannot open a pull request', () => {
+    // The gate reads the method name and never the params, so this split is the
+    // only place the read/write line can be drawn for gh. `readonly` grants
+    // `git` and refuses `shell`; if the mutating half rode plain `['git']` it
+    // would run on a machine whose owner said no writes.
+    expect(capabilities['gh.exec']).toEqual(['git']);
+    expect(capabilities['gh.mutate']).toEqual(['git', 'shell']);
+    expect(RUNTIME_CONSENT_PRESETS.readonly.git).toBe(true);
+    expect(RUNTIME_CONSENT_PRESETS.readonly.shell).toBe(false);
+  });
+
   it('requires a write capability for everything that writes', () => {
     // `readonly` grants `library` and refuses `fsWrite`, so a library method
     // that touches files has to name both — listing only `library` would let

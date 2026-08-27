@@ -383,6 +383,14 @@ export const messages = {
       empty: 'Nada detectado nesta máquina ainda.',
       allClear: 'Tudo que o toolchain reporta está pronto.',
     },
+    /**
+     * O card só aparece quando há revisões esperando, então não existe chave de
+     * estado vazio: um card vazio é a coisa que o painel promete não mostrar.
+     */
+    github: {
+      label: 'Revisões esperando',
+      row: '{repo} #{number}',
+    },
     workspace: {
       label: 'Workspace',
       cleanTree: 'árvore limpa',
@@ -1494,6 +1502,10 @@ export const messages = {
       switchToDark: 'Mudar para o tema escuro',
       chooseWorkdir: 'Escolher diretório de trabalho',
       refreshQuota: 'Atualizar cota do {runner}',
+      // A trilha não tem atalho de teclado para trocar de painel, então a
+      // paleta é o caminho acessível — não uma conveniência.
+      openGithubPanel: 'Abrir o painel do GitHub',
+      reviewRequests: 'Revisões esperando por mim',
     },
   },
 
@@ -1740,23 +1752,237 @@ export const messages = {
       actionError: 'A ação de stash falhou.',
       close: 'Fechar stashes',
     },
+    worktrees: {
+      title: 'Worktrees',
+      loading: 'Lendo as worktrees...',
+      loadError: 'Não foi possível ler as worktrees deste repositório.',
+      empty: 'Este repositório tem apenas a worktree principal.',
+      refresh: 'Atualizar worktrees',
+      add: 'Adicionar worktree',
+      addTitle: 'Nova worktree',
+      pathLabel: 'Caminho da worktree',
+      pathHint: 'Absoluto ou relativo à raiz do repositório.',
+      pathPlaceholder: '../painel-feature',
+      branchLabel: 'Branch',
+      branchPlaceholder: 'feat/painel',
+      modeLabel: 'Branch a ser usada',
+      modeNew: 'Criar uma nova branch',
+      modeExisting: 'Usar uma branch existente',
+      submit: 'Criar worktree',
+      submitting: 'Criando...',
+      cancel: 'Cancelar',
+      added: 'Worktree criada em {path}.',
+      open: 'Worktree em {path}',
+      remove: 'Remover',
+      removeLabel: 'Remover a worktree em {path}',
+      removeTitle: 'Remover esta worktree?',
+      removeHint:
+        'Exclui o diretório de trabalho do disco. A branch e seus commits permanecem no repositório.',
+      removeConfirm: 'Remover worktree',
+      removeCancel: 'Manter worktree',
+      removed: 'Worktree removida.',
+      force: 'Descartar o trabalho não commitado dessa worktree',
+      actionError: 'A ação de worktree falhou.',
+      badges: {
+        main: 'Principal',
+        current: 'Este chat',
+        detached: 'Destacada',
+        locked: 'Bloqueada',
+        prunable: 'Removível',
+      },
+      lockedReason: 'Bloqueada: {reason}',
+      prunableReason: 'Removível: {reason}',
+      detached: 'Destacada em {commit}',
+    },
   },
 
   github: {
     title: 'GitHub',
     loading: 'Lendo o contexto do GitHub...',
-    loadError: 'Não foi possível ler o contexto do GitHub.',
-    installHint:
-      'Instale a GitHub CLI no servidor para ver o contexto do repositório e do pull request.',
-    authHint: 'Execute gh auth login no servidor para conectar o GitHub.',
-    noPr: 'Nenhum pull request para esta branch.',
-    defaultBranch: 'Branch padrão: {branch}',
-    refs: '{base} ← {head}',
+    /**
+     * O vocabulário de badges de pull request, com chaves em minúsculas porque o
+     * único consumidor indexa com `state.toLowerCase()` e o bloco carrega
+     * `draft`, que não é um estado de pull request.
+     */
     states: {
       open: 'Aberto',
       closed: 'Fechado',
       merged: 'Integrado',
       draft: 'Rascunho',
+    },
+
+    panel: {
+      inbox: 'Esperando por você',
+      repo: 'Neste repositório',
+      prs: 'Pull requests',
+      issues: 'Issues',
+      checks: 'Verificações',
+      reviewComments: 'Comentários de revisão',
+      noWorkdir: 'Aponte este chat para uma pasta para ver os pull requests e as issues dela.',
+      open: 'Abrir o painel do GitHub',
+      back: 'Voltar para a lista',
+      branchChip: '#{number} · {status}',
+    },
+
+    /** Resumo de uma linha das verificações, para o chip do painel Repositório. */
+    chip: {
+      checksFailing: 'verificações falhando',
+      checksRunning: 'verificações em execução',
+      checksPassing: 'verificações passaram',
+      noChecks: 'sem verificações',
+    },
+
+    /**
+     * Anotação por branch na lista de branches. Só `MERGED` ganha uma frase
+     * própria. Diz que o pull request foi integrado, não que apagar a branch é
+     * seguro — quem decide isso é a própria recusa do Git numa ponta não
+     * integrada.
+     */
+    branchPr: {
+      merged: 'integrado',
+    },
+
+    /**
+     * Chaveado pelo valor de rede dos quatro estados de "sem conexão", para o
+     * painel indexar direto pela resposta em vez de fazer um switch. Uma frase
+     * por estado e uma dica dizendo o que fazer a respeito.
+     */
+    connection: {
+      'gh-not-installed': 'A CLI do GitHub não está instalada onde este chat roda.',
+      'not-authenticated': 'A CLI do GitHub não está autenticada onde este chat roda.',
+      'no-remote': 'Este repositório não tem remoto configurado.',
+      'not-a-github-remote': 'Este repositório não tem um remoto no GitHub.',
+    },
+    connectionHint: {
+      'gh-not-installed': 'Instale o gh naquela máquina e atualize.',
+      'not-authenticated': 'Execute gh auth login naquela máquina e atualize.',
+      'no-remote': 'Adicione um remoto com git remote add origin e atualize.',
+      'not-a-github-remote': 'O painel do GitHub só lê repositórios hospedados no GitHub.',
+    },
+
+    empty: {
+      prs: 'Nenhum pull request corresponde a este filtro.',
+      issues: 'Nenhuma issue corresponde a este filtro.',
+      inbox: 'Nada aguardando a sua revisão.',
+      checks: 'Este pull request não executa verificações.',
+      threads: 'Nenhum comentário de revisão neste pull request.',
+    },
+
+    issueState: {
+      OPEN: 'Aberta',
+      CLOSED: 'Fechada',
+    },
+    reviewDecision: {
+      APPROVED: 'Aprovado',
+      CHANGES_REQUESTED: 'Mudanças solicitadas',
+      REVIEW_REQUIRED: 'Revisão necessária',
+    },
+    /** Fica fora de `reviewDecision`: "nenhuma" é um null, não um membro da união. */
+    reviewDecisionNone: 'Ainda sem revisão',
+    checkBucket: {
+      pass: 'Passou',
+      fail: 'Falhou',
+      pending: 'Em execução',
+      skipping: 'Ignorada',
+      cancel: 'Cancelada',
+    },
+    mergeState: {
+      BEHIND: 'Atrás da branch base',
+      BLOCKED: 'Merge bloqueado',
+      CLEAN: 'Pronto para integrar',
+      DIRTY: 'Conflita com a branch base',
+      DRAFT: 'Ainda é rascunho',
+      HAS_HOOKS: 'Pronto para integrar, com hooks do repositório',
+      UNKNOWN: 'Estado do merge desconhecido',
+      UNSTABLE: 'Pode ser integrado, mas há verificações falhando',
+    },
+    mergeable: {
+      MERGEABLE: 'Sem conflitos',
+      CONFLICTING: 'Com conflitos',
+      UNKNOWN: 'Verificando conflitos',
+    },
+    prFilter: {
+      open: 'Abertos',
+      mine: 'Meus',
+      'review-requested': 'Revisão solicitada',
+      all: 'Todos',
+    },
+    issueFilter: {
+      open: 'Abertas',
+      assigned: 'Atribuídas a mim',
+      mine: 'Criadas por mim',
+    },
+
+    row: {
+      number: '#{number}',
+      draft: 'Rascunho',
+      author: 'por {author}',
+      bot: 'bot',
+      diffStat: '+{additions} / -{deletions} em {files} arquivos',
+      assignees: 'Atribuída a {assignees}',
+      unassigned: 'Sem responsável',
+      labels: 'Labels',
+    },
+
+    actions: {
+      openInBrowser: 'Abrir no navegador',
+      copyUrl: 'Copiar URL',
+      copyReference: 'Copiar owner/repo#123',
+      copied: 'Copiado para a área de transferência.',
+      pasteReference: 'Colar a referência na mensagem',
+      reviewCommentsToComposer: 'Enviar os comentários de revisão para o compositor',
+      issueToNewChat: 'Abrir um novo chat a partir desta issue',
+      createPr: 'Criar pull request',
+      markReady: 'Marcar como pronto para revisão',
+      checkout: 'Fazer checkout desta branch',
+      refresh: 'Atualizar',
+      pushAndCreatePr: 'Publicar a branch e criar o pull request',
+    },
+
+    createPr: {
+      title: 'Criar pull request',
+      titleLabel: 'Título',
+      titlePlaceholder: 'Descreva a mudança em uma linha',
+      bodyLabel: 'Descrição',
+      bodyPlaceholder: 'O que mudou e por quê',
+      draftLabel: 'Criar como rascunho',
+      submit: 'Criar pull request',
+      cancel: 'Cancelar',
+      success: 'Pull request #{number} criado.',
+      error: 'Não foi possível criar o pull request.',
+      pushHint:
+        'Esta branch ainda não existe no remoto. Ela será publicada antes de o pull request ser aberto.',
+      pushError: 'Não foi possível publicar a branch, então o pull request não foi criado.',
+      noBranch: 'Faça checkout de uma branch para criar um pull request.',
+    },
+
+    /**
+     * O texto que a ação "comentários de revisão" escreve no compositor. Fica
+     * no i18n como qualquer outra frase visível: é uma mensagem que a pessoa lê
+     * e edita antes de enviar, não um formato de rede.
+     */
+    reviewTask: {
+      heading: 'Resolva estes comentários de revisão ainda abertos em {reference}:',
+      withLine: '{path}:{line}',
+      noLine: '{path}',
+      comment: '{author}: {body}',
+      unknownAuthor: 'alguém',
+      truncated:
+        'Este pull request tem mais conversas de revisão ou comentários do que couberam aqui — confira {reference} no GitHub para ver o restante.',
+    },
+
+    staleness: {
+      updated: 'Atualizado {relative}',
+      refreshing: 'Atualizando...',
+    },
+
+    errors: {
+      prs: 'Não foi possível carregar os pull requests.',
+      issues: 'Não foi possível carregar as issues.',
+      inbox: 'Não foi possível carregar a sua fila de revisões.',
+      checks: 'Não foi possível carregar as verificações.',
+      threads: 'Não foi possível carregar os comentários de revisão.',
+      action: 'A ação do GitHub falhou.',
     },
   },
 

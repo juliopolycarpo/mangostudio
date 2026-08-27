@@ -92,4 +92,47 @@ describe('useGitRealtimeInvalidation', () => {
     unmount();
     expect(release).toHaveBeenCalledTimes(1);
   });
+
+  /**
+   * A same-client write masks this: it invalidates the GitHub panel's own
+   * `githubKeys` queries explicitly alongside this event. A second mounted
+   * client — another tab, or a different chat's panel sharing the query
+   * client — only ever sees this event, so the `github` scope has to reach
+   * `githubKeys` on its own or that client's PR/issue/check/thread reads go
+   * stale until a manual refresh.
+   */
+  it('invalidates the GitHub panel queries on a github-scoped event', async () => {
+    const refetchGithubContext = jest.fn().mockResolvedValue({ state: 'none' });
+    const refetchPrs = jest.fn().mockResolvedValue({ prs: [] });
+
+    renderHook(() => {
+      useQuery({
+        queryKey: ['github-context', 'chat-1', 'main'],
+        queryFn: refetchGithubContext,
+        initialData: { state: 'none' },
+        staleTime: Number.POSITIVE_INFINITY,
+      });
+      useQuery({
+        queryKey: ['github-panel', 'prs', 'chat-1', 'open'],
+        queryFn: refetchPrs,
+        initialData: { prs: [] },
+        staleTime: Number.POSITIVE_INFINITY,
+      });
+      useGitRealtimeInvalidation('chat-1');
+    });
+
+    await act(async () => {
+      await listener({
+        type: 'invalidate',
+        message: {
+          type: 'invalidate',
+          topic: 'git:chat-1',
+          scopes: ['github'],
+        },
+      });
+    });
+
+    await waitFor(() => expect(refetchGithubContext).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(refetchPrs).toHaveBeenCalledTimes(1));
+  });
 });

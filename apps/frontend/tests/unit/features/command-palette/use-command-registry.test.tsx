@@ -12,6 +12,7 @@
 
 import { describe, expect, it, jest, mock } from 'bun:test';
 import type { AgentProfile } from '@mangostudio/shared/agents';
+import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import type { Chat } from '@mangostudio/shared/chat';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import type { useAppState } from '@/hooks/use-app-state';
@@ -53,6 +54,9 @@ function appState(): AppState {
     handleNewChat: jest.fn(),
     handleNewChatWithRunner: jest.fn(),
     openWorkdirPicker: jest.fn(),
+    // The GitHub rows read the rail's own settings: hidden there, the rail
+    // drops the panel and the rows would select a different one.
+    settings: { workspaceSettings: DEFAULT_WORKSPACE_SETTINGS },
   } as unknown as AppState;
 }
 

@@ -395,6 +395,35 @@ export interface RuntimeGitExecResult {
   readonly incomplete?: boolean;
 }
 
+/**
+ * Params for both `gh.exec` and `gh.mutate`.
+ *
+ * One shape, two methods. The split is not about what a call looks like — it is
+ * about what consent it needs, and the gate decides that from the method name
+ * alone (see `consent-gate.ts`), so the read/write line has to be drawn between
+ * two methods rather than between two values of one parameter.
+ */
+export interface RuntimeGhExecParams {
+  readonly args: readonly string[];
+  readonly cwd: string;
+  readonly timeoutMs?: number;
+  readonly acceptedExitCodes?: readonly number[];
+}
+
+export interface RuntimeGhExecResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+  /**
+   * `gh` exited, but a surviving child (it runs git, and git runs credential
+   * helpers) still held a pipe open when the capture stopped, so the captured
+   * text may be short of what `gh` actually wrote. Omitted rather than `false`
+   * on a clean drain, so an older peer that never learned the field reads the
+   * same as a complete capture.
+   */
+  readonly incomplete?: boolean;
+}
+
 export interface RuntimeSnapshotCaptureParams {
   readonly path: string;
 }
@@ -1051,6 +1080,16 @@ export interface RuntimeMethodMap {
   'git.exec': {
     readonly params: RuntimeGitExecParams;
     readonly result: RuntimeGitExecResult;
+  };
+  /** Read-only `gh` subcommands; refuses a write subcommand structurally. */
+  'gh.exec': {
+    readonly params: RuntimeGhExecParams;
+    readonly result: RuntimeGhExecResult;
+  };
+  /** Mutating `gh` subcommands; needs shell consent on top of git. */
+  'gh.mutate': {
+    readonly params: RuntimeGhExecParams;
+    readonly result: RuntimeGhExecResult;
   };
   'snapshot.capture': {
     readonly params: RuntimeSnapshotCaptureParams;

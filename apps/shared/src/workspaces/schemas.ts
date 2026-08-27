@@ -41,7 +41,17 @@ export const ValidatePathResponseSchema = Type.Object({
 /** Upper bound on remembered working directories, shared by the schema, normalizer, and UI. */
 export const RECENT_WORKDIRS_MAX = 10;
 
-export const WORKSPACE_PANEL_IDS = ['git', 'todos'] as const;
+/**
+ * Rail panels in their default order. `github` sits next to `git` because the
+ * two answer the same question one step apart — what changed locally, and what
+ * that change looks like once it is a pull request.
+ *
+ * This array and `WorkspacePanelIdSchema` below are two hand-written halves of
+ * one list: TypeBox needs the literal tuple spelled out to infer the union, so
+ * adding a panel means editing both. Everything downstream — `maxItems`, the
+ * settings normalizer's backfill, the rail — reads one of these two.
+ */
+export const WORKSPACE_PANEL_IDS = ['git', 'github', 'todos'] as const;
 export const WORKSPACE_PANEL_WIDTH_MIN = 280;
 export const WORKSPACE_PANEL_WIDTH_MAX = 640;
 export const WORKSPACE_PANEL_WIDTH_DEFAULT = 360;
@@ -51,7 +61,12 @@ export const CHAT_SIDEBAR_WIDTH_MIN = 240;
 export const CHAT_SIDEBAR_WIDTH_MAX = 420;
 export const CHAT_SIDEBAR_WIDTH_DEFAULT = 256;
 
-export const WorkspacePanelIdSchema = Type.Union([Type.Literal('git'), Type.Literal('todos')]);
+/** The schema half of `WORKSPACE_PANEL_IDS`; the two must list the same ids. */
+export const WorkspacePanelIdSchema = Type.Union([
+  Type.Literal('git'),
+  Type.Literal('github'),
+  Type.Literal('todos'),
+]);
 
 export const WorkspacePanelSettingsSchema = Type.Object({
   visiblePanelIds: Type.Array(WorkspacePanelIdSchema, {

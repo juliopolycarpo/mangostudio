@@ -13,6 +13,7 @@ export type RuntimeServiceErrorKind =
   | 'unobserved_line_numbers'
   | 'shell_execution'
   | 'git_execution'
+  | 'gh_execution'
   | 'workspace_browser'
   | 'workspace_containment'
   | 'workdir_validation'

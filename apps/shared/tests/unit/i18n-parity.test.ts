@@ -14,6 +14,15 @@ import {
   ExternalApprovalRoutingSchema,
   ExternalPermissionLevelSchema,
 } from '../../src/external-agents';
+import {
+  GithubCheckBucketSchema,
+  GithubIssueFilterSchema,
+  GithubIssueStateSchema,
+  GithubMergeableStateSchema,
+  GithubMergeStateStatusSchema,
+  GithubPrFilterSchema,
+  GithubReviewDecisionSchema,
+} from '../../src/github';
 import { en, ptBR } from '../../src/i18n';
 import {
   AdaptNoteSchema,
@@ -143,6 +152,48 @@ const ENUM_COVERAGE = [
     path: 'externalAgents.permission.routing',
     values: literalValues(ExternalApprovalRoutingSchema),
     blocks: [en.externalAgents.permission.routing, ptBR.externalAgents.permission.routing],
+  },
+  {
+    // The GitHub panel renders every one of gh's vocabularies as a chip or a
+    // filter tab. A member with no sentence is a blank badge on a row that
+    // otherwise looks fine, so each union is pinned to its block here.
+    path: 'github.issueState',
+    values: literalValues(GithubIssueStateSchema),
+    blocks: [en.github.issueState, ptBR.github.issueState],
+  },
+  {
+    // "No decision" is `github.reviewDecisionNone`, deliberately outside this
+    // block: it is a null on the wire, not a fourth member.
+    path: 'github.reviewDecision',
+    values: literalValues(GithubReviewDecisionSchema),
+    blocks: [en.github.reviewDecision, ptBR.github.reviewDecision],
+  },
+  {
+    path: 'github.checkBucket',
+    values: literalValues(GithubCheckBucketSchema),
+    blocks: [en.github.checkBucket, ptBR.github.checkBucket],
+  },
+  {
+    path: 'github.mergeState',
+    values: literalValues(GithubMergeStateStatusSchema),
+    blocks: [en.github.mergeState, ptBR.github.mergeState],
+  },
+  {
+    path: 'github.mergeable',
+    values: literalValues(GithubMergeableStateSchema),
+    blocks: [en.github.mergeable, ptBR.github.mergeable],
+  },
+  {
+    // Filter tabs. A missing label here is worse than a blank badge: the tab
+    // that would run `--author=@me` is unlabelled and therefore unreachable.
+    path: 'github.prFilter',
+    values: literalValues(GithubPrFilterSchema),
+    blocks: [en.github.prFilter, ptBR.github.prFilter],
+  },
+  {
+    path: 'github.issueFilter',
+    values: literalValues(GithubIssueFilterSchema),
+    blocks: [en.github.issueFilter, ptBR.github.issueFilter],
   },
   {
     path: 'settings.externalApi.scope',

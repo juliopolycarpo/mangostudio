@@ -29,6 +29,7 @@ export function createLocalRuntimeManifest(
 ): RuntimeCapabilityManifest {
   const shells = (['bash', 'zsh', 'powershell'] as const).filter(isShellAvailable);
   const git = inspectGit();
+  const gh = inspectGh();
   const tools =
     allow.fsRead ||
     allow.fsWrite ||
@@ -48,6 +49,15 @@ export function createLocalRuntimeManifest(
     git: {
       available: allow.git && git.available,
       ...(allow.git && git.version ? { version: git.version } : {}),
+    },
+    // Gated on `git` because that is the weaker of the two capabilities `gh`
+    // answers to — `gh.mutate` also needs `shell`, but a machine that granted
+    // neither has no `gh` worth announcing. The version travels with it so a
+    // later consumer can degrade one feature on an old CLI instead of hiding
+    // the whole panel.
+    gh: {
+      available: allow.git && gh.available,
+      ...(allow.git && gh.version ? { version: gh.version } : {}),
     },
     features: {
       tools,
@@ -86,6 +96,43 @@ export function createLocalRuntimeManifest(
     // an owner who refused it.
     allow,
   };
+}
+
+/**
+ * Probes the GitHub CLI the same way {@link inspectGit} probes Git, with one
+ * difference that matters: `gh --version` prints two lines — the version and a
+ * release URL — so only the first is parsed. A plain `.trim()`, which is all
+ * Git's single-line output needs, would put a URL in the manifest and blow past
+ * the health report's 64-character cap on the field.
+ */
+function inspectGh(): NonNullable<RuntimeCapabilityManifest['gh']> {
+  // Resolved against the *live* PATH rather than the one this process started
+  // with, because that is the PATH `buildGhEnvironment()` hands the spawn. The
+  // two would otherwise be able to disagree — the manifest announcing a `gh`
+  // the execution path cannot find, or hiding one it can — and a capability
+  // announcement that does not describe the executable that will actually run
+  // is worse than no announcement. `Bun.which` falls back to the startup PATH
+  // when the option is undefined, so an unset PATH keeps the old behavior.
+  const executable = Bun.which('gh', { PATH: process.env.PATH });
+  if (!executable) return { available: false };
+
+  const result = Bun.spawnSync([executable, '--version'], {
+    stdout: 'pipe',
+    stderr: 'ignore',
+    ...HIDDEN_WINDOW,
+  });
+  if (!result.success) return { available: false };
+  const version = parseGhVersion(result.stdout.toString());
+  return version ? { available: true, version } : { available: true };
+}
+
+/** `gh version 2.97.0 (2026-07-31)\nhttps://...` becomes `2.97.0`. */
+export function parseGhVersion(output: string): string {
+  const firstLine = output.split('\n', 1)[0]?.trim() ?? '';
+  return firstLine
+    .replace(/^gh version\s+/i, '')
+    .replace(/\s*\(.*$/, '')
+    .trim();
 }
 
 function inspectGit(): RuntimeCapabilityManifest['git'] {

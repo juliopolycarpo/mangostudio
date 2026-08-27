@@ -18,6 +18,9 @@ const {
   mockBranchDelete,
   mockBranchRename,
   mockHeadMessage,
+  mockWorktreeList,
+  mockWorktreeAdd,
+  mockWorktreeRemove,
 } = {
   mockStage: jest.fn(),
   mockUnstage: jest.fn(),
@@ -31,6 +34,9 @@ const {
   mockBranchDelete: jest.fn(),
   mockBranchRename: jest.fn(),
   mockHeadMessage: jest.fn(),
+  mockWorktreeList: jest.fn(),
+  mockWorktreeAdd: jest.fn(),
+  mockWorktreeRemove: jest.fn(),
 };
 
 mock.module('@/lib/api-client', () => ({
@@ -47,6 +53,11 @@ mock.module('@/lib/api-client', () => ({
         stash: { apply: { post: mockStashApply }, drop: { post: mockStashDrop } },
         branches: { delete: mockBranchDelete, rename: { post: mockBranchRename } },
         'head-message': { get: mockHeadMessage },
+        worktrees: {
+          get: mockWorktreeList,
+          post: mockWorktreeAdd,
+          delete: mockWorktreeRemove,
+        },
       },
     },
   } as unknown as typeof ApiClient,
@@ -56,6 +67,7 @@ mock.module('@/lib/api-client', () => ({
 // under test have to come in afterwards or they bind the real api-client.
 const {
   gitWriteScopes,
+  useAddWorktree,
   useCommit,
   useDeleteBranch,
   useGitFetch,
@@ -63,6 +75,8 @@ const {
   useGitPull,
   useGitPush,
   useGitStashes,
+  useGitWorktrees,
+  useRemoveWorktree,
   useRenameBranch,
   useStagePaths,
   useStashApply,
@@ -94,6 +108,7 @@ function useSeedTrackedQueries(spies: {
   commits?: QuerySpy;
   diffs?: QuerySpy;
   github?: QuerySpy;
+  worktrees?: QuerySpy;
 }) {
   useQuery({
     queryKey: ['git-state', 'chat-1'],
@@ -135,6 +150,12 @@ function useSeedTrackedQueries(spies: {
     queryKey: ['github-context', 'chat-1', 'main'],
     queryFn: spies.github ?? noop,
     initialData: { state: 'none' },
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  useQuery({
+    queryKey: ['git-worktrees', 'chat-1'],
+    queryFn: spies.worktrees ?? noop,
+    initialData: { worktrees: [] },
     staleTime: Number.POSITIVE_INFINITY,
   });
 }
@@ -400,6 +421,79 @@ describe('Git write hooks', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(mockHeadMessage).toHaveBeenCalledWith({ query: { chatId: 'chat-2' } });
     expect(result.current.data?.title).toBe('previous title');
+  });
+
+  it('lists worktrees through Eden', async () => {
+    mockWorktreeList.mockResolvedValue({
+      data: { worktrees: [{ path: '/repo', branch: 'main', isMain: true }] },
+      error: null,
+    });
+
+    const { result } = renderHook(() => useGitWorktrees('chat-2'));
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockWorktreeList).toHaveBeenCalledWith({ query: { chatId: 'chat-2' } });
+    expect(result.current.data?.worktrees).toHaveLength(1);
+  });
+
+  it("adding a worktree refreshes branches and worktrees but not this chat's state", async () => {
+    mockWorktreeAdd.mockResolvedValue({ data: { worktrees: [] }, error: null });
+    const refetchWorktrees = jest.fn().mockResolvedValue({ worktrees: [] });
+    const refetchBranches = jest.fn().mockResolvedValue({ branches: [], remotes: [] });
+    const refetchState = jest.fn().mockResolvedValue(repoState);
+    const refetchHistory = jest.fn().mockResolvedValue({ commits: [], nextCursor: null });
+
+    const { result } = renderHook(() => {
+      useSeedTrackedQueries({
+        worktrees: refetchWorktrees,
+        branches: refetchBranches,
+        state: refetchState,
+        history: refetchHistory,
+      });
+      return useAddWorktree('chat-1');
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        path: '/work/feature',
+        mode: 'new-branch',
+        branch: 'feat/panel',
+      });
+    });
+
+    expect(mockWorktreeAdd).toHaveBeenCalledWith({
+      chatId: 'chat-1',
+      path: '/work/feature',
+      mode: 'new-branch',
+      branch: 'feat/panel',
+    });
+    await waitFor(() => expect(refetchWorktrees).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(refetchBranches).toHaveBeenCalledTimes(1));
+    expect(refetchState).not.toHaveBeenCalled();
+    expect(refetchHistory).not.toHaveBeenCalled();
+  });
+
+  it('removing a worktree sends the force flag and refreshes the same scopes', async () => {
+    mockWorktreeRemove.mockResolvedValue({ data: { worktrees: [] }, error: null });
+    const refetchWorktrees = jest.fn().mockResolvedValue({ worktrees: [] });
+    const refetchState = jest.fn().mockResolvedValue(repoState);
+
+    const { result } = renderHook(() => {
+      useSeedTrackedQueries({ worktrees: refetchWorktrees, state: refetchState });
+      return useRemoveWorktree('chat-1');
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ path: '/work/feature', force: true });
+    });
+
+    expect(mockWorktreeRemove).toHaveBeenCalledWith({
+      chatId: 'chat-1',
+      path: '/work/feature',
+      force: true,
+    });
+    await waitFor(() => expect(refetchWorktrees).toHaveBeenCalledTimes(1));
+    expect(refetchState).not.toHaveBeenCalled();
   });
 
   it('covers every write mutation with a non-empty known scope set', () => {

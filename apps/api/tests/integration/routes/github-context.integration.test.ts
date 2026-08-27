@@ -8,6 +8,10 @@ import { getDb } from '../../../src/db/database';
 import { createGithubContextService } from '../../../src/modules/github/application/github-context-service';
 import { createGithubRoutes } from '../../../src/modules/github/http/github-routes';
 import { createGhCli } from '../../../src/modules/github/infrastructure/gh-cli';
+import {
+  closeAllRuntimeConnections,
+  setRuntimeConnectionManagerForTests,
+} from '../../../src/services/runtime-client/runtime-connection-manager';
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import {
   createApiTestApp,
@@ -39,6 +43,7 @@ const prOutput = JSON.stringify({
 
 const tempDirs: string[] = [];
 let restoreAuth: (() => void) | null = null;
+let originalPath: string | undefined;
 
 async function createTempDir(): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), 'mango-github-routes-'));
@@ -51,17 +56,20 @@ function shellResult(stdout: string | undefined, stderr: string | undefined): st
   return `printf '%s\\n' '${stdout ?? ''}'\nexit 0`;
 }
 
-async function createGithubPlugin(workdir: string, scenario?: ShimScenario) {
-  const binDir = await createTempDir();
-  if (scenario) {
-    const script = `#!/bin/sh
+function shimScript(scenario: ShimScenario): string {
+  return `#!/bin/sh
 case "$*" in
   "--version")
-    printf '%s\\n' 'gh version 2.96.0'
+    printf '%s\\n' 'gh version 2.97.0 (2026-07-31)'
+    printf '%s\\n' 'https://github.com/cli/cli/releases/tag/v2.97.0'
     exit 0
     ;;
-  "auth status")
-    ${scenario.authenticated === false ? "printf '%s\\n' 'not logged in' >&2\n    exit 1" : 'exit 0'}
+  "auth status --json hosts")
+    ${
+      scenario.authenticated === false
+        ? "printf '%s\\n' 'not logged in' >&2\n    printf '%s\\n' '{\"hosts\":{}}'\n    exit 0"
+        : 'printf \'%s\\n\' \'{"hosts":{"github.example":[{"active":true,"state":"success"}]}}\'\n    exit 0'
+    }
     ;;
   "repo view --json nameWithOwner,defaultBranchRef,url")
     ${shellResult(scenario.repoStdout ?? repoOutput, scenario.repoStderr)}
@@ -75,18 +83,46 @@ case "$*" in
     ;;
 esac
 `;
-    const shimPath = join(binDir, 'gh');
-    await writeFile(shimPath, script);
-    await chmod(shimPath, 0o755);
-  }
+}
 
-  const cli = createGhCli({
-    environment: {
-      PATH: binDir,
-      HOME: workdir,
-    },
-  });
-  return createGithubRoutes(createGithubContextService(cli));
+/**
+ * A `gh` whose `--version` fails, which is how the runtime's manifest probe
+ * reports "no GitHub CLI here".
+ *
+ * Deleting `gh` from PATH is not an option any more: PATH is now process-wide
+ * rather than a per-facade option, and replacing it wholesale would break every
+ * other spawn the in-process runtime makes. A shim that cannot answer the probe
+ * reaches the same manifest state by the same code path.
+ */
+const UNUSABLE_SHIM = `#!/bin/sh\nexit 127\n`;
+
+/**
+ * Installs a fake `gh` where the *runtime* will look for it.
+ *
+ * The spawn now happens inside the runtime service, which rebuilds its
+ * environment from `process.env` — so the shim has to go on the real PATH, not
+ * on an option handed to the hub-side facade. And it has to be there *before*
+ * the local runtime connects: `inspectGh()` runs once per connection and the
+ * connection manager caches the manifest, so a runtime already connected under
+ * the original PATH would answer "no gh" for the rest of the process.
+ */
+async function installGhShim(script: string): Promise<void> {
+  const binDir = await createTempDir();
+  const shimPath = join(binDir, 'gh');
+  await writeFile(shimPath, script);
+  await chmod(shimPath, 0o755);
+
+  originalPath ??= process.env.PATH;
+  // Prepended, never replaced: the runtime still needs the rest of PATH to find
+  // git and a shell while it builds its manifest.
+  process.env.PATH = `${binDir}${':'}${originalPath ?? ''}`;
+  await closeAllRuntimeConnections();
+  setRuntimeConnectionManagerForTests(undefined);
+}
+
+async function createGithubPlugin(scenario?: ShimScenario) {
+  await installGhShim(scenario ? shimScript(scenario) : UNUSABLE_SHIM);
+  return createGithubRoutes({ resolveContext: createGithubContextService(createGhCli()) });
 }
 
 async function bindWorkdir(chatId: string, workdir: string): Promise<void> {
@@ -102,6 +138,12 @@ function getContext(app: ReturnType<typeof createAuthenticatedApiTestApp>['app']
 afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
+  // Both halves matter: the PATH so no later file inherits the shim, and the
+  // manager so the next connection re-probes against the restored PATH.
+  if (originalPath !== undefined) process.env.PATH = originalPath;
+  originalPath = undefined;
+  await closeAllRuntimeConnections();
+  setRuntimeConnectionManagerForTests(undefined);
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
@@ -111,7 +153,7 @@ describe('GitHub context routes', () => {
     const user = await insertTestUser();
     const chat = await insertTestChat(user.id);
     await bindWorkdir(chat.id, workdir);
-    const plugin = await createGithubPlugin(workdir, {});
+    const plugin = await createGithubPlugin({});
     const { app, restore } = createAuthenticatedApiTestApp(user, plugin);
     restoreAuth = restore;
 
@@ -136,7 +178,7 @@ describe('GitHub context routes', () => {
     const user = await insertTestUser();
     const chat = await insertTestChat(user.id);
     await bindWorkdir(chat.id, workdir);
-    const plugin = await createGithubPlugin(workdir, {
+    const plugin = await createGithubPlugin({
       prStderr: 'no pull requests found for branch "feat/no-pr"',
     });
     const { app, restore } = createAuthenticatedApiTestApp(user, plugin);
@@ -147,12 +189,12 @@ describe('GitHub context routes', () => {
     expect(await response.json()).toMatchObject({ state: 'ok', pr: null });
   });
 
-  it('degrades cleanly when PATH contains no gh executable', async () => {
+  it('degrades cleanly when the runtime manifest reports no usable gh', async () => {
     const workdir = await createTempDir();
     const user = await insertTestUser();
     const chat = await insertTestChat(user.id);
     await bindWorkdir(chat.id, workdir);
-    const plugin = await createGithubPlugin(workdir);
+    const plugin = await createGithubPlugin();
     const { app, restore } = createAuthenticatedApiTestApp(user, plugin);
     restoreAuth = restore;
 
@@ -168,6 +210,16 @@ describe('GitHub context routes', () => {
     }> = [
       { scenario: { authenticated: false }, expected: 'not-authenticated' },
       { scenario: { repoStderr: 'no git remotes found' }, expected: 'no-remote' },
+      // The ordinary case, not an exotic one: a chat binds to whatever folder
+      // the user picked, and most folders are not checkouts at all. This used
+      // to fall through the ladder and answer 500.
+      {
+        scenario: {
+          repoStderr:
+            'failed to run git: fatal: not a git repository (or any of the parent directories): .git',
+        },
+        expected: 'no-remote',
+      },
       {
         scenario: {
           repoStderr:
@@ -182,14 +234,18 @@ describe('GitHub context routes', () => {
       const user = await insertTestUser();
       const chat = await insertTestChat(user.id);
       await bindWorkdir(chat.id, workdir);
-      const plugin = await createGithubPlugin(workdir, scenario);
+      const plugin = await createGithubPlugin(scenario);
       const { app, restore } = createAuthenticatedApiTestApp(user, plugin);
       restoreAuth = restore;
 
       try {
         const response = await getContext(app, chat.id);
         expect(response.status).toBe(200);
-        expect(await response.json()).toEqual({ state: expected });
+        const payload = await response.json();
+        // The whole body, so a regression that appends gh's stderr to an
+        // otherwise-correct state fails here rather than passing on a
+        // `toMatchObject`.
+        expect(payload).toEqual({ state: expected });
       } finally {
         restore();
         restoreAuth = null;
@@ -198,8 +254,7 @@ describe('GitHub context routes', () => {
   });
 
   it('enforces authentication, ownership, and a bound working directory', async () => {
-    const workdir = await createTempDir();
-    const plugin = await createGithubPlugin(workdir, {});
+    const plugin = await createGithubPlugin({});
     const unauthenticatedApp = createApiTestApp(plugin);
     const unauthenticated = await unauthenticatedApp.handle(
       new Request('http://localhost/github/context?chatId=chat-1')
@@ -236,12 +291,14 @@ describe('GitHub context routes', () => {
     const user = await insertTestUser();
     const chat = await insertTestChat(user.id);
     await bindWorkdir(chat.id, workdir);
-    const plugin = await createGithubPlugin(workdir, { repoStdout: '{not-json' });
+    const plugin = await createGithubPlugin({ repoStdout: '{not-json' });
     const { app, restore } = createAuthenticatedApiTestApp(user, plugin);
     restoreAuth = restore;
 
     const response = await getContext(app, chat.id);
     expect(response.status).toBe(500);
+    // gh's own output never reaches the body: the route answers with a fixed
+    // message and a code, and logs the detail server-side.
     expect(await response.json()).toEqual({
       error: 'GitHub context could not be read',
       code: 'GH_OUTPUT_INVALID',

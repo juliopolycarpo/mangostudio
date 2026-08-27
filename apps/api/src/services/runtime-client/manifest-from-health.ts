@@ -46,6 +46,12 @@ export function capabilityManifestFromHealth(
     homeDir: report.homeDir,
     shells,
     git: report.git,
+    // Spread conditionally because the key is optional on both shapes and
+    // absent means unavailable: writing `gh: report.gh` would put an explicit
+    // `undefined` on a manifest that other code reads with `?.available`, and
+    // writing `gh: report.gh ?? { available: false }` would tell the hub a peer
+    // answered "no gh" when it never answered at all.
+    ...(report.gh ? { gh: report.gh } : {}),
     features: {
       tools,
       git: allow.git && report.git.available,

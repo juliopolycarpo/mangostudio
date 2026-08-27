@@ -58,6 +58,17 @@ export const RUNTIME_METHOD_CAPABILITIES: Readonly<
   'fs.apply-patch': ['fsWrite'],
   'shell.run': ['shell'],
   'git.exec': ['git'],
+  // `gh` is split across two methods for the reason this table exists: consent
+  // is decided from the method name, before any handler sees a parameter, so a
+  // single `gh.exec` could not treat `pr view` and `pr create` differently
+  // however carefully it inspected its argv. `readonly` grants `git`, and a
+  // machine whose owner marked it read-only must not be able to open a pull
+  // request — so the mutating half answers to `shell` as well, the capability
+  // that means "this hub may cause effects here". The runtime also keeps two
+  // separate subcommand allowlists (`services/gh.ts`), so the read method
+  // refuses a write subcommand even when the hub asks for one on it.
+  'gh.exec': ['git'],
+  'gh.mutate': ['git', 'shell'],
   // Reading a file to remember it, and writing files back to undo a turn.
   'snapshot.capture': ['checkpoints', 'fsRead'],
   'snapshot.hash': ['checkpoints', 'fsRead'],

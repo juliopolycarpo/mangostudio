@@ -4,15 +4,13 @@ import type {
   GitRepoState,
   GitStatus,
 } from '@mangostudio/shared/git';
-import type { GithubContext, GithubPrState } from '@mangostudio/shared/github';
+import type { GithubContext } from '@mangostudio/shared/github';
 import type { Messages } from '@mangostudio/shared/i18n';
 import {
   AlertTriangle,
   Check,
-  ExternalLink,
   FileCode2,
   FolderGit2,
-  GitPullRequest,
   Minus,
   MoreHorizontal,
   Plus,
@@ -22,7 +20,6 @@ import {
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Menu';
@@ -34,6 +31,7 @@ import { ICON_SM } from '@/lib/icon-sizes';
 import { workdirBasename } from '@/lib/paths';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { BranchControl } from './BranchControl';
+import { BranchPrChip } from './BranchPrChip';
 import { CommitForm } from './CommitForm';
 import { type DiffSelection, DiffViewer } from './DiffViewer';
 import { readGitPanelPrefs, writeGitPanelPrefs } from './git-panel-prefs';
@@ -50,6 +48,7 @@ import { useGithubContext } from './hooks/use-github-context';
 import { RemoteActions } from './RemoteActions';
 import { RepositoryHistory } from './RepositoryHistory';
 import { StashSheet } from './StashSheet';
+import { WorktreeSection } from './WorktreeSection';
 
 interface GitPanelProps {
   readonly chatId: string;
@@ -169,13 +168,10 @@ export function GitPanel({ chatId }: GitPanelProps) {
           loading={stateQuery.isLoading}
           error={stateQuery.error}
           githubContext={githubQuery.data}
-          githubLoading={githubQuery.isLoading}
-          githubError={githubQuery.error}
           initPending={initMutation.isPending}
           initError={initMutation.error}
           onInitialize={() => initMutation.mutate()}
           onRetry={() => void stateQuery.refetch()}
-          onGithubRetry={() => void githubQuery.refetch()}
         />
       </div>
 
@@ -202,13 +198,10 @@ interface GitPanelContentProps {
   readonly loading: boolean;
   readonly error: Error | null;
   readonly githubContext: GithubContext | undefined;
-  readonly githubLoading: boolean;
-  readonly githubError: Error | null;
   readonly initPending: boolean;
   readonly initError: Error | null;
   readonly onInitialize: () => void;
   readonly onRetry: () => void;
-  readonly onGithubRetry: () => void;
 }
 
 function GitPanelContent({
@@ -217,13 +210,10 @@ function GitPanelContent({
   loading,
   error,
   githubContext,
-  githubLoading,
-  githubError,
   initPending,
   initError,
   onInitialize,
   onRetry,
-  onGithubRetry,
 }: GitPanelContentProps) {
   const { t } = useI18n();
   const labels = t.git;
@@ -289,10 +279,8 @@ function GitPanelContent({
           key={chatId}
           chatId={chatId}
           status={state.status}
+          repoRoot={state.root}
           githubContext={githubContext}
-          githubLoading={githubLoading}
-          githubError={githubError}
-          onGithubRetry={onGithubRetry}
         />
       );
   }
@@ -301,17 +289,13 @@ function GitPanelContent({
 function RepositoryStatus({
   chatId,
   status,
+  repoRoot,
   githubContext,
-  githubLoading,
-  githubError,
-  onGithubRetry,
 }: {
   readonly chatId: string;
   readonly status: GitStatus;
+  readonly repoRoot: string;
   readonly githubContext: GithubContext | undefined;
-  readonly githubLoading: boolean;
-  readonly githubError: Error | null;
-  readonly onGithubRetry: () => void;
 }) {
   const { t } = useI18n();
   const { toast } = useToast();
@@ -500,12 +484,9 @@ function RepositoryStatus({
         </>
       )}
 
-      <GithubSection
-        context={githubContext}
-        loading={githubLoading}
-        error={githubError}
-        onRetry={onGithubRetry}
-      />
+      <WorktreeSection chatId={chatId} repoRoot={repoRoot} />
+
+      <BranchPrChip chatId={chatId} context={githubContext} />
 
       {discardRequest ? (
         <div
@@ -599,129 +580,6 @@ function splitDiscardSelections(changes: readonly GitFileChange[]): GitDiscardSe
     if (paths.length > 0) selections.push({ paths, mode });
   }
   return selections;
-}
-
-function GithubSection({
-  context,
-  loading,
-  error,
-  onRetry,
-}: {
-  readonly context: GithubContext | undefined;
-  readonly loading: boolean;
-  readonly error: Error | null;
-  readonly onRetry: () => void;
-}) {
-  const { t } = useI18n();
-  const labels = t.github;
-  const [expanded, setExpanded] = useState(false);
-
-  if (context?.state === 'no-remote' || context?.state === 'not-a-github-remote') return null;
-
-  let content: ReactNode;
-  if (error && !context) {
-    content = (
-      <div className="flex items-center gap-2 text-xs text-error">
-        <span className="min-w-0 flex-1">{labels.loadError}</span>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="cursor-pointer rounded px-1.5 py-1 text-[10px] font-semibold text-primary hover:bg-primary/10"
-        >
-          {t.common.retry}
-        </button>
-      </div>
-    );
-  } else if (loading || !context) {
-    content = <p className="text-xs text-on-surface-variant">{labels.loading}</p>;
-  } else if (context.state === 'gh-not-installed') {
-    content = <p className="text-xs leading-5 text-on-surface-variant">{labels.installHint}</p>;
-  } else if (context.state === 'not-authenticated') {
-    content = (
-      <p className="font-mono text-xs leading-5 text-on-surface-variant">{labels.authHint}</p>
-    );
-  } else {
-    content = (
-      <div className="space-y-2.5">
-        <div>
-          <a
-            href={context.repo.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex max-w-full items-center gap-1.5 text-xs font-semibold text-on-surface hover:text-primary"
-          >
-            <span className="truncate">{context.repo.nameWithOwner}</span>
-            <ExternalLink size={11} className="shrink-0" aria-hidden="true" />
-          </a>
-          <p className="mt-0.5 text-[10px] text-on-surface-variant">
-            {labels.defaultBranch.replace('{branch}', context.repo.defaultBranch)}
-          </p>
-        </div>
-        {context.pr ? (
-          <div className="rounded-lg border border-outline-variant/15 bg-surface-container-lowest/40 p-2.5">
-            <div className="flex items-start gap-2">
-              <a
-                href={context.pr.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="min-w-0 flex-1 text-xs font-semibold leading-4 text-on-surface hover:text-primary"
-              >
-                #{context.pr.number} {context.pr.title}
-              </a>
-              <GithubPrBadge state={context.pr.state} draft={context.pr.isDraft} />
-            </div>
-            <p className="mt-1.5 truncate font-mono text-[10px] text-on-surface-variant">
-              {labels.refs
-                .replace('{base}', context.pr.baseRefName)
-                .replace('{head}', context.pr.headRefName)}
-            </p>
-          </div>
-        ) : (
-          <p className="text-xs text-on-surface-variant">{labels.noPr}</p>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <details
-      open={expanded}
-      onToggle={(event) => setExpanded(event.currentTarget.open)}
-      className="rounded-xl border border-outline-variant/15 bg-surface-container/35 p-3"
-    >
-      <summary className="flex cursor-pointer list-none items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-on-surface-variant [&::-webkit-details-marker]:hidden">
-        <GitPullRequest size={14} className="text-primary" />
-        {labels.title}
-      </summary>
-      <div className="mt-3">{content}</div>
-    </details>
-  );
-}
-
-function GithubPrBadge({
-  state,
-  draft,
-}: {
-  readonly state: GithubPrState;
-  readonly draft: boolean;
-}) {
-  const { t } = useI18n();
-  const label = draft
-    ? t.github.states.draft
-    : t.github.states[state.toLowerCase() as Lowercase<GithubPrState>];
-  const variant = draft
-    ? ('warning' as const)
-    : state === 'OPEN'
-      ? ('success' as const)
-      : state === 'MERGED'
-        ? ('accent' as const)
-        : ('neutral' as const);
-
-  return (
-    <Badge variant={variant} className="px-1.5 py-0.5 text-[9px] tracking-normal">
-      {label}
-    </Badge>
-  );
 }
 
 function ChangeGroup({

@@ -1,83 +1,71 @@
-import type { GithubContext, GithubPr, GithubRepo } from '@mangostudio/shared/github';
+import type { GithubContext, GithubPr } from '@mangostudio/shared/github';
 import { GithubPrSchema } from '@mangostudio/shared/github';
-import Type, { type Static, type TSchema } from 'typebox';
-import Value from 'typebox/value';
-import { GhCliError, type GithubCli, ghCli } from '../infrastructure/gh-cli';
+import { readGhOutput } from '../domain/gh-output';
+import {
+  GhCliError,
+  type GhRuntimeSelection,
+  type GithubCli,
+  ghCli,
+} from '../infrastructure/gh-cli';
+import { createGithubRepoResolver, type ResolveGithubRepo } from './github-repo-resolver';
 
-const GhRepoOutputSchema = Type.Object({
-  nameWithOwner: Type.String(),
-  defaultBranchRef: Type.Object({ name: Type.String() }),
-  url: Type.String(),
-});
-
-const NO_REMOTE_PATTERN = /no git remotes found/i;
-const NOT_GITHUB_REMOTE_PATTERN =
-  /(?:none of the git remotes.*known GitHub host|not a GitHub repository)/i;
 const NO_PULL_REQUEST_PATTERN = /no pull requests found/i;
 
-export class GithubContextError extends Error {
-  readonly code = 'GH_OUTPUT_INVALID';
+/**
+ * Resolves GitHub context for a workdir *on a given machine*.
+ *
+ * The selection is not optional and is not defaulted here. A chat pinned to a
+ * WSL, SSH, or container environment has a workdir that only exists over there,
+ * and running `gh` anywhere else answers about the wrong filesystem and the
+ * wrong GitHub account — so the caller that knows which environment the chat
+ * belongs to has to say.
+ */
+export type GetGithubContext = (
+  workdir: string,
+  selection: GhRuntimeSelection,
+  signal?: AbortSignal
+) => Promise<GithubContext>;
 
-  constructor(readonly command: 'repo view' | 'pr view') {
-    super(`GitHub CLI returned invalid JSON for ${command}.`);
-    this.name = 'GithubContextError';
-  }
-}
-
-export type GetGithubContext = (workdir: string, signal?: AbortSignal) => Promise<GithubContext>;
-
-export function createGithubContextService(client: GithubCli): GetGithubContext {
-  return async (workdir, signal) => {
-    if (!(await client.isAvailable(workdir))) return { state: 'gh-not-installed' };
-    if (!(await client.isAuthenticated(workdir))) return { state: 'not-authenticated' };
-
-    let repo: GithubRepo;
-    try {
-      const result = await client.viewRepo(workdir, signal);
-      const output = parseGhOutput(result.stdout, GhRepoOutputSchema, 'repo view');
-      repo = {
-        nameWithOwner: output.nameWithOwner,
-        defaultBranch: output.defaultBranchRef.name,
-        url: output.url,
-      };
-    } catch (error) {
-      if (matchesGhError(error, NO_REMOTE_PATTERN)) return { state: 'no-remote' };
-      if (matchesGhError(error, NOT_GITHUB_REMOTE_PATTERN)) {
-        return { state: 'not-a-github-remote' };
-      }
-      throw error;
-    }
+/**
+ * The header's "which repository and which pull request" read.
+ *
+ * The availability, authentication and remote ladder is not repeated here: it
+ * is the same one every other GitHub endpoint runs, so it comes from
+ * `createGithubRepoResolver` and this service is only the branch's pull request
+ * on top of it.
+ *
+ * @example
+ * const getContext = createGithubContextService(ghCli);
+ * await getContext(workdir, { userId, environmentId });
+ */
+export function createGithubContextService(
+  client: GithubCli,
+  resolveRepo: ResolveGithubRepo = createGithubRepoResolver(client)
+): GetGithubContext {
+  return async (workdir, selection, signal) => {
+    const resolution = await resolveRepo(workdir, selection, signal);
+    if (resolution.state !== 'ok') return resolution;
 
     let pr: GithubPr | null;
     try {
-      const result = await client.viewCurrentPr(workdir, signal);
-      pr = parseGhOutput(result.stdout, GithubPrSchema, 'pr view');
+      const result = await client.run('pr.view-current', {}, { cwd: workdir, selection, signal });
+      pr = readGhOutput('pr.view-current', result.stdout, GithubPrSchema, (value) => value);
     } catch (error) {
-      if (matchesGhError(error, NO_PULL_REQUEST_PATTERN)) pr = null;
+      if (isNoPullRequest(error)) pr = null;
       else throw error;
     }
 
-    return { state: 'ok', repo, pr };
+    return { state: 'ok', repo: resolution.repo, pr };
   };
 }
 
 export const getGithubContext = createGithubContextService(ghCli);
 
-function matchesGhError(error: unknown, pattern: RegExp): boolean {
-  return error instanceof GhCliError && error.exitCode === 1 && pattern.test(error.stderr);
-}
-
-function parseGhOutput<T extends TSchema>(
-  stdout: string,
-  schema: T,
-  command: 'repo view' | 'pr view'
-): Static<T> {
-  let value: unknown;
-  try {
-    value = JSON.parse(stdout);
-  } catch {
-    throw new GithubContextError(command);
-  }
-  if (!Value.Check(schema, value)) throw new GithubContextError(command);
-  return value as Static<T>;
+/** gh reports "this branch has no pull request" as exit 1 with prose on stderr. */
+function isNoPullRequest(error: unknown): boolean {
+  return (
+    error instanceof GhCliError &&
+    error.exitCode === 1 &&
+    NO_PULL_REQUEST_PATTERN.test(error.stderr)
+  );
 }

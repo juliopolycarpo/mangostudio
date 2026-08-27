@@ -1,24 +1,16 @@
 import { expect, test } from '@playwright/test';
 
-const uniqueEmail = () => `library-smoke-${Date.now()}@test.local`;
-
 test('library surface renders its coverage matrix', async ({ page }) => {
-  // Signup plus a cold library scan of every enabled location costs more than
-  // the 30s project default, so the per-step waits below fail on their own
-  // assertion rather than dying of the suite timeout.
+  // A cold library scan of every enabled location costs more than the 30s
+  // project default, so the per-step waits below fail on their own assertion
+  // rather than dying of the suite timeout.
   test.setTimeout(90_000);
 
   const consoleErrors: string[] = [];
   page.on('pageerror', (error) => consoleErrors.push(error.message));
 
-  // The surface is behind the auth guard, so the smoke run needs an account.
-  await page.goto('/signup');
-  await page.locator('#name').fill('Library Smoke');
-  await page.locator('#email').fill(uniqueEmail());
-  await page.locator('#password').fill('smoke-pass-123');
-  await page.locator('form#signup-form button[type="submit"]').click();
-  await expect(page).not.toHaveURL(/\/signup/, { timeout: 10_000 });
-
+  // The surface is behind the auth guard; the session comes from the suite's
+  // shared `storageState`, so there is no signup to pay for here.
   await page.goto('/environments/library');
 
   // The section index redirects to the skills tab. Anchored, because every one
