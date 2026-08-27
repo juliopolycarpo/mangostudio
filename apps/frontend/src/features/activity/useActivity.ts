@@ -26,7 +26,7 @@ export function useActivity(options?: UseActivityOptions) {
     await queryClient.invalidateQueries({ queryKey: activityKeys.all });
   }, [queryClient]);
 
-  useRealtimeInvalidation(ACTIVITY_TOPIC, invalidate);
+  useRealtimeInvalidation(ACTIVITY_TOPIC, 'activity-feed', invalidate);
 
   const since = options?.since;
   const workdir = options?.workdir;

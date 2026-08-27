@@ -24,7 +24,7 @@ import { apiKeyGuard } from '../../../src/plugins/api-key-guard';
 import { requireAuth } from '../../../src/plugins/auth-middleware';
 import { errorHandler } from '../../../src/plugins/error-handler';
 import { rateLimit } from '../../../src/plugins/rate-limit';
-import { classifyRateLimit } from '../../../src/plugins/rate-limit-policy';
+import { classifyRateLimit, RATE_LIMIT_BUCKETS } from '../../../src/plugins/rate-limit-policy';
 import { insertTestUser } from '../../support/factories';
 import { createApiTestApp } from '../../support/harness/create-api-test-app';
 
@@ -276,7 +276,10 @@ describe('rate-limit classification is ready before enforcement', () => {
     const get = (path: string) =>
       app.handle(new Request(`http://localhost${path}`, { headers: CALLER }));
 
-    for (let i = 0; i <= 100; i += 1) await get('/api/chats');
+    // Driven off the bucket rather than a literal: this asserts which bucket
+    // enforces, not what its ceiling happens to be, and a hardcoded 100 turned
+    // a retune of that ceiling into a failure here (#941).
+    for (let i = 0; i <= RATE_LIMIT_BUCKETS.general.max; i += 1) await get('/api/chats');
 
     expect((await get('/api/chats')).status).toBe(429);
     expect((await get('/api/health')).status).toBe(200);

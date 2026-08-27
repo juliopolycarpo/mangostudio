@@ -30,11 +30,11 @@ export function useExternalAgents(environmentId: string | null): ExternalAgentsV
 
   // A runtime connecting or dropping, an environment edited or removed: exactly
   // when "is Codex installed and signed in over there" stops being true.
-  useRealtimeInvalidation(ENVIRONMENTS_TOPIC, invalidate);
+  useRealtimeInvalidation(ENVIRONMENTS_TOPIC, 'external-agents', invalidate);
   // The machine did not change, but the hub finished probing it. The first
   // render after a cold cache shows the capability-free scan — no model or
   // permission picker — and this is what fills them in once the vendor answers.
-  useRealtimeInvalidation(EXTERNAL_AGENTS_TOPIC, invalidate);
+  useRealtimeInvalidation(EXTERNAL_AGENTS_TOPIC, 'external-agents', invalidate);
 
   const { data, isLoading } = useQuery(externalAgentsQueryOptions(environmentId));
   const agents = useMemo(() => data?.agents ?? [], [data?.agents]);

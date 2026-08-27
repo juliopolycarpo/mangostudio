@@ -24,7 +24,9 @@ mock.module('@/lib/realtime/realtime-client', () => ({
 
 // Static imports run before the mock above, so the hook comes in afterwards or
 // it binds the real realtime client.
-const { useRealtimeInvalidation } = await import('@/lib/realtime/use-realtime-invalidation');
+const { useRealtimeInvalidation, resetRealtimeInvalidations } = await import(
+  '@/lib/realtime/use-realtime-invalidation'
+);
 
 describe('useRealtimeInvalidation', () => {
   let subscriptions: Subscription[] = [];
@@ -34,6 +36,9 @@ describe('useRealtimeInvalidation', () => {
     // alias to the shared stub under `bun test`; the session goes in through
     // its seam and `bun.setup.ts` clears it after every test.
     setTestSession({ user: { id: 'user-test' } });
+    // Subscriptions are shared per (topic, concern) in module state, so a hook
+    // left mounted by an earlier test would otherwise be reused by this one.
+    resetRealtimeInvalidations();
     subscriptions = [];
     mocks.subscribe.mockImplementation((topic: string, listener: RealtimeTopicListener) => {
       const release = jest.fn();
@@ -52,7 +57,7 @@ describe('useRealtimeInvalidation', () => {
   }
 
   it('subscribes once on mount', () => {
-    renderHook(() => useRealtimeInvalidation('settings', jest.fn()));
+    renderHook(() => useRealtimeInvalidation('settings', 'test', jest.fn()));
 
     expect(mocks.bindRealtimeClientToUser).toHaveBeenCalledWith('user-test');
     expect(mocks.subscribe).toHaveBeenCalledTimes(1);
@@ -60,13 +65,13 @@ describe('useRealtimeInvalidation', () => {
   });
 
   it('never subscribes for a null topic', () => {
-    renderHook(() => useRealtimeInvalidation(null, jest.fn()));
+    renderHook(() => useRealtimeInvalidation(null, 'test', jest.fn()));
 
     expect(mocks.subscribe).not.toHaveBeenCalled();
   });
 
   it('unsubscribes on unmount', () => {
-    const { unmount } = renderHook(() => useRealtimeInvalidation('settings', jest.fn()));
+    const { unmount } = renderHook(() => useRealtimeInvalidation('settings', 'test', jest.fn()));
     const subscription = only();
     expect(subscription.release).not.toHaveBeenCalled();
 
@@ -76,7 +81,7 @@ describe('useRealtimeInvalidation', () => {
 
   it('swaps subscriptions when the topic changes', () => {
     const { rerender } = renderHook(
-      ({ topic }: { topic: string | null }) => useRealtimeInvalidation(topic, jest.fn()),
+      ({ topic }: { topic: string | null }) => useRealtimeInvalidation(topic, 'test', jest.fn()),
       { initialProps: { topic: 'git:chat-1' as string | null } }
     );
     rerender({ topic: 'git:chat-2' });
@@ -91,7 +96,7 @@ describe('useRealtimeInvalidation', () => {
 
   it('releases when the topic becomes null', () => {
     const { rerender } = renderHook(
-      ({ topic }: { topic: string | null }) => useRealtimeInvalidation(topic, jest.fn()),
+      ({ topic }: { topic: string | null }) => useRealtimeInvalidation(topic, 'test', jest.fn()),
       { initialProps: { topic: 'git:chat-1' as string | null } }
     );
     rerender({ topic: null });
@@ -105,7 +110,7 @@ describe('useRealtimeInvalidation', () => {
 
     const { rerender } = renderHook(
       ({ label }: { label: string }) =>
-        useRealtimeInvalidation('settings', () => {
+        useRealtimeInvalidation('settings', 'test', () => {
           calls.push(label);
         }),
       { initialProps: { label: 'render-0' } }
@@ -128,7 +133,7 @@ describe('useRealtimeInvalidation', () => {
     const received: RealtimeSignal[] = [];
 
     renderHook(() =>
-      useRealtimeInvalidation('settings', (signal) => {
+      useRealtimeInvalidation('settings', 'test', (signal) => {
         received.push(signal);
       })
     );
@@ -150,7 +155,9 @@ describe('useRealtimeInvalidation', () => {
     process.on('unhandledRejection', unhandled);
 
     renderHook(() =>
-      useRealtimeInvalidation('settings', () => Promise.reject(new Error('invalidation failed')))
+      useRealtimeInvalidation('settings', 'test', () =>
+        Promise.reject(new Error('invalidation failed'))
+      )
     );
 
     // Returning the promise is what lets the client absorb the rejection instead
@@ -161,5 +168,74 @@ describe('useRealtimeInvalidation', () => {
 
     process.off('unhandledRejection', unhandled);
     expect(unhandled).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Regression for #941: the environments overview mounts thirteen cards that
+   * all read one tool-identity map. Each used to own a subscription, so a single
+   * `subscribed` ack ran thirteen identical invalidations — and React Query's
+   * default `cancelRefetch` makes each of those a fresh HTTP request.
+   */
+  it('runs one callback per signal however many components share a concern', () => {
+    let runs = 0;
+    const mountCard = () =>
+      renderHook(() =>
+        useRealtimeInvalidation('settings', 'tool-identities', () => {
+          runs += 1;
+        })
+      );
+    const cards = [mountCard(), mountCard(), mountCard()];
+
+    expect(mocks.subscribe).toHaveBeenCalledTimes(1);
+    act(() => {
+      void only().listener({ type: 'subscribed' });
+    });
+    expect(runs).toBe(1);
+
+    // Losing the component that happened to register first must not silence the
+    // concern: whoever is still mounted takes the signal.
+    cards[0]?.unmount();
+    expect(only().release).not.toHaveBeenCalled();
+    act(() => {
+      void only().listener({ type: 'subscribed' });
+    });
+    expect(runs).toBe(2);
+
+    // The topic goes only when the last of them is gone.
+    cards[1]?.unmount();
+    cards[2]?.unmount();
+    expect(only().release).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps different concerns on one topic independent', () => {
+    const seen: string[] = [];
+    renderHook(() =>
+      useRealtimeInvalidation('settings', 'tool-identities', () => {
+        seen.push('tool-identities');
+      })
+    );
+    renderHook(() =>
+      useRealtimeInvalidation('settings', 'settings-sections', () => {
+        seen.push('settings-sections');
+      })
+    );
+
+    expect(mocks.subscribe).toHaveBeenCalledTimes(2);
+    act(() => {
+      for (const subscription of subscriptions) void subscription.listener({ type: 'subscribed' });
+    });
+
+    expect([...seen].sort()).toEqual(['settings-sections', 'tool-identities']);
+  });
+
+  it('re-subscribes a concern that was fully released', () => {
+    const first = renderHook(() =>
+      useRealtimeInvalidation('settings', 'tool-identities', jest.fn())
+    );
+    first.unmount();
+
+    renderHook(() => useRealtimeInvalidation('settings', 'tool-identities', jest.fn()));
+
+    expect(mocks.subscribe).toHaveBeenCalledTimes(2);
   });
 });

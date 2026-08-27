@@ -329,7 +329,7 @@ export function useGitState(chatId: string) {
 export function useGitRealtimeInvalidation(chatId: string): void {
   const queryClient = useQueryClient();
 
-  useRealtimeInvalidation(gitTopic(chatId), (signal) => {
+  useRealtimeInvalidation(gitTopic(chatId), 'git-state', (signal) => {
     if (signal.type === 'subscribed') {
       return invalidateGitScopes(queryClient, chatId, GIT_SCOPES);
     }
