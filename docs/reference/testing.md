@@ -403,6 +403,53 @@ caches, and a timings file is untracked, so it cannot enter that cache key: shar
 shard `i`. Balancing it is worth 0.5s within the lane and 0.6s overall (59.2s vs
 58.6s critical shard), which does not pay for that hazard.
 
+#### Why the unisolated lane opts out too
+
+`api-integration` also opts out, for the opposite reason: everything above
+assumes each file starts from a fresh global, and that lane is the one where it
+does not.
+
+It is the only lane that is both **sharded and unisolated**. Its files share one
+module graph, so what a shard runs a file *beside* decides what that file
+inherits — the in-memory database from `setupTestEnvironment()`, any
+`mock.module` registration, the memoized `getAuth()`. A timings-balanced
+partition is a function of a file that `--update-timings` refreshes every run and
+CI caches across runs, so it **rotates**: a file's companions change from run to
+run, and the shard a file lands on moves with the baseline. A leak then surfaces
+as an intermittent failure in a file nobody touched. This is not hypothetical —
+PR #951's own first CI run failed on shard 3 because `app.ts` snapshotted
+`getConfig().corsOrigins` at module evaluation, so *which file imported `app`
+first* decided what the CORS gate saw.
+
+Round-robin is derived by each shard from the file set alone, so the same commit
+always produces the same partition and a leak is reproducible from the SHA.
+Measured on the 101-file lane (Bun 1.4.0, 85.3s total, `--shard=i/8`):
+
+| Split                                | Critical shard | Reproducible |
+| ------------------------------------ | -------------- | ------------ |
+| `--timings`, balanced (rotates)      | 20.3s          | no           |
+| Round-robin (what the lane now runs) | 29.9s          | yes          |
+
++9.6s, and cheap because one file (`spawn-runtime-child`, 20.3s) is 24% of the
+lane and is the floor under *any* split — the balancing had little left to win.
+Determinism verified rather than assumed: two consecutive no-timings runs
+produced byte-identical partitions, union 101 files, no duplicates.
+
+Two things this does **not** buy, so do not read more into it:
+
+- The partition is stable for a given file set, not across them. Adding or
+  deleting an integration file shifts the whole stride.
+- Determinism is not immunity. It makes a leak reproducible; it does not stop
+  one. Detection is [the randomized-order nightly](#randomized-order)'s job, and
+  a soak of 48 shard runs across six partitions (two round-robin, four rotated)
+  came back 0 fail — the class is not currently manifesting, which is the
+  evidence for taking this option over unsharding the lane.
+
+If the nightly's unisolated lane does go red on cross-file leakage, the
+escalation is to unshard `api-integration` and run it whole in its own CI job the
+way the frontend lane does — correct by construction, at 85.3s on the critical
+path instead of 29.9s.
+
 #### Merging is not concatenation
 
 Bun's per-file `LF:`/`FNF:` are *run-dependent*: a source
