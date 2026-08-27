@@ -197,11 +197,19 @@ describe('GitHub read service', () => {
     expect(client.ids()).toEqual(['repo.view', 'pr.checks']);
   });
 
-  it('treats gh’s blank output for a pull request with no checks as an empty list', async () => {
+  it('treats gh’s own no-checks message as an empty list', async () => {
     // `gh pr checks` exits 1 with nothing on stdout when a pull request has no
-    // checks — the same exit code a failing check uses, which the spec accepts.
+    // checks — the same exit code a failing check uses, which the spec accepts —
+    // but it does print the reason to stderr (confirmed against gh 2.98.0).
     const client = new FakeGithubCli({
-      stdout: { 'repo.view': repoOutput, 'pr.checks': '\n' },
+      stdout: { 'repo.view': repoOutput },
+      respond: {
+        'pr.checks': () => ({
+          stdout: '',
+          stderr: "no checks reported on the 'feat/x' branch",
+          exitCode: 1,
+        }),
+      },
     });
     const reads = createService(client);
 
@@ -216,8 +224,6 @@ describe('GitHub read service', () => {
     // A pull request that does not exist produces the *same* exit code and the
     // same blank stdout as one with no checks, so answering "no checks" for a
     // number nobody ever opened is a wrong answer wearing an ordinary shape.
-    // gh separates them on stderr, which is the only signal short of a second
-    // round trip.
     const client = new FakeGithubCli({
       stdout: { 'repo.view': repoOutput },
       respond: {
@@ -236,23 +242,28 @@ describe('GitHub read service', () => {
     );
   });
 
-  it('still reports no checks when gh says nothing at all on stderr', async () => {
+  it('refuses an unrecognized blank-output failure instead of reporting no checks', async () => {
+    // Exit 1 with blank stdout is not specific to "no checks": a rate limit,
+    // an expired token, or a network blip exits the same way, per `gh help
+    // exit-codes`. Only gh's own no-checks message earns the empty-list
+    // answer; anything else — including a blank stderr, the shape a transport
+    // failure with no HTTP response can produce — must surface as a failure
+    // rather than a falsely clean panel.
     const client = new FakeGithubCli({
       stdout: { 'repo.view': repoOutput },
       respond: {
         'pr.checks': () => ({
           stdout: '',
-          stderr: "no checks reported on the 'feat/x' branch",
+          stderr: 'HTTP 401: Bad credentials (https://api.github.com/graphql)',
           exitCode: 1,
         }),
       },
     });
     const reads = createService(client);
 
-    await expect(reads.getPullRequestChecks({ ...repoRequest, number: 7 })).resolves.toMatchObject({
-      state: 'ok',
-      checks: [],
-    });
+    await expect(reads.getPullRequestChecks({ ...repoRequest, number: 7 })).rejects.toThrow(
+      /unreadable output/i
+    );
   });
 
   it('splits owner and name for the pinned GraphQL document', async () => {

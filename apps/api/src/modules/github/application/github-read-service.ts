@@ -226,22 +226,20 @@ export function createGithubReadService(options: GithubReadServiceOptions = {}):
     getPullRequestChecks: (request) =>
       readRepoScoped(request, `checks:${request.number}`, async () => {
         const result = await client.run('pr.checks', { number: request.number }, target(request));
-        // `gh pr checks` exits 1 with an empty stdout when a pull request has no
-        // checks at all — the same exit code it uses for a failing check, which
-        // the spec accepts so a red pull request can still be read. Blank stdout
-        // is that case, and it is an empty list rather than unreadable output.
-        //
-        // A pull request that does not exist has the same exit code and the same
-        // blank stdout, so stdout alone cannot tell the two apart, and reporting
-        // "no checks" for a number nobody ever opened is a wrong answer wearing
-        // the shape of an ordinary one. gh does distinguish them on stderr, and
-        // that is the only signal available without spending a second round trip
-        // on `pr view` to ask whether the number resolves.
+        // `gh pr checks` exits 1 with an empty stdout for more than one reason —
+        // a pull request with no checks at all, one that does not exist, and an
+        // ordinary API failure (rate limit, auth, network) all land here the
+        // same way, per `gh help exit-codes`: exit 1 means "failed for any
+        // reason", not specifically "no checks". Blank stdout alone cannot tell
+        // them apart, so this matches gh's own no-checks message on stderr
+        // (confirmed against gh 2.98.0) rather than defaulting an unrecognised
+        // failure to "no checks" — a rate-limited read should surface as a
+        // failure, not report an empty, all-green panel.
         if (result.stdout.trim().length === 0) {
-          if (isUnresolvedPullRequest(result.stderr)) {
-            throw new GithubOutputError('pr.checks');
+          if (isNoChecksReported(result.stderr)) {
+            return { summary: { ...EMPTY_CHECK_SUMMARY }, checks: [] };
           }
-          return { summary: { ...EMPTY_CHECK_SUMMARY }, checks: [] };
+          throw new GithubOutputError('pr.checks');
         }
         const checks = readGhOutput('pr.checks', result.stdout, GhCheckRunListSchema, toCheckRuns);
         return { summary: summarizeCheckBuckets(checks), checks };
@@ -268,19 +266,19 @@ export function createGithubReadService(options: GithubReadServiceOptions = {}):
 }
 
 /**
- * Whether gh refused because the pull request number does not exist.
+ * Whether gh's own stderr is the exact sentence it prints for a pull request
+ * that genuinely has zero check runs.
  *
- * Matched on stderr because it is the only thing that differs: `gh pr checks`
- * answers a checkless pull request and an imaginary one with the same exit code
- * and the same empty stdout. The phrasing is GitHub's GraphQL resolver rather
- * than gh's own wording, which is why matching it is tolerable — but it is
- * still a string match against a message nobody promised to keep, so it fails
- * *open*: an unrecognised message reads as "no checks", exactly what this code
- * did before, rather than turning some future gh release's unfamiliar phrasing
- * into a broken panel.
+ * An allowlist rather than a blocklist on purpose: matching only the message
+ * nobody-resolves-this-PR-number case (as this used to) leaves every other
+ * blank-stdout exit-1 failure — rate limit, expired auth, a network blip —
+ * silently reported as "no checks" instead of surfacing as an error. Failing
+ * *closed* on an unrecognised message is the safer direction here, since the
+ * cost of a wrongly-reported failure is a retry, while the cost of a wrongly
+ * "clean" panel is a merge nobody double-checked.
  */
-function isUnresolvedPullRequest(stderr: string): boolean {
-  return /could not resolve to a pullrequest/i.test(stderr);
+function isNoChecksReported(stderr: string): boolean {
+  return /no checks reported on the/i.test(stderr);
 }
 
 /** The process-wide read service the routes use; tests inject their own. */
