@@ -1,5 +1,6 @@
 import { RefreshCw } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
+import { useNow } from '@/hooks/use-now';
 import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
 
 interface GithubStalenessProps {
@@ -7,6 +8,13 @@ interface GithubStalenessProps {
   readonly cachedAt: number | null;
   readonly refreshing: boolean;
 }
+
+/**
+ * How often the label re-reads the clock. Half a minute, because the coarsest
+ * thing this line ever has to say is "1 minute ago" and a slower tick would let
+ * the label lag the truth by more than the unit it prints.
+ */
+const STALENESS_TICK_MS = 30_000;
 
 /**
  * When this section's data was actually read.
@@ -21,6 +29,11 @@ interface GithubStalenessProps {
  */
 export function GithubStaleness({ cachedAt, refreshing }: GithubStalenessProps) {
   const { t, locale } = useI18n();
+  // The panel deliberately never polls, so this component is the only thing
+  // that can move the label — a render that says "updated now" is otherwise the
+  // last word until the user refreshes. Off while there is nothing to age.
+  const now = useNow(refreshing || cachedAt === null ? null : STALENESS_TICK_MS);
+
   if (refreshing) {
     return (
       <span className="text-[10px] text-on-surface-variant">{t.github.staleness.refreshing}</span>
@@ -31,7 +44,7 @@ export function GithubStaleness({ cachedAt, refreshing }: GithubStalenessProps) 
   return (
     <span className="text-[10px] text-on-surface-variant" title={new Date(cachedAt).toISOString()}>
       {formatMessage(t.github.staleness.updated, {
-        relative: formatRelativeTime(cachedAt, locale),
+        relative: formatRelativeTime(cachedAt, locale, now),
       })}
     </span>
   );
