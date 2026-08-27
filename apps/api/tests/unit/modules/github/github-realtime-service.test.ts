@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { RealtimeServerMessage } from '@mangostudio/shared/realtime';
-import { publishGithubWriteInvalidation } from '../../../../src/modules/github/application/github-realtime-service';
+import {
+  type GithubInvalidationTarget,
+  publishGithubWriteInvalidation,
+} from '../../../../src/modules/github/application/github-realtime-service';
 import {
   type getRealtimeBus,
   setRealtimeBusForTests,
@@ -20,6 +23,35 @@ class RecordingRealtimeBus {
   }
 }
 
+/** Answers the sibling enumeration from a fixed list, without a database. */
+class FakeSiblingIndex {
+  readonly queries: Array<{
+    userId: string;
+    environmentId: string;
+    workdir: string;
+    root?: string;
+  }> = [];
+
+  constructor(private readonly chatIds: readonly string[]) {}
+
+  list = (
+    userId: string,
+    environmentId: string,
+    workdir: string,
+    root?: string
+  ): Promise<string[]> => {
+    this.queries.push({ userId, environmentId, workdir, ...(root ? { root } : {}) });
+    return Promise.resolve([...this.chatIds]);
+  };
+}
+
+const TARGET: GithubInvalidationTarget = {
+  userId: 'user-1',
+  chatId: 'chat-1',
+  environmentId: 'devbox',
+  workdir: '/remote/repo',
+};
+
 function installBus(): RecordingRealtimeBus {
   const bus = new RecordingRealtimeBus();
   setRealtimeBusForTests(bus as unknown as ReturnType<typeof getRealtimeBus>);
@@ -31,11 +63,12 @@ afterEach(() => {
 });
 
 describe('GitHub write invalidation', () => {
-  it('invalidates only the github slice after opening or readying a pull request', () => {
+  it('invalidates only the github slice after opening or readying a pull request', async () => {
     const bus = installBus();
+    const siblings = new FakeSiblingIndex(['chat-1']);
 
-    publishGithubWriteInvalidation({ userId: 'user-1', chatId: 'chat-1' }, 'create');
-    publishGithubWriteInvalidation({ userId: 'user-1', chatId: 'chat-1' }, 'ready');
+    await publishGithubWriteInvalidation(TARGET, 'create', { listSiblingChatIds: siblings.list });
+    await publishGithubWriteInvalidation(TARGET, 'ready', { listSiblingChatIds: siblings.list });
 
     expect(bus.published).toEqual([
       {
@@ -49,18 +82,84 @@ describe('GitHub write invalidation', () => {
     ]);
   });
 
-  it('invalidates the working tree too after a checkout', () => {
+  it('invalidates the working tree too after a checkout', async () => {
     // `gh pr checkout` fetches a ref and switches branches, so the state, the
     // branch list, the history and every open diff are about a different
     // commit afterwards — not just the GitHub lists.
     const bus = installBus();
+    const siblings = new FakeSiblingIndex(['chat-1']);
 
-    publishGithubWriteInvalidation({ userId: 'user-1', chatId: 'chat-1' }, 'checkout');
+    await publishGithubWriteInvalidation(TARGET, 'checkout', { listSiblingChatIds: siblings.list });
 
     expect(bus.published[0]?.message).toEqual({
       type: 'invalidate',
       topic: 'git:chat-1',
       scopes: ['state', 'branches', 'history', 'diffs', 'github'],
     });
+  });
+
+  it('fans the same scopes out to every chat on the same workdir and machine (#943)', async () => {
+    // A second chat open on the repository reads the same GitHub state and the
+    // same working tree, so it is exactly as stale as the chat that wrote.
+    const bus = installBus();
+    const siblings = new FakeSiblingIndex(['chat-2', 'chat-1', 'chat-3', 'chat-3']);
+
+    await publishGithubWriteInvalidation(TARGET, 'checkout', { listSiblingChatIds: siblings.list });
+
+    expect(siblings.queries).toEqual([
+      { userId: 'user-1', environmentId: 'devbox', workdir: '/remote/repo' },
+    ]);
+    // The initiator first and exactly once, each sibling once despite the
+    // duplicate row, all with the operation's own scopes.
+    expect(
+      bus.published.map((entry) =>
+        entry.message.type === 'invalidate' ? entry.message.topic : entry.message.type
+      )
+    ).toEqual(['git:chat-1', 'git:chat-2', 'git:chat-3']);
+    for (const entry of bus.published) {
+      expect(entry.userId).toBe('user-1');
+      expect(entry.message).toMatchObject({
+        type: 'invalidate',
+        scopes: ['state', 'branches', 'history', 'diffs', 'github'],
+      });
+    }
+  });
+
+  it('widens the checkout fan-out to chats under a resolved worktree root (#944)', async () => {
+    // A chat bound to a package subdirectory of the same checkout shares the
+    // same HEAD, index and working tree as one bound to the root.
+    const bus = installBus();
+    const siblings = new FakeSiblingIndex(['chat-2']);
+    const target: GithubInvalidationTarget = { ...TARGET, root: '/remote/repo' };
+
+    await publishGithubWriteInvalidation(target, 'checkout', { listSiblingChatIds: siblings.list });
+
+    expect(siblings.queries).toEqual([
+      { userId: 'user-1', environmentId: 'devbox', workdir: '/remote/repo', root: '/remote/repo' },
+    ]);
+    expect(
+      bus.published.map((entry) =>
+        entry.message.type === 'invalidate' ? entry.message.topic : entry.message.type
+      )
+    ).toEqual(['git:chat-1', 'git:chat-2']);
+  });
+
+  it('still invalidates the initiating chat when the sibling enumeration fails', async () => {
+    // The write already happened by publish time; a broken lookup must not
+    // reject up into the write response nor swallow the one publish that
+    // definitely applies.
+    const bus = installBus();
+    const listSiblingChatIds = () => Promise.reject(new Error('db unavailable'));
+
+    await expect(
+      publishGithubWriteInvalidation(TARGET, 'ready', { listSiblingChatIds })
+    ).resolves.toBeUndefined();
+
+    expect(bus.published).toEqual([
+      {
+        userId: 'user-1',
+        message: { type: 'invalidate', topic: 'git:chat-1', scopes: ['github'] },
+      },
+    ]);
   });
 });

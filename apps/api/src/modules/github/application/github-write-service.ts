@@ -116,10 +116,25 @@ export function createGithubWriteService(
     return readGhOutput('pr.view-summary', result.stdout, GhPrSummaryOutputSchema, toPrSummary);
   }
 
-  /** Drops the stale reads and tells the panel, in that order. */
-  function settle(request: GithubWriteRequest, operation: GithubWriteOperation): void {
+  /** Drops the stale reads and tells the panels, in that order. */
+  function settle(
+    request: GithubWriteRequest,
+    operation: GithubWriteOperation,
+    root?: string
+  ): void {
     cache.clear(request.selection);
-    publish({ userId: request.selection.userId, chatId: request.chatId }, operation);
+    // Fire-and-forget: the initiating chat is published synchronously inside,
+    // and the sibling fan-out that follows is failure-isolated there.
+    void publish(
+      {
+        userId: request.selection.userId,
+        chatId: request.chatId,
+        environmentId: request.selection.environmentId,
+        workdir: request.workdir,
+        ...(root ? { root } : {}),
+      },
+      operation
+    );
   }
 
   /**
@@ -142,8 +157,11 @@ export function createGithubWriteService(
     // queue unless it takes the same lock. Serializing it here is what stops
     // a checkout from racing a stage, commit, branch switch, or worktree
     // operation on the same repository against a moving index or working tree.
+    // The resolved root also widens the invalidation fan-out below to every
+    // chat under it, not just chats bound to this exact workdir string (#944).
+    let root: string | undefined;
     if (command === 'pr.checkout') {
-      const root = await requireRepoRoot(request.workdir, request.signal, request.selection);
+      root = await requireRepoRoot(request.workdir, request.signal, request.selection);
       await withRepoMutationLock(request.selection, root, runMutation, request.signal);
     } else {
       await runMutation();
@@ -154,7 +172,7 @@ export function createGithubWriteService(
     // the cache and realtime subscribers correct, instead of quietly keeping
     // the pre-mutation state and inviting a retry of something that already
     // happened.
-    settle(request, operation);
+    settle(request, operation, root);
     const pr = await readSummary(request, number);
     return { state: 'ok', pr };
   }

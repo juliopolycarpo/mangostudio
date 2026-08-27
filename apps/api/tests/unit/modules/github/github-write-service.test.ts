@@ -34,7 +34,29 @@ const summaryOutput = JSON.stringify({
 
 interface Published {
   readonly chatId: string;
+  readonly environmentId: string;
+  readonly workdir: string;
   readonly operation: GithubWriteOperation;
+  readonly root?: string;
+}
+
+const PUBLISHED_TARGET = { chatId: 'chat-1', environmentId: 'devbox', workdir: '/remote/repo' };
+
+/** Captures the invalidation target the write hands to the realtime layer. */
+function recordPublish(published: Published[]) {
+  return (
+    target: { chatId: string; environmentId: string; workdir: string; root?: string },
+    operation: GithubWriteOperation
+  ): Promise<void> => {
+    published.push({
+      chatId: target.chatId,
+      environmentId: target.environmentId,
+      workdir: target.workdir,
+      operation,
+      ...(target.root ? { root: target.root } : {}),
+    });
+    return Promise.resolve();
+  };
 }
 
 /**
@@ -60,7 +82,7 @@ function createService(client: FakeGithubCli, published: Published[] = []) {
     cache: createGithubCache(),
     currentBranch: () => Promise.resolve('feat/panel'),
     pullRequestTemplate: () => Promise.resolve('## Summary\n\n## Test Plan\n- [ ] `bun run check`'),
-    publish: (target, operation) => published.push({ chatId: target.chatId, operation }),
+    publish: recordPublish(published),
     ...noopRepoRootDeps,
   });
 }
@@ -154,7 +176,15 @@ describe('GitHub write service', () => {
         operation === 'ready' ? 'pr.ready' : 'pr.checkout',
         'pr.view-summary',
       ]);
-      expect(published).toEqual([{ chatId: 'chat-1', operation }]);
+      // Only `checkout` resolves a worktree root, so only it widens the
+      // invalidation fan-out beyond this exact workdir (#944).
+      expect(published).toEqual([
+        {
+          ...PUBLISHED_TARGET,
+          operation,
+          ...(operation === 'checkout' ? { root: '/remote/repo' } : {}),
+        },
+      ]);
     }
   });
 
@@ -180,7 +210,7 @@ describe('GitHub write service', () => {
         cache,
         currentBranch: () => Promise.resolve('feat/panel'),
         pullRequestTemplate: () => Promise.resolve(''),
-        publish: (target, op) => published.push({ chatId: target.chatId, operation: op }),
+        publish: recordPublish(published),
         ...noopRepoRootDeps,
       });
 
@@ -192,7 +222,13 @@ describe('GitHub write service', () => {
         Error
       );
 
-      expect(published).toEqual([{ chatId: 'chat-1', operation }]);
+      expect(published).toEqual([
+        {
+          ...PUBLISHED_TARGET,
+          operation,
+          ...(operation === 'checkout' ? { root: '/remote/repo' } : {}),
+        },
+      ]);
       const after = await cache.read({ ...SELECTION, subject: 'inbox' }, 'v', () =>
         Promise.resolve({})
       );
@@ -211,7 +247,7 @@ describe('GitHub write service', () => {
       cache,
       currentBranch: () => Promise.resolve('feat/panel'),
       pullRequestTemplate: () => Promise.resolve(''),
-      publish: (target, op) => published.push({ chatId: target.chatId, operation: op }),
+      publish: recordPublish(published),
       ...noopRepoRootDeps,
     });
 
@@ -223,7 +259,7 @@ describe('GitHub write service', () => {
       writes.createPullRequest(REQUEST, { chatId: 'chat-1', title: 'T' })
     ).rejects.toBeInstanceOf(GithubOutputError);
 
-    expect(published).toEqual([{ chatId: 'chat-1', operation: 'create' }]);
+    expect(published).toEqual([{ ...PUBLISHED_TARGET, operation: 'create' }]);
     const after = await cache.read({ ...SELECTION, subject: 'inbox' }, 'v', () =>
       Promise.resolve({})
     );
@@ -243,7 +279,7 @@ describe('GitHub write service', () => {
       cache,
       currentBranch: () => Promise.resolve('feat/panel'),
       pullRequestTemplate: () => Promise.resolve(''),
-      publish: () => undefined,
+      publish: async () => undefined,
       ...noopRepoRootDeps,
     });
 
@@ -306,7 +342,7 @@ describe('GitHub write service', () => {
       cache: createGithubCache(),
       currentBranch: () => Promise.resolve('feat/panel'),
       pullRequestTemplate: () => Promise.resolve(''),
-      publish: () => undefined,
+      publish: async () => undefined,
       requireRepoRoot: () => Promise.resolve('/remote/repo-root'),
       withRepoMutationLock: (selection, root, mutation) => {
         lockCalls.push({ environmentId: selection.environmentId, root });

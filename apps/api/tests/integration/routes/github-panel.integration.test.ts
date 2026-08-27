@@ -158,7 +158,7 @@ function createPanelPlugin(overrides: FakeGithubCliOptions = {}) {
         cache,
         currentBranch: () => Promise.resolve('feat/panel'),
         pullRequestTemplate: () => Promise.resolve('## Summary'),
-        publish: () => undefined,
+        publish: () => Promise.resolve(),
         // `pr checkout` resolves the repository root through the real git
         // write service to take its mutation lock, which would otherwise
         // spawn a real `git rev-parse` against `/remote/repo` — a workdir this
