@@ -57,9 +57,39 @@ describe('getAuth', () => {
     });
 
     const { trustedOrigins } = getAuth().options;
+    // A function, not an array — see the note in src/auth.ts. Better Auth
+    // resolves it per request, which is what keeps the memoized instance from
+    // pinning the list to whatever config was live at the first getAuth().
+    expect(typeof trustedOrigins).toBe('function');
+    const resolved = (trustedOrigins as () => string[])();
 
-    expect(trustedOrigins).toContain('https://studio.example.com');
-    expect(trustedOrigins).toContain('http://localhost:3001');
-    expect(trustedOrigins).not.toContain('https://attacker.example');
+    expect(resolved).toContain('https://studio.example.com');
+    expect(resolved).toContain('http://localhost:3001');
+    expect(resolved).not.toContain('https://attacker.example');
+  });
+
+  // The regression the function form buys, and the half an array cannot cover:
+  // `getAuth()` is memoized, so a config loaded after the first call used to be
+  // invisible to Better Auth for the life of the process. Ordering here is the
+  // whole test — initialize first, configure second.
+  it('sees an origin the config gains after the instance was built', () => {
+    loadConfigForTest({
+      auth: { secret: 'test-secret-at-least-32-characters-long', url: VALID_AUTH_URL },
+      server: { host: '0.0.0.0', port: 3001, publicUrl: '', allowedOrigins: [] },
+    });
+    const { trustedOrigins } = getAuth().options;
+    expect((trustedOrigins as () => string[])()).not.toContain('https://late.example.com');
+
+    loadConfigForTest({
+      auth: { secret: 'test-secret-at-least-32-characters-long', url: VALID_AUTH_URL },
+      server: {
+        host: '0.0.0.0',
+        port: 3001,
+        publicUrl: '',
+        allowedOrigins: ['https://late.example.com'],
+      },
+    });
+
+    expect((trustedOrigins as () => string[])()).toContain('https://late.example.com');
   });
 });

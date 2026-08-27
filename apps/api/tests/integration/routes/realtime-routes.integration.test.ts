@@ -323,9 +323,10 @@ describe('realtime WebSocket origins and liveness', () => {
     }
   });
 
-  // The handshake reads cfg.corsOrigins when the routes are built, so a config
-  // installed before startServer() is what this asserts on: the origin is only
-  // reachable because server.allowedOrigins named it.
+  // The handshake reads cfg.corsOrigins per connection, so this asserts only
+  // that the origin is reachable because server.allowedOrigins named it. The
+  // ordering half — config installed *after* the routes exist — is the test
+  // below.
   it('accepts an origin configured through server.allowedOrigins', async () => {
     loadConfigForTest({
       auth: { secret: 'test-secret-at-least-32-characters-long', url: 'http://localhost:3001' },
@@ -346,6 +347,53 @@ describe('realtime WebSocket origins and liveness', () => {
     });
     await configuredClient.opened;
     expect(await configuredClient.nextMessage()).toEqual({ type: 'ready' });
+
+    const rejectedClient = connect(wsUrl, {
+      Cookie: user.cookie,
+      Origin: 'https://attacker.example',
+    });
+    await rejectedClient.opened;
+    expect(await rejectedClient.nextMessage()).toEqual({
+      type: 'error',
+      error: 'Origin is not allowed',
+      code: ERROR_CODES.PERMISSION_DENIED,
+    });
+    expect((await rejectedClient.closed).code).toBe(REALTIME_CLOSE_CODES.FORBIDDEN);
+  });
+
+  // The snapshot bug, inverted: build the routes first, name the origin second.
+  // `realtimeRoutes` in app.ts is a module-scope instance built at first
+  // import, long before a split deployment's config file is read — and under
+  // the unisolated integration lane, before whichever test file happens to load
+  // its own config. A Set captured at construction rejects this handshake.
+  it('accepts an origin the config gains after the routes were built', async () => {
+    const { httpUrl, wsUrl } = startServer();
+    const user = await signUp(httpUrl);
+
+    loadConfigForTest({
+      auth: { secret: 'test-secret-at-least-32-characters-long', url: 'http://localhost:3001' },
+      server: {
+        host: '0.0.0.0',
+        port: 3001,
+        publicUrl: '',
+        allowedOrigins: ['https://late.example.com'],
+      },
+    });
+
+    const configuredClient = connect(wsUrl, {
+      Cookie: user.cookie,
+      Origin: 'https://late.example.com',
+    });
+    await configuredClient.opened;
+    expect(await configuredClient.nextMessage()).toEqual({ type: 'ready' });
+  });
+
+  // The inverse direction, so "read it per connection" cannot degrade into
+  // "trust everything": an origin no config ever named is still rejected after
+  // the routes have been serving.
+  it('still rejects an origin no config named', async () => {
+    const { httpUrl, wsUrl } = startServer();
+    const user = await signUp(httpUrl);
 
     const rejectedClient = connect(wsUrl, {
       Cookie: user.cookie,
