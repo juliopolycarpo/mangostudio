@@ -25,12 +25,22 @@ class RecordingRealtimeBus {
 
 /** Answers the sibling enumeration from a fixed list, without a database. */
 class FakeSiblingIndex {
-  readonly queries: Array<{ userId: string; environmentId: string; workdir: string }> = [];
+  readonly queries: Array<{
+    userId: string;
+    environmentId: string;
+    workdir: string;
+    root?: string;
+  }> = [];
 
   constructor(private readonly chatIds: readonly string[]) {}
 
-  list = (userId: string, environmentId: string, workdir: string): Promise<string[]> => {
-    this.queries.push({ userId, environmentId, workdir });
+  list = (
+    userId: string,
+    environmentId: string,
+    workdir: string,
+    root?: string
+  ): Promise<string[]> => {
+    this.queries.push({ userId, environmentId, workdir, ...(root ? { root } : {}) });
     return Promise.resolve([...this.chatIds]);
   };
 }
@@ -113,6 +123,25 @@ describe('GitHub write invalidation', () => {
         scopes: ['state', 'branches', 'history', 'diffs', 'github'],
       });
     }
+  });
+
+  it('widens the checkout fan-out to chats under a resolved worktree root (#944)', async () => {
+    // A chat bound to a package subdirectory of the same checkout shares the
+    // same HEAD, index and working tree as one bound to the root.
+    const bus = installBus();
+    const siblings = new FakeSiblingIndex(['chat-2']);
+    const target: GithubInvalidationTarget = { ...TARGET, root: '/remote/repo' };
+
+    await publishGithubWriteInvalidation(target, 'checkout', { listSiblingChatIds: siblings.list });
+
+    expect(siblings.queries).toEqual([
+      { userId: 'user-1', environmentId: 'devbox', workdir: '/remote/repo', root: '/remote/repo' },
+    ]);
+    expect(
+      bus.published.map((entry) =>
+        entry.message.type === 'invalidate' ? entry.message.topic : entry.message.type
+      )
+    ).toEqual(['git:chat-1', 'git:chat-2']);
   });
 
   it('still invalidates the initiating chat when the sibling enumeration fails', async () => {

@@ -37,6 +37,7 @@ interface Published {
   readonly environmentId: string;
   readonly workdir: string;
   readonly operation: GithubWriteOperation;
+  readonly root?: string;
 }
 
 const PUBLISHED_TARGET = { chatId: 'chat-1', environmentId: 'devbox', workdir: '/remote/repo' };
@@ -44,7 +45,7 @@ const PUBLISHED_TARGET = { chatId: 'chat-1', environmentId: 'devbox', workdir: '
 /** Captures the invalidation target the write hands to the realtime layer. */
 function recordPublish(published: Published[]) {
   return (
-    target: { chatId: string; environmentId: string; workdir: string },
+    target: { chatId: string; environmentId: string; workdir: string; root?: string },
     operation: GithubWriteOperation
   ): Promise<void> => {
     published.push({
@@ -52,6 +53,7 @@ function recordPublish(published: Published[]) {
       environmentId: target.environmentId,
       workdir: target.workdir,
       operation,
+      ...(target.root ? { root: target.root } : {}),
     });
     return Promise.resolve();
   };
@@ -174,7 +176,15 @@ describe('GitHub write service', () => {
         operation === 'ready' ? 'pr.ready' : 'pr.checkout',
         'pr.view-summary',
       ]);
-      expect(published).toEqual([{ ...PUBLISHED_TARGET, operation }]);
+      // Only `checkout` resolves a worktree root, so only it widens the
+      // invalidation fan-out beyond this exact workdir (#944).
+      expect(published).toEqual([
+        {
+          ...PUBLISHED_TARGET,
+          operation,
+          ...(operation === 'checkout' ? { root: '/remote/repo' } : {}),
+        },
+      ]);
     }
   });
 
@@ -212,7 +222,13 @@ describe('GitHub write service', () => {
         Error
       );
 
-      expect(published).toEqual([{ ...PUBLISHED_TARGET, operation }]);
+      expect(published).toEqual([
+        {
+          ...PUBLISHED_TARGET,
+          operation,
+          ...(operation === 'checkout' ? { root: '/remote/repo' } : {}),
+        },
+      ]);
       const after = await cache.read({ ...SELECTION, subject: 'inbox' }, 'v', () =>
         Promise.resolve({})
       );

@@ -14,20 +14,27 @@
  * The publish fans out to every chat the same user has bound to the same
  * workdir on the same machine, not just the chat that made the write: a second
  * panel open on the repository reads the same GitHub state and the same working
- * tree, so it is exactly as stale as the first (#943). The initiating chat is
- * published synchronously and unconditionally; the sibling enumeration is one
- * database read that runs after it and is failure-isolated, because the write
- * already happened and a lookup error must not turn it into an apparent
- * failure. Siblings in *other* checkouts of the same repository are out of this
- * set on purpose — their staleness line ages visibly until the repo-scoped
- * topic follow-up lands.
+ * tree, so it is exactly as stale as the first (#943). For `checkout`, which
+ * already resolves the worktree root to serialize against the git write queue,
+ * that fan-out widens to every chat bound anywhere under the root — a chat
+ * bound to a package subdirectory of the same checkout shares the same HEAD,
+ * index and working tree just as much as one bound to the root (#944). The
+ * initiating chat is published synchronously and unconditionally; the sibling
+ * enumeration is one database read that runs after it and is failure-isolated,
+ * because the write already happened and a lookup error must not turn it into
+ * an apparent failure. Siblings in *other* checkouts of the same repository are
+ * still out of this set on purpose — their staleness line ages visibly until
+ * the repo-scoped topic follow-up lands.
  */
 
 import { type GitScope, gitTopic } from '@mangostudio/shared/realtime';
 import { getDb } from '../../../db/database';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getRealtimeBus } from '../../../services/realtime/realtime-bus';
-import { listChatIdsByWorkdir } from '../../chats/infrastructure/chat-repository';
+import {
+  listChatIdsByWorkdir,
+  listChatIdsUnderWorktreeRoot,
+} from '../../chats/infrastructure/chat-repository';
 
 const logger = createDiagnosticLogger('github-realtime');
 
@@ -53,12 +60,15 @@ export interface GithubInvalidationTarget {
   readonly chatId: string;
   readonly environmentId: string;
   readonly workdir: string;
+  /** The resolved worktree root, when the write already resolved one (checkout). */
+  readonly root?: string;
 }
 
 export type ListSiblingChatIds = (
   userId: string,
   environmentId: string,
-  workdir: string
+  workdir: string,
+  root?: string
 ) => Promise<string[]>;
 
 export interface GithubRealtimeOptions {
@@ -66,8 +76,10 @@ export interface GithubRealtimeOptions {
   readonly listSiblingChatIds?: ListSiblingChatIds;
 }
 
-const defaultListSiblingChatIds: ListSiblingChatIds = (userId, environmentId, workdir) =>
-  listChatIdsByWorkdir(userId, environmentId, workdir, getDb());
+const defaultListSiblingChatIds: ListSiblingChatIds = (userId, environmentId, workdir, root) =>
+  root
+    ? listChatIdsUnderWorktreeRoot(userId, environmentId, root, getDb())
+    : listChatIdsByWorkdir(userId, environmentId, workdir, getDb());
 
 /**
  * Publishes only after the write has succeeded. Resolves once the fan-out has
@@ -91,7 +103,12 @@ export async function publishGithubWriteInvalidation(
 
   const listSiblingChatIds = options.listSiblingChatIds ?? defaultListSiblingChatIds;
   try {
-    const chatIds = await listSiblingChatIds(target.userId, target.environmentId, target.workdir);
+    const chatIds = await listSiblingChatIds(
+      target.userId,
+      target.environmentId,
+      target.workdir,
+      target.root
+    );
     for (const chatId of new Set(chatIds)) {
       if (chatId === target.chatId) continue;
       bus.publish(target.userId, {

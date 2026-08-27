@@ -196,11 +196,13 @@ export async function listByIdsForUser(
 }
 
 /**
- * Ids of every chat one user has bound to the same workdir on the same
+ * Ids of every chat one user has bound to the exact same workdir on the same
  * machine. A write through any of them changes what all of them read, so the
- * realtime layer fans its invalidation out to this set. Exact workdir
- * equality on purpose: two checkouts of one repository are two working trees
- * with independent state.
+ * realtime layer fans its invalidation out to this set. Exact equality on
+ * purpose: two checkouts of one repository are two working trees with
+ * independent state, and `pr create` / `pr ready` never resolve a worktree
+ * root to widen the match against, unlike `pr checkout`
+ * ({@link listChatIdsUnderWorktreeRoot}).
  *
  * @example
  * const ids = await listChatIdsByWorkdir(userId, environmentId, workdir, db);
@@ -219,6 +221,41 @@ export async function listChatIdsByWorkdir(
     .where('workdir', '=', workdir)
     .execute();
   return rows.map((row) => row.id);
+}
+
+/** True when `workdir` is `root` itself or a path underneath it. */
+function isUnderWorktreeRoot(workdir: string, root: string): boolean {
+  return workdir === root || workdir.startsWith(`${root}/`) || workdir.startsWith(`${root}\\`);
+}
+
+/**
+ * Ids of every chat one user has bound to a workdir at or under a resolved
+ * git worktree root, on one machine. `pr checkout` moves the shared HEAD,
+ * index and working tree for the whole worktree, so a chat bound to a
+ * subdirectory of it — a monorepo package, say — is exactly as stale as one
+ * bound to the root itself, not just one bound to the identical string
+ * (#944). Matched in application code rather than a `LIKE` prefix: `root`
+ * comes from `git rev-parse --show-toplevel` and could contain `%` or `_`.
+ *
+ * @example
+ * const ids = await listChatIdsUnderWorktreeRoot(userId, environmentId, root, db);
+ */
+export async function listChatIdsUnderWorktreeRoot(
+  userId: string,
+  environmentId: string,
+  root: string,
+  db: Kysely<Database>
+): Promise<string[]> {
+  const rows = await db
+    .selectFrom('chats')
+    .select(['id', 'workdir'])
+    .where('userId', '=', userId)
+    .where('environmentId', '=', environmentId)
+    .where('workdir', 'is not', null)
+    .execute();
+  return rows
+    .filter((row) => row.workdir !== null && isUnderWorktreeRoot(row.workdir, root))
+    .map((row) => row.id);
 }
 
 export async function getById(id: string, db: Kysely<Database>): Promise<ChatRecord | undefined> {
