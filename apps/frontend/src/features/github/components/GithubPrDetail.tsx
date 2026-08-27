@@ -169,6 +169,40 @@ function MarkReadyAction({
   );
 }
 
+/**
+ * A failed sub-query of the detail view, with the retry it needs.
+ *
+ * The rail's header refresh button refetches the *list* query behind whichever
+ * tab is open, not the three this view runs, so a checks or threads read that
+ * failed on its own has no other way back. One line rather than an `EmptyState`
+ * because it sits between two blocks that are already rendering.
+ *
+ * @example
+ * <DetailQueryError label={t.github.errors.checks} onRetry={query.refetch} />
+ */
+function DetailQueryError({
+  label,
+  onRetry,
+}: {
+  readonly label: string;
+  readonly onRetry: () => Promise<unknown>;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <p className="text-[10px] text-error">
+      {label}{' '}
+      <button
+        type="button"
+        onClick={() => void onRetry()}
+        className="cursor-pointer font-semibold underline hover:text-on-surface focus-visible:outline-2 focus-visible:outline-primary"
+      >
+        {t.common.retry}
+      </button>
+    </p>
+  );
+}
+
 /** gh's five buckets, painted the way the rest of the panel paints state. */
 const CHECK_TONES: Readonly<Record<GithubCheckBucket, StatusDotTone>> = {
   pass: 'success',
@@ -182,6 +216,14 @@ function ChecksBlock({ chatId, number }: { readonly chatId: string; readonly num
   const { t } = useI18n();
   const query = useQuery(githubPrChecksQueryOptions(chatId, number));
 
+  // A failed read is not a lost connection, and only the second one is already
+  // explained above. `gh pr checks` answers separately from `gh pr view`, so it
+  // can rate-limit, lose authorization, or fail in a way this build does not
+  // recognize while the detail around it renders fine — and staying silent
+  // there is indistinguishable from a pull request that runs no checks.
+  if (query.isError) {
+    return <DetailQueryError label={t.github.errors.checks} onRetry={query.refetch} />;
+  }
   // Silent while loading and on every not-ok state: the detail view above has
   // already explained a lost connection, and a second copy of that explanation
   // in a 360px rail is noise.
@@ -249,6 +291,12 @@ function ReviewThreadsAction({
   const { t } = useI18n();
   const query = useQuery(githubPrThreadsQueryOptions(chatId, number));
 
+  // Same reasoning as `ChecksBlock`: this GraphQL read fails independently of
+  // the detail above it, and the action this panel exists for silently missing
+  // reads as "nothing to address" rather than as a failure.
+  if (query.isError) {
+    return <DetailQueryError label={t.github.errors.threads} onRetry={query.refetch} />;
+  }
   if (query.data?.state !== 'ok') return null;
 
   const task = reviewThreadsToTask(
