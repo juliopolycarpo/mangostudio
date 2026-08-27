@@ -66,10 +66,14 @@ export function GithubPanel({ chatId, workdir }: GithubPanelProps) {
       <GithubRepoSection
         chatId={chatId}
         workdir={workdir}
-        // No upstream is what makes the combined push-then-create action
-        // mandatory rather than a convenience: `gh pr create` on an unpushed
-        // branch prompts for where to push, and prompts are disabled.
-        needsPush={Boolean(branch?.name) && !branch?.upstream}
+        // No upstream, or an upstream that is behind local commits, is what
+        // makes the combined push-then-create action mandatory rather than a
+        // convenience: `gh pr create --head` skips pushing entirely, so a
+        // branch ahead of its already-published upstream would otherwise open
+        // a pull request missing the commits the user meant to submit, and a
+        // branch with none at all makes `gh` prompt for where to push —
+        // prompts are disabled, so that prompt is a hang.
+        needsPush={Boolean(branch?.name) && (!branch?.upstream || (branch?.ahead ?? 0) > 0)}
         branchName={branch?.name ?? null}
         branchLoading={gitState.isLoading}
         prefs={prefs}

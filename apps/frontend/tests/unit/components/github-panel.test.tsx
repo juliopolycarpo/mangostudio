@@ -352,4 +352,37 @@ describe('GithubPanel', () => {
       scenario.restore();
     }
   });
+
+  /**
+   * `gh pr create --head` skips pushing outright, so a branch that already has
+   * an upstream but sits ahead of it still needs the combined push-then-create
+   * path — not just a branch with no upstream at all.
+   */
+  it('offers to push first when the branch has an upstream but is ahead of it', async () => {
+    const { scenario } = await renderPanel({
+      gitState: {
+        ...GIT_REPO_STATE,
+        status: {
+          ...GIT_REPO_STATE.status,
+          branch: {
+            name: 'feat/github-panel',
+            upstream: 'origin/feat/github-panel',
+            ahead: 2,
+            behind: 0,
+          },
+        },
+      },
+    });
+    try {
+      act(() => {
+        requestGithubCreatePr();
+      });
+
+      expect(
+        await screen.findByRole('button', { name: 'Push the branch and create the pull request' })
+      ).toBeVisible();
+    } finally {
+      scenario.restore();
+    }
+  });
 });
