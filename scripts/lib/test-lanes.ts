@@ -54,6 +54,13 @@ export interface TestLane {
    * lane's own cwd, so every lane needs a separate one.
    */
   readonly timingsPath?: string;
+  /**
+   * Repo-relative LCOV slice this lane writes, set only where a workspace owns
+   * more than one lane and the slices have to be merged into the single file
+   * `SHARDED_LCOV_PATHS` names. A single-lane workspace writes that file
+   * directly from its own coverage dir, with nothing to merge.
+   */
+  readonly lcovPath?: string;
   /** Repo-relative manifest declaring the lane's coverage script. */
   readonly manifest: string;
   /** Script key inside that manifest. */
@@ -103,9 +110,10 @@ export const TEST_LANES: readonly TestLane[] = [
   // intermittently wedges the whole invocation in CI (oven-sh/bun#39709 — the
   // runner never exits, or `spawnSync` stalls inside isolate workers), so the
   // spawn-heavy integration files stay out of it until oven-sh/bun#38008
-  // ships. Each lane writes its own LCOV slice; the api `test:coverage`
-  // script merges the two into the single `coverage/api/lcov.info` the
-  // coverage readers expect. That is one more merge hop than the other
+  // ships. Each lane writes its own LCOV slice, and the api `test:coverage`
+  // script delegates to scripts/ci/run-workspace-coverage.ts, which runs both
+  // lanes whatever the earlier one did and merges the slices into the single
+  // `coverage/api/lcov.info` the coverage readers expect. That is one more merge hop than the other
   // workspaces take, and merge-lcov-shards.ts is not strictly associative —
   // its "shape" record is whichever input covered the most lines, so a
   // pre-merged pair can win a shape a flat merge would have given to a
@@ -118,6 +126,7 @@ export const TEST_LANES: readonly TestLane[] = [
     sharded: true,
     junitPath: `${JUNIT_DIR}/api-unit.xml`,
     timingsPath: `${TIMINGS_DIR}/api-unit.json`,
+    lcovPath: '.mango/artifacts/coverage/api-unit/lcov.info',
     manifest: 'apps/api/package.json',
     coverageScript: 'test:coverage:unit',
   },
@@ -127,6 +136,7 @@ export const TEST_LANES: readonly TestLane[] = [
     sharded: true,
     junitPath: `${JUNIT_DIR}/api-integration.xml`,
     timingsPath: `${TIMINGS_DIR}/api-integration.json`,
+    lcovPath: '.mango/artifacts/coverage/api-integration/lcov.info',
     manifest: 'apps/api/package.json',
     coverageScript: 'test:coverage:integration',
   },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { ALL_WORKSPACE_NAMES, ROOT_DIR } from '../lib/config';
 import { parseShard, shardedCoverageWorkspaces, testLaneEnv } from '../lib/test';
@@ -45,6 +45,21 @@ describe('test lane declarations', () => {
       expect(script).toContain(`--timings=${expected}`);
       // Without this the lanes read a timings file and never refresh it.
       expect(script).toContain('--update-timings');
+    }
+  );
+
+  // Same pinning as the JUnit and timings paths, for the merge step's inputs:
+  // `lcovPath` is what run-workspace-coverage.ts merges, `--coverage-dir` is
+  // what actually gets written. Drift means merging a slice nothing produced,
+  // which reports one lane's coverage as the whole workspace's — on a run
+  // where every job still exits 0.
+  it.each(TEST_LANES.filter((lane) => lane.lcovPath))(
+    'the $id lane writes LCOV where the lane table says it does',
+    async (lane) => {
+      const scripts = await readScripts(lane.manifest);
+      const dir = dirname(lane.lcovPath as string);
+      const expected = lane.manifest === 'package.json' ? dir : `../../${dir}`;
+      expect(scripts[lane.coverageScript]).toContain(`--coverage-dir=${expected}`);
     }
   );
 
@@ -152,26 +167,32 @@ describe('api lanes', () => {
     expect(script).not.toContain('tests/unit');
   });
 
-  // Each lane writes its own slice; the orchestrating script must merge them
-  // into the one per-workspace file every coverage reader (and the shard
-  // upload) expects, or api coverage silently becomes integration-only.
-  it('merges both LCOV slices into the staged api file', async () => {
+  // `test:coverage` delegates to the orchestrator rather than chaining the two
+  // lanes and the merge with `&&`. A chain lets one failing unit test skip the
+  // integration lane *and* the merge, so a red shard uploads no integration
+  // JUnit and no api LCOV at all — and when the failure is shared across the
+  // shards, the merge job dies on a missing input instead of reporting the
+  // test failures. Pinned as an absence of `&&` because that is the shape the
+  // next person reaching for a second lane would copy.
+  it('runs both lanes through the coverage orchestrator, not an && chain', async () => {
     const scripts = await readScripts('apps/api/package.json');
     const script = scripts['test:coverage'];
-    expect(script).toContain('merge-lcov-shards.ts');
-    expect(script).toContain(`../../${SHARDED_LCOV_PATHS.api}`);
-    expect(script).toContain('coverage/api-unit/lcov.info');
-    expect(script).toContain('coverage/api-integration/lcov.info');
+    expect(script).toContain('run-workspace-coverage.ts');
+    expect(script).toContain('--workspace=api');
+    expect(script).not.toContain('&&');
   });
 
-  it('gives each lane its own coverage directory', async () => {
-    const scripts = await readScripts('apps/api/package.json');
-    expect(scripts['test:coverage:unit']).toContain(
-      '--coverage-dir=../../.mango/artifacts/coverage/api-unit'
+  // Two lanes sharing a coverage directory would have the second overwrite the
+  // first, and a slice pointed at the staged file would make the merge read its
+  // own output as an input. The lane-table-to-manifest pin is in the registry
+  // suite above; this pins the pair is distinct in the first place.
+  it('gives each lane its own LCOV slice, separate from the staged file', () => {
+    const slices = TEST_LANES.filter((lane) => lane.workspace === 'api').map(
+      (lane) => lane.lcovPath
     );
-    expect(scripts['test:coverage:integration']).toContain(
-      '--coverage-dir=../../.mango/artifacts/coverage/api-integration'
-    );
+    expect(slices).toHaveLength(2);
+    expect(new Set(slices).size).toBe(2);
+    expect(slices).not.toContain(SHARDED_LCOV_PATHS.api);
   });
 });
 

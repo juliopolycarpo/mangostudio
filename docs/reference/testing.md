@@ -128,8 +128,16 @@ that made them.
 
 The api coverage lane is **two invocations, with opposite settings**:
 `test:coverage:unit` keeps `--parallel=1`, `test:coverage:integration` takes no
-flag at all, and `test:coverage` chains them and merges their LCOV slices into
-the one staged `coverage/api/lcov.info`. The split exists because the unit
+flag at all, and `test:coverage` delegates to
+`scripts/ci/run-workspace-coverage.ts`, which runs both lanes and merges their
+LCOV slices into the one staged `coverage/api/lcov.info`. The orchestrator is
+there instead of an `&&` chain because a chain lets one failing unit test skip
+the integration lane *and* the merge: the red shard then uploads no integration
+JUnit and no api LCOV, and a failure shared across the shards kills the merge
+job on a missing input rather than reporting the test failures. Every lane runs
+whatever the earlier ones did, the merge runs over whatever slices exist (none
+is not an error), and the exit code is the first failing lane's. The split
+itself exists because the unit
 suite cannot live without isolation (the 172-failure table below) while the
 integration suite cannot safely live *inside* it — Bun's isolate machinery is
 what intermittently hangs the whole invocation in CI (see [The isolate runner can hang](#the-isolate-runner-can-hang)), and the spawn-heavy integration
