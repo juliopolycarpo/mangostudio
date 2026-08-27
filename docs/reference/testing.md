@@ -533,23 +533,50 @@ reporter first rather than assuming the XML grew an `errors` count.
 
 ### Randomized order
 
-`randomized-order-nightly.yml` runs `apps/api`, `apps/shared` and
-`apps/runtime` under `--randomize --seed=<run number>` every night. It exists
-for the one class the merge gate cannot see: a test that passes only because of
-what the file before it left behind, which is a live hazard here while
-`bun test` shares one module graph across a lane's files.
+`randomized-order-nightly.yml` runs four lanes under
+`--randomize --seed=<run number>` every night. It exists for the one class the
+merge gate cannot see: a test that passes only because of what the file before it
+left behind, which is a live hazard here while `bun test` shares one module graph
+across a lane's files.
 
 `--randomize` shuffles **file order** as well as the tests inside each file —
 verified, not assumed: three probe files run as `c, b, a` under seed 3 where
 seeds 1 and 2 keep `a, b, c`. File order is the half that matters for leaked
 `mock.module` registrations.
 
+**The isolation setting decides which half of the hazard a lane can detect**,
+which is why the matrix carries it per entry:
+
+| Lane              | Invocation                                | Detects                          |
+| ----------------- | ----------------------------------------- | -------------------------------- |
+| `api`             | `--parallel=1` over the whole workspace   | order dependence *within* a file |
+| `api-integration` | no `--parallel`, over `tests/integration` | *cross-file* leakage             |
+| `shared`          | `--parallel=1`                            | order dependence within a file   |
+| `runtime`         | `--parallel=1`                            | order dependence within a file   |
+
+`--parallel=1` means "one worker, *isolated*" (see [Parallelism](#parallelism)),
+so a fresh global per file is exactly what hides cross-file leakage. The
+`api-integration` entry deliberately re-runs files the `api` entry already
+covered, in the mode the merge gate actually uses — without it, the class this
+workflow exists for had no detector anywhere in CI, which is how the sharded,
+unisolated lane came to rely on a rotating partition for safety.
+
 It is deliberately not merge-gating. A suite that fails weekly on a different
 seed is a bug report; making it block merges teaches everyone to re-run CI, and
-that habit outlasts the fix. A failure logs its seed and uploads the run log,
-because the order **is** the finding. Reproduce with
-`(cd apps/<workspace> && bun test --timeout 15000 --parallel=1 --randomize --seed=<n>)`,
-and read what ran before the failing file rather than the failing file itself.
+that habit outlasts the fix. `fail-fast: false` keeps one red lane from
+cancelling the others' evidence. A failure logs its seed and uploads the run log
+under `randomized-order-<lane>-seed-<n>`, because the order **is** the finding.
+Each job's log opens with the exact command to reproduce its own lane; read what
+ran before the failing file rather than the failing file itself.
+
+A worked example of what it catches, and of the fix shape:
+`settings-agents.integration.test.ts` failed on seeds 2, 4, 5 and 6 (1, 3, 7, 8
+clean). Every test in it persisted per-user rows under one fixed user id, so the
+`default` override written by "updates built-in default settings per user" was
+what "synthesizes default from legacy app settings" read when the shuffle put
+them in that order. The fix is a fresh identity per test rather than a list of
+tables to truncate — namespacing the rows means a test that later writes a new
+table cannot reopen the hole.
 
 ### Code Health
 
