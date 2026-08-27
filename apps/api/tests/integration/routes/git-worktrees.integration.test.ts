@@ -16,10 +16,18 @@ import {
   createRealtimeBus,
   setRealtimeBusForTests,
 } from '../../../src/services/realtime/realtime-bus';
+import { createTargetPaths } from '../../../src/services/runtime-client/target-paths';
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const hasGit = Bun.which('git') !== null;
+// This suite runs real `git` against the actual filesystem rather than a
+// runtime host, so the path semantics `resolveGitCommonDir` needs are this
+// process's own platform rather than a stub for one.
+const hostPaths = createTargetPaths({
+  pathStyle: process.platform === 'win32' ? 'win32' : 'posix',
+  homeDir: tmpdir(),
+} as Parameters<typeof createTargetPaths>[0]);
 const tempDirs: string[] = [];
 let restoreAuth: (() => void) | null = null;
 
@@ -303,8 +311,10 @@ describe('Git worktree routes', () => {
       const fromLinked = await runFixtureGit(linked, ['rev-parse', '--git-common-dir']);
       expect(fromMain).not.toBe(fromLinked);
 
-      expect(resolveGitCommonDir(root, fromMain)).toBe(join(root, '.git'));
-      expect(resolveGitCommonDir(linked, fromLinked)).toBe(resolveGitCommonDir(root, fromMain));
+      expect(resolveGitCommonDir(root, fromMain, hostPaths)).toBe(join(root, '.git'));
+      expect(resolveGitCommonDir(linked, fromLinked, hostPaths)).toBe(
+        resolveGitCommonDir(root, fromMain, hostPaths)
+      );
     }
   );
 

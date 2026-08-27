@@ -112,12 +112,13 @@ export function removeWorktree(
     signal,
     'Removing worktree',
     'worktreeRemove',
-    async (root, selection) => {
+    async (root, selection, paths) => {
       const { worktrees } = await readWorktreeList(root, signal, selection);
       // The target machine's path semantics, not the hub's: these are paths on
       // that filesystem, and comparing them through `node:path` here would
-      // match nothing at all whenever the two platforms disagree.
-      const paths = await readTargetPaths(selection);
+      // match nothing at all whenever the two platforms disagree. Reused from
+      // `runWorktreeMutation`, which already reads them to key the common-dir
+      // lock, rather than asking the runtime client a second time.
       const worktree = findWorktree(worktrees, root, input.path, paths);
       if (!worktree) {
         throw new GitWriteError(
@@ -194,14 +195,22 @@ async function runWorktreeMutation(
   signal: AbortSignal | undefined,
   operation: string,
   invalidationOperation: WorktreeMutation,
-  mutation: (root: string, selection: GitRuntimeSelection) => Promise<void>
+  mutation: (
+    root: string,
+    selection: GitRuntimeSelection,
+    paths: WorktreePathSemantics
+  ) => Promise<void>
 ): Promise<GitWorktreeListResponse> {
   const selection: GitRuntimeSelection = target;
   try {
     const root = await requireRepoRoot(workdir, signal, selection);
-    const commonDir = await readGitCommonDir(root, selection, signal);
+    // Read once and reused for both the lock key below and whichever mutation
+    // needs to compare worktree paths: they are paths on the runtime, not the
+    // hub, and every caller of this function is about that same machine.
+    const paths = await readTargetPaths(selection);
+    const commonDir = await readGitCommonDir(root, selection, paths, signal);
     const worktrees = await withMutationLock(target.environmentId, commonDir, async () => {
-      await mutation(root, selection);
+      await mutation(root, selection, paths);
       return await readWorktreeList(root, signal, selection);
     });
     publishGitWriteInvalidation(target, invalidationOperation);
@@ -234,6 +243,7 @@ async function readTargetPaths(selection: GitRuntimeSelection): Promise<Worktree
 async function readGitCommonDir(
   root: string,
   selection: GitRuntimeSelection,
+  paths: WorktreePathSemantics,
   signal?: AbortSignal
 ): Promise<string> {
   const result = await runGit(['rev-parse', '--git-common-dir'], {
@@ -241,7 +251,7 @@ async function readGitCommonDir(
     signal,
     ...selection,
   });
-  return resolveGitCommonDir(root, result.stdout);
+  return resolveGitCommonDir(root, result.stdout, paths);
 }
 
 function mapWorktreeFailure(error: unknown, operation: string): never {
