@@ -1,6 +1,8 @@
 ---
-description: Cursor Cloud VM environment facts and gotchas. Skip unless this session is a Cursor Cloud agent.
-alwaysApply: true
+description: Apply only when this session is a Cursor Cloud or background agent in a Cloud VM (exec-daemon Node, ~/.mango, bun install --ignore-scripts). Do not apply in local Cursor Desktop or the default IDE harness.
+alwaysApply: false
+metadata:
+  environments: cloud
 ---
 
 # Cursor Cloud
