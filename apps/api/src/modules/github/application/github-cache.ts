@@ -30,12 +30,27 @@ export interface GithubCacheScope {
   readonly subject: string;
 }
 
+export interface GithubCacheReadOptions {
+  /**
+   * Drops this one entry before reading, so the load behind it is a real `gh`
+   * call rather than the cached answer from up to `ttlMs` ago.
+   *
+   * Scoped to the exact key rather than the whole machine: the coarse
+   * `clear` below is right for a write, which can touch any read, but a
+   * refresh button asks about the one list it is sitting on, and dropping the
+   * rest of that machine's cache would turn one click into every other open
+   * tab's next read paying for a `gh` call it didn't ask for.
+   */
+  readonly bypass?: boolean;
+}
+
 export interface GithubCache {
   /** Returns a cached payload or loads and caches one. */
   readonly read: <T>(
     scope: GithubCacheScope,
     variant: string,
-    load: () => Promise<T>
+    load: () => Promise<T>,
+    options?: GithubCacheReadOptions
   ) => Promise<T>;
   /**
    * Drops every entry for one machine.
@@ -71,8 +86,16 @@ export function createGithubCache(options: CreateGithubCacheOptions = {}): Githu
   });
 
   return {
-    read: <T>(scope: GithubCacheScope, variant: string, load: () => Promise<T>): Promise<T> =>
-      cache.get(cacheKey(scope, variant), load) as Promise<T>,
+    read: <T>(
+      scope: GithubCacheScope,
+      variant: string,
+      load: () => Promise<T>,
+      options?: GithubCacheReadOptions
+    ): Promise<T> => {
+      const key = cacheKey(scope, variant);
+      if (options?.bypass) cache.clearWhere((candidate) => candidate === key);
+      return cache.get(key, load) as Promise<T>;
+    },
     clear: (scope) => {
       const prefix = machinePrefix(scope.userId, scope.environmentId);
       cache.clearWhere((key) => key.startsWith(prefix));

@@ -11,7 +11,8 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { GithubPanel } from '../../../src/features/github/components/GithubPanel';
 import { requestGithubCreatePr } from '../../../src/features/github/lib/github-panel-request';
 import { AppContext } from '../../../src/lib/app-context';
@@ -219,6 +220,36 @@ describe('GithubPanel', () => {
     try {
       expect(await screen.findByText('Tighten the runtime probe cache')).toBeVisible();
       expect(screen.getByText('mango/runtime #17')).toBeVisible();
+    } finally {
+      scenario.restore();
+    }
+  });
+
+  /**
+   * The explicit refresh button is meaningless if it just re-reads the API's
+   * own ~60s cache: GitHub could have changed externally and the panel would
+   * still show the same rows with a spinner in between. `refresh=true` is
+   * what tells the server to bypass that cache for this one call.
+   */
+  it('asks the server to bypass its cache when the user presses refresh', async () => {
+    const user = userEvent.setup();
+    const { scenario } = await renderPanel({
+      inbox: { state: 'ok', cachedAt: 1_000, items: [] },
+    });
+    try {
+      expect(await screen.findByText('Nothing is waiting on your review.')).toBeVisible();
+      scenario.respondWithJson('GET', '/api/github/inbox?refresh=true', {
+        body: { state: 'ok', cachedAt: 2_000, items: [INBOX_ITEM] },
+      });
+
+      const inbox = within(screen.getByTestId('github-inbox-section'));
+      await user.click(inbox.getByRole('button', { name: 'Refresh' }));
+
+      // Resolves only because the mock is registered under the
+      // `refresh=true` query string above — an unscoped refetch would hit the
+      // already-registered plain `/api/github/inbox` key and repeat the empty
+      // list instead.
+      expect(await screen.findByText('Tighten the runtime probe cache')).toBeVisible();
     } finally {
       scenario.restore();
     }

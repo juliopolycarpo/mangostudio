@@ -15,6 +15,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { checkoutPullRequest } from '../api';
+import { useForceRefresh } from '../hooks/use-force-refresh';
 import { useIssueToNewChat } from '../hooks/use-issue-to-new-chat';
 import { type GithubPanelPrefs, ISSUE_FILTERS, PR_FILTERS } from '../lib/github-panel-prefs';
 import { onGithubCreatePrRequest } from '../lib/github-panel-request';
@@ -88,12 +89,13 @@ export function GithubRepoSection({
     []
   );
 
+  const forceRefresh = useForceRefresh();
   const prsQuery = useQuery({
-    ...githubPrsQueryOptions(chatId, prefs.prFilter),
+    ...githubPrsQueryOptions(chatId, prefs.prFilter, forceRefresh.read),
     enabled: Boolean(workdir) && tab === 'prs',
   });
   const issuesQuery = useQuery({
-    ...githubIssuesQueryOptions(chatId, prefs.issueFilter),
+    ...githubIssuesQueryOptions(chatId, prefs.issueFilter, forceRefresh.read),
     enabled: Boolean(workdir) && tab === 'issues',
   });
   const activeQuery = tab === 'prs' ? prsQuery : issuesQuery;
@@ -110,7 +112,7 @@ export function GithubRepoSection({
           <>
             <GithubStaleness cachedAt={cachedAt} refreshing={activeQuery.isFetching} />
             <GithubRefreshButton
-              onRefresh={() => void activeQuery.refetch()}
+              onRefresh={() => void forceRefresh.trigger(activeQuery.refetch)}
               refreshing={activeQuery.isFetching}
             />
           </>

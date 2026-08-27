@@ -136,6 +136,7 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
               },
               limit: query.limit ?? GITHUB_LIST_LIMIT_DEFAULT,
               signal: request.signal,
+              refresh: query.refresh,
             })
           )
       )
@@ -153,6 +154,7 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
               ...repoRequest(target, request.signal),
               filter: query.filter ?? 'open',
               limit: query.limit ?? GITHUB_LIST_LIMIT_DEFAULT,
+              refresh: query.refresh,
             })
           );
         }
@@ -171,6 +173,7 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
               ...repoRequest(target, request.signal),
               filter: query.filter ?? 'open',
               limit: query.limit ?? GITHUB_LIST_LIMIT_DEFAULT,
+              refresh: query.refresh,
             })
           );
         }

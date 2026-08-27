@@ -421,16 +421,27 @@ const GithubListLimitSchema = Type.Integer({ minimum: 1, maximum: 30 });
 /** Page size the API applies when a list query omits `limit`. */
 export const GITHUB_LIST_LIMIT_DEFAULT = 20;
 
+/**
+ * `refresh` bypasses the API's ~60s read-through cache for this one call. The
+ * panel's own 60s `staleTime` already skips a refetch that would just hit
+ * that cache, so a request carrying it is always the user's own refresh
+ * button — the one case where "the cached answer is still young" is the
+ * wrong tradeoff.
+ */
+const GithubRefreshSchema = Type.Optional(Type.Boolean());
+
 export const GithubPrsQuerySchema = Type.Object({
   chatId: Type.String({ minLength: 1 }),
   filter: Type.Optional(GithubPrFilterSchema),
   limit: Type.Optional(GithubListLimitSchema),
+  refresh: GithubRefreshSchema,
 });
 
 export const GithubIssuesQuerySchema = Type.Object({
   chatId: Type.String({ minLength: 1 }),
   filter: Type.Optional(GithubIssueFilterSchema),
   limit: Type.Optional(GithubListLimitSchema),
+  refresh: GithubRefreshSchema,
 });
 
 /**
@@ -444,6 +455,7 @@ export const GithubIssuesQuerySchema = Type.Object({
 export const GithubInboxQuerySchema = Type.Object({
   environmentId: Type.Optional(Type.String({ minLength: 1 })),
   limit: Type.Optional(GithubListLimitSchema),
+  refresh: GithubRefreshSchema,
 });
 
 /**

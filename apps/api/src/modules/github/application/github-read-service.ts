@@ -67,6 +67,8 @@ export interface GithubRepoRequest {
   readonly workdir: string;
   readonly selection: GhRuntimeSelection;
   readonly signal?: AbortSignal;
+  /** Bypasses the read-through cache for this call; see `GithubCacheReadOptions`. */
+  readonly refresh?: boolean;
 }
 
 export interface GithubPrsRequest extends GithubRepoRequest {
@@ -87,6 +89,8 @@ export interface GithubInboxRequest {
   readonly selection: GhRuntimeSelection;
   readonly limit: number;
   readonly signal?: AbortSignal;
+  /** Bypasses the read-through cache for this call; see `GithubCacheReadOptions`. */
+  readonly refresh?: boolean;
 }
 
 export interface GithubReadService {
@@ -131,12 +135,17 @@ export function createGithubReadService(options: GithubReadServiceOptions = {}):
     load: (repo: GithubRepo) => Promise<T>
   ): Promise<GithubUnavailableState | ({ state: 'ok'; cachedAt: number; repo: GithubRepo } & T)> {
     const scope = { ...request.selection, subject: request.workdir };
-    return cache.read(scope, variant, async () => {
-      const resolution = await resolveRepo(request.workdir, request.selection, request.signal);
-      if (resolution.state !== 'ok') return resolution;
-      const payload = await load(resolution.repo);
-      return { state: 'ok' as const, cachedAt: now(), repo: resolution.repo, ...payload };
-    });
+    return cache.read(
+      scope,
+      variant,
+      async () => {
+        const resolution = await resolveRepo(request.workdir, request.selection, request.signal);
+        if (resolution.state !== 'ok') return resolution;
+        const payload = await load(resolution.repo);
+        return { state: 'ok' as const, cachedAt: now(), repo: resolution.repo, ...payload };
+      },
+      { bypass: request.refresh }
+    );
   }
 
   const target = (request: GithubRepoRequest) => ({
@@ -156,25 +165,31 @@ export function createGithubReadService(options: GithubReadServiceOptions = {}):
    */
   function readInbox(request: GithubInboxRequest): Promise<GithubInboxResponse> {
     const scope = { ...request.selection, subject: INBOX_SUBJECT };
-    return cache.read(scope, `inbox:${request.limit}`, async () => {
-      if (!(await client.isAvailable(request.selection))) return { state: 'gh-not-installed' };
-      if (!(await client.isAuthenticated(request.selection))) return { state: 'not-authenticated' };
+    return cache.read(
+      scope,
+      `inbox:${request.limit}`,
+      async () => {
+        if (!(await client.isAvailable(request.selection))) return { state: 'gh-not-installed' };
+        if (!(await client.isAuthenticated(request.selection)))
+          return { state: 'not-authenticated' };
 
-      const result = await client.run(
-        'search.prs',
-        { limit: request.limit },
-        {
-          cwd: await homeCwd(request.selection),
-          selection: request.selection,
-          ...(request.signal ? { signal: request.signal } : {}),
-        }
-      );
-      return {
-        state: 'ok' as const,
-        cachedAt: now(),
-        items: readGhOutput('search.prs', result.stdout, GhSearchPrListSchema, toInboxItems),
-      };
-    });
+        const result = await client.run(
+          'search.prs',
+          { limit: request.limit },
+          {
+            cwd: await homeCwd(request.selection),
+            selection: request.selection,
+            ...(request.signal ? { signal: request.signal } : {}),
+          }
+        );
+        return {
+          state: 'ok' as const,
+          cachedAt: now(),
+          items: readGhOutput('search.prs', result.stdout, GhSearchPrListSchema, toInboxItems),
+        };
+      },
+      { bypass: request.refresh }
+    );
   }
 
   return {

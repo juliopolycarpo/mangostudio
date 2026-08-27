@@ -148,6 +148,33 @@ describe('GitHub read service', () => {
     expect(refreshed).toMatchObject({ cachedAt: 61_001 });
   });
 
+  it('bypasses a still-fresh cache entry when the caller asks for a refresh', async () => {
+    let now = 1_000;
+    const client = new FakeGithubCli({
+      stdout: { 'repo.view': repoOutput, 'pr.list': prListOutput },
+    });
+    const reads = createService(client, () => now);
+
+    await reads.listPullRequests({ ...repoRequest, filter: 'open', limit: 20 });
+    now += 1;
+    // Well inside the 60s TTL — an ordinary repeat read would still be served
+    // from the entry above, the way the TTL test right above this one shows.
+    const forced = await reads.listPullRequests({
+      ...repoRequest,
+      filter: 'open',
+      limit: 20,
+      refresh: true,
+    });
+    expect(client.ids().filter((id) => id === 'pr.list')).toHaveLength(2);
+    expect(forced).toMatchObject({ cachedAt: 1_001 });
+
+    // The entry a forced read leaves behind is a normal one: the very next
+    // read, unforced, is served from it rather than forcing again.
+    now += 1;
+    await reads.listPullRequests({ ...repoRequest, filter: 'open', limit: 20 });
+    expect(client.ids().filter((id) => id === 'pr.list')).toHaveLength(2);
+  });
+
   it('reads checks in one round trip and summarizes them from gh’s own buckets', async () => {
     const client = new FakeGithubCli({
       stdout: {

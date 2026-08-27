@@ -49,6 +49,16 @@ export const githubKeys = {
 };
 
 /**
+ * Reads at whichever moment the query actually fires, not at the call that
+ * built these options: `refetch()` cannot pass the queryFn an argument, so a
+ * refresh button flips a ref true right before calling it and this reads that
+ * ref — true for the one request it triggered, false for every request that
+ * follows, without a query key that changes on every click and leaves the
+ * previous refresh's cache entry behind.
+ */
+type ForceRefresh = () => boolean;
+
+/**
  * Pull requests waiting on this user's review, across every repository.
  *
  * `environmentId` picks whose `gh` answers, because credentials differ per
@@ -58,13 +68,16 @@ export const githubKeys = {
  * @example
  * const inbox = useQuery(githubInboxQueryOptions(sourceChat?.environmentId));
  */
-export function githubInboxQueryOptions(environmentId?: string) {
+export function githubInboxQueryOptions(environmentId?: string, forceRefresh?: ForceRefresh) {
   return queryOptions({
     queryKey: githubKeys.inbox(environmentId),
     staleTime: GITHUB_STALE_TIME_MS,
     queryFn: async (): Promise<GithubInboxResponse> => {
       const { data, error } = await client.api.github.inbox.get({
-        query: environmentId ? { environmentId } : {},
+        query: {
+          ...(environmentId ? { environmentId } : {}),
+          ...(forceRefresh?.() ? { refresh: true } : {}),
+        },
       });
       if (error) throw new ApiError(error.value);
       return data as GithubInboxResponse;
@@ -78,12 +91,18 @@ export function githubInboxQueryOptions(environmentId?: string) {
  * @example
  * useQuery(githubPrsQueryOptions('chat-1', 'open'));
  */
-export function githubPrsQueryOptions(chatId: string, filter: GithubPrFilter) {
+export function githubPrsQueryOptions(
+  chatId: string,
+  filter: GithubPrFilter,
+  forceRefresh?: ForceRefresh
+) {
   return queryOptions({
     queryKey: githubKeys.prs(chatId, filter),
     staleTime: GITHUB_STALE_TIME_MS,
     queryFn: async (): Promise<GithubPrsResponse> => {
-      const { data, error } = await client.api.github.prs.get({ query: { chatId, filter } });
+      const { data, error } = await client.api.github.prs.get({
+        query: { chatId, filter, ...(forceRefresh?.() ? { refresh: true } : {}) },
+      });
       if (error) throw new ApiError(error.value);
       return data as GithubPrsResponse;
     },
@@ -96,12 +115,18 @@ export function githubPrsQueryOptions(chatId: string, filter: GithubPrFilter) {
  * @example
  * useQuery(githubIssuesQueryOptions('chat-1', 'open'));
  */
-export function githubIssuesQueryOptions(chatId: string, filter: GithubIssueFilter) {
+export function githubIssuesQueryOptions(
+  chatId: string,
+  filter: GithubIssueFilter,
+  forceRefresh?: ForceRefresh
+) {
   return queryOptions({
     queryKey: githubKeys.issues(chatId, filter),
     staleTime: GITHUB_STALE_TIME_MS,
     queryFn: async (): Promise<GithubIssuesResponse> => {
-      const { data, error } = await client.api.github.issues.get({ query: { chatId, filter } });
+      const { data, error } = await client.api.github.issues.get({
+        query: { chatId, filter, ...(forceRefresh?.() ? { refresh: true } : {}) },
+      });
       if (error) throw new ApiError(error.value);
       return data as GithubIssuesResponse;
     },

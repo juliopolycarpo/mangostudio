@@ -5,6 +5,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG } from '@/lib/icon-sizes';
+import { useForceRefresh } from '../hooks/use-force-refresh';
 import { githubInboxQueryOptions } from '../queries';
 import { GithubNotConnected } from './GithubNotConnected';
 import { GithubPrBadge } from './GithubPrBadge';
@@ -42,7 +43,8 @@ export function GithubInboxSection({ chatId, collapsed, onToggle }: GithubInboxS
   const { chats, currentEnvironmentId } = useApp();
   const environmentId =
     chats.find((chat) => chat.id === chatId)?.environmentId ?? currentEnvironmentId ?? undefined;
-  const query = useQuery(githubInboxQueryOptions(environmentId));
+  const forceRefresh = useForceRefresh();
+  const query = useQuery(githubInboxQueryOptions(environmentId, forceRefresh.read));
   const data = query.data;
 
   return (
@@ -58,13 +60,13 @@ export function GithubInboxSection({ chatId, collapsed, onToggle }: GithubInboxS
             refreshing={query.isFetching}
           />
           <GithubRefreshButton
-            onRefresh={() => void query.refetch()}
+            onRefresh={() => void forceRefresh.trigger(query.refetch)}
             refreshing={query.isFetching}
           />
         </>
       }
     >
-      <InboxBody chatId={chatId} environmentId={environmentId} />
+      <InboxBody chatId={chatId} environmentId={environmentId} forceRefresh={forceRefresh.read} />
     </GithubSection>
   );
 }
@@ -76,12 +78,14 @@ export function GithubInboxSection({ chatId, collapsed, onToggle }: GithubInboxS
 function InboxBody({
   chatId,
   environmentId,
+  forceRefresh,
 }: {
   readonly chatId: string;
   readonly environmentId: string | undefined;
+  readonly forceRefresh: () => boolean;
 }) {
   const { t } = useI18n();
-  const query = useQuery(githubInboxQueryOptions(environmentId));
+  const query = useQuery(githubInboxQueryOptions(environmentId, forceRefresh));
 
   if (query.isPending) {
     return (
