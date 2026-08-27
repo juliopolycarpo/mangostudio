@@ -252,6 +252,19 @@ async function runGh(
 ): Promise<RuntimeGhExecResult> {
   const { args, cwd, timeoutMs, acceptedExitCodes } = validateGhExecParams(method, allowed, params);
 
+  // Refusing here rather than after spawning costs nothing for a read and
+  // matters for a write: `gh pr create` accepted before the cancel frame
+  // arrives cannot be un-accepted by killing the process reporting it.
+  if (signal?.aborted) {
+    throw new GhExecutionError('GitHub CLI command aborted.', {
+      exitCode: null,
+      stderr: 'GitHub CLI command aborted.',
+      stdout: '',
+      args,
+      aborted: true,
+    });
+  }
+
   let proc: ReturnType<typeof spawnGh>;
   try {
     proc = spawnGh(args, cwd);
@@ -283,9 +296,15 @@ async function runGh(
   };
 
   const timeoutId = setTimeout(() => kill('timeout'), timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  // A read has nothing to lose by being interrupted, so a later cancel still
+  // kills it. A mutation already spawned may already be in flight against
+  // GitHub — the aborted-before-spawn check above is the only cancellation
+  // point for `gh.mutate`; once running, only the timeout bounds it, and it
+  // reports its real outcome instead of a synthetic "aborted".
   const abortHandler = () => kill('abort');
-  signal?.addEventListener('abort', abortHandler, { once: true });
-  if (signal?.aborted) abortHandler();
+  if (method !== 'gh.mutate') {
+    signal?.addEventListener('abort', abortHandler, { once: true });
+  }
   // Stop the capture once `gh` itself is gone rather than waiting for the
   // timeout — but not in the same tick. Cancelling the instant `exited`
   // resolves races the reader's pending `read()` against the abort, and an

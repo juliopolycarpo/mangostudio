@@ -410,4 +410,41 @@ describe('gh execution', () => {
     expect(error).toBeInstanceOf(GhExecutionError);
     expect((error as GhExecutionError).data.aborted).toBe(true);
   });
+
+  it.skipIf(!hasGh)(
+    'refuses a gh.mutate call that was already aborted before it spawned',
+    async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const error = await refusal(() =>
+        mutateGh(
+          { args: ['pr', 'create', '--fill'], cwd: '/', timeoutMs: 10_000 },
+          controller.signal
+        )
+      );
+      expect(error).toBeInstanceOf(GhExecutionError);
+      expect((error as GhExecutionError).data.aborted).toBe(true);
+    }
+  );
+
+  it.skipIf(!hasGh)(
+    'lets an in-flight gh.mutate run to its own conclusion instead of killing it on a later abort',
+    async () => {
+      const controller = new AbortController();
+      // `/` is not a git repository, so `gh` fails fast and locally without a
+      // network round trip — the assertion is about *how* it fails, not that
+      // it succeeds. Aborting from a microtask still lands after `spawnGh`
+      // runs, since nothing awaits between validating params and spawning.
+      const resultPromise = mutateGh(
+        { args: ['pr', 'create', '--fill'], cwd: '/', timeoutMs: 10_000 },
+        controller.signal
+      );
+      queueMicrotask(() => controller.abort());
+      const error = await refusal(() => resultPromise);
+      expect(error).toBeInstanceOf(GhExecutionError);
+      // Not the synthetic "aborted" shape: `gh` ran to its own exit rather
+      // than being SIGKILLed the instant the cancel frame arrived.
+      expect((error as GhExecutionError).data.aborted).toBeUndefined();
+    }
+  );
 });
