@@ -46,6 +46,12 @@ const GH_ENV_KEYS = [
   'TMPDIR',
   'TMP',
   'TEMP',
+  // `gh help environment`: with no `GH_CONFIG_DIR`, gh's default config
+  // location on Windows is `$AppData/GitHub CLI`. Dropping this made every
+  // Windows runtime without an explicit `GH_CONFIG_DIR` unable to find the
+  // config a normal `gh auth login` wrote, so the panel reported the account
+  // as unauthenticated regardless of what `gh auth status` would say directly.
+  'APPDATA',
   'XDG_CONFIG_HOME',
   'GH_CONFIG_DIR',
   'GH_HOST',

@@ -82,6 +82,7 @@ describe('gh CLI boundary', () => {
     const env = buildGhEnvironment({
       PATH: '/bin',
       HOME: '/home/test',
+      APPDATA: 'C:\\Users\\test\\AppData\\Roaming',
       XDG_CONFIG_HOME: '/config',
       GH_CONFIG_DIR: '/config/gh',
       GH_HOST: 'github.example',
@@ -98,6 +99,7 @@ describe('gh CLI boundary', () => {
     expect(env).toEqual({
       PATH: '/bin',
       HOME: '/home/test',
+      APPDATA: 'C:\\Users\\test\\AppData\\Roaming',
       XDG_CONFIG_HOME: '/config',
       GH_CONFIG_DIR: '/config/gh',
       GH_HOST: 'github.example',
@@ -109,6 +111,17 @@ describe('gh CLI boundary', () => {
       NO_COLOR: '1',
       LC_ALL: 'C',
     });
+  });
+
+  /**
+   * The regression: on a native Windows runtime without an explicit
+   * `GH_CONFIG_DIR`, `gh` falls back to `$AppData/GitHub CLI` — dropping
+   * `APPDATA` from the allowlist made that config unreachable, so a real
+   * `gh auth login` looked like no login had happened at all.
+   */
+  it("preserves APPDATA for gh's default Windows config location", () => {
+    const env = buildGhEnvironment({ APPDATA: 'C:\\Users\\test\\AppData\\Roaming' });
+    expect(env.APPDATA).toBe('C:\\Users\\test\\AppData\\Roaming');
   });
 
   it('summarizes an argv down to its subcommand, never its prose', () => {
