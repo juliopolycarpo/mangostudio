@@ -23,9 +23,15 @@ export function createTurboTestCommand(task: TestLaneTask, workspaces: Workspace
  * // Usage: createTurboTestCommand('test:coverage', shardedCoverageWorkspaces());
  */
 export function shardedCoverageWorkspaces(): WorkspaceName[] {
-  return TEST_LANES.filter((lane) => lane.sharded && lane.workspace !== 'root').map(
-    (lane) => lane.workspace as WorkspaceName
-  );
+  // De-duplicated: a workspace with several sharded lanes (api's unit and
+  // integration) is still one turbo filter.
+  return [
+    ...new Set(
+      TEST_LANES.filter((lane) => lane.sharded && lane.workspace !== 'root').map(
+        (lane) => lane.workspace as WorkspaceName
+      )
+    ),
+  ];
 }
 
 /**

@@ -10,7 +10,13 @@
 
 import type { WorkspaceName } from './config';
 
-export type TestLaneId = 'root' | 'api' | 'shared' | 'runtime' | 'frontend';
+export type TestLaneId =
+  | 'root'
+  | 'api-unit'
+  | 'api-integration'
+  | 'shared'
+  | 'runtime'
+  | 'frontend';
 
 /**
  * Total-coverage floors, in percent, enforced by
@@ -89,14 +95,36 @@ export const TEST_LANES: readonly TestLane[] = [
     manifest: 'package.json',
     coverageScript: 'test:scripts',
   },
+  // The api workspace is two lanes, not one, because its two suites need
+  // opposite isolation settings. Unit keeps `--parallel=1` (= one worker,
+  // `--isolate`): dropping isolation there costs 172 failures (measured; see
+  // docs/reference/testing.md). Integration runs with no `--parallel` at all —
+  // it passes without isolation by design, and Bun's isolate machinery is what
+  // intermittently wedges the whole invocation in CI (oven-sh/bun#39709 — the
+  // runner never exits, or `spawnSync` stalls inside isolate workers), so the
+  // spawn-heavy integration files stay out of it until oven-sh/bun#38008
+  // ships. Each lane writes its own LCOV slice; the api `test:coverage`
+  // script merges the two into the single `coverage/api/lcov.info` the
+  // coverage readers expect (the merge in merge-lcov-shards.ts is
+  // associative, so merging per-workspace before merging per-shard changes
+  // nothing).
   {
-    id: 'api',
+    id: 'api-unit',
     workspace: 'api',
     sharded: true,
-    junitPath: `${JUNIT_DIR}/api.xml`,
-    timingsPath: `${TIMINGS_DIR}/api.json`,
+    junitPath: `${JUNIT_DIR}/api-unit.xml`,
+    timingsPath: `${TIMINGS_DIR}/api-unit.json`,
     manifest: 'apps/api/package.json',
-    coverageScript: 'test:coverage',
+    coverageScript: 'test:coverage:unit',
+  },
+  {
+    id: 'api-integration',
+    workspace: 'api',
+    sharded: true,
+    junitPath: `${JUNIT_DIR}/api-integration.xml`,
+    timingsPath: `${TIMINGS_DIR}/api-integration.json`,
+    manifest: 'apps/api/package.json',
+    coverageScript: 'test:coverage:integration',
   },
   {
     id: 'shared',
@@ -139,9 +167,11 @@ export const TEST_LANES: readonly TestLane[] = [
 
 /**
  * Workspaces whose LCOV the merge job stages back into the checkout from the
- * per-job artifacts. The sharded lanes need the real merge in
- * `merge-lcov-shards.ts`; the frontend contributes exactly one file from its
- * own job, for which the merge degenerates to a copy.
+ * per-job artifacts, keyed by workspace. The sharded lanes need the real
+ * merge in `merge-lcov-shards.ts`; the frontend contributes exactly one file
+ * from its own job, for which the merge degenerates to a copy. The api entry
+ * is one path even though the workspace is two lanes: its `test:coverage`
+ * script merges the per-lane slices into this file before the shard uploads.
  */
 export const SHARDED_LCOV_PATHS: Readonly<Record<string, string>> = {
   api: '.mango/artifacts/coverage/api/lcov.info',

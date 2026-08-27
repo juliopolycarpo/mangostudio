@@ -87,11 +87,13 @@ describe('test lane declarations', () => {
     }
   );
 
-  it('covers every workspace lane in the staged-LCOV table', () => {
-    const laneIds = new Set(
-      TEST_LANES.filter((lane) => lane.workspace !== 'root').map((lane) => lane.id)
+  // Keyed by workspace, not lane: the api workspace is two lanes whose LCOV
+  // slices its own `test:coverage` script merges into the one staged file.
+  it('covers every workspace in the staged-LCOV table', () => {
+    const workspaces = new Set(
+      TEST_LANES.filter((lane) => lane.workspace !== 'root').map((lane) => lane.workspace)
     );
-    expect(new Set(Object.keys(SHARDED_LCOV_PATHS))).toEqual(laneIds);
+    expect(new Set(Object.keys(SHARDED_LCOV_PATHS))).toEqual(workspaces);
   });
 
   it('has one lane per workspace plus root, with unique JUnit paths', () => {
@@ -120,6 +122,54 @@ describe('test lane declarations', () => {
       );
     }
   );
+});
+
+describe('api lanes', () => {
+  // The two api suites need opposite isolation settings, which is why the
+  // workspace is two lanes at all. Unit without isolation is 172 failures
+  // (measured on 1.4.0); integration inside Bun's isolate machinery is the
+  // intermittent runner hang (oven-sh/bun#39709) that burned CI's
+  // timeout-minutes. Pin both directions so neither flag drifts onto the
+  // other lane.
+  it('keeps the unit lane isolated and never --no-isolate', async () => {
+    const scripts = await readScripts(laneById('api-unit').manifest);
+    const script = scripts[laneById('api-unit').coverageScript];
+    expect(script).toContain('--parallel=1');
+    expect(script).not.toContain('--no-isolate');
+    expect(script).toContain('tests/unit');
+    expect(script).not.toContain('tests/integration');
+  });
+
+  it('keeps the integration lane out of isolate mode', async () => {
+    const scripts = await readScripts(laneById('api-integration').manifest);
+    const script = scripts[laneById('api-integration').coverageScript];
+    expect(script).not.toContain('--parallel');
+    expect(script).not.toContain('--isolate');
+    expect(script).toContain('tests/integration');
+    expect(script).not.toContain('tests/unit');
+  });
+
+  // Each lane writes its own slice; the orchestrating script must merge them
+  // into the one per-workspace file every coverage reader (and the shard
+  // upload) expects, or api coverage silently becomes integration-only.
+  it('merges both LCOV slices into the staged api file', async () => {
+    const scripts = await readScripts('apps/api/package.json');
+    const script = scripts['test:coverage'];
+    expect(script).toContain('merge-lcov-shards.ts');
+    expect(script).toContain(`../../${SHARDED_LCOV_PATHS.api}`);
+    expect(script).toContain('coverage/api-unit/lcov.info');
+    expect(script).toContain('coverage/api-integration/lcov.info');
+  });
+
+  it('gives each lane its own coverage directory', async () => {
+    const scripts = await readScripts('apps/api/package.json');
+    expect(scripts['test:coverage:unit']).toContain(
+      '--coverage-dir=../../.mango/artifacts/coverage/api-unit'
+    );
+    expect(scripts['test:coverage:integration']).toContain(
+      '--coverage-dir=../../.mango/artifacts/coverage/api-integration'
+    );
+  });
 });
 
 describe('frontend lane', () => {

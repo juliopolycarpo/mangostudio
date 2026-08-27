@@ -21,7 +21,9 @@
     "test": "bun run test:unit && bun run test:integration",
     "test:unit": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun test --timeout 15000 --parallel=1 tests/unit",
     "test:integration": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun test --timeout 15000 tests/integration",
-    "test:coverage": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun test --timings=../../.mango/artifacts/timings/api.json --update-timings --coverage --timeout 15000 --parallel=1 --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/api.xml $MANGOSTUDIO_BUN_TEST_ARGS tests/unit tests/integration"
+    "test:coverage": "bun run test:coverage:unit && bun run test:coverage:integration && bun ../../scripts/qa-gate/merge-lcov-shards.ts ../../.mango/artifacts/coverage/api/lcov.info ../../.mango/artifacts/coverage/api-unit/lcov.info ../../.mango/artifacts/coverage/api-integration/lcov.info",
+    "test:coverage:unit": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun test --timings=../../.mango/artifacts/timings/api-unit.json --update-timings --coverage --coverage-dir=../../.mango/artifacts/coverage/api-unit --timeout 15000 --parallel=1 --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/api-unit.xml $MANGOSTUDIO_BUN_TEST_ARGS tests/unit",
+    "test:coverage:integration": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun test --timings=../../.mango/artifacts/timings/api-integration.json --update-timings --coverage --coverage-dir=../../.mango/artifacts/coverage/api-integration --timeout 15000 --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/api-integration.xml $MANGOSTUDIO_BUN_TEST_ARGS tests/integration"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^3.0.24",
