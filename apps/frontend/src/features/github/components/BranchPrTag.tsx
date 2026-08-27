@@ -15,12 +15,11 @@ import { githubPrsQueryOptions } from '../queries';
  *
  * Bounded by the list's own 30-row cap: this covers *recent* pull requests, not
  * every one the repository has ever had. Older branches go unannotated, which
- * reads the same as having no pull request — the safe direction, since it
- * withholds "safe to delete" rather than inventing it.
+ * reads the same as having no pull request.
  *
  * @example
  * const annotations = useBranchPrAnnotations(chatId);
- * annotations.get('feat/github-panel')?.safeToDelete; // true
+ * annotations.get('feat/github-panel')?.isMerged; // true
  */
 export function useBranchPrAnnotations(chatId: string): ReadonlyMap<string, BranchPrAnnotation> {
   const query = useQuery(githubPrsQueryOptions(chatId, 'all'));
@@ -52,11 +51,11 @@ export function BranchPrTag({
   return (
     <span
       className={`shrink-0 font-mono text-[10px] ${
-        annotation.safeToDelete ? 'text-success' : 'text-on-surface-variant/70'
+        annotation.isMerged ? 'text-success' : 'text-on-surface-variant/70'
       }`}
-      title={annotation.safeToDelete ? t.github.branchPr.safeToDelete : annotation.url}
+      title={annotation.isMerged ? t.github.branchPr.merged : annotation.url}
     >
-      {annotation.safeToDelete ? `${number} · ${t.github.branchPr.safeToDelete}` : number}
+      {annotation.isMerged ? `${number} · ${t.github.branchPr.merged}` : number}
     </span>
   );
 }

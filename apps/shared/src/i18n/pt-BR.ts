@@ -1834,11 +1834,12 @@ export const messages = {
 
     /**
      * Anotação por branch na lista de branches. Só `MERGED` ganha uma frase
-     * própria: é o único estado em que apagar a branch local é seguro sem
-     * perder trabalho.
+     * própria. Diz que o pull request foi integrado, não que apagar a branch é
+     * seguro — quem decide isso é a própria recusa do Git numa ponta não
+     * integrada.
      */
     branchPr: {
-      safeToDelete: 'integrado — seguro apagar',
+      merged: 'integrado',
     },
 
     /**

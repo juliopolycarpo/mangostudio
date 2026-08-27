@@ -1,10 +1,15 @@
 /**
  * Matching local branches to the pull requests they were opened as.
  *
- * The question this answers is "is deleting this branch safe" — and it is only
- * answerable with `MERGED`, which no open-PR view can report. That is why the
- * annotation reads the `all` filter and why `all` exists in the contract at
- * all: `open`, `mine` and `review-requested` every one resolve to
+ * This reports whether the pull request merged, not whether deleting the
+ * local branch is safe: `gh pr list` reports a PR's state, not whether the
+ * branch's current tip is an ancestor of it, and a branch can carry commits
+ * added after the PR merged that Git itself has never seen land anywhere.
+ * `git branch -d` is the actual safety check — it refuses an unmerged tip and
+ * a caller reads that refusal before offering `--force` — so this annotation
+ * stays a hint about the pull request, not a verdict on the branch. That is
+ * why the annotation reads the `all` filter and why `all` exists in the
+ * contract at all: `open`, `mine` and `review-requested` every one resolve to
  * `--state=open`, so under any of them a merged branch and a branch that never
  * had a pull request look identical.
  */
@@ -16,8 +21,8 @@ export interface BranchPrAnnotation {
   readonly state: GithubPrState;
   readonly url: string;
   readonly isDraft: boolean;
-  /** True only for `MERGED`: the one state in which the local branch is spent. */
-  readonly safeToDelete: boolean;
+  /** True only for `MERGED`. Not a claim that the branch's tip is merged too. */
+  readonly isMerged: boolean;
 }
 
 /**
@@ -36,7 +41,7 @@ export interface BranchPrAnnotation {
  * rather than inventing it.
  *
  * @example
- * annotateBranchesWithPrs(prs).get('feat/github-panel')?.safeToDelete; // true
+ * annotateBranchesWithPrs(prs).get('feat/github-panel')?.isMerged; // true
  */
 export function annotateBranchesWithPrs(
   prs: readonly GithubPrSummary[]
@@ -51,7 +56,7 @@ export function annotateBranchesWithPrs(
       state: pr.state,
       url: pr.url,
       isDraft: pr.isDraft,
-      safeToDelete: pr.state === 'MERGED',
+      isMerged: pr.state === 'MERGED',
     });
   }
 

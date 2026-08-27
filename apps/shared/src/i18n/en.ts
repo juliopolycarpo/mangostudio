@@ -1809,11 +1809,11 @@ export const messages: Messages = {
 
     /**
      * Per-branch annotation in the branch list. Only `MERGED` earns a sentence
-     * of its own: it is the one state in which deleting the local branch is
-     * safe without losing work.
+     * of its own. Says the pull request merged, not that deleting the branch
+     * is safe — Git's own refusal on an unmerged tip is what decides that.
      */
     branchPr: {
-      safeToDelete: 'merged — safe to delete',
+      merged: 'merged',
     },
 
     /**
