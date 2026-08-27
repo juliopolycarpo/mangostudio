@@ -2,8 +2,32 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Writable } from 'node:stream';
 
 import { runTestsWithWatchdog, type WatchdogOptions } from '../ci/run-tests-watchdog';
+
+/**
+ * A sink that accepts every chunk but never synchronously. `highWaterMark: 1`
+ * plus a deferred callback makes `write()` return false on essentially every
+ * chunk, so the forwarder has to pause the child and wait for `drain` — the
+ * path a real CI stdout pipe takes once its buffer fills.
+ */
+class SlowSink extends Writable {
+  private readonly chunks: Buffer[] = [];
+
+  constructor() {
+    super({ highWaterMark: 1 });
+  }
+
+  override _write(chunk: Buffer, _encoding: BufferEncoding, done: () => void): void {
+    this.chunks.push(Buffer.from(chunk));
+    setImmediate(done);
+  }
+
+  text(): string {
+    return Buffer.concat(this.chunks).toString();
+  }
+}
 
 const temps: string[] = [];
 
@@ -72,6 +96,29 @@ describe('runTestsWithWatchdog', () => {
       shard: 3,
       exitCode: 124,
     });
+  });
+
+  // Both sinks refuse chunks once their buffers fill, and a forwarder that
+  // ignores that keeps the whole run's output on the heap instead of pausing
+  // the child. Pausing is only half the fix: a resume that never fires would
+  // deadlock here — the child would never exit, the watchdog would kill it at
+  // the bound and report a hang that was really the forwarder's fault.
+  it('applies backpressure without losing or reordering output', async () => {
+    const dir = await makeTemp();
+    const sink = new SlowSink();
+    const lines = Array.from({ length: 200 }, (_, index) => `line-${index}`);
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: ['bun', '-e', 'for (let i = 0; i < 200; i++) console.log("line-" + i);'],
+        timeoutSeconds: 30,
+        stdout: sink,
+      })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 1 });
+    const expected = `${lines.join('\n')}\n`;
+    expect(sink.text()).toBe(expected);
+    expect(await Bun.file(join(dir, 'run.log')).text()).toBe(expected);
   });
 
   // A command that cannot start emits `error` and may never emit `exit`.

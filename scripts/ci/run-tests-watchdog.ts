@@ -50,6 +50,13 @@ export interface WatchdogOptions {
   readonly killGraceSeconds?: number;
   /** Combined stdout+stderr of the attempt whose exit code is reported. */
   readonly logFile: string;
+  /**
+   * Where the child's output is mirrored live. Defaults to this process's own
+   * stdout — the CI job log. A parameter so tests can assert what was
+   * forwarded, and drive the backpressure path, without a dump into the test
+   * log.
+   */
+  readonly stdout?: NodeJS.WritableStream;
   /** `shard-meta.json` the merge job reads; written even when hung. */
   readonly metaFile: string;
   /** Timings baseline to snapshot and restore between attempts. */
@@ -106,12 +113,7 @@ const runAttempt = async (options: WatchdogOptions): Promise<AttemptResult> => {
   // would count phantom errors against a green retry. Every attempt is still
   // streamed to stdout, so the job log keeps the full history.
   const log = createWriteStream(options.logFile, { flags: 'w' });
-  // A write stream with nothing on `error` throws on the first failed write.
-  // The log is a diagnostic, never the run's verdict, so a full disk must not
-  // turn a green shard into a crashed watchdog.
-  log.on('error', (caught: Error) => {
-    process.stdout.write(`Watchdog could not write ${options.logFile}: ${caught.message}\n`);
-  });
+  const mirror = options.stdout ?? process.stdout;
   // detached: the child leads its own process group, so the kill below reaches
   // turbo and the bun test workers it spawned, not just the top process.
   const child = spawn(executable, args, {
@@ -119,9 +121,47 @@ const runAttempt = async (options: WatchdogOptions): Promise<AttemptResult> => {
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+
+  // Neither sink is guaranteed to take a chunk synchronously: a CI stdout pipe
+  // and a log file both refuse once their buffer fills. A forwarder that
+  // ignores `write`'s return value never pauses the child, so the unflushed
+  // chunks pile up on the watchdog's heap for the length of the run — with
+  // MANGOSTUDIO_SPAWN_DIAGNOSTICS on top of the test output, that is the whole
+  // shard. The `2>&1 | tee` shape this replaced got the backpressure from the
+  // pipe for free.
+  const blocked = new Set<NodeJS.WritableStream>();
+  const resumeIfDrained = (): void => {
+    if (blocked.size > 0) return;
+    child.stdout.resume();
+    child.stderr.resume();
+  };
+  const writeTo = (sink: NodeJS.WritableStream, chunk: Buffer): void => {
+    if (sink.write(chunk) || blocked.has(sink)) return;
+    blocked.add(sink);
+    child.stdout.pause();
+    child.stderr.pause();
+    sink.once('drain', () => {
+      blocked.delete(sink);
+      resumeIfDrained();
+    });
+  };
+
+  // A write stream with nothing on `error` throws on the first failed write.
+  // The log is a diagnostic, never the run's verdict, so a full disk must not
+  // turn a green shard into a crashed watchdog — and must not leave the child
+  // paused on a sink that will never emit `drain` either, which would starve it
+  // until the timeout fired and reported a Bun hang that never happened.
+  let logWritable = true;
+  log.on('error', (caught: Error) => {
+    logWritable = false;
+    blocked.delete(log);
+    resumeIfDrained();
+    mirror.write(`Watchdog could not write ${options.logFile}: ${caught.message}\n`);
+  });
+
   const forward = (chunk: Buffer): void => {
-    process.stdout.write(chunk);
-    log.write(chunk);
+    writeTo(mirror, chunk);
+    if (logWritable) writeTo(log, chunk);
   };
   child.stdout.on('data', forward);
   child.stderr.on('data', forward);
@@ -136,8 +176,8 @@ const runAttempt = async (options: WatchdogOptions): Promise<AttemptResult> => {
     // from burning both attempts' full timeouts.
     child.once('error', (caught: Error) => {
       const message = `Watchdog could not run '${options.command.join(' ')}': ${caught.message}\n`;
-      process.stdout.write(message);
-      log.write(message);
+      mirror.write(message);
+      if (logWritable) log.write(message);
       resolve(1);
     });
   });
