@@ -82,6 +82,18 @@ jobs:
     # never share one, so the precondition never exists. In-job `--parallel`
     # composes with this the day the fix ships — see
     # docs/reference/testing.md.
+    #
+    # What sharding does NOT dodge is the isolate-runner hang
+    # (oven-sh/bun#39709): even at `--parallel=1`, the api lane's isolate-mode
+    # invocation intermittently never exits and the job burns this whole
+    # `timeout-minutes`. Two defenses below: the api coverage lane keeps only
+    # its unit suite in isolate mode (integration runs unisolated — see
+    # scripts/lib/test-lanes.ts), and the test step runs under
+    # scripts/ci/run-tests-watchdog.ts, which kills a wedged invocation after
+    # its per-attempt bound and retries once. Note for triage: a rerun of only
+    # failed jobs reuses resolve-timings' output and therefore the exact file
+    # partition that hung; "re-run all jobs" re-resolves the baseline, which
+    # is why it has looked more reliable.
     name: Tests (shard ${{ matrix.shard }}/8)
     needs: [resolve-timings]
     runs-on: ubuntu-latest
@@ -163,18 +175,18 @@ jobs:
       # This shard's slice of every sharded lane; each takes `--shard`
       # directly. The frontend lane is not among them — its LCOV cannot be
       # merged across shards, so it runs whole in the `frontend` job below.
+      #
+      # The watchdog owns the log file, the shard-meta.json the merge job
+      # reads, and the exit code; a hung Bun isolate runner (oven-sh/bun#39709)
+      # is killed after 210s — ~4x a healthy shard's test step — and retried
+      # once with the restored timings baseline put back first.
       - name: Run tests with coverage
         id: coverage
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          set -o pipefail
-          start="$(date +%s)"
-          status=0
-          bun run test --coverage --shard="${SHARD}/${SHARD_COUNT}" 2>&1 | tee coverage-run.log || status=$?
-          printf '{"shard":%s,"exitCode":%s,"durationSeconds":%s}\n' \
-            "${SHARD}" "${status}" "$(( $(date +%s) - start ))" > shard-meta.json
-          exit "${status}"
+          bun ./scripts/ci/run-tests-watchdog.ts --label="${SHARD}" --timeout-seconds=210 \
+            -- bun run test --coverage --shard="${SHARD}/${SHARD_COUNT}"
 
       # Unhandled errors never reach the JUnit report: Bun's "# Unhandled error
       # between tests" block leaves failures="0" with no failing case while the
@@ -261,16 +273,14 @@ jobs:
           exact-key: ${{ needs.resolve-timings.outputs.key }}
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
+      # Same watchdog as the shard job: this lane runs `--parallel=4
+      # --isolate`, which is squarely in oven-sh/bun#39709's habitat even
+      # though it has not hung here yet.
       - name: Run frontend tests with coverage
         id: coverage
         run: |
-          set -o pipefail
-          start="$(date +%s)"
-          status=0
-          bun run test --coverage --only=frontend 2>&1 | tee coverage-run.log || status=$?
-          printf '{"shard":"frontend","exitCode":%s,"durationSeconds":%s}\n' \
-            "${status}" "$(( $(date +%s) - start ))" > shard-meta.json
-          exit "${status}"
+          bun ./scripts/ci/run-tests-watchdog.ts --label=frontend --timeout-seconds=210 \
+            -- bun run test --coverage --only=frontend
 
       # Same reason as the shard job: Bun's "# Unhandled error between tests"
       # block exists only in the log, never in the JUnit report.
