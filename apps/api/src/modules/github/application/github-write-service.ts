@@ -116,10 +116,20 @@ export function createGithubWriteService(
     return readGhOutput('pr.view-summary', result.stdout, GhPrSummaryOutputSchema, toPrSummary);
   }
 
-  /** Drops the stale reads and tells the panel, in that order. */
+  /** Drops the stale reads and tells the panels, in that order. */
   function settle(request: GithubWriteRequest, operation: GithubWriteOperation): void {
     cache.clear(request.selection);
-    publish({ userId: request.selection.userId, chatId: request.chatId }, operation);
+    // Fire-and-forget: the initiating chat is published synchronously inside,
+    // and the sibling fan-out that follows is failure-isolated there.
+    void publish(
+      {
+        userId: request.selection.userId,
+        chatId: request.chatId,
+        environmentId: request.selection.environmentId,
+        workdir: request.workdir,
+      },
+      operation
+    );
   }
 
   /**

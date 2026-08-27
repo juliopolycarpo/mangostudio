@@ -195,6 +195,32 @@ export async function listByIdsForUser(
     .execute();
 }
 
+/**
+ * Ids of every chat one user has bound to the same workdir on the same
+ * machine. A write through any of them changes what all of them read, so the
+ * realtime layer fans its invalidation out to this set. Exact workdir
+ * equality on purpose: two checkouts of one repository are two working trees
+ * with independent state.
+ *
+ * @example
+ * const ids = await listChatIdsByWorkdir(userId, environmentId, workdir, db);
+ */
+export async function listChatIdsByWorkdir(
+  userId: string,
+  environmentId: string,
+  workdir: string,
+  db: Kysely<Database>
+): Promise<string[]> {
+  const rows = await db
+    .selectFrom('chats')
+    .select('id')
+    .where('userId', '=', userId)
+    .where('environmentId', '=', environmentId)
+    .where('workdir', '=', workdir)
+    .execute();
+  return rows.map((row) => row.id);
+}
+
 export async function getById(id: string, db: Kysely<Database>): Promise<ChatRecord | undefined> {
   const row = await db.selectFrom('chats').selectAll().where('id', '=', id).executeTakeFirst();
   return row ? mapChatRow(row) : undefined;
