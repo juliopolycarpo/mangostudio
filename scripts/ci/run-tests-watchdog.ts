@@ -31,9 +31,10 @@
 // Usage: bun ./scripts/ci/run-tests-watchdog.ts --label=3 -- bun run test --coverage --shard=3/8
 
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { createWriteStream } from 'node:fs';
 import { cp, mkdtemp, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { constants, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
@@ -70,7 +71,22 @@ interface AttemptResult {
   readonly hung: boolean;
 }
 
+// Deliberately ref'd: these are `Promise.race` deadlines, and an unref'd timer
+// that is the only thing left pending would let the process exit with a
+// still-unresolved race — a silent exit 0 in place of the shard's real code.
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * The exit code to report for a child the *runner* killed. Deliberately not
+ * `HUNG_EXIT_CODE`: 124 means "this watchdog's timer fired", and a shard that
+ * the kernel OOM-killed (137) or that segfaulted must not read as a Bun hang
+ * in `shard-meta.json` — the two get triaged differently.
+ * // Usage: signalExitCode('SIGKILL') // → 137
+ */
+const signalExitCode = (signal: NodeJS.Signals): number => {
+  const number = constants.signals[signal as keyof typeof constants.signals];
+  return typeof number === 'number' ? 128 + number : 1;
+};
 
 const killGroup = (pid: number, signal: NodeJS.Signals): void => {
   try {
@@ -90,6 +106,12 @@ const runAttempt = async (options: WatchdogOptions): Promise<AttemptResult> => {
   // would count phantom errors against a green retry. Every attempt is still
   // streamed to stdout, so the job log keeps the full history.
   const log = createWriteStream(options.logFile, { flags: 'w' });
+  // A write stream with nothing on `error` throws on the first failed write.
+  // The log is a diagnostic, never the run's verdict, so a full disk must not
+  // turn a green shard into a crashed watchdog.
+  log.on('error', (caught: Error) => {
+    process.stdout.write(`Watchdog could not write ${options.logFile}: ${caught.message}\n`);
+  });
   // detached: the child leads its own process group, so the kill below reaches
   // turbo and the bun test workers it spawned, not just the top process.
   const child = spawn(executable, args, {
@@ -105,7 +127,19 @@ const runAttempt = async (options: WatchdogOptions): Promise<AttemptResult> => {
   child.stderr.on('data', forward);
 
   const exited = new Promise<number>((resolve) => {
-    child.once('exit', (code, signal) => resolve(code ?? (signal ? HUNG_EXIT_CODE : 1)));
+    child.once('exit', (code, signal) => resolve(code ?? (signal ? signalExitCode(signal) : 1)));
+    // Without this listener a spawn failure (a missing executable, EMFILE)
+    // emits `error` with nothing subscribed, which Node throws — the watchdog
+    // would die before writing `shard-meta.json`, and the merge job would read
+    // a missing file rather than a failing shard. `exit` is not guaranteed to
+    // follow `error`, so this is also what keeps a command that never started
+    // from burning both attempts' full timeouts.
+    child.once('error', (caught: Error) => {
+      const message = `Watchdog could not run '${options.command.join(' ')}': ${caught.message}\n`;
+      process.stdout.write(message);
+      log.write(message);
+      resolve(1);
+    });
   });
 
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -133,7 +167,14 @@ const runAttempt = async (options: WatchdogOptions): Promise<AttemptResult> => {
     return { exitCode: HUNG_EXIT_CODE, hung: true };
   } finally {
     clearTimeout(timer);
+    // `end()` only queues the flush, and the CLI below finishes with
+    // `process.exit()`, which does not drain a pending stream. The log feeds
+    // the unhandled-error extraction and the failure artifact — and its last
+    // line is what names the file that wedged — so wait for the bytes to
+    // land. Bounded, because a stream that already errored never emits
+    // `finish` and this must not become a second way to hang.
     log.end();
+    await Promise.race([once(log, 'finish').catch(() => undefined), sleep(5000)]);
   }
 };
 
@@ -148,9 +189,17 @@ const snapshotTimings = async (timingsDir: string): Promise<string | null> => {
   return backup;
 };
 
-const restoreTimings = async (timingsDir: string, backup: string): Promise<void> => {
+/**
+ * Put the baseline the first attempt started from back on disk. `backup` is
+ * null when there was no baseline — a cold timings cache — and "absent" is
+ * then the state to restore, not a no-op: the killed attempt's
+ * `--update-timings` leaves this shard's partial slices behind, and a retry
+ * that balances against them derives a different partition than the seven
+ * shards still falling back to the round-robin split.
+ */
+const restoreTimings = async (timingsDir: string, backup: string | null): Promise<void> => {
   await rm(timingsDir, { recursive: true, force: true });
-  await cp(backup, timingsDir, { recursive: true });
+  if (backup) await cp(backup, timingsDir, { recursive: true });
 };
 
 /**
@@ -167,12 +216,15 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
   let attempts = 1;
   let attempt = await runAttempt(options);
   if (attempt.hung) {
+    // Leading newline, not cosmetic: GitHub parses a workflow command only
+    // when `::` starts a line, and a killed child's last chunk routinely ends
+    // mid-line — without it the annotation is swallowed into that line.
     process.stdout.write(
-      `::warning::Test invocation for '${options.label}' produced no exit within ` +
+      `\n::warning::Test invocation for '${options.label}' produced no exit within ` +
         `${options.timeoutSeconds}s; killed its process group and retrying once ` +
         '(oven-sh/bun#39709 — Bun isolate runner hang).\n'
     );
-    if (backup) await restoreTimings(timingsDir, backup);
+    await restoreTimings(timingsDir, backup);
     attempts = 2;
     attempt = await runAttempt(options);
   }
@@ -211,7 +263,11 @@ if (import.meta.main) {
     else valid = false;
   }
 
-  if (!valid || !label || command.length === 0 || !Number.isFinite(timeoutSeconds)) {
+  // `> 0`, not just finite: a zero or negative bound fires the timer before the
+  // child can produce anything, so every attempt reads as hung and the step
+  // reports 124 without ever having run the suite.
+  const boundedTimeout = Number.isFinite(timeoutSeconds) && timeoutSeconds > 0;
+  if (!valid || !label || command.length === 0 || !boundedTimeout) {
     process.stderr.write(USAGE);
     process.exit(2);
   }

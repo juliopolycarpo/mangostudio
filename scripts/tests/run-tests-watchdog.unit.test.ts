@@ -74,6 +74,27 @@ describe('runTestsWithWatchdog', () => {
     });
   });
 
+  // A command that cannot start emits `error` and may never emit `exit`.
+  // Without a listener Node throws it, killing the watchdog before it writes
+  // the meta file the merge job reads; with one but no `exit`, the two
+  // attempts would burn their full timeouts waiting for a process that does
+  // not exist. Both must degrade to an ordinary, un-retried failure.
+  it('fails fast when the command cannot be spawned', async () => {
+    const dir = await makeTemp();
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: [join(dir, 'no-such-executable'), 'arg'],
+        timeoutSeconds: 30,
+      })
+    );
+
+    expect(result).toMatchObject({ exitCode: 1, attempts: 1 });
+    expect(await Bun.file(join(dir, 'shard-meta.json')).json()).toMatchObject({ exitCode: 1 });
+  });
+
+  // `timeoutSeconds` is generous here on purpose: the first attempt has to
+  // reach its `writeFileSync` before the watchdog kills it, and a loaded CI
+  // runner can spend most of a second just starting `bun`.
   it('retries a hung first attempt and reports the second attempt green', async () => {
     const dir = await makeTemp();
     // First run leaves a marker and hangs; the second sees the marker and exits 0.
@@ -85,7 +106,33 @@ describe('runTestsWithWatchdog', () => {
       setInterval(() => {}, 1000);
     `;
     const result = await runTestsWithWatchdog(
-      optionsIn(dir, { command: ['bun', '-e', script], timeoutSeconds: 1 })
+      optionsIn(dir, { command: ['bun', '-e', script], timeoutSeconds: 3 })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+  });
+
+  // The cold-cache half of the same invariant: with no baseline to restore,
+  // "absent" is the state the retry has to see. Leaving the killed attempt's
+  // `--update-timings` output behind makes the retry balance against this
+  // shard's own partial slice while the other shards round-robin, which is a
+  // different partition — the failure the restore exists to prevent.
+  it('clears a timings directory the first attempt created when there was no baseline', async () => {
+    const dir = await makeTemp();
+    const timingsFile = join(dir, 'timings', 'api-unit.json');
+    const marker = join(dir, 'first-attempt-ran');
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        process.exit(fs.existsSync(${JSON.stringify(timingsFile)}) ? 9 : 0);
+      }
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      fs.mkdirSync(${JSON.stringify(join(dir, 'timings'))}, { recursive: true });
+      fs.writeFileSync(${JSON.stringify(timingsFile)}, "written-by-attempt-1");
+      setInterval(() => {}, 1000);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], timeoutSeconds: 3 })
     );
 
     expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
@@ -117,7 +164,7 @@ describe('runTestsWithWatchdog', () => {
       setInterval(() => {}, 1000);
     `;
     const result = await runTestsWithWatchdog(
-      optionsIn(dir, { command: ['bun', '-e', script], timeoutSeconds: 1 })
+      optionsIn(dir, { command: ['bun', '-e', script], timeoutSeconds: 3 })
     );
 
     expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
