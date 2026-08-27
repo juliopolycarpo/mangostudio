@@ -26,6 +26,12 @@ export interface TargetPaths {
   /** Canonical form of an already-absolute path: `.`, `..`, and trailing separators removed. */
   canonical(path: string): string;
   /**
+   * True when two already-canonical (or canonicalizable) paths name the same
+   * location under this target's own rules — case-folded on `win32`, since
+   * `C:\Repo` and `c:\repo` are one directory there but two everywhere else.
+   */
+  equals(left: string, right: string): boolean;
+  /**
    * Joins a relative path onto an absolute base, canonicalizing the result.
    * A relative `base` would send the result to the hub's own working directory,
    * so callers check it first — see `resolveWorkdirRelativePath`.
@@ -71,6 +77,7 @@ export function createTargetPaths(manifest: RuntimeCapabilityManifest): TargetPa
     homeDir: impl.isAbsolute(manifest.homeDir) ? manifest.homeDir : '',
     isAbsolute: (path) => impl.isAbsolute(path),
     canonical,
+    equals: (left, right) => fold(canonical(left)) === fold(canonical(right)),
     // `base` is absolute at every call site, so `resolve` cannot reach for the
     // hub's cwd; it is used here only for its segment folding.
     join: (base, path) => canonical(impl.resolve(base, path)),

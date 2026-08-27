@@ -87,6 +87,15 @@ describe('findWorktree', () => {
       findWorktree(windowsWorktrees, 'C:\\repo', 'C:\\work\\.\\feature\\', posixPaths)
     ).toBeUndefined();
   });
+
+  it('matches a Windows runtime\u2019s listed path regardless of casing', () => {
+    const windowsWorktrees = [worktree('C:\\Work\\Feature')];
+    const windowsPaths = pathsFor('win32');
+
+    expect(
+      findWorktree(windowsWorktrees, 'c:\\repo', 'c:\\work\\feature', windowsPaths)?.path
+    ).toBe('C:\\Work\\Feature');
+  });
 });
 
 describe('isSameWorktreePath', () => {
@@ -100,5 +109,20 @@ describe('isSameWorktreePath', () => {
 
   it('leaves the filesystem root alone', () => {
     expect(isSameWorktreePath('/', '/', posixPaths)).toBe(true);
+  });
+
+  /**
+   * The regression the P1 review comment on this PR flagged: `git worktree
+   * list` and the chat's own resolved root can disagree in casing on Windows
+   * while naming the same directory, and this guard is what keeps a chat from
+   * removing the worktree it is currently running in.
+   */
+  it('folds case on a Windows runtime, where the same directory can be spelled two ways', () => {
+    const windowsPaths = pathsFor('win32');
+    expect(isSameWorktreePath('C:\\Work\\Feature', 'c:\\work\\feature', windowsPaths)).toBe(true);
+  });
+
+  it('does not fold case on posix, where casing is significant', () => {
+    expect(isSameWorktreePath('/Work/Feature', '/work/feature', posixPaths)).toBe(false);
   });
 });

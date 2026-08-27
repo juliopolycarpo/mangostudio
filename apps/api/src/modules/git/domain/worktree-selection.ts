@@ -16,6 +16,12 @@ import type { GitWorktree } from '@mangostudio/shared/git';
 export interface WorktreePathSemantics {
   /** Canonical form of an absolute path: `.`, `..` and trailing separators removed. */
   canonical(path: string): string;
+  /**
+   * True when two paths name the same location under the target's own rules —
+   * case-folded on `win32`, where `git worktree list` and a caller's own root
+   * can disagree in casing and still name one directory.
+   */
+  equals(left: string, right: string): boolean;
   /** Joins a relative path onto an absolute base; an absolute path wins over the base. */
   join(base: string, path: string): string;
 }
@@ -44,7 +50,7 @@ export function findWorktree(
   paths: WorktreePathSemantics
 ): GitWorktree | undefined {
   const target = paths.join(root, path);
-  return worktrees.find((worktree) => paths.canonical(worktree.path) === target);
+  return worktrees.find((worktree) => paths.equals(worktree.path, target));
 }
 
 /** True when two paths name the same worktree once written the same way. */
@@ -53,5 +59,5 @@ export function isSameWorktreePath(
   right: string,
   paths: WorktreePathSemantics
 ): boolean {
-  return paths.canonical(left) === paths.canonical(right);
+  return paths.equals(left, right);
 }
