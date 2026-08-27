@@ -74,6 +74,36 @@ export async function insertTestUser(overrides: Partial<UserFixture> = {}): Prom
 }
 
 /**
+ * Idempotently give already-named identities a `user` row, so a route that
+ * persists something owned by one of them clears the foreign keys pointing at
+ * `user.id` (`secret_metadata`'s among them).
+ *
+ * `insertTestUser` mints its own id and throws on a second call; this takes the
+ * caller's fixed identities and is a no-op the second time, so two `describe`
+ * blocks that legitimately share one can both ask for it.
+ * // Usage: beforeAll(() => ensureTestUsers(OPENAI_PROJ_USER));
+ */
+export async function ensureTestUsers(...users: readonly UserFixture[]): Promise<void> {
+  const db = getDb();
+  const now = new Date().toISOString();
+  for (const user of users) {
+    await db
+      .insertInto('user')
+      .values({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        emailVerified: 0,
+        image: null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflict((oc) => oc.column('id').doNothing())
+      .execute();
+  }
+}
+
+/**
  * Creates a chat row in the test database with realistic faker-generated data.
  * Returns the inserted chat so tests can reference its id in request bodies.
  */

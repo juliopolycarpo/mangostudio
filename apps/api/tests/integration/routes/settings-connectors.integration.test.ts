@@ -26,6 +26,7 @@ import {
   type SuccessPayload,
   withFetch,
 } from '../../support/connectors';
+import { ensureTestUsers } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const TEST_USER = {
@@ -42,43 +43,14 @@ const CURSOR_CONNECTOR_USER = {
 
 let restoreAuth: (() => void) | null = null;
 
-interface TestIdentity {
-  readonly id: string;
-  readonly name: string;
-  readonly email: string;
-}
-
-/**
- * Give the named identities a `user` row, so a route that persists something
- * owned by one of them clears `secret_metadata`'s foreign key.
- *
- * Every `describe` seeds the identities *it* authenticates as, and no others.
- * Sharing a seed across blocks makes the file order-dependent: `beforeAll` runs
- * per `describe`, so a block that reads a row a sibling block inserted only
- * passes while the runner happens to schedule them in that order. It did not
- * under `--randomize` — see the block comment on the project-scoped block.
- *
- * Idempotent, so two blocks that legitimately share an identity can both ask.
- * // Usage: beforeAll(() => seedUsers(OPENAI_PROJ_USER));
+/*
+ * Every `describe` seeds — with `ensureTestUsers`, from tests/support/factories
+ * — the identities *it* authenticates as, and no others. Sharing a seed across
+ * blocks makes the file order-dependent: `beforeAll` runs per `describe`, so a
+ * block that reads a row a sibling block inserted only passes while the runner
+ * happens to schedule them in that order. It did not under `--randomize` — see
+ * the block comment on the project-scoped block.
  */
-async function seedUsers(...users: readonly TestIdentity[]): Promise<void> {
-  const db = getDb();
-  const now = new Date().toISOString();
-  for (const user of users) {
-    await db
-      .insertInto('user')
-      .values({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        emailVerified: 0,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflict((oc) => oc.column('id').doNothing())
-      .execute();
-  }
-}
 
 afterEach(async () => {
   restoreAuth?.();
@@ -89,6 +61,8 @@ afterEach(async () => {
 });
 
 describe('settings connectors routes', () => {
+  beforeAll(() => ensureTestUsers(TEST_USER));
+
   it('GET /settings/connectors returns empty connector list for a new user', async () => {
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
     restoreAuth = restore;
@@ -184,7 +158,7 @@ describe('settings connectors routes', () => {
  * a user already has is taken away.
  */
 describe('deprecated cursor connector routes', () => {
-  beforeAll(() => seedUsers(CURSOR_CONNECTOR_USER));
+  beforeAll(() => ensureTestUsers(CURSOR_CONNECTOR_USER));
 
   afterEach(() => {
     restoreAuth?.();
@@ -271,6 +245,7 @@ describe('deprecated cursor connector routes', () => {
 
 describe('Gemini aliases API', () => {
   beforeAll(async () => {
+    await ensureTestUsers(TEST_USER);
     await mock.module('@google/genai', () => {
       return {
         GoogleGenAI: class {
@@ -455,7 +430,12 @@ describe('openai connector routes', () => {
   // `OPENAI_FAIL_USER` used to be seeded here and consumed by the
   // project-scoped block below, which is exactly the dependency that broke.
   beforeAll(() =>
-    seedUsers(OPENAI_CONNECTOR_USER, OPENAI_LIST_USER, COMPAT_LIST_USER, DEEPSEEK_CONNECTOR_USER)
+    ensureTestUsers(
+      OPENAI_CONNECTOR_USER,
+      OPENAI_LIST_USER,
+      COMPAT_LIST_USER,
+      DEEPSEEK_CONNECTOR_USER
+    )
   );
 
   let originalOpenAIProvider: AIProvider;
@@ -767,7 +747,7 @@ describe('openai project-scoped connector routes', () => {
   // that persists a connector failed the `secret_metadata` foreign key and
   // answered 500. Seeding what this block actually uses removes the ordering
   // assumption rather than pinning an order.
-  beforeAll(() => seedUsers(OPENAI_PROJ_USER, OPENAI_FAIL_USER));
+  beforeAll(() => ensureTestUsers(OPENAI_PROJ_USER, OPENAI_FAIL_USER));
 
   let originalOpenAIProvider: AIProvider;
 
