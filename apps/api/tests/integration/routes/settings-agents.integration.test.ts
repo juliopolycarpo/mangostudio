@@ -14,15 +14,10 @@ import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { loadConfigForTest } from '../../../src/lib/config';
 import { settingsRoutes } from '../../../src/routes/settings';
+import { makeTestIdentity, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const TEST_AUTH_SECRET = 'test-secret-at-least-32-characters-long';
-
-interface TestIdentity {
-  readonly id: string;
-  readonly name: string;
-  readonly email: string;
-}
 
 /**
  * Fresh identities per test, because the rows these tests write are keyed by
@@ -41,28 +36,18 @@ interface TestIdentity {
  * clean), and it is what the randomized-order nightly has reported every night
  * since that workflow landed.
  *
- * A fresh id per test namespaces the rows instead of enumerating the tables to
- * truncate, so a test that starts writing a new one cannot reopen the hole.
+ * `makeTestIdentity` (tests/support/factories) mints them, so the namespacing
+ * rule is one helper rather than a per-file counter.
  */
-let identitySeq = 0;
-let testUser: TestIdentity;
-let otherUser: TestIdentity;
+let testUser: UserFixture;
+let otherUser: UserFixture;
 
 let restoreAuth: (() => void) | null = null;
 let agentsDir: string;
 
 beforeEach(() => {
-  identitySeq += 1;
-  testUser = {
-    id: `agent-settings-user-${identitySeq}`,
-    name: 'Agent Settings User',
-    email: `agent-settings-${identitySeq}@mangostudio.test`,
-  };
-  otherUser = {
-    id: `agent-settings-other-user-${identitySeq}`,
-    name: 'Other Agent Settings User',
-    email: `other-agent-settings-${identitySeq}@mangostudio.test`,
-  };
+  testUser = makeTestIdentity('agent-settings-user', 'Agent Settings User');
+  otherUser = makeTestIdentity('agent-settings-other-user', 'Other Agent Settings User');
   agentsDir = mkdtempSync(join(tmpdir(), 'mango-agent-routes-'));
   loadConfigForTest({
     agents: { dir: agentsDir },
@@ -100,7 +85,7 @@ describe('settings agents routes', () => {
     await getDb()
       .insertInto('user_app_settings')
       .values({
-        id: `agent-legacy-app-settings-${identitySeq}`,
+        id: `agent-legacy-app-settings-${testUser.id}`,
         userId: testUser.id,
         settingsJson: JSON.stringify({
           ...DEFAULT_APP_SETTINGS,
@@ -119,7 +104,7 @@ describe('settings agents routes', () => {
     await getDb()
       .insertInto('user_tool_settings')
       .values({
-        id: `agent-disabled-tool-${identitySeq}`,
+        id: `agent-disabled-tool-${testUser.id}`,
         userId: testUser.id,
         toolName: 'generate_image',
         enabled: 0,

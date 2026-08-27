@@ -21,6 +21,30 @@ export interface ConnectorFixture {
   userId: string;
 }
 
+let identitySeq = 0;
+
+/**
+ * Mint a fresh identity *without* inserting it, for suites whose rows are keyed
+ * by user id and whose tables nothing truncates between tests. A test that
+ * writes `user_app_settings` under a fixed id is read back by the next test in
+ * the same file; a per-test id namespaces those rows instead of enumerating the
+ * tables to truncate, so a test that starts writing a new one cannot reopen the
+ * hole.
+ *
+ * The counter is module-level, so ids stay unique across the files that share
+ * one module graph in the unisolated `api-integration` lane. Prefer
+ * `insertTestUser` when the suite also needs the `user` row itself.
+ * // Usage: const user = makeTestIdentity('app-settings-user', 'App Settings User');
+ */
+export function makeTestIdentity(prefix: string, name: string): UserFixture {
+  identitySeq += 1;
+  return {
+    id: `${prefix}-${identitySeq}`,
+    name,
+    email: `${prefix}-${identitySeq}@mangostudio.test`,
+  };
+}
+
 /**
  * Creates a user row in the test database with realistic faker-generated data.
  * Returns the inserted user so it can be passed to createAuthenticatedApiTestApp.

@@ -7,13 +7,8 @@ import {
 import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { settingsRoutes } from '../../../src/routes/settings';
+import { makeTestIdentity, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
-
-interface TestIdentity {
-  readonly id: string;
-  readonly name: string;
-  readonly email: string;
-}
 
 /**
  * Fresh identities per test, because `user_app_settings` is keyed by user and
@@ -26,27 +21,17 @@ interface TestIdentity {
  * `DEFAULT_APP_SETTINGS`. Reproduced with `bun test --randomize --seed=1`
  * (also seed=2).
  *
- * A fresh id per test namespaces the rows instead of enumerating the tables
- * to truncate, so a test that starts writing a new one cannot reopen the hole.
+ * `makeTestIdentity` (tests/support/factories) mints them, so the namespacing
+ * rule is one helper rather than a per-file counter.
  */
-let identitySeq = 0;
-let testUser: TestIdentity;
-let otherUser: TestIdentity;
+let testUser: UserFixture;
+let otherUser: UserFixture;
 
 let restoreAuth: (() => void) | null = null;
 
 beforeEach(() => {
-  identitySeq += 1;
-  testUser = {
-    id: `app-settings-user-${identitySeq}`,
-    name: 'App Settings User',
-    email: `app-settings-${identitySeq}@mangostudio.test`,
-  };
-  otherUser = {
-    id: `app-settings-other-user-${identitySeq}`,
-    name: 'Other App Settings User',
-    email: `other-app-settings-${identitySeq}@mangostudio.test`,
-  };
+  testUser = makeTestIdentity('app-settings-user', 'App Settings User');
+  otherUser = makeTestIdentity('app-settings-other-user', 'Other App Settings User');
 });
 
 afterEach(() => {
@@ -159,26 +144,22 @@ describe('settings app settings routes', () => {
   });
 
   it('normalizes malformed persisted JSON to defaults', async () => {
-    const malformedUserId = `malformed-app-settings-user-${identitySeq}`;
+    const malformedUser = makeTestIdentity(
+      'malformed-app-settings-user',
+      'Malformed App Settings User'
+    );
     await getDb()
       .insertInto('user_app_settings')
       .values({
-        id: `malformed-app-settings-row-${identitySeq}`,
-        userId: malformedUserId,
+        id: `malformed-app-settings-row-${malformedUser.id}`,
+        userId: malformedUser.id,
         settingsJson: '{bad-json',
         createdAt: Date.now(),
         updatedAt: Date.now(),
       })
       .execute();
 
-    const { app, restore } = createAuthenticatedApiTestApp(
-      {
-        id: malformedUserId,
-        name: 'Malformed App Settings User',
-        email: `malformed-app-settings-${identitySeq}@mangostudio.test`,
-      },
-      settingsRoutes
-    );
+    const { app, restore } = createAuthenticatedApiTestApp(malformedUser, settingsRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(new Request('http://localhost/settings/app'));
