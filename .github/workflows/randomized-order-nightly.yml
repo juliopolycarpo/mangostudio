@@ -133,7 +133,10 @@ jobs:
           args=(--timeout 15000 --randomize "--seed=${SEED}")
           if [ -n "${ISOLATION}" ]; then args+=("${ISOLATION}"); fi
           if [ -n "${LANE_PATH}" ]; then args+=("${LANE_PATH}"); fi
-          echo "::notice::Reproduce with: (cd apps/${WORKSPACE} && bun test ${args[*]})"
+          # Carries the env the job sets, not just the flags: a paste that
+          # leaves `MANGOSTUDIO_DIAGNOSTIC_LOGS` or `DATABASE_PATH` behind runs
+          # a different suite than the one that went red.
+          echo "::notice::Reproduce with: (cd apps/${WORKSPACE} && DATABASE_PATH=${DATABASE_PATH} MANGOSTUDIO_DIAGNOSTIC_LOGS=${MANGOSTUDIO_DIAGNOSTIC_LOGS} bun test ${args[*]})"
           bun test "${args[@]}" 2>&1 | tee run.log
 
       # The order is the finding. Without it a red run names a failing test and
