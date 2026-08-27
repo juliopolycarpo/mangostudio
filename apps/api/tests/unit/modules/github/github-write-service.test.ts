@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import type { GitRuntimeSelection } from '../../../../src/modules/git/infrastructure/git-cli';
 import { createGithubCache } from '../../../../src/modules/github/application/github-cache';
 import { createGithubReadService } from '../../../../src/modules/github/application/github-read-service';
 import type { GithubWriteOperation } from '../../../../src/modules/github/application/github-realtime-service';
@@ -37,17 +38,20 @@ interface Published {
 }
 
 /**
- * `requireRepoRoot` and `withMutationLock` reach the runtime connection and
- * a shared queue keyed by (environment, root) respectively — real for the
- * checkout lock, but exactly what a unit test for the write service itself
- * should not have to stand up. `withMutationLock` here just runs the
- * mutation directly, since these tests are not the ones asserting ordering
- * against a concurrent git write.
+ * `requireRepoRoot` and `withRepoMutationLock` reach the runtime connection —
+ * the second one twice, since it resolves the repository's common directory
+ * before it queues. Real for the checkout lock, but exactly what a unit test
+ * for the write service itself should not have to stand up.
+ * `withRepoMutationLock` here just runs the mutation directly, since these
+ * tests are not the ones asserting ordering against a concurrent git write.
  */
 const noopRepoRootDeps = {
   requireRepoRoot: () => Promise.resolve('/remote/repo'),
-  withMutationLock: <T>(_environmentId: string, _scope: string, mutation: () => Promise<T>) =>
-    mutation(),
+  withRepoMutationLock: <T>(
+    _selection: GitRuntimeSelection,
+    _root: string,
+    mutation: () => Promise<T>
+  ) => mutation(),
 };
 
 function createService(client: FakeGithubCli, published: Published[] = []) {
@@ -296,7 +300,7 @@ describe('GitHub write service', () => {
    */
   it('serializes a checkout through the resolved repository root, not a ready', async () => {
     const client = createClient();
-    const lockCalls: Array<{ environmentId: string; scope: string }> = [];
+    const lockCalls: Array<{ environmentId: string; root: string }> = [];
     const writes = createGithubWriteService({
       client,
       cache: createGithubCache(),
@@ -304,16 +308,16 @@ describe('GitHub write service', () => {
       pullRequestTemplate: () => Promise.resolve(''),
       publish: () => undefined,
       requireRepoRoot: () => Promise.resolve('/remote/repo-root'),
-      withMutationLock: (environmentId, scope, mutation) => {
-        lockCalls.push({ environmentId, scope });
+      withRepoMutationLock: (selection, root, mutation) => {
+        lockCalls.push({ environmentId: selection.environmentId, root });
         return mutation();
       },
     });
 
     await writes.checkoutPullRequest(REQUEST, { chatId: 'chat-1', number: 7 });
-    expect(lockCalls).toEqual([{ environmentId: 'devbox', scope: '/remote/repo-root' }]);
+    expect(lockCalls).toEqual([{ environmentId: 'devbox', root: '/remote/repo-root' }]);
 
     await writes.markPullRequestReady(REQUEST, { chatId: 'chat-1', number: 7 });
-    expect(lockCalls).toEqual([{ environmentId: 'devbox', scope: '/remote/repo-root' }]);
+    expect(lockCalls).toEqual([{ environmentId: 'devbox', root: '/remote/repo-root' }]);
   });
 });

@@ -165,7 +165,7 @@ function createPanelPlugin(overrides: FakeGithubCliOptions = {}) {
         // route-shape test never backs with an actual checkout. The lock
         // itself is `git-write-service.test.ts`'s job, not this file's.
         requireRepoRoot: () => Promise.resolve('/remote/repo'),
-        withMutationLock: (_environmentId, _scope, mutation) => mutation(),
+        withRepoMutationLock: (_selection, _root, mutation) => mutation(),
       }),
     }),
   };

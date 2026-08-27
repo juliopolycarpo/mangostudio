@@ -19,10 +19,8 @@ import type {
   GithubPrActionResponse,
   GithubPrSummary,
 } from '@mangostudio/shared/github';
-import {
-  requireRepoRoot as requireRepoRootDefault,
-  withMutationLock as withMutationLockDefault,
-} from '../../git/application/git-write-service';
+import { withRepoMutationLock as withRepoMutationLockDefault } from '../../git/application/git-mutation-lock';
+import { requireRepoRoot as requireRepoRootDefault } from '../../git/application/git-write-service';
 import { GhPrSummaryOutputSchema, GithubOutputError, readGhOutput } from '../domain/gh-output';
 import { toPrSummary } from '../domain/github-normalizers';
 import {
@@ -79,7 +77,7 @@ export interface GithubWriteServiceOptions {
    * or the runtime connection `requireRepoRoot` resolves it through.
    */
   readonly requireRepoRoot?: typeof requireRepoRootDefault;
-  readonly withMutationLock?: typeof withMutationLockDefault;
+  readonly withRepoMutationLock?: typeof withRepoMutationLockDefault;
 }
 
 /**
@@ -101,7 +99,7 @@ export function createGithubWriteService(
     ((request: GithubWriteRequest) => readPullRequestTemplate(request, request.chatId));
   const publish = options.publish ?? publishGithubWriteInvalidation;
   const requireRepoRoot = options.requireRepoRoot ?? requireRepoRootDefault;
-  const withMutationLock = options.withMutationLock ?? withMutationLockDefault;
+  const withRepoMutationLock = options.withRepoMutationLock ?? withRepoMutationLockDefault;
 
   const target = (request: GithubWriteRequest): GhCommandTarget => ({
     cwd: request.workdir,
@@ -146,7 +144,7 @@ export function createGithubWriteService(
     // operation on the same repository against a moving index or working tree.
     if (command === 'pr.checkout') {
       const root = await requireRepoRoot(request.workdir, request.signal, request.selection);
-      await withMutationLock(request.selection.environmentId, root, runMutation);
+      await withRepoMutationLock(request.selection, root, runMutation, request.signal);
     } else {
       await runMutation();
     }

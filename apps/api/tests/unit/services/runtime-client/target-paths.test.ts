@@ -86,6 +86,17 @@ describe('createTargetPaths', () => {
     expect(posixPaths.equals('/work/feature/', '/work/./feature')).toBe(true);
   });
 
+  /**
+   * `identity` is what a map key uses where `equals` cannot be called — the
+   * mutation-lock queue. Two paths that compare equal have to produce one key,
+   * or a Windows repository takes two locks on one common directory.
+   */
+  it('gives one identity to every spelling of a path the target treats as equal', () => {
+    expect(windowsPaths.identity('C:\\Repo\\.git')).toBe(windowsPaths.identity('c:\\repo\\.git\\'));
+    expect(posixPaths.identity('/repo/.git/')).toBe(posixPaths.identity('/repo/./.git'));
+    expect(posixPaths.identity('/Repo/.git')).not.toBe(posixPaths.identity('/repo/.git'));
+  });
+
   it('ignores a home directory that is not absolute on the target', () => {
     // A manifest is a claim by the other end. A relative one would send every
     // `~` expansion to the hub's own working directory.

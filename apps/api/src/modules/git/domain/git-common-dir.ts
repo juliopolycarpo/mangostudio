@@ -35,7 +35,7 @@ import type { WorktreePathSemantics } from './worktree-selection';
 export function resolveGitCommonDir(
   root: string,
   printed: string,
-  paths: WorktreePathSemantics
+  paths: Pick<WorktreePathSemantics, 'join'>
 ): string {
   const trimmed = printed.trim();
   if (trimmed.length === 0) {

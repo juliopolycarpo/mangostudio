@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { withMutationLock } from '../../../../src/modules/git/application/git-write-service';
+import { withMutationLock } from '../../../../src/modules/git/application/git-mutation-lock';
 
 /** A mutation that records when it entered and left, and finishes on demand. */
 function tracked(name: string, log: string[]) {

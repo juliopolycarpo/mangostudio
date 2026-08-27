@@ -32,6 +32,16 @@ export interface TargetPaths {
    */
   equals(left: string, right: string): boolean;
   /**
+   * The string two paths that {@link equals} share — canonical, and folded on
+   * `win32`. For using a target path as a map key, where `equals` cannot help:
+   * the mutation-lock queue is keyed by string, so `C:\Repo\.git` and
+   * `c:\repo\.git` would otherwise take two locks on one directory.
+   *
+   * Never render this back to a user: the folding loses the case the target
+   * actually stores.
+   */
+  identity(path: string): string;
+  /**
    * Joins a relative path onto an absolute base, canonicalizing the result.
    * A relative `base` would send the result to the hub's own working directory,
    * so callers check it first — see `resolveWorkdirRelativePath`.
@@ -67,6 +77,8 @@ export function createTargetPaths(manifest: RuntimeCapabilityManifest): TargetPa
     return trimmed.length > root.length ? trimmed : root || normalized;
   };
 
+  const identity = (path: string): string => fold(canonical(path));
+
   return {
     style: manifest.pathStyle,
     sep: impl.sep,
@@ -77,7 +89,8 @@ export function createTargetPaths(manifest: RuntimeCapabilityManifest): TargetPa
     homeDir: impl.isAbsolute(manifest.homeDir) ? manifest.homeDir : '',
     isAbsolute: (path) => impl.isAbsolute(path),
     canonical,
-    equals: (left, right) => fold(canonical(left)) === fold(canonical(right)),
+    identity,
+    equals: (left, right) => identity(left) === identity(right),
     // `base` is absolute at every call site, so `resolve` cannot reach for the
     // hub's cwd; it is used here only for its segment folding.
     join: (base, path) => canonical(impl.resolve(base, path)),

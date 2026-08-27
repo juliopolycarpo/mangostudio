@@ -6,7 +6,6 @@ import type {
   RemoveWorktreeBody,
 } from '@mangostudio/shared/git';
 import { getRuntimeClient } from '../../../services/runtime-client';
-import { resolveGitCommonDir } from '../domain/git-common-dir';
 import {
   buildWorktreeAddArgs,
   buildWorktreeRemoveArgs,
@@ -19,6 +18,7 @@ import {
   type WorktreePathSemantics,
 } from '../domain/worktree-selection';
 import { GitCliError, type GitRuntimeSelection, runGit } from '../infrastructure/git-cli';
+import { withRepoMutationLock } from './git-mutation-lock';
 import { type GitInvalidationTarget, publishGitWriteInvalidation } from './git-realtime-service';
 import {
   combinedCommandOutput,
@@ -26,7 +26,6 @@ import {
   GitWriteError,
   mapWriteFailure,
   requireRepoRoot,
-  withMutationLock,
 } from './git-write-service';
 
 // Adding a worktree checks out a whole tree, so it gets the same headroom a
@@ -183,11 +182,10 @@ function refuseUnremovableWorktree(
 /**
  * Runs a worktree mutation under the lock that covers the whole repository.
  *
- * The lock key is the common directory rather than the repository root, because
- * that is the state `worktree add` and `worktree remove` write: the worktree
- * registry and the ref database, shared by every worktree of the repository.
- * Keyed on the root, a mutation from the main worktree and one from a linked
- * worktree would take different locks and race on the same registry.
+ * The same lock every other repository mutation takes — `withRepoMutationLock`
+ * keys on the common directory, which is exactly the state `worktree add` and
+ * `worktree remove` write: the worktree registry and the ref database, shared
+ * by every worktree of the repository.
  */
 async function runWorktreeMutation(
   workdir: string,
@@ -208,11 +206,15 @@ async function runWorktreeMutation(
     // needs to compare worktree paths: they are paths on the runtime, not the
     // hub, and every caller of this function is about that same machine.
     const paths = await readTargetPaths(selection);
-    const commonDir = await readGitCommonDir(root, selection, paths, signal);
-    const worktrees = await withMutationLock(target.environmentId, commonDir, async () => {
-      await mutation(root, selection, paths);
-      return await readWorktreeList(root, signal, selection);
-    });
+    const worktrees = await withRepoMutationLock(
+      selection,
+      root,
+      async () => {
+        await mutation(root, selection, paths);
+        return await readWorktreeList(root, signal, selection);
+      },
+      signal
+    );
     publishGitWriteInvalidation(target, invalidationOperation);
     return worktrees;
   } catch (error) {
@@ -237,21 +239,6 @@ async function readWorktreeList(
 async function readTargetPaths(selection: GitRuntimeSelection): Promise<WorktreePathSemantics> {
   const runtime = await getRuntimeClient(selection.userId, selection.environmentId);
   return runtime.paths;
-}
-
-/** The absolute administrative directory every worktree of this repository shares. */
-async function readGitCommonDir(
-  root: string,
-  selection: GitRuntimeSelection,
-  paths: WorktreePathSemantics,
-  signal?: AbortSignal
-): Promise<string> {
-  const result = await runGit(['rev-parse', '--git-common-dir'], {
-    cwd: root,
-    signal,
-    ...selection,
-  });
-  return resolveGitCommonDir(root, result.stdout, paths);
 }
 
 function mapWorktreeFailure(error: unknown, operation: string): never {

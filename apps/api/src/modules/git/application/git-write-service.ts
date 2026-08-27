@@ -35,6 +35,7 @@ import {
   type RunGitOptions,
   runGit,
 } from '../infrastructure/git-cli';
+import { withMutationLock, withRepoMutationLock } from './git-mutation-lock';
 import {
   type GitInvalidationTarget,
   type GitWriteOperation,
@@ -44,7 +45,6 @@ import { getRepoRoot, getRepoStatus } from './git-status-service';
 
 type PathSelection = Pick<StagePathsBody | UnstagePathsBody, 'all' | 'paths'>;
 
-const mutationQueues = new Map<string, Promise<void>>();
 const COMMIT_TIMEOUT_MS = 60_000;
 const REMOTE_TIMEOUT_MS = 120_000;
 const MERGE_CONFLICT_PATTERN = /CONFLICT|Merge conflict|needs merge/i;
@@ -58,41 +58,6 @@ export class GitWriteError extends Error {
   ) {
     super(message);
     this.name = 'GitWriteError';
-  }
-}
-
-/**
- * Serializes index mutations for one repository while allowing other repos to
- * proceed.
- *
- * `scope` is the path the mutation contends on, and it is not always the
- * repository root. Every worktree of a repository has its own `index` and its
- * own `index.lock`, so ordinary index mutations are genuinely independent and
- * key on the root. `git worktree add` and `git worktree remove` mutate the
- * administrative state under the shared common directory instead, so
- * `git-worktree-service.ts` passes that directory here and serializes against
- * every worktree of the same repository through this one queue map.
- */
-export async function withMutationLock<T>(
-  environmentId: string,
-  scope: string,
-  mutation: () => Promise<T>
-): Promise<T> {
-  const key = `${environmentId}:${scope}`;
-  const previous = mutationQueues.get(key) ?? Promise.resolve();
-  let release!: () => void;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const queue = previous.then(() => current);
-  mutationQueues.set(key, queue);
-
-  await previous;
-  try {
-    return await mutation();
-  } finally {
-    release();
-    if (mutationQueues.get(key) === queue) mutationQueues.delete(key);
   }
 }
 
@@ -229,6 +194,10 @@ function mapCommitFailure(error: unknown, operation: string): never {
  * Resolves the repository root before locking so every workdir that points into
  * the same repository serializes on one key — two chats rooted at `/repo` and
  * `/repo/sub` share a single `.git/index` and must not mutate it concurrently.
+ *
+ * The key itself is `withRepoMutationLock`'s, which widens that to every
+ * worktree of the repository: these mutations write refs and reflogs under the
+ * shared common directory, not only the per-worktree index.
  */
 async function runRepoMutation<T>(
   workdir: string,
@@ -241,7 +210,7 @@ async function runRepoMutation<T>(
   try {
     const selection = runtimeSelection(target);
     const root = await requireRepoRoot(workdir, signal, selection);
-    return await withMutationLock(target.environmentId, root, () => mutation(root));
+    return await withRepoMutationLock(selection, root, () => mutation(root), signal);
   } catch (error) {
     return mapFailure(error, operation);
   }
@@ -270,6 +239,10 @@ export function initRepo(
   return publishAfterSuccessfulMutation(
     invalidationTarget,
     'init',
+    // The one mutation that cannot take the repository lock: there is no
+    // repository yet, so there is no common directory to key on. The workdir is
+    // what two concurrent `init` calls contend on, and nothing else can be
+    // mutating a directory that is not a repository.
     withMutationLock(invalidationTarget.environmentId, workdir, async () => {
       const selection = runtimeSelection(invalidationTarget);
       if (!(await isGitAvailable(selection))) {
