@@ -141,8 +141,11 @@ Há um rate limiter em memória (`rate-limit.ts`) que conta requests por (bucket
 id do cliente). A função `classify` (`rate-limit-policy.ts`) classifica cada
 request em um bucket — `health`, `auth`, `general` (sessão no navegador) e
 `api-key` (requests com `x-api-key`) usam contadores independentes para
-automação não afetar sessões no mesmo IP. O id do cliente é o IP em todos os
-buckets hoje (ids por chave exigem o id verificado após `apiKeyGuard`; ver
+automação não afetar sessões no mesmo IP. O `general` é o mais amplo deles: os
+buckets mais estreitos limitam uma operação cara cada um, enquanto o `general`
+limita carregamentos de página comuns, e um carregamento são muitos requests. O
+id do cliente é o IP em todos os buckets hoje (ids por chave exigem o id
+verificado após `apiKeyGuard`; ver
 issue #737). Requests bloqueados retornam `429` como `ApiErrorResponse`
 (`code: RATE_LIMITED`) com header `Retry-After`. Os contadores expirados são
 limpos sob demanda. Headers de proxy só afetam o id do cliente quando

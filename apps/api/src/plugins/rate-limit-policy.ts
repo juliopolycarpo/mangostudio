@@ -6,10 +6,15 @@
  * prefix-tolerant so the policy stays correct whether or not the `/api` prefix
  * is present — this is the bug the earlier `path === '/health'` check missed.
  *
- * Health and auth get their own, more generous buckets so they are never
- * starved by — nor able to starve — the general API bucket, while still being
- * capped against floods. Requests carrying `x-api-key` use a separate bucket so
- * automation scripts do not share counters with browser session traffic.
+ * Health and auth get their own buckets so they are never starved by — nor able
+ * to starve — the general API bucket, while still being capped against floods.
+ * Requests carrying `x-api-key` use a separate bucket so automation scripts do
+ * not share counters with browser session traffic.
+ *
+ * `general` is the widest of them, not the strictest. Every narrower bucket
+ * bounds one expensive operation; `general` bounds ordinary page loads, and a
+ * page load is many requests. Isolation, not a low ceiling, is what keeps a
+ * flood in one bucket off the others.
  *
  * The api-key bucket is keyed by client IP for now. Hashing the raw header for
  * a per-key counter would let an unauthenticated caller rotate `x-api-key` and
@@ -29,13 +34,33 @@ export type RateLimitHeaderLookup = {
 
 /** Per-route-group limits. Each bucket has an independent per-client counter. */
 export const RATE_LIMIT_BUCKETS = {
-  /** Expensive application and generation endpoints (the baseline limit). */
-  general: { name: 'general', max: 100, windowMs: ONE_MINUTE_MS },
+  /**
+   * Everything without a narrower bucket: the application endpoints a signed-in
+   * browser calls, which is to say the cost of ordinary page loads.
+   *
+   * Sized against the app as it actually loads rather than against one request.
+   * A view of the Environments surface — the heaviest — costs ~15 requests in
+   * this bucket, so 600 leaves room for roughly 40 page views a minute while
+   * still bounding a flood. At the 100 it started with, that was three
+   * refreshes: a developer hitting reload while debugging locked themselves out
+   * inside a minute (#941).
+   *
+   * The counter keys on client IP, so — as with `runtimeSocket` and
+   * `probeForce` — a ceiling tuned to one browser's cadence would let a single
+   * impatient user 429 everyone sharing their address. This is the broadest
+   * bucket, covering every ordinary page load, which is where that hurts most.
+   */
+  general: { name: 'general', max: 600, windowMs: ONE_MINUTE_MS },
   /**
    * Auth endpoints are hit on every page load (session checks) and are a
-   * brute-force target. A separate, more generous bucket keeps legitimate auth
-   * traffic flowing independently of general API load; credential-level lockout
-   * is handled by Better Auth.
+   * brute-force target. A separate bucket keeps legitimate auth traffic flowing
+   * independently of general API load; credential-level lockout is handled by
+   * Better Auth.
+   *
+   * Deliberately left below `general` when that one was widened: a page load
+   * costs one session check, not a dozen requests, so this ceiling is already
+   * generous against the traffic it sees — and it is the one bucket where a
+   * flood is a credential attack rather than an impatient reload.
    */
   auth: { name: 'auth', max: 120, windowMs: ONE_MINUTE_MS },
   /** Liveness probe polled by load balancers/monitoring; generous but bounded. */
@@ -44,6 +69,10 @@ export const RATE_LIMIT_BUCKETS = {
    * Key-authenticated automation traffic. Counted separately from `general` so a
    * noisy script cannot starve a browser session on the same host IP. Client id
    * is the caller IP until verified key ids can key the bucket (#737).
+   *
+   * Below `general` and staying there: a script makes the requests it means to,
+   * one at a time, so it has no page-load fan-out to pay for. Isolation is what
+   * this bucket is for; the ceiling only has to bound a runaway loop.
    */
   apiKey: { name: 'api-key', max: 120, windowMs: ONE_MINUTE_MS },
   /**

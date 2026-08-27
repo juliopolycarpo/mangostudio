@@ -3,11 +3,13 @@
  *
  * Every spec used to sign up for itself, and each signup carried a full
  * application bootstrap behind it — session, settings, chats, environments,
- * agents. The API rate-limits the `general` bucket at 100 requests a minute
- * counted *per client IP* (`apps/api/src/plugins/rate-limit-policy.ts`), and on
- * CI the whole suite is one IP. At five specs that fit; the sixth pushed it
- * over, and whichever spec happened to run next failed on "too many requests"
- * looking exactly like its own feature had broken.
+ * agents. The API rate-limits the `general` bucket *per client IP*
+ * (`apps/api/src/plugins/rate-limit-policy.ts`), and on CI the whole suite is
+ * one IP. At the 100-per-minute that bucket used to allow, five specs fit and
+ * the sixth pushed it over — and whichever spec happened to run next failed on
+ * "too many requests" looking exactly like its own feature had broken. The
+ * ceiling has since been raised to 600 and the per-view fan-out cut (#941), but
+ * the reason to sign up once outlives both numbers.
  *
  * Signing up once, here, over HTTP rather than through a browser, removes both
  * costs at once: one signup instead of four, and no page load to pay for it.
