@@ -96,7 +96,10 @@ describe('test lane declarations', () => {
     expect(new Set(Object.keys(SHARDED_LCOV_PATHS))).toEqual(workspaces);
   });
 
-  it('has one lane per workspace plus root, with unique JUnit paths', () => {
+  // Every workspace has at least one lane (api has two), and no two lanes
+  // share a JUnit path — the second half is what stops one lane from
+  // overwriting another's report and halving the reported test count.
+  it('covers every workspace plus root, with unique JUnit paths', () => {
     const covered = new Set(TEST_LANES.map((lane) => lane.workspace));
     expect(covered).toEqual(new Set(['root', ...ALL_WORKSPACE_NAMES]));
     expect(new Set(TEST_LANES.map((lane) => lane.junitPath)).size).toBe(TEST_LANES.length);

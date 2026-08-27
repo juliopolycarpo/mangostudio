@@ -105,9 +105,13 @@ export const TEST_LANES: readonly TestLane[] = [
   // spawn-heavy integration files stay out of it until oven-sh/bun#38008
   // ships. Each lane writes its own LCOV slice; the api `test:coverage`
   // script merges the two into the single `coverage/api/lcov.info` the
-  // coverage readers expect (the merge in merge-lcov-shards.ts is
-  // associative, so merging per-workspace before merging per-shard changes
-  // nothing).
+  // coverage readers expect. That is one more merge hop than the other
+  // workspaces take, and merge-lcov-shards.ts is not strictly associative —
+  // its "shape" record is whichever input covered the most lines, so a
+  // pre-merged pair can win a shape a flat merge would have given to a
+  // per-shard record. The drift is the same kind and order the sharded merge
+  // already documents (lines flat, functions approximate), not a new class of
+  // error.
   {
     id: 'api-unit',
     workspace: 'api',
