@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import {
   GithubCreatePrResponseSchema,
   GithubInboxResponseSchema,
@@ -420,6 +420,38 @@ describe('GitHub panel reads', () => {
       error: 'GitHub context could not be read',
       code: 'INTERNAL',
     });
+  });
+
+  it('never writes gh pr create prose to the server log', async () => {
+    // `error.args` on a failed `gh pr create` carries the full `--title`/`--body`
+    // argv, and `--body` is often the repository's own pull-request template —
+    // prose meant for GitHub, not the server's own log file.
+    const title = 'Fix the leak';
+    const body = 'Confidential rollout notes nobody outside GitHub should see.';
+    const { user, chat } = await createChatWithWorkdir();
+    const { plugin } = createPanelPlugin({
+      respond: {
+        'pr.create': () =>
+          Promise.reject(
+            new GhCliError(['pr', 'create', '--title', title, '--body', body], 1, 'fatal: exit 1')
+          ),
+      },
+    });
+    const { app, restore } = createAuthenticatedApiTestApp(user, plugin);
+    restoreAuth = restore;
+    const errorSpy = spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const response = await post(app, '/github/pr', { chatId: chat.id, title, body });
+      expect(response.status).toBe(500);
+
+      const logged = errorSpy.mock.calls.map((call) => JSON.stringify(call));
+      expect(logged.some((entry) => entry.includes(title))).toBe(false);
+      expect(logged.some((entry) => entry.includes(body))).toBe(false);
+      expect(logged.some((entry) => entry.includes('"args":["pr","create"]'))).toBe(true);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it('answers a typed error, not gh output, when gh emits unreadable JSON', async () => {

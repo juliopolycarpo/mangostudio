@@ -20,6 +20,7 @@
  * to say — and `ApiErrorResponse` stays for calls that actually failed.
  */
 
+import { summarizeGhSubcommand } from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   type ApiErrorResponse,
@@ -320,7 +321,11 @@ function githubFailure(error: unknown, set: { status?: number | string }): ApiEr
     // A cancelled request is the client hanging up, not a server fault worth logging.
     if (!error.aborted) {
       console.error('[github] gh command failed', {
-        args: error.args,
+        // Never the full argv: `gh pr create --title ... --body ...` carries
+        // prose somebody wrote — often the repository's own pull-request
+        // template — and that is not this log's to keep. The subcommand is
+        // what an operator needs to see, matching the runtime's own audit log.
+        args: summarizeGhSubcommand(error.args),
         exitCode: error.exitCode,
         stderr: error.stderr,
       });
