@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { ChatTodosResponseSchema, type TodoList } from '@mangostudio/shared/todos';
 import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
@@ -18,7 +18,19 @@ import {
 let TEST_USER!: UserFixture;
 let TEST_CHAT!: ChatFixture;
 
-beforeAll(async () => {
+/**
+ * Fresh user and chat per test rather than once per file: `chat_todos` is
+ * keyed by chat id and the shared in-memory database is never reset between
+ * tests. A single `TEST_CHAT` created in `beforeAll` was written by "returns
+ * the persisted todo list with its updatedAt timestamp" and read by "returns
+ * an empty list with null updatedAt when the chat has no todos" — order
+ * dependent under randomization, since both target the same chat. Reproduced
+ * with `bun test --randomize --seed=1` (also seed=2, 3, 6).
+ *
+ * `insertTestUser`/`insertTestChat` already mint random ids per call, so
+ * moving the calls into `beforeEach` is enough to namespace every test's rows.
+ */
+beforeEach(async () => {
   TEST_USER = await insertTestUser();
   TEST_CHAT = await insertTestChat(TEST_USER.id);
 });

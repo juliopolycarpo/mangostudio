@@ -569,14 +569,30 @@ under `randomized-order-<lane>-seed-<n>`, because the order **is** the finding.
 Each job's log opens with the exact command to reproduce its own lane; read what
 ran before the failing file rather than the failing file itself.
 
-A worked example of what it catches, and of the fix shape:
-`settings-agents.integration.test.ts` failed on seeds 2, 4, 5 and 6 (1, 3, 7, 8
-clean). Every test in it persisted per-user rows under one fixed user id, so the
-`default` override written by "updates built-in default settings per user" was
-what "synthesizes default from legacy app settings" read when the shuffle put
-them in that order. The fix is a fresh identity per test rather than a list of
-tables to truncate — namespacing the rows means a test that later writes a new
-table cannot reopen the hole.
+#### What it caught on its first run
+
+The unisolated lane failed 4–5 tests on every seed tried (1, 2 and 3), in four
+files that are green in the fixed order. All of them are one of three shapes,
+and `--randomize` reaches all three because it reorders `it` blocks and
+`describe` blocks *within* a file as well as the files themselves:
+
+| Shape                                                      | Files                                      | Symptom                                                        |
+| ---------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------- |
+| Per-user rows written under one fixed user id              | `settings-agents`, `settings-app-settings` | a later test reads back an earlier test's persisted settings   |
+| One fixture built in `beforeAll` and shared by every test  | `chat-todos`                               | the "empty list" test reads todos a sibling test wrote         |
+| `beforeAll` seeding rows a **sibling `describe`** consumes | `settings-connectors`                      | `SQLITE_CONSTRAINT_FOREIGNKEY` → 500 on every persisting route |
+
+The third is the least obvious and the most worth remembering: `beforeAll` runs
+per `describe`, so a block that authenticates as a user another block seeded
+only passes while the runner happens to schedule them in that order. Because
+`PRAGMA foreign_keys = ON` is set unconditionally in `src/db/database.ts`, a
+missing `user` row is a hard failure rather than a silent one.
+
+The fixes are all "own your own state", never "truncate these tables": a fresh
+identity per test, fixtures minted in `beforeEach` rather than `beforeAll`, and
+each `describe` seeding exactly the identities it authenticates as. Namespacing
+means a test that later writes a new table cannot reopen the hole; a truncation
+list means it can.
 
 ### Code Health
 
