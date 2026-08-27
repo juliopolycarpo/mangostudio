@@ -26,6 +26,16 @@
  *      side already carries a free-text commit message the same way — see
  *      `modules/git/domain/commit-command.ts`.
  *
+ *      The cost of that choice is a ceiling on a Windows runtime, where the OS
+ *      caps a whole command line at 32,767 UTF-16 units while the contract
+ *      permits a 60,000-character body. `domain/gh-command-line.ts` refuses
+ *      such a call with a sentence naming the limit, rather than letting
+ *      `Bun.spawn` fail with nothing in it about which argument was too long.
+ *      Lifting the ceiling means `--body-file -` over a new `stdin` param on
+ *      the runtime protocol, gated on a manifest capability — an old runtime
+ *      would ignore the param, `gh` would read EOF, and the pull request would
+ *      be opened with an empty body and exit 0.
+ *
  *   2. **Nothing a user typed ever selects a flag.** Filters are TypeBox
  *      literal unions mapping to fixed argv fragments, so `filter=mine` picks
  *      `--author=@me` from this file rather than reaching `gh` verbatim.

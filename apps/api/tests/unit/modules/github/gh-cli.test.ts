@@ -511,4 +511,39 @@ describe('gh command facade', () => {
 
     expect(probes).toBe(1);
   });
+
+  /**
+   * A body the contract allows (60,000 characters) is longer than a whole
+   * Windows command line may be (32,767 UTF-16 units), and `CreateProcess`
+   * refuses the call before `gh` starts — which surfaces as a failure to spawn
+   * `gh` with nothing in it about which argument was too long.
+   */
+  it('refuses an oversized command line on a Windows runtime before spawning', async () => {
+    const runtime = new FakeGhRuntime({ ...TEST_MANIFEST, pathStyle: 'win32' });
+    runtime.install();
+
+    const attempt = runGh(['pr', 'create', `--body=${'x'.repeat(40_000)}`], {
+      cwd: 'C:\\repo',
+      userId: 'user-1',
+      environmentId: 'winbox',
+      mutation: true,
+    });
+
+    await expect(attempt).rejects.toThrow(/too long for the Windows machine/);
+    expect(runtime.calls).toEqual([]);
+  });
+
+  it('sends the same command line to a posix runtime, whose limit it is nowhere near', async () => {
+    const runtime = new FakeGhRuntime();
+    runtime.install();
+
+    await runGh(['pr', 'create', `--body=${'x'.repeat(40_000)}`], {
+      cwd: '/remote/repo',
+      userId: 'user-1',
+      environmentId: 'devbox',
+      mutation: true,
+    });
+
+    expect(runtime.calls).toHaveLength(1);
+  });
 });

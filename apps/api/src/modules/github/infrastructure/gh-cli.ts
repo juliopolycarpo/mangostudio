@@ -26,6 +26,7 @@ import {
   detailStringArray,
   isAbortError,
 } from '../../../services/runtime-client/remote-error-details';
+import { exceedsWindowsCommandLine } from '../domain/gh-command-line';
 import {
   buildGhCommandArgv,
   GH_COMMAND_SPECS,
@@ -168,6 +169,16 @@ export async function runGh(
   let result: RuntimeGhExecResult;
   try {
     const runtime = await getRuntimeClient(options.userId, options.environmentId);
+    // Before the spawn, because after it there is nothing left to say: Windows
+    // refuses the whole command line and `Bun.spawn` reports that as a failure
+    // to start `gh`, with nothing in it about which argument was too long.
+    if (runtime.manifest.pathStyle === 'win32' && exceedsWindowsCommandLine(args)) {
+      throw new GhCliError(
+        args,
+        null,
+        'This command is too long for the Windows machine it runs on. A pull request description of about 30,000 characters is the most `gh` can be given there; shorten it, or open the pull request with a shorter description and paste the rest as a comment.'
+      );
+    }
     const call = options.mutation ? runtime.gh.mutate : runtime.gh.exec;
     result = await call(
       {
@@ -354,6 +365,10 @@ export async function resolveGhHomeCwd(selection: GhRuntimeSelection): Promise<s
 }
 
 function mapGhFailure(args: readonly string[], error: unknown): GhCliError {
+  // A refusal this file raised itself already carries the argv, the exit code
+  // and the sentence a user should read; re-wrapping it would replace all three
+  // with `error.message` alone.
+  if (error instanceof GhCliError) return error;
   if (isAbortError(error)) {
     return new GhCliError(args, null, 'GitHub CLI command aborted.', true);
   }
