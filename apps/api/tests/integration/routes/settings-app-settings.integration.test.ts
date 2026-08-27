@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
   type AppSettings,
   AppSettingsSchema,
@@ -7,21 +7,32 @@ import {
 import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { settingsRoutes } from '../../../src/routes/settings';
+import { makeTestIdentity, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
-const TEST_USER = {
-  id: 'app-settings-user',
-  name: 'App Settings User',
-  email: 'app-settings@mangostudio.test',
-};
-
-const OTHER_USER = {
-  id: 'app-settings-other-user',
-  name: 'Other App Settings User',
-  email: 'other-app-settings@mangostudio.test',
-};
+/**
+ * Fresh identities per test, because `user_app_settings` is keyed by user and
+ * nothing truncates it in between: `setupTestEnvironment()` migrates the
+ * shared in-memory database once per process, and `--isolate` only gives each
+ * *file* a fresh module graph, not each test. With a fixed `TEST_USER.id` the
+ * file was order-dependent — "persists app settings per user" saves a
+ * non-default settings blob for that id, and if it runs before "returns
+ * defaults for a new user" the latter reads back the former's rows instead of
+ * `DEFAULT_APP_SETTINGS`. Reproduced with `bun test --randomize --seed=1`
+ * (also seed=2).
+ *
+ * `makeTestIdentity` (tests/support/factories) mints them, so the namespacing
+ * rule is one helper rather than a per-file counter.
+ */
+let testUser: UserFixture;
+let otherUser: UserFixture;
 
 let restoreAuth: (() => void) | null = null;
+
+beforeEach(() => {
+  testUser = makeTestIdentity('app-settings-user', 'App Settings User');
+  otherUser = makeTestIdentity('app-settings-other-user', 'Other App Settings User');
+});
 
 afterEach(() => {
   restoreAuth?.();
@@ -30,7 +41,7 @@ afterEach(() => {
 
 describe('settings app settings routes', () => {
   it('returns defaults for a new user', async () => {
-    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    const { app, restore } = createAuthenticatedApiTestApp(testUser, settingsRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(new Request('http://localhost/settings/app'));
@@ -42,7 +53,7 @@ describe('settings app settings routes', () => {
   });
 
   it('persists app settings per user', async () => {
-    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    const { app, restore } = createAuthenticatedApiTestApp(testUser, settingsRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
@@ -122,7 +133,7 @@ describe('settings app settings routes', () => {
     });
 
     restoreAuth?.();
-    const other = createAuthenticatedApiTestApp(OTHER_USER, settingsRoutes);
+    const other = createAuthenticatedApiTestApp(otherUser, settingsRoutes);
     restoreAuth = other.restore;
 
     const otherResponse = await other.app.handle(new Request('http://localhost/settings/app'));
@@ -133,25 +144,22 @@ describe('settings app settings routes', () => {
   });
 
   it('normalizes malformed persisted JSON to defaults', async () => {
+    const malformedUser = makeTestIdentity(
+      'malformed-app-settings-user',
+      'Malformed App Settings User'
+    );
     await getDb()
       .insertInto('user_app_settings')
       .values({
-        id: 'malformed-app-settings-row',
-        userId: 'malformed-app-settings-user',
+        id: `malformed-app-settings-row-${malformedUser.id}`,
+        userId: malformedUser.id,
         settingsJson: '{bad-json',
         createdAt: Date.now(),
         updatedAt: Date.now(),
       })
       .execute();
 
-    const { app, restore } = createAuthenticatedApiTestApp(
-      {
-        id: 'malformed-app-settings-user',
-        name: 'Malformed App Settings User',
-        email: 'malformed-app-settings@mangostudio.test',
-      },
-      settingsRoutes
-    );
+    const { app, restore } = createAuthenticatedApiTestApp(malformedUser, settingsRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(new Request('http://localhost/settings/app'));
@@ -162,7 +170,7 @@ describe('settings app settings routes', () => {
   });
 
   it('accepts a PUT body missing the workspace library scope and normalizes on save', async () => {
-    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    const { app, restore } = createAuthenticatedApiTestApp(testUser, settingsRoutes);
     restoreAuth = restore;
 
     const homeOnlyLibraryLocations = {

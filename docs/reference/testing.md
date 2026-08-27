@@ -403,6 +403,53 @@ caches, and a timings file is untracked, so it cannot enter that cache key: shar
 shard `i`. Balancing it is worth 0.5s within the lane and 0.6s overall (59.2s vs
 58.6s critical shard), which does not pay for that hazard.
 
+#### Why the unisolated lane opts out too
+
+`api-integration` also opts out, for the opposite reason: everything above
+assumes each file starts from a fresh global, and that lane is the one where it
+does not.
+
+It is the only lane that is both **sharded and unisolated**. Its files share one
+module graph, so what a shard runs a file *beside* decides what that file
+inherits — the in-memory database from `setupTestEnvironment()`, any
+`mock.module` registration, the memoized `getAuth()`. A timings-balanced
+partition is a function of a file that `--update-timings` refreshes every run and
+CI caches across runs, so it **rotates**: a file's companions change from run to
+run, and the shard a file lands on moves with the baseline. A leak then surfaces
+as an intermittent failure in a file nobody touched. This is not hypothetical —
+PR #951's own first CI run failed on shard 3 because `app.ts` snapshotted
+`getConfig().corsOrigins` at module evaluation, so *which file imported `app`
+first* decided what the CORS gate saw.
+
+Round-robin is derived by each shard from the file set alone, so the same commit
+always produces the same partition and a leak is reproducible from the SHA.
+Measured on the 101-file lane (Bun 1.4.0, 85.3s total, `--shard=i/8`):
+
+| Split                                | Critical shard | Reproducible |
+| ------------------------------------ | -------------- | ------------ |
+| `--timings`, balanced (rotates)      | 20.3s          | no           |
+| Round-robin (what the lane now runs) | 29.9s          | yes          |
+
++9.6s, and cheap because one file (`spawn-runtime-child`, 20.3s) is 24% of the
+lane and is the floor under *any* split — the balancing had little left to win.
+Determinism verified rather than assumed: two consecutive no-timings runs
+produced byte-identical partitions, union 101 files, no duplicates.
+
+Two things this does **not** buy, so do not read more into it:
+
+- The partition is stable for a given file set, not across them. Adding or
+  deleting an integration file shifts the whole stride.
+- Determinism is not immunity. It makes a leak reproducible; it does not stop
+  one. Detection is [the randomized-order nightly](#randomized-order)'s job, and
+  a soak of 48 shard runs across six partitions (two round-robin, four rotated)
+  came back 0 fail — the class is not currently manifesting, which is the
+  evidence for taking this option over unsharding the lane.
+
+If the nightly's unisolated lane does go red on cross-file leakage, the
+escalation is to unshard `api-integration` and run it whole in its own CI job the
+way the frontend lane does — correct by construction, at 85.3s on the critical
+path instead of 29.9s.
+
 #### Merging is not concatenation
 
 Bun's per-file `LF:`/`FNF:` are *run-dependent*: a source
@@ -486,23 +533,66 @@ reporter first rather than assuming the XML grew an `errors` count.
 
 ### Randomized order
 
-`randomized-order-nightly.yml` runs `apps/api`, `apps/shared` and
-`apps/runtime` under `--randomize --seed=<run number>` every night. It exists
-for the one class the merge gate cannot see: a test that passes only because of
-what the file before it left behind, which is a live hazard here while
-`bun test` shares one module graph across a lane's files.
+`randomized-order-nightly.yml` runs four lanes under
+`--randomize --seed=<run number>` every night. It exists for the one class the
+merge gate cannot see: a test that passes only because of what the file before it
+left behind, which is a live hazard here while `bun test` shares one module graph
+across a lane's files.
 
 `--randomize` shuffles **file order** as well as the tests inside each file —
 verified, not assumed: three probe files run as `c, b, a` under seed 3 where
 seeds 1 and 2 keep `a, b, c`. File order is the half that matters for leaked
 `mock.module` registrations.
 
+**The isolation setting decides which half of the hazard a lane can detect**,
+which is why the matrix carries it per entry:
+
+| Lane              | Invocation                                | Detects                          |
+| ----------------- | ----------------------------------------- | -------------------------------- |
+| `api`             | `--parallel=1` over the whole workspace   | order dependence *within* a file |
+| `api-integration` | no `--parallel`, over `tests/integration` | *cross-file* leakage             |
+| `shared`          | `--parallel=1`                            | order dependence within a file   |
+| `runtime`         | `--parallel=1`                            | order dependence within a file   |
+
+`--parallel=1` means "one worker, *isolated*" (see [Parallelism](#parallelism)),
+so a fresh global per file is exactly what hides cross-file leakage. The
+`api-integration` entry deliberately re-runs files the `api` entry already
+covered, in the mode the merge gate actually uses — without it, the class this
+workflow exists for had no detector anywhere in CI, which is how the sharded,
+unisolated lane came to rely on a rotating partition for safety.
+
 It is deliberately not merge-gating. A suite that fails weekly on a different
 seed is a bug report; making it block merges teaches everyone to re-run CI, and
-that habit outlasts the fix. A failure logs its seed and uploads the run log,
-because the order **is** the finding. Reproduce with
-`(cd apps/<workspace> && bun test --timeout 15000 --parallel=1 --randomize --seed=<n>)`,
-and read what ran before the failing file rather than the failing file itself.
+that habit outlasts the fix. `fail-fast: false` keeps one red lane from
+cancelling the others' evidence. A failure logs its seed and uploads the run log
+under `randomized-order-<lane>-seed-<n>`, because the order **is** the finding.
+Each job's log opens with the exact command to reproduce its own lane; read what
+ran before the failing file rather than the failing file itself.
+
+#### What it caught on its first run
+
+The unisolated lane failed 4–5 tests on every seed tried (1, 2 and 3), in four
+files that are green in the fixed order. All of them are one of three shapes,
+and `--randomize` reaches all three because it reorders `it` blocks and
+`describe` blocks *within* a file as well as the files themselves:
+
+| Shape                                                      | Files                                      | Symptom                                                        |
+| ---------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------- |
+| Per-user rows written under one fixed user id              | `settings-agents`, `settings-app-settings` | a later test reads back an earlier test's persisted settings   |
+| One fixture built in `beforeAll` and shared by every test  | `chat-todos`                               | the "empty list" test reads todos a sibling test wrote         |
+| `beforeAll` seeding rows a **sibling `describe`** consumes | `settings-connectors`                      | `SQLITE_CONSTRAINT_FOREIGNKEY` → 500 on every persisting route |
+
+The third is the least obvious and the most worth remembering: `beforeAll` runs
+per `describe`, so a block that authenticates as a user another block seeded
+only passes while the runner happens to schedule them in that order. Because
+`PRAGMA foreign_keys = ON` is set unconditionally in `src/db/database.ts`, a
+missing `user` row is a hard failure rather than a silent one.
+
+The fixes are all "own your own state", never "truncate these tables": a fresh
+identity per test, fixtures minted in `beforeEach` rather than `beforeAll`, and
+each `describe` seeding exactly the identities it authenticates as. Namespacing
+means a test that later writes a new table cannot reopen the hole; a truncation
+list means it can.
 
 ### Code Health
 

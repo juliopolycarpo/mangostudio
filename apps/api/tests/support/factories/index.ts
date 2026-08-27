@@ -21,6 +21,30 @@ export interface ConnectorFixture {
   userId: string;
 }
 
+let identitySeq = 0;
+
+/**
+ * Mint a fresh identity *without* inserting it, for suites whose rows are keyed
+ * by user id and whose tables nothing truncates between tests. A test that
+ * writes `user_app_settings` under a fixed id is read back by the next test in
+ * the same file; a per-test id namespaces those rows instead of enumerating the
+ * tables to truncate, so a test that starts writing a new one cannot reopen the
+ * hole.
+ *
+ * The counter is module-level, so ids stay unique across the files that share
+ * one module graph in the unisolated `api-integration` lane. Prefer
+ * `insertTestUser` when the suite also needs the `user` row itself.
+ * // Usage: const user = makeTestIdentity('app-settings-user', 'App Settings User');
+ */
+export function makeTestIdentity(prefix: string, name: string): UserFixture {
+  identitySeq += 1;
+  return {
+    id: `${prefix}-${identitySeq}`,
+    name,
+    email: `${prefix}-${identitySeq}@mangostudio.test`,
+  };
+}
+
 /**
  * Creates a user row in the test database with realistic faker-generated data.
  * Returns the inserted user so it can be passed to createAuthenticatedApiTestApp.
@@ -47,6 +71,36 @@ export async function insertTestUser(overrides: Partial<UserFixture> = {}): Prom
     .execute();
 
   return user;
+}
+
+/**
+ * Idempotently give already-named identities a `user` row, so a route that
+ * persists something owned by one of them clears the foreign keys pointing at
+ * `user.id` (`secret_metadata`'s among them).
+ *
+ * `insertTestUser` mints its own id and throws on a second call; this takes the
+ * caller's fixed identities and is a no-op the second time, so two `describe`
+ * blocks that legitimately share one can both ask for it.
+ * // Usage: beforeAll(() => ensureTestUsers(OPENAI_PROJ_USER));
+ */
+export async function ensureTestUsers(...users: readonly UserFixture[]): Promise<void> {
+  const db = getDb();
+  const now = new Date().toISOString();
+  for (const user of users) {
+    await db
+      .insertInto('user')
+      .values({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        emailVerified: 0,
+        image: null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflict((oc) => oc.column('id').doNothing())
+      .execute();
+  }
 }
 
 /**

@@ -74,14 +74,17 @@ export const JUNIT_DIR = '.mango/artifacts/junit';
 /**
  * Where each lane's `--timings` file lives.
  *
- * For sharded lanes these are load-bearing for correctness, not just for
- * speed. Without them `--shard=i/N` is a round-robin over the alphabetical
- * file list, so all N shards derive the same partition independently and
- * cannot disagree. With them the partition is a function of a *shared file*,
- * and N shards that read different bytes will not cover the file set between
- * them — some files run twice, others not at all, and every shard still exits
- * 0. The duplicate-claim check in `mergeLaneSlices`
+ * For an *isolated* sharded lane these are load-bearing for correctness, not
+ * just for speed. Without them `--shard=i/N` is a round-robin over the
+ * alphabetical file list, so all N shards derive the same partition
+ * independently and cannot disagree. With them the partition is a function of
+ * a *shared file*, and N shards that read different bytes will not cover the
+ * file set between them — some files run twice, others not at all, and every
+ * shard still exits 0. The duplicate-claim check in `mergeLaneSlices`
  * (`scripts/ci/merge-timings-shards.ts`) is what turns that into a failure.
+ *
+ * An *unisolated* sharded lane inverts that trade, which is why
+ * `api-integration` opts out — see the lane entry below.
  *
  * The unsharded frontend lane keeps one too: `--timings` also balances
  * `--parallel` workers by measured wall time instead of file order.
@@ -135,7 +138,29 @@ export const TEST_LANES: readonly TestLane[] = [
     workspace: 'api',
     sharded: true,
     junitPath: `${JUNIT_DIR}/api-integration.xml`,
-    timingsPath: `${TIMINGS_DIR}/api-integration.json`,
+    // Deliberately no timingsPath, and the only lane that opts out for this
+    // reason. This is the one lane that is both sharded and unisolated: its
+    // files share a module graph, so what a shard runs beside decides what it
+    // inherits — the in-memory database, `mock.module` registrations, the
+    // memoized `getAuth()`. A timings-balanced partition is a function of a
+    // file that is refreshed every run and cached across runs, so it rotates:
+    // a file's companions change from run to run and a leak surfaces as an
+    // intermittent failure in a file nobody touched. Round-robin over the
+    // alphabetical list is derived by each shard from the file set alone, so
+    // the same commit always produces the same partition and a leak is
+    // reproducible from the SHA.
+    //
+    // Measured on the 101-file lane (Bun 1.4.0, 85.3s total): the critical
+    // shard goes 20.3s -> 29.9s at N=8. Cheap, because one file
+    // (`spawn-runtime-child`, 20.3s) is 24% of the lane and is the floor under
+    // any split — the balancing had little left to win. Determinism verified:
+    // two no-timings runs produced byte-identical partitions, union 101 files,
+    // no duplicates.
+    //
+    // Note what this does *not* buy: the partition is stable for a given file
+    // set, not across them. Adding or deleting an integration file shifts the
+    // whole stride. Detection of the leak class itself is the randomized-order
+    // nightly's job (`.github/workflows/randomized-order-nightly.yml`).
     lcovPath: '.mango/artifacts/coverage/api-integration/lcov.info',
     manifest: 'apps/api/package.json',
     coverageScript: 'test:coverage:integration',

@@ -3,14 +3,15 @@
  *
  * Connector tests repeatedly (a) stub `globalThis.fetch` so provider key
  * validation does not hit the network, and (b) re-register the real
- * openai / base-url-policy modules afterwards, because `mock.restore()` does
- * NOT revert `mock.module()` overrides. Centralizing both removes the most
- * error-prone boilerplate from individual tests.
+ * openai / base-url-policy / gemini modules afterwards, because
+ * `mock.restore()` does NOT revert `mock.module()` overrides. Centralizing
+ * both removes the most error-prone boilerplate from individual tests.
  */
 
 import { mock } from 'bun:test';
 import type { ChatGptUsageSnapshot } from '@mangostudio/shared/connectors';
 import Type from 'typebox';
+import * as geminiService from '../../../src/services/gemini';
 import {
   UnsafeBaseUrlError,
   validateBaseUrl,
@@ -25,6 +26,12 @@ import {
 // override them via mock.module().
 const realValidateOpenAIAuthContext = validateOpenAIAuthContext;
 const realValidateBaseUrl = validateBaseUrl;
+// The whole namespace, not a hand-listed subset: the gemini overrides tests
+// install are *partial* (one names only `updateConnectorModels`), and the
+// route modules bind `InvalidGeminiApiKeyError` and
+// `GeminiValidationUnavailableError` for `instanceof` checks. Restoring a
+// subset would leave the same hole a different shape.
+const realGeminiService = { ...geminiService };
 
 type FetchImpl = typeof globalThis.fetch;
 
@@ -153,9 +160,10 @@ export async function allowAnyBaseUrl(): Promise<void> {
 }
 
 /**
- * Re-registers the real openai and base-url-policy modules. Call in `afterEach`
- * of any connector test that used mock.module on them, so the overrides do not
- * leak into other tests. // Usage: afterEach(restoreConnectorProviderMocks)
+ * Re-registers the real openai, base-url-policy and gemini modules. Call in
+ * `afterEach` of any connector test that used mock.module on them, so the
+ * overrides do not leak into other tests.
+ * // Usage: afterEach(restoreConnectorProviderMocks)
  */
 export async function restoreConnectorProviderMocks(): Promise<void> {
   await mock.module('../../../src/services/providers/openai/index', () => ({
@@ -167,4 +175,5 @@ export async function restoreConnectorProviderMocks(): Promise<void> {
     validateBaseUrl: realValidateBaseUrl,
     UnsafeBaseUrlError,
   }));
+  await mock.module('../../../src/services/gemini', () => realGeminiService);
 }

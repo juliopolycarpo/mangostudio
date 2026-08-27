@@ -11,14 +11,26 @@ name: Randomized Order Nightly
 # as well as the tests inside each file, verified: seed 3 runs three probe files
 # as c, b, a where seeds 1 and 2 keep a, b, c.
 #
+# **The isolation setting decides which half of that hazard a lane can see**,
+# which is why the matrix carries it per entry rather than passing
+# `--parallel=1` to everything:
+#
+#   - `--parallel=1` means "one worker, *isolated*" (Bun implies `--isolate`),
+#     so each file gets a fresh global. Shuffling file order under it can only
+#     surface order dependence *inside* a file.
+#   - The `api-integration` lane is the one the merge gate runs with no
+#     `--parallel` at all (scripts/lib/test-lanes.ts), sharing one module graph
+#     across all 101 files. Cross-file leakage is only reachable in that mode,
+#     so it gets its own entry that reproduces it — without one, the class this
+#     workflow exists for had no detector anywhere in CI.
+#
 # Deliberately **not** merge-gating. A suite that fails weekly on a different
 # seed is a bug report; making it block merges teaches everyone to re-run CI,
 # and that habit outlasts the fix. Failures rely on the standard
 # failed-scheduled-run notification.
 #
-# The seed is the run number, so every night is a new order and any failure
-# names the exact seed to reproduce with:
-#   (cd apps/<workspace> && bun test --timeout 15000 --parallel=1 --randomize --seed=<n>)
+# The seed is the run number, so every night is a new order, and each job logs
+# the exact command to reproduce its own lane.
 
 on:
   schedule:
@@ -39,16 +51,41 @@ concurrency:
 
 jobs:
   randomized:
-    name: Randomized order (${{ matrix.workspace }})
+    name: Randomized order (${{ matrix.lane }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
-      # One workspace's ordering bug says nothing about another's, and finding
-      # all of them in one night beats finding the first one four nights
-      # running.
+      # One lane's ordering bug says nothing about another's, and finding all of
+      # them in one night beats finding the first one four nights running. Kept
+      # `false` now that a lane is red on a known, separately tracked defect:
+      # otherwise that one failure would cancel every other lane's evidence.
       fail-fast: false
       matrix:
-        workspace: [api, shared, runtime]
+        # `include`-only, so each lane carries its own isolation setting and
+        # path. `isolation` is the empty string for the lane the merge gate runs
+        # unisolated; every other lane keeps `--parallel=1` (= one worker,
+        # isolated). `path` empty means the whole workspace suite.
+        include:
+          - lane: api
+            workspace: api
+            isolation: "--parallel=1"
+            path: ""
+          # The same files the `api` entry above already runs, deliberately
+          # run a second time without isolation. That is the entire point: at
+          # `--parallel=1` a fresh global per file hides exactly the leakage
+          # the merge gate's unisolated lane is exposed to.
+          - lane: api-integration
+            workspace: api
+            isolation: ""
+            path: tests/integration
+          - lane: shared
+            workspace: shared
+            isolation: "--parallel=1"
+            path: ""
+          - lane: runtime
+            workspace: runtime
+            isolation: "--parallel=1"
+            path: ""
     env:
       DATABASE_PATH: /tmp/mangostudio-test.sqlite
       SEED: ${{ inputs.seed || github.run_number }}
@@ -79,6 +116,8 @@ jobs:
         env:
           MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
           WORKSPACE: ${{ matrix.workspace }}
+          ISOLATION: ${{ matrix.isolation }}
+          LANE_PATH: ${{ matrix.path }}
         run: |
           # `set -o pipefail` is load-bearing, not boilerplate: a step without an
           # explicit `shell:` runs under `bash -e {0}`, which does NOT set it, so
@@ -86,8 +125,19 @@ jobs:
           # report success — no notification, and the log upload below (gated on
           # `outcome != success`) would never run.
           set -o pipefail
-          echo "::notice::Reproduce with: (cd apps/${WORKSPACE} && bun test --timeout 15000 --parallel=1 --randomize --seed=${SEED})"
-          bun test --timeout 15000 --parallel=1 --randomize --seed="${SEED}" 2>&1 | tee run.log
+          # An array, not a string: `isolation` and `path` are empty for at
+          # least one lane each, and a quoted empty string would reach
+          # `bun test` as an argument it reads as a path filter matching
+          # nothing. Appended with `if` rather than `&&` so an empty value does
+          # not make the list return 1 and trip `bash -e`.
+          args=(--timeout 15000 --randomize "--seed=${SEED}")
+          if [ -n "${ISOLATION}" ]; then args+=("${ISOLATION}"); fi
+          if [ -n "${LANE_PATH}" ]; then args+=("${LANE_PATH}"); fi
+          # Carries the env the job sets, not just the flags: a paste that
+          # leaves `MANGOSTUDIO_DIAGNOSTIC_LOGS` or `DATABASE_PATH` behind runs
+          # a different suite than the one that went red.
+          echo "::notice::Reproduce with: (cd apps/${WORKSPACE} && DATABASE_PATH=${DATABASE_PATH} MANGOSTUDIO_DIAGNOSTIC_LOGS=${MANGOSTUDIO_DIAGNOSTIC_LOGS} bun test ${args[*]})"
+          bun test "${args[@]}" 2>&1 | tee run.log
 
       # The order is the finding. Without it a red run names a failing test and
       # nothing about what ran before it, which is the half that matters.
@@ -97,6 +147,6 @@ jobs:
         if: ${{ !cancelled() && steps.randomized.outcome != 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: randomized-order-${{ matrix.workspace }}-seed-${{ env.SEED }}
+          name: randomized-order-${{ matrix.lane }}-seed-${{ env.SEED }}
           path: apps/${{ matrix.workspace }}/run.log
           retention-days: 14
