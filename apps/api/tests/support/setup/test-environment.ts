@@ -39,11 +39,12 @@ import { registerApplicationServices } from '../../../src/services/register-appl
  * A foreign origin every API test runs with, standing in for a split deployment
  * where the frontend bundle is served from somewhere other than this API.
  *
- * It has to be installed here rather than per-test: `app.ts` captures
- * `getConfig().corsOrigins` once, at module evaluation, so the CORS gate is
- * bound to whatever the config held when the first test file imported the app.
- * Setting it in the synchronous bootstrap phase is what lets a test prove the
- * `server.allowedOrigins` setting actually reaches that gate.
+ * Installed in the base test config so it is present by default; the CORS gate
+ * in `app.ts` reads `getConfig().corsOrigins` per request (it used to snapshot
+ * at module evaluation, which bound the gate to whatever config was live when
+ * the first test file imported the app — an order dependence the shared-graph
+ * lane exposed), so a test can prove the `server.allowedOrigins` setting
+ * reaches the gate regardless of which file imported the app first.
  */
 export const SPLIT_DEPLOYMENT_TEST_ORIGIN = 'https://studio.test';
 

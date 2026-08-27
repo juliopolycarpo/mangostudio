@@ -143,10 +143,20 @@ export const app = new Elysia()
       requestLogger.info('received', { method: request.method, path: url.pathname });
     }
   })
-  // Enable CORS for frontend requests
+  // Enable CORS for frontend requests. The origin check is a function, not a
+  // snapshot of `getConfig().corsOrigins`: this module is evaluated once per
+  // process, and an array captured here would bind the CORS gate to whatever
+  // config happened to be live at first import — under the shared-module-graph
+  // test lane, that is whichever test file imported the app first. Entries are
+  // validated to be canonical `scheme://host[:port]` origins, so the exact
+  // string comparison the config module promises is the whole check; a `true`
+  // return makes the plugin echo the request's Origin with `Vary: Origin`.
   .use(
     cors({
-      origin: getConfig().corsOrigins,
+      origin: (request) => {
+        const requestOrigin = request.headers.get('Origin');
+        return requestOrigin !== null && getConfig().corsOrigins.includes(requestOrigin);
+      },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],

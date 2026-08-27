@@ -19,7 +19,7 @@ import { describe, expect, it } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { app } from '../../../src/app';
-import { getConfig } from '../../../src/lib/config';
+import { getConfig, loadConfigForTest } from '../../../src/lib/config';
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
 import { SPLIT_DEPLOYMENT_TEST_ORIGIN } from '../../support/setup/test-environment';
 
@@ -166,6 +166,41 @@ describe('CORS policy', () => {
     );
 
     expect(response.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  // Regression: the gate must read the live config, not a snapshot from
+  // `app.ts`'s module evaluation. Under the shared-module-graph lane the app
+  // is first imported by whichever test file loads it first — which may be
+  // *while* an earlier file's `loadConfigForTest` override is still installed,
+  // since module evaluation runs before any `beforeEach` restores the base
+  // config. A snapshot taken then silently drops `server.allowedOrigins`
+  // (observed: shard 3 of PR #951's first CI run). `app` was imported at the
+  // top of this file, so granting an origin configured only now proves the
+  // check is per-request.
+  it('honors a config loaded after the app module was evaluated', async () => {
+    const lateOrigin = 'https://late-config.test';
+    loadConfigForTest({
+      server: { host: '0.0.0.0', port: 3001, publicUrl: '', allowedOrigins: [lateOrigin] },
+    });
+
+    const granted = await app.handle(
+      new Request('http://localhost/api/health', {
+        method: 'OPTIONS',
+        headers: { Origin: lateOrigin, 'Access-Control-Request-Method': 'POST' },
+      })
+    );
+    const revoked = await app.handle(
+      new Request('http://localhost/api/health', {
+        method: 'OPTIONS',
+        headers: { Origin: SPLIT_DEPLOYMENT_TEST_ORIGIN, 'Access-Control-Request-Method': 'POST' },
+      })
+    );
+
+    expect(granted.headers.get('access-control-allow-origin')).toBe(lateOrigin);
+    // The base-config origin is gone from the loaded config, so an echo here
+    // would mean the gate is still serving the first-import snapshot.
+    expect(revoked.headers.get('access-control-allow-origin')).toBeNull();
+    // The global beforeEach reinstalls the base test config for later tests.
   });
 });
 
