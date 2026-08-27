@@ -35,6 +35,13 @@ export interface ActionCommandParams {
   /** False on a shell with no chat selected, which is what hides the workdir row. */
   readonly hasChat: boolean;
   /**
+   * False once the user removes the GitHub panel from the rail in settings.
+   * The rows below open the rail's GitHub panel, and the rail drops a hidden
+   * panel — so without this gate they promise GitHub and deliver whichever
+   * panel is first in the order.
+   */
+  readonly githubPanelVisible: boolean;
+  /**
    * True while a turn is streaming. Hides the workdir row for the same reason
    * the composer disables its workdir chip: repointing the binding mid-turn
    * makes the hub reap the live external session with `session-lost`.
@@ -83,6 +90,7 @@ export function actionCommands({
   externalAgents,
   resolvedTheme,
   hasChat,
+  githubPanelVisible,
   isGenerating,
   chatHasTurns,
   newChatShortcut,
@@ -186,8 +194,9 @@ export function actionCommands({
   // The rail has no keyboard shortcut for switching panels — `lib/keyboard.ts`
   // has only mod+K and mod+N — so these three rows are the GitHub panel's
   // entire shortcut story rather than a nicety. All of them need a chat,
-  // because the rail only exists on the chat surface.
-  if (hasChat) {
+  // because the rail only exists on the chat surface, and all of them need the
+  // panel itself: hidden, it is not in the rail for these rows to select.
+  if (hasChat && githubPanelVisible) {
     items.push(
       {
         id: 'action:github-panel',

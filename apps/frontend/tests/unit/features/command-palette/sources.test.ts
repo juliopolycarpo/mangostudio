@@ -182,6 +182,7 @@ describe('actionCommands', () => {
       externalAgents: descriptors,
       resolvedTheme: 'dark',
       hasChat: true,
+      githubPanelVisible: true,
       isGenerating: false,
       chatHasTurns: false,
       newChatShortcut: 'Ctrl+N',
@@ -274,5 +275,17 @@ describe('actionCommands', () => {
 
     expect(onCreateGithubPr).toHaveBeenCalledTimes(1);
     expect(onOpenGithubPanel).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The rail drops a panel the user hid, so these rows would select whichever
+   * panel is first in the order — and the create request would latch, opening
+   * the form unbidden the day the panel comes back.
+   */
+  it('hides every GitHub row when the panel is not in the rail', () => {
+    const ids = build({ githubPanelVisible: false }).map((item) => item.id);
+    expect(ids).not.toContain('action:github-panel');
+    expect(ids).not.toContain('action:github-create-pr');
+    expect(ids).not.toContain('action:github-review-requests');
   });
 });

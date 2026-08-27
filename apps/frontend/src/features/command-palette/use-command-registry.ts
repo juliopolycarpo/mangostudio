@@ -25,6 +25,7 @@ import {
   useExternalAgents,
 } from '@/features/external-agents/useExternalAgents';
 import { requestGithubCreatePr } from '@/features/github/lib/github-panel-request';
+import { isWorkspacePanelVisible } from '@/features/workspace/rail/panel-registry';
 import { requestRailPanel } from '@/features/workspace/rail/rail-panel-request';
 import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
@@ -64,6 +65,13 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
   // exists to avoid.
   const { agents, chats, currentChatId, isGenerating } = app;
   const chatHasTurns = useChatHasTurns(currentChatId);
+  // Settings, not availability: the panel's own gate is a chat, which the rows
+  // already require. Read here rather than passed in, because the palette is
+  // mounted beside the rail and not by it.
+  const githubPanelVisible = isWorkspacePanelVisible(
+    'github',
+    app.settings.workspaceSettings.sidePanel
+  );
 
   // The active runner's quota, on the same identity-guarded entry the header
   // pill and the selector chip share — so refreshing from the palette lights
@@ -113,6 +121,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
       ),
       resolvedTheme,
       hasChat: currentChatId !== null,
+      githubPanelVisible,
       isGenerating,
       chatHasTurns,
       newChatShortcut: newChatShortcutHint(),
@@ -199,6 +208,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
     currentChatId,
     environmentsQuery.data,
     external.agents,
+    githubPanelVisible,
     isGenerating,
     locale,
     navigate,

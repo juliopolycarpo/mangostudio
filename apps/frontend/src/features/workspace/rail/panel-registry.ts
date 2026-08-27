@@ -64,10 +64,28 @@ export function getAvailableWorkspacePanels(
   state: RailPanelAvailabilityState,
   settings: WorkspacePanelSettings
 ): RailPanelDefinition[] {
-  const visibleIds = new Set(settings.visiblePanelIds);
-
   return settings.panelOrder.flatMap((panelId) => {
     const panel = REGISTRY_BY_ID.get(panelId);
-    return panel && visibleIds.has(panelId) && panel.availability(state) ? [panel] : [];
+    return panel && isWorkspacePanelVisible(panelId, settings) && panel.availability(state)
+      ? [panel]
+      : [];
   });
+}
+
+/**
+ * Whether the user has kept this panel in the rail at all.
+ *
+ * Separate from `availability`, which answers about the current chat. Callers
+ * outside the rail that offer a shortcut *into* a panel need this half: the
+ * rail drops a hidden panel, so a command-palette row that ignores it opens
+ * whichever panel is first instead of the one the row names.
+ *
+ * @example
+ * isWorkspacePanelVisible('github', workspaceSettings.sidePanel);
+ */
+export function isWorkspacePanelVisible(
+  panelId: WorkspacePanelId,
+  settings: WorkspacePanelSettings
+): boolean {
+  return settings.visiblePanelIds.includes(panelId);
 }
