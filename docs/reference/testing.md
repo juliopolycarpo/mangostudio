@@ -117,13 +117,23 @@ and reach for a real filesystem only when the test is about the filesystem.
 
 ### Parallelism
 
-`test:unit` and `test:coverage` in `apps/api` pass `--parallel=1`. Read that as
-"one worker, isolated" rather than "no parallelism": Bun's `--parallel=N` runs
-files in N worker processes and **implies `--isolate`**, which gives each file a
-fresh global object. Isolation is the load-bearing half. Bun's default — no
-`--parallel` at all — runs every file in one process off a single module graph,
-where the in-memory database from `setupTestEnvironment()` and any `mock.module`
-registration outlive the file that made them.
+`test:unit` and `test:coverage:unit` in `apps/api` pass `--parallel=1`. Read
+that as "one worker, isolated" rather than "no parallelism": Bun's
+`--parallel=N` runs files in N worker processes and **implies `--isolate`**,
+which gives each file a fresh global object. Isolation is the load-bearing
+half. Bun's default — no `--parallel` at all — runs every file in one process
+off a single module graph, where the in-memory database from
+`setupTestEnvironment()` and any `mock.module` registration outlive the file
+that made them.
+
+The api coverage lane is **two invocations, with opposite settings**:
+`test:coverage:unit` keeps `--parallel=1`, `test:coverage:integration` takes no
+flag at all, and `test:coverage` chains them and merges their LCOV slices into
+the one staged `coverage/api/lcov.info`. The split exists because the unit
+suite cannot live without isolation (the 172-failure table below) while the
+integration suite cannot safely live *inside* it — Bun's isolate machinery is
+what intermittently hangs the whole invocation in CI (see [The isolate runner can hang](#the-isolate-runner-can-hang)), and the spawn-heavy integration
+files are where the wedge has been observed.
 
 Measured on `apps/api/tests/unit` (3437 tests, 301 files), Bun
 `1.4.0-canary.1`, `--timeout 15000` throughout:
@@ -244,6 +254,43 @@ through a pipe too, which is what CI gives it.
 So the unit lane cannot take worker parallelism yet. The integration lane can:
 12 of 12 clean at four workers on a runner, 50.6s against 71–75s unflagged.
 
+#### The isolate runner can hang
+
+The abort above is the loud failure. The quiet one: a `bun test` in isolate
+mode — **including `--parallel=1`** — sometimes never exits. Every lane that
+finished shows its summary, the log freezes, and the job burns its whole
+`timeout-minutes` before the runner kills orphaned `bun`/`turbo` processes. A
+milder form of the same wedge shows up as `spawnSync git --version` stalling
+15s+ inside integration files (visible via `MANGOSTUDIO_SPAWN_DIAGNOSTICS`),
+timing out tests with `killed 1 dangling process`.
+
+Observed on stock Bun 1.4.0 across at least seven CI runs (different PRs and
+`main`) in the week after the 1.4.0 pin, always in the api coverage lane — the
+only isolate-mode lane in the shard matrix. Upstream this is
+[oven-sh/bun#39709](https://github.com/oven-sh/bun/issues/39709) (isolate
+runner never exits after its per-file work; dropping `--isolate` removes it)
+and [oven-sh/bun#39584](https://github.com/oven-sh/bun/issues/39584). Bun
+1.4.0 shipped without oven-sh/bun#38008; in the 234-run soak recorded above,
+the only build with zero hangs across 85 runs was the #38008 build, so that
+patch is the unblock for this too.
+
+Two mitigations are in place until it ships:
+
+- The api **integration** suite runs outside isolate mode (see
+  [Parallelism](#parallelism)).
+- Every CI test invocation runs under `scripts/ci/run-tests-watchdog.ts`,
+  which kills the invocation's process group after a per-attempt bound and
+  retries once, restoring the timings baseline first so the retry computes the
+  same shard partition as the other seven jobs.
+
+**Why "re-run failed jobs" used to re-hang while "re-run all jobs" passed:**
+the hang follows specific files, and the file-to-shard partition is a function
+of the resolved timings baseline. Rerunning only failed jobs reuses the
+successful `resolve-timings` job's output — the identical partition, so the
+trigger files land on the same shard again. Rerunning all jobs re-resolves the
+baseline, which usually rotated in the meantime, moving or splitting the
+trigger files.
+
 ### Sharding
 
 `--parallel=N` is blocked; `--shard=i/N` is not, and it reaches the same prize
@@ -252,6 +299,11 @@ which is the precondition for the abort above. A shard is a subset of files run
 by a process that never shares itself with another shard, so that precondition
 never exists. The two compose: in-job `--parallel` still applies the day
 oven-sh/bun#38008 ships.
+
+What sharding does *not* sidestep is [the isolate runner hang](#the-isolate-runner-can-hang): that needs no concurrency, only isolate
+mode, so it rode along into the shard jobs until the api integration suite
+left isolate mode. More shards is not a defense either — it only reshuffles
+which shard the trigger files land on.
 
 `bun run test --coverage --shard=i/N` splits every **sharded** lane at once;
 each takes the flag through `MANGOSTUDIO_BUN_TEST_ARGS`. `--shard` requires
