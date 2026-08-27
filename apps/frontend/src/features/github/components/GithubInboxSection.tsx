@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Inbox, RefreshCw } from 'lucide-react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
+import { useApp } from '@/lib/app-context';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG } from '@/lib/icon-sizes';
 import { githubInboxQueryOptions } from '../queries';
@@ -32,7 +33,16 @@ const GITHUB_INBOX_TESTID = 'github-inbox-section';
  */
 export function GithubInboxSection({ chatId, collapsed, onToggle }: GithubInboxSectionProps) {
   const { t } = useI18n();
-  const query = useQuery(githubInboxQueryOptions());
+  // The source chat's own record first, and the shell's current environment
+  // only as a fallback — same resolution `useIssueToNewChat` uses, since a
+  // chat pinned to WSL/SSH/a container has `gh` credentials that live on that
+  // machine, not on the hub's. Resolved once here and threaded to `InboxBody`
+  // too, so the staleness stamp above and the rows below always read the same
+  // cache entry.
+  const { chats, currentEnvironmentId } = useApp();
+  const environmentId =
+    chats.find((chat) => chat.id === chatId)?.environmentId ?? currentEnvironmentId ?? undefined;
+  const query = useQuery(githubInboxQueryOptions(environmentId));
   const data = query.data;
 
   return (
@@ -54,7 +64,7 @@ export function GithubInboxSection({ chatId, collapsed, onToggle }: GithubInboxS
         </>
       }
     >
-      <InboxBody chatId={chatId} />
+      <InboxBody chatId={chatId} environmentId={environmentId} />
     </GithubSection>
   );
 }
@@ -63,9 +73,15 @@ export function GithubInboxSection({ chatId, collapsed, onToggle }: GithubInboxS
  * Split from the section shell so the query's four-way degradation is one
  * function with early returns instead of a chain of ternaries in JSX.
  */
-function InboxBody({ chatId }: { readonly chatId: string }) {
+function InboxBody({
+  chatId,
+  environmentId,
+}: {
+  readonly chatId: string;
+  readonly environmentId: string | undefined;
+}) {
   const { t } = useI18n();
-  const query = useQuery(githubInboxQueryOptions());
+  const query = useQuery(githubInboxQueryOptions(environmentId));
 
   if (query.isPending) {
     return (

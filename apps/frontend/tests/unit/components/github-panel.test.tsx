@@ -14,6 +14,7 @@ import { describe, expect, it } from 'bun:test';
 import { screen } from '@testing-library/react';
 import { GithubPanel } from '../../../src/features/github/components/GithubPanel';
 import { requestGithubCreatePr } from '../../../src/features/github/lib/github-panel-request';
+import { AppContext } from '../../../src/lib/app-context';
 import { act, flushAsyncRender } from '../../support/harness/render';
 import { renderWithRouter } from '../../support/harness/render-with-router';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
@@ -78,14 +79,29 @@ interface ScenarioOverrides {
   readonly inbox?: unknown;
   readonly prs?: unknown;
   readonly gitState?: unknown;
+  /** Inbox response keyed under this environment instead of the default local one. */
+  readonly inboxEnvironmentId?: string;
+}
+
+/** The app context every panel test renders under; only what `useApp()` reads here. */
+function fakeApp(
+  overrides: { chats?: readonly unknown[]; currentEnvironmentId?: string | null } = {}
+) {
+  return {
+    chats: overrides.chats ?? [],
+    currentEnvironmentId: overrides.currentEnvironmentId ?? null,
+  } as never;
 }
 
 function installScenario(overrides: ScenarioOverrides = {}) {
+  const inboxPath = overrides.inboxEnvironmentId
+    ? `/api/github/inbox?environmentId=${overrides.inboxEnvironmentId}`
+    : '/api/github/inbox';
   return createFetchScenario()
     .respondWithJson('GET', `/api/git/state?chatId=${CHAT_ID}`, {
       body: overrides.gitState ?? GIT_REPO_STATE,
     })
-    .respondWithJson('GET', '/api/github/inbox', {
+    .respondWithJson('GET', inboxPath, {
       body: overrides.inbox ?? { state: 'ok', cachedAt: Date.now(), items: [] },
     })
     .respondWithJson('GET', `/api/github/prs?chatId=${CHAT_ID}&filter=open`, {
@@ -94,9 +110,17 @@ function installScenario(overrides: ScenarioOverrides = {}) {
     .install();
 }
 
-async function renderPanel(overrides: ScenarioOverrides = {}, workdir: string | null = WORKDIR) {
+async function renderPanel(
+  overrides: ScenarioOverrides = {},
+  workdir: string | null = WORKDIR,
+  app = fakeApp()
+) {
   const scenario = installScenario(overrides);
-  const result = await renderWithRouter(<GithubPanel chatId={CHAT_ID} workdir={workdir} />);
+  const result = await renderWithRouter(
+    <AppContext value={app}>
+      <GithubPanel chatId={CHAT_ID} workdir={workdir} />
+    </AppContext>
+  );
   // Both sections answer after the first paint, and each answer is a React
   // state update; settling them here keeps the act warnings out of whichever
   // file the runner happens to be on when they land.
@@ -112,9 +136,37 @@ describe('GithubPanel', () => {
       // the in-flight state is observable. Rail panels use `EmptyState` for
       // loading rather than skeleton lines — `HubSkeletonLines` belongs to the
       // home hub, and importing it here would be a cross-feature reach.
-      await renderWithRouter(<GithubPanel chatId={CHAT_ID} workdir={WORKDIR} />);
+      await renderWithRouter(
+        <AppContext value={fakeApp()}>
+          <GithubPanel chatId={CHAT_ID} workdir={WORKDIR} />
+        </AppContext>
+      );
       expect(screen.getAllByText('Reading GitHub context...').length).toBeGreaterThan(0);
       await flushAsyncRender();
+    } finally {
+      scenario.restore();
+    }
+  });
+
+  it("reads the inbox from the chat's own environment, not the hub's", async () => {
+    // A chat pinned to a remote environment: the review queue must ask that
+    // machine's `gh`, not default to the hub's own local one.
+    const app = fakeApp({
+      chats: [{ id: CHAT_ID, environmentId: 'wsl-env' }],
+    });
+    const { scenario } = await renderPanel(
+      {
+        inboxEnvironmentId: 'wsl-env',
+        inbox: { state: 'ok', cachedAt: Date.now(), items: [INBOX_ITEM] },
+      },
+      WORKDIR,
+      app
+    );
+    try {
+      // Resolves only because the mock is registered under the
+      // `environmentId=wsl-env` query string above — an unscoped request would
+      // hit the unregistered `/api/github/inbox` key and reject instead.
+      expect(await screen.findByText('Tighten the runtime probe cache')).toBeVisible();
     } finally {
       scenario.restore();
     }

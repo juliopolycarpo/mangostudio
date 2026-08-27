@@ -36,7 +36,7 @@ const GITHUB_STALE_TIME_MS = 60_000;
  */
 export const githubKeys = {
   all: ['github-panel'] as const,
-  inbox: () => [...githubKeys.all, 'inbox'] as const,
+  inbox: (environmentId?: string) => [...githubKeys.all, 'inbox', environmentId ?? null] as const,
   prs: (chatId: string, filter: GithubPrFilter) =>
     [...githubKeys.all, 'prs', chatId, filter] as const,
   issues: (chatId: string, filter: GithubIssueFilter) =>
@@ -51,18 +51,21 @@ export const githubKeys = {
 /**
  * Pull requests waiting on this user's review, across every repository.
  *
- * No `environmentId`: absent means the hub's own machine, which is the one
- * whose `gh` credentials the panel can assume exist.
+ * `environmentId` picks whose `gh` answers, because credentials differ per
+ * host. Omitted means the hub's own machine — the right default for the home
+ * card, which has no chat and so no other environment to ask for.
  *
  * @example
- * const inbox = useQuery(githubInboxQueryOptions());
+ * const inbox = useQuery(githubInboxQueryOptions(sourceChat?.environmentId));
  */
-export function githubInboxQueryOptions() {
+export function githubInboxQueryOptions(environmentId?: string) {
   return queryOptions({
-    queryKey: githubKeys.inbox(),
+    queryKey: githubKeys.inbox(environmentId),
     staleTime: GITHUB_STALE_TIME_MS,
     queryFn: async (): Promise<GithubInboxResponse> => {
-      const { data, error } = await client.api.github.inbox.get({ query: {} });
+      const { data, error } = await client.api.github.inbox.get({
+        query: environmentId ? { environmentId } : {},
+      });
       if (error) throw new ApiError(error.value);
       return data as GithubInboxResponse;
     },
