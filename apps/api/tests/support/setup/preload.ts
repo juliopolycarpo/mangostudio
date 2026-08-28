@@ -8,6 +8,12 @@
  * `bun run --filter @mangostudio/api test:unit`). The config safety net in
  * `src/lib/config.ts` and the harness guard keep wrong-directory runs safe and
  * loud. See docs/reference/testing.md.
+ *
+ * Keep this graph free of anything a test may `mock.module()`. Mocking a module
+ * the preload imports re-evaluates the preload's graph, which produces a second
+ * `test-environment.ts` with `initialized` back to false — every later
+ * `createApiTestApp` then throws the not-initialized guard. See
+ * tests/support/mocks/google-genai.ts for the measurement.
  */
 
 import { installSpawnDiagnostics } from './spawn-diagnostics';

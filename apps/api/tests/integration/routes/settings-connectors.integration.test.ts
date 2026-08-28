@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { ModelCatalogResponseSchema } from '@mangostudio/shared/catalog';
 import { ConnectorStatusSchema } from '@mangostudio/shared/connectors';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
@@ -55,8 +55,9 @@ let restoreAuth: (() => void) | null = null;
 afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
-  // Re-register the real openai/base-url modules so mock.module overrides do not
-  // leak into later test files (mock.restore() does not revert mock.module()).
+  // Re-register the real openai/base-url/gemini/@google/genai modules so
+  // mock.module overrides do not leak into later test files (mock.restore()
+  // does not revert mock.module()).
   await restoreConnectorProviderMocks();
 });
 
@@ -244,8 +245,14 @@ describe('deprecated cursor connector routes', () => {
 /* ------------------------------------------------------------------ */
 
 describe('Gemini aliases API', () => {
-  beforeAll(async () => {
-    await ensureTestUsers(TEST_USER);
+  beforeAll(() => ensureTestUsers(TEST_USER));
+
+  // Per test, not once per block: the file-level `afterEach` restores the real
+  // `@google/genai` after every test (`mock.restore()` does not revert
+  // `mock.module()`, so that restore is the only thing that keeps this fake
+  // from following the process into the next file), which would leave a
+  // `beforeAll` fake installed for the first test only.
+  beforeEach(async () => {
     await mock.module('@google/genai', () => {
       return {
         GoogleGenAI: class {
@@ -265,10 +272,6 @@ describe('Gemini aliases API', () => {
         },
       };
     });
-  });
-
-  afterAll(() => {
-    mock.restore();
   });
 
   it('POST /settings/connectors/gemini adds a connector', async () => {

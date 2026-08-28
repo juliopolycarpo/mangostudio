@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { restoreGoogleGenAI } from '../../../support/mocks/google-genai';
 
 /**
  * Unit tests for GeminiProvider.generateTextStream.
@@ -40,6 +41,11 @@ describe('GeminiProvider.generateTextStream', () => {
     resetGeminiClientCache();
     // Clear module cache between tests (Bun test isolation)
     mock.restore();
+    // …which does not revert mock.module(). This file runs in the isolated unit
+    // lane, so its `@google/genai` fake cannot reach another file today; the
+    // explicit restore keeps that true if it ever runs unisolated, and keeps
+    // one mechanism for undoing this mock across the suite.
+    await restoreGoogleGenAI();
   });
 
   it('yields text chunks and a final done:true sentinel', async () => {

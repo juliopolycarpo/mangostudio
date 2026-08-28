@@ -21,6 +21,7 @@ import {
   OpenAIConfigError,
   validateOpenAIAuthContext,
 } from '../../../src/services/providers/openai/index';
+import { restoreGoogleGenAI } from '../mocks/google-genai';
 
 // Capture the real implementations at module-load time, before any test can
 // override them via mock.module().
@@ -160,9 +161,9 @@ export async function allowAnyBaseUrl(): Promise<void> {
 }
 
 /**
- * Re-registers the real openai, base-url-policy and gemini modules. Call in
- * `afterEach` of any connector test that used mock.module on them, so the
- * overrides do not leak into other tests.
+ * Re-registers the real openai, base-url-policy, gemini and `@google/genai`
+ * modules. Call in `afterEach` of any connector test that used mock.module on
+ * them, so the overrides do not leak into other tests.
  * // Usage: afterEach(restoreConnectorProviderMocks)
  */
 export async function restoreConnectorProviderMocks(): Promise<void> {
@@ -176,4 +177,5 @@ export async function restoreConnectorProviderMocks(): Promise<void> {
     UnsafeBaseUrlError,
   }));
   await mock.module('../../../src/services/gemini', () => realGeminiService);
+  await restoreGoogleGenAI();
 }
