@@ -10,9 +10,12 @@
  *    Commands only: whether a *skill* is reachable as `/name` is a per-vendor
  *    fact the vendor's own catalog already answers, and guessing it from a
  *    directory listing would offer names the CLI never registers.
- * 3. **The chat's capabilities**, for MangoStudio's own runner, which has no
- *    commands of its own (issue #961) but does resolve an effective skill set
- *    server-side — the same one the turn will advertise to the model.
+ * 3. **The user's skills**, for MangoStudio's own runner, which has no commands
+ *    of its own (issue #961). Filtered on exactly what `buildSkillsPromptSection`
+ *    filters on, so the palette offers what the turn will advertise. Read
+ *    user-scoped rather than through the chat's capabilities because the
+ *    composer on the home screen has no chat behind it yet, and `/` has to work
+ *    on the first message rather than the second.
  */
 
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
@@ -21,8 +24,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { externalCommandKeys } from '@/features/external-agents/command-catalog';
 import { libraryResourcesQueryOptions } from '@/features/library/queries';
+import { skillSettingsListQueryOptions } from '@/features/settings/skills/queries';
 import { mergeSlashCommands, type SlashCommandEntry } from '../lib/slash-commands';
-import { chatCapabilitiesQueryOptions } from './use-chat-capabilities';
 
 /** Shared so an unannounced catalog is referentially stable across renders. */
 const NO_COMMANDS: readonly ExternalAgentCommand[] = [];
@@ -76,14 +79,14 @@ export function useSlashCommands({
     enabled: active && targetId !== null,
   });
 
-  const capabilitiesQuery = useQuery({
-    ...chatCapabilitiesQueryOptions({ chatId: chatId ?? '' }),
-    enabled: active && Boolean(chatId) && targetId === null,
+  const skillsQuery = useQuery({
+    ...skillSettingsListQueryOptions(),
+    enabled: active && targetId === null,
   });
 
   const session = sessionQuery.data;
   const library = libraryQuery.data;
-  const capabilities = capabilitiesQuery.data;
+  const skills = skillsQuery.data;
 
   return useMemo(() => {
     const sessionEntries: SlashCommandEntry[] = (session ?? []).map((command) => ({
@@ -106,13 +109,20 @@ export function useSlashCommands({
             )
             .map((resource) => ({ name: resource.ref.slug, origin: 'library' as const }));
 
+    // The same three flags `buildSkillsPromptSection` filters on, so the
+    // palette cannot offer a name the turn will not advertise: a shadowed slug
+    // resolves to a different source's copy, and an invalid one to nothing.
     const skillEntries: SlashCommandEntry[] =
       targetId !== null
         ? []
-        : (capabilities?.skills ?? [])
-            .filter((skill) => skill.state === 'enabled')
-            .map((skill) => ({ name: skill.slug, origin: 'skill' as const }));
+        : (skills?.skills ?? [])
+            .filter((skill) => skill.valid && skill.enabled && !skill.shadowed)
+            .map((skill) => ({
+              name: skill.slug,
+              ...(skill.description ? { description: skill.description } : {}),
+              origin: 'skill' as const,
+            }));
 
     return mergeSlashCommands(sessionEntries, libraryEntries, skillEntries);
-  }, [session, library, capabilities, targetId]);
+  }, [session, library, skills, targetId]);
 }
