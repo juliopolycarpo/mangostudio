@@ -31,6 +31,22 @@ name: Randomized Order Nightly
 #
 # The seed is the run number, so every night is a new order, and each job logs
 # the exact command to reproduce its own lane.
+#
+# Every lane runs under scripts/ci/run-tests-watchdog.ts with `--retry-on-crash`:
+# a hang (oven-sh/bun#39709) dies at the watchdog's bound instead of burning
+# this job's `timeout-minutes`, and an isolate-runner crash
+# (`panic(main thread): abort()`, the same #889 class) gets one same-seed
+# retry so the rest of the lane's file list still runs, instead of the whole
+# night's findings for that lane scrolling away with a job that looks like
+# "infra". Both outcomes are labeled `::warning`/infra in the job log rather
+# than left to look like an ordering finding.
+#
+# `--parallel=1` stays on the `api`/`shared`/`runtime` lanes rather than
+# sharding it away: it is the only detector for *within-file* order
+# dependence under the merge gate's own unit-lane mode, and dropping it on
+# `api` would duplicate the `api-integration` entry instead of adding
+# coverage. Revisit only when a Bun release verifiably contains
+# oven-sh/bun#38008 (check the patch, not the version — tracked in #889).
 
 on:
   schedule:
@@ -118,13 +134,8 @@ jobs:
           WORKSPACE: ${{ matrix.workspace }}
           ISOLATION: ${{ matrix.isolation }}
           LANE_PATH: ${{ matrix.path }}
+          LANE: ${{ matrix.lane }}
         run: |
-          # `set -o pipefail` is load-bearing, not boilerplate: a step without an
-          # explicit `shell:` runs under `bash -e {0}`, which does NOT set it, so
-          # the pipeline's status would be `tee`'s and a failing suite would
-          # report success — no notification, and the log upload below (gated on
-          # `outcome != success`) would never run.
-          set -o pipefail
           # An array, not a string: `isolation` and `path` are empty for at
           # least one lane each, and a quoted empty string would reach
           # `bun test` as an argument it reads as a path filter matching
@@ -137,16 +148,27 @@ jobs:
           # leaves `MANGOSTUDIO_DIAGNOSTIC_LOGS` or `DATABASE_PATH` behind runs
           # a different suite than the one that went red.
           echo "::notice::Reproduce with: (cd apps/${WORKSPACE} && DATABASE_PATH=${DATABASE_PATH} MANGOSTUDIO_DIAGNOSTIC_LOGS=${MANGOSTUDIO_DIAGNOSTIC_LOGS} bun test ${args[*]})"
-          bun test "${args[@]}" 2>&1 | tee run.log
+          # The watchdog owns run.log, mirrors the child's output to this
+          # step's own log, and bounds+retries a hang or a crash exactly like
+          # the merge gate's shards (scripts/ci/run-tests-watchdog.ts).
+          bun ../../scripts/ci/run-tests-watchdog.ts --label="${LANE}" \
+            --timeout-seconds=300 --retry-on-crash \
+            --log-file=run.log --meta-file=run-meta.json \
+            -- bun test "${args[@]}"
 
       # The order is the finding. Without it a red run names a failing test and
       # nothing about what ran before it, which is the half that matters.
-      # `outcome != success` covers a failed run and a step timeout; `!cancelled()`
-      # skips a user-cancelled job, where there is nothing useful to keep.
+      # `outcome != success` covers a failed run and a step timeout;
+      # `outputs.crashed == 'true'` also uploads a crash-then-clean-retry
+      # night, whose only evidence of the crash lives in the preserved
+      # attempt-1 log. `!cancelled()` skips a user-cancelled job, where there
+      # is nothing useful to keep. The glob picks up both `run.log` and, when
+      # a crash preserved it, `run.log.attempt-1`; `run-meta.json` is not
+      # uploaded because nothing here consumes it.
       - name: Upload run log
-        if: ${{ !cancelled() && steps.randomized.outcome != 'success' }}
+        if: ${{ !cancelled() && (steps.randomized.outcome != 'success' || steps.randomized.outputs.crashed == 'true') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: randomized-order-${{ matrix.lane }}-seed-${{ env.SEED }}
-          path: apps/${{ matrix.workspace }}/run.log
+          path: apps/${{ matrix.workspace }}/run.log*
           retention-days: 14
