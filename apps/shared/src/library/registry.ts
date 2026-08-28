@@ -280,6 +280,26 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     readBy: ['codex'],
   },
   {
+    // Cursor's own "new command" flow writes here for a global command and into
+    // the repository for a project one, so the home directory is a first-class
+    // scope even though Cursor documents neither. Unlike the other two, Cursor
+    // walks this tree recursively; this layout reads only its top level.
+    //
+    // Reading it on a *remote* environment is the honest thing to report and
+    // still worth a caveat: Cursor loads the machine it runs on, so an SSH
+    // session serves commands from the developer's own home rather than the
+    // host's. The file being here is a fact about this machine; whether the
+    // Cursor session in front of the user loaded it is not ours to claim.
+    id: 'cursor-commands',
+    kind: 'command',
+    scope: 'home',
+    resolvePath: homePath('.cursor', 'commands'),
+    access: 'read-write',
+    layout: 'directory-of-files',
+    format: 'markdown-frontmatter',
+    readBy: ['cursor'],
+  },
+  {
     id: 'mango-instructions',
     kind: 'instruction',
     scope: 'home',
@@ -413,7 +433,7 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
       // MangoStudio has no slash commands of its own. A `.mango/commands`
       // directory would put a tick in this column for files nothing ever loads,
       // which is a worse answer than the honest empty one — and propagation
-      // needs no hub location to keep two vendors in step.
+      // needs no hub location to keep the vendors in step.
       command: [],
       instruction: ['mango-instructions'],
       setting: ['mango-settings'],
@@ -453,11 +473,7 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
     reads: {
       skill: ['cursor-skills', 'cursor-skills-builtin'],
       subagent: ['cursor-agents'],
-      // Cursor's commands are repository files (`.cursor/commands`), and no
-      // home-scoped equivalent is documented. Claiming one would scan a
-      // directory that does not exist and report every command as absent from
-      // a target that may well have it checked into a repo.
-      command: [],
+      command: ['cursor-commands'],
       instruction: ['cursor-rules'],
       setting: ['cursor-settings'],
       hook: [],

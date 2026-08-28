@@ -127,17 +127,16 @@ describe('library target registry', () => {
   it('reads commands from each vendor home that has one', () => {
     expect(getLibraryTarget('claude')?.reads.command).toEqual(['claude-commands']);
     expect(getLibraryTarget('codex')?.reads.command).toEqual(['codex-prompts']);
+    expect(getLibraryTarget('cursor')?.reads.command).toEqual(['cursor-commands']);
   });
 
   /**
-   * Absence here is a decision, not an omission. MangoStudio has no slash
-   * commands, and Cursor keeps its in a repository rather than a home
-   * directory — a location for either would report a coverage tick for files
+   * Absence here is a decision, not an omission: MangoStudio has no slash
+   * commands, so a location for it would report a coverage tick for files
    * nothing loads.
    */
-  it('claims no command home for the two targets that do not have one', () => {
+  it('claims no command home for the target that has no commands', () => {
     expect(getLibraryTarget('mangostudio')?.reads.command).toEqual([]);
-    expect(getLibraryTarget('cursor')?.reads.command).toEqual([]);
   });
 
   it('resolves command locations under each vendor config home, override included', () => {
@@ -146,6 +145,9 @@ describe('library target registry', () => {
     );
     expect(getLibraryLocation('codex-prompts')?.resolvePath(LINUX_ENV)).toBe(
       '/home/ada/.codex/prompts'
+    );
+    expect(getLibraryLocation('cursor-commands')?.resolvePath(LINUX_ENV)).toBe(
+      '/home/ada/.cursor/commands'
     );
     expect(
       getLibraryLocation('codex-prompts')?.resolvePath({
@@ -159,9 +161,13 @@ describe('library target registry', () => {
    * A command is one markdown file, so it is hashed as a file. Landing in the
    * directory domain would make every command pair report `incomparable`
    * against a runtime that hashes directories differently.
+   *
+   * One format across all three is what keeps a propagation a byte copy: a
+   * vendor modelled with a different format would need an adapter that does not
+   * exist, and every write to it would report `no-adapter-strategy`.
    */
-  it('stores commands as flat markdown files in both homes', () => {
-    for (const id of ['claude-commands', 'codex-prompts'] as const) {
+  it('stores commands as flat markdown files in every home', () => {
+    for (const id of ['claude-commands', 'codex-prompts', 'cursor-commands'] as const) {
       expect(getLibraryLocation(id)).toMatchObject({
         kind: 'command',
         scope: 'home',
