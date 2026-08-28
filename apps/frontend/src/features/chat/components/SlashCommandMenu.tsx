@@ -15,6 +15,14 @@ interface Props {
   readonly entries: readonly SlashCommandEntry[];
   readonly activeIndex: number;
   readonly listId: string;
+  /**
+   * Whether a source is still answering.
+   *
+   * Only changes what the *empty* panel says, but that is the whole point: the
+   * composer holds Enter while this is true, and a palette that held a key
+   * without saying why would read as a dead keyboard.
+   */
+  readonly pending: boolean;
   readonly onSelect: (entry: SlashCommandEntry) => void;
   /**
    * Moves the highlight to the row the pointer is over.
@@ -27,7 +35,14 @@ interface Props {
   readonly onHighlight: (index: number) => void;
 }
 
-export function SlashCommandMenu({ entries, activeIndex, listId, onSelect, onHighlight }: Props) {
+export function SlashCommandMenu({
+  entries,
+  activeIndex,
+  listId,
+  pending,
+  onSelect,
+  onHighlight,
+}: Props) {
   const { t } = useI18n();
   const labels = t.chat.input;
   const activeRef = useRef<HTMLDivElement>(null);
@@ -58,6 +73,9 @@ export function SlashCommandMenu({ entries, activeIndex, listId, onSelect, onHig
       role="listbox"
       tabIndex={-1}
       aria-label={labels.slashMenuLabel}
+      // Says the list is being built rather than that it is empty — the same
+      // thing the panel's text says, for a reader that never sees the panel.
+      aria-busy={pending}
       // On the container, not only on the rows: the padding, the gutters beside
       // a row and the scrollbar all belong to this element, and a press on any
       // of them would blur the textarea, which the composer answers by
@@ -67,7 +85,11 @@ export function SlashCommandMenu({ entries, activeIndex, listId, onSelect, onHig
         empty ? 'p-3' : 'app-scrollbar max-h-72 overflow-y-auto p-1'
       }`}
     >
-      {empty && <p className="text-xs text-on-surface-variant/70">{labels.slashMenuEmpty}</p>}
+      {empty && (
+        <p className="text-xs text-on-surface-variant/70">
+          {pending ? labels.slashMenuLoading : labels.slashMenuEmpty}
+        </p>
+      )}
       {entries.map((entry, index) => (
         <div
           key={entry.name}

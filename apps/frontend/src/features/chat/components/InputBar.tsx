@@ -219,18 +219,21 @@ export function InputBar({
     () => (slashQuery === null ? [] : matchSlashCommands(slashCommands.entries, slashQuery)),
     [slashCommands.entries, slashQuery]
   );
+  // A source is still answering and has produced no match yet. The distinction
+  // "No command matches" cannot be allowed to make: a library scan walks
+  // directories on whichever machine the chat runs on, and on the first `/` of
+  // a session that walk is routinely slower than the next keystroke.
+  const slashPending = slashQuery !== null && slashQuery.length > 0 && slashCommands.loading;
   // A bare `/` with nothing to offer stays quiet — an empty popover over every
-  // slash would be noise. Once the user has typed a name, "no match" is worth
-  // saying, because the alternative is a menu that silently vanishes. Not while
-  // a source is still answering, though: a library scan walks directories on
-  // the runtime host, and "No command matches" during that walk is a claim the
-  // palette cannot support and the user will act on.
-  const slashOpen =
-    slashQuery !== null &&
-    (slashMatches.length > 0 || (slashQuery.length > 0 && !slashCommands.loading));
-  // Whether there is anything to *choose*. A palette showing "no match" must
-  // not also take the arrow keys: they are the prompt history's, and swallowing
-  // them would strand a user who typed a name that does not exist.
+  // slash would be noise. Once the user has typed a name the palette is open
+  // either way, because both things it can say then are worth saying: "no
+  // match" beats a menu that silently vanishes, and the pending state beats
+  // Enter falling through to send. It has to be *open* to hold that key.
+  const slashOpen = slashQuery !== null && (slashMatches.length > 0 || slashQuery.length > 0);
+  // Whether there is anything to *choose*. A palette showing "no match" or
+  // "still looking" must not also take the arrow keys: they are the prompt
+  // history's, and swallowing them would strand a user who typed a name that
+  // does not exist.
   const slashSelectable = slashOpen && slashMatches.length > 0;
   // Clamped where it is read rather than reset in an effect: a catalog
   // announced while the menu is open shortens the list, and an effect that
@@ -365,6 +368,16 @@ export function InputBar({
       }
     }
 
+    // Enter on a half-typed name whose sources have not answered. Letting it
+    // through submits `/auto` as prose one tick before `/autopilot` would have
+    // been offered — a prompt the user never wrote, sent to an agent that reads
+    // it as one. Held rather than queued: the palette says it is still looking,
+    // and a second Enter after that lands on a real answer.
+    if (slashPending && !slashSelectable && event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      return;
+    }
+
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       handleSubmit(event);
@@ -492,6 +505,7 @@ export function InputBar({
                 entries={slashMatches}
                 activeIndex={slashActiveIndex}
                 listId={slashListId}
+                pending={slashPending}
                 onSelect={completeSlashCommand}
                 onHighlight={setSlashIndex}
               />

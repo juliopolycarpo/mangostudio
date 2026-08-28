@@ -266,4 +266,43 @@ describe('composer slash palette', () => {
     await user.keyboard('{ArrowDown}{Enter}');
     expect(onSubmit).toHaveBeenCalledWith('/nope', undefined);
   });
+
+  /**
+   * The first `/` of a session, before any source has answered: no catalog has
+   * been announced yet and the library scan is walking directories on whichever
+   * machine the chat runs on. Enter there used to fall straight through to
+   * submit and send `/auto` as prose — a beat before `/autopilot` would have
+   * been offered, and to an agent that reads it as an ordinary sentence.
+   *
+   * Rendered without `ComposerWithCatalog` on purpose: a published catalog is
+   * the one thing that would give this query a match to complete.
+   */
+  it('holds Enter while a source is still answering', async () => {
+    const onSubmit = jest.fn();
+    const originalFetch = globalThis.fetch;
+    // Never resolved, so the scan is in flight for the whole test.
+    const scanInFlight = Promise.withResolvers<Response>();
+    globalThis.fetch = (() => scanInFlight.promise) as unknown as typeof fetch;
+    try {
+      render(
+        <InputBar
+          onSubmit={onSubmit}
+          chatId="chat-loading"
+          runner={RUNNER}
+          externalDescriptor={DESCRIPTOR}
+        />
+      );
+      const user = userEvent.setup();
+      const textbox = screen.getByRole('textbox');
+      await user.type(textbox, '/auto');
+
+      expect(await screen.findByText('Looking for commands...')).toBeInTheDocument();
+      await user.keyboard('{Enter}');
+
+      expect(onSubmit).not.toHaveBeenCalled();
+      expect(textbox).toHaveValue('/auto');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

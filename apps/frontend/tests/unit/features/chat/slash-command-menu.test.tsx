@@ -27,6 +27,7 @@ describe('SlashCommandMenu', () => {
           entries={[REVIEW]}
           activeIndex={0}
           listId="slash-menu"
+          pending={false}
           onSelect={noop}
           onHighlight={noop}
         />
@@ -40,6 +41,7 @@ describe('SlashCommandMenu', () => {
           entries={[DATAVIZ]}
           activeIndex={0}
           listId="slash-menu"
+          pending={false}
           onSelect={noop}
           onHighlight={noop}
         />

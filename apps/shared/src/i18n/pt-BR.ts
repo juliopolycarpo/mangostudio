@@ -58,6 +58,7 @@ export const messages = {
       mcpInsertFailed: 'Falha ao inserir prompt',
       slashMenuLabel: 'Comandos de barra',
       slashMenuEmpty: 'Nenhum comando corresponde.',
+      slashMenuLoading: 'Procurando comandos...',
       slashMenuOrigin: {
         session: 'sessão',
         library: 'em disco',

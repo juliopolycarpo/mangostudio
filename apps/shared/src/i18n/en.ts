@@ -60,6 +60,7 @@ export const messages: Messages = {
       mcpInsertFailed: 'Failed to insert prompt',
       slashMenuLabel: 'Slash commands',
       slashMenuEmpty: 'No command matches.',
+      slashMenuLoading: 'Looking for commands...',
       /**
        * Where a name came from. `session` is the running agent's own answer and
        * `library` is a file on disk it has not confirmed reading yet — a
