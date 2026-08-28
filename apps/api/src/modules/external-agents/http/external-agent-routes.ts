@@ -36,6 +36,7 @@ import {
   refreshExternalAccountLimits,
 } from '../application/external-account-limits';
 import {
+  type DiscoveredExternalAgent,
   type ExternalAgentDiscoveryService,
   externalAgentDiscoveryService,
 } from '../application/external-agent-discovery';
@@ -84,7 +85,11 @@ const AccountLimitsResponseSchema = t.Object({
 });
 
 export interface ExternalAgentRouteDependencies {
-  readonly discovery?: ExternalAgentDiscoveryService;
+  /**
+   * Descriptors *with* their provenance: the disclosure endpoints here are the
+   * only callers that must tell an adapter's answer from the cheap pass.
+   */
+  readonly discovery?: Pick<ExternalAgentDiscoveryService, 'describeExternalAgents'>;
   /** How revocation stops what is already running. */
   readonly sessions?: Pick<ExternalSessionManager, 'reapScope'>;
 }
@@ -135,7 +140,7 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
         const environmentId = query.environmentId ?? LOCAL_ENVIRONMENT_ID;
         // Discovery answers for an environment it could not reach rather than
         // throwing, so there is no failure arm here to write.
-        const agents = await discovery.listExternalAgents({ userId, environmentId });
+        const agents = await discovery.describeExternalAgents({ userId, environmentId });
         return { environmentId, agents: await withDisclosureReasons(userId, agents) };
       }
     )
@@ -165,6 +170,7 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
           200: AcknowledgeResponseSchema,
           401: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ params, query, user, set }) => {
@@ -178,13 +184,31 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
           return { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND };
         }
         const environmentId = query.environmentId ?? LOCAL_ENVIRONMENT_ID;
-        const agents = await discovery.listExternalAgents({ userId, environmentId });
-        const descriptor = agents.find((agent) => agent.targetId === params.targetId);
-        if (!descriptor) {
+        // The one discovery call that waits for the adapter. Everywhere else a
+        // cold cache degrades to the cheap pass and the worst case is a selector
+        // rendering a stale capability for a few seconds; here it would be
+        // written into a consent record that outlives the session, and the
+        // placeholder it stored would never match a real answer again.
+        const agents = await discovery.describeExternalAgents(
+          { userId, environmentId },
+          { waitForAdapter: true }
+        );
+        const agent = agents.find((candidate) => candidate.descriptor.targetId === params.targetId);
+        if (!agent || agent.descriptor.unavailableReason) {
           set.status = 404;
           return {
             error: 'This agent is not available on that machine.',
             code: ERROR_CODES.NOT_FOUND,
+          };
+        }
+        if (!agent.adapterAnswered) {
+          // The probe was refused, timed out or never started. Recording anyway
+          // would store consent to a capability set nobody was shown, so the
+          // notice stays unanswered and the client may retry.
+          set.status = 503;
+          return {
+            error: 'Could not confirm what this agent can do on that machine. Try again.',
+            code: ERROR_CODES.PROVIDER_ERROR,
           };
         }
 
@@ -194,8 +218,8 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
         await acknowledgeExternalDisclosure(
           { userId, targetId: params.targetId },
           {
-            capabilities: descriptor.capabilities,
-            supportedConfigurations: descriptor.supportedConfigurations,
+            capabilities: agent.descriptor.capabilities,
+            supportedConfigurations: agent.descriptor.supportedConfigurations,
           },
           getDb()
         );
@@ -316,21 +340,29 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
  */
 async function withDisclosureReasons(
   userId: string,
-  agents: readonly ExternalAgentDescriptor[]
+  agents: readonly DiscoveredExternalAgent[]
 ): Promise<readonly ExternalAgentDescriptor[]> {
   const db = getDb();
   return await Promise.all(
-    agents.map(async (agent) => {
-      if (agent.unavailableReason || !agent.installed) return agent;
+    agents.map(async ({ descriptor, adapterAnswered }) => {
+      if (descriptor.unavailableReason || !descriptor.installed) return descriptor;
       const required = await requiresExternalDisclosure(
-        { userId, targetId: agent.targetId },
-        {
-          capabilities: agent.capabilities,
-          supportedConfigurations: agent.supportedConfigurations,
-        },
+        { userId, targetId: descriptor.targetId },
+        // Only an adapter's answer describes this vendor. On the cheap pass the
+        // capability set is a placeholder, and comparing a stored fingerprint
+        // against it would put the notice back in front of every user on every
+        // cold cache — which is a reload, a sign-in or a runtime reconnect.
+        adapterAnswered
+          ? {
+              capabilities: descriptor.capabilities,
+              supportedConfigurations: descriptor.supportedConfigurations,
+            }
+          : null,
         db
       );
-      return required ? { ...agent, unavailableReason: 'disclosure-required' as const } : agent;
+      return required
+        ? { ...descriptor, unavailableReason: 'disclosure-required' as const }
+        : descriptor;
     })
   );
 }

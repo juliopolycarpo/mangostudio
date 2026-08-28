@@ -18,6 +18,11 @@
  * - **Fail closed.** No row, an unreadable row, a row from an older text
  *   version, and a row whose context fingerprint no longer matches all mean the
  *   same thing: ask again. The failure to prefer is one extra dialog.
+ * - **A fingerprint is only compared against an adapter's answer.** The cheap
+ *   discovery pass reports every capability false because it never asked, and
+ *   fingerprinting that placeholder would make an ordinary cold cache look like
+ *   a vendor that changed. Unknown is not stale, and it is not consent either:
+ *   the row still has to exist and still has to carry the current text version.
  * - **No back door.** There is no configuration flag and no environment
  *   variable that satisfies the gate. The same reasoning as the isolation
  *   attestation: a notice obligation that the party under it can switch off is
@@ -72,10 +77,19 @@ export function disclosureContextFingerprint(context: ExternalDisclosureContext)
  * Both halves of the comparison matter and neither implies the other: the
  * version catches MangoStudio changing what it said, the fingerprint catches the
  * vendor or the account changing what it does.
+ *
+ * `null` is not a third stale reason — it means **no adapter answered**, so
+ * nothing is known about what this vendor can do here. Only the row itself is
+ * checked in that case. Comparing anyway would fingerprint the cheap pass's
+ * placeholder, which is every capability false and no effective default, and
+ * that value can never match an acknowledgement recorded from a real answer: the
+ * gate would re-prompt on every cold cache — a page reload, a sign-in, a
+ * reconnect — for consent nobody withdrew. A dialog that reappears for no reason
+ * the user can act on is the one that teaches people to click through it.
  */
 export async function requiresExternalDisclosure(
   scope: ExternalDisclosureScope,
-  context: ExternalDisclosureContext,
+  context: ExternalDisclosureContext | null,
   db: Kysely<Database>
 ): Promise<boolean> {
   const row = await db
@@ -87,6 +101,7 @@ export async function requiresExternalDisclosure(
 
   if (!row) return true;
   if (row.disclosureVersion !== EXTERNAL_DISCLOSURE_VERSION) return true;
+  if (!context) return false;
   return row.contextFingerprint !== disclosureContextFingerprint(context);
 }
 

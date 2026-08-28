@@ -140,6 +140,53 @@ describe('requiresExternalDisclosure', () => {
       true
     );
   });
+
+  /**
+   * The reprompt loop this null arm exists to close.
+   *
+   * A cold discovery cache — a reload, a sign-in, a runtime reconnect — leaves
+   * the hub with the cheap pass, whose every capability reads false because it
+   * never asked. Fingerprinting that placeholder can never match an
+   * acknowledgement recorded from a real adapter answer, so the notice came back
+   * on every refresh for consent nobody had withdrawn.
+   */
+  it('does not re-prompt when no adapter answered', async () => {
+    const userId = await freshUser();
+    await acknowledgeExternalDisclosure({ userId, targetId: 'claude' }, MANUAL, getDb());
+    expect(await requiresExternalDisclosure({ userId, targetId: 'claude' }, null, getDb())).toBe(
+      false
+    );
+  });
+
+  it('still requires it when nothing was acknowledged and no adapter answered', async () => {
+    const userId = await freshUser();
+    expect(await requiresExternalDisclosure({ userId, targetId: 'claude' }, null, getDb())).toBe(
+      true
+    );
+  });
+
+  /** Unknown covers what the vendor does, never what MangoStudio said about it. */
+  it('still re-prompts on an older text version when no adapter answered', async () => {
+    const userId = await freshUser();
+    await acknowledgeExternalDisclosure({ userId, targetId: 'claude' }, MANUAL, getDb());
+    await getDb()
+      .updateTable('external_agent_disclosures')
+      .set({ disclosureVersion: 0 })
+      .where('userId', '=', userId)
+      .execute();
+    expect(await requiresExternalDisclosure({ userId, targetId: 'claude' }, null, getDb())).toBe(
+      true
+    );
+  });
+
+  it('does not let an unknown context stand in for a revoked one', async () => {
+    const userId = await freshUser();
+    await acknowledgeExternalDisclosure({ userId, targetId: 'claude' }, MANUAL, getDb());
+    await revokeExternalDisclosure({ userId, targetId: 'claude' }, getDb());
+    expect(await requiresExternalDisclosure({ userId, targetId: 'claude' }, null, getDb())).toBe(
+      true
+    );
+  });
 });
 
 describe('acknowledgeExternalDisclosure', () => {

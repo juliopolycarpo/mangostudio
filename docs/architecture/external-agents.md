@@ -352,6 +352,17 @@ accounts on 2026-08-14; nothing about MangoStudio changes and no capability flag
 runs without asking goes from "reads only" to "everything, with a classifier reviewing each
 action". Consent given for the first must not silently cover the second.
 
+Two of those three materials come from the **adapter that would run the turn**, so the fingerprint
+is only ever compared against an adapter's answer. The cheap discovery pass reports every capability
+false and no effective default — it looked for a binary, it never asked what the binary would do —
+and treating that placeholder as a finding made an ordinary cold cache indistinguishable from a
+vendor that had changed. A reload, a sign-in or a runtime reconnect drops the discovery cache, so
+the notice came back on every one of them for consent nobody had withdrawn. Unknown is therefore not
+stale: with no adapter answer the row is still checked for existence and for the current text
+version, and nothing else. For the same reason the acknowledgement endpoint is the one discovery
+caller that **waits** for the authoritative pass — a selector render may serve a placeholder for a
+few seconds, a consent record may never store one.
+
 Revoking blocks new starts and closes live sessions, so withdrawing never leaves a vendor process
 running that the owner has just refused. No configuration flag or environment variable satisfies
 the gate.

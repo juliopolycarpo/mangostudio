@@ -84,7 +84,8 @@ export interface ResolveExternalTurnConfigurationInput {
 }
 
 export interface ExternalTurnConfigurationDependencies {
-  readonly discovery?: ExternalAgentDiscoveryService;
+  /** Descriptors only: this resolver reads what the agent can do, never why. */
+  readonly discovery?: Pick<ExternalAgentDiscoveryService, 'listExternalAgents'>;
   readonly resolveRuntimeClient?: typeof getRuntimeClient;
   readonly isolationRegistry?: ExternalIdentityIsolationRegistry;
 }
