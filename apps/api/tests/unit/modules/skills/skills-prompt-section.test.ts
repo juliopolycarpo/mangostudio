@@ -59,6 +59,17 @@ describe('buildSkillsPromptSection', () => {
     expect(section).not.toContain('broken');
   });
 
+  /**
+   * The composer's `/` palette offers skills to a MangoStudio chat, and this
+   * section is the only thing that gives `/name` a meaning here: the native
+   * runner has no command loader to expand it (issue #961), so the advertised
+   * instruction is what turns the completion into a skill invocation.
+   */
+  it('says that a leading /name asks for that skill by name', () => {
+    const section = buildSkillsPromptSection([makeSkill()]);
+    expect(section).toContain('/<name>');
+  });
+
   it('caps the listing at 64 skills', () => {
     const skills = Array.from({ length: 65 }, (_, index) =>
       makeSkill({ name: `skill-${String(index).padStart(2, '0')}`, key: `mango:skill-${index}` })
