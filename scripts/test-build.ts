@@ -24,13 +24,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startFakeChatGptServer } from '../apps/api/tests/support/chatgpt/fake-server';
 import { extractTarArchive } from './lib/archive';
-import { pumpStream, readFirstLine } from './lib/child-streams';
+import { pumpStream } from './lib/child-streams';
 import {
   DISTRIBUTION_MANIFEST_FILE,
   readDistributionManifest,
   validateDistributionManifest,
 } from './lib/distribution-manifest';
 import { captureCommand } from './lib/exec';
+import { findModuleResolutionFailure } from './lib/module-resolution';
 import {
   type BinaryTarget,
   filterBinaryTargets,
@@ -40,6 +41,7 @@ import {
   runtimeBinaryName,
 } from './lib/release-targets';
 import { resolveReleaseVersion } from './lib/release-version';
+import { probeRuntimeHandshake, type RuntimeHandshakeProbe } from './lib/runtime-handshake';
 import { waitForServerReady } from './lib/wait-for-health';
 import { findChecksum, sha256File } from './release/verify-checksum';
 
@@ -326,53 +328,63 @@ async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Pro
   }
   pass(`${label} --version → ${VERSION}`);
 
-  const child = Bun.spawn({
-    cmd: [binaryPath, '--stdio'],
-    stdin: 'pipe',
-    stdout: 'pipe',
-    stderr: 'pipe',
+  const probe = await probeRuntimeHandshake({
+    command: [binaryPath, '--stdio'],
+    timeoutMs: RUNTIME_HANDSHAKE_TIMEOUT_MS,
   });
 
-  try {
-    const read = await readFirstLine(child.stdout, RUNTIME_HANDSHAKE_TIMEOUT_MS);
-    if (read.kind !== 'line') fail(`${label} --stdio sent no handshake frame`);
-    const hello = read.line;
+  if (!probe.hello) reportFailedHandshake(label, probe);
 
-    let frame: { type?: string; runtimeVersion?: string; manifest?: { platform?: string } };
-    try {
-      frame = JSON.parse(hello) as typeof frame;
-    } catch {
-      fail(`${label} --stdio wrote a non-JSON line to stdout: ${hello}`);
-    }
-    if (frame.type !== 'hello') fail(`Expected a hello frame, got: ${hello}`);
-    if (frame.runtimeVersion !== VERSION) {
-      fail(`Handshake reported runtime ${frame.runtimeVersion}, expected ${VERSION}`);
-    }
-    if (!frame.manifest?.platform) fail('Handshake carried no capability manifest');
-    pass(`${label} --stdio handshakes with a v${VERSION} manifest`);
-  } finally {
-    child.stdin.end();
-    child.kill();
-    await child.exited.catch(() => undefined as undefined);
+  // Guarded on the success path too: a runtime can greet and still have failed
+  // to resolve a chunk it needs later, and that is worth failing the smoke.
+  assertNoModuleResolutionFailures(probe.stderr, `${label} stderr`);
+
+  const hello = probe.hello;
+  let frame: { type?: string; runtimeVersion?: string; manifest?: { platform?: string } };
+  try {
+    frame = JSON.parse(hello) as typeof frame;
+  } catch {
+    fail(`${label} --stdio wrote a non-JSON line to stdout: ${hello}`);
   }
+  if (frame.type !== 'hello') fail(`Expected a hello frame, got: ${hello}`);
+  if (frame.runtimeVersion !== VERSION) {
+    fail(`Handshake reported runtime ${frame.runtimeVersion}, expected ${VERSION}`);
+  }
+  if (!frame.manifest?.platform) fail('Handshake carried no capability manifest');
+  pass(`${label} --stdio handshakes with a v${VERSION} manifest`);
+}
+
+/**
+ * Prints everything the probe collected, then exits.
+ *
+ * Two undiagnosable Windows flakes came from a single-line report, so the
+ * partial frame, the exit status and the child's stderr all reach the log
+ * before `fail()` takes the process down. Details lead and the verdict lands
+ * last, which is where a CI log gets read from; the module-resolution assert
+ * runs just before it so a pattern hit becomes the final, more specific ❌.
+ * The cause is on the header line too, because that assert is a `never` and
+ * would otherwise be the only thing printed on the likeliest crash of all.
+ */
+function reportFailedHandshake(label: string, probe: RuntimeHandshakeProbe): never {
+  console.error(`  🔎 ${label} --stdio ${probe.failure}`);
+  if (probe.partial) console.error(`     partial stdout (no newline): ${probe.partial}`);
+  if (probe.exitCode !== null) console.error(`     exit code: ${probe.exitCode}`);
+  if (probe.signal) console.error(`     signal: ${probe.signal}`);
+  console.error('     --- runtime stderr ---');
+  console.error(probe.stderr.trim() || '     (empty)');
+  console.error('     --- end runtime stderr ---');
+
+  assertNoModuleResolutionFailures(probe.stderr, `${label} stderr`);
+  fail(`${label} --stdio ${probe.failure}`);
 }
 
 // ---------------------------------------------------------------------------
 // Runtime smoke test
 // ---------------------------------------------------------------------------
 
-const MODULE_RESOLUTION_FAILURE_PATTERNS = [
-  'ResolveMessage',
-  'Cannot find module',
-  './642.js',
-] as const;
-
 function assertNoModuleResolutionFailures(text: string, label: string): void {
-  for (const pattern of MODULE_RESOLUTION_FAILURE_PATTERNS) {
-    if (text.includes(pattern)) {
-      fail(`${label} contains forbidden module-resolution pattern: ${pattern}`);
-    }
-  }
+  const pattern = findModuleResolutionFailure(text);
+  if (pattern) fail(`${label} contains forbidden module-resolution pattern: ${pattern}`);
 }
 
 function buildSessionCookieHeader(response: Response): string {
