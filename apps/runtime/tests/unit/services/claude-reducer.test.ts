@@ -379,6 +379,21 @@ describe('the init record’s slash-command list', () => {
     expect(commands.map((command) => command.name)).toEqual(['review']);
   });
 
+  /**
+   * The exclusion list is what makes the catalog safe to offer. A run that
+   * states it in a shape this cannot read has not been withheld from, so the
+   * honest answer is no catalog — not one that quietly includes `/doctor`.
+   */
+  it('says nothing when the terminal-only list is unreadable', () => {
+    expect(
+      catalogFrom({
+        session_id: 'a',
+        slash_commands: ['review', 'doctor'],
+        terminal_slash_commands: 'doctor',
+      })
+    ).toEqual([]);
+  });
+
   it('withholds the CLI’s private plumbing', () => {
     const commands = catalogFrom({
       session_id: 'a',
