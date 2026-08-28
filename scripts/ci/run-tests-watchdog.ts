@@ -113,6 +113,8 @@ const FAILURE_SUMMARY_RE = /^\s*[1-9]\d* fail/m;
 interface AttemptResult {
   readonly exitCode: number;
   readonly hung: boolean;
+  /** The attempt's direct child, for reaping stragglers before a retry. */
+  readonly pid?: number;
 }
 
 const isCrash = (attempt: AttemptResult, logText: string): boolean =>
@@ -254,7 +256,7 @@ const runAttempt = async (options: WatchdogOptions): Promise<AttemptResult> => {
 
   try {
     const first = await Promise.race([exited, timedOut]);
-    if (first !== 'timeout') return { exitCode: first, hung: false };
+    if (first !== 'timeout') return { exitCode: first, hung: false, pid: child.pid };
 
     const pid = child.pid;
     const graceMs = (options.killGraceSeconds ?? 10) * 1000;
@@ -368,6 +370,15 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
       `\n::warning::Test invocation for '${options.label}' crashed (Bun isolate-runner ` +
         'abort, oven-sh/bun#39709 class — tracked in #889); retrying once with the same seed.\n'
     );
+    // The direct child's own abort does not guarantee its isolate workers
+    // exited too — an escaped worker would keep running against the same
+    // database and inherited output pipes alongside attempt 2. Reap the
+    // group and give any straggler a moment to finish before the log is
+    // renamed out of the retry's way.
+    if (attempt.pid !== undefined) {
+      killGroup(attempt.pid, 'SIGKILL');
+      await sleep(2000);
+    }
     attempt = await retry();
     crashed = await observe(attempt);
     crashedAny = crashedAny || crashed;

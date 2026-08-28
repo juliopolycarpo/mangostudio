@@ -523,4 +523,34 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
     expect(result.attempts).toBe(2);
     expect(result.exitCode).not.toBe(0);
   });
+
+  // Regression: a crashed main thread's isolate worker could outlive the
+  // attempt and keep running into the retry. The straggler here inherits the
+  // crashed attempt's process group and would write its marker file 500ms
+  // after being spawned unless the group is reaped before the retry starts.
+  it("reaps a crashed attempt's process group before retrying", async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const strayMarker = join(dir, 'stray-wrote');
+    const straySurvivalScript = `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(strayMarker)}, ""), 500)`;
+    const script = `
+      const fs = require("node:fs");
+      const { spawn } = require("node:child_process");
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        process.exit(0);
+      }
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      spawn("bun", ["-e", ${JSON.stringify(straySurvivalScript)}], { stdio: "ignore" }).unref();
+      console.log("panic(main thread): abort()");
+      process.exit(134);
+    `;
+
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+    await Bun.sleep(800);
+    expect(await Bun.file(strayMarker).exists()).toBe(false);
+  });
 });
