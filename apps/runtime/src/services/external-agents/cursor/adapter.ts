@@ -37,6 +37,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
   ExternalAgentCapabilities,
+  ExternalAgentCommand,
   ExternalAgentConfiguration,
   ExternalAgentEvent,
   ExternalAgentModel,
@@ -108,7 +109,7 @@ import type {
   AcpStopReason,
   CursorStatusResponse,
 } from './protocol';
-import { CursorTurnReducer } from './reducer';
+import { CursorTurnReducer, readAvailableCommands } from './reducer';
 import { isCursorVersionSupported, requireCursorVersion } from './version';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -216,6 +217,15 @@ interface CursorSession {
   appliedModelId?: string;
   readonly approvals: Map<string, PendingApproval>;
   activeTurn?: ActiveTurn;
+  /**
+   * The slash commands Cursor announced for this session.
+   *
+   * Session-scoped because the announcement is: it arrives while `session/new`
+   * is still in flight, before any turn exists, and Cursor never sends it
+   * again. Held here and replayed into each turn, which is also what makes it
+   * survive a reload — the hub streams the catalog and persists nothing.
+   */
+  commands?: readonly ExternalAgentCommand[];
 }
 
 /** A live ACP process with a completed, version-checked handshake. */
@@ -418,6 +428,13 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
     const channel = new TurnChannel<ExternalAgentEvent>();
     const active: ActiveTurn = { handle, channel, reducer: new CursorTurnReducer(this.#now) };
     session.activeTurn = active;
+
+    // Replayed into every turn, not just the first. The catalog was announced
+    // once, before any of them; a client that reloaded mid-session would
+    // otherwise never see it again, because nothing persists it.
+    if (session.commands) {
+      channel.push({ type: 'commands_available', commands: session.commands });
+    }
 
     const run = async (): Promise<void> => {
       try {
@@ -732,9 +749,34 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
   #onNotification(sessionId: string, method: string, params: unknown): void {
     if (method !== 'session/update') return;
     const session = this.#sessions.get(sessionId);
-    const active = session?.activeTurn;
-    if (!session || !active) return;
+    if (!session) return;
+    // A notification body is optional in JSON-RPC, and reading through it is
+    // not: this handler runs inside the pump, whose only `catch` rejects every
+    // pending request on the connection. One malformed frame would end the
+    // session rather than be ignored.
+    if (!params || typeof params !== 'object') return;
     const notification = params as AcpSessionNotification;
+
+    // The catalog is *stored* before the turn and correlation guards below,
+    // because it is the one notification that arrives outside a turn: Cursor
+    // sends it once while `session/new` is still in flight, so there is no
+    // `activeTurn` to reduce it into and `nativeSessionId` is very often still
+    // the empty placeholder this session was registered with. Storing is all
+    // that happens here — a catalog that lands mid-turn falls through to the
+    // reducer like every other frame, so there is one place that turns an
+    // update into an event.
+    const announced = readAvailableCommands(notification.update);
+    if (announced) {
+      // Match when the handle is known, accept when it is not: during the
+      // handshake window the only session on this connection is this one, and
+      // refusing the frame there is what dropped the whole catalog.
+      const known = session.nativeSessionId.length > 0;
+      if (known && notification.sessionId !== session.nativeSessionId) return;
+      session.commands = announced;
+    }
+
+    const active = session.activeTurn;
+    if (!active) return;
     // Session-scoped, so this is the only correlation there is. A notification
     // for another ACP session on the same connection is not this turn's.
     if (notification.sessionId !== session.nativeSessionId) return;

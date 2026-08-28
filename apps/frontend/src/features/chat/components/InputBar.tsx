@@ -7,6 +7,8 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useId,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -20,12 +22,21 @@ import { steerExternalTurn } from '@/services/external-agent-service';
 import { filesFromClipboard, useComposerAttachments } from '../hooks/use-composer-attachments';
 import { useComposerDraft } from '../hooks/use-composer-draft';
 import { usePromptHistory } from '../hooks/use-prompt-history';
+import { useSlashCommands } from '../hooks/use-slash-commands';
 import { COMPOSER_ACCENT_PROPERTY, composerAccent } from '../lib/composer-accent';
 import { onComposerFocusRequest } from '../lib/composer-draft-store';
+import {
+  applySlashCompletion,
+  matchSlashCommands,
+  nextSlashIndex,
+  type SlashCommandEntry,
+  slashQueryAt,
+} from '../lib/slash-commands';
 import { CapabilityInspector } from './CapabilityInspector';
 import { ComposerChipRow, type ComposerChipRowProps } from './ComposerChipRow';
 import { ImageIntentToggle } from './ImageIntentToggle';
 import { McpComposerMenu } from './McpComposerMenu';
+import { SlashCommandMenu } from './SlashCommandMenu';
 
 /** Roughly eight lines before the box stops growing and starts scrolling. */
 const TEXTAREA_MAX_HEIGHT_PX = 200;
@@ -183,6 +194,87 @@ export function InputBar({
       ? formatMessage(t.chat.input.placeholderRunner, { agent: runnerName })
       : t.chat.input.placeholder;
 
+  /**
+   * The `/` palette.
+   *
+   * Driven by the caret rather than by a trigger key, so it survives the user
+   * clicking back into a command they had already typed. `dismissed` is what
+   * Escape sets: it must not be inferred from the text, or the palette would
+   * reopen on the very next keystroke and Escape would do nothing.
+   */
+  const slashListId = useId();
+  const [caret, setCaret] = useState(0);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
+  const slashQuery = slashDismissed || inputDisabled ? null : slashQueryAt(prompt, caret);
+  const slashCommands = useSlashCommands({
+    chatId,
+    runner,
+    environmentId: externalDescriptor?.environmentId ?? null,
+    activeModel,
+    selectedAgentId,
+    active: slashQuery !== null,
+  });
+  const slashMatches = useMemo(
+    () => (slashQuery === null ? [] : matchSlashCommands(slashCommands.entries, slashQuery)),
+    [slashCommands.entries, slashQuery]
+  );
+  // A source is still answering and has produced no match yet. The distinction
+  // "No command matches" cannot be allowed to make: a library scan walks
+  // directories on whichever machine the chat runs on, and on the first `/` of
+  // a session that walk is routinely slower than the next keystroke.
+  const slashPending = slashQuery !== null && slashQuery.length > 0 && slashCommands.loading;
+  // A bare `/` with nothing to offer stays quiet — an empty popover over every
+  // slash would be noise. Once the user has typed a name the palette is open
+  // either way, because both things it can say then are worth saying: "no
+  // match" beats a menu that silently vanishes, and the pending state beats
+  // Enter falling through to send. It has to be *open* to hold that key.
+  const slashOpen = slashQuery !== null && (slashMatches.length > 0 || slashQuery.length > 0);
+  // Whether there is anything to *choose*. A palette showing "no match" or
+  // "still looking" must not also take the arrow keys: they are the prompt
+  // history's, and swallowing them would strand a user who typed a name that
+  // does not exist.
+  const slashSelectable = slashOpen && slashMatches.length > 0;
+  // Clamped where it is read rather than reset in an effect: a catalog
+  // announced while the menu is open shortens the list, and an effect that
+  // corrects the index only after paint leaves one render — and any keystroke
+  // inside it — pointing past the end, at no row and at an
+  // `aria-activedescendant` no option carries.
+  const slashActiveIndex = Math.min(slashIndex, Math.max(slashMatches.length - 1, 0));
+
+  // A new query is a new list; the highlight goes back to the best match.
+  useEffect(() => setSlashIndex(0), [slashQuery]);
+
+  // The palette's state belongs to the text it is showing over, and this
+  // composer is not remounted when the chat changes — `useComposerDraft` swaps
+  // the prompt under a caret still pointing into the previous chat's text. Left
+  // alone, switching to a chat whose draft happens to start with `/` opens a
+  // palette nobody asked for and hands it the arrows and Enter.
+  useEffect(() => {
+    setCaret(0);
+    setSlashIndex(0);
+    setSlashDismissed(false);
+  }, [chatId]);
+
+  const completeSlashCommand = (entry: SlashCommandEntry) => {
+    const completion = applySlashCompletion(prompt, entry.name);
+    setPrompt(completion.value);
+    setSlashDismissed(true);
+    setCaret(completion.caret);
+    // Completing is editing by hand, the same as typing: leaving the history
+    // cursor live over text the user did not recall means the next ↑ throws the
+    // completion away instead of moving the caret.
+    history.release();
+    // After React has painted the new value: setting a range against the old
+    // one puts the caret at a character that is no longer there.
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(completion.caret, completion.caret);
+    });
+  };
+
   const handleSteer = async (text: string) => {
     if (!chatId || steering) return;
     setSteering(true);
@@ -240,6 +332,51 @@ export function InputBar({
     // An IME candidate window uses Enter to accept a suggestion. `keyCode 229`
     // is the fallback for browsers that do not set `isComposing` on keydown.
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+
+    // The palette owns Enter and the arrows while it is open, which is why it
+    // is handled before the submit and history branches rather than inside
+    // them: choosing a command is what those keys mean on screen right now.
+    if (slashOpen && event.key === 'Escape') {
+      event.preventDefault();
+      setSlashDismissed(true);
+      return;
+    }
+    if (slashSelectable) {
+      // History keeps the arrows while it owns them. A recalled prompt that
+      // happens to start with a command opens the palette without the user
+      // asking, and taking ↑ there strands them mid-recall with no way back.
+      // Typing releases history, so a palette opened by typing keeps the keys.
+      if (!history.isRecalling && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+        event.preventDefault();
+        setSlashIndex(
+          nextSlashIndex(slashActiveIndex, slashMatches.length, event.key === 'ArrowDown' ? 1 : -1)
+        );
+        return;
+      }
+      // Tab and Enter are never history's, so they complete either way — unless
+      // the highlighted name is already typed in full, where there is nothing
+      // left to complete and Enter is the send the user meant. Without that,
+      // finishing a name costs a second Enter, and a recalled `/deploy` cannot
+      // be re-sent at all. Shift is excluded from both: Shift+Tab is how a
+      // keyboard leaves the composer, and Shift+Enter is a newline.
+      const chosen = slashMatches[slashActiveIndex];
+      const completes = chosen !== undefined && chosen.name !== slashQuery;
+      if (completes && !event.shiftKey && (event.key === 'Tab' || event.key === 'Enter')) {
+        event.preventDefault();
+        completeSlashCommand(chosen);
+        return;
+      }
+    }
+
+    // Enter on a half-typed name whose sources have not answered. Letting it
+    // through submits `/auto` as prose one tick before `/autopilot` would have
+    // been offered — a prompt the user never wrote, sent to an agent that reads
+    // it as one. Held rather than queued: the palette says it is still looking,
+    // and a second Enter after that lands on a real answer.
+    if (slashPending && !slashSelectable && event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      return;
+    }
 
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -362,7 +499,17 @@ export function InputBar({
               box grows under it, the way a shell prompt does. The padding
               moved onto this row so the two share a text box and stay on the
               same baseline. */}
-          <div className="flex items-start gap-2 px-3 py-2.5">
+          <div className="relative flex items-start gap-2 px-3 py-2.5">
+            {slashOpen && (
+              <SlashCommandMenu
+                entries={slashMatches}
+                activeIndex={slashActiveIndex}
+                listId={slashListId}
+                pending={slashPending}
+                onSelect={completeSlashCommand}
+                onHighlight={setSlashIndex}
+              />
+            )}
             <span
               aria-hidden="true"
               className={`composer-prompt-mark ${inputDisabled ? 'opacity-50' : ''}`}
@@ -373,12 +520,48 @@ export function InputBar({
               ref={textareaRef}
               rows={1}
               value={prompt}
+              // An editable combobox, but only while there is a popup to be
+              // the combobox *of*. The rest of the time this is a multi-line
+              // prompt box, and claiming a role with no listbox behind it would
+              // trade the composer's real semantics for a completion that
+              // covers one token of it.
+              //
+              // The consequence to know: a *lazy* role-based locator — a
+              // Playwright `getByRole('textbox')`, not a resolved DOM node —
+              // stops matching while the palette is open. Address the textarea
+              // by element there.
+              {...(slashOpen
+                ? ({
+                    role: 'combobox',
+                    'aria-autocomplete': 'list',
+                    'aria-expanded': true,
+                    'aria-controls': slashListId,
+                    ...(slashSelectable
+                      ? { 'aria-activedescendant': `${slashListId}-${slashActiveIndex}` }
+                      : {}),
+                  } as const)
+                : {})}
               onChange={(event) => {
                 setPrompt(event.target.value);
+                setCaret(event.target.selectionStart ?? event.target.value.length);
+                // Typing is what un-dismisses the palette: Escape hides it for
+                // the text it was showing over, not for the rest of the chat.
+                setSlashDismissed(false);
                 history.release();
                 if (steerError) setSteerError(null);
                 if (uploads.error) uploads.clearError();
               }}
+              onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
+              // A palette left open over a composer nobody is typing in is a
+              // menu the keyboard cannot reach. Choosing a row does not blur:
+              // the list answers `mousedown` with `preventDefault`, so focus
+              // never leaves the textarea for a click inside it.
+              onBlur={() => setSlashDismissed(true)}
+              // The other half of that: coming back is what makes the palette
+              // caret-driven rather than trigger-keyed. Without it, a trip to
+              // the MCP menu and back leaves a command the user is standing in
+              // the middle of with no menu until they type another character.
+              onFocus={() => setSlashDismissed(false)}
               onKeyDown={handleKeyDown}
               onPaste={(event) => {
                 const files = filesFromClipboard(event.clipboardData);

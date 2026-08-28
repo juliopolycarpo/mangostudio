@@ -44,6 +44,13 @@ const EVERY_EVENT: readonly ExternalAgentEvent[] = [
   { type: 'usage', usage: { inputTokens: 12, outputTokens: 3 } },
   { type: 'completed' },
   { type: 'error', error: { code: 'vendor_failed', message: 'boom' } },
+  // Appended rather than placed in union order: the option-set case below
+  // indexes into this array. One vendor sends help text with each name and the
+  // other sends names alone, so both halves are represented.
+  {
+    type: 'commands_available',
+    commands: [{ name: 'review', description: 'Read a diff' }, { name: 'compact' }],
+  },
 ];
 
 describe('external stream chunks', () => {

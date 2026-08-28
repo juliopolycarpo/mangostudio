@@ -45,6 +45,29 @@ export interface ClaudeInitRecord extends ClaudeStreamRecord {
   readonly mcp_server_errors?: unknown;
   readonly plugins?: unknown;
   readonly plugin_errors?: unknown;
+  /**
+   * Every name this run will expand as `/name`, without descriptions.
+   *
+   * One flat list: user commands from disk, plugin and MCP commands, the CLI's
+   * own builtins, and the skills that `skills` repeats. Claude Code sends no
+   * help text with them, which is why the neutral catalog's `description` is
+   * optional rather than the vendors being normalized to a common shape.
+   */
+  readonly slash_commands?: unknown;
+  /**
+   * The subset of `slash_commands` that only does something in the interactive
+   * terminal. Observed as `["doctor", "color"]` on 2.1.250.
+   */
+  readonly terminal_slash_commands?: unknown;
+  /**
+   * Skills, which are also listed in `slash_commands`.
+   *
+   * Read for nothing today: a skill is invoked as `/name` like anything else,
+   * and offering it twice under two headings would suggest a distinction the
+   * prompt does not have. Declared because it is part of the record and the
+   * next person to look will otherwise wonder where it went.
+   */
+  readonly skills?: unknown;
 }
 
 /** One block inside an `assistant` or `user` message. */
@@ -132,6 +155,55 @@ export function initCapabilities(record: ClaudeInitRecord): readonly string[] | 
   const capabilities = record.capabilities;
   if (!Array.isArray(capabilities)) return undefined;
   return capabilities.filter((value): value is string => typeof value === 'string');
+}
+
+/**
+ * Names a run announced but cannot act on outside an interactive terminal, or
+ * `undefined` when the run did not state that list in a shape this can read.
+ *
+ * Absent counts as unreadable, and that is the whole point. `2.1.226` — a build
+ * inside this adapter's supported range, and the one every fixture here was
+ * recorded from — announces `doctor`, `color`, `clear` and `heapdump` in
+ * `slash_commands` and carries no `terminal_slash_commands` at all. Reading
+ * absence as "this run excluded nothing" would publish exactly those names as
+ * usable on every build that predates the field.
+ */
+function terminalOnlyCommands(record: ClaudeInitRecord): ReadonlySet<string> | undefined {
+  const names = record.terminal_slash_commands;
+  if (!Array.isArray(names)) return undefined;
+  return new Set(names.filter((value): value is string => typeof value === 'string'));
+}
+
+/**
+ * The commands this run can expand, in the order the CLI announced them.
+ *
+ * Two kinds are withheld, and only two. `terminal_slash_commands` is the
+ * vendor's own statement that a name needs the interactive terminal this
+ * adapter does not give it. A `__`-prefixed name is the CLI's private
+ * plumbing — `__remote-workflow` is not something a user types.
+ *
+ * Everything else is passed through, builtins included. Whether `/compact`
+ * behaves the same in `--print` as it does in the REPL is the vendor's answer
+ * to give, and a hand-maintained blocklist of "commands we think are
+ * interactive" would go stale the first time that list changes.
+ */
+export function initSlashCommands(record: ClaudeInitRecord): readonly string[] | undefined {
+  const names = record.slash_commands;
+  if (!Array.isArray(names)) return undefined;
+  const terminalOnly = terminalOnlyCommands(record);
+  // Withholding is the promise this catalog makes, so a run that did not state
+  // its exclusion list — because it answered with a scalar, or because it is a
+  // build from before the field existed — gets no catalog rather than one that
+  // quietly includes names the vendor needs a terminal for. The composer still
+  // has the library's scan of the same directories to fall back on.
+  if (!terminalOnly) return undefined;
+  return names.filter(
+    (value): value is string =>
+      typeof value === 'string' &&
+      value.length > 0 &&
+      !value.startsWith('__') &&
+      !terminalOnly.has(value)
+  );
 }
 
 /**

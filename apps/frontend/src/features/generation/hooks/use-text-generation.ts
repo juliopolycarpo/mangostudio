@@ -30,6 +30,7 @@ import type { useChats } from '@/features/chat/hooks/use-chats';
 import { chatKeys, messageKeys } from '@/features/chat/queries';
 import { generateChatTitleSuggestion } from '@/features/chat/services/chat-title';
 import { compactChat, summarizeToNewChat } from '@/features/chat/services/context-compaction';
+import { publishExternalCommands } from '@/features/external-agents/command-catalog';
 import {
   type ExternalDisclosureRequest,
   promptExternalDisclosure,
@@ -532,6 +533,13 @@ export function useTextGeneration({
                 // account the turn is running as ends up under another one.
                 chunk.vendorAccountFingerprint ?? null
               );
+            }
+
+            // What this session will expand as `/name`. Filed against the chat
+            // so the composer's palette can offer the vendor's own list rather
+            // than a guess rebuilt from directories the CLI may not have read.
+            if (chunk.type === 'external_commands') {
+              publishExternalCommands(queryClient, activeChatId, chunk.commands);
             }
           };
 

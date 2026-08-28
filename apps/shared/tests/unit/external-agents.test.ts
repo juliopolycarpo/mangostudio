@@ -375,6 +375,12 @@ describe('the neutral event contract', () => {
         observedAtMs: 1_700_000_000_000,
       },
     },
+    {
+      type: 'commands_available',
+      // One vendor sends help text with each name and the other sends names
+      // alone, so both halves of that disagreement are represented here.
+      commands: [{ name: 'review', description: 'Read a diff' }, { name: 'compact' }],
+    },
     { type: 'completed' },
     { type: 'error', error: { code: 'stream_closed', message: 'The process exited.' } },
   ];

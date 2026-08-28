@@ -58,6 +58,19 @@ export const messages: Messages = {
       mcpNeedsChat: 'Open a chat before attaching resources.',
       mcpAttachFailed: 'Failed to attach resource',
       mcpInsertFailed: 'Failed to insert prompt',
+      slashMenuLabel: 'Slash commands',
+      slashMenuEmpty: 'No command matches.',
+      slashMenuLoading: 'Looking for commands...',
+      /**
+       * Where a name came from. `session` is the running agent's own answer and
+       * `library` is a file on disk it has not confirmed reading yet — a
+       * distinction worth keeping, because only the first one is proof.
+       */
+      slashMenuOrigin: {
+        session: 'session',
+        library: 'on disk',
+        skill: 'skill',
+      },
       mcpPromptArgsTitle: 'Prompt arguments',
       mcpPromptInsert: 'Insert',
       mcpPromptCancel: 'Cancel',

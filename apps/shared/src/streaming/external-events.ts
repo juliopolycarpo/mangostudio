@@ -128,6 +128,9 @@ export function externalAgentEventToStreamChunk(
     case 'completed':
       return null;
 
+    case 'commands_available':
+      return { type: 'external_commands', commands: [...event.commands], done: false };
+
     case 'text_delta':
       return { type: 'external_text', text: event.text, done: false };
 

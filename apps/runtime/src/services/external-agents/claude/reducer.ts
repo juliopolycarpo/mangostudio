@@ -41,6 +41,7 @@ import {
   type ClaudeStreamRecord,
   contentBlocks,
   initCapabilities,
+  initSlashCommands,
   parentToolUseId,
   recordSubtype,
   recordType,
@@ -131,10 +132,13 @@ export interface ClaudeRunInit {
   readonly capabilities?: readonly string[];
   readonly permissionMode?: string;
   readonly model?: string;
+  /** Names this run will expand as `/name`. Absent when the CLI announced none. */
+  readonly slashCommands?: readonly string[];
 }
 
 export function readClaudeInit(record: ClaudeInitRecord): ClaudeRunInit {
   const capabilities = initCapabilities(record);
+  const slashCommands = initSlashCommands(record);
   return {
     ...(typeof record.session_id === 'string' && record.session_id.length > 0
       ? { sessionId: record.session_id }
@@ -142,6 +146,7 @@ export function readClaudeInit(record: ClaudeInitRecord): ClaudeRunInit {
     ...(capabilities ? { capabilities } : {}),
     ...(typeof record.permissionMode === 'string' ? { permissionMode: record.permissionMode } : {}),
     ...(typeof record.model === 'string' ? { model: record.model } : {}),
+    ...(slashCommands ? { slashCommands } : {}),
   };
 }
 
@@ -200,12 +205,26 @@ export class ClaudeTurnReducer {
     if (recordSubtype(record) !== 'init') return NOTHING;
     const init = readClaudeInit(record);
     this.#onInit?.(init);
-    if (this.#sessionStarted || !init.sessionId) return NOTHING;
-    this.#sessionStarted = true;
-    return {
-      events: [{ type: 'session_started', sessionId: init.sessionId, resumed: this.#resumed }],
-      finished: false,
-    };
+
+    const events: ExternalAgentEvent[] = [];
+    if (!this.#sessionStarted && init.sessionId) {
+      this.#sessionStarted = true;
+      events.push({ type: 'session_started', sessionId: init.sessionId, resumed: this.#resumed });
+    }
+    // Announced per run rather than per session, because the CLI is spawned
+    // again for every turn and re-reads its command directories each time. That
+    // makes the catalog self-healing here in a way it is not for a long-lived
+    // ACP session: a command file written between two turns is in the next
+    // list. Emitted even when the session id was missing — the catalog is
+    // useful on its own, and tying it to a handle it does not need would drop
+    // it for a run that only failed to name itself.
+    if (init.slashCommands) {
+      events.push({
+        type: 'commands_available',
+        commands: init.slashCommands.map((name) => ({ name })),
+      });
+    }
+    return events.length > 0 ? { events, finished: false } : NOTHING;
   }
 
   /**

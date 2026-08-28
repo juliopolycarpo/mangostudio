@@ -618,6 +618,38 @@ export const ExternalAgentErrorSchema = Type.Object(
 export type ExternalAgentError = Static<typeof ExternalAgentErrorSchema>;
 
 /**
+ * One slash command a session can expand, as the vendor announced it.
+ *
+ * The catalog is the vendor's rather than MangoStudio's, because the CLI is the
+ * only thing that knows what it actually loaded: user commands from disk, the
+ * plugin commands a marketplace added, and the skills a build exposes under the
+ * same `/` prefix. A list rebuilt from a directory scan would confidently offer
+ * commands the running binary never read.
+ *
+ * `description` is optional because the vendors disagree about it: Cursor sends
+ * a line of help with every entry, Claude Code announces names alone.
+ */
+export const ExternalAgentCommandSchema = Type.Object(
+  {
+    /** Invoked as `/name`. The vendor's own spelling, never re-slugged. */
+    name: VendorText('commandName', { minLength: 1 }),
+    description: Type.Optional(VendorText('commandDescription')),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalAgentCommand = Static<typeof ExternalAgentCommandSchema>;
+
+/**
+ * How many commands one catalog may carry.
+ *
+ * Sized off the observed ceiling with room to grow: a Claude Code install with
+ * plugins announces ~56 and Cursor ~32, so this bounds a vendor that starts
+ * enumerating something else without silently dropping a real catalog.
+ */
+export const EXTERNAL_COMMAND_CATALOG_MAX_ITEMS = 256;
+
+/**
  * The neutral event contract every adapter normalizes onto.
  *
  * Ordering and idempotency are *not* here: every event travels inside the
@@ -631,6 +663,24 @@ export const ExternalAgentEventSchema = Type.Union([
       /** The vendor's own session handle. Server-owned; no client request writes it. */
       sessionId: VendorText('vendorId', { minLength: 1 }),
       resumed: Type.Boolean(),
+    },
+    { additionalProperties: false }
+  ),
+  /**
+   * The session's slash-command catalog, as announced by the vendor.
+   *
+   * Session state rather than transcript: it describes what the user may type
+   * next, so it is never persisted as a message. Both vendors announce it
+   * unprompted — Cursor once per session, Claude Code at the head of every run
+   * — and the last one received wins, so a consumer keeps one list per chat
+   * rather than accumulating them.
+   */
+  Type.Object(
+    {
+      type: Type.Literal('commands_available'),
+      commands: ReadonlyArraySchema(ExternalAgentCommandSchema, {
+        maxItems: EXTERNAL_COMMAND_CATALOG_MAX_ITEMS,
+      }),
     },
     { additionalProperties: false }
   ),

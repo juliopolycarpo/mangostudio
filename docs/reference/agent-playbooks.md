@@ -83,6 +83,12 @@ Open these first:
 - `apps/shared/src/streaming/events.ts`
 - `apps/shared/src/streaming/schemas.ts`
 - `apps/frontend/src/features/chat/ChatPage.tsx`
+- `apps/frontend/src/features/chat/components/InputBar.tsx` (the composer, including the `/`
+  palette's caret and keyboard)
+- `apps/frontend/src/features/chat/lib/slash-commands.ts` (what opens the palette, how it ranks,
+  and what a completion replaces — pure, and the place to start for any `/` question)
+- `apps/frontend/src/features/chat/hooks/use-slash-commands.ts` (the three sources behind it:
+  the session's announced catalog, the library scan, the chat's effective skills)
 - `apps/frontend/src/features/generation/hooks/use-text-generation.ts`
 - `apps/frontend/src/features/chat/hooks/use-chat-stream.ts`
 - `apps/frontend/src/services/generation-service.ts`
@@ -464,6 +470,8 @@ Open these first:
   through the selected runtime rather than of the hub's own filesystem)
 - `apps/frontend/src/features/external-agents/ExternalReviewAction.tsx` (the repository panel's
   "Review my changes", kept away from the permissions dropdown's differently-scoped "Auto-review")
+- `apps/frontend/src/features/external-agents/command-catalog.ts` (the per-chat slash-command
+  catalog the stream files; live-only, with no route behind the key)
 - `apps/shared/src/environments/detection/agent-cli-definitions.ts` (what the scanner looks for)
 - `apps/api/tests/unit/modules/external-agents/`, `apps/shared/tests/unit/external-agents.test.ts`
 

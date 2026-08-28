@@ -164,7 +164,7 @@ describe('ExternalTurnTranscript', () => {
     expect(target.turnPart.status).toBe('terminal');
   });
 
-  it('does not charge observational account/thread usage against the event budget', () => {
+  it('does not charge observational session state against the event budget', () => {
     const target = transcript({ maxEvents: 1 });
     const limits = {
       targetId: 'codex' as const,
@@ -181,6 +181,14 @@ describe('ExternalTurnTranscript', () => {
       ...Array.from({ length: 20 }, () => ({
         type: 'account_limits' as const,
         limits,
+      })),
+      // The slash-command catalog is the same class of thing, and the widest of
+      // the three: Cursor replays it into every turn and re-announces it live,
+      // so a charged catalog would spend a turn's budget on a menu that is
+      // never written down.
+      ...Array.from({ length: 20 }, () => ({
+        type: 'commands_available' as const,
+        commands: [{ name: 'review', description: 'Read a diff' }],
       })),
       { type: 'completed' as const },
     ]);

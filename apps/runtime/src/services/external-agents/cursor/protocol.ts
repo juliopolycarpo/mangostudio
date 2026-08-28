@@ -177,6 +177,24 @@ export interface AcpPlanUpdate extends AcpSessionUpdateEnvelope {
   readonly entries?: readonly AcpPlanEntry[];
 }
 
+/** One entry of the slash-command catalog Cursor announces per session. */
+export interface AcpAvailableCommand {
+  readonly name?: unknown;
+  readonly description?: unknown;
+}
+
+/**
+ * The catalog itself, sent once when the session opens.
+ *
+ * Cursor does not re-send it: a command file written mid-session still expands
+ * when typed, but this list will not mention it until the next session. That is
+ * the vendor's behaviour, observed live, and the reason a consumer treats the
+ * catalog as a hint rather than an allowlist.
+ */
+export interface AcpAvailableCommandsUpdate extends AcpSessionUpdateEnvelope {
+  readonly availableCommands?: unknown;
+}
+
 /**
  * The raw notification body.
  *

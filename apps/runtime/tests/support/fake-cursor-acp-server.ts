@@ -23,6 +23,8 @@ export type CursorScenario =
   /** Asks about an ACP session this connection is not holding. */
   | 'permission-foreign-session'
   | 'unknown-additive'
+  /** Announces a second, different catalog while the turn is already running. */
+  | 'commands-re-announced'
   | 'dangling-tool-call'
   | 'refusal'
   | 'load-rejected'
@@ -148,6 +150,17 @@ export class FakeCursorAcpServer {
         return;
       }
       case 'session/new':
+        // The live vendor announces its slash-command catalog while this very
+        // request is in flight — before the client can know the session handle,
+        // and long before any turn exists. Reproduced here because that timing
+        // is the whole difficulty: an adapter that waits for a turn drops it.
+        this.#notify('session/update', {
+          sessionId: this.#sessionId,
+          update: {
+            sessionUpdate: 'available_commands_update',
+            availableCommands: [{ name: 'review', description: 'Read a diff (user)' }],
+          },
+        });
         this.#respond(id, this.#sessionState(true));
         return;
       case 'session/load':
@@ -252,6 +265,20 @@ export class FakeCursorAcpServer {
       this.#notify('session/update', {
         sessionId: 'some-other-session',
         update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'NOPE' } },
+      });
+    }
+
+    if (this.#scenario === 'commands-re-announced') {
+      // The live vendor announces once at `session/new` and never again, but a
+      // build that changed its mind mid-session would send this — and it is the
+      // only path where the catalog reaches a turn through the reducer rather
+      // than through the adapter's per-turn replay.
+      this.#notify('session/update', {
+        sessionId: this.#sessionId,
+        update: {
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [{ name: 'deploy', description: 'Ship the build (user)' }],
+        },
       });
     }
 

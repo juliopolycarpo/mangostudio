@@ -17,7 +17,10 @@ const MAX_DESCRIPTION_CHARS = 1_024;
 const SKILLS_INSTRUCTION =
   'The following skills extend your capabilities. When a task matches a skill ' +
   'description, call the `skill` tool with that skill name to load its full ' +
-  'instructions before doing the task.';
+  'instructions before doing the task. A message that begins with `/<name>` is ' +
+  'the user asking for that skill by name: load it the same way and treat the ' +
+  'rest of the message as its arguments. A leading `/` that is part of a ' +
+  'filesystem path, or that names no skill above, is ordinary text.';
 
 /**
  * Renders the prompt section for usable skills, or undefined when there is

@@ -47,6 +47,17 @@ export const EXTERNAL_TEXT_LIMITS = {
   vendorId: 128,
   /** Minimal account display label. Never the raw email. */
   accountLabel: 128,
+  /** A slash command's invocable name, without its leading `/`. */
+  commandName: 128,
+  /**
+   * One line of help for a slash command, as the vendor wrote it.
+   *
+   * Wider than `title` because this is prose the vendor chose for a picker, not
+   * a label it derived: Cursor ships command descriptions that run past 250
+   * code points, and cutting them at a title's length would truncate the half
+   * that says what the command does.
+   */
+  commandDescription: 512,
 } as const;
 
 export type ExternalTextLimit = keyof typeof EXTERNAL_TEXT_LIMITS;
