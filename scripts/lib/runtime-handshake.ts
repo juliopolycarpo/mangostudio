@@ -27,15 +27,16 @@ export interface RuntimeHandshakeProbeOptions {
 export interface RuntimeHandshakeProbe {
   /** The handshake line, or `null` when none arrived. */
   readonly hello: string | null;
-  /** Human-readable cause; `null` exactly when `hello` is set. */
+  /** Human-readable cause; `null` exactly when `hello` is not `null` — an
+   * empty `hello` is still a line the child wrote, not a failure. */
   readonly failure: string | null;
   /** Anything written to stdout without a terminating newline. */
   readonly partial: string;
   /** Everything the child wrote to stderr. */
   readonly stderr: string;
-  /** The child's real exit code, or `null` when it was killed instead. */
+  /** The child's own exit code, or `null` when our kill got there first. */
   readonly exitCode: number | null;
-  /** The signal that killed the child, when it died on one. */
+  /** The signal the child died on, when it died on one of its own. */
   readonly signal: string | null;
 }
 
@@ -83,19 +84,27 @@ export async function probeRuntimeHandshake(
     };
   }
 
-  // The child is still alive on `timeout` and probably dead on `eof`, so the
-  // two paths cannot share a cleanup: killing a hung child first makes its exit
-  // code ours, not its own.
+  // The child is usually still alive on `timeout` and probably dead on `eof`,
+  // so the two paths cannot share a cleanup: killing a hung child first makes
+  // its exit code ours, not its own.
   if (read.kind === 'timeout') {
+    // A child that already died while a grandchild kept the stdout pipe open
+    // still has a real status, and that status is the whole diagnostic — read
+    // it before our own kill replaces it with ours.
+    const diedOnItsOwn = await hasExited(child);
+    const exitCode = diedOnItsOwn ? child.exitCode : null;
+    const signal = diedOnItsOwn ? child.signalCode : null;
     child.kill();
     await finish(child, stderr, exitGraceMs);
     return {
       hello: null,
-      failure: `wrote no handshake frame within ${timeoutMs}ms and was killed`,
+      failure: diedOnItsOwn
+        ? `wrote no handshake frame within ${timeoutMs}ms and left stdout open; ${describeExit(exitCode, signal)}`
+        : `wrote no handshake frame within ${timeoutMs}ms and was killed`,
       partial: read.partial,
       stderr: stderr.text(),
-      exitCode: null,
-      signal: null,
+      exitCode,
+      signal,
     };
   }
 
@@ -130,6 +139,11 @@ function describeExit(exitCode: number | null, signal: string | null): string {
   if (signal) return `killed by ${signal}`;
   if (exitCode === null) return 'exit status unavailable';
   return `exited with code ${exitCode}`;
+}
+
+/** True when the child is already gone, without waiting on one that is not. */
+function hasExited(child: { exited: Promise<number> }): Promise<boolean> {
+  return settledWithin(child.exited, 0);
 }
 
 /** Waits out a killed child and its stderr, bounded so cleanup cannot hang. */

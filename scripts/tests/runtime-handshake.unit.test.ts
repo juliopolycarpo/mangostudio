@@ -147,6 +147,29 @@ describe('scripts/lib/runtime-handshake', () => {
       // Cleanup is bounded: the handshake budget is 10s and must not be spent.
       expect(Date.now() - startedAt).toBeLessThan(5_000);
     });
+
+    // The Windows shape this probe exists to name: the runtime died, but a
+    // grandchild inherited stdout, so the pipe never reaches EOF and the read
+    // times out. The dead child's own status is the diagnostic, so our kill
+    // must not overwrite it with nothing.
+    test('keeps the exit status of a child that died holding stdout open', async () => {
+      const probe = await probeRuntimeHandshake({
+        command: standIn(
+          `Bun.spawn({ cmd: [process.execPath, '-e', 'setTimeout(() => process.exit(0), 3000);'],` +
+            ` stdout: 'inherit', stderr: 'ignore', stdin: 'ignore' });` +
+            `await Bun.write(Bun.stderr, 'dying\\n');` +
+            `process.exit(7);`
+        ),
+        timeoutMs: HANGING_TIMEOUT_MS,
+        exitGraceMs: 200,
+      });
+
+      expect(probe.hello).toBeNull();
+      expect(probe.exitCode).toBe(7);
+      expect(probe.failure).toContain('left stdout open');
+      expect(probe.failure).toContain('exited with code 7');
+      expect(probe.stderr).toContain('dying');
+    });
   });
 });
 
