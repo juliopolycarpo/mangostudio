@@ -220,6 +220,39 @@ describe('runTestsWithWatchdog', () => {
   // shards computes a different partition — files run twice or not at all —
   // so the retry must re-read the exact baseline the first attempt started
   // from.
+  // A `createWriteStream` that never opened (full disk, missing directory)
+  // leaves nothing at `logFile` for `preserveAttemptLog`'s `rename()` to find.
+  // That must warn and fall through to the retry, not reject and skip the
+  // retry, the meta-file write, and the GitHub output entirely.
+  it('does not let a preserved-log rename failure cancel the retry', async () => {
+    const dir = await makeTemp();
+    const logFile = join(dir, 'run.log');
+    const marker = join(dir, 'first-attempt-ran');
+    const sink = new CaptureSink();
+    // Unlinks its own log file before hanging, so the retry's rename() has
+    // nothing to find — the same shape a failed createWriteStream leaves.
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) process.exit(0);
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      fs.unlinkSync(${JSON.stringify(logFile)});
+      setInterval(() => {}, 1000);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: ['bun', '-e', script],
+        timeoutSeconds: 3,
+        logFile,
+        preserveAttemptLogs: true,
+        stdout: sink,
+      })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+    expect(sink.text()).toContain('Watchdog could not preserve');
+    expect(await Bun.file(join(dir, 'shard-meta.json')).json()).toMatchObject({ exitCode: 0 });
+  });
+
   it('restores the timings baseline before the retry', async () => {
     const dir = await makeTemp();
     const timingsDir = join(dir, 'timings');

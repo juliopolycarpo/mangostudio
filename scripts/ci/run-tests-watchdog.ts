@@ -122,12 +122,24 @@ const hasFailureSummary = (logText: string): boolean =>
   FAILURE_SUMMARY_RE.test(logText.split('\n').slice(-FAILURE_SUMMARY_TAIL_LINES).join('\n'));
 
 /**
- * Rename attempt 1's log out of the retry's way. `logFile` is guaranteed to
- * exist here: `runAttempt`'s `finally` waits for the write stream's `finish`
- * before returning.
+ * Rename attempt 1's log out of the retry's way. `logFile` usually exists
+ * here — `runAttempt`'s `finally` waits for the write stream's `finish`
+ * before returning — but a `createWriteStream` that never opened (a full
+ * disk, a missing directory) leaves nothing to rename. Never throws: a
+ * preservation failure must not cancel the retry it is meant to be a safety
+ * net for.
  */
-const preserveAttemptLog = async (logFile: string): Promise<void> => {
-  await rename(logFile, `${logFile}.attempt-1`);
+const preserveAttemptLog = async (
+  logFile: string,
+  mirror: NodeJS.WritableStream
+): Promise<void> => {
+  try {
+    await rename(logFile, `${logFile}.attempt-1`);
+  } catch (caught) {
+    mirror.write(
+      `Watchdog could not preserve ${logFile} before retrying: ${(caught as Error).message}\n`
+    );
+  }
 };
 
 // Deliberately ref'd: these are `Promise.race` deadlines, and an unref'd timer
@@ -326,7 +338,7 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
   };
 
   const retry = async (): Promise<AttemptResult> => {
-    if (options.preserveAttemptLogs) await preserveAttemptLog(options.logFile);
+    if (options.preserveAttemptLogs) await preserveAttemptLog(options.logFile, mirror);
     await restoreTimings(timingsDir, backup);
     attempts = 2;
     return runAttempt(options);
