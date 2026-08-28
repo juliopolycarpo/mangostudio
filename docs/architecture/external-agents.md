@@ -154,6 +154,41 @@ a different version, and the runtime is the one that would actually run the turn
 | `nativeReview`         | The vendor's own review of uncommitted changes             |
 | `accountUsage`         | Plan-level usage and rate limits                           |
 
+## Slash commands
+
+Every vendor expands `/name` at the head of a prompt, in the exact non-interactive mode its adapter
+uses — verified against live binaries, not inferred from the fact that a terminal does it. Nothing
+in the prompt path escapes, wraps or rewrites a leading slash, and nothing needs to: the text
+arrives as the user typed it and the CLI resolves the name against directories it read itself.
+
+Two of them also *announce* what they will expand, and the adapter forwards that as
+`commands_available`:
+
+| Target | Where the catalog comes from                        | When                         | Descriptions |
+| ------ | --------------------------------------------------- | ---------------------------- | ------------ |
+| Cursor | ACP `available_commands_update`                     | Once, when the session opens | Yes          |
+| Claude | `system/init`'s `slash_commands`                    | At the head of every run     | No           |
+| Codex  | Nothing on the wire; custom prompts are client-side | —                            | —            |
+
+The catalog is **a hint, not an allowlist**. A command file written after a Cursor session opened
+still expands when typed and never appears in that session's list, so nothing refuses a name it has
+not seen — the list exists to help a user find a command, not to gate one. Claude Code is exempt
+from that staleness by construction: it is spawned again for every turn and re-reads its command
+directories each time, which is also why the same event arrives once per run rather than once per
+session.
+
+Only two kinds of announced name are withheld, both on the vendor's own say-so: the ones Claude
+Code marks `terminal_slash_commands`, which need the interactive terminal the adapter does not
+give it, and its `__`-prefixed internals. Whether `/compact` behaves the same under `--print` as it
+does in the REPL is the vendor's answer to give, so a hand-maintained list of "commands we think
+are interactive" is not kept.
+
+Codex has no catalog to send, and the composer falls back to the library's scan of
+`~/.codex/prompts` for it — which is the same fallback every target uses before its first turn.
+Giving MangoStudio's own runner real commands is [#961](https://github.com/juliopolycarpo/mangostudio/issues/961);
+until then `/name` reaches a native chat as a request for the skill of that name, advertised in the
+`<available-skills>` section rather than expanded by a loader.
+
 ## Permissions
 
 Two orthogonal product axes:

@@ -24,6 +24,9 @@ import { libraryResourcesQueryOptions } from '@/features/library/queries';
 import { mergeSlashCommands, type SlashCommandEntry } from '../lib/slash-commands';
 import { chatCapabilitiesQueryOptions } from './use-chat-capabilities';
 
+/** Shared so an unannounced catalog is referentially stable across renders. */
+const NO_COMMANDS: readonly ExternalAgentCommand[] = [];
+
 interface Options {
   readonly chatId: string | null;
   readonly runner: ChatRunnerConfiguration | undefined;
@@ -51,14 +54,19 @@ export function useSlashCommands({
 }: Options): readonly SlashCommandEntry[] {
   const targetId = runner?.kind === 'external' ? runner.targetId : null;
 
-  // A cache read, not a fetch: nothing serves this key, and the stream's
-  // `external_commands` chunk is the only writer. Subscribing through the query
-  // client rather than reading it once is what re-renders the palette when a
-  // turn announces a catalog while the menu is open.
+  // A subscription, not a fetch: nothing serves this key, and the stream's
+  // `external_commands` chunk is its only writer. Subscribing through the query
+  // client rather than reading the cache once is what re-renders the palette
+  // when a turn announces a catalog while the menu is open.
+  //
+  // `enabled: false` is load-bearing. A placeholder fetch would resolve *after*
+  // a catalog published in the same tick and overwrite it with the empty list
+  // — which is exactly what a chat opened mid-turn does.
   const sessionQuery = useQuery({
     queryKey: externalCommandKeys.byChat(chatId ?? ''),
-    queryFn: (): readonly ExternalAgentCommand[] => [],
-    enabled: Boolean(chatId) && targetId !== null,
+    queryFn: (): readonly ExternalAgentCommand[] => NO_COMMANDS,
+    enabled: false,
+    initialData: NO_COMMANDS,
     staleTime: Number.POSITIVE_INFINITY,
     gcTime: Number.POSITIVE_INFINITY,
   });
