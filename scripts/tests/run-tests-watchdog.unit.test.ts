@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,6 +29,20 @@ class SlowSink extends Writable {
   }
 }
 
+/** A plain capturing sink, for tests that only need to read back what was written. */
+class CaptureSink extends Writable {
+  private readonly chunks: Buffer[] = [];
+
+  override _write(chunk: Buffer, _encoding: BufferEncoding, done: () => void): void {
+    this.chunks.push(Buffer.from(chunk));
+    done();
+  }
+
+  text(): string {
+    return Buffer.concat(this.chunks).toString();
+  }
+}
+
 const temps: string[] = [];
 
 const makeTemp = async (): Promise<string> => {
@@ -39,6 +53,22 @@ const makeTemp = async (): Promise<string> => {
 
 afterEach(async () => {
   await Promise.all(temps.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+// `runTestsWithWatchdog` appends to `$GITHUB_OUTPUT` when `retryOnCrash` is
+// on, and this suite runs inside real CI steps where that variable is
+// genuinely set — without this, every crash-mode test here would append to
+// the *test step's own* output file instead of a throwaway one.
+let originalGithubOutput: string | undefined;
+
+beforeEach(() => {
+  originalGithubOutput = process.env.GITHUB_OUTPUT;
+  delete process.env.GITHUB_OUTPUT;
+});
+
+afterEach(() => {
+  if (originalGithubOutput === undefined) delete process.env.GITHUB_OUTPUT;
+  else process.env.GITHUB_OUTPUT = originalGithubOutput;
 });
 
 const optionsIn = (dir: string, overrides: Partial<WatchdogOptions>): WatchdogOptions => ({
@@ -216,5 +246,175 @@ describe('runTestsWithWatchdog', () => {
 
     expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
     expect(await Bun.file(timingsFile).text()).toBe(baseline);
+  });
+});
+
+// A crash marker file lets a script behave differently on its first and
+// second invocation without any external state beyond the child's own
+// filesystem — the same shape the hang-retry tests above use.
+const crashOnceThenScript = (marker: string, onRetry: string): string => `
+  const fs = require("node:fs");
+  if (fs.existsSync(${JSON.stringify(marker)})) {
+    ${onRetry}
+  }
+  fs.writeFileSync(${JSON.stringify(marker)}, "");
+  console.log("panic(main thread): abort()");
+  console.log("oh no: Bun has crashed");
+  process.exit(134);
+`;
+
+describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
+  it('retries a crash once and reports the clean retry green, with attempt 1 preserved', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const sink = new CaptureSink();
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: ['bun', '-e', crashOnceThenScript(marker, 'process.exit(0);')],
+        retryOnCrash: true,
+        preserveAttemptLogs: true,
+        stdout: sink,
+      })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+    expect(sink.text()).toContain('::warning::');
+    expect(sink.text()).toContain('crashed');
+    expect(await Bun.file(`${join(dir, 'run.log')}.attempt-1`).text()).toContain(
+      'panic(main thread): abort()'
+    );
+  });
+
+  // Regression: Bun's own summary always prints a " 0 fail" line on a clean
+  // run, and a failure scan on bare `\d+` would match that zero — turning a
+  // findings-free crash-then-retry into a phantom non-zero exit.
+  it('does not mistake a clean run\'s "0 fail" summary line for a finding', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: [
+          'bun',
+          '-e',
+          crashOnceThenScript(marker, 'console.log("0 fail"); process.exit(0);'),
+        ],
+        retryOnCrash: true,
+      })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+  });
+
+  // Findings outrank the clean retry: the crash only proves the isolate
+  // runner recovered, not that the failures attempt 1 reported didn't happen.
+  it('reports a non-zero exit when an earlier attempt logged failures before crashing', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        console.log("0 fail");
+        process.exit(0);
+      }
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      console.log("2 fail");
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result.attempts).toBe(2);
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  it('reports a non-zero exit when the retry crashes again', async () => {
+    const dir = await makeTemp();
+    const script = `
+      console.log("panic(main thread): abort()");
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result).toMatchObject({ exitCode: 134, attempts: 2 });
+  });
+
+  // The no-retry-on-real-failure contract must survive crash mode: a plain
+  // red run is not a crash and must not get a second roll of the dice.
+  it('does not retry a plain failure even with retryOnCrash on', async () => {
+    const dir = await makeTemp();
+    const script = `
+      console.log("1 fail");
+      process.exit(1);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result).toMatchObject({ exitCode: 1, attempts: 1 });
+  });
+
+  // Merge-gate callers pass no new flags; a crash must surface exactly as it
+  // did before this feature existed.
+  it('does not retry a crash when retryOnCrash is unset', async () => {
+    const dir = await makeTemp();
+    const script = `
+      console.log("panic(main thread): abort()");
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(optionsIn(dir, { command: ['bun', '-e', script] }));
+
+    expect(result).toMatchObject({ exitCode: 134, attempts: 1 });
+  });
+
+  // The signal path is independent of the log-marker scan: a process that
+  // dies by SIGABRT with no crash text in its output must still be caught.
+  // `bash`, not `bun -e`, self-signals here — Bun's own runtime installs a
+  // SIGABRT handler that prints its "oh no: Bun has crashed" banner, which
+  // would leave the marker in the log anyway and defeat the point of this
+  // case.
+  it('classifies a bare SIGABRT exit as a crash with no log marker present', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const script = `
+      if [ -f ${JSON.stringify(marker)} ]; then exit 0; fi
+      touch ${JSON.stringify(marker)}
+      kill -ABRT $$
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bash', '-c', script], retryOnCrash: true })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+  });
+
+  it('writes crashed=true to $GITHUB_OUTPUT when a crash was retried', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const githubOutput = join(dir, 'github-output');
+    await writeFile(githubOutput, '');
+    process.env.GITHUB_OUTPUT = githubOutput;
+
+    await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: ['bun', '-e', crashOnceThenScript(marker, 'process.exit(0);')],
+        retryOnCrash: true,
+      })
+    );
+
+    expect(await Bun.file(githubOutput).text()).toContain('crashed=true\n');
+  });
+
+  it('writes crashed=false to $GITHUB_OUTPUT for a clean run in crash mode', async () => {
+    const dir = await makeTemp();
+    const githubOutput = join(dir, 'github-output');
+    await writeFile(githubOutput, '');
+    process.env.GITHUB_OUTPUT = githubOutput;
+
+    await runTestsWithWatchdog(optionsIn(dir, { retryOnCrash: true }));
+
+    expect(await Bun.file(githubOutput).text()).toContain('crashed=false\n');
   });
 });

@@ -28,12 +28,20 @@
 // A run that *fails* is not retried — only one that had to be killed. Real
 // failures should surface, not get a second roll of the dice.
 //
+// `retryOnCrash` (opt-in, unset for every merge-gate caller) extends the same
+// bound to a second failure class: the isolate runner aborting outright
+// (`panic(main thread): abort()`, the #889 class of oven-sh/bun#39709) rather
+// than hanging. A crash truncates whatever file list was left, so it gets the
+// same one same-seed retry as a hang — and, since the point is not losing a
+// night's findings, the attempt log a crash would otherwise clobber is kept
+// alongside the retry's instead of overwritten.
+//
 // Usage: bun ./scripts/ci/run-tests-watchdog.ts --label=3 -- bun run test --coverage --shard=3/8
 
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createWriteStream } from 'node:fs';
-import { cp, mkdtemp, rm, stat } from 'node:fs/promises';
+import { appendFile, cp, mkdtemp, rename, rm, stat } from 'node:fs/promises';
 import { constants, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -62,6 +70,20 @@ export interface WatchdogOptions {
   /** Timings baseline to snapshot and restore between attempts. */
   readonly timingsDir?: string;
   readonly cwd?: string;
+  /**
+   * Retry once, same seed, when a non-hung attempt looks like an isolate-runner
+   * abort rather than a real test failure (SIGABRT/134, or a crash marker in
+   * the log). Off by default — every existing caller keeps the old
+   * fail-once-and-surface contract.
+   */
+  readonly retryOnCrash?: boolean;
+  /**
+   * Before a retry, rename the first attempt's log to `<logFile>.attempt-1`
+   * instead of letting the retry's `createWriteStream('w')` overwrite it. The
+   * nightly's whole reason to run under this watchdog is that attempt 1 may
+   * hold the night's only ordering finding when a crash cuts it off.
+   */
+  readonly preserveAttemptLogs?: boolean;
 }
 
 export interface WatchdogResult {
@@ -72,11 +94,41 @@ export interface WatchdogResult {
 }
 
 const HUNG_EXIT_CODE = 124;
+// SIGABRT via signalExitCode (128 + 6) — also the code Bun's own
+// `panic(main thread): abort()` exits with directly, so a literal 134 is
+// checked the same way as a signal-derived one.
+const CRASH_EXIT_CODE = 134;
+const CRASH_LOG_MARKERS = [/oh no: Bun has crashed/, /panic\(main thread\)/];
+// A killed-mid-run attempt never reaches Bun's summary line at all — that
+// case is covered by the preserved attempt-1 log, not this scan. This only
+// needs to catch a crash that struck *after* the summary printed, and a
+// full panic dump (version, features, stack) can trail it by well over a
+// screenful, so scan generously; the anchored `fail` shape makes an earlier
+// false match implausible. `[1-9]\d*`, not `\d+`: Bun always prints a
+// ` 0 fail` line on a clean run, and `\d+` matches that zero — verified live,
+// it turned a green shared-lane run into a reported exit 1.
+const FAILURE_SUMMARY_TAIL_LINES = 200;
+const FAILURE_SUMMARY_RE = /^\s*[1-9]\d* fail/m;
 
 interface AttemptResult {
   readonly exitCode: number;
   readonly hung: boolean;
 }
+
+const isCrash = (attempt: AttemptResult, logText: string): boolean =>
+  attempt.exitCode === CRASH_EXIT_CODE || CRASH_LOG_MARKERS.some((marker) => marker.test(logText));
+
+const hasFailureSummary = (logText: string): boolean =>
+  FAILURE_SUMMARY_RE.test(logText.split('\n').slice(-FAILURE_SUMMARY_TAIL_LINES).join('\n'));
+
+/**
+ * Rename attempt 1's log out of the retry's way. `logFile` is guaranteed to
+ * exist here: `runAttempt`'s `finally` waits for the write stream's `finish`
+ * before returning.
+ */
+const preserveAttemptLog = async (logFile: string): Promise<void> => {
+  await rename(logFile, `${logFile}.attempt-1`);
+};
 
 // Deliberately ref'd: these are `Promise.race` deadlines, and an unref'd timer
 // that is the only thing left pending would let the process exit with a
@@ -244,44 +296,93 @@ const restoreTimings = async (timingsDir: string, backup: string | null): Promis
 
 /**
  * Run a test command with a hang watchdog and one retry, and record the
- * shard-meta the merge job reads. The exit code is the final attempt's; a
- * hang reports 124.
+ * shard-meta the merge job reads. The exit code is the final attempt's — a
+ * hang reports 124, and with `retryOnCrash` on, a clean retry after findings
+ * elsewhere still reports non-zero (see below).
  * // Usage: const { exitCode } = await runTestsWithWatchdog({ label: '3', command: ['bun', 'run', 'test'], timeoutSeconds: 240, logFile: 'coverage-run.log', metaFile: 'shard-meta.json' });
  */
 export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<WatchdogResult> => {
   const startedAt = Date.now();
   const timingsDir = options.timingsDir ?? join(options.cwd ?? ROOT_DIR, TIMINGS_DIR);
   const backup = await snapshotTimings(timingsDir);
+  const crashRetryEnabled = options.retryOnCrash === true;
+  const mirror = options.stdout ?? process.stdout;
 
   let attempts = 1;
   let attempt = await runAttempt(options);
+  let crashedAny = false;
+  let failuresSeen = false;
+
+  // Reads the attempt's log while it still sits at `options.logFile` — before
+  // any retry renames it out of the way — so both the crash check and the
+  // failure-summary scan see the bytes that attempt actually produced.
+  const observe = async (result: AttemptResult): Promise<boolean> => {
+    if (!crashRetryEnabled) return false;
+    const text = await Bun.file(options.logFile)
+      .text()
+      .catch(() => '');
+    if (hasFailureSummary(text)) failuresSeen = true;
+    return !result.hung && isCrash(result, text);
+  };
+
+  const retry = async (): Promise<AttemptResult> => {
+    if (options.preserveAttemptLogs) await preserveAttemptLog(options.logFile);
+    await restoreTimings(timingsDir, backup);
+    attempts = 2;
+    return runAttempt(options);
+  };
+
+  let crashed = await observe(attempt);
+  crashedAny = crashedAny || crashed;
+
   if (attempt.hung) {
     // Leading newline, not cosmetic: GitHub parses a workflow command only
     // when `::` starts a line, and a killed child's last chunk routinely ends
     // mid-line — without it the annotation is swallowed into that line.
-    process.stdout.write(
+    mirror.write(
       `\n::warning::Test invocation for '${options.label}' produced no exit within ` +
         `${options.timeoutSeconds}s; killed its process group and retrying once ` +
         '(oven-sh/bun#39709 — Bun isolate runner hang).\n'
     );
-    await restoreTimings(timingsDir, backup);
-    attempts = 2;
-    attempt = await runAttempt(options);
+    attempt = await retry();
+    crashed = await observe(attempt);
+    crashedAny = crashedAny || crashed;
+  } else if (crashRetryEnabled && crashed) {
+    mirror.write(
+      `\n::warning::Test invocation for '${options.label}' crashed (Bun isolate-runner ` +
+        'abort, oven-sh/bun#39709 class — tracked in #889); retrying once with the same seed.\n'
+    );
+    attempt = await retry();
+    crashed = await observe(attempt);
+    crashedAny = crashedAny || crashed;
   }
   if (backup) await rm(backup, { recursive: true, force: true });
 
+  // A crash that struck after real findings must not read as green just
+  // because the retry came back clean — the retry proves the isolate runner
+  // recovered, not that the earlier failures didn't happen. `1` rather than
+  // the crashed attempt's own code: a plain `bun test` failure is never
+  // retried, so the only way in here is a hang (124) or a crash (134/marker),
+  // neither of which is a meaningful "test failure" exit code to persist.
+  let exitCode = attempt.exitCode;
+  if (crashRetryEnabled && failuresSeen && exitCode === 0) exitCode = 1;
+
   const durationSeconds = Math.round((Date.now() - startedAt) / 1000);
   const shard = /^\d+$/.test(options.label) ? Number(options.label) : options.label;
-  await Bun.write(
-    options.metaFile,
-    `${JSON.stringify({ shard, exitCode: attempt.exitCode, durationSeconds })}\n`
-  );
-  return { exitCode: attempt.exitCode, attempts, durationSeconds };
+  await Bun.write(options.metaFile, `${JSON.stringify({ shard, exitCode, durationSeconds })}\n`);
+
+  if (crashRetryEnabled) {
+    const githubOutput = process.env.GITHUB_OUTPUT;
+    if (githubOutput) await appendFile(githubOutput, `crashed=${crashedAny}\n`);
+  }
+
+  return { exitCode, attempts, durationSeconds };
 };
 
 const USAGE =
   'Usage: bun ./scripts/ci/run-tests-watchdog.ts --label=<shard|lane> ' +
-  '[--timeout-seconds=240] [--log-file=coverage-run.log] [--meta-file=shard-meta.json] -- <command...>\n';
+  '[--timeout-seconds=240] [--log-file=coverage-run.log] [--meta-file=shard-meta.json] ' +
+  '[--retry-on-crash] -- <command...>\n';
 
 if (import.meta.main) {
   const argv = process.argv.slice(2);
@@ -293,6 +394,7 @@ if (import.meta.main) {
   let timeoutSeconds = 240;
   let logFile = 'coverage-run.log';
   let metaFile = 'shard-meta.json';
+  let retryOnCrash = false;
   let valid = true;
   for (const flag of flags) {
     if (flag.startsWith('--label=')) label = flag.slice('--label='.length);
@@ -300,6 +402,7 @@ if (import.meta.main) {
       timeoutSeconds = Number(flag.slice('--timeout-seconds='.length));
     } else if (flag.startsWith('--log-file=')) logFile = flag.slice('--log-file='.length);
     else if (flag.startsWith('--meta-file=')) metaFile = flag.slice('--meta-file='.length);
+    else if (flag === '--retry-on-crash') retryOnCrash = true;
     else valid = false;
   }
 
@@ -319,6 +422,10 @@ if (import.meta.main) {
     logFile,
     metaFile,
     cwd: process.cwd(),
+    retryOnCrash,
+    // The CLI has one on/off switch; the two options are only independent at
+    // the function-level API tests exercise directly.
+    preserveAttemptLogs: retryOnCrash,
   });
   process.exit(result.exitCode);
 }
