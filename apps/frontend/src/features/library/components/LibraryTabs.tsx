@@ -21,6 +21,7 @@ export function LibraryTabs() {
         { to: '/environments/library/commands', label: t.library.tabs.commands, search },
         { to: '/environments/library/instructions', label: t.library.tabs.instructions, search },
         { to: '/environments/library/settings', label: t.library.tabs.settings, search },
+        { to: '/environments/library/locations', label: t.library.tabs.locations, search },
       ]}
     />
   );

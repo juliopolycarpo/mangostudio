@@ -27,6 +27,18 @@ test('library surface renders its coverage matrix', async ({ page }) => {
   await page.getByRole('link', { name: 'Subagents' }).click();
   await expect(page).toHaveURL(/\/environments\/library\/subagents$/);
 
+  await page.getByRole('link', { name: 'Commands' }).click();
+  await expect(page).toHaveURL(/\/environments\/library\/commands$/);
+  await expect(page.getByTestId('coverage-matrix')).toBeVisible({ timeout: 20_000 });
+
+  // Every location the scanner could read, and the switch that decides whether
+  // it does. A matrix that came back empty is only trustworthy once this page
+  // says the directory behind it was actually looked at.
+  await page.getByRole('link', { name: 'Locations' }).click();
+  await expect(page).toHaveURL(/\/environments\/library\/locations$/);
+  await expect(page.getByTestId('location-settings')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('switch').first()).toBeVisible();
+
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page).toHaveURL(/\/environments\/library\/settings$/);
   await expect(

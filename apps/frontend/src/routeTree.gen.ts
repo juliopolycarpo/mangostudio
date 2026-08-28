@@ -51,6 +51,7 @@ import { Route as AuthenticatedEnvironmentsLibraryResourceKeyRouteImport } from 
 import { Route as AuthenticatedEnvironmentsLibraryBackupsRouteImport } from './routes/_authenticated/environments/library/backups'
 import { Route as AuthenticatedEnvironmentsLibraryCommandsRouteImport } from './routes/_authenticated/environments/library/commands'
 import { Route as AuthenticatedEnvironmentsLibraryInstructionsRouteImport } from './routes/_authenticated/environments/library/instructions'
+import { Route as AuthenticatedEnvironmentsLibraryLocationsRouteImport } from './routes/_authenticated/environments/library/locations'
 import { Route as AuthenticatedEnvironmentsLibrarySettingsRouteImport } from './routes/_authenticated/environments/library/settings'
 import { Route as AuthenticatedEnvironmentsLibrarySkillsRouteImport } from './routes/_authenticated/environments/library/skills'
 import { Route as AuthenticatedEnvironmentsLibrarySubagentsRouteImport } from './routes/_authenticated/environments/library/subagents'
@@ -300,6 +301,12 @@ const AuthenticatedEnvironmentsLibraryInstructionsRoute =
     path: '/instructions',
     getParentRoute: () => AuthenticatedEnvironmentsLibraryRoute,
   } as any)
+const AuthenticatedEnvironmentsLibraryLocationsRoute =
+  AuthenticatedEnvironmentsLibraryLocationsRouteImport.update({
+    id: '/locations',
+    path: '/locations',
+    getParentRoute: () => AuthenticatedEnvironmentsLibraryRoute,
+  } as any)
 const AuthenticatedEnvironmentsLibrarySettingsRoute =
   AuthenticatedEnvironmentsLibrarySettingsRouteImport.update({
     id: '/settings',
@@ -372,6 +379,7 @@ export interface FileRoutesByFullPath {
   '/environments/library/backups': typeof AuthenticatedEnvironmentsLibraryBackupsRoute
   '/environments/library/commands': typeof AuthenticatedEnvironmentsLibraryCommandsRoute
   '/environments/library/instructions': typeof AuthenticatedEnvironmentsLibraryInstructionsRoute
+  '/environments/library/locations': typeof AuthenticatedEnvironmentsLibraryLocationsRoute
   '/environments/library/settings': typeof AuthenticatedEnvironmentsLibrarySettingsRoute
   '/environments/library/skills': typeof AuthenticatedEnvironmentsLibrarySkillsRoute
   '/environments/library/subagents': typeof AuthenticatedEnvironmentsLibrarySubagentsRoute
@@ -416,6 +424,7 @@ export interface FileRoutesByTo {
   '/environments/library/backups': typeof AuthenticatedEnvironmentsLibraryBackupsRoute
   '/environments/library/commands': typeof AuthenticatedEnvironmentsLibraryCommandsRoute
   '/environments/library/instructions': typeof AuthenticatedEnvironmentsLibraryInstructionsRoute
+  '/environments/library/locations': typeof AuthenticatedEnvironmentsLibraryLocationsRoute
   '/environments/library/settings': typeof AuthenticatedEnvironmentsLibrarySettingsRoute
   '/environments/library/skills': typeof AuthenticatedEnvironmentsLibrarySkillsRoute
   '/environments/library/subagents': typeof AuthenticatedEnvironmentsLibrarySubagentsRoute
@@ -466,6 +475,7 @@ export interface FileRoutesById {
   '/_authenticated/environments/library/backups': typeof AuthenticatedEnvironmentsLibraryBackupsRoute
   '/_authenticated/environments/library/commands': typeof AuthenticatedEnvironmentsLibraryCommandsRoute
   '/_authenticated/environments/library/instructions': typeof AuthenticatedEnvironmentsLibraryInstructionsRoute
+  '/_authenticated/environments/library/locations': typeof AuthenticatedEnvironmentsLibraryLocationsRoute
   '/_authenticated/environments/library/settings': typeof AuthenticatedEnvironmentsLibrarySettingsRoute
   '/_authenticated/environments/library/skills': typeof AuthenticatedEnvironmentsLibrarySkillsRoute
   '/_authenticated/environments/library/subagents': typeof AuthenticatedEnvironmentsLibrarySubagentsRoute
@@ -516,6 +526,7 @@ export interface FileRouteTypes {
     | '/environments/library/backups'
     | '/environments/library/commands'
     | '/environments/library/instructions'
+    | '/environments/library/locations'
     | '/environments/library/settings'
     | '/environments/library/skills'
     | '/environments/library/subagents'
@@ -560,6 +571,7 @@ export interface FileRouteTypes {
     | '/environments/library/backups'
     | '/environments/library/commands'
     | '/environments/library/instructions'
+    | '/environments/library/locations'
     | '/environments/library/settings'
     | '/environments/library/skills'
     | '/environments/library/subagents'
@@ -609,6 +621,7 @@ export interface FileRouteTypes {
     | '/_authenticated/environments/library/backups'
     | '/_authenticated/environments/library/commands'
     | '/_authenticated/environments/library/instructions'
+    | '/_authenticated/environments/library/locations'
     | '/_authenticated/environments/library/settings'
     | '/_authenticated/environments/library/skills'
     | '/_authenticated/environments/library/subagents'
@@ -919,6 +932,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedEnvironmentsLibraryInstructionsRouteImport
       parentRoute: typeof AuthenticatedEnvironmentsLibraryRoute
     }
+    '/_authenticated/environments/library/locations': {
+      id: '/_authenticated/environments/library/locations'
+      path: '/locations'
+      fullPath: '/environments/library/locations'
+      preLoaderRoute: typeof AuthenticatedEnvironmentsLibraryLocationsRouteImport
+      parentRoute: typeof AuthenticatedEnvironmentsLibraryRoute
+    }
     '/_authenticated/environments/library/settings': {
       id: '/_authenticated/environments/library/settings'
       path: '/settings'
@@ -962,6 +982,7 @@ interface AuthenticatedEnvironmentsLibraryRouteChildren {
   AuthenticatedEnvironmentsLibraryBackupsRoute: typeof AuthenticatedEnvironmentsLibraryBackupsRoute
   AuthenticatedEnvironmentsLibraryCommandsRoute: typeof AuthenticatedEnvironmentsLibraryCommandsRoute
   AuthenticatedEnvironmentsLibraryInstructionsRoute: typeof AuthenticatedEnvironmentsLibraryInstructionsRoute
+  AuthenticatedEnvironmentsLibraryLocationsRoute: typeof AuthenticatedEnvironmentsLibraryLocationsRoute
   AuthenticatedEnvironmentsLibrarySettingsRoute: typeof AuthenticatedEnvironmentsLibrarySettingsRoute
   AuthenticatedEnvironmentsLibrarySkillsRoute: typeof AuthenticatedEnvironmentsLibrarySkillsRoute
   AuthenticatedEnvironmentsLibrarySubagentsRoute: typeof AuthenticatedEnvironmentsLibrarySubagentsRoute
@@ -978,6 +999,8 @@ const AuthenticatedEnvironmentsLibraryRouteChildren: AuthenticatedEnvironmentsLi
       AuthenticatedEnvironmentsLibraryCommandsRoute,
     AuthenticatedEnvironmentsLibraryInstructionsRoute:
       AuthenticatedEnvironmentsLibraryInstructionsRoute,
+    AuthenticatedEnvironmentsLibraryLocationsRoute:
+      AuthenticatedEnvironmentsLibraryLocationsRoute,
     AuthenticatedEnvironmentsLibrarySettingsRoute:
       AuthenticatedEnvironmentsLibrarySettingsRoute,
     AuthenticatedEnvironmentsLibrarySkillsRoute:
