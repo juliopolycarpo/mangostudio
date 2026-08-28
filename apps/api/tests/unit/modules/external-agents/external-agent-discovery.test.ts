@@ -877,6 +877,93 @@ describe('external agent discovery — the authoritative pass', () => {
       expect(signal.published).toEqual(['user-1']);
     });
   });
+
+  /**
+   * A cheap-pass descriptor and an adapter's refusal are byte-identical — every
+   * capability false — so provenance cannot be read back off the descriptor.
+   * The consent path needs to tell them apart, which is what this reports.
+   */
+  describe('provenance', () => {
+    it('marks a descriptor the adapter never spoke for', async () => {
+      const service = createExternalAgentDiscoveryService({ probingService: PROBING });
+
+      const [codex] = await service.describeExternalAgents(SCOPE);
+
+      expect(codex?.adapterAnswered).toBe(false);
+    });
+
+    it('marks a descriptor an adapter answered for', async () => {
+      const signal = refreshSignal();
+      const service = createExternalAgentDiscoveryService({
+        probingService: PROBING,
+        publishRefresh: signal.publishRefresh,
+        authoritative: authoritative([{ targetId: 'codex', capabilities: ALL_CAPABLE }]),
+      });
+
+      await service.describeExternalAgents(SCOPE);
+      await signal.untilPublished(1);
+      const [codex] = await service.describeExternalAgents(SCOPE);
+
+      expect(codex?.adapterAnswered).toBe(true);
+    });
+
+    it('waits for the adapter on a cold miss when the caller asks it to', async () => {
+      const service = createExternalAgentDiscoveryService({
+        probingService: PROBING,
+        authoritative: authoritative([{ targetId: 'codex', capabilities: ALL_CAPABLE }], {
+          delayMs: 10,
+        }),
+      });
+
+      const [codex] = await service.describeExternalAgents(SCOPE, { waitForAdapter: true });
+
+      expect(codex?.adapterAnswered).toBe(true);
+      expect(codex?.descriptor.capabilities).toEqual(ALL_CAPABLE);
+    });
+
+    /**
+     * Waiting buys an answer, not a guarantee of one. A refused, timed-out or
+     * capped probe still reports "nobody answered" rather than "no
+     * capabilities", so the caller refuses instead of storing a placeholder.
+     */
+    it('reports no answer rather than an empty one when the probe fails', async () => {
+      const service = createExternalAgentDiscoveryService({
+        probingService: PROBING,
+        authoritative: {
+          describe: () => Promise.reject(new Error('runtime unreachable')),
+        },
+      });
+
+      const [codex] = await service.describeExternalAgents(SCOPE, { waitForAdapter: true });
+
+      expect(codex?.adapterAnswered).toBe(false);
+      expect(codex?.descriptor.capabilities).toEqual(NO_EXTERNAL_AGENT_CAPABILITIES);
+    });
+
+    it('spends no wait when an expired answer is already remembered', async () => {
+      let clock = 1_000;
+      const signal = refreshSignal();
+      const service = createExternalAgentDiscoveryService({
+        probingService: PROBING,
+        cacheTtlMs: 100,
+        now: () => clock,
+        publishRefresh: signal.publishRefresh,
+        authoritative: authoritative([
+          { targetId: 'codex', version: '0.147.0', capabilities: ALL_CAPABLE },
+        ]),
+      });
+
+      await service.describeExternalAgents(SCOPE);
+      await signal.untilPublished(1);
+      clock += 101;
+
+      const [codex] = await service.describeExternalAgents(SCOPE, { waitForAdapter: true });
+
+      expect(codex?.adapterAnswered).toBe(true);
+      expect(codex?.descriptor.version).toBe('0.147.0');
+      await drainBackgroundWork();
+    });
+  });
 });
 
 describe('external agent discovery — runtime authority', () => {

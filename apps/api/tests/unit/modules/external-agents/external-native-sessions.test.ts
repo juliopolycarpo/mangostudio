@@ -53,11 +53,10 @@ function descriptor(overrides: Partial<ExternalAgentDescriptor> = {}): ExternalA
   };
 }
 
-function discoveryOf(...agents: readonly ExternalAgentDescriptor[]): ExternalAgentDiscoveryService {
-  return {
-    listExternalAgents: () => Promise.resolve(agents),
-    resetCache: () => undefined,
-  };
+function discoveryOf(
+  ...agents: readonly ExternalAgentDescriptor[]
+): Pick<ExternalAgentDiscoveryService, 'listExternalAgents'> {
+  return { listExternalAgents: () => Promise.resolve(agents) };
 }
 
 function serviceFor(

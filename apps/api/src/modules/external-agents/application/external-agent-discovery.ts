@@ -111,8 +111,49 @@ export interface AuthoritativeAgentDiscovery {
   ): Promise<readonly AuthoritativeAgentStatus[]>;
 }
 
+/**
+ * One descriptor, plus whether an adapter actually answered for it.
+ *
+ * The cheap pass fills `capabilities` with {@link NO_EXTERNAL_AGENT_CAPABILITIES}
+ * and `supportedConfigurations` with nothing, because a binary on disk says
+ * nothing about what it is willing to do. That is a **placeholder, not a
+ * finding**, and the two are indistinguishable in the descriptor itself — every
+ * flag reads `false` either way.
+ *
+ * Anything that derives a decision from what the vendor can do has to tell them
+ * apart, which is why this flag is carried explicitly rather than inferred. The
+ * caller that needs it is the disclosure gate: fingerprinting a placeholder
+ * records consent to a capability set nobody was shown, and comparing against
+ * one re-prompts a user whose acknowledgement never changed.
+ */
+export interface DiscoveredExternalAgent {
+  readonly descriptor: ExternalAgentDescriptor;
+  readonly adapterAnswered: boolean;
+}
+
+export interface DescribeExternalAgentsOptions {
+  /**
+   * Wait for the authoritative pass on a cold miss instead of serving the scan.
+   *
+   * Off by default, and the default is the doctrine this module opens with:
+   * nothing on the path to rendering a selector waits for a vendor subprocess.
+   * A consent record is not a selector render — it is written once, it outlives
+   * the session, and a placeholder written into one is wrong for as long as it
+   * survives — so that path pays the wait rather than storing a guess.
+   *
+   * An expired cache entry is still an adapter's answer and satisfies this
+   * without waiting; only a genuine cold miss blocks.
+   */
+  readonly waitForAdapter?: boolean;
+}
+
 export interface ExternalAgentDiscoveryService {
   listExternalAgents(scope: ProbeScope): Promise<readonly ExternalAgentDescriptor[]>;
+  /** The same answer, with each descriptor's provenance attached. */
+  describeExternalAgents(
+    scope: ProbeScope,
+    options?: DescribeExternalAgentsOptions
+  ): Promise<readonly DiscoveredExternalAgent[]>;
   /** Drops cached authoritative answers, optionally narrowed to environment and owner. */
   resetCache(environmentId?: string, userId?: string): void;
 }
@@ -483,6 +524,25 @@ function mergeAll(
 }
 
 /**
+ * Which of these descriptors an adapter actually spoke for.
+ *
+ * Keyed off the answer map rather than off the descriptor, because a refusal is
+ * an answer: `runtime-denied` and `isolation-unproven` arrive with every
+ * capability false, and that emptiness is a finding rather than the scan's
+ * placeholder. Both are still refused by the consent path — on the reason, not
+ * on the provenance — but only one of them describes the vendor.
+ */
+function attribute(
+  descriptors: readonly ExternalAgentDescriptor[],
+  answers: AuthoritativeAnswers
+): readonly DiscoveredExternalAgent[] {
+  return descriptors.map((descriptor) => ({
+    descriptor,
+    adapterAnswered: answers.has(descriptor.targetId),
+  }));
+}
+
+/**
  * Whether a refresh changed anything the user can see.
  *
  * `discovery` is excluded deliberately. It reports `source` — `live` for the
@@ -729,25 +789,47 @@ export function createExternalAgentDiscoveryService(
       .finally(() => watched.delete(watchKey));
   }
 
+  async function describeExternalAgents(
+    scope: ProbeScope,
+    options: DescribeExternalAgentsOptions = {}
+  ): Promise<readonly DiscoveredExternalAgent[]> {
+    const base = await baseDescriptors(probing, scope);
+
+    const escalate = base
+      .filter((descriptor) => descriptor.installed)
+      .map((descriptor) => descriptor.targetId);
+    if (escalate.length === 0 || !authoritative)
+      return attribute(mergeAll(base, NO_ANSWERS), NO_ANSWERS);
+
+    const remembered = rememberedAnswers(scopeKey(scope));
+    if (remembered?.fresh) {
+      return attribute(mergeAll(base, remembered.byTarget), remembered.byTarget);
+    }
+
+    // The one caller that pays the probe rather than degrading to the scan. A
+    // failed or capped probe still lands here as an empty map, which the caller
+    // reads as "no adapter answered" and refuses — never as "no capabilities".
+    if (options.waitForAdapter && !remembered) {
+      const byTarget = await authoritativeFor(scope, escalate);
+      return attribute(mergeAll(base, byTarget), byTarget);
+    }
+
+    // Stale while revalidate. A cold miss can only offer the cheap pass, but
+    // an expired entry still describes this machine from the adapter that
+    // would run the turn, so it is served while the probe replacing it runs
+    // behind the response.
+    const answers = remembered?.byTarget ?? NO_ANSWERS;
+    const served = mergeAll(base, answers);
+    refreshInBackground(scope, base, escalate, served);
+    return attribute(served, answers);
+  }
+
   return {
+    describeExternalAgents,
+
     async listExternalAgents(scope) {
-      const base = await baseDescriptors(probing, scope);
-
-      const escalate = base
-        .filter((descriptor) => descriptor.installed)
-        .map((descriptor) => descriptor.targetId);
-      if (escalate.length === 0 || !authoritative) return mergeAll(base, NO_ANSWERS);
-
-      const remembered = rememberedAnswers(scopeKey(scope));
-      if (remembered?.fresh) return mergeAll(base, remembered.byTarget);
-
-      // Stale while revalidate. A cold miss can only offer the cheap pass, but
-      // an expired entry still describes this machine from the adapter that
-      // would run the turn, so it is served while the probe replacing it runs
-      // behind the response.
-      const served = mergeAll(base, remembered?.byTarget ?? NO_ANSWERS);
-      refreshInBackground(scope, base, escalate, served);
-      return served;
+      const discovered = await describeExternalAgents(scope);
+      return discovered.map((agent) => agent.descriptor);
     },
 
     resetCache(environmentId, userId) {

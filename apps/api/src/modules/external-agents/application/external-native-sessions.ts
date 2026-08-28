@@ -135,7 +135,8 @@ export interface AdoptExternalNativeSessionInput {
 }
 
 export interface ExternalNativeSessionDependencies {
-  readonly discovery?: ExternalAgentDiscoveryService;
+  /** Descriptors only: this service reads capabilities, never their provenance. */
+  readonly discovery?: Pick<ExternalAgentDiscoveryService, 'listExternalAgents'>;
   readonly resolveRuntimeClient?: typeof getRuntimeClient;
   readonly isolationRegistry?: ExternalIdentityIsolationRegistry;
   readonly db?: () => Kysely<Database>;

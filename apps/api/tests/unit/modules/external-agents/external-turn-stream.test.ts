@@ -112,7 +112,6 @@ function harness(
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
     discovery: {
       listExternalAgents: () => Promise.resolve(options.agents ?? [descriptor()]),
-      resetCache: () => undefined,
     },
   });
   const repoRootCalls: Array<{ workdir: string; selection: unknown }> = [];
@@ -209,6 +208,40 @@ describe('the third-party disclosure gate', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.failure.kind).toBe('disclosure-required');
+  });
+
+  /**
+   * The send path never fingerprints the cheap pass, and this is why.
+   *
+   * A scan-only descriptor claims no capability and no permission pair, so
+   * configuration refuses it before the gate is reached. Without that shield,
+   * comparing an acknowledgement against the placeholder would refuse an
+   * acknowledged user's send as `disclosure-required` — sending them to a dialog
+   * they had already answered, which no amount of clicking would clear.
+   */
+  it('refuses a send on a scan-only descriptor before it reaches the gate', async () => {
+    const { stream } = harness({
+      agents: [
+        descriptor({
+          capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+          supportedConfigurations: [],
+        }),
+      ],
+    });
+    const result = await stream(
+      {
+        userId,
+        chat: chatRecord(),
+        chatId,
+        prompt: 'hello',
+        attachmentIds: [],
+        externalTurn: undefined,
+      },
+      getDb()
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.kind).toBe('unsupported');
   });
 });
 
