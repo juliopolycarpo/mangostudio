@@ -52,22 +52,35 @@ export function slashQueryAt(value: string, caret: number): string | null {
   return query.includes('/') ? null : query;
 }
 
+/** A completed prompt and where the caret belongs in it. */
+export interface SlashCompletion {
+  readonly value: string;
+  readonly caret: number;
+}
+
 /**
  * Replaces the command token with `name`, keeping whatever arguments follow.
  *
  * A completed command always ends in a space when nothing follows it, because
  * every one of these takes arguments and the next thing the user types is one.
- * // Usage: applySlashCompletion('/rev --all', 'review') === '/review --all'
+ * The caret comes back with the text rather than from a second function: it is
+ * a position *in this string*, and deriving it from the name alone is how it
+ * ends up inside a separator the completion did not write — a newline, or the
+ * second of two spaces.
+ * // Usage: applySlashCompletion('/rev --all', 'review') === { value: '/review --all', caret: 8 }
  */
-export function applySlashCompletion(value: string, name: string): string {
+export function applySlashCompletion(value: string, name: string): SlashCompletion {
   const whitespace = value.slice(1).search(/\s/);
-  if (whitespace === -1) return `/${name} `;
-  return `/${name}${value.slice(whitespace + 1)}`;
-}
-
-/** Where the caret belongs after a completion: just past the inserted name. */
-export function slashCompletionCaret(name: string): number {
-  return name.length + 2;
+  const completed = `/${name}`;
+  const next = whitespace === -1 ? ' ' : value.slice(whitespace + 1);
+  // Past the name, and past the separator when it is a single space, so the
+  // next keystroke is an argument. A newline or a run of spaces is the user's
+  // own formatting and stays in front of the caret.
+  const skipsSeparator = next.startsWith(' ') && !next.startsWith('  ');
+  return {
+    value: `${completed}${next}`,
+    caret: completed.length + (skipsSeparator ? 1 : 0),
+  };
 }
 
 /**
@@ -100,11 +113,17 @@ export function mergeSlashCommands(
 /**
  * The closest matches for what the user has typed, best first.
  *
- * Ranked in three tiers rather than scored: a prefix match is what someone
- * typing a name they already know is doing, a name that merely contains the
- * query is the next most likely, and a description match is how a command gets
- * found by what it does. Ties keep the order the sources were merged in, so the
- * vendor's live list stays ahead of the library's scan.
+ * Ranked in four tiers rather than scored: the name typed in full is the one
+ * the user meant, a prefix match is what someone typing a name they already
+ * know is doing, a name that merely contains the query is the next most likely,
+ * and a description match is how a command gets found by what it does. Ties
+ * keep the order the sources were merged in, so the vendor's live list stays
+ * ahead of the library's scan.
+ *
+ * The exact tier is load-bearing rather than a nicety: catalogs arrive in the
+ * vendor's own order, so `['test-all', 'test']` would otherwise put `test-all`
+ * first for the query `test` and Enter would rewrite the command the user had
+ * already finished typing into a different one.
  * // Usage: matchSlashCommands(entries, 'rev')
  */
 export function matchSlashCommands(
@@ -115,11 +134,16 @@ export function matchSlashCommands(
   const needle = query.trim().toLowerCase();
   if (needle.length === 0) return entries.slice(0, limit);
 
+  const exact: SlashCommandEntry[] = [];
   const prefix: SlashCommandEntry[] = [];
   const infix: SlashCommandEntry[] = [];
   const described: SlashCommandEntry[] = [];
   for (const entry of entries) {
     const name = entry.name.toLowerCase();
+    if (name === needle) {
+      exact.push(entry);
+      continue;
+    }
     if (name.startsWith(needle)) {
       prefix.push(entry);
       continue;
@@ -130,7 +154,7 @@ export function matchSlashCommands(
     }
     if (entry.description?.toLowerCase().includes(needle)) described.push(entry);
   }
-  return [...prefix, ...infix, ...described].slice(0, limit);
+  return [...exact, ...prefix, ...infix, ...described].slice(0, limit);
 }
 
 /** Moves the highlight, wrapping at both ends so the list is a loop. */

@@ -11,11 +11,13 @@
  *    fact the vendor's own catalog already answers, and guessing it from a
  *    directory listing would offer names the CLI never registers.
  * 3. **The user's skills**, for MangoStudio's own runner, which has no commands
- *    of its own (issue #961). Filtered on exactly what `buildSkillsPromptSection`
- *    filters on, so the palette offers what the turn will advertise. Read
- *    user-scoped rather than through the chat's capabilities because the
- *    composer on the home screen has no chat behind it yet, and `/` has to work
- *    on the first message rather than the second.
+ *    of its own (issue #961). Filtered and capped the way
+ *    `buildSkillsPromptSection` filters and caps, so the palette offers what the
+ *    turn will advertise. Read user-scoped rather than through the chat's
+ *    capabilities because the composer on the home screen has no chat behind it
+ *    yet, and `/` has to work on the first message rather than the second — the
+ *    cost of that is one thing this cannot mirror, `appendSkillsPromptSection`'s
+ *    check that the chat's tool profile allows the `skill` tool at all.
  */
 
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
@@ -29,6 +31,15 @@ import { mergeSlashCommands, type SlashCommandEntry } from '../lib/slash-command
 
 /** Shared so an unannounced catalog is referentially stable across renders. */
 const NO_COMMANDS: readonly ExternalAgentCommand[] = [];
+
+/** How long an idle chat keeps the catalog its last session announced. */
+const SESSION_CATALOG_GC_MS = 60 * 60 * 1_000;
+
+/**
+ * The ceiling `buildSkillsPromptSection` advertises, mirrored so the palette
+ * cannot offer the 65th name alphabetically — the turn would not list it.
+ */
+const MAX_LISTED_SKILLS = 64;
 
 interface Options {
   readonly chatId: string | null;
@@ -45,16 +56,29 @@ interface Options {
   readonly active: boolean;
 }
 
+export interface SlashCommandSources {
+  readonly entries: readonly SlashCommandEntry[];
+  /**
+   * Whether a fallback source is still answering.
+   *
+   * Reported rather than folded into an empty list because the two are
+   * different answers: "this chat has no `/review`" is worth saying, and
+   * "the scan has not come back yet" is a claim the palette has no business
+   * making while a directory walk on the runtime host is still in flight.
+   */
+  readonly loading: boolean;
+}
+
 /**
  * The palette's entries for one chat, already merged and de-duplicated.
- * // Usage: const commands = useSlashCommands({ chatId, runner, environmentId });
+ * // Usage: const { entries, loading } = useSlashCommands({ chatId, runner, environmentId, active: true });
  */
 export function useSlashCommands({
   chatId,
   runner,
   environmentId,
   active,
-}: Options): readonly SlashCommandEntry[] {
+}: Options): SlashCommandSources {
   const targetId = runner?.kind === 'external' ? runner.targetId : null;
 
   // A subscription, not a fetch: nothing serves this key, and the stream's
@@ -71,7 +95,12 @@ export function useSlashCommands({
     enabled: false,
     initialData: NO_COMMANDS,
     staleTime: Number.POSITIVE_INFINITY,
-    gcTime: Number.POSITIVE_INFINITY,
+    // Bounded rather than infinite: `initialData` seeds an entry for every chat
+    // the composer ever mounts against — native runners included, where nothing
+    // writes this key — and React Query keeps the largest `gcTime` any observer
+    // declared, so an infinite one is a per-chat leak for the life of the tab.
+    // An hour outlives any plausible navigate-away-and-back.
+    gcTime: SESSION_CATALOG_GC_MS,
   });
 
   const libraryQuery = useQuery({
@@ -88,35 +117,48 @@ export function useSlashCommands({
   const library = libraryQuery.data;
   const skills = skillsQuery.data;
 
-  return useMemo(() => {
-    const sessionEntries: SlashCommandEntry[] = (session ?? []).map((command) => ({
-      name: command.name,
-      ...(command.description ? { description: command.description } : {}),
-      origin: 'session',
-    }));
+  const entries = useMemo(() => {
+    // Gated on the runner like the other two sources. The catalog outlives the
+    // session that announced it — nothing invalidates the key — so a chat moved
+    // off its vendor onto MangoStudio's own runner would otherwise still be
+    // offered the vendor's names, which reach a native turn as ordinary prose.
+    const sessionEntries: SlashCommandEntry[] =
+      targetId === null
+        ? []
+        : (session ?? []).map((command) => ({
+            name: command.name,
+            ...(command.description ? { description: command.description } : {}),
+            origin: 'session' as const,
+          }));
 
-    // `present` and nothing else: a `shadowed` copy is a file this target will
-    // never read, and offering it would put a name in the palette that the
-    // agent answers with a different command's contents.
+    // Anything but `absent`: `shadowed` means this target *does* read a copy,
+    // from `effectiveLocationId`, and merely has others behind it — the same
+    // predicate `presentTargetCount` in `features/library/format.ts` uses.
     const libraryEntries: SlashCommandEntry[] =
       targetId === null
         ? []
         : (library?.resources ?? [])
             .filter((resource) =>
               resource.coverage.some(
-                (coverage) => coverage.targetId === targetId && coverage.state === 'present'
+                (coverage) => coverage.targetId === targetId && coverage.state !== 'absent'
               )
             )
             .map((resource) => ({ name: resource.ref.slug, origin: 'library' as const }));
 
-    // The same three flags `buildSkillsPromptSection` filters on, so the
-    // palette cannot offer a name the turn will not advertise: a shadowed slug
-    // resolves to a different source's copy, and an invalid one to nothing.
+    // The same three flags and the same ceiling `buildSkillsPromptSection`
+    // applies, so the palette cannot offer a name the turn will not advertise:
+    // a shadowed slug resolves to a different source's copy, an invalid one to
+    // nothing, and the 65th name alphabetically is cut from the section.
+    //
+    // Known gap: that section is only appended when the chat's tool profile
+    // allows the `skill` tool, which this hook cannot see from the home screen.
     const skillEntries: SlashCommandEntry[] =
       targetId !== null
         ? []
         : (skills?.skills ?? [])
             .filter((skill) => skill.valid && skill.enabled && !skill.shadowed)
+            .sort((left, right) => left.name.localeCompare(right.name))
+            .slice(0, MAX_LISTED_SKILLS)
             .map((skill) => ({
               name: skill.slug,
               ...(skill.description ? { description: skill.description } : {}),
@@ -125,4 +167,11 @@ export function useSlashCommands({
 
     return mergeSlashCommands(sessionEntries, libraryEntries, skillEntries);
   }, [session, library, skills, targetId]);
+
+  // Only the source this runner actually reads can hold the palette back, and
+  // only while it is fetching: a *disabled* query reports `isPending` forever,
+  // so the other one would keep the menu silent for good.
+  const loading = targetId === null ? skillsQuery.isLoading : libraryQuery.isLoading;
+
+  return { entries, loading };
 }

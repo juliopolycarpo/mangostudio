@@ -17,6 +17,7 @@ import { fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
 import { InputBar } from '../../../src/features/chat/components/InputBar';
+import { setComposerDraft } from '../../../src/features/chat/lib/composer-draft-store';
 import { publishExternalCommands } from '../../../src/features/external-agents/command-catalog';
 import { render } from '../../support/harness/render';
 
@@ -58,7 +59,7 @@ function ComposerWithCatalog(props: React.ComponentProps<typeof InputBar>) {
  */
 function renderComposer(chatId: string = CHAT_ID) {
   const onSubmit = jest.fn();
-  render(
+  const view = render(
     <ComposerWithCatalog
       onSubmit={onSubmit}
       chatId={chatId}
@@ -66,7 +67,16 @@ function renderComposer(chatId: string = CHAT_ID) {
       externalDescriptor={DESCRIPTOR}
     />
   );
-  return { onSubmit, user: userEvent.setup() };
+  const rerenderWithChat = (nextChatId: string) =>
+    view.rerender(
+      <ComposerWithCatalog
+        onSubmit={onSubmit}
+        chatId={nextChatId}
+        runner={RUNNER}
+        externalDescriptor={DESCRIPTOR}
+      />
+    );
+  return { onSubmit, rerenderWithChat, user: userEvent.setup() };
 }
 
 describe('composer slash palette', () => {
@@ -99,6 +109,22 @@ describe('composer slash palette', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  /**
+   * The name is already typed, so there is nothing to complete and the palette
+   * has no claim on Enter. Completing it to itself would cost a second Enter
+   * for every command a user knows by heart — and, worse, hand the keystroke to
+   * whichever *other* entry the list happened to rank first.
+   */
+  it('sends rather than re-completing a name that is already typed in full', async () => {
+    const { onSubmit, user } = renderComposer('chat-exact');
+    const textbox = screen.getByRole('textbox');
+    await user.type(textbox, '/autopilot');
+    await screen.findByRole('option', { name: /autopilot/ });
+    await user.keyboard('{Enter}');
+
+    expect(onSubmit).toHaveBeenCalledWith('/autopilot', undefined);
+  });
+
   it('sends on the Enter after the command has been chosen', async () => {
     const { onSubmit, user } = renderComposer();
     const textbox = screen.getByRole('textbox');
@@ -118,6 +144,45 @@ describe('composer slash palette', () => {
     await user.keyboard('{ArrowDown}{Enter}');
 
     expect(textbox).toHaveValue('/autopilot ');
+  });
+
+  /**
+   * The pointer path, which the keyboard tests never touch: the list answers
+   * `mousedown` with `preventDefault` so the composer keeps focus, and the
+   * padding around a row belongs to the container rather than to the row — a
+   * press there must not blur the textarea and take the menu down mid-click.
+   */
+  it('completes a row the pointer picks, and survives a press on the panel itself', async () => {
+    const { onSubmit, user } = renderComposer('chat-pointer');
+    const textbox = screen.getByRole('textbox');
+    await user.type(textbox, '/');
+
+    const list = await screen.findByRole('listbox');
+    fireEvent.mouseDown(list);
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('option', { name: /autopilot/ }));
+    expect(textbox).toHaveValue('/autopilot ');
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The composer is not remounted when the chat changes — `useComposerDraft`
+   * swaps the text under whatever caret the palette was tracking. A draft that
+   * happens to start with `/` would otherwise be met by a menu nobody opened,
+   * holding the arrows and Enter over a prompt the user has not touched.
+   */
+  it('drops the palette when the chat under the composer changes', async () => {
+    const { rerenderWithChat, user } = renderComposer('chat-switch-a');
+    const textbox = screen.getByRole('textbox');
+    await user.type(textbox, '/aut');
+    await screen.findByRole('option', { name: /autopilot/ });
+
+    setComposerDraft('chat-switch-b', '/autopilot the branch');
+    rerenderWithChat('chat-switch-b');
+
+    expect(textbox).toHaveValue('/autopilot the branch');
+    expect(screen.queryByRole('option')).toBeNull();
   });
 
   it('closes on Escape and leaves the typed text alone', async () => {

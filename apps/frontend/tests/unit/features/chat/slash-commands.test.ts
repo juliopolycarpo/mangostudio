@@ -13,7 +13,6 @@ import {
   mergeSlashCommands,
   nextSlashIndex,
   type SlashCommandEntry,
-  slashCompletionCaret,
   slashQueryAt,
 } from '@/features/chat/lib/slash-commands';
 
@@ -67,16 +66,40 @@ describe('slashQueryAt', () => {
 
 describe('applySlashCompletion', () => {
   it('completes a bare name and leaves the caret past a trailing space', () => {
-    expect(applySlashCompletion('/rev', 'review')).toBe('/review ');
-    expect(slashCompletionCaret('review')).toBe('/review '.length);
+    expect(applySlashCompletion('/rev', 'review')).toEqual({
+      value: '/review ',
+      caret: '/review '.length,
+    });
   });
 
   it('keeps arguments that were already typed', () => {
-    expect(applySlashCompletion('/rev --all', 'review')).toBe('/review --all');
+    expect(applySlashCompletion('/rev --all', 'review')).toEqual({
+      value: '/review --all',
+      caret: '/review '.length,
+    });
   });
 
   it('replaces a name that was typed in full', () => {
-    expect(applySlashCompletion('/review', 'review-pr')).toBe('/review-pr ');
+    expect(applySlashCompletion('/review', 'review-pr')).toEqual({
+      value: '/review-pr ',
+      caret: '/review-pr '.length,
+    });
+  });
+
+  /**
+   * The caret is a position in the completed string, not `name.length + 2`: a
+   * separator the user wrote rather than the completion is left in front of it,
+   * or the caret lands on the next line instead of after the command.
+   */
+  it('stops at the command when the separator is not a single space', () => {
+    expect(applySlashCompletion('/rev\nnotes', 'review')).toEqual({
+      value: '/review\nnotes',
+      caret: '/review'.length,
+    });
+    expect(applySlashCompletion('/rev  --all', 'review')).toEqual({
+      value: '/review  --all',
+      caret: '/review'.length,
+    });
   });
 });
 
@@ -114,6 +137,19 @@ describe('matchSlashCommands', () => {
 
   it('returns everything for an empty query', () => {
     expect(matchSlashCommands(entries, '')).toEqual(entries);
+  });
+
+  /**
+   * Catalogs arrive in the vendor's own order, so a longer name can precede the
+   * one it extends. Enter completes the top row: without an exact tier, a user
+   * who typed `/test` in full gets `/test-all`, a different command.
+   */
+  it('puts a name typed in full ahead of a longer one that starts with it', () => {
+    const ordered = [entry('test-all'), entry('test')];
+    expect(matchSlashCommands(ordered, 'test').map((match) => match.name)).toEqual([
+      'test',
+      'test-all',
+    ]);
   });
 
   it('ranks a prefix match above a name that merely contains the query', () => {

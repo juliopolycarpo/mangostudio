@@ -16,7 +16,14 @@ interface Props {
   readonly activeIndex: number;
   readonly listId: string;
   readonly onSelect: (entry: SlashCommandEntry) => void;
-  /** Keeps the highlight from following the pointer while the keyboard drives. */
+  /**
+   * Moves the highlight to the row the pointer is over.
+   *
+   * Driven by real motion rather than by `mouseenter`: arrow keys scroll rows
+   * under a stationary cursor, and a browser that re-dispatches hover on that
+   * scroll would otherwise snap the highlight back to whatever the pointer
+   * happened to be resting on.
+   */
   readonly onHighlight: (index: number) => void;
 }
 
@@ -33,23 +40,11 @@ export function SlashCommandMenu({ entries, activeIndex, listId, onSelect, onHig
     activeRef.current?.scrollIntoView({ block: 'nearest' });
   }, [activeIndex]);
 
-  // An empty listbox rather than a bare panel: the composer points
-  // `aria-controls` at this id whenever the palette is open, and "no match" is
-  // the state it is open in most often. A panel without the id and the role
-  // would make that reference dangle exactly then.
-  if (entries.length === 0) {
-    return (
-      <div
-        id={listId}
-        role="listbox"
-        tabIndex={-1}
-        aria-label={labels.slashMenuLabel}
-        className="absolute bottom-full left-0 z-40 mb-2 w-80 rounded-2xl border border-outline-variant/20 bg-surface-container-high p-3 shadow-2xl"
-      >
-        <p className="text-xs text-on-surface-variant/70">{labels.slashMenuEmpty}</p>
-      </div>
-    );
-  }
+  // One container for both states. An empty listbox rather than a bare panel:
+  // the composer points `aria-controls` at this id whenever the palette is
+  // open, and "no match" is the state it is open in most often — a panel
+  // without the id and the role would make that reference dangle exactly then.
+  const empty = entries.length === 0;
 
   return (
     <div
@@ -61,8 +56,16 @@ export function SlashCommandMenu({ entries, activeIndex, listId, onSelect, onHig
       role="listbox"
       tabIndex={-1}
       aria-label={labels.slashMenuLabel}
-      className="app-scrollbar absolute bottom-full left-0 z-40 mb-2 max-h-72 w-80 overflow-y-auto rounded-2xl border border-outline-variant/20 bg-surface-container-high p-1 shadow-2xl"
+      // On the container, not only on the rows: the padding, the gutters beside
+      // a row and the scrollbar all belong to this element, and a press on any
+      // of them would blur the textarea, which the composer answers by
+      // dismissing the palette out from under the pointer mid-click.
+      onMouseDown={(event) => event.preventDefault()}
+      className={`absolute bottom-full left-0 z-40 mb-2 w-80 rounded-2xl border border-outline-variant/20 bg-surface-container-high shadow-2xl ${
+        empty ? 'p-3' : 'app-scrollbar max-h-72 overflow-y-auto p-1'
+      }`}
     >
+      {empty && <p className="text-xs text-on-surface-variant/70">{labels.slashMenuEmpty}</p>}
       {entries.map((entry, index) => (
         <div
           key={entry.name}
@@ -78,7 +81,7 @@ export function SlashCommandMenu({ entries, activeIndex, listId, onSelect, onHig
             event.preventDefault();
             onSelect(entry);
           }}
-          onMouseEnter={() => onHighlight(index)}
+          onMouseMove={() => onHighlight(index)}
           className={`flex cursor-pointer flex-col gap-0.5 rounded-xl px-2.5 py-1.5 text-left ${
             index === activeIndex ? 'bg-surface-container-highest' : 'hover:bg-surface-container'
           }`}

@@ -30,7 +30,6 @@ import {
   matchSlashCommands,
   nextSlashIndex,
   type SlashCommandEntry,
-  slashCompletionCaret,
   slashQueryAt,
 } from '../lib/slash-commands';
 import { CapabilityInspector } from './CapabilityInspector';
@@ -215,35 +214,59 @@ export function InputBar({
     active: slashQuery !== null,
   });
   const slashMatches = useMemo(
-    () => (slashQuery === null ? [] : matchSlashCommands(slashCommands, slashQuery)),
-    [slashCommands, slashQuery]
+    () => (slashQuery === null ? [] : matchSlashCommands(slashCommands.entries, slashQuery)),
+    [slashCommands.entries, slashQuery]
   );
   // A bare `/` with nothing to offer stays quiet — an empty popover over every
   // slash would be noise. Once the user has typed a name, "no match" is worth
-  // saying, because the alternative is a menu that silently vanishes.
-  const slashOpen = slashQuery !== null && (slashMatches.length > 0 || slashQuery.length > 0);
+  // saying, because the alternative is a menu that silently vanishes. Not while
+  // a source is still answering, though: a library scan walks directories on
+  // the runtime host, and "No command matches" during that walk is a claim the
+  // palette cannot support and the user will act on.
+  const slashOpen =
+    slashQuery !== null &&
+    (slashMatches.length > 0 || (slashQuery.length > 0 && !slashCommands.loading));
   // Whether there is anything to *choose*. A palette showing "no match" must
   // not also take the arrow keys: they are the prompt history's, and swallowing
   // them would strand a user who typed a name that does not exist.
   const slashSelectable = slashOpen && slashMatches.length > 0;
+  // Clamped where it is read rather than reset in an effect: a catalog
+  // announced while the menu is open shortens the list, and an effect that
+  // corrects the index only after paint leaves one render — and any keystroke
+  // inside it — pointing past the end, at no row and at an
+  // `aria-activedescendant` no option carries.
+  const slashActiveIndex = Math.min(slashIndex, Math.max(slashMatches.length - 1, 0));
 
-  // The highlight resets when the query changes and when the list under it
-  // does — a catalog announced while the menu is open shortens the list, and an
-  // index left pointing past its end selects nothing on Enter.
-  useEffect(() => setSlashIndex(0), [slashQuery, slashMatches.length]);
+  // A new query is a new list; the highlight goes back to the best match.
+  useEffect(() => setSlashIndex(0), [slashQuery]);
+
+  // The palette's state belongs to the text it is showing over, and this
+  // composer is not remounted when the chat changes — `useComposerDraft` swaps
+  // the prompt under a caret still pointing into the previous chat's text. Left
+  // alone, switching to a chat whose draft happens to start with `/` opens a
+  // palette nobody asked for and hands it the arrows and Enter.
+  useEffect(() => {
+    setCaret(0);
+    setSlashIndex(0);
+    setSlashDismissed(false);
+  }, [chatId]);
 
   const completeSlashCommand = (entry: SlashCommandEntry) => {
-    setPrompt(applySlashCompletion(prompt, entry.name));
+    const completion = applySlashCompletion(prompt, entry.name);
+    setPrompt(completion.value);
     setSlashDismissed(true);
-    const position = slashCompletionCaret(entry.name);
-    setCaret(position);
+    setCaret(completion.caret);
+    // Completing is editing by hand, the same as typing: leaving the history
+    // cursor live over text the user did not recall means the next ↑ throws the
+    // completion away instead of moving the caret.
+    history.release();
     // After React has painted the new value: setting a range against the old
     // one puts the caret at a character that is no longer there.
     requestAnimationFrame(() => {
       const textarea = textareaRef.current;
       if (!textarea) return;
       textarea.focus();
-      textarea.setSelectionRange(position, position);
+      textarea.setSelectionRange(completion.caret, completion.caret);
     });
   };
 
@@ -320,14 +343,20 @@ export function InputBar({
       // Typing releases history, so a palette opened by typing keeps the keys.
       if (!history.isRecalling && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
         event.preventDefault();
-        setSlashIndex((current) =>
-          nextSlashIndex(current, slashMatches.length, event.key === 'ArrowDown' ? 1 : -1)
+        setSlashIndex(
+          nextSlashIndex(slashActiveIndex, slashMatches.length, event.key === 'ArrowDown' ? 1 : -1)
         );
         return;
       }
-      // Tab and Enter are never history's, so they complete either way.
-      const chosen = slashMatches[slashIndex];
-      if (chosen && (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey))) {
+      // Tab and Enter are never history's, so they complete either way — unless
+      // the highlighted name is already typed in full, where there is nothing
+      // left to complete and Enter is the send the user meant. Without that,
+      // finishing a name costs a second Enter, and a recalled `/deploy` cannot
+      // be re-sent at all. Shift is excluded from both: Shift+Tab is how a
+      // keyboard leaves the composer, and Shift+Enter is a newline.
+      const chosen = slashMatches[slashActiveIndex];
+      const completes = chosen !== undefined && chosen.name !== slashQuery;
+      if (completes && !event.shiftKey && (event.key === 'Tab' || event.key === 'Enter')) {
         event.preventDefault();
         completeSlashCommand(chosen);
         return;
@@ -459,7 +488,7 @@ export function InputBar({
             {slashOpen && (
               <SlashCommandMenu
                 entries={slashMatches}
-                activeIndex={slashIndex}
+                activeIndex={slashActiveIndex}
                 listId={slashListId}
                 onSelect={completeSlashCommand}
                 onHighlight={setSlashIndex}
@@ -491,8 +520,8 @@ export function InputBar({
                     'aria-autocomplete': 'list',
                     'aria-expanded': true,
                     'aria-controls': slashListId,
-                    ...(slashMatches.length > 0
-                      ? { 'aria-activedescendant': `${slashListId}-${slashIndex}` }
+                    ...(slashSelectable
+                      ? { 'aria-activedescendant': `${slashListId}-${slashActiveIndex}` }
                       : {}),
                   } as const)
                 : {})}
@@ -509,9 +538,14 @@ export function InputBar({
               onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
               // A palette left open over a composer nobody is typing in is a
               // menu the keyboard cannot reach. Choosing a row does not blur:
-              // the options answer `mousedown` with `preventDefault`, so focus
-              // never leaves the textarea for a click inside the list.
+              // the list answers `mousedown` with `preventDefault`, so focus
+              // never leaves the textarea for a click inside it.
               onBlur={() => setSlashDismissed(true)}
+              // The other half of that: coming back is what makes the palette
+              // caret-driven rather than trigger-keyed. Without it, a trip to
+              // the MCP menu and back leaves a command the user is standing in
+              // the middle of with no menu until they type another character.
+              onFocus={() => setSlashDismissed(false)}
               onKeyDown={handleKeyDown}
               onPaste={(event) => {
                 const files = filesFromClipboard(event.clipboardData);
