@@ -148,6 +148,17 @@ export class FakeCursorAcpServer {
         return;
       }
       case 'session/new':
+        // The live vendor announces its slash-command catalog while this very
+        // request is in flight — before the client can know the session handle,
+        // and long before any turn exists. Reproduced here because that timing
+        // is the whole difficulty: an adapter that waits for a turn drops it.
+        this.#notify('session/update', {
+          sessionId: this.#sessionId,
+          update: {
+            sessionUpdate: 'available_commands_update',
+            availableCommands: [{ name: 'review', description: 'Read a diff (user)' }],
+          },
+        });
         this.#respond(id, this.#sessionState(true));
         return;
       case 'session/load':
