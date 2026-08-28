@@ -608,6 +608,16 @@ each `describe` seeding exactly the identities it authenticates as. Namespacing
 means a test that later writes a new table cannot reopen the hole; a truncation
 list means it can.
 
+Process-wide state is the exception, because no individual suite can own it.
+`setupTestEnvironment()` reinstalls the canonical test config in **both**
+`beforeEach` and `afterEach`: `beforeEach` alone leaves the last test's
+`loadConfigForTest` override installed through the next file's module
+evaluation and `beforeAll` hooks, which both run before any `beforeEach`. That
+window is where an override reaches module-level state — it once dropped
+`server.allowedOrigins` for a whole shard. Suite-local `afterEach` hooks run
+before the preload-registered one (inner→outer, verified on Bun 1.4.0), so a
+local teardown still sees its own override.
+
 ### Code Health
 
 `bun run check` includes a repository-wide Knip scan. Change-scoped checks run it
@@ -781,6 +791,27 @@ Frontend support lives in `apps/frontend/tests/support/`:
   imports it next — Vitest resolved lazily and let a partial factory pass
   unnoticed. Spread `const actual = await import(spec)` into any factory that
   does not cover the full module.
+- **`mock.restore()` does not revert `mock.module()`.** It restores `mock()` /
+  `spyOn` doubles and leaves module registrations installed for the rest of the
+  process — in an unisolated lane, for every file scheduled after the one that
+  registered them. `mock.module()` on an already-loaded module also *merges*
+  into the live namespace rather than replacing it, so re-registering a
+  hand-listed subset leaves the rest of the fake in place. The sanctioned undo
+  is a whole-namespace capture (`const real = { ...mod }`) in a support module,
+  re-registered from the suite's `afterEach`:
+  `support/mocks/google-genai.ts` for the Gemini SDK,
+  `support/connectors/index.ts` for the first-party provider modules.
+- **Never `mock.module()` anything the bunfig preload imports.** The capture
+  above has to run before any test installs a fake, which makes the preload
+  look like its natural home. It is the one place it cannot go: mocking a
+  module in the preload's graph re-evaluates that graph, producing a second
+  `test-environment.ts` whose `initialized` flag is false, and every later
+  `createApiTestApp` throws the not-initialized guard. Measured on Bun 1.4.0 —
+  importing `@google/genai` from the preload took `--randomize --seed=1` over
+  `apps/api/tests/integration` from 36 failures to 605. Import the capture from
+  a support module test files pull in at module scope instead; module
+  evaluation still precedes every hook in that file, so the capture is early
+  enough in any file order.
 - **Better Auth turns off origin, rate-limit and secret validation under
   `NODE_ENV=test`** (`bun test` sets it), so no `bun test` case can assert any
   of the three — the positive case passes while checking nothing and the
