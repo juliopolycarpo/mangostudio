@@ -494,4 +494,33 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
 
     expect(await Bun.file(githubOutput).text()).toContain('log-preserved=false\n');
   });
+
+  // Regression: a failure summary followed by more than 200 lines of panic
+  // dump used to fall outside the tail slice the scan used to inspect,
+  // silently dropping a real finding once the retry came back clean.
+  it('finds a failure summary trailed by a panic dump past the old 200-line tail window', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const paddingLines = Array.from(
+      { length: 250 },
+      (_, index) => `console.log("panic dump line ${index}");`
+    ).join('\n');
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        console.log("0 fail");
+        process.exit(0);
+      }
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      console.log("2 fail");
+      ${paddingLines}
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result.attempts).toBe(2);
+    expect(result.exitCode).not.toBe(0);
+  });
 });

@@ -101,13 +101,13 @@ const CRASH_EXIT_CODE = 134;
 const CRASH_LOG_MARKERS = [/oh no: Bun has crashed/, /panic\(main thread\)/];
 // A killed-mid-run attempt never reaches Bun's summary line at all — that
 // case is covered by the preserved attempt-1 log, not this scan. This only
-// needs to catch a crash that struck *after* the summary printed, and a
-// full panic dump (version, features, stack) can trail it by well over a
-// screenful, so scan generously; the anchored `fail` shape makes an earlier
-// false match implausible. `[1-9]\d*`, not `\d+`: Bun always prints a
-// ` 0 fail` line on a clean run, and `\d+` matches that zero — verified live,
-// it turned a green shared-lane run into a reported exit 1.
-const FAILURE_SUMMARY_TAIL_LINES = 200;
+// needs to catch a crash that struck *after* the summary printed, and a full
+// panic dump (version, features, stack) can trail it by well over 200 lines,
+// so the scan covers the complete log rather than a tail slice — the
+// anchored `fail` shape makes a false match elsewhere implausible.
+// `[1-9]\d*`, not `\d+`: Bun always prints a ` 0 fail` line on a clean run,
+// and `\d+` matches that zero — verified live, it turned a green shared-lane
+// run into a reported exit 1.
 const FAILURE_SUMMARY_RE = /^\s*[1-9]\d* fail/m;
 
 interface AttemptResult {
@@ -118,8 +118,7 @@ interface AttemptResult {
 const isCrash = (attempt: AttemptResult, logText: string): boolean =>
   attempt.exitCode === CRASH_EXIT_CODE || CRASH_LOG_MARKERS.some((marker) => marker.test(logText));
 
-const hasFailureSummary = (logText: string): boolean =>
-  FAILURE_SUMMARY_RE.test(logText.split('\n').slice(-FAILURE_SUMMARY_TAIL_LINES).join('\n'));
+const hasFailureSummary = (logText: string): boolean => FAILURE_SUMMARY_RE.test(logText);
 
 /**
  * Rename attempt 1's log out of the retry's way. `logFile` usually exists
