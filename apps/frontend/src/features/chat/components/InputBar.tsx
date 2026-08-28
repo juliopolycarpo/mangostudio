@@ -211,6 +211,8 @@ export function InputBar({
     chatId,
     runner,
     environmentId: externalDescriptor?.environmentId ?? null,
+    activeModel,
+    selectedAgentId,
     active: slashQuery !== null,
   });
   const slashMatches = useMemo(

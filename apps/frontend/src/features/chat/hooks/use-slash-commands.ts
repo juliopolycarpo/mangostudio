@@ -15,9 +15,12 @@
  *    `buildSkillsPromptSection` filters and caps, so the palette offers what the
  *    turn will advertise. Read user-scoped rather than through the chat's
  *    capabilities because the composer on the home screen has no chat behind it
- *    yet, and `/` has to work on the first message rather than the second — the
- *    cost of that is one thing this cannot mirror, `appendSkillsPromptSection`'s
- *    check that the chat's tool profile allows the `skill` tool at all.
+ *    yet, and `/` has to work on the first message rather than the second.
+ *    Narrowed by the chat's own capabilities once there is a chat to ask about:
+ *    that projection is resolved by the same code generation uses, and it is the
+ *    only thing that knows whether the tool profile admits the `skill` tool at
+ *    all — without it a chat with skills turned off is offered `/dataviz` and
+ *    sends it to a model with no `<available-skills>` section to read it by.
  */
 
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
@@ -28,6 +31,7 @@ import { externalCommandKeys } from '@/features/external-agents/command-catalog'
 import { libraryResourcesQueryOptions } from '@/features/library/queries';
 import { skillSettingsListQueryOptions } from '@/features/settings/skills/queries';
 import { mergeSlashCommands, type SlashCommandEntry } from '../lib/slash-commands';
+import { chatCapabilitiesQueryOptions } from './use-chat-capabilities';
 
 /** Shared so an unannounced catalog is referentially stable across renders. */
 const NO_COMMANDS: readonly ExternalAgentCommand[] = [];
@@ -45,6 +49,13 @@ interface Options {
   readonly chatId: string | null;
   readonly runner: ChatRunnerConfiguration | undefined;
   readonly environmentId: string | null;
+  /**
+   * The composer's pending model and agent, passed through to the capability
+   * projection so it answers for the turn this palette is about to start rather
+   * than for the chat's saved selection.
+   */
+  readonly activeModel?: string | null | undefined;
+  readonly selectedAgentId?: string | undefined;
   /**
    * Whether the palette is open.
    *
@@ -77,6 +88,8 @@ export function useSlashCommands({
   chatId,
   runner,
   environmentId,
+  activeModel,
+  selectedAgentId,
   active,
 }: Options): SlashCommandSources {
   const targetId = runner?.kind === 'external' ? runner.targetId : null;
@@ -113,9 +126,36 @@ export function useSlashCommands({
     enabled: active && targetId === null,
   });
 
+  // The same selection `CapabilityInspector` builds, so the two share one cache
+  // entry: a user who has opened the inspector has already paid for this.
+  const capabilitiesQuery = useQuery({
+    ...chatCapabilitiesQueryOptions({
+      chatId: chatId ?? '',
+      ...(activeModel ? { model: activeModel } : {}),
+      ...(selectedAgentId ? { agentId: selectedAgentId } : {}),
+    }),
+    enabled: active && targetId === null && chatId !== null,
+  });
+
   const session = sessionQuery.data;
   const library = libraryQuery.data;
   const skills = skillsQuery.data;
+
+  /**
+   * Skill keys this chat's next turn will advertise, or `undefined` when the
+   * projection has not answered.
+   *
+   * `state === 'enabled'` is the whole of `buildSkillsPromptSection`'s filter
+   * plus the `skill`-tool check `appendSkillsPromptSection` makes, resolved by
+   * the server rather than mirrored here. Undefined is deliberately distinct
+   * from empty: an unasked or failed projection must not empty a palette the
+   * user-scoped filter can still answer for.
+   */
+  const advertisedKeys = useMemo(() => {
+    const entries = capabilitiesQuery.data?.skills;
+    if (!entries) return undefined;
+    return new Set(entries.filter((skill) => skill.state === 'enabled').map((skill) => skill.key));
+  }, [capabilitiesQuery.data]);
 
   const entries = useMemo(() => {
     // Gated on the runner like the other two sources. The catalog outlives the
@@ -148,15 +188,18 @@ export function useSlashCommands({
     // The same three flags and the same ceiling `buildSkillsPromptSection`
     // applies, so the palette cannot offer a name the turn will not advertise:
     // a shadowed slug resolves to a different source's copy, an invalid one to
-    // nothing, and the 65th name alphabetically is cut from the section.
+    // nothing, and the 65th name alphabetically is cut from the section. When
+    // the chat's projection has answered it narrows this further, since only it
+    // knows whether the `skill` tool survives the chat's tool profile.
     //
-    // Known gap: that section is only appended when the chat's tool profile
-    // allows the `skill` tool, which this hook cannot see from the home screen.
+    // Home screen aside: with no chat there is no profile to ask about, so the
+    // palette offers what the user has installed and the first turn decides.
     const skillEntries: SlashCommandEntry[] =
       targetId !== null
         ? []
         : (skills?.skills ?? [])
             .filter((skill) => skill.valid && skill.enabled && !skill.shadowed)
+            .filter((skill) => advertisedKeys?.has(skill.key) ?? true)
             .sort((left, right) => left.name.localeCompare(right.name))
             .slice(0, MAX_LISTED_SKILLS)
             .map((skill) => ({
@@ -166,7 +209,7 @@ export function useSlashCommands({
             }));
 
     return mergeSlashCommands(sessionEntries, libraryEntries, skillEntries);
-  }, [session, library, skills, targetId]);
+  }, [session, library, skills, targetId, advertisedKeys]);
 
   // Only the source this runner actually reads can hold the palette back, and
   // only while it is fetching: a *disabled* query reports `isPending` forever,
