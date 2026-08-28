@@ -750,13 +750,21 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
     if (method !== 'session/update') return;
     const session = this.#sessions.get(sessionId);
     if (!session) return;
+    // A notification body is optional in JSON-RPC, and reading through it is
+    // not: this handler runs inside the pump, whose only `catch` rejects every
+    // pending request on the connection. One malformed frame would end the
+    // session rather than be ignored.
+    if (!params || typeof params !== 'object') return;
     const notification = params as AcpSessionNotification;
 
-    // The command catalog is handled before the turn and correlation guards
-    // below, because it is the one notification that arrives outside a turn.
-    // Cursor sends it once, while `session/new` is still in flight — so there
-    // is no `activeTurn` to push it into, and `nativeSessionId` is very often
-    // still the empty placeholder this session was registered with.
+    // The catalog is *stored* before the turn and correlation guards below,
+    // because it is the one notification that arrives outside a turn: Cursor
+    // sends it once while `session/new` is still in flight, so there is no
+    // `activeTurn` to reduce it into and `nativeSessionId` is very often still
+    // the empty placeholder this session was registered with. Storing is all
+    // that happens here — a catalog that lands mid-turn falls through to the
+    // reducer like every other frame, so there is one place that turns an
+    // update into an event.
     const announced = readAvailableCommands(notification.update);
     if (announced) {
       // Match when the handle is known, accept when it is not: during the
@@ -765,12 +773,6 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
       const known = session.nativeSessionId.length > 0;
       if (known && notification.sessionId !== session.nativeSessionId) return;
       session.commands = announced;
-      // A catalog re-announced mid-turn is still worth forwarding live.
-      session.activeTurn?.channel.push({
-        type: 'commands_available',
-        commands: session.commands,
-      });
-      return;
     }
 
     const active = session.activeTurn;

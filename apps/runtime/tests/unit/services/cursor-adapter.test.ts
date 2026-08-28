@@ -555,6 +555,39 @@ describe('cursor adapter — turns', () => {
     expect(second[0]).toMatchObject({ type: 'commands_available' });
   });
 
+  /**
+   * The one path the reducer owns. The catalog announced at `session/new` is
+   * held on the session and replayed by `startTurn`; a re-announce that lands
+   * while a turn is running goes through `#onNotification` like every other
+   * frame, so the adapter stores it and the reducer is what emits it.
+   */
+  it('forwards a catalog re-announced while the turn is running', async () => {
+    const adapter = new CursorAcpAdapter();
+    const probe = harness({ scenario: 'commands-re-announced' });
+    await adapter.openSession({ params: openParams(), context: probe.context });
+
+    const events = await collect(
+      adapter.startTurn({
+        nativeSessionId: CURSOR_TRANSCRIPT.sessionId,
+        params: turnParams(),
+        context: probe.context,
+      })
+    );
+    const catalogs = events.filter((event) => event.type === 'commands_available');
+
+    // The session's own list opens the turn, and the re-announce closes it —
+    // the recorded transcript this scenario replays carries a catalog of its
+    // own in between, which is itself a frame taking the reducer's path.
+    expect(catalogs[0]).toEqual({
+      type: 'commands_available',
+      commands: [{ name: 'review', description: 'Read a diff (user)' }],
+    });
+    expect(catalogs.at(-1)).toEqual({
+      type: 'commands_available',
+      commands: [{ name: 'deploy', description: 'Ship the build (user)' }],
+    });
+  });
+
   it('ignores updates addressed to another session on the same connection', async () => {
     const adapter = new CursorAcpAdapter();
     const probe = harness({ scenario: 'unknown-additive' });

@@ -163,9 +163,10 @@ export class CursorTurnReducer {
       case 'plan':
         return this.#plan(update as AcpPlanUpdate);
       case 'available_commands_update': {
-        // Only reached by a catalog Cursor re-announced mid-turn. The one it
-        // sends at `session/new` arrives before any reducer exists, and the
-        // adapter holds that one on the session.
+        // A catalog Cursor re-announced while a turn is running. The one it
+        // sends at `session/new` arrives before any reducer exists; the adapter
+        // stores that one on the session and replays it into each turn, and
+        // stores this one too on its way past.
         const commands = readAvailableCommands(update);
         return commands ? only({ type: 'commands_available', commands }) : NOTHING;
       }
