@@ -25,6 +25,10 @@ describe('cursor reducer — a recorded turn', () => {
     const types = events.map((event) => event.type);
 
     expect(types).toEqual([
+      // The recording opens with the catalog, which is where the live stream
+      // puts it: Cursor announces what the session can expand before it says
+      // anything else, and never again.
+      'commands_available',
       'reasoning_delta',
       'reasoning_delta',
       'text_delta',
@@ -103,7 +107,6 @@ describe('cursor reducer — a recorded turn', () => {
     const events = replay([
       { sessionUpdate: 'quantum_update', payload: { anything: true } },
       { sessionUpdate: 'session_info_update', title: 'Cursor picked its own title' },
-      { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'x' }] },
       { sessionUpdate: 'current_mode_update', currentModeId: 'plan' },
       { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'the prompt' } },
       undefined,
@@ -248,5 +251,57 @@ describe('cursor reducer — progress', () => {
     expect(first.events[0]?.type === 'activity_started' ? first.events[0].callId : '').toBe(
       second.events[0]?.type === 'activity_updated' ? second.events[0].callId : 'x'
     );
+  });
+});
+
+describe('cursor reducer — the slash-command catalog', () => {
+  it('projects the announced commands, descriptions and all', () => {
+    const [event] = replay([
+      {
+        sessionUpdate: 'available_commands_update',
+        availableCommands: [
+          { name: 'test-command', description: 'Accessibility Audit (user)' },
+          { name: 'autopilot', description: 'Keep a PR merge-ready. (builtin skill)' },
+        ],
+      },
+    ]);
+
+    expect(event).toEqual({
+      type: 'commands_available',
+      commands: [
+        { name: 'test-command', description: 'Accessibility Audit (user)' },
+        { name: 'autopilot', description: 'Keep a PR merge-ready. (builtin skill)' },
+      ],
+    });
+  });
+
+  it('drops rows with no usable name and omits an empty description', () => {
+    const [event] = replay([
+      {
+        sessionUpdate: 'available_commands_update',
+        availableCommands: [
+          { name: '   ', description: 'nameless' },
+          { description: 'also nameless' },
+          'not an object',
+          { name: 'review', description: '  ' },
+        ],
+      },
+    ]);
+
+    expect(event).toEqual({ type: 'commands_available', commands: [{ name: 'review' }] });
+  });
+
+  it('emits an empty catalog rather than swallowing it', () => {
+    // "This session has no commands" is an answer the composer acts on. Staying
+    // silent would leave a palette offering whatever the previous session had.
+    expect(replay([{ sessionUpdate: 'available_commands_update', availableCommands: [] }])).toEqual(
+      [{ type: 'commands_available', commands: [] }]
+    );
+  });
+
+  it('ignores an update whose command list is not a list', () => {
+    expect(
+      replay([{ sessionUpdate: 'available_commands_update', availableCommands: 'nope' }])
+    ).toEqual([]);
   });
 });

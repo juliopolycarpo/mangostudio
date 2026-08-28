@@ -58,6 +58,19 @@ describe('ClaudeTurnReducer, on a recorded read-a-file turn', () => {
     expect(inits[0]?.permissionMode).toBe('plan');
   });
 
+  it('announces the run’s slash commands alongside the session', () => {
+    const { events } = reduceAll('claude-read-turn.jsonl');
+    const catalog = events.find((event) => event.type === 'commands_available');
+
+    // Every name arrives without help text: Claude Code announces the list and
+    // no descriptions, which is why the neutral entry's is optional.
+    expect(catalog).toMatchObject({ type: 'commands_available' });
+    const commands = catalog?.type === 'commands_available' ? catalog.commands : [];
+    expect(commands).toContainEqual({ name: 'gh' });
+    // Skills are announced under the same prefix and are not a second heading.
+    expect(commands).toContainEqual({ name: 'dataviz' });
+  });
+
   it('reports the resume state it was opened with rather than inferring one', () => {
     const { events } = reduceAll('claude-read-turn.jsonl', { resumed: true });
     expect(events[0]).toMatchObject({ type: 'session_started', resumed: true });
@@ -341,5 +354,48 @@ describe('claudeActivityKind', () => {
    */
   it('falls back to other for a tool it does not recognize', () => {
     expect(claudeActivityKind('SomeFuturePluginTool')).toBe('other');
+  });
+});
+
+describe('the init record’s slash-command list', () => {
+  function catalogFrom(record: Record<string, unknown>): readonly { name: string }[] {
+    const reducer = new ClaudeTurnReducer({ resumed: false });
+    const events = reducer.reduce({ type: 'system', subtype: 'init', ...record }).events;
+    const catalog = events.find((event) => event.type === 'commands_available');
+    return catalog?.type === 'commands_available' ? catalog.commands : [];
+  }
+
+  /**
+   * The vendor's own statement that a name needs the interactive terminal this
+   * adapter never gives it. Offering one would insert a command that silently
+   * does nothing.
+   */
+  it('withholds the names the run marked terminal-only', () => {
+    const commands = catalogFrom({
+      session_id: 'a',
+      slash_commands: ['review', 'doctor', 'color'],
+      terminal_slash_commands: ['doctor', 'color'],
+    });
+    expect(commands.map((command) => command.name)).toEqual(['review']);
+  });
+
+  it('withholds the CLI’s private plumbing', () => {
+    const commands = catalogFrom({
+      session_id: 'a',
+      slash_commands: ['__remote-workflow', 'compact'],
+    });
+    expect(commands.map((command) => command.name)).toEqual(['compact']);
+  });
+
+  /**
+   * A run that failed to name itself still knows what it can expand, and the
+   * palette is useful without a session handle it does not need.
+   */
+  it('announces the catalog even when the run carried no session id', () => {
+    expect(catalogFrom({ slash_commands: ['review'] })).toEqual([{ name: 'review' }]);
+  });
+
+  it('says nothing when the run announced no list at all', () => {
+    expect(catalogFrom({ session_id: 'a' })).toEqual([]);
   });
 });

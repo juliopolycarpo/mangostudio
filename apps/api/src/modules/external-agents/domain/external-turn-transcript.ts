@@ -253,6 +253,12 @@ export class ExternalTurnTranscript {
         // client that can read the chat.
         return { durable: false };
 
+      case 'commands_available':
+        // What the user may type next, not what the agent said. Persisting it
+        // would replay a catalog into a reloaded transcript long after the
+        // session that announced it stopped existing.
+        return { durable: false };
+
       case 'text_delta':
         this.#text += event.text;
         this.#appendText('text', event.text);

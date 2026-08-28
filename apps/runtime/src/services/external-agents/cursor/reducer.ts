@@ -31,9 +31,12 @@
 
 import type {
   ExternalActivityStatus,
+  ExternalAgentCommand,
   ExternalAgentEvent,
 } from '@mangostudio/shared/external-agents';
 import type {
+  AcpAvailableCommand,
+  AcpAvailableCommandsUpdate,
   AcpMessageChunkUpdate,
   AcpPlanUpdate,
   AcpSessionUpdateEnvelope,
@@ -120,12 +123,13 @@ export class CursorTurnReducer {
         return this.#toolCallUpdate(update as AcpToolCallUpdate);
       case 'plan':
         return this.#plan(update as AcpPlanUpdate);
+      case 'available_commands_update':
+        return this.#availableCommands(update as AcpAvailableCommandsUpdate);
       default:
         // Includes `user_message_chunk` (the prompt MangoStudio just sent, which
         // persisting would duplicate in the transcript), `session_info_update`
-        // (Cursor's own generated chat title, which is not MangoStudio's title),
-        // `available_commands_update` (the vendor's slash-command catalog) and
-        // `current_mode_update` (an echo of a mode this adapter set). None is
+        // (Cursor's own generated chat title, which is not MangoStudio's title)
+        // and `current_mode_update` (an echo of a mode this adapter set). None is
         // load-bearing for liveness: a working turn always produces text,
         // reasoning or tool-call traffic.
         return NOTHING;
@@ -251,6 +255,33 @@ export class CursorTurnReducer {
    * bracketed under a synthetic one and updated in place rather than emitting a
    * new pill per revision. It closes with the turn, like any other open call.
    */
+  /**
+   * The session's slash-command catalog.
+   *
+   * Passed through as the vendor wrote it, including the `(user)`,
+   * `(global)` and `(builtin skill)` suffixes Cursor appends to a description.
+   * Those are the vendor's own words about where a command came from, and
+   * parsing them into a typed provenance field would be reading tea leaves: the
+   * suffix is a rendering choice, not a contract, and it would break silently
+   * the first time Cursor rephrases it.
+   *
+   * An empty catalog is emitted rather than swallowed. "This session has no
+   * commands" is an answer the composer can act on; dropping it would leave the
+   * palette showing a stale list from whatever ran before.
+   */
+  #availableCommands(update: AcpAvailableCommandsUpdate): CursorTurnReduction {
+    if (!Array.isArray(update.availableCommands)) return NOTHING;
+    const commands: ExternalAgentCommand[] = [];
+    for (const entry of update.availableCommands as readonly AcpAvailableCommand[]) {
+      if (!entry || typeof entry !== 'object') continue;
+      const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+      if (name.length === 0) continue;
+      const description = typeof entry.description === 'string' ? entry.description.trim() : '';
+      commands.push({ name, ...(description.length > 0 ? { description } : {}) });
+    }
+    return only({ type: 'commands_available', commands });
+  }
+
   #plan(update: AcpPlanUpdate): CursorTurnReduction {
     const entries = update.entries ?? [];
     const detail = entries

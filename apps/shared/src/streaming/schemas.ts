@@ -1,10 +1,12 @@
 import Type, { type Static } from 'typebox';
 import { SSEErrorEventSchema } from '../errors';
 import {
+  EXTERNAL_COMMAND_CATALOG_MAX_ITEMS,
   ExternalAccountLimitsSchema,
   ExternalActivityKindSchema,
   ExternalActivityStatusSchema,
   ExternalActivityUpdateSchema,
+  ExternalAgentCommandSchema,
   ExternalAgentErrorSchema,
   ExternalAgentTargetIdSchema,
   ExternalApprovalDecisionSchema,
@@ -428,6 +430,23 @@ const SSEExternalThreadUsageEventSchema = Type.Object({
   done: Type.Literal(false),
 });
 
+/**
+ * The slash commands this session can expand, announced by the vendor.
+ *
+ * Live state, not a message part: nothing about it is persisted, and a reload
+ * falls back to what the library scanned on disk until the next turn announces
+ * the catalog again. That asymmetry is deliberate — the vendor's list is the
+ * only one that knows about plugin commands and builtin skills, and it only
+ * exists once a process has started.
+ */
+const SSEExternalCommandsEventSchema = Type.Object({
+  type: Type.Literal('external_commands'),
+  commands: Type.Array(ExternalAgentCommandSchema, {
+    maxItems: EXTERNAL_COMMAND_CATALOG_MAX_ITEMS,
+  }),
+  done: Type.Literal(false),
+});
+
 const SSEExternalAccountLimitsEventSchema = Type.Object({
   type: Type.Literal('external_account_limits'),
   limits: ExternalAccountLimitsSchema,
@@ -555,6 +574,7 @@ export const StreamChunkSchema = Type.Union([
   SSEExternalUsageEventSchema,
   SSEExternalThreadUsageEventSchema,
   SSEExternalAccountLimitsEventSchema,
+  SSEExternalCommandsEventSchema,
   SSEExternalSteerEventSchema,
   SSEExternalErrorEventSchema,
   SSEExternalTurnCompletedEventSchema,

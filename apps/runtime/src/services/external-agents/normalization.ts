@@ -2,6 +2,7 @@ import type {
   ExternalActivityResult,
   ExternalActivityUpdate,
   ExternalActivityView,
+  ExternalAgentCommand,
   ExternalAgentConfiguration,
   ExternalAgentError,
   ExternalAgentEvent,
@@ -15,7 +16,11 @@ import type {
   ExternalSupportedConfiguration,
   ExternalTextLimit,
 } from '@mangostudio/shared/external-agents';
-import { boundVendorText, sanitizeVendorText } from '@mangostudio/shared/external-agents';
+import {
+  boundVendorText,
+  EXTERNAL_COMMAND_CATALOG_MAX_ITEMS,
+  sanitizeVendorText,
+} from '@mangostudio/shared/external-agents';
 
 /**
  * Normalizes display text and refuses rewritten opaque ids at the adapter
@@ -152,6 +157,8 @@ export function normalizeExternalAgentEvent(event: ExternalAgentEvent): External
           optionId: safeVendorId(event.decision.optionId, 'approval option id'),
         },
       };
+    case 'commands_available':
+      return { ...event, commands: normalizeCommands(event.commands) };
     case 'error':
       return { ...event, error: normalizeError(event.error) };
     case 'usage':
@@ -300,6 +307,40 @@ function normalizeApprovalOption(option: ExternalApprovalOption): ExternalApprov
       ? { rawLabel: displayText(option.rawLabel, 'approvalOptionLabel').text }
       : {}),
   };
+}
+
+/**
+ * Bounds a slash-command catalog, dropping rows that cannot be offered.
+ *
+ * A name is **dropped** rather than truncated, on the same terms as a session
+ * id: the palette inserts it into the composer for the vendor to expand, so a
+ * shortened name is a command the CLI does not have. A description is display
+ * text and is cut like every other label. Over-long catalogs are cut to the
+ * contract's ceiling here, because emitting a longer one fails validation in
+ * the supervisor and ends the turn — a far worse answer to a big command list
+ * than a shorter list.
+ */
+function normalizeCommands(
+  commands: readonly ExternalAgentCommand[]
+): readonly ExternalAgentCommand[] {
+  const normalized: ExternalAgentCommand[] = [];
+  const seen = new Set<string>();
+  for (const command of commands) {
+    if (normalized.length >= EXTERNAL_COMMAND_CATALOG_MAX_ITEMS) break;
+    const name = boundVendorText(command.name, 'commandName');
+    if (name.truncated || name.text.length === 0 || seen.has(name.text)) continue;
+    seen.add(name.text);
+
+    const description =
+      command.description === undefined
+        ? undefined
+        : displayText(command.description, 'commandDescription');
+    normalized.push({
+      name: name.text,
+      ...(description && description.text.length > 0 ? { description: description.text } : {}),
+    });
+  }
+  return normalized;
 }
 
 function normalizeError(error: ExternalAgentError): ExternalAgentError {
