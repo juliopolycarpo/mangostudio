@@ -9,8 +9,12 @@ import { probeRuntimeHandshake } from '../lib/runtime-handshake';
  * turn an expected `eof` into a timeout.
  */
 const ANSWERING_TIMEOUT_MS = 10_000;
-/** Short, because these stand-ins never answer and the test waits it out. */
-const HANGING_TIMEOUT_MS = 250;
+/**
+ * Short, because these stand-ins never answer and the test waits it out — but
+ * not so short that a loaded shard's spawn latency eats the whole budget before
+ * the child writes the stderr these tests then assert on.
+ */
+const HANGING_TIMEOUT_MS = 1_000;
 
 const HELLO_FRAME = JSON.stringify({
   type: 'hello',
