@@ -241,7 +241,7 @@ the Environments entry.
 A location is only scanned while it is switched on. Enablement lives in app
 settings (`profileSettings.<profile>.libraryLocations.home`), the scanner reads
 it through `enabledLibraryLocations`, and the Locations tab
-(`features/library/hooks/use-location-settings.ts`) is where a user changes it.
+(`apps/frontend/src/features/library/hooks/use-location-settings.ts`) is where a user changes it.
 It is one setting for every machine, while the health beside each row is the
 selected machine's. MangoStudio's own directories are forced on by the
 normalizer and render locked. A tab that comes back empty is worth checking
