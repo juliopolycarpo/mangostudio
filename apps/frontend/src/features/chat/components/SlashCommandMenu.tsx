@@ -26,14 +26,26 @@ export function SlashCommandMenu({ entries, activeIndex, listId, onSelect, onHig
   const activeRef = useRef<HTMLDivElement>(null);
 
   // Arrow keys can walk the highlight past the visible window, and a selection
-  // the user cannot see is the same as no selection.
+  // the user cannot see is the same as no selection. Keyed on the index rather
+  // than run once: on mount the highlight is always the first row, which is the
+  // one case that needed no scrolling.
   useEffect(() => {
     activeRef.current?.scrollIntoView({ block: 'nearest' });
-  }, []);
+  }, [activeIndex]);
 
+  // An empty listbox rather than a bare panel: the composer points
+  // `aria-controls` at this id whenever the palette is open, and "no match" is
+  // the state it is open in most often. A panel without the id and the role
+  // would make that reference dangle exactly then.
   if (entries.length === 0) {
     return (
-      <div className="absolute bottom-full left-0 z-40 mb-2 w-80 rounded-2xl border border-outline-variant/20 bg-surface-container-high p-3 shadow-2xl">
+      <div
+        id={listId}
+        role="listbox"
+        tabIndex={-1}
+        aria-label={labels.slashMenuLabel}
+        className="absolute bottom-full left-0 z-40 mb-2 w-80 rounded-2xl border border-outline-variant/20 bg-surface-container-high p-3 shadow-2xl"
+      >
         <p className="text-xs text-on-surface-variant/70">{labels.slashMenuEmpty}</p>
       </div>
     );

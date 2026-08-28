@@ -13,7 +13,7 @@ import type {
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { useQueryClient } from '@tanstack/react-query';
-import { screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
 import { InputBar } from '../../../src/features/chat/components/InputBar';
@@ -44,18 +44,24 @@ const CATALOG: readonly ExternalAgentCommand[] = [
  */
 function ComposerWithCatalog(props: React.ComponentProps<typeof InputBar>) {
   const queryClient = useQueryClient();
+  const chatId = props.chatId ?? CHAT_ID;
   useEffect(() => {
-    publishExternalCommands(queryClient, CHAT_ID, CATALOG);
-  }, [queryClient]);
+    publishExternalCommands(queryClient, chatId, CATALOG);
+  }, [queryClient, chatId]);
   return <InputBar {...props} />;
 }
 
-function renderComposer() {
+/**
+ * `chatId` is a parameter because prompt history is a module-level store keyed
+ * by it: a test that sends anything would otherwise inherit whatever an earlier
+ * test in this file sent, and recall the wrong entry.
+ */
+function renderComposer(chatId: string = CHAT_ID) {
   const onSubmit = jest.fn();
   render(
     <ComposerWithCatalog
       onSubmit={onSubmit}
-      chatId={CHAT_ID}
+      chatId={chatId}
       runner={RUNNER}
       externalDescriptor={DESCRIPTOR}
     />
@@ -134,6 +140,38 @@ describe('composer slash palette', () => {
     await user.type(screen.getByRole('textbox'), 'run the /auto');
 
     expect(screen.queryByRole('option')).toBeNull();
+  });
+
+  /**
+   * The palette can open without the user asking for it: prompt history
+   * recalls a bare command, the caret lands inside it, and the menu appears.
+   * Taking ↑ there parks the user on a recalled prompt with no way back.
+   */
+  it('leaves the arrows to prompt history while it is walking it', async () => {
+    const { user } = renderComposer('chat-history');
+    const textbox = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    await user.type(textbox, 'hello{Enter}');
+    // The trailing space closes the palette by moving the caret out of the
+    // command token, so this Enter sends rather than completing.
+    await user.type(textbox, '/autopilot {Enter}');
+    expect(textbox).toHaveValue('');
+
+    // Trimmed on the way into history, so what comes back is a bare command
+    // with the caret free to land inside it.
+    await user.type(textbox, '{ArrowUp}');
+    expect(textbox).toHaveValue('/autopilot');
+
+    // Putting the caret back inside the recalled command is what opens a
+    // palette the user never asked for. Driven with `fireEvent` rather than
+    // `user.type`, which would click first and put the caret back at the end.
+    textbox.setSelectionRange(10, 10);
+    fireEvent.select(textbox);
+    await screen.findByRole('option', { name: /autopilot/ });
+
+    // Walking further back must still work.
+    fireEvent.keyDown(textbox, { key: 'ArrowUp' });
+    expect(textbox).toHaveValue('hello');
   });
 
   /**

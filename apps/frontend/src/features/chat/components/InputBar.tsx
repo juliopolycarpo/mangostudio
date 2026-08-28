@@ -314,13 +314,18 @@ export function InputBar({
       return;
     }
     if (slashSelectable) {
-      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      // History keeps the arrows while it owns them. A recalled prompt that
+      // happens to start with a command opens the palette without the user
+      // asking, and taking ↑ there strands them mid-recall with no way back.
+      // Typing releases history, so a palette opened by typing keeps the keys.
+      if (!history.isRecalling && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
         event.preventDefault();
         setSlashIndex((current) =>
           nextSlashIndex(current, slashMatches.length, event.key === 'ArrowDown' ? 1 : -1)
         );
         return;
       }
+      // Tab and Enter are never history's, so they complete either way.
       const chosen = slashMatches[slashIndex];
       if (chosen && (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey))) {
         event.preventDefault();
@@ -502,6 +507,11 @@ export function InputBar({
                 if (uploads.error) uploads.clearError();
               }}
               onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
+              // A palette left open over a composer nobody is typing in is a
+              // menu the keyboard cannot reach. Choosing a row does not blur:
+              // the options answer `mousedown` with `preventDefault`, so focus
+              // never leaves the textarea for a click inside the list.
+              onBlur={() => setSlashDismissed(true)}
               onKeyDown={handleKeyDown}
               onPaste={(event) => {
                 const files = filesFromClipboard(event.clipboardData);
