@@ -1,9 +1,11 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { writeFileSync } from 'node:fs';
 import { ModelCatalogResponseSchema } from '@mangostudio/shared/catalog';
 import { ConnectorStatusSchema } from '@mangostudio/shared/connectors';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
+import { TEST_MANAGED_CONFIG_PATH } from '../../../src/lib/config';
 import { ConnectorNotFoundError } from '../../../src/modules/connectors/application/connector-errors';
 import { settingsRoutes } from '../../../src/routes/settings';
 import {
@@ -26,7 +28,7 @@ import {
   type SuccessPayload,
   withFetch,
 } from '../../support/connectors';
-import { ensureTestUsers } from '../../support/factories';
+import { ensureTestUsers, insertTestConnector, makeTestIdentity } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const TEST_USER = {
@@ -34,6 +36,14 @@ const TEST_USER = {
   name: 'Test User',
   email: 'test-connectors@mangostudio.test',
 };
+
+/**
+ * Two `[openai_api_keys]` entries the placeholder test writes into the managed
+ * config file: one whose value `isPlaceholderConfigSecretValue` rejects, one it
+ * accepts. The accepted one is what keeps the rejection assertion honest.
+ */
+const PLACEHOLDER_CONNECTOR_NAME = 'openai-placeholder-from-dev-config';
+const REAL_CONFIG_CONNECTOR_NAME = 'openai-real-from-dev-config';
 
 const CURSOR_CONNECTOR_USER = {
   id: 'test-user-cursor-connectors',
@@ -136,20 +146,76 @@ describe('settings connectors routes', () => {
   });
 
   it('GET /settings/connectors does not return placeholder config-file connectors from local dev config', async () => {
+    // The dev config this asserts on is written here, by name and by value.
+    // It used to assert the absence of three names that *sibling* `describe`
+    // blocks create — which the managed config file is wiped between tests to
+    // prevent, so those names could never appear and all three assertions
+    // passed against nothing, in every order.
+    writeFileSync(
+      TEST_MANAGED_CONFIG_PATH,
+      [
+        '[openai_api_keys]',
+        `${PLACEHOLDER_CONNECTOR_NAME} = "your-secret-key-here"`,
+        `${REAL_CONFIG_CONNECTOR_NAME} = "sk-live-openai-config-aaaa"`,
+        '',
+      ].join('\n')
+    );
+
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
     restoreAuth = restore;
 
-    const response = await app.handle(new Request('http://localhost/settings/connectors'));
+    try {
+      const response = await app.handle(new Request('http://localhost/settings/connectors'));
 
-    expect(response.status).toBe(200);
+      expect(response.status).toBe(200);
 
-    const payload = (await response.json()) as ConnectorListPayload;
-    expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
+      const payload = (await response.json()) as ConnectorListPayload;
+      expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
 
-    const connectorNames = payload.connectors.map((connector) => connector.name);
-    expect(connectorNames).not.toContain('openai-for-list');
-    expect(connectorNames).not.toContain('deepseek-for-list');
-    expect(connectorNames).not.toContain('openai-proj-model-update');
+      const connectorNames = payload.connectors.map((connector) => connector.name);
+      expect(connectorNames).not.toContain(PLACEHOLDER_CONNECTOR_NAME);
+      // The tripwire. Absence is only evidence while the sync that would have
+      // surfaced the entry actually ran; a real key from the same file proves
+      // it did, so this test can never pass on an empty list again.
+      expect(connectorNames).toContain(REAL_CONFIG_CONNECTOR_NAME);
+    } finally {
+      // Config-file sync stores its rows as shared ones (`userId` null) and
+      // nothing truncates the table between tests, so the real entry would
+      // otherwise stay visible to every file that runs later in the lane.
+      await getDb()
+        .deleteFrom('secret_metadata')
+        .where('name', 'in', [PLACEHOLDER_CONNECTOR_NAME, REAL_CONFIG_CONNECTOR_NAME])
+        .execute();
+    }
+  });
+
+  it('GET /settings/connectors omits a connector owned by another user', async () => {
+    // The scoping half of the list contract, which nothing else pins: the
+    // empty-list test above filters by `userId` before asserting, so it cannot
+    // notice a regression that starts handing out other people's rows.
+    const otherUser = makeTestIdentity('connector-scope-other', 'Connector Scope Other');
+    await ensureTestUsers(otherUser);
+    const foreignConnector = await insertTestConnector(otherUser.id, {
+      name: 'connector-owned-by-another-user',
+      provider: 'openai',
+    });
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    try {
+      const response = await app.handle(new Request('http://localhost/settings/connectors'));
+
+      expect(response.status).toBe(200);
+
+      const payload = (await response.json()) as ConnectorListPayload;
+      expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
+      expect(payload.connectors.some((connector) => connector.id === foreignConnector.id)).toBe(
+        false
+      );
+    } finally {
+      await getDb().deleteFrom('secret_metadata').where('id', '=', foreignConnector.id).execute();
+    }
   });
 });
 
