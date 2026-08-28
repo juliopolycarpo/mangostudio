@@ -125,20 +125,22 @@ const hasFailureSummary = (logText: string): boolean =>
  * Rename attempt 1's log out of the retry's way. `logFile` usually exists
  * here — `runAttempt`'s `finally` waits for the write stream's `finish`
  * before returning — but a `createWriteStream` that never opened (a full
- * disk, a missing directory) leaves nothing to rename. Never throws: a
- * preservation failure must not cancel the retry it is meant to be a safety
- * net for.
+ * disk, a missing directory) leaves nothing to rename. Returns whether the
+ * preserved log actually landed on disk. Never throws: a preservation
+ * failure must not cancel the retry it is meant to be a safety net for.
  */
 const preserveAttemptLog = async (
   logFile: string,
   mirror: NodeJS.WritableStream
-): Promise<void> => {
+): Promise<boolean> => {
   try {
     await rename(logFile, `${logFile}.attempt-1`);
+    return true;
   } catch (caught) {
     mirror.write(
       `Watchdog could not preserve ${logFile} before retrying: ${(caught as Error).message}\n`
     );
+    return false;
   }
 };
 
@@ -324,6 +326,7 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
   let attempt = await runAttempt(options);
   let crashedAny = false;
   let failuresSeen = false;
+  let logPreserved = false;
 
   // Reads the attempt's log while it still sits at `options.logFile` — before
   // any retry renames it out of the way — so both the crash check and the
@@ -338,7 +341,9 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
   };
 
   const retry = async (): Promise<AttemptResult> => {
-    if (options.preserveAttemptLogs) await preserveAttemptLog(options.logFile, mirror);
+    if (options.preserveAttemptLogs) {
+      logPreserved = await preserveAttemptLog(options.logFile, mirror);
+    }
     await restoreTimings(timingsDir, backup);
     attempts = 2;
     return runAttempt(options);
@@ -383,9 +388,15 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
   const shard = /^\d+$/.test(options.label) ? Number(options.label) : options.label;
   await Bun.write(options.metaFile, `${JSON.stringify({ shard, exitCode, durationSeconds })}\n`);
 
-  if (crashRetryEnabled) {
-    const githubOutput = process.env.GITHUB_OUTPUT;
-    if (githubOutput) await appendFile(githubOutput, `crashed=${crashedAny}\n`);
+  const githubOutput = process.env.GITHUB_OUTPUT;
+  if (githubOutput) {
+    if (crashRetryEnabled) await appendFile(githubOutput, `crashed=${crashedAny}\n`);
+    // Separate from `crashed`: a hung attempt that retries clean also leaves
+    // an `.attempt-1` log on disk, and the caller needs to know to upload it
+    // even though `crashedAny` never went true for a plain hang.
+    if (options.preserveAttemptLogs) {
+      await appendFile(githubOutput, `log-preserved=${logPreserved}\n`);
+    }
   }
 
   return { exitCode, attempts, durationSeconds };

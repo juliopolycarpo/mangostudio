@@ -160,13 +160,15 @@ jobs:
       # nothing about what ran before it, which is the half that matters.
       # `outcome != success` covers a failed run and a step timeout;
       # `outputs.crashed == 'true'` also uploads a crash-then-clean-retry
-      # night, whose only evidence of the crash lives in the preserved
-      # attempt-1 log. `!cancelled()` skips a user-cancelled job, where there
-      # is nothing useful to keep. The glob picks up both `run.log` and, when
-      # a crash preserved it, `run.log.attempt-1`; `run-meta.json` is not
+      # night, and `outputs.log-preserved == 'true'` does the same for a
+      # hang-then-clean-retry — both leave their only evidence in the
+      # preserved attempt-1 log even though the step itself reports success.
+      # `!cancelled()` skips a user-cancelled job, where there is nothing
+      # useful to keep. The glob picks up both `run.log` and, when a hang or
+      # crash preserved it, `run.log.attempt-1`; `run-meta.json` is not
       # uploaded because nothing here consumes it.
       - name: Upload run log
-        if: ${{ !cancelled() && (steps.randomized.outcome != 'success' || steps.randomized.outputs.crashed == 'true') }}
+        if: ${{ !cancelled() && (steps.randomized.outcome != 'success' || steps.randomized.outputs.crashed == 'true' || steps.randomized.outputs.log-preserved == 'true') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: randomized-order-${{ matrix.lane }}-seed-${{ env.SEED }}

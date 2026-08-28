@@ -450,4 +450,48 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
 
     expect(await Bun.file(githubOutput).text()).toContain('crashed=false\n');
   });
+
+  // A hang that retries clean never sets `crashed`, but `retry()` still
+  // preserves attempt 1's log — the nightly workflow's artifact-upload step
+  // needs its own signal for that case, or the only evidence of the hang is
+  // silently dropped from a green step.
+  it('writes log-preserved=true to $GITHUB_OUTPUT after a hung attempt retries clean', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const githubOutput = join(dir, 'github-output');
+    await writeFile(githubOutput, '');
+    process.env.GITHUB_OUTPUT = githubOutput;
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) process.exit(0);
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      setInterval(() => {}, 1000);
+    `;
+
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: ['bun', '-e', script],
+        timeoutSeconds: 3,
+        retryOnCrash: true,
+        preserveAttemptLogs: true,
+      })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+    const output = await Bun.file(githubOutput).text();
+    expect(output).toContain('crashed=false\n');
+    expect(output).toContain('log-preserved=true\n');
+    expect(await Bun.file(`${join(dir, 'run.log')}.attempt-1`).exists()).toBe(true);
+  });
+
+  it('writes log-preserved=false to $GITHUB_OUTPUT for a clean run with no retry', async () => {
+    const dir = await makeTemp();
+    const githubOutput = join(dir, 'github-output');
+    await writeFile(githubOutput, '');
+    process.env.GITHUB_OUTPUT = githubOutput;
+
+    await runTestsWithWatchdog(optionsIn(dir, { retryOnCrash: true, preserveAttemptLogs: true }));
+
+    expect(await Bun.file(githubOutput).text()).toContain('log-preserved=false\n');
+  });
 });
