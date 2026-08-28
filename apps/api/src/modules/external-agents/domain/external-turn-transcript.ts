@@ -121,7 +121,14 @@ export class ExternalTurnTranscript {
     // Observational vendor state is streamed to the hub for display/cache only.
     // It must not consume transcript event/byte budgets or be able to terminate
     // the turn — the contract treats these as non-durable no-ops.
-    if (event.type === 'thread_usage' || event.type === 'account_limits') {
+    if (
+      event.type === 'thread_usage' ||
+      event.type === 'account_limits' ||
+      // A slash-command catalog is the same shape of thing: streamed for the
+      // composer's palette, persisted nowhere. Charging it would let a vendor
+      // that re-announces mid-turn spend a turn's budget on a menu.
+      event.type === 'commands_available'
+    ) {
       return { durable: false };
     }
 
@@ -256,7 +263,9 @@ export class ExternalTurnTranscript {
       case 'commands_available':
         // What the user may type next, not what the agent said. Persisting it
         // would replay a catalog into a reloaded transcript long after the
-        // session that announced it stopped existing.
+        // session that announced it stopped existing. Unreachable — `apply`
+        // exempts it above, the way it does `thread_usage` — but the switch is
+        // the union's exhaustiveness check and every member has to name itself.
         return { durable: false };
 
       case 'text_delta':
