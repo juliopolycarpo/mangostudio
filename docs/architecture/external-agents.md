@@ -183,6 +183,13 @@ give it, and its `__`-prefixed internals. Whether `/compact` behaves the same un
 does in the REPL is the vendor's answer to give, so a hand-maintained list of "commands we think
 are interactive" is not kept.
 
+That makes `terminal_slash_commands` load-bearing, and it is **newer than the oldest Claude build
+the adapter supports** (`2.1.211`). A run that does not state the list — because it answered with a
+scalar, or because it predates the field, as the recorded `2.1.226` fixture does while still
+announcing `doctor` and `color` — gets **no catalog at all** rather than one that quietly publishes
+names needing a terminal. The composer falls back to the library scan there, the same way it does
+before a target's first turn.
+
 Codex has no catalog to send, and the composer falls back to the library's scan of
 `~/.codex/prompts` for it — which is the same fallback every target uses before its first turn.
 Giving MangoStudio's own runner real commands is [#961](https://github.com/juliopolycarpo/mangostudio/issues/961);

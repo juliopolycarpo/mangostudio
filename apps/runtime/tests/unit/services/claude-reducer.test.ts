@@ -58,17 +58,17 @@ describe('ClaudeTurnReducer, on a recorded read-a-file turn', () => {
     expect(inits[0]?.permissionMode).toBe('plan');
   });
 
-  it('announces the run’s slash commands alongside the session', () => {
+  /**
+   * The recording is a `2.1.226` run: it lists 71 names under `slash_commands`
+   * — `gh` and `dataviz` among them, but `doctor`, `color`, `clear` and
+   * `heapdump` too — and carries no `terminal_slash_commands`. That build is
+   * inside the supported range, so this is the shape a real user hits, and the
+   * only honest answer to it is no catalog at all. `the init record’s
+   * slash-command list` covers the runs that do state their exclusions.
+   */
+  it('announces no catalog for a run that predates the terminal-only list', () => {
     const { events } = reduceAll('claude-read-turn.jsonl');
-    const catalog = events.find((event) => event.type === 'commands_available');
-
-    // Every name arrives without help text: Claude Code announces the list and
-    // no descriptions, which is why the neutral entry's is optional.
-    expect(catalog).toMatchObject({ type: 'commands_available' });
-    const commands = catalog?.type === 'commands_available' ? catalog.commands : [];
-    expect(commands).toContainEqual({ name: 'gh' });
-    // Skills are announced under the same prefix and are not a second heading.
-    expect(commands).toContainEqual({ name: 'dataviz' });
+    expect(events.find((event) => event.type === 'commands_available')).toBeUndefined();
   });
 
   it('reports the resume state it was opened with rather than inferring one', () => {
@@ -394,10 +394,23 @@ describe('the init record’s slash-command list', () => {
     ).toEqual([]);
   });
 
+  /**
+   * The same rule, for the case that actually ships: `terminal_slash_commands`
+   * is newer than the oldest build this adapter supports, and the ones without
+   * it still announce `doctor` and `color` under `slash_commands`. An absent
+   * list is a run that has told us nothing, not a run that excluded nothing.
+   */
+  it('says nothing when the run predates the terminal-only list', () => {
+    expect(catalogFrom({ session_id: 'a', slash_commands: ['review', 'doctor', 'color'] })).toEqual(
+      []
+    );
+  });
+
   it('withholds the CLI’s private plumbing', () => {
     const commands = catalogFrom({
       session_id: 'a',
       slash_commands: ['__remote-workflow', 'compact'],
+      terminal_slash_commands: [],
     });
     expect(commands.map((command) => command.name)).toEqual(['compact']);
   });
@@ -407,7 +420,9 @@ describe('the init record’s slash-command list', () => {
    * palette is useful without a session handle it does not need.
    */
   it('announces the catalog even when the run carried no session id', () => {
-    expect(catalogFrom({ slash_commands: ['review'] })).toEqual([{ name: 'review' }]);
+    expect(catalogFrom({ slash_commands: ['review'], terminal_slash_commands: [] })).toEqual([
+      { name: 'review' },
+    ]);
   });
 
   it('says nothing when the run announced no list at all', () => {

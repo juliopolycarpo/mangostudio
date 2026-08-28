@@ -43,6 +43,20 @@ const RECORDED_INIT = RECORDED[0];
 const RECORDED_SESSION_ID = 'b01414e7-4b4b-43a2-9109-a33e21664340';
 
 /**
+ * The same record with the one field a `2.1.226` recording cannot have.
+ *
+ * `terminal_slash_commands` arrived after this recording was taken, and the
+ * adapter withholds the whole catalog without it — deliberately, since that
+ * build announces `doctor` and `color` as ordinary commands. A test about what
+ * the catalog does on the wire needs a run that stated its exclusions, so the
+ * empty list is added here rather than faking a whole init record.
+ */
+const RECORDED_INIT_WITH_EXCLUSIONS = JSON.stringify({
+  ...(JSON.parse(RECORDED_INIT ?? '{}') as Record<string, unknown>),
+  terminal_slash_commands: [],
+});
+
+/**
  * The recording up to the point where the `Read` call is open and its result has
  * not arrived. A failure here has an activity to close.
  */
@@ -299,7 +313,7 @@ describe('a cancelled turn', () => {
   it('closes the stream without putting a failure in the transcript', async () => {
     const hold = Promise.withResolvers<void>();
     const { adapter, context } = await openSession([
-      { lines: [RECORDED_INIT], hold: hold.promise },
+      { lines: [RECORDED_INIT_WITH_EXCLUSIONS], hold: hold.promise },
     ]);
     const iterator = startTurn(adapter, context)[Symbol.asyncIterator]();
 

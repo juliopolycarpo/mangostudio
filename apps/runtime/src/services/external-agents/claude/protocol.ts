@@ -159,15 +159,17 @@ export function initCapabilities(record: ClaudeInitRecord): readonly string[] | 
 
 /**
  * Names a run announced but cannot act on outside an interactive terminal, or
- * `undefined` when the run stated that list in a shape this cannot read.
+ * `undefined` when the run did not state that list in a shape this can read.
  *
- * Absent is not the same as unreadable: a run that names no terminal-only
- * command withholds nothing, while one that answers with a scalar or an object
- * has told us something we failed to understand.
+ * Absent counts as unreadable, and that is the whole point. `2.1.226` — a build
+ * inside this adapter's supported range, and the one every fixture here was
+ * recorded from — announces `doctor`, `color`, `clear` and `heapdump` in
+ * `slash_commands` and carries no `terminal_slash_commands` at all. Reading
+ * absence as "this run excluded nothing" would publish exactly those names as
+ * usable on every build that predates the field.
  */
 function terminalOnlyCommands(record: ClaudeInitRecord): ReadonlySet<string> | undefined {
   const names = record.terminal_slash_commands;
-  if (names === undefined) return new Set();
   if (!Array.isArray(names)) return undefined;
   return new Set(names.filter((value): value is string => typeof value === 'string'));
 }
@@ -189,10 +191,11 @@ export function initSlashCommands(record: ClaudeInitRecord): readonly string[] |
   const names = record.slash_commands;
   if (!Array.isArray(names)) return undefined;
   const terminalOnly = terminalOnlyCommands(record);
-  // Withholding is the promise this catalog makes, so a run whose exclusion
-  // list could not be read gets no catalog rather than one that quietly
-  // includes names the vendor said need a terminal. The composer still has the
-  // library's scan of the same directories to fall back on.
+  // Withholding is the promise this catalog makes, so a run that did not state
+  // its exclusion list — because it answered with a scalar, or because it is a
+  // build from before the field existed — gets no catalog rather than one that
+  // quietly includes names the vendor needs a terminal for. The composer still
+  // has the library's scan of the same directories to fall back on.
   if (!terminalOnly) return undefined;
   return names.filter(
     (value): value is string =>
