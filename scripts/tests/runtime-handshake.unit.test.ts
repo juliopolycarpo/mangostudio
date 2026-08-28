@@ -170,6 +170,18 @@ describe('scripts/lib/runtime-handshake', () => {
       expect(probe.failure).toContain('exited with code 7');
       expect(probe.stderr).toContain('dying');
     });
+
+    // A bare newline is a line, not a missing frame: the caller's guard has to
+    // be `hello === null`, so the probe must not blur the two.
+    test('reports an empty first line as a handshake line, not a failure', async () => {
+      const probe = await probeRuntimeHandshake({
+        command: standIn(`await Bun.write(Bun.stdout, '\\n');${NEVER_RESOLVES}`),
+        timeoutMs: ANSWERING_TIMEOUT_MS,
+      });
+
+      expect(probe.hello).toBe('');
+      expect(probe.failure).toBeNull();
+    });
   });
 });
 

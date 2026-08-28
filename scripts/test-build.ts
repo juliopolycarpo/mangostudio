@@ -333,7 +333,10 @@ async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Pro
     timeoutMs: RUNTIME_HANDSHAKE_TIMEOUT_MS,
   });
 
-  if (!probe.hello) reportFailedHandshake(label, probe);
+  // `=== null`, not falsy: a child whose first record is a bare newline greets
+  // with an empty line, and that belongs in the JSON check below with a real
+  // message, not in the failure report with a `null` cause.
+  if (probe.hello === null) reportFailedHandshake(label, probe);
 
   // Guarded on the success path too: a runtime can greet and still have failed
   // to resolve a chunk it needs later, and that is worth failing the smoke.
