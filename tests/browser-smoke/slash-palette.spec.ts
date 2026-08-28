@@ -21,6 +21,27 @@ test('the composer answers a slash with the command palette', async ({ page }) =
   const composer = page.getByTestId('composer');
   await expect(composer).toBeVisible({ timeout: 20_000 });
 
+  // A hub with no default working directory in `workspaceSettings` opens the
+  // folder picker over an existing chat by itself (`use-runner-selection`), and
+  // it is a modal whose backdrop swallows every click below it — a click waits
+  // for a hit target it never gets, rather than failing fast.
+  //
+  // Conditional because whether it appears depends on the hub under the suite,
+  // not on this spec: a fresh one always shows it, and `reuseExistingServer`
+  // means a local run without CI set reuses a dev server whose chat is already
+  // bound and shows nothing. Reproduce the CI shape with `CI=true bun run test
+  // --e2e`, and run the whole suite — the chat this picker needs is left behind
+  // by an alphabetically earlier spec.
+  const workdirPicker = page.getByRole('dialog', { name: 'Working directory' });
+  const pickerOpened = await workdirPicker
+    .waitFor({ state: 'visible', timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (pickerOpened) {
+    await page.keyboard.press('Escape');
+    await expect(workdirPicker).toBeHidden({ timeout: 10_000 });
+  }
+
   // Located by element, not by role: the composer is a `textbox` until the
   // palette opens and a `combobox` while it is open, and a role-based locator
   // re-resolves between the two and finds nothing.
