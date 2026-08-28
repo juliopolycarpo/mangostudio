@@ -1987,12 +1987,14 @@ export const messages: Messages = {
     tabs: {
       skills: 'Skills',
       subagents: 'Subagents',
+      commands: 'Commands',
       instructions: 'Instructions',
       settings: 'Settings',
     },
     kinds: {
       skill: 'Skill',
       subagent: 'Subagent',
+      command: 'Command',
       instruction: 'Instruction',
       setting: 'Setting',
       hook: 'Hook',

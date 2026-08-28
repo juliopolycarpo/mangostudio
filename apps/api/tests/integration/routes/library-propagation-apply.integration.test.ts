@@ -64,6 +64,7 @@ const INSTRUCTION_LOCATIONS: readonly LibraryLocationId[] = [
   'codex-instructions',
 ];
 const SUBAGENT_LOCATIONS: readonly LibraryLocationId[] = ['claude-agents', 'codex-agents'];
+const COMMAND_LOCATIONS: readonly LibraryLocationId[] = ['claude-commands', 'codex-prompts'];
 
 const LOCATION_DIRECTORIES: Record<string, readonly string[]> = {
   'mango-skills': ['.mango', 'skills'],
@@ -80,6 +81,10 @@ const INSTRUCTION_FILES: Record<string, readonly string[]> = {
 const SUBAGENT_FILES: Record<string, readonly string[]> = {
   'claude-agents': ['.claude', 'agents', 'reviewer.md'],
   'codex-agents': ['.codex', 'agents', 'reviewer.toml'],
+};
+const COMMAND_FILES: Record<string, readonly string[]> = {
+  'claude-commands': ['.claude', 'commands', 'deploy.md'],
+  'codex-prompts': ['.codex', 'prompts', 'deploy.md'],
 };
 
 let home: string;
@@ -132,6 +137,20 @@ function writeSubagent(locationId: LibraryLocationId, body: string): void {
   writeFileSync(path, body);
 }
 
+function commandPath(locationId: LibraryLocationId): string {
+  return join(home, ...(COMMAND_FILES[locationId] ?? []));
+}
+
+function writeCommand(locationId: LibraryLocationId, body: string): void {
+  const path = commandPath(locationId);
+  mkdirSync(join(path, '..'), { recursive: true });
+  writeFileSync(path, body);
+}
+
+function readCommand(locationId: LibraryLocationId): string {
+  return readFileSync(commandPath(locationId), 'utf8');
+}
+
 function makeDirectories(...locationIds: LibraryLocationId[]): void {
   for (const locationId of locationIds) {
     mkdirSync(join(home, ...(LOCATION_DIRECTORIES[locationId] ?? [])), { recursive: true });
@@ -159,6 +178,7 @@ function preview(request: PropagationPreviewRequest): Promise<PropagationPreview
     ...SKILL_LOCATIONS,
     ...INSTRUCTION_LOCATIONS,
     ...SUBAGENT_LOCATIONS,
+    ...COMMAND_LOCATIONS,
     'cursor-rules',
   ]);
   return previewLibraryPropagation(userId(), request, {
@@ -848,6 +868,58 @@ describe('propagation apply — file-backed resources', () => {
     );
     await expect(failure).rejects.toThrow(/destinations of differing formats/);
     expect(existsSync(join(home, '.cursor', 'rules', 'global.mdc'))).toBe(false);
+  });
+});
+
+/**
+ * `claude-commands` and `codex-prompts` are both `markdown-frontmatter`, so a
+ * copy between them never needs a format conversion — the same shape that
+ * makes a same-vendor skill copy a plain byte copy. This is the "propagate
+ * once, stays in sync" path end to end: preview, apply, and a fresh rescan
+ * confirming the two vendors read as one resource afterwards.
+ */
+describe('propagation apply — commands', () => {
+  it('offers a same-format destination with no adapter conversion, then stays in sync after apply', async () => {
+    writeCommand('claude-commands', '---\ndescription: Deploy the app\n---\nDeploy steps.\n');
+    mkdirSync(join(home, '.codex', 'prompts'), { recursive: true });
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['command:deploy'],
+      targetLocationIds: ['codex-prompts'],
+    };
+
+    const taken = await preview(request);
+    const entry = onlyEntry(taken);
+    const destination = entry.destinations.find((d) => d.locationId === 'codex-prompts');
+    if (!destination) throw new Error('Expected a codex-prompts destination.');
+    const outcome = destination.outcomes.find(
+      (candidate) => candidate.winnerContentHash === winnerFrom(entry, 'claude-commands')
+    );
+
+    expect(destination.blockedReason).toBeUndefined();
+    expect(destination.toFormat).toBe('markdown-frontmatter');
+    expect(outcome?.operation).toBe('create');
+    // Both vendors store a command the same way, so there is no conversion to
+    // decide and no `adaptation` to report. This is the property the whole kind
+    // rests on: the bytes cross unchanged, which is what leaves the two copies
+    // comparable on the rescan below instead of permanently divergent.
+    expect(outcome?.adaptation).toBeUndefined();
+
+    const result = await applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [adoptAll(entry, winnerFrom(entry, 'claude-commands'))]),
+      applyDeps()
+    );
+
+    expect(result.failed).toEqual([]);
+    expect(readCommand('codex-prompts')).toBe(readCommand('claude-commands'));
+    expect(result.applied[0]).toMatchObject({
+      locationId: 'codex-prompts',
+      operation: 'create',
+      contentHash: winnerFrom(entry, 'claude-commands'),
+    });
+
+    const rescan = await preview(request);
+    expect(onlyEntry(rescan).divergence).toBe('uniform');
   });
 });
 

@@ -26,6 +26,7 @@ import {
   ShieldOff,
   SlidersHorizontal,
   Sparkles,
+  SquareSlash,
   UploadCloud,
   Webhook,
 } from 'lucide-react';
@@ -48,6 +49,7 @@ const QUOTA_WARNING_PERCENT = 90;
 const PROPAGATION_ICONS: Record<ResourceKind, LucideIcon> = {
   skill: Sparkles,
   subagent: Bot,
+  command: SquareSlash,
   instruction: FileText,
   setting: SlidersHorizontal,
   hook: Webhook,

@@ -2013,12 +2013,14 @@ export const messages = {
     tabs: {
       skills: 'Skills',
       subagents: 'Subagentes',
+      commands: 'Comandos',
       instructions: 'Instruções',
       settings: 'Configurações',
     },
     kinds: {
       skill: 'Skill',
       subagent: 'Subagente',
+      command: 'Comando',
       instruction: 'Instrução',
       setting: 'Configuração',
       hook: 'Hook',

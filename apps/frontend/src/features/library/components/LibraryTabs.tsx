@@ -18,6 +18,7 @@ export function LibraryTabs() {
       tabs={[
         { to: '/environments/library/skills', label: t.library.tabs.skills, search },
         { to: '/environments/library/subagents', label: t.library.tabs.subagents, search },
+        { to: '/environments/library/commands', label: t.library.tabs.commands, search },
         { to: '/environments/library/instructions', label: t.library.tabs.instructions, search },
         { to: '/environments/library/settings', label: t.library.tabs.settings, search },
       ]}

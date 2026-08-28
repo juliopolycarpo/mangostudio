@@ -257,6 +257,29 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     readBy: ['cursor'],
   },
   {
+    id: 'claude-commands',
+    kind: 'command',
+    scope: 'home',
+    resolvePath: claudePath('commands'),
+    access: 'read-write',
+    layout: 'directory-of-files',
+    format: 'markdown-frontmatter',
+    readBy: ['claude'],
+  },
+  {
+    // Codex calls these "custom prompts" and reads only the top level of this
+    // directory. `directory-of-files` scans exactly that, so a nested file is
+    // skipped here for the same reason Codex never offers it.
+    id: 'codex-prompts',
+    kind: 'command',
+    scope: 'home',
+    resolvePath: codexPath('prompts'),
+    access: 'read-write',
+    layout: 'directory-of-files',
+    format: 'markdown-frontmatter',
+    readBy: ['codex'],
+  },
+  {
     id: 'mango-instructions',
     kind: 'instruction',
     scope: 'home',
@@ -387,6 +410,11 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
     reads: {
       skill: ['mango-skills', 'agents-skills', 'claude-skills'],
       subagent: ['mango-agents'],
+      // MangoStudio has no slash commands of its own. A `.mango/commands`
+      // directory would put a tick in this column for files nothing ever loads,
+      // which is a worse answer than the honest empty one — and propagation
+      // needs no hub location to keep two vendors in step.
+      command: [],
       instruction: ['mango-instructions'],
       setting: ['mango-settings'],
       hook: [],
@@ -399,6 +427,7 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
     reads: {
       skill: ['claude-skills'],
       subagent: ['claude-agents'],
+      command: ['claude-commands'],
       instruction: ['claude-instructions'],
       setting: ['claude-settings'],
       hook: ['claude-hooks'],
@@ -411,6 +440,7 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
     reads: {
       skill: ['codex-skills', 'agents-skills'],
       subagent: ['codex-agents'],
+      command: ['codex-prompts'],
       instruction: ['codex-instructions'],
       setting: ['codex-settings'],
       hook: ['codex-hooks', 'codex-permission-rules'],
@@ -423,6 +453,11 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
     reads: {
       skill: ['cursor-skills', 'cursor-skills-builtin'],
       subagent: ['cursor-agents'],
+      // Cursor's commands are repository files (`.cursor/commands`), and no
+      // home-scoped equivalent is documented. Claiming one would scan a
+      // directory that does not exist and report every command as absent from
+      // a target that may well have it checked into a repo.
+      command: [],
       instruction: ['cursor-rules'],
       setting: ['cursor-settings'],
       hook: [],
@@ -483,6 +518,7 @@ export function listLibraryTargetDescriptors(): LibraryTargetDescriptor[] {
     reads: {
       skill: [...target.reads.skill],
       subagent: [...target.reads.subagent],
+      command: [...target.reads.command],
       instruction: [...target.reads.instruction],
       setting: [...target.reads.setting],
       hook: [...target.reads.hook],

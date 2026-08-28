@@ -49,6 +49,7 @@ import { Route as AuthenticatedSettingsToolsRouteImport } from './routes/_authen
 import { Route as AuthenticatedEnvironmentsLibraryIndexRouteImport } from './routes/_authenticated/environments/library/index'
 import { Route as AuthenticatedEnvironmentsLibraryResourceKeyRouteImport } from './routes/_authenticated/environments/library/$resourceKey'
 import { Route as AuthenticatedEnvironmentsLibraryBackupsRouteImport } from './routes/_authenticated/environments/library/backups'
+import { Route as AuthenticatedEnvironmentsLibraryCommandsRouteImport } from './routes/_authenticated/environments/library/commands'
 import { Route as AuthenticatedEnvironmentsLibraryInstructionsRouteImport } from './routes/_authenticated/environments/library/instructions'
 import { Route as AuthenticatedEnvironmentsLibrarySettingsRouteImport } from './routes/_authenticated/environments/library/settings'
 import { Route as AuthenticatedEnvironmentsLibrarySkillsRouteImport } from './routes/_authenticated/environments/library/skills'
@@ -287,6 +288,12 @@ const AuthenticatedEnvironmentsLibraryBackupsRoute =
     path: '/backups',
     getParentRoute: () => AuthenticatedEnvironmentsLibraryRoute,
   } as any)
+const AuthenticatedEnvironmentsLibraryCommandsRoute =
+  AuthenticatedEnvironmentsLibraryCommandsRouteImport.update({
+    id: '/commands',
+    path: '/commands',
+    getParentRoute: () => AuthenticatedEnvironmentsLibraryRoute,
+  } as any)
 const AuthenticatedEnvironmentsLibraryInstructionsRoute =
   AuthenticatedEnvironmentsLibraryInstructionsRouteImport.update({
     id: '/instructions',
@@ -363,6 +370,7 @@ export interface FileRoutesByFullPath {
   '/settings/': typeof AuthenticatedSettingsIndexRoute
   '/environments/library/$resourceKey': typeof AuthenticatedEnvironmentsLibraryResourceKeyRoute
   '/environments/library/backups': typeof AuthenticatedEnvironmentsLibraryBackupsRoute
+  '/environments/library/commands': typeof AuthenticatedEnvironmentsLibraryCommandsRoute
   '/environments/library/instructions': typeof AuthenticatedEnvironmentsLibraryInstructionsRoute
   '/environments/library/settings': typeof AuthenticatedEnvironmentsLibrarySettingsRoute
   '/environments/library/skills': typeof AuthenticatedEnvironmentsLibrarySkillsRoute
@@ -406,6 +414,7 @@ export interface FileRoutesByTo {
   '/settings': typeof AuthenticatedSettingsIndexRoute
   '/environments/library/$resourceKey': typeof AuthenticatedEnvironmentsLibraryResourceKeyRoute
   '/environments/library/backups': typeof AuthenticatedEnvironmentsLibraryBackupsRoute
+  '/environments/library/commands': typeof AuthenticatedEnvironmentsLibraryCommandsRoute
   '/environments/library/instructions': typeof AuthenticatedEnvironmentsLibraryInstructionsRoute
   '/environments/library/settings': typeof AuthenticatedEnvironmentsLibrarySettingsRoute
   '/environments/library/skills': typeof AuthenticatedEnvironmentsLibrarySkillsRoute
@@ -455,6 +464,7 @@ export interface FileRoutesById {
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
   '/_authenticated/environments/library/$resourceKey': typeof AuthenticatedEnvironmentsLibraryResourceKeyRoute
   '/_authenticated/environments/library/backups': typeof AuthenticatedEnvironmentsLibraryBackupsRoute
+  '/_authenticated/environments/library/commands': typeof AuthenticatedEnvironmentsLibraryCommandsRoute
   '/_authenticated/environments/library/instructions': typeof AuthenticatedEnvironmentsLibraryInstructionsRoute
   '/_authenticated/environments/library/settings': typeof AuthenticatedEnvironmentsLibrarySettingsRoute
   '/_authenticated/environments/library/skills': typeof AuthenticatedEnvironmentsLibrarySkillsRoute
@@ -504,6 +514,7 @@ export interface FileRouteTypes {
     | '/settings/'
     | '/environments/library/$resourceKey'
     | '/environments/library/backups'
+    | '/environments/library/commands'
     | '/environments/library/instructions'
     | '/environments/library/settings'
     | '/environments/library/skills'
@@ -547,6 +558,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/environments/library/$resourceKey'
     | '/environments/library/backups'
+    | '/environments/library/commands'
     | '/environments/library/instructions'
     | '/environments/library/settings'
     | '/environments/library/skills'
@@ -595,6 +607,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/'
     | '/_authenticated/environments/library/$resourceKey'
     | '/_authenticated/environments/library/backups'
+    | '/_authenticated/environments/library/commands'
     | '/_authenticated/environments/library/instructions'
     | '/_authenticated/environments/library/settings'
     | '/_authenticated/environments/library/skills'
@@ -892,6 +905,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedEnvironmentsLibraryBackupsRouteImport
       parentRoute: typeof AuthenticatedEnvironmentsLibraryRoute
     }
+    '/_authenticated/environments/library/commands': {
+      id: '/_authenticated/environments/library/commands'
+      path: '/commands'
+      fullPath: '/environments/library/commands'
+      preLoaderRoute: typeof AuthenticatedEnvironmentsLibraryCommandsRouteImport
+      parentRoute: typeof AuthenticatedEnvironmentsLibraryRoute
+    }
     '/_authenticated/environments/library/instructions': {
       id: '/_authenticated/environments/library/instructions'
       path: '/instructions'
@@ -940,6 +960,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedEnvironmentsLibraryRouteChildren {
   AuthenticatedEnvironmentsLibraryResourceKeyRoute: typeof AuthenticatedEnvironmentsLibraryResourceKeyRoute
   AuthenticatedEnvironmentsLibraryBackupsRoute: typeof AuthenticatedEnvironmentsLibraryBackupsRoute
+  AuthenticatedEnvironmentsLibraryCommandsRoute: typeof AuthenticatedEnvironmentsLibraryCommandsRoute
   AuthenticatedEnvironmentsLibraryInstructionsRoute: typeof AuthenticatedEnvironmentsLibraryInstructionsRoute
   AuthenticatedEnvironmentsLibrarySettingsRoute: typeof AuthenticatedEnvironmentsLibrarySettingsRoute
   AuthenticatedEnvironmentsLibrarySkillsRoute: typeof AuthenticatedEnvironmentsLibrarySkillsRoute
@@ -953,6 +974,8 @@ const AuthenticatedEnvironmentsLibraryRouteChildren: AuthenticatedEnvironmentsLi
       AuthenticatedEnvironmentsLibraryResourceKeyRoute,
     AuthenticatedEnvironmentsLibraryBackupsRoute:
       AuthenticatedEnvironmentsLibraryBackupsRoute,
+    AuthenticatedEnvironmentsLibraryCommandsRoute:
+      AuthenticatedEnvironmentsLibraryCommandsRoute,
     AuthenticatedEnvironmentsLibraryInstructionsRoute:
       AuthenticatedEnvironmentsLibraryInstructionsRoute,
     AuthenticatedEnvironmentsLibrarySettingsRoute:

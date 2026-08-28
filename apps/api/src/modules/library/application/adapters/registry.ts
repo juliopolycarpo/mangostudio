@@ -88,6 +88,7 @@ export class FormatAdapterRegistry implements AdapterCatalog {
 const RESOURCE_KINDS: readonly ResourceKind[] = [
   'skill',
   'subagent',
+  'command',
   'instruction',
   'setting',
   'hook',

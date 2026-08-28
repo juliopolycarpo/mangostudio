@@ -30,7 +30,7 @@ function targetDescriptor(
   return {
     id,
     displayNameKey: `library.targets.${id}`,
-    reads: { skill, subagent: [], instruction: [], setting: [], hook: [] },
+    reads: { skill, subagent: [], command: [], instruction: [], setting: [], hook: [] },
   };
 }
 
