@@ -304,6 +304,9 @@ describe('a cancelled turn', () => {
     const iterator = startTurn(adapter, context)[Symbol.asyncIterator]();
 
     expect((await iterator.next()).value).toMatchObject({ type: 'session_started' });
+    // The same `system/init` record also carries the run's command catalog, so
+    // it is already queued behind the session event before the cancel lands.
+    expect((await iterator.next()).value).toMatchObject({ type: 'commands_available' });
     await adapter.cancel({
       sessionId: 'chat-1',
       nativeSessionId: MINTED_SESSION_ID,

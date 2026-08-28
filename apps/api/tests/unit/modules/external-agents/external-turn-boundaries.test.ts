@@ -186,6 +186,9 @@ describe('external turn boundaries', () => {
       'activity_updated',
       'approval_requested',
       'approval_resolved',
+      // Names the user may type. It asks the hub to run nothing, and the hub
+      // does not resolve one — the vendor expands it on the next prompt.
+      'commands_available',
       'completed',
       'error',
       'reasoning_delta',
