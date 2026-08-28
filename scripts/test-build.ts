@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startFakeChatGptServer } from '../apps/api/tests/support/chatgpt/fake-server';
 import { extractTarArchive } from './lib/archive';
+import { pumpStream, readFirstLine } from './lib/child-streams';
 import {
   DISTRIBUTION_MANIFEST_FILE,
   readDistributionManifest,
@@ -333,8 +334,9 @@ async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Pro
   });
 
   try {
-    const hello = await readFirstLine(child.stdout, RUNTIME_HANDSHAKE_TIMEOUT_MS);
-    if (!hello) fail(`${label} --stdio sent no handshake frame`);
+    const read = await readFirstLine(child.stdout, RUNTIME_HANDSHAKE_TIMEOUT_MS);
+    if (read.kind !== 'line') fail(`${label} --stdio sent no handshake frame`);
+    const hello = read.line;
 
     let frame: { type?: string; runtimeVersion?: string; manifest?: { platform?: string } };
     try {
@@ -352,36 +354,6 @@ async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Pro
     child.stdin.end();
     child.kill();
     await child.exited.catch(() => undefined as undefined);
-  }
-}
-
-/**
- * Reads one newline-terminated record, or null if the deadline passes first.
- *
- * Deliberately hand-rolled rather than reusing `RuntimeFrameDecoder`: this
- * script runs in the smoke matrix with `--no-install`, so it must have no
- * external runtime imports — `scripts/tests/smoke-dependencies.unit.test.ts`
- * enforces that. The shape assertions above stand in for schema validation.
- */
-async function readFirstLine(
-  stream: ReadableStream<Uint8Array>,
-  timeoutMs: number
-): Promise<string | null> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  const deadline = Bun.sleep(timeoutMs).then(() => null);
-  let buffered = '';
-
-  try {
-    while (true) {
-      const chunk = await Promise.race([reader.read(), deadline]);
-      if (!chunk || chunk.done) return null;
-      buffered += decoder.decode(chunk.value, { stream: true });
-      const newline = buffered.indexOf('\n');
-      if (newline !== -1) return buffered.slice(0, newline);
-    }
-  } finally {
-    reader.releaseLock();
   }
 }
 
@@ -572,7 +544,6 @@ async function smokeTest(): Promise<void> {
   const authBaseUrl = `http://127.0.0.1:${PORT}`;
   const chatGptSmokeEnabled = canBindChatGptCallbackPort();
   const fakeChatGpt = chatGptSmokeEnabled ? startFakeChatGptServer() : null;
-  let serverStderr = '';
 
   // The binary is a CLI; bare invocation prints help, so start the server
   // explicitly in the foreground (API_PORT is honored by `serve`).
@@ -602,18 +573,7 @@ async function smokeTest(): Promise<void> {
     stderr: 'pipe',
   });
 
-  const stderrReader = proc.stderr.getReader();
-  const stderrPump = (async () => {
-    const decoder = new TextDecoder();
-    while (true) {
-      const { done, value } = await stderrReader.read();
-      if (done) break;
-      if (value) {
-        serverStderr += decoder.decode(value, { stream: true });
-      }
-    }
-    serverStderr += decoder.decode();
-  })();
+  const serverStderr = pumpStream(proc.stderr);
 
   try {
     console.log('   Waiting for server to be ready...');
@@ -865,7 +825,7 @@ async function smokeTest(): Promise<void> {
       const sessionCookie = buildSessionCookieHeader(signupResponse);
 
       console.log('\n🔌 Running deprecated Cursor connector smoke...');
-      await smokeDeprecatedCursorConnector(PORT, sessionCookie, serverStderr);
+      await smokeDeprecatedCursorConnector(PORT, sessionCookie, serverStderr.text());
 
       if (fakeChatGpt) {
         console.log('\n🔌 Running ChatGPT connector smoke...');
@@ -879,7 +839,7 @@ async function smokeTest(): Promise<void> {
   } finally {
     proc.kill();
     await proc.exited.catch(() => undefined as undefined);
-    await stderrPump.catch(() => undefined as undefined);
+    await serverStderr.done.catch(() => undefined as undefined);
     fakeChatGpt?.stop();
     removeTempDir(tmpHome);
   }
