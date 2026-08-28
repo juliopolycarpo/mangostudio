@@ -137,4 +137,43 @@ describe('useSlashCommands — skills', () => {
       expect(result.current.entries.map((entry) => entry.name)).toEqual(['dataviz']);
     });
   });
+
+  /**
+   * Regression for a race between the two sources: `/api/skills` can answer
+   * before `/api/chats/:id/capabilities` does, and a palette that fell back to
+   * unfiltered for that gap would offer `/dataviz` a beat before the profile
+   * check has actually run — the same beat `appendSkillsPromptSection` reads to
+   * decide whether the turn gets a prompt section for it at all.
+   */
+  it('withholds skills while the capability projection is still in flight', async () => {
+    const respondToApp = scenario.fetchMock.getMockImplementation();
+    if (!respondToApp) throw new Error('fetch scenario has no implementation to wrap');
+
+    let releaseCapabilities: (() => void) | undefined;
+    const capabilitiesGate = new Promise<void>((resolve) => {
+      releaseCapabilities = resolve;
+    });
+
+    scenario.fetchMock.mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      if (url.includes('/capabilities')) await capabilitiesGate;
+      return respondToApp(input, init);
+    });
+    scenario.respondWithJson('GET', '/api/chats/chat-1/capabilities', {
+      body: capabilities('enabled'),
+    });
+
+    const { result } = renderPalette('chat-1');
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(true);
+    });
+    expect(result.current.entries).toEqual([]);
+
+    releaseCapabilities?.();
+
+    await waitFor(() => {
+      expect(result.current.entries.map((entry) => entry.name)).toEqual(['dataviz']);
+    });
+  });
 });

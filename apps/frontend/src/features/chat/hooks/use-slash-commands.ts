@@ -194,8 +194,14 @@ export function useSlashCommands({
     //
     // Home screen aside: with no chat there is no profile to ask about, so the
     // palette offers what the user has installed and the first turn decides.
+    // `advertisedKeys === undefined` alone would also cover a projection still
+    // in flight, and falling back to unfiltered there too would let the
+    // palette advertise a skill this turn's tool profile ends up excluding —
+    // offering `/name` a beat before `appendSkillsPromptSection` would agree
+    // to write its prompt section. `isLoading` is what tells "in flight" apart
+    // from "unasked" and "failed", both of which still fail open below.
     const skillEntries: SlashCommandEntry[] =
-      targetId !== null
+      targetId !== null || capabilitiesQuery.isLoading
         ? []
         : (skills?.skills ?? [])
             .filter((skill) => skill.valid && skill.enabled && !skill.shadowed)
@@ -209,12 +215,18 @@ export function useSlashCommands({
             }));
 
     return mergeSlashCommands(sessionEntries, libraryEntries, skillEntries);
-  }, [session, library, skills, targetId, advertisedKeys]);
+  }, [session, library, skills, targetId, advertisedKeys, capabilitiesQuery.isLoading]);
 
   // Only the source this runner actually reads can hold the palette back, and
   // only while it is fetching: a *disabled* query reports `isPending` forever,
-  // so the other one would keep the menu silent for good.
-  const loading = targetId === null ? skillsQuery.isLoading : libraryQuery.isLoading;
+  // so the other one would keep the menu silent for good. The capability
+  // projection joins the skill side for the same reason it withholds entries
+  // above — `isLoading` is `false` while it is disabled, so the home-screen
+  // case is unaffected.
+  const loading =
+    targetId === null
+      ? skillsQuery.isLoading || capabilitiesQuery.isLoading
+      : libraryQuery.isLoading;
 
   return { entries, loading };
 }
