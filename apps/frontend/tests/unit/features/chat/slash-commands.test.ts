@@ -52,6 +52,17 @@ describe('slashQueryAt', () => {
   it('stays closed on text with no slash at all', () => {
     expect(slashQueryAt('review this', 6)).toBeNull();
   });
+
+  /**
+   * An absolute path is a common opening token here, and no vendor command
+   * name contains a separator — Claude Code namespaces plugin commands with
+   * `:`, Cursor uses plain names. Without this the palette sits open over every
+   * path a user pastes into an empty composer.
+   */
+  it('treats a leading path as prose rather than a command', () => {
+    expect(slashQueryAt('/home/me/repo is broken', 5)).toBeNull();
+    expect(slashQueryAt('/usr/bin/env', 12)).toBeNull();
+  });
 });
 
 describe('applySlashCompletion', () => {

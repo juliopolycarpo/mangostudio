@@ -43,7 +43,13 @@ export function slashQueryAt(value: string, caret: number): string | null {
   // the user is writing arguments, and a palette over those would replace the
   // command they already chose.
   if (caret < 1 || caret > tokenEnd) return null;
-  return value.slice(1, tokenEnd);
+
+  const query = value.slice(1, tokenEnd);
+  // An absolute path is the common first token in this product — "/home/me/repo
+  // is broken" — and no vendor's command name has ever contained a separator:
+  // Claude Code namespaces plugin commands with `:`, Cursor uses plain names.
+  // Without this the palette sits open over every path the user types.
+  return query.includes('/') ? null : query;
 }
 
 /**

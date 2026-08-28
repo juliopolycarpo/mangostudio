@@ -135,4 +135,32 @@ describe('composer slash palette', () => {
 
     expect(screen.queryByRole('option')).toBeNull();
   });
+
+  /**
+   * A path is a common opening token, and a palette over one would both cover
+   * the composer and take the arrow keys the prompt history needs.
+   */
+  it('leaves the arrows alone while the user types a leading path', async () => {
+    const { onSubmit, user } = renderComposer();
+    const textbox = screen.getByRole('textbox');
+    await user.type(textbox, '/home/me/repo is broken');
+
+    expect(screen.queryByRole('listbox')).toBeNull();
+    await user.keyboard('{ArrowUp}{Enter}');
+    expect(onSubmit).toHaveBeenCalledWith('/home/me/repo is broken', undefined);
+  });
+
+  /**
+   * A name that matches nothing still says so, but the arrows stay the prompt
+   * history's — a menu with nothing in it has nothing to walk.
+   */
+  it('reports no match without taking the keyboard', async () => {
+    const { onSubmit, user } = renderComposer();
+    const textbox = screen.getByRole('textbox');
+    await user.type(textbox, '/nope');
+
+    expect(await screen.findByText('No command matches.')).toBeInTheDocument();
+    await user.keyboard('{ArrowDown}{Enter}');
+    expect(onSubmit).toHaveBeenCalledWith('/nope', undefined);
+  });
 });

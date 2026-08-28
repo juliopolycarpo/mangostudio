@@ -222,8 +222,15 @@ export function InputBar({
   // slash would be noise. Once the user has typed a name, "no match" is worth
   // saying, because the alternative is a menu that silently vanishes.
   const slashOpen = slashQuery !== null && (slashMatches.length > 0 || slashQuery.length > 0);
+  // Whether there is anything to *choose*. A palette showing "no match" must
+  // not also take the arrow keys: they are the prompt history's, and swallowing
+  // them would strand a user who typed a name that does not exist.
+  const slashSelectable = slashOpen && slashMatches.length > 0;
 
-  useEffect(() => setSlashIndex(0), [slashQuery]);
+  // The highlight resets when the query changes and when the list under it
+  // does — a catalog announced while the menu is open shortens the list, and an
+  // index left pointing past its end selects nothing on Enter.
+  useEffect(() => setSlashIndex(0), [slashQuery, slashMatches.length]);
 
   const completeSlashCommand = (entry: SlashCommandEntry) => {
     setPrompt(applySlashCompletion(prompt, entry.name));
@@ -301,17 +308,17 @@ export function InputBar({
     // The palette owns Enter and the arrows while it is open, which is why it
     // is handled before the submit and history branches rather than inside
     // them: choosing a command is what those keys mean on screen right now.
-    if (slashOpen) {
+    if (slashOpen && event.key === 'Escape') {
+      event.preventDefault();
+      setSlashDismissed(true);
+      return;
+    }
+    if (slashSelectable) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
         setSlashIndex((current) =>
           nextSlashIndex(current, slashMatches.length, event.key === 'ArrowDown' ? 1 : -1)
         );
-        return;
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setSlashDismissed(true);
         return;
       }
       const chosen = slashMatches[slashIndex];
@@ -468,6 +475,11 @@ export function InputBar({
               // prompt box, and claiming a role with no listbox behind it would
               // trade the composer's real semantics for a completion that
               // covers one token of it.
+              //
+              // The consequence to know: a *lazy* role-based locator — a
+              // Playwright `getByRole('textbox')`, not a resolved DOM node —
+              // stops matching while the palette is open. Address the textarea
+              // by element there.
               {...(slashOpen
                 ? ({
                     role: 'combobox',
