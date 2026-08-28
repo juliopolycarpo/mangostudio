@@ -35,10 +35,12 @@ export function SlashCommandMenu({ entries, activeIndex, listId, onSelect, onHig
   // Arrow keys can walk the highlight past the visible window, and a selection
   // the user cannot see is the same as no selection. Keyed on the index rather
   // than run once: on mount the highlight is always the first row, which is the
-  // one case that needed no scrolling.
+  // one case that needed no scrolling. `entries` is also a dependency: a new
+  // query can replace the list while the index stays `0`, and the row at that
+  // index is then a different DOM node the browser has never scrolled to.
   useEffect(() => {
     activeRef.current?.scrollIntoView({ block: 'nearest' });
-  }, [activeIndex]);
+  }, [activeIndex, entries]);
 
   // One container for both states. An empty listbox rather than a bare panel:
   // the composer points `aria-controls` at this id whenever the palette is
