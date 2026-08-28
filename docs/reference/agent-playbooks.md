@@ -238,6 +238,15 @@ The library is a section of the environments umbrella, not a top-level surface:
 its URLs live under `/environments/library`, and the sidebar reaches it through
 the Environments entry.
 
+A location is only scanned while it is switched on. Enablement lives in app
+settings (`profileSettings.<profile>.libraryLocations.home`), the scanner reads
+it through `enabledLibraryLocations`, and the Locations tab
+(`apps/frontend/src/features/library/hooks/use-location-settings.ts`) is where a user changes it.
+It is one setting for every machine, while the health beside each row is the
+selected machine's. MangoStudio's own directories are forced on by the
+normalizer and render locked. A tab that comes back empty is worth checking
+against that switch before it is read as "there is nothing on disk".
+
 There is no canonical copy of a resource: every location on every environment is
 a peer. When versions diverge, only a human picks the winner. The API refuses an
 apply that does not name one, and the UI is built so a user cannot reach that

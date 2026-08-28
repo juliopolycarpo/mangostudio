@@ -15,6 +15,7 @@ import { SkillSourceSchema } from '../../../src/skills';
 const RESOURCE_KINDS: ReadonlyArray<ResourceKind> = [
   'skill',
   'subagent',
+  'command',
   'instruction',
   'setting',
   'hook',

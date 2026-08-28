@@ -335,16 +335,20 @@ export function ResourceDetail({
 
 /** Which tab this resource lives under, for the back link. */
 function kindTab(resource: LibraryResource) {
+  // Exhaustive on purpose: a `default` here sends a kind nobody wired up to the
+  // skills tab, which looks like a working back link and is not one.
   switch (resource.ref.kind) {
+    case 'skill':
+      return '/environments/library/skills' as const;
     case 'subagent':
       return '/environments/library/subagents' as const;
+    case 'command':
+      return '/environments/library/commands' as const;
     case 'instruction':
       return '/environments/library/instructions' as const;
     case 'setting':
     case 'hook':
       return '/environments/library/settings' as const;
-    default:
-      return '/environments/library/skills' as const;
   }
 }
 

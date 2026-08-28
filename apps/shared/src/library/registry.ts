@@ -257,6 +257,49 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     readBy: ['cursor'],
   },
   {
+    id: 'claude-commands',
+    kind: 'command',
+    scope: 'home',
+    resolvePath: claudePath('commands'),
+    access: 'read-write',
+    layout: 'directory-of-files',
+    format: 'markdown-frontmatter',
+    readBy: ['claude'],
+  },
+  {
+    // Codex calls these "custom prompts" and reads only the top level of this
+    // directory. `directory-of-files` scans exactly that, so a nested file is
+    // skipped here for the same reason Codex never offers it.
+    id: 'codex-prompts',
+    kind: 'command',
+    scope: 'home',
+    resolvePath: codexPath('prompts'),
+    access: 'read-write',
+    layout: 'directory-of-files',
+    format: 'markdown-frontmatter',
+    readBy: ['codex'],
+  },
+  {
+    // Cursor's own "new command" flow writes here for a global command and into
+    // the repository for a project one, so the home directory is a first-class
+    // scope even though Cursor documents neither. Unlike the other two, Cursor
+    // walks this tree recursively; this layout reads only its top level.
+    //
+    // Reading it on a *remote* environment is the honest thing to report and
+    // still worth a caveat: Cursor loads the machine it runs on, so an SSH
+    // session serves commands from the developer's own home rather than the
+    // host's. The file being here is a fact about this machine; whether the
+    // Cursor session in front of the user loaded it is not ours to claim.
+    id: 'cursor-commands',
+    kind: 'command',
+    scope: 'home',
+    resolvePath: homePath('.cursor', 'commands'),
+    access: 'read-write',
+    layout: 'directory-of-files',
+    format: 'markdown-frontmatter',
+    readBy: ['cursor'],
+  },
+  {
     id: 'mango-instructions',
     kind: 'instruction',
     scope: 'home',
@@ -387,6 +430,11 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
     reads: {
       skill: ['mango-skills', 'agents-skills', 'claude-skills'],
       subagent: ['mango-agents'],
+      // MangoStudio has no slash commands of its own. A `.mango/commands`
+      // directory would put a tick in this column for files nothing ever loads,
+      // which is a worse answer than the honest empty one — and propagation
+      // needs no hub location to keep the vendors in step.
+      command: [],
       instruction: ['mango-instructions'],
       setting: ['mango-settings'],
       hook: [],
@@ -399,6 +447,7 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
     reads: {
       skill: ['claude-skills'],
       subagent: ['claude-agents'],
+      command: ['claude-commands'],
       instruction: ['claude-instructions'],
       setting: ['claude-settings'],
       hook: ['claude-hooks'],
@@ -411,6 +460,7 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
     reads: {
       skill: ['codex-skills', 'agents-skills'],
       subagent: ['codex-agents'],
+      command: ['codex-prompts'],
       instruction: ['codex-instructions'],
       setting: ['codex-settings'],
       hook: ['codex-hooks', 'codex-permission-rules'],
@@ -423,6 +473,7 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
     reads: {
       skill: ['cursor-skills', 'cursor-skills-builtin'],
       subagent: ['cursor-agents'],
+      command: ['cursor-commands'],
       instruction: ['cursor-rules'],
       setting: ['cursor-settings'],
       hook: [],
@@ -483,6 +534,7 @@ export function listLibraryTargetDescriptors(): LibraryTargetDescriptor[] {
     reads: {
       skill: [...target.reads.skill],
       subagent: [...target.reads.subagent],
+      command: [...target.reads.command],
       instruction: [...target.reads.instruction],
       setting: [...target.reads.setting],
       hook: [...target.reads.hook],

@@ -1987,12 +1987,15 @@ export const messages: Messages = {
     tabs: {
       skills: 'Skills',
       subagents: 'Subagents',
+      commands: 'Commands',
       instructions: 'Instructions',
       settings: 'Settings',
+      locations: 'Locations',
     },
     kinds: {
       skill: 'Skill',
       subagent: 'Subagent',
+      command: 'Command',
       instruction: 'Instruction',
       setting: 'Setting',
       hook: 'Hook',
@@ -2057,6 +2060,19 @@ export const messages: Messages = {
       'json-settings': 'JSON settings',
       'toml-settings': 'TOML settings',
       'rules-dsl': 'Rules',
+    },
+    locationSettings: {
+      description:
+        'Only the directories switched on here are scanned. This applies to every machine; the state beside each one is what the selected machine reports.',
+      scan: 'Scan',
+      /** Accessible name: every row's switch reads "Scan" on screen. */
+      scanLocation: 'Scan {location}',
+      alwaysOn: 'Always scanned',
+      alwaysOnHint: 'MangoStudio owns this directory and cannot be blind to it.',
+      entries: '{count} entries',
+      missing: 'does not exist yet',
+      readOnly: 'read-only',
+      unsupported: 'unavailable on this platform',
     },
     matrix: {
       resourceColumn: 'Resource',

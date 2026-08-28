@@ -97,7 +97,7 @@ describe('describeActivity', () => {
   });
 
   it('picks the row icon from the resource kind', () => {
-    const kinds = ['skill', 'subagent', 'instruction', 'setting', 'hook'] as const;
+    const kinds = ['skill', 'subagent', 'command', 'instruction', 'setting', 'hook'] as const;
     const icons = kinds.map(
       (resourceKind) =>
         describeActivity(

@@ -96,7 +96,12 @@ describe('library target registry', () => {
   });
 
   it('treats only kinds with a writable location as comparable', () => {
-    expect([...COMPARABLE_RESOURCE_KINDS].sort()).toEqual(['instruction', 'skill', 'subagent']);
+    expect([...COMPARABLE_RESOURCE_KINDS].sort()).toEqual([
+      'command',
+      'instruction',
+      'skill',
+      'subagent',
+    ]);
   });
 
   it('hashes only directory-of-dirs kinds with the directory domain', () => {
@@ -117,6 +122,60 @@ describe('library target registry', () => {
 
   it('keeps Codex native skills ahead of the shared agents location', () => {
     expect(getLibraryTarget('codex')?.reads.skill).toEqual(['codex-skills', 'agents-skills']);
+  });
+
+  it('reads commands from each vendor home that has one', () => {
+    expect(getLibraryTarget('claude')?.reads.command).toEqual(['claude-commands']);
+    expect(getLibraryTarget('codex')?.reads.command).toEqual(['codex-prompts']);
+    expect(getLibraryTarget('cursor')?.reads.command).toEqual(['cursor-commands']);
+  });
+
+  /**
+   * Absence here is a decision, not an omission: MangoStudio has no slash
+   * commands, so a location for it would report a coverage tick for files
+   * nothing loads.
+   */
+  it('claims no command home for the target that has no commands', () => {
+    expect(getLibraryTarget('mangostudio')?.reads.command).toEqual([]);
+  });
+
+  it('resolves command locations under each vendor config home, override included', () => {
+    expect(getLibraryLocation('claude-commands')?.resolvePath(LINUX_ENV)).toBe(
+      '/home/ada/.claude/commands'
+    );
+    expect(getLibraryLocation('codex-prompts')?.resolvePath(LINUX_ENV)).toBe(
+      '/home/ada/.codex/prompts'
+    );
+    expect(getLibraryLocation('cursor-commands')?.resolvePath(LINUX_ENV)).toBe(
+      '/home/ada/.cursor/commands'
+    );
+    expect(
+      getLibraryLocation('codex-prompts')?.resolvePath({
+        ...LINUX_ENV,
+        env: { CODEX_HOME: '/home/ada/dotfiles/codex' },
+      })
+    ).toBe('/home/ada/dotfiles/codex/prompts');
+  });
+
+  /**
+   * A command is one markdown file, so it is hashed as a file. Landing in the
+   * directory domain would make every command pair report `incomparable`
+   * against a runtime that hashes directories differently.
+   *
+   * One format across all three is what keeps a propagation a byte copy: a
+   * vendor modelled with a different format would need an adapter that does not
+   * exist, and every write to it would report `no-adapter-strategy`.
+   */
+  it('stores commands as flat markdown files in every home', () => {
+    for (const id of ['claude-commands', 'codex-prompts', 'cursor-commands'] as const) {
+      expect(getLibraryLocation(id)).toMatchObject({
+        kind: 'command',
+        scope: 'home',
+        layout: 'directory-of-files',
+        format: 'markdown-frontmatter',
+        access: 'read-write',
+      });
+    }
   });
 
   it('exposes schema-valid target descriptors with i18n keys', () => {
@@ -209,6 +268,7 @@ describe('library target registry', () => {
     expect(ids).toEqual([
       'claude-skills',
       'claude-agents',
+      'claude-commands',
       'claude-instructions',
       'claude-settings',
       'claude-hooks',

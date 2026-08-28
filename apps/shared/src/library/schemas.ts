@@ -5,6 +5,7 @@ import type { SkillSource } from '../skills';
 export const ResourceKindSchema = Type.Union([
   Type.Literal('skill'),
   Type.Literal('subagent'),
+  Type.Literal('command'),
   Type.Literal('instruction'),
   Type.Literal('setting'),
   Type.Literal('hook'),
@@ -348,6 +349,7 @@ export const ConceptComparisonListSchema = Type.Array(ConceptComparisonSchema);
 const LibraryTargetReadsSchema = Type.Object({
   skill: Type.Array(LibraryLocationIdSchema),
   subagent: Type.Array(LibraryLocationIdSchema),
+  command: Type.Array(LibraryLocationIdSchema),
   instruction: Type.Array(LibraryLocationIdSchema),
   setting: Type.Array(LibraryLocationIdSchema),
   hook: Type.Array(LibraryLocationIdSchema),

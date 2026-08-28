@@ -2013,12 +2013,15 @@ export const messages = {
     tabs: {
       skills: 'Skills',
       subagents: 'Subagentes',
+      commands: 'Comandos',
       instructions: 'Instruções',
       settings: 'Configurações',
+      locations: 'Locais',
     },
     kinds: {
       skill: 'Skill',
       subagent: 'Subagente',
+      command: 'Comando',
       instruction: 'Instrução',
       setting: 'Configuração',
       hook: 'Hook',
@@ -2081,6 +2084,19 @@ export const messages = {
       'json-settings': 'Configuração JSON',
       'toml-settings': 'Configuração TOML',
       'rules-dsl': 'Regras',
+    },
+    locationSettings: {
+      description:
+        'Só os diretórios ligados aqui são varridos. Isso vale para todas as máquinas; o estado ao lado de cada um é o que a máquina selecionada relata.',
+      scan: 'Varrer',
+      /** Nome acessível: o switch de cada linha mostra só "Varrer" na tela. */
+      scanLocation: 'Varrer {location}',
+      alwaysOn: 'Sempre varrido',
+      alwaysOnHint: 'Este diretório é do MangoStudio e ele não pode ficar cego a ele.',
+      entries: '{count} entradas',
+      missing: 'ainda não existe',
+      readOnly: 'somente leitura',
+      unsupported: 'indisponível nesta plataforma',
     },
     matrix: {
       resourceColumn: 'Recurso',

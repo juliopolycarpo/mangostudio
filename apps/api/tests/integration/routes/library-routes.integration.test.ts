@@ -1,6 +1,9 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { DEFAULT_APP_SETTINGS, withLibraryLocations } from '@mangostudio/shared/app-settings';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
   LibraryResource,
@@ -10,6 +13,9 @@ import type {
   LibraryUnreadableEntry,
 } from '@mangostudio/shared/library';
 import { listLibraryTargetDescriptors } from '@mangostudio/shared/library/host';
+import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
+import { getDb } from '../../../src/db/database';
+import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';
 import { LibraryFeatureUnavailableError } from '../../../src/modules/library/domain/library-feature-error';
 import {
   createLibraryRoutes,
@@ -17,6 +23,8 @@ import {
   MAX_LIBRARY_CONTENT_BYTES,
   STATE_REQUIRES_TARGET_MESSAGE,
 } from '../../../src/modules/library/http/library-routes';
+import { LibraryCache } from '../../../src/modules/library/infrastructure/library-cache';
+import { createLibraryPathEnv } from '../../../src/modules/library/infrastructure/location-probe';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const TEST_USER = {
@@ -476,5 +484,159 @@ describe('library routes', () => {
 
     expect(response.status).toBe(404);
     expect(await response.json()).toMatchObject({ code: 'NOT_FOUND' });
+  });
+});
+
+/**
+ * `command` locations are home-scoped and disabled by default
+ * (`DEFAULT_LIBRARY_LOCATION_SETTINGS` only turns on the two mango ones), so
+ * every test here enables `claude-commands`/`codex-prompts` explicitly and
+ * scans a real temp home instead of a scripted `LibraryRouteService` — the
+ * only way to prove the route wires kind filtering, coverage, divergence, and
+ * the unreadable-entries channel through to a real discovery scan.
+ */
+describe('library routes over real command locations', () => {
+  let home: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'mango-command-routes-'));
+  });
+
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    restoreAuth?.();
+    restoreAuth = null;
+  });
+
+  function claudeCommandsDir(): string {
+    return join(home, '.claude', 'commands');
+  }
+
+  function codexPromptsDir(): string {
+    return join(home, '.codex', 'prompts');
+  }
+
+  function writeClaudeCommand(fileName: string, body: string): void {
+    mkdirSync(claudeCommandsDir(), { recursive: true });
+    writeFileSync(join(claudeCommandsDir(), fileName), body);
+  }
+
+  function writeCodexPrompt(fileName: string, body: string): void {
+    mkdirSync(codexPromptsDir(), { recursive: true });
+    writeFileSync(join(codexPromptsDir(), fileName), body);
+  }
+
+  function realCommandRouteService(): LibraryRouteService {
+    const pathEnv = createLibraryPathEnv({ homeDir: home, env: {} });
+    const settings = withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+      home: { 'claude-commands': true, 'codex-prompts': true },
+      workspace: {},
+    });
+    return {
+      discover: (userId) =>
+        discoverLibraryResources(getDb(), userId, {
+          force: true,
+          kinds: ['command'],
+          cache: new LibraryCache(),
+          pathEnv,
+          settings,
+        }),
+      listLocations: () => Promise.resolve([]),
+      listTargets: listLibraryTargetDescriptors,
+      readContent: () => Promise.resolve(null),
+    };
+  }
+
+  function commandResourceOf(scan: LibraryScanResult, key: string): LibraryResource {
+    const resource = scan.resources.find((candidate) => candidate.key === key);
+    if (!resource) throw new Error(`Expected "${key}" in the scan.`);
+    return resource;
+  }
+
+  it('discovers a claude command and covers claude alone', async () => {
+    writeClaudeCommand('deploy.md', '---\ndescription: Deploy the app\n---\nDeploy steps.\n');
+    const { app, restore } = createAuthenticatedApiTestApp(
+      TEST_USER,
+      createLibraryRoutes(realCommandRouteService())
+    );
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/library/resources?kind=command')
+    );
+
+    expect(response.status).toBe(200);
+    const scan = (await response.json()) as LibraryScanResult;
+    const resource = commandResourceOf(scan, 'command:deploy');
+    expect(resource.ref).toEqual({ kind: 'command', slug: 'deploy' });
+    expect(resource.coverage).toEqual([
+      { targetId: 'mangostudio', state: 'absent', shadowedLocationIds: [] },
+      {
+        targetId: 'claude',
+        state: 'present',
+        effectiveLocationId: 'claude-commands',
+        shadowedLocationIds: [],
+      },
+      { targetId: 'codex', state: 'absent', shadowedLocationIds: [] },
+      { targetId: 'cursor', state: 'absent', shadowedLocationIds: [] },
+    ]);
+  });
+
+  it('reports uniform divergence for byte-identical copies across vendors', async () => {
+    const body = '---\ndescription: Deploy the app\n---\nDeploy steps.\n';
+    writeClaudeCommand('deploy.md', body);
+    writeCodexPrompt('deploy.md', body);
+    const { app, restore } = createAuthenticatedApiTestApp(
+      TEST_USER,
+      createLibraryRoutes(realCommandRouteService())
+    );
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/library/resources?kind=command')
+    );
+
+    const scan = (await response.json()) as LibraryScanResult;
+    expect(commandResourceOf(scan, 'command:deploy').divergence).toBe('uniform');
+  });
+
+  it('reports divergent for copies whose bytes differ across vendors', async () => {
+    writeClaudeCommand('deploy.md', '---\ndescription: Deploy the app\n---\nDeploy steps.\n');
+    writeCodexPrompt('deploy.md', '---\ndescription: Deploy the app\n---\nDifferent steps.\n');
+    const { app, restore } = createAuthenticatedApiTestApp(
+      TEST_USER,
+      createLibraryRoutes(realCommandRouteService())
+    );
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/library/resources?kind=command')
+    );
+
+    const scan = (await response.json()) as LibraryScanResult;
+    expect(commandResourceOf(scan, 'command:deploy').divergence).toBe('divergent');
+  });
+
+  it('reports a command whose stem fails the slug pattern on the unreadable-entries channel', async () => {
+    writeClaudeCommand('deploy.md', '---\ndescription: Deploy the app\n---\nDeploy steps.\n');
+    // The space makes "my deploy" fail LIBRARY_RESOURCE_SLUG_PATTERN. Reported
+    // by its full file name — directory-of-files locations name unreadable
+    // entries with the extension still on, unlike a directory-of-dirs entry.
+    writeClaudeCommand('my deploy.md', '---\ndescription: Not nameable\n---\nBody.\n');
+    const { app, restore } = createAuthenticatedApiTestApp(
+      TEST_USER,
+      createLibraryRoutes(realCommandRouteService())
+    );
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/library/resources?kind=command')
+    );
+
+    const scan = (await response.json()) as LibraryScanResult;
+    expect(scan.unreadableEntries).toEqual([
+      { locationId: 'claude-commands', name: 'my deploy.md', reason: 'invalid-name' },
+    ]);
+    expect(scan.resources.map((resource) => resource.key)).toContain('command:deploy');
   });
 });

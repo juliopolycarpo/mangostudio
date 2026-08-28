@@ -156,6 +156,7 @@ export function parseEnvArgs(rest: string[]): EnvArgs {
 const LIBRARY_KINDS = new Set<ResourceKind>([
   'skill',
   'subagent',
+  'command',
   'instruction',
   'setting',
   'hook',
