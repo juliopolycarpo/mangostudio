@@ -328,7 +328,9 @@ function normalizeCommands(
   for (const command of commands) {
     if (normalized.length >= EXTERNAL_COMMAND_CATALOG_MAX_ITEMS) break;
     const name = boundVendorText(command.name, 'commandName');
-    if (name.truncated || name.text.length === 0 || seen.has(name.text)) continue;
+    if (name.truncated || name.text.length === 0 || /\s/u.test(name.text) || seen.has(name.text)) {
+      continue;
+    }
     seen.add(name.text);
 
     const description =
