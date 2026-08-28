@@ -7,6 +7,8 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useId,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -20,12 +22,22 @@ import { steerExternalTurn } from '@/services/external-agent-service';
 import { filesFromClipboard, useComposerAttachments } from '../hooks/use-composer-attachments';
 import { useComposerDraft } from '../hooks/use-composer-draft';
 import { usePromptHistory } from '../hooks/use-prompt-history';
+import { useSlashCommands } from '../hooks/use-slash-commands';
 import { COMPOSER_ACCENT_PROPERTY, composerAccent } from '../lib/composer-accent';
 import { onComposerFocusRequest } from '../lib/composer-draft-store';
+import {
+  applySlashCompletion,
+  matchSlashCommands,
+  nextSlashIndex,
+  type SlashCommandEntry,
+  slashCompletionCaret,
+  slashQueryAt,
+} from '../lib/slash-commands';
 import { CapabilityInspector } from './CapabilityInspector';
 import { ComposerChipRow, type ComposerChipRowProps } from './ComposerChipRow';
 import { ImageIntentToggle } from './ImageIntentToggle';
 import { McpComposerMenu } from './McpComposerMenu';
+import { SlashCommandMenu } from './SlashCommandMenu';
 
 /** Roughly eight lines before the box stops growing and starts scrolling. */
 const TEXTAREA_MAX_HEIGHT_PX = 200;
@@ -183,6 +195,51 @@ export function InputBar({
       ? formatMessage(t.chat.input.placeholderRunner, { agent: runnerName })
       : t.chat.input.placeholder;
 
+  /**
+   * The `/` palette.
+   *
+   * Driven by the caret rather than by a trigger key, so it survives the user
+   * clicking back into a command they had already typed. `dismissed` is what
+   * Escape sets: it must not be inferred from the text, or the palette would
+   * reopen on the very next keystroke and Escape would do nothing.
+   */
+  const slashListId = useId();
+  const [caret, setCaret] = useState(0);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
+  const slashQuery = slashDismissed || inputDisabled ? null : slashQueryAt(prompt, caret);
+  const slashCommands = useSlashCommands({
+    chatId,
+    runner,
+    environmentId: externalDescriptor?.environmentId ?? null,
+    active: slashQuery !== null,
+  });
+  const slashMatches = useMemo(
+    () => (slashQuery === null ? [] : matchSlashCommands(slashCommands, slashQuery)),
+    [slashCommands, slashQuery]
+  );
+  // A bare `/` with nothing to offer stays quiet — an empty popover over every
+  // slash would be noise. Once the user has typed a name, "no match" is worth
+  // saying, because the alternative is a menu that silently vanishes.
+  const slashOpen = slashQuery !== null && (slashMatches.length > 0 || slashQuery.length > 0);
+
+  useEffect(() => setSlashIndex(0), [slashQuery]);
+
+  const completeSlashCommand = (entry: SlashCommandEntry) => {
+    setPrompt(applySlashCompletion(prompt, entry.name));
+    setSlashDismissed(true);
+    const position = slashCompletionCaret(entry.name);
+    setCaret(position);
+    // After React has painted the new value: setting a range against the old
+    // one puts the caret at a character that is no longer there.
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(position, position);
+    });
+  };
+
   const handleSteer = async (text: string) => {
     if (!chatId || steering) return;
     setSteering(true);
@@ -240,6 +297,30 @@ export function InputBar({
     // An IME candidate window uses Enter to accept a suggestion. `keyCode 229`
     // is the fallback for browsers that do not set `isComposing` on keydown.
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+
+    // The palette owns Enter and the arrows while it is open, which is why it
+    // is handled before the submit and history branches rather than inside
+    // them: choosing a command is what those keys mean on screen right now.
+    if (slashOpen) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        setSlashIndex((current) =>
+          nextSlashIndex(current, slashMatches.length, event.key === 'ArrowDown' ? 1 : -1)
+        );
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setSlashDismissed(true);
+        return;
+      }
+      const chosen = slashMatches[slashIndex];
+      if (chosen && (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey))) {
+        event.preventDefault();
+        completeSlashCommand(chosen);
+        return;
+      }
+    }
 
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -362,7 +443,16 @@ export function InputBar({
               box grows under it, the way a shell prompt does. The padding
               moved onto this row so the two share a text box and stay on the
               same baseline. */}
-          <div className="flex items-start gap-2 px-3 py-2.5">
+          <div className="relative flex items-start gap-2 px-3 py-2.5">
+            {slashOpen && (
+              <SlashCommandMenu
+                entries={slashMatches}
+                activeIndex={slashIndex}
+                listId={slashListId}
+                onSelect={completeSlashCommand}
+                onHighlight={setSlashIndex}
+              />
+            )}
             <span
               aria-hidden="true"
               className={`composer-prompt-mark ${inputDisabled ? 'opacity-50' : ''}`}
@@ -373,12 +463,33 @@ export function InputBar({
               ref={textareaRef}
               rows={1}
               value={prompt}
+              // An editable combobox, but only while there is a popup to be
+              // the combobox *of*. The rest of the time this is a multi-line
+              // prompt box, and claiming a role with no listbox behind it would
+              // trade the composer's real semantics for a completion that
+              // covers one token of it.
+              {...(slashOpen
+                ? ({
+                    role: 'combobox',
+                    'aria-autocomplete': 'list',
+                    'aria-expanded': true,
+                    'aria-controls': slashListId,
+                    ...(slashMatches.length > 0
+                      ? { 'aria-activedescendant': `${slashListId}-${slashIndex}` }
+                      : {}),
+                  } as const)
+                : {})}
               onChange={(event) => {
                 setPrompt(event.target.value);
+                setCaret(event.target.selectionStart ?? event.target.value.length);
+                // Typing is what un-dismisses the palette: Escape hides it for
+                // the text it was showing over, not for the rest of the chat.
+                setSlashDismissed(false);
                 history.release();
                 if (steerError) setSteerError(null);
                 if (uploads.error) uploads.clearError();
               }}
+              onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
               onKeyDown={handleKeyDown}
               onPaste={(event) => {
                 const files = filesFromClipboard(event.clipboardData);

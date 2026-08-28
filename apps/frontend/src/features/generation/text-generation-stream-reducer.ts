@@ -173,8 +173,12 @@ export function reduceTextGenerationStreamChunk(
       return reduceDone(nextState, chunk.messageId, chunk.generationTime);
     // Handled by the caller, not by the transcript: an account quota belongs to
     // the machine's signed-in account, not to this turn's messages, and the send
-    // path files it in the shared query cache the quota surfaces read.
+    // path files it in the shared query cache the quota surfaces read. A slash
+    // command catalog is filed the same way, for the same reason — it says what
+    // the user may type next, which is a property of the session rather than of
+    // any message in it.
     case 'external_account_limits':
+    case 'external_commands':
     case 'context_info':
     case 'fallback_notice':
       return nextState;

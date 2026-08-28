@@ -56,6 +56,13 @@ export const messages = {
       mcpNeedsChat: 'Abra um chat antes de anexar recursos.',
       mcpAttachFailed: 'Falha ao anexar recurso',
       mcpInsertFailed: 'Falha ao inserir prompt',
+      slashMenuLabel: 'Comandos de barra',
+      slashMenuEmpty: 'Nenhum comando corresponde.',
+      slashMenuOrigin: {
+        session: 'sessão',
+        library: 'em disco',
+        skill: 'skill',
+      },
       mcpPromptArgsTitle: 'Argumentos do prompt',
       mcpPromptInsert: 'Inserir',
       mcpPromptCancel: 'Cancelar',
