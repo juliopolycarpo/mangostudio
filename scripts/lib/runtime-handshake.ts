@@ -10,7 +10,12 @@
 // from it must import nothing but `node:`/`bun` builtins and other `scripts/lib`
 // modules — `scripts/tests/smoke-dependencies.unit.test.ts` enforces that.
 
-import { type PumpedStream, pumpStream, readFirstLine } from './child-streams';
+import {
+  type FirstLineResult,
+  type PumpedStream,
+  pumpStream,
+  readFirstLine,
+} from './child-streams';
 
 /** How long a child that closed stdout gets to exit before it is killed. */
 const DEFAULT_EXIT_GRACE_MS = 2_000;
@@ -68,7 +73,17 @@ export async function probeRuntimeHandshake(
   // child wrote on its way to not handshaking is the diagnostic we came for.
   const stderr = pumpStream(child.stderr);
 
-  const read = await readFirstLine(child.stdout, timeoutMs);
+  let read: FirstLineResult;
+  try {
+    read = await readFirstLine(child.stdout, timeoutMs);
+  } catch (caught) {
+    // A thrown read leaves the child running and the stderr pump attached; a
+    // rejection is not one of `readFirstLine`'s reported outcomes, so it gets
+    // the same cleanup as every other exit path instead of leaking both.
+    child.kill();
+    await finish(child, stderr, exitGraceMs);
+    throw caught;
+  }
   child.stdin.end();
 
   if (read.kind === 'line') {
