@@ -806,6 +806,10 @@ Frontend support lives in `apps/frontend/tests/support/`:
   re-registered from the suite's `afterEach`:
   `support/mocks/google-genai.ts` for the Gemini SDK,
   `support/connectors/index.ts` for the first-party provider modules.
+  `integration/routes/_respond-stream-helpers.ts` predates this pattern: its
+  `restoreAllMocks` still re-registers hand-listed subsets for seven of the
+  eleven modules it covers, so it cannot undo a partial fake of any of them.
+  Follow the capture pattern above in new code rather than that file's shape.
 - **Never add a direct import of a mocked module to the bunfig preload.** The
   capture above has to run before any test installs a fake, which makes the
   preload look like its natural home. It is the one place it cannot go: mocking
