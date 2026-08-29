@@ -515,10 +515,23 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
       kill -ABRT $$
     `;
     const result = await runTestsWithWatchdog(
-      optionsIn(dir, { command: ['bash', '-c', script], retryOnCrash: true })
+      optionsIn(dir, {
+        command: ['bash', '-c', script],
+        retryOnCrash: true,
+        // Only so the assertion below has attempt 1's log to read; the retry
+        // would otherwise truncate it.
+        preserveAttemptLogs: true,
+      })
     );
 
     expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+    // Load-bearing, not decoration: if the shell ever printed something the
+    // markers matched, this test would still pass — via the marker path,
+    // leaving the signal-derived `exitCode === CRASH_EXIT_CODE` branch it
+    // exists for uncovered.
+    const attemptOne = await Bun.file(`${join(dir, 'run.log')}.attempt-1`).text();
+    expect(attemptOne).not.toContain('Bun has crashed');
+    expect(attemptOne).not.toContain('panic(main thread)');
   });
 
   it('writes crashed=true to $GITHUB_OUTPUT when a crash was retried', async () => {
