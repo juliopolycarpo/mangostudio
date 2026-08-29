@@ -39,7 +39,10 @@ name: Randomized Order Nightly
 # retry so the rest of the lane's file list still runs, instead of the whole
 # night's findings for that lane scrolling away with a job that looks like
 # "infra". Both outcomes are labeled `::warning`/infra in the job log rather
-# than left to look like an ordering finding.
+# than left to look like an ordering finding — but neither may hide one: a
+# crashed attempt that already logged failures (inline `(fail)` lines or a
+# ` N fail` summary) still reports non-zero, because the retry proves the
+# isolate runner recovered, not that those failures didn't happen.
 #
 # `--parallel=1` stays on the `api`/`shared`/`runtime` lanes rather than
 # sharding it away: it is the only detector for *within-file* order
@@ -182,8 +185,10 @@ jobs:
       # `outcome != success` covers a failed run and a step timeout;
       # `outputs.crashed == 'true'` also uploads a crash-then-clean-retry
       # night, and `outputs.log-preserved == 'true'` does the same for a
-      # hang-then-clean-retry — both leave their only evidence in the
-      # preserved attempt-1 log even though the step itself reports success.
+      # hang-then-clean-retry. A crash that already logged failures reports
+      # non-zero on its own and is covered by `outcome`; these two outputs are
+      # for the case where the step *succeeds* and the preserved attempt-1 log
+      # is the only record that anything went wrong at all.
       # `!cancelled()` skips a user-cancelled job, where there is nothing
       # useful to keep. The glob picks up both `run.log` and, when a hang or
       # crash preserved it, `run.log.attempt-1`; `run-meta.json` is not
