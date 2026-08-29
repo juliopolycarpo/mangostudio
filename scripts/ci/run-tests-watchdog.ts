@@ -68,7 +68,11 @@ export interface WatchdogOptions {
   readonly stdout?: NodeJS.WritableStream;
   /** `shard-meta.json` the merge job reads; written even when hung. */
   readonly metaFile: string;
-  /** Timings baseline to snapshot and restore between attempts. */
+  /**
+   * Timings baseline to snapshot and restore between attempts. Defaults to
+   * the repo-root `TIMINGS_DIR`, which is where every lane's baseline lives
+   * regardless of the directory the caller's step runs from.
+   */
   readonly timingsDir?: string;
   readonly cwd?: string;
   /**
@@ -361,7 +365,13 @@ const restoreTimings = async (timingsDir: string, backup: string | null): Promis
  */
 export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<WatchdogResult> => {
   const startedAt = Date.now();
-  const timingsDir = options.timingsDir ?? join(options.cwd ?? ROOT_DIR, TIMINGS_DIR);
+  // Anchored at the repo root, not at `cwd`. `TIMINGS_DIR` is a repo-root
+  // path (scripts/test.ts creates it there), while `cwd` is wherever the
+  // caller's step happens to run — the randomized-order nightly runs its
+  // lanes from `apps/<workspace>`, where the old join resolved to an
+  // `apps/api/.mango/artifacts/timings` that never exists, making the
+  // snapshot/restore invariant a silent no-op.
+  const timingsDir = options.timingsDir ?? join(ROOT_DIR, TIMINGS_DIR);
   const backup = await snapshotTimings(timingsDir);
   const crashRetryEnabled = options.retryOnCrash === true;
   const mirror = options.stdout ?? process.stdout;
