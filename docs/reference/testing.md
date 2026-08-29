@@ -615,8 +615,13 @@ Process-wide state is the exception, because no individual suite can own it.
 evaluation and `beforeAll` hooks, which both run before any `beforeEach`. That
 window is where an override reaches module-level state — it once dropped
 `server.allowedOrigins` for a whole shard. Suite-local `afterEach` hooks run
-before the preload-registered one (inner→outer, verified on Bun 1.4.0), so a
-local teardown still sees its own override.
+before the preload-registered one, so a local teardown still sees its own
+override — `describe` scopes unwind inner→outer, and hooks sharing a scope run
+in reverse registration order, which is what covers a test file's own top-level
+`afterEach` (root scope, same as the preload's, registered later). Both verified
+on Bun 1.4.0. `afterAll` is the other side of that: it runs *after* the
+preload's `afterEach`, so per-file teardown cannot read the last test's
+override.
 
 ### Code Health
 

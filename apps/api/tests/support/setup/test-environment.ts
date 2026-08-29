@@ -148,9 +148,12 @@ export function setupTestEnvironment(): Promise<void> {
   // `getConfig()` load from disk, which the safety net in `src/lib/config.ts`
   // then has to catch. The canonical test config is the idempotent teardown.
   //
-  // Hook order (verified on Bun 1.4.0, inner→outer like Jest): suite-local
-  // `afterEach` hooks run before this preload-registered one, so a local
-  // teardown that still reads its own override sees it.
+  // Hook order (verified on Bun 1.4.0): every suite-local `afterEach` runs
+  // before this preload-registered one, so a local teardown that still reads
+  // its own override sees it. Two rules combine to give that — `describe`
+  // scopes unwind inner→outer like Jest, *and* hooks sharing a scope run in
+  // reverse registration order, which is what covers a test file's own
+  // top-level `afterEach` (same root scope as this one, registered later).
   beforeEach(installBaseTestConfig);
   afterEach(() => {
     resetManagedConfigFile();
