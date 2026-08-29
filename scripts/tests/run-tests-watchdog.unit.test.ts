@@ -325,7 +325,8 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
 
   // Regression: Bun's own summary always prints a " 0 fail" line on a clean
   // run, and a failure scan on bare `\d+` would match that zero — turning a
-  // findings-free crash-then-retry into a phantom non-zero exit.
+  // findings-free crash-then-retry into a phantom non-zero exit. Same trap
+  // for a `0 error` line if one ever appears.
   it('does not mistake a clean run\'s "0 fail" summary line for a finding', async () => {
     const dir = await makeTemp();
     const marker = join(dir, 'first-attempt-ran');
@@ -334,7 +335,10 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
         command: [
           'bun',
           '-e',
-          crashOnceThenScript(marker, 'console.log("0 fail"); process.exit(0);'),
+          crashOnceThenScript(
+            marker,
+            'console.log("0 fail"); console.log("0 error"); process.exit(0);'
+          ),
         ],
         retryOnCrash: true,
       })
@@ -382,6 +386,54 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
       fs.writeFileSync(${JSON.stringify(marker)}, "");
       console.log("(fail) leaky > reads a stale database [1.20ms]");
       console.log("panic(main thread): abort()");
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result.attempts).toBe(2);
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  // The shape neither `(fail)` nor `N fail` can see: Bun reported only
+  // `# Unhandled error between tests` / `N error(s)` (JUnit stays green;
+  // scripts/qa-gate/unhandled-errors.ts exists for this) and then crashed.
+  // A clean retry must not hide that signal.
+  it('reports a non-zero exit when a crash cut off an unhandled-error heading', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        console.log("0 fail");
+        process.exit(0);
+      }
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      console.log("# Unhandled error between tests");
+      console.log("panic(main thread): abort()");
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result.attempts).toBe(2);
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  it('reports a non-zero exit when a crash follows a Bun unhandled-error count', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        console.log("0 fail");
+        process.exit(0);
+      }
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      console.log("0 fail");
+      console.log("@mangostudio/api:test:  1 error");
       process.exit(134);
     `;
     const result = await runTestsWithWatchdog(

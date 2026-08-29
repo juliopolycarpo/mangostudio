@@ -575,12 +575,13 @@ the watchdog's per-attempt bound rather than burning the step budget, and a
 crash gets one same-seed retry so the rest of the lane's file list still runs.
 Both are annotated `::warning` so an infra failure does not read as an ordering
 finding — but neither is allowed to hide one. The watchdog scans the crashed
-attempt's log for Bun's inline `(fail)` lines as well as its `N fail` summary,
-and reports non-zero when either is present even if the retry came back clean:
-a crash proves the runner recovered, not that the failures did not happen. A
-retried night keeps attempt 1 at `run.log.attempt-1` and uploads it even when
-the step itself is green, since a truncated attempt is exactly where the
-night's only finding may sit.
+attempt's log for Bun's inline `(fail)` lines, its `N fail` summary, and the
+unhandled-error signal (`# Unhandled error between tests` / `N error(s)`)
+that JUnit cannot carry, and reports non-zero when any is present even if the
+retry came back clean: a crash proves the runner recovered, not that the
+failures did not happen. A retried night keeps attempt 1 at
+`run.log.attempt-1` and uploads it even when the step itself is green, since a
+truncated attempt is exactly where the night's only finding may sit.
 
 #### What it caught on its first run
 

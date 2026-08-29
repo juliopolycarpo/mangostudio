@@ -128,8 +128,17 @@ const CRASH_LOG_MARKERS = [/oh no: Bun has crashed/, /panic\(main thread\)/];
 // `[1-9]\d*`, not `\d+`: Bun always prints a ` 0 fail` line on a clean run,
 // and `\d+` matches that zero — verified live, it turned a green shared-lane
 // run into a reported exit 1.
+//
+// The same scan must keep Bun's unhandled-error signal. An error raised
+// between tests prints `# Unhandled error between tests` and a `N error(s)`
+// summary with no failing testcase — `scripts/qa-gate/unhandled-errors.ts`
+// exists because JUnit reports `failures="0"` for that run. Without these
+// shapes, a crash after only that signal leaves `failuresSeen` false and a
+// clean retry reports green over the ordering finding.
 const INLINE_FAILURE_RE = /^\(fail\)/;
 const FAILURE_SUMMARY_RE = /^[1-9]\d* fail\b/;
+const UNHANDLED_HEADING = '# Unhandled error between tests';
+const UNHANDLED_ERROR_COUNT_RE = /^[1-9]\d* errors?\b/;
 
 interface AttemptResult {
   readonly exitCode: number;
@@ -160,7 +169,7 @@ const isCrash = (attempt: AttemptResult, logText: string): boolean =>
   (attempt.exitCode !== 0 && CRASH_LOG_MARKERS.some((marker) => marker.test(logText)));
 
 /**
- * Whether an attempt's log reports at least one failing test.
+ * Whether an attempt's log reports a test failure or an unhandled error.
  *
  * Line-wise via `normalizeLogLine` rather than a multiline regex over the raw
  * text: `bun run test` goes through turbo `--ui=stream`, which prefixes every
@@ -172,7 +181,12 @@ const isCrash = (attempt: AttemptResult, logText: string): boolean =>
 const hasFailure = (logText: string): boolean =>
   logText.split('\n').some((rawLine) => {
     const { body } = normalizeLogLine(rawLine);
-    return INLINE_FAILURE_RE.test(body) || FAILURE_SUMMARY_RE.test(body);
+    return (
+      INLINE_FAILURE_RE.test(body) ||
+      FAILURE_SUMMARY_RE.test(body) ||
+      body === UNHANDLED_HEADING ||
+      UNHANDLED_ERROR_COUNT_RE.test(body)
+    );
   });
 
 /**
