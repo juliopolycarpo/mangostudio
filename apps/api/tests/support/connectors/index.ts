@@ -12,26 +12,24 @@ import { mock } from 'bun:test';
 import type { ChatGptUsageSnapshot } from '@mangostudio/shared/connectors';
 import Type from 'typebox';
 import * as geminiService from '../../../src/services/gemini';
-import {
-  UnsafeBaseUrlError,
-  validateBaseUrl,
-} from '../../../src/services/providers/core/base-url-policy';
-import {
-  OpenAIAuthError,
-  OpenAIConfigError,
-  validateOpenAIAuthContext,
-} from '../../../src/services/providers/openai/index';
+import * as baseUrlPolicy from '../../../src/services/providers/core/base-url-policy';
+import * as openaiModule from '../../../src/services/providers/openai/index';
 import { restoreGoogleGenAI } from '../mocks/google-genai';
 
 // Capture the real implementations at module-load time, before any test can
 // override them via mock.module().
-const realValidateOpenAIAuthContext = validateOpenAIAuthContext;
-const realValidateBaseUrl = validateBaseUrl;
-// The whole namespace, not a hand-listed subset: the gemini overrides tests
-// install are *partial* (one names only `updateConnectorModels`), and the
-// route modules bind `InvalidGeminiApiKeyError` and
-// `GeminiValidationUnavailableError` for `instanceof` checks. Restoring a
-// subset would leave the same hole a different shape.
+//
+// Whole namespaces, not hand-listed subsets. The overrides tests install are
+// *partial* (one gemini fake names only `updateConnectorModels`), and
+// `mock.module()` on an already-loaded module *merges* rather than replaces —
+// so re-registering only the exports a fake happened to name leaves the rest of
+// that fake installed. `openai/index` also exports `openAIProvider` and
+// `streamWithResponsesAPI`, and the route modules bind
+// `InvalidGeminiApiKeyError` / `GeminiValidationUnavailableError` for
+// `instanceof` checks; a subset restore would leave the same hole a different
+// shape.
+const realOpenAIModule = { ...openaiModule };
+const realBaseUrlPolicy = { ...baseUrlPolicy };
 const realGeminiService = { ...geminiService };
 
 type FetchImpl = typeof globalThis.fetch;
@@ -155,8 +153,8 @@ export async function withFetch<T>(fetchImpl: FetchImpl, body: () => Promise<T>)
 /** Mocks base-url validation to always pass (avoids DNS lookups in tests). */
 export async function allowAnyBaseUrl(): Promise<void> {
   await mock.module('../../../src/services/providers/core/base-url-policy', () => ({
+    ...realBaseUrlPolicy,
     validateBaseUrl: () => Promise.resolve(),
-    UnsafeBaseUrlError,
   }));
 }
 
@@ -167,15 +165,11 @@ export async function allowAnyBaseUrl(): Promise<void> {
  * // Usage: afterEach(restoreConnectorProviderMocks)
  */
 export async function restoreConnectorProviderMocks(): Promise<void> {
-  await mock.module('../../../src/services/providers/openai/index', () => ({
-    validateOpenAIAuthContext: realValidateOpenAIAuthContext,
-    OpenAIAuthError,
-    OpenAIConfigError,
-  }));
-  await mock.module('../../../src/services/providers/core/base-url-policy', () => ({
-    validateBaseUrl: realValidateBaseUrl,
-    UnsafeBaseUrlError,
-  }));
+  await mock.module('../../../src/services/providers/openai/index', () => realOpenAIModule);
+  await mock.module(
+    '../../../src/services/providers/core/base-url-policy',
+    () => realBaseUrlPolicy
+  );
   await mock.module('../../../src/services/gemini', () => realGeminiService);
   await restoreGoogleGenAI();
 }

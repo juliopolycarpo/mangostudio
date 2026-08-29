@@ -42,9 +42,10 @@ describe('GeminiProvider.generateTextStream', () => {
     // Clear module cache between tests (Bun test isolation)
     mock.restore();
     // …which does not revert mock.module(). This file runs in the isolated unit
-    // lane, so its `@google/genai` fake cannot reach another file today; the
-    // explicit restore keeps that true if it ever runs unisolated, and keeps
-    // one mechanism for undoing this mock across the suite.
+    // lane, so no fake it installs can reach another file today. The explicit
+    // restore keeps one mechanism for undoing this mock across the suite; it
+    // covers `@google/genai` only, so running this file unisolated would still
+    // leak the `providers/gemini/secret` fake below and needs its own capture.
     await restoreGoogleGenAI();
   });
 
