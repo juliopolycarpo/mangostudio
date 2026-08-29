@@ -410,9 +410,19 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
    * see the bytes that attempt actually produced. Returns false whenever crash
    * retry is off, which is what keeps every merge-gate caller on the old
    * fail-once-and-surface contract.
+   *
+   * An attempt that exited 0 is skipped outright, and that gate is what makes
+   * the failure scan safe to run on *every* attempt rather than only the
+   * aborted one. Bun cannot exit 0 with a failing test, so every `(fail)` or
+   * ` N fail` line in a green attempt's log is mirrored data — a suite quoting
+   * those strings, which this repo's own fixtures do. Recording it would let a
+   * clean retry flip its own exit 0 to 1 over output that reported nothing. A
+   * hang (124) and a crash (134, or non-zero with a marker) are both non-zero,
+   * so nothing the scan exists for is skipped; a green run just stops paying
+   * for a full log read it could not act on.
    */
   const observe = async (result: AttemptResult): Promise<boolean> => {
-    if (!crashRetryEnabled) return false;
+    if (!crashRetryEnabled || result.exitCode === 0) return false;
     const text = await Bun.file(options.logFile)
       .text()
       .catch(() => '');
@@ -470,11 +480,13 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
   // retried, so the only way in here is a hang (124) or a crash (134/marker),
   // neither of which is a meaningful "test failure" exit code to persist.
   //
-  // `attempts === 2` is what makes that safe to key off a log scan. Bun cannot
-  // exit 0 with a failing test, so a single green attempt whose log matched is
+  // Two gates make that safe to key off a log scan, and both are needed. Bun
+  // cannot exit 0 with a failing test, so a green attempt's matching lines are
   // always a mirror of someone else's output — a suite that prints `(fail)` or
-  // ` 2 fail` as *data*, which the watchdog's own fixtures below do. Only a
-  // retry can legitimately hide findings an earlier attempt already reported.
+  // ` 2 fail` as *data*, which the watchdog's own fixtures below do. `observe`
+  // therefore never records a green attempt at all, which covers the retry
+  // itself; `attempts === 2` covers the single-attempt case, where there is no
+  // earlier attempt whose findings a clean run could be hiding.
   let exitCode = attempt.exitCode;
   if (crashRetryEnabled && attempts === 2 && failuresSeen && exitCode === 0) exitCode = 1;
 

@@ -488,6 +488,30 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
     expect(result).toMatchObject({ exitCode: 0, attempts: 1 });
   });
 
+  // Regression: the same mirrored-output trap, one attempt later. A crash with
+  // no findings hands the verdict to the retry — and a *green* retry whose log
+  // merely quotes `(fail)` is data, by the same "Bun cannot exit 0 with a
+  // failing test" argument. Scanning it anyway turned a clean night red.
+  it('does not turn a clean retry into a failure over its own mirrored output', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: [
+          'bun',
+          '-e',
+          crashOnceThenScript(
+            marker,
+            'console.log("(fail) some suite > quoted by a fixture [1.00ms]"); process.exit(0);'
+          ),
+        ],
+        retryOnCrash: true,
+      })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+  });
+
   it('reports a non-zero exit when the retry crashes again', async () => {
     const dir = await makeTemp();
     const script = `
