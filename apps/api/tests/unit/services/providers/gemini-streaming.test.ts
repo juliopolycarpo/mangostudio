@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { restoreGoogleGenAI } from '../../../support/mocks/google-genai';
 
 /**
  * Unit tests for GeminiProvider.generateTextStream.
@@ -29,17 +30,16 @@ function mockGeminiSecretModule() {
 }
 
 describe('GeminiProvider.generateTextStream', () => {
-  beforeEach(() => {
-    // Reset module mocks between tests
-  });
-
   afterEach(async () => {
     const { resetGeminiClientCache } = await import(
       '../../../../src/services/providers/gemini/client'
     );
     resetGeminiClientCache();
-    // Clear module cache between tests (Bun test isolation)
-    mock.restore();
+    // `mock.restore()` cannot undo `mock.module()`, so re-register the real SDK
+    // instead. This covers `@google/genai` only: the `providers/gemini/secret`
+    // fake below has no capture, so this file relies on the isolated unit lane
+    // to keep it from reaching another file.
+    await restoreGoogleGenAI();
   });
 
   it('yields text chunks and a final done:true sentinel', async () => {

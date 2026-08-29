@@ -1,9 +1,11 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { writeFileSync } from 'node:fs';
 import { ModelCatalogResponseSchema } from '@mangostudio/shared/catalog';
 import { ConnectorStatusSchema } from '@mangostudio/shared/connectors';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
+import { TEST_MANAGED_CONFIG_PATH } from '../../../src/lib/config';
 import { ConnectorNotFoundError } from '../../../src/modules/connectors/application/connector-errors';
 import { settingsRoutes } from '../../../src/routes/settings';
 import {
@@ -26,7 +28,7 @@ import {
   type SuccessPayload,
   withFetch,
 } from '../../support/connectors';
-import { ensureTestUsers } from '../../support/factories';
+import { ensureTestUsers, insertTestConnector, insertTestUser } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const TEST_USER = {
@@ -55,8 +57,9 @@ let restoreAuth: (() => void) | null = null;
 afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
-  // Re-register the real openai/base-url modules so mock.module overrides do not
-  // leak into later test files (mock.restore() does not revert mock.module()).
+  // Re-register the real openai/base-url/gemini/@google/genai modules so
+  // mock.module overrides do not leak into later test files (mock.restore()
+  // does not revert mock.module()).
   await restoreConnectorProviderMocks();
 });
 
@@ -135,7 +138,94 @@ describe('settings connectors routes', () => {
   });
 
   it('GET /settings/connectors does not return placeholder config-file connectors from local dev config', async () => {
+    // The dev config this asserts on is written here, by name and by value.
+    // It used to assert the absence of three names that *sibling* `describe`
+    // blocks create — which the managed config file is wiped between tests to
+    // prevent, so those names could never appear and all three assertions
+    // passed against nothing, in every order.
+    //
+    // Writing the file has a side effect worth naming: `listConnectors` syncs
+    // *every* registered provider, and a provider whose TOML section is absent
+    // reconciles to "no config-file connectors" — deleting every
+    // `source: 'config-file'` row visible to this caller (its own plus the
+    // shared `userId: null` ones). That is production behaviour, not a test
+    // artifact, but it means this test destroys shared config-file rows a
+    // sibling test left behind (measured: the `shared-compat-without-base-url`
+    // row from the test above). Nothing in the suite reads such a row across
+    // tests today; a future one must create its own row inside its own test.
+    //
+    // Two entries, one rejected by `isPlaceholderConfigSecretValue` and one
+    // accepted; the accepted one is what keeps the rejection assertion honest.
+    const PLACEHOLDER_CONNECTOR_NAME = 'openai-placeholder-from-dev-config';
+    const REAL_CONFIG_CONNECTOR_NAME = 'openai-real-from-dev-config';
+    writeFileSync(
+      TEST_MANAGED_CONFIG_PATH,
+      [
+        '[openai_api_keys]',
+        `${PLACEHOLDER_CONNECTOR_NAME} = "your-secret-key-here"`,
+        `${REAL_CONFIG_CONNECTOR_NAME} = "sk-live-openai-config-aaaa"`,
+        '',
+      ].join('\n')
+    );
+
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    try {
+      const response = await app.handle(new Request('http://localhost/settings/connectors'));
+
+      expect(response.status).toBe(200);
+
+      const payload = (await response.json()) as ConnectorListPayload;
+      expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
+
+      const connectorNames = payload.connectors.map((connector) => connector.name);
+      expect(connectorNames).not.toContain(PLACEHOLDER_CONNECTOR_NAME);
+      // The tripwire. Absence is only evidence while the sync that would have
+      // surfaced the entry actually ran; a real key from the same file proves
+      // it did, so this test can never pass on an empty list again.
+      expect(connectorNames).toContain(REAL_CONFIG_CONNECTOR_NAME);
+    } finally {
+      // Config-file sync stores its rows as shared ones (`userId` null) and
+      // nothing truncates the table between tests, so the real entry would
+      // otherwise stay visible to every file that runs later in the lane.
+      await getDb()
+        .deleteFrom('secret_metadata')
+        .where('name', 'in', [PLACEHOLDER_CONNECTOR_NAME, REAL_CONFIG_CONNECTOR_NAME])
+        .execute();
+    }
+  });
+
+  it('GET /settings/connectors omits a connector owned by another user', async () => {
+    // The scoping half of the list contract, which nothing else pins: the
+    // empty-list test above filters by `userId` before asserting, so it cannot
+    // notice a regression that starts handing out other people's rows.
+    //
+    // Both identities are minted per test rather than reusing `TEST_USER`, so
+    // neither row is visible to any other test and none of this needs cleaning
+    // up — the "own your own state" convention in docs/reference/testing.md,
+    // instead of a hand-maintained delete list that the next row can outgrow.
+    const otherUser = await insertTestUser();
+    const caller = await insertTestUser();
+    const foreignConnector = await insertTestConnector(otherUser.id, {
+      name: 'connector-owned-by-another-user',
+      provider: 'openai',
+    });
+    // The tripwire, for the same reason the placeholder test above needs one:
+    // `some(...)` is false for an empty list, so absence alone would also be
+    // satisfied by a regression that stops returning anyone's connectors.
+    // `source: 'bun-secrets'` keeps this row outside config-file reconciliation,
+    // which deletes config-file rows with no matching TOML entry. That sync
+    // early-returns when the config file is absent, and this test writes none,
+    // so it is dormant here — the source is defence in depth against a future
+    // test in this file that does write one.
+    const ownConnector = await insertTestConnector(caller.id, {
+      name: 'connector-owned-by-the-caller',
+      provider: 'openai',
+      source: 'bun-secrets',
+    });
+
+    const { app, restore } = createAuthenticatedApiTestApp(caller, settingsRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(new Request('http://localhost/settings/connectors'));
@@ -144,11 +234,9 @@ describe('settings connectors routes', () => {
 
     const payload = (await response.json()) as ConnectorListPayload;
     expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
-
-    const connectorNames = payload.connectors.map((connector) => connector.name);
-    expect(connectorNames).not.toContain('openai-for-list');
-    expect(connectorNames).not.toContain('deepseek-for-list');
-    expect(connectorNames).not.toContain('openai-proj-model-update');
+    const connectorIds = payload.connectors.map((connector) => connector.id);
+    expect(connectorIds).not.toContain(foreignConnector.id);
+    expect(connectorIds).toContain(ownConnector.id);
   });
 });
 
@@ -244,8 +332,14 @@ describe('deprecated cursor connector routes', () => {
 /* ------------------------------------------------------------------ */
 
 describe('Gemini aliases API', () => {
-  beforeAll(async () => {
-    await ensureTestUsers(TEST_USER);
+  beforeAll(() => ensureTestUsers(TEST_USER));
+
+  // Per test, not once per block: the file-level `afterEach` restores the real
+  // `@google/genai` after every test (`mock.restore()` does not revert
+  // `mock.module()`, so that restore is the only thing that keeps this fake
+  // from following the process into the next file), which would leave a
+  // `beforeAll` fake installed for the first test only.
+  beforeEach(async () => {
     await mock.module('@google/genai', () => {
       return {
         GoogleGenAI: class {
@@ -265,10 +359,6 @@ describe('Gemini aliases API', () => {
         },
       };
     });
-  });
-
-  afterAll(() => {
-    mock.restore();
   });
 
   it('POST /settings/connectors/gemini adds a connector', async () => {

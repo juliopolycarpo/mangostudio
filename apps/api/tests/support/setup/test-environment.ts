@@ -8,6 +8,9 @@
  *   3. The schema is migrated onto that in-memory database.
  *   4. The managed config file is reset between tests, so a config-file
  *      connector written by one test cannot leak into another test's reads.
+ *   5. The canonical config is reinstalled both before and after every test, so
+ *      no `loadConfigForTest` override survives the test that installed it —
+ *      including into the next file's module evaluation.
  *
  * ## Bun preload await gotcha
  *
@@ -132,8 +135,30 @@ export function setupTestEnvironment(): Promise<void> {
   // inherits another's overrides; afterEach clears the managed config file so
   // config-file connector writes never leak forward. A test that needs custom
   // config still overrides it in its own beforeEach (which runs after this one).
+  //
+  // afterEach reinstalls the config too, because beforeEach alone leaves a tail:
+  // a file's last override stays installed until the *next test's* beforeEach,
+  // and the next file's module evaluation and `beforeAll` hooks both run before
+  // that. In the unisolated `api-integration` lane those are the moments that
+  // read config into module-level state — the window that once dropped
+  // `server.allowedOrigins` for a whole shard. Restoring here closes it for
+  // every file at once, so no future override needs its own teardown.
+  //
+  // Reinstalling rather than `resetConfig()`: a null singleton makes the next
+  // `getConfig()` load from disk, which the safety net in `src/lib/config.ts`
+  // then has to catch. The canonical test config is the idempotent teardown.
+  //
+  // Hook order (verified on Bun 1.4.0): every suite-local `afterEach` runs
+  // before this preload-registered one, so a local teardown that still reads
+  // its own override sees it. Two rules combine to give that — `describe`
+  // scopes unwind inner→outer like Jest, *and* hooks sharing a scope run in
+  // reverse registration order, which is what covers a test file's own
+  // top-level `afterEach` (same root scope as this one, registered later).
   beforeEach(installBaseTestConfig);
-  afterEach(resetManagedConfigFile);
+  afterEach(() => {
+    resetManagedConfigFile();
+    installBaseTestConfig();
+  });
   afterAll(removeManagedConfigDir);
 
   setupPromise = migrateTestDatabase();
