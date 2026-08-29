@@ -448,7 +448,11 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
     return runAttempt(options);
   };
 
-  let crashed = await observe(attempt);
+  // Only attempt 1's verdict is read: it is the one that decides whether to
+  // retry. The retry is still `observe`d below, for its side effects alone —
+  // `crashedAny` for the artifact upload, `failuresSeen` for the exit code —
+  // since there is no third attempt to gate.
+  const crashed = await observe(attempt);
 
   if (attempt.hung) {
     // Leading newline, not cosmetic: GitHub parses a workflow command only
@@ -460,7 +464,7 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
         '(oven-sh/bun#39709 — Bun isolate runner hang).\n'
     );
     attempt = await retry();
-    crashed = await observe(attempt);
+    await observe(attempt);
   } else if (crashed) {
     mirror.write(
       `\n::warning::Test invocation for '${options.label}' crashed (Bun isolate-runner ` +
@@ -476,7 +480,7 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
       await sleep((options.crashReapGraceSeconds ?? 2) * 1000);
     }
     attempt = await retry();
-    crashed = await observe(attempt);
+    await observe(attempt);
   }
   if (backup) await rm(backup, { recursive: true, force: true });
 
