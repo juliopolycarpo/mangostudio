@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,6 +29,20 @@ class SlowSink extends Writable {
   }
 }
 
+/** A plain capturing sink, for tests that only need to read back what was written. */
+class CaptureSink extends Writable {
+  private readonly chunks: Buffer[] = [];
+
+  override _write(chunk: Buffer, _encoding: BufferEncoding, done: () => void): void {
+    this.chunks.push(Buffer.from(chunk));
+    done();
+  }
+
+  text(): string {
+    return Buffer.concat(this.chunks).toString();
+  }
+}
+
 const temps: string[] = [];
 
 const makeTemp = async (): Promise<string> => {
@@ -41,11 +55,32 @@ afterEach(async () => {
   await Promise.all(temps.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
+// `runTestsWithWatchdog` appends to `$GITHUB_OUTPUT` when `retryOnCrash` is
+// on, and this suite runs inside real CI steps where that variable is
+// genuinely set — without this, every crash-mode test here would append to
+// the *test step's own* output file instead of a throwaway one.
+let originalGithubOutput: string | undefined;
+
+beforeEach(() => {
+  originalGithubOutput = process.env.GITHUB_OUTPUT;
+  delete process.env.GITHUB_OUTPUT;
+});
+
+afterEach(() => {
+  if (originalGithubOutput === undefined) delete process.env.GITHUB_OUTPUT;
+  else process.env.GITHUB_OUTPUT = originalGithubOutput;
+});
+
 const optionsIn = (dir: string, overrides: Partial<WatchdogOptions>): WatchdogOptions => ({
   label: '3',
   command: ['bun', '-e', 'console.log("ok")'],
   timeoutSeconds: 30,
   killGraceSeconds: 1,
+  // The CI default is 2s, and every crash-path test below reaches the reap.
+  // Overridden here for the same reason `killGraceSeconds` is: the wait
+  // guards against a straggler worker, and nothing in these fixtures needs
+  // seconds of it.
+  crashReapGraceSeconds: 0.2,
   logFile: join(dir, 'run.log'),
   metaFile: join(dir, 'shard-meta.json'),
   timingsDir: join(dir, 'timings'),
@@ -216,5 +251,520 @@ describe('runTestsWithWatchdog', () => {
 
     expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
     expect(await Bun.file(timingsFile).text()).toBe(baseline);
+  });
+
+  // A `createWriteStream` that never opened (full disk, missing directory)
+  // leaves nothing at `logFile` for `preserveAttemptLog`'s `rename()` to find.
+  // That must warn and fall through to the retry, not reject and skip the
+  // retry, the meta-file write, and the GitHub output entirely.
+  it('does not let a preserved-log rename failure cancel the retry', async () => {
+    const dir = await makeTemp();
+    const logFile = join(dir, 'run.log');
+    const marker = join(dir, 'first-attempt-ran');
+    const sink = new CaptureSink();
+    // Unlinks its own log file before hanging, so the retry's rename() has
+    // nothing to find — the same shape a failed createWriteStream leaves.
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) process.exit(0);
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      fs.unlinkSync(${JSON.stringify(logFile)});
+      setInterval(() => {}, 1000);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: ['bun', '-e', script],
+        timeoutSeconds: 3,
+        logFile,
+        preserveAttemptLogs: true,
+        stdout: sink,
+      })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+    expect(sink.text()).toContain('Watchdog could not preserve');
+    expect(await Bun.file(join(dir, 'shard-meta.json')).json()).toMatchObject({ exitCode: 0 });
+  });
+});
+
+// A crash marker file lets a script behave differently on its first and
+// second invocation without any external state beyond the child's own
+// filesystem — the same shape the hang-retry tests above use.
+const crashOnceThenScript = (marker: string, onRetry: string): string => `
+  const fs = require("node:fs");
+  if (fs.existsSync(${JSON.stringify(marker)})) {
+    ${onRetry}
+  }
+  fs.writeFileSync(${JSON.stringify(marker)}, "");
+  console.log("panic(main thread): abort()");
+  console.log("oh no: Bun has crashed");
+  process.exit(134);
+`;
+
+describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
+  it('retries a crash once and reports the clean retry green, with attempt 1 preserved', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const sink = new CaptureSink();
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: ['bun', '-e', crashOnceThenScript(marker, 'process.exit(0);')],
+        retryOnCrash: true,
+        preserveAttemptLogs: true,
+        stdout: sink,
+      })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+    expect(sink.text()).toContain('::warning::');
+    expect(sink.text()).toContain('crashed');
+    expect(await Bun.file(`${join(dir, 'run.log')}.attempt-1`).text()).toContain(
+      'panic(main thread): abort()'
+    );
+  });
+
+  // Regression: Bun's own summary always prints a " 0 fail" line on a clean
+  // run, and a failure scan on bare `\d+` would match that zero — turning a
+  // findings-free crash-then-retry into a phantom non-zero exit. Same trap
+  // for a `0 error` line if one ever appears.
+  it('does not mistake a clean run\'s "0 fail" summary line for a finding', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: [
+          'bun',
+          '-e',
+          crashOnceThenScript(
+            marker,
+            'console.log("0 fail"); console.log("0 error"); process.exit(0);'
+          ),
+        ],
+        retryOnCrash: true,
+      })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+  });
+
+  // Findings outrank the clean retry: the crash only proves the isolate
+  // runner recovered, not that the failures attempt 1 reported didn't happen.
+  it('reports a non-zero exit when an earlier attempt logged failures before crashing', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        console.log("0 fail");
+        process.exit(0);
+      }
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      console.log("2 fail");
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result.attempts).toBe(2);
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  // The shape the summary scan alone cannot see: the isolate runner aborts
+  // partway through the file list, so Bun never reaches its ` N fail` line —
+  // but it already printed the `(fail)` lines for the tests that did run. A
+  // clean retry must not report green over them.
+  it('reports a non-zero exit when a crash cut the run off before the summary', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        console.log("0 fail");
+        process.exit(0);
+      }
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      console.log("(fail) leaky > reads a stale database [1.20ms]");
+      console.log("panic(main thread): abort()");
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result.attempts).toBe(2);
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  // The shape neither `(fail)` nor `N fail` can see: Bun reported only
+  // `# Unhandled error between tests` / `N error(s)` (JUnit stays green;
+  // scripts/qa-gate/unhandled-errors.ts exists for this) and then crashed.
+  // A clean retry must not hide that signal.
+  it('reports a non-zero exit when a crash cut off an unhandled-error heading', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        console.log("0 fail");
+        process.exit(0);
+      }
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      console.log("# Unhandled error between tests");
+      console.log("panic(main thread): abort()");
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result.attempts).toBe(2);
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  it('reports a non-zero exit when a crash follows a Bun unhandled-error count', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        console.log("0 fail");
+        process.exit(0);
+      }
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      console.log("0 fail");
+      console.log("@mangostudio/api:test:  1 error");
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result.attempts).toBe(2);
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  // `bun run test` reaches the log through turbo `--ui=stream`, which prefixes
+  // every line with `<package>:<task>: `. A `^`-anchored scan of the raw text
+  // matches nothing under that caller — silently, and in the direction that
+  // reads as green.
+  it('finds failures behind a turbo stream prefix', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        console.log("@mangostudio/api:test:  0 fail");
+        process.exit(0);
+      }
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      console.log("@mangostudio/api:test:  2 fail");
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result.attempts).toBe(2);
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  // Widening the scan to inline `(fail)` lines widens what a *green* run can
+  // match too: a suite that prints those strings as data — this very file
+  // does, through the fixtures above — would otherwise turn its own exit 0
+  // into a phantom 1. Bun cannot exit 0 with a failing test, so only a retry
+  // can legitimately hide findings.
+  it('does not turn a single green attempt into a failure over mirrored output', async () => {
+    const dir = await makeTemp();
+    const script = `
+      console.log("(fail) some suite > quoted by a fixture [1.00ms]");
+      console.log("2 fail");
+      process.exit(0);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 1 });
+  });
+
+  // Regression: the same mirrored-output trap, one attempt later. A crash with
+  // no findings hands the verdict to the retry — and a *green* retry whose log
+  // merely quotes `(fail)` is data, by the same "Bun cannot exit 0 with a
+  // failing test" argument. Scanning it anyway turned a clean night red.
+  it('does not turn a clean retry into a failure over its own mirrored output', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: [
+          'bun',
+          '-e',
+          crashOnceThenScript(
+            marker,
+            'console.log("(fail) some suite > quoted by a fixture [1.00ms]"); process.exit(0);'
+          ),
+        ],
+        retryOnCrash: true,
+      })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+  });
+
+  // Regression: the summary scans are anchored end-to-end, so an ordinary log
+  // line that merely opens with a count — `1 error: …` is Bun's own module
+  // resolution shape — cannot be mistaken for the ` N error` summary and flip
+  // a findings-free crash retry to red.
+  it('does not mistake a count-prefixed log line for a failure summary', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) process.exit(0);
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      console.log("1 error: Cannot find module 'left-pad'");
+      console.log("3 failures were retried by the vendor CLI");
+      console.log("panic(main thread): abort()");
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+  });
+
+  it('reports a non-zero exit when the retry crashes again', async () => {
+    const dir = await makeTemp();
+    const script = `
+      console.log("panic(main thread): abort()");
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result).toMatchObject({ exitCode: 134, attempts: 2 });
+  });
+
+  // A suite that *prints* the crash markers is not a crashed suite. This
+  // file's own fixtures do exactly that, and `bun test scripts/` mirrors them
+  // into the parent's stdout — so without the exit-code gate, every shard
+  // carrying the scripts lane would retry itself and report `crashed=true` on
+  // a run that passed.
+  it('does not treat a green run that quotes the crash markers as a crash', async () => {
+    const dir = await makeTemp();
+    const githubOutput = join(dir, 'github-output');
+    await writeFile(githubOutput, '');
+    process.env.GITHUB_OUTPUT = githubOutput;
+    const script = `
+      console.log("oh no: Bun has crashed");
+      console.log("panic(main thread): abort()");
+      process.exit(0);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 1 });
+    expect(await Bun.file(githubOutput).text()).toContain('crashed=false\n');
+  });
+
+  // The no-retry-on-real-failure contract must survive crash mode: a plain
+  // red run is not a crash and must not get a second roll of the dice.
+  it('does not retry a plain failure even with retryOnCrash on', async () => {
+    const dir = await makeTemp();
+    const script = `
+      console.log("1 fail");
+      process.exit(1);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result).toMatchObject({ exitCode: 1, attempts: 1 });
+  });
+
+  // Merge-gate callers pass no new flags; a crash must surface exactly as it
+  // did before this feature existed.
+  it('does not retry a crash when retryOnCrash is unset', async () => {
+    const dir = await makeTemp();
+    const script = `
+      console.log("panic(main thread): abort()");
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(optionsIn(dir, { command: ['bun', '-e', script] }));
+
+    expect(result).toMatchObject({ exitCode: 134, attempts: 1 });
+  });
+
+  // The signal path is independent of the log-marker scan: a process that
+  // dies by SIGABRT with no crash text in its output must still be caught.
+  // `bash`, not `bun -e`, self-signals here — Bun's own runtime installs a
+  // SIGABRT handler that prints its "oh no: Bun has crashed" banner, which
+  // would leave the marker in the log anyway and defeat the point of this
+  // case.
+  it('classifies a bare SIGABRT exit as a crash with no log marker present', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const script = `
+      if [ -f ${JSON.stringify(marker)} ]; then exit 0; fi
+      touch ${JSON.stringify(marker)}
+      kill -ABRT $$
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: ['bash', '-c', script],
+        retryOnCrash: true,
+        // Only so the assertion below has attempt 1's log to read; the retry
+        // would otherwise truncate it.
+        preserveAttemptLogs: true,
+      })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+    // Load-bearing, not decoration: if the shell ever printed something the
+    // markers matched, this test would still pass — via the marker path,
+    // leaving the signal-derived `exitCode === CRASH_EXIT_CODE` branch it
+    // exists for uncovered.
+    const attemptOne = await Bun.file(`${join(dir, 'run.log')}.attempt-1`).text();
+    expect(attemptOne).not.toContain('Bun has crashed');
+    expect(attemptOne).not.toContain('panic(main thread)');
+  });
+
+  it('writes crashed=true to $GITHUB_OUTPUT when a crash was retried', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const githubOutput = join(dir, 'github-output');
+    await writeFile(githubOutput, '');
+    process.env.GITHUB_OUTPUT = githubOutput;
+
+    await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: ['bun', '-e', crashOnceThenScript(marker, 'process.exit(0);')],
+        retryOnCrash: true,
+      })
+    );
+
+    expect(await Bun.file(githubOutput).text()).toContain('crashed=true\n');
+  });
+
+  it('writes crashed=false to $GITHUB_OUTPUT for a clean run in crash mode', async () => {
+    const dir = await makeTemp();
+    const githubOutput = join(dir, 'github-output');
+    await writeFile(githubOutput, '');
+    process.env.GITHUB_OUTPUT = githubOutput;
+
+    await runTestsWithWatchdog(optionsIn(dir, { retryOnCrash: true }));
+
+    expect(await Bun.file(githubOutput).text()).toContain('crashed=false\n');
+  });
+
+  // A hang that retries clean never sets `crashed`, but `retry()` still
+  // preserves attempt 1's log — the nightly workflow's artifact-upload step
+  // needs its own signal for that case, or the only evidence of the hang is
+  // silently dropped from a green step.
+  it('writes log-preserved=true to $GITHUB_OUTPUT after a hung attempt retries clean', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const githubOutput = join(dir, 'github-output');
+    await writeFile(githubOutput, '');
+    process.env.GITHUB_OUTPUT = githubOutput;
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) process.exit(0);
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      setInterval(() => {}, 1000);
+    `;
+
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: ['bun', '-e', script],
+        timeoutSeconds: 3,
+        retryOnCrash: true,
+        preserveAttemptLogs: true,
+      })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+    const output = await Bun.file(githubOutput).text();
+    expect(output).toContain('crashed=false\n');
+    expect(output).toContain('log-preserved=true\n');
+    expect(await Bun.file(`${join(dir, 'run.log')}.attempt-1`).exists()).toBe(true);
+  });
+
+  it('writes log-preserved=false to $GITHUB_OUTPUT for a clean run with no retry', async () => {
+    const dir = await makeTemp();
+    const githubOutput = join(dir, 'github-output');
+    await writeFile(githubOutput, '');
+    process.env.GITHUB_OUTPUT = githubOutput;
+
+    await runTestsWithWatchdog(optionsIn(dir, { retryOnCrash: true, preserveAttemptLogs: true }));
+
+    expect(await Bun.file(githubOutput).text()).toContain('log-preserved=false\n');
+  });
+
+  // Regression: a failure summary followed by more than 200 lines of panic
+  // dump used to fall outside the tail slice the scan used to inspect,
+  // silently dropping a real finding once the retry came back clean.
+  it('finds a failure summary trailed by a panic dump past the old 200-line tail window', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const paddingLines = Array.from(
+      { length: 250 },
+      (_, index) => `console.log("panic dump line ${index}");`
+    ).join('\n');
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        console.log("0 fail");
+        process.exit(0);
+      }
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      console.log("2 fail");
+      ${paddingLines}
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result.attempts).toBe(2);
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  // Regression: a crashed main thread's isolate worker could outlive the
+  // attempt and keep running into the retry. The straggler here inherits the
+  // crashed attempt's process group and would write its marker file 500ms
+  // after being spawned unless the group is reaped before the retry starts.
+  it("reaps a crashed attempt's process group before retrying", async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    // A bare relative name, not a path built from `dir`: the watchdog spawns
+    // the attempt with `cwd: dir`, and the stray inherits that same cwd, so
+    // the script text needs no dynamic value interpolated into it at all.
+    const strayMarkerName = 'stray-wrote';
+    const straySurvivalScript =
+      'setTimeout(() => require("node:fs").writeFileSync("stray-wrote", ""), 500)';
+    const script = `
+      const fs = require("node:fs");
+      const { spawn } = require("node:child_process");
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        process.exit(0);
+      }
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      spawn("bun", ["-e", ${JSON.stringify(straySurvivalScript)}], { stdio: "ignore" }).unref();
+      console.log("panic(main thread): abort()");
+      process.exit(134);
+    `;
+
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+    await Bun.sleep(800);
+    expect(await Bun.file(join(dir, strayMarkerName)).exists()).toBe(false);
   });
 });

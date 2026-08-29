@@ -31,6 +31,25 @@ name: Randomized Order Nightly
 #
 # The seed is the run number, so every night is a new order, and each job logs
 # the exact command to reproduce its own lane.
+#
+# Every lane runs under scripts/ci/run-tests-watchdog.ts with `--retry-on-crash`:
+# a hang (oven-sh/bun#39709) dies at the watchdog's bound instead of burning
+# this job's `timeout-minutes`, and an isolate-runner crash
+# (`panic(main thread): abort()`, the same #889 class) gets one same-seed
+# retry so the rest of the lane's file list still runs, instead of the whole
+# night's findings for that lane scrolling away with a job that looks like
+# "infra". Both outcomes are labeled `::warning`/infra in the job log rather
+# than left to look like an ordering finding — but neither may hide one: a
+# crashed attempt that already logged failures (inline `(fail)` lines or a
+# ` N fail` summary) still reports non-zero, because the retry proves the
+# isolate runner recovered, not that those failures didn't happen.
+#
+# `--parallel=1` stays on the `api`/`shared`/`runtime` lanes rather than
+# sharding it away: it is the only detector for *within-file* order
+# dependence under the merge gate's own unit-lane mode, and dropping it on
+# `api` would duplicate the `api-integration` entry instead of adding
+# coverage. Revisit only when a Bun release verifiably contains
+# oven-sh/bun#38008 (check the patch, not the version — tracked in #889).
 
 on:
   schedule:
@@ -53,7 +72,9 @@ jobs:
   randomized:
     name: Randomized order (${{ matrix.lane }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Sized with the step and per-attempt bounds below — see the budget comment
+    # on the "Run in a randomized order" step before changing this.
+    timeout-minutes: 22
     strategy:
       # One lane's ordering bug says nothing about another's, and finding all of
       # them in one night beats finding the first one four nights running. Kept
@@ -106,25 +127,39 @@ jobs:
       # and it must not write JUnit reports or coverage that anything else
       # reads.
       #
-      # Step timeout is tighter than the job's so a hang dies here and still
-      # leaves time for the log upload. A job-level timeout cancels the job
-      # before that step can run, and the log is the finding.
+      # The three timeouts here are one budget; changing any of them alone
+      # breaks it:
+      #
+      #   --timeout-seconds=420  One attempt. Healthy lanes run 160-235s, so
+      #                          this is ~80% headroom. 300s left only ~28%,
+      #                          and a GitHub runner under noisy-neighbour load
+      #                          routinely costs 30-50% — a green night would
+      #                          be SIGTERM'd, reported as an
+      #                          oven-sh/bun#39709 hang that never happened,
+      #                          and burn a second full attempt proving it. A
+      #                          fabricated infra report is worse than a slow
+      #                          one: the step bound below already caps the
+      #                          true pathology, a run that never ends.
+      #   timeout-minutes: 16    This step. Two full attempts (14m) plus the
+      #                          kill grace, group reap and log flush between
+      #                          them.
+      #   timeout-minutes: 22    The job. The above plus checkout, setup,
+      #                          migrations and the artifact upload.
+      #
+      # The step bound stays tighter than the job's so even a double hang dies
+      # here and still leaves time for the log upload. A job-level timeout
+      # cancels the job before that step can run, and the log is the finding.
       - name: Run in a randomized order
         id: randomized
-        timeout-minutes: 12
+        timeout-minutes: 16
         working-directory: apps/${{ matrix.workspace }}
         env:
           MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
           WORKSPACE: ${{ matrix.workspace }}
           ISOLATION: ${{ matrix.isolation }}
           LANE_PATH: ${{ matrix.path }}
+          LANE: ${{ matrix.lane }}
         run: |
-          # `set -o pipefail` is load-bearing, not boilerplate: a step without an
-          # explicit `shell:` runs under `bash -e {0}`, which does NOT set it, so
-          # the pipeline's status would be `tee`'s and a failing suite would
-          # report success — no notification, and the log upload below (gated on
-          # `outcome != success`) would never run.
-          set -o pipefail
           # An array, not a string: `isolation` and `path` are empty for at
           # least one lane each, and a quoted empty string would reach
           # `bun test` as an argument it reads as a path filter matching
@@ -137,16 +172,31 @@ jobs:
           # leaves `MANGOSTUDIO_DIAGNOSTIC_LOGS` or `DATABASE_PATH` behind runs
           # a different suite than the one that went red.
           echo "::notice::Reproduce with: (cd apps/${WORKSPACE} && DATABASE_PATH=${DATABASE_PATH} MANGOSTUDIO_DIAGNOSTIC_LOGS=${MANGOSTUDIO_DIAGNOSTIC_LOGS} bun test ${args[*]})"
-          bun test "${args[@]}" 2>&1 | tee run.log
+          # The watchdog owns run.log, mirrors the child's output to this
+          # step's own log, and bounds+retries a hang or a crash exactly like
+          # the merge gate's shards (scripts/ci/run-tests-watchdog.ts).
+          bun ../../scripts/ci/run-tests-watchdog.ts --label="${LANE}" \
+            --timeout-seconds=420 --retry-on-crash \
+            --log-file=run.log --meta-file=run-meta.json \
+            -- bun test "${args[@]}"
 
       # The order is the finding. Without it a red run names a failing test and
       # nothing about what ran before it, which is the half that matters.
-      # `outcome != success` covers a failed run and a step timeout; `!cancelled()`
-      # skips a user-cancelled job, where there is nothing useful to keep.
+      # `outcome != success` covers a failed run and a step timeout;
+      # `outputs.crashed == 'true'` also uploads a crash-then-clean-retry
+      # night, and `outputs.log-preserved == 'true'` does the same for a
+      # hang-then-clean-retry. A crash that already logged failures reports
+      # non-zero on its own and is covered by `outcome`; these two outputs are
+      # for the case where the step *succeeds* and the preserved attempt-1 log
+      # is the only record that anything went wrong at all.
+      # `!cancelled()` skips a user-cancelled job, where there is nothing
+      # useful to keep. The glob picks up both `run.log` and, when a hang or
+      # crash preserved it, `run.log.attempt-1`; `run-meta.json` is not
+      # uploaded because nothing here consumes it.
       - name: Upload run log
-        if: ${{ !cancelled() && steps.randomized.outcome != 'success' }}
+        if: ${{ !cancelled() && (steps.randomized.outcome != 'success' || steps.randomized.outputs.crashed == 'true' || steps.randomized.outputs.log-preserved == 'true') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: randomized-order-${{ matrix.lane }}-seed-${{ env.SEED }}
-          path: apps/${{ matrix.workspace }}/run.log
+          path: apps/${{ matrix.workspace }}/run.log*
           retention-days: 14

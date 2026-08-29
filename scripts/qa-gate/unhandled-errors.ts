@@ -12,16 +12,8 @@
 //
 // Usage: bun ./scripts/qa-gate/unhandled-errors.ts <run.log> > errors.json
 
+import { normalizeLogLine } from '../lib/log-lines';
 import type { TestErrorHeadline } from './collect/types';
-
-const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
-
-// Turbo `--ui=stream` prefixes lines with `<package>:<task>: `; a direct
-// `bun test` invocation has no prefix. Tolerate both.
-const TURBO_PREFIX_RE = /^(?:@[\w/-]+|\/\/):[\w:-]+:\s+/;
-// The same prefix, captured, so a block opened by one lane is not closed by
-// another lane's interleaved output.
-const TURBO_TASK_RE = /^((?:@[\w/-]+|\/\/):[\w:-]+):\s+/;
 
 // `bun test`: a block heading, then the offending source and an
 // `error: <message>` headline, then the run summary's ` N error` line.
@@ -58,10 +50,8 @@ export const parseUnhandledErrors = (text: string): UnhandledErrors => {
   };
 
   for (const rawLine of text.split('\n')) {
-    const stripped = rawLine.replace(ANSI_RE, '').replace(/\r$/, '');
-    if (stripped.startsWith('##[')) continue;
-    const taskKey = stripped.match(TURBO_TASK_RE)?.[1] ?? '';
-    const body = stripped.replace(TURBO_PREFIX_RE, '').trim();
+    const { taskKey, body } = normalizeLogLine(rawLine);
+    if (body.startsWith('##[')) continue;
 
     if (body === BUN_UNHANDLED_HEADING) {
       bunBlockOpen.add(taskKey);
