@@ -135,10 +135,17 @@ const CRASH_LOG_MARKERS = [/oh no: Bun has crashed/, /panic\(main thread\)/];
 // exists because JUnit reports `failures="0"` for that run. Without these
 // shapes, a crash after only that signal leaves `failuresSeen` false and a
 // clean retry reports green over the ordering finding.
+//
+// Both summary shapes are anchored end-to-end, matching the live-verified
+// shape in scripts/qa-gate/unhandled-errors.ts. A `\b` tail would also match
+// an ordinary log line — `1 error: cannot find module …` — and turn a
+// findings-free night red. Narrowing costs nothing here because each summary
+// has a redundant detector that survives a truncated run anyway: inline
+// `(fail)` for failures, the block heading for unhandled errors.
 const INLINE_FAILURE_RE = /^\(fail\)/;
-const FAILURE_SUMMARY_RE = /^[1-9]\d* fail\b/;
+const FAILURE_SUMMARY_RE = /^[1-9]\d*\s+fail$/;
 const UNHANDLED_HEADING = '# Unhandled error between tests';
-const UNHANDLED_ERROR_COUNT_RE = /^[1-9]\d* errors?\b/;
+const UNHANDLED_ERROR_COUNT_RE = /^[1-9]\d*\s+errors?$/;
 
 interface AttemptResult {
   readonly exitCode: number;

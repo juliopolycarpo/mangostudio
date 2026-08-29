@@ -512,6 +512,29 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
     expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
   });
 
+  // Regression: the summary scans are anchored end-to-end, so an ordinary log
+  // line that merely opens with a count — `1 error: …` is Bun's own module
+  // resolution shape — cannot be mistaken for the ` N error` summary and flip
+  // a findings-free crash retry to red.
+  it('does not mistake a count-prefixed log line for a failure summary', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) process.exit(0);
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      console.log("1 error: Cannot find module 'left-pad'");
+      console.log("3 failures were retried by the vendor CLI");
+      console.log("panic(main thread): abort()");
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+  });
+
   it('reports a non-zero exit when the retry crashes again', async () => {
     const dir = await makeTemp();
     const script = `
