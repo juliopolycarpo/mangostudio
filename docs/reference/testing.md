@@ -806,17 +806,21 @@ Frontend support lives in `apps/frontend/tests/support/`:
   re-registered from the suite's `afterEach`:
   `support/mocks/google-genai.ts` for the Gemini SDK,
   `support/connectors/index.ts` for the first-party provider modules.
-- **Never `mock.module()` anything the bunfig preload imports.** The capture
-  above has to run before any test installs a fake, which makes the preload
-  look like its natural home. It is the one place it cannot go: mocking a
-  module in the preload's graph re-evaluates that graph, producing a second
-  `test-environment.ts` whose `initialized` flag is false, and every later
-  `createApiTestApp` throws the not-initialized guard. Measured on Bun 1.4.0 —
-  importing `@google/genai` from the preload took `--randomize --seed=1` over
-  `apps/api/tests/integration` from 36 failures to 605. Import the capture from
-  a support module test files pull in at module scope instead; module
-  evaluation still precedes every hook in that file, so the capture is early
-  enough in any file order.
+- **Never add a direct import of a mocked module to the bunfig preload.** The
+  capture above has to run before any test installs a fake, which makes the
+  preload look like its natural home. It is the one place it cannot go: mocking
+  a module the preload imports *at top level* re-evaluates that graph, producing
+  a second `test-environment.ts` whose `initialized` flag is false, and every
+  later `createApiTestApp` throws the not-initialized guard. Measured on Bun
+  1.4.0 — importing `@google/genai` from the preload took `--randomize --seed=1`
+  over `apps/api/tests/integration` from 36 failures to 605. Transitive
+  reachability is not the trigger, and the rule is not "nothing the preload can
+  reach": `test-environment.ts` already pulls `@google/genai`,
+  `src/services/gemini` and the openai modules in through
+  `registerApplicationServices()`, and the connector suites mock all of them
+  today. Import the capture from a support module test files pull in at module
+  scope instead; module evaluation still precedes every hook in that file, so
+  the capture is early enough in any file order.
 - **Better Auth turns off origin, rate-limit and secret validation under
   `NODE_ENV=test`** (`bun test` sets it), so no `bun test` case can assert any
   of the three — the positive case passes while checking nothing and the

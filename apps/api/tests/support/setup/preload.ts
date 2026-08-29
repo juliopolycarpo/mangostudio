@@ -9,11 +9,15 @@
  * `src/lib/config.ts` and the harness guard keep wrong-directory runs safe and
  * loud. See docs/reference/testing.md.
  *
- * Keep this graph free of anything a test may `mock.module()`. Mocking a module
- * the preload imports re-evaluates the preload's graph, which produces a second
- * `test-environment.ts` with `initialized` back to false — every later
- * `createApiTestApp` then throws the not-initialized guard. See
- * tests/support/mocks/google-genai.ts for the measurement.
+ * Never add a *direct* import of anything a test may `mock.module()` to this
+ * file. Mocking a module this one imports at top level re-evaluates the
+ * preload's graph, which produces a second `test-environment.ts` with
+ * `initialized` back to false — every later `createApiTestApp` then throws the
+ * not-initialized guard. See tests/support/mocks/google-genai.ts for the
+ * measurement. Transitive reachability is not the trigger: `test-environment.ts`
+ * already pulls in `@google/genai`, `src/services/gemini` and the openai
+ * modules through `registerApplicationServices()`, and connector tests mock all
+ * of them without hitting this.
  */
 
 import { installSpawnDiagnostics } from './spawn-diagnostics';
