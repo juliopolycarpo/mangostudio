@@ -57,6 +57,12 @@ export interface WatchdogOptions {
   readonly timeoutSeconds: number;
   /** How long SIGTERM gets before the group is SIGKILLed. */
   readonly killGraceSeconds?: number;
+  /**
+   * How long a crashed attempt's reaped process group gets to finish before
+   * the retry starts. Injectable for the same reason `killGraceSeconds` is:
+   * the crash-path tests would otherwise each pay the full CI-sized wait.
+   */
+  readonly crashReapGraceSeconds?: number;
   /** Combined stdout+stderr of the attempt whose exit code is reported. */
   readonly logFile: string;
   /**
@@ -436,7 +442,7 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
     // renamed out of the retry's way.
     if (attempt.pid !== undefined) {
       killGroup(attempt.pid, 'SIGKILL');
-      await sleep(2000);
+      await sleep((options.crashReapGraceSeconds ?? 2) * 1000);
     }
     attempt = await retry();
     crashed = await observe(attempt);

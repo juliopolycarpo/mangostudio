@@ -76,6 +76,11 @@ const optionsIn = (dir: string, overrides: Partial<WatchdogOptions>): WatchdogOp
   command: ['bun', '-e', 'console.log("ok")'],
   timeoutSeconds: 30,
   killGraceSeconds: 1,
+  // The CI default is 2s, and every crash-path test below reaches the reap.
+  // Overridden here for the same reason `killGraceSeconds` is: the wait
+  // guards against a straggler worker, and nothing in these fixtures needs
+  // seconds of it.
+  crashReapGraceSeconds: 0.2,
   logFile: join(dir, 'run.log'),
   metaFile: join(dir, 'shard-meta.json'),
   timingsDir: join(dir, 'timings'),
