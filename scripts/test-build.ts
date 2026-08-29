@@ -24,12 +24,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startFakeChatGptServer } from '../apps/api/tests/support/chatgpt/fake-server';
 import { extractTarArchive } from './lib/archive';
+import { pumpStream } from './lib/child-streams';
 import {
   DISTRIBUTION_MANIFEST_FILE,
   readDistributionManifest,
   validateDistributionManifest,
 } from './lib/distribution-manifest';
 import { captureCommand } from './lib/exec';
+import { findModuleResolutionFailure } from './lib/module-resolution';
 import {
   type BinaryTarget,
   filterBinaryTargets,
@@ -39,6 +41,7 @@ import {
   runtimeBinaryName,
 } from './lib/release-targets';
 import { resolveReleaseVersion } from './lib/release-version';
+import { probeRuntimeHandshake, type RuntimeHandshakeProbe } from './lib/runtime-handshake';
 import { waitForServerReady } from './lib/wait-for-health';
 import { findChecksum, sha256File } from './release/verify-checksum';
 
@@ -325,82 +328,66 @@ async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Pro
   }
   pass(`${label} --version → ${VERSION}`);
 
-  const child = Bun.spawn({
-    cmd: [binaryPath, '--stdio'],
-    stdin: 'pipe',
-    stdout: 'pipe',
-    stderr: 'pipe',
+  const probe = await probeRuntimeHandshake({
+    command: [binaryPath, '--stdio'],
+    timeoutMs: RUNTIME_HANDSHAKE_TIMEOUT_MS,
   });
 
-  try {
-    const hello = await readFirstLine(child.stdout, RUNTIME_HANDSHAKE_TIMEOUT_MS);
-    if (!hello) fail(`${label} --stdio sent no handshake frame`);
+  // `=== null`, not falsy: a child whose first record is a bare newline greets
+  // with an empty line, and that belongs in the JSON check below with a real
+  // message, not in the failure report with a `null` cause.
+  if (probe.hello === null) reportFailedHandshake(label, probe);
 
-    let frame: { type?: string; runtimeVersion?: string; manifest?: { platform?: string } };
-    try {
-      frame = JSON.parse(hello) as typeof frame;
-    } catch {
-      fail(`${label} --stdio wrote a non-JSON line to stdout: ${hello}`);
-    }
-    if (frame.type !== 'hello') fail(`Expected a hello frame, got: ${hello}`);
-    if (frame.runtimeVersion !== VERSION) {
-      fail(`Handshake reported runtime ${frame.runtimeVersion}, expected ${VERSION}`);
-    }
-    if (!frame.manifest?.platform) fail('Handshake carried no capability manifest');
-    pass(`${label} --stdio handshakes with a v${VERSION} manifest`);
-  } finally {
-    child.stdin.end();
-    child.kill();
-    await child.exited.catch(() => undefined as undefined);
+  // Guarded on the success path too: a runtime can greet and still have failed
+  // to resolve a chunk it needs later, and that is worth failing the smoke.
+  assertNoModuleResolutionFailures(probe.stderr, `${label} stderr`);
+
+  const hello = probe.hello;
+  let frame: { type?: string; runtimeVersion?: string; manifest?: { platform?: string } };
+  try {
+    frame = JSON.parse(hello) as typeof frame;
+  } catch {
+    fail(`${label} --stdio wrote a non-JSON line to stdout: ${hello}`);
   }
+  if (frame.type !== 'hello') fail(`Expected a hello frame, got: ${hello}`);
+  if (frame.runtimeVersion !== VERSION) {
+    fail(`Handshake reported runtime ${frame.runtimeVersion}, expected ${VERSION}`);
+  }
+  if (!frame.manifest?.platform) fail('Handshake carried no capability manifest');
+  pass(`${label} --stdio handshakes with a v${VERSION} manifest`);
 }
 
 /**
- * Reads one newline-terminated record, or null if the deadline passes first.
+ * Prints everything the probe collected, then exits.
  *
- * Deliberately hand-rolled rather than reusing `RuntimeFrameDecoder`: this
- * script runs in the smoke matrix with `--no-install`, so it must have no
- * external runtime imports — `scripts/tests/smoke-dependencies.unit.test.ts`
- * enforces that. The shape assertions above stand in for schema validation.
+ * Two undiagnosable Windows flakes came from a single-line report, so the
+ * partial frame, the exit status and the child's stderr all reach the log
+ * before `fail()` takes the process down. Details lead and the verdict lands
+ * last, which is where a CI log gets read from; the module-resolution assert
+ * runs just before it so a pattern hit becomes the final, more specific ❌.
+ * The cause is on the header line too, because that assert is a `never` and
+ * would otherwise be the only thing printed on the likeliest crash of all.
  */
-async function readFirstLine(
-  stream: ReadableStream<Uint8Array>,
-  timeoutMs: number
-): Promise<string | null> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  const deadline = Bun.sleep(timeoutMs).then(() => null);
-  let buffered = '';
+function reportFailedHandshake(label: string, probe: RuntimeHandshakeProbe): never {
+  console.error(`  🔎 ${label} --stdio ${probe.failure}`);
+  if (probe.partial) console.error(`     partial stdout (no newline): ${probe.partial}`);
+  if (probe.exitCode !== null) console.error(`     exit code: ${probe.exitCode}`);
+  if (probe.signal) console.error(`     signal: ${probe.signal}`);
+  console.error('     --- runtime stderr ---');
+  console.error(probe.stderr.trim() || '     (empty)');
+  console.error('     --- end runtime stderr ---');
 
-  try {
-    while (true) {
-      const chunk = await Promise.race([reader.read(), deadline]);
-      if (!chunk || chunk.done) return null;
-      buffered += decoder.decode(chunk.value, { stream: true });
-      const newline = buffered.indexOf('\n');
-      if (newline !== -1) return buffered.slice(0, newline);
-    }
-  } finally {
-    reader.releaseLock();
-  }
+  assertNoModuleResolutionFailures(probe.stderr, `${label} stderr`);
+  fail(`${label} --stdio ${probe.failure}`);
 }
 
 // ---------------------------------------------------------------------------
 // Runtime smoke test
 // ---------------------------------------------------------------------------
 
-const MODULE_RESOLUTION_FAILURE_PATTERNS = [
-  'ResolveMessage',
-  'Cannot find module',
-  './642.js',
-] as const;
-
 function assertNoModuleResolutionFailures(text: string, label: string): void {
-  for (const pattern of MODULE_RESOLUTION_FAILURE_PATTERNS) {
-    if (text.includes(pattern)) {
-      fail(`${label} contains forbidden module-resolution pattern: ${pattern}`);
-    }
-  }
+  const pattern = findModuleResolutionFailure(text);
+  if (pattern) fail(`${label} contains forbidden module-resolution pattern: ${pattern}`);
 }
 
 function buildSessionCookieHeader(response: Response): string {
@@ -572,7 +559,6 @@ async function smokeTest(): Promise<void> {
   const authBaseUrl = `http://127.0.0.1:${PORT}`;
   const chatGptSmokeEnabled = canBindChatGptCallbackPort();
   const fakeChatGpt = chatGptSmokeEnabled ? startFakeChatGptServer() : null;
-  let serverStderr = '';
 
   // The binary is a CLI; bare invocation prints help, so start the server
   // explicitly in the foreground (API_PORT is honored by `serve`).
@@ -602,18 +588,7 @@ async function smokeTest(): Promise<void> {
     stderr: 'pipe',
   });
 
-  const stderrReader = proc.stderr.getReader();
-  const stderrPump = (async () => {
-    const decoder = new TextDecoder();
-    while (true) {
-      const { done, value } = await stderrReader.read();
-      if (done) break;
-      if (value) {
-        serverStderr += decoder.decode(value, { stream: true });
-      }
-    }
-    serverStderr += decoder.decode();
-  })();
+  const serverStderr = pumpStream(proc.stderr);
 
   try {
     console.log('   Waiting for server to be ready...');
@@ -865,7 +840,7 @@ async function smokeTest(): Promise<void> {
       const sessionCookie = buildSessionCookieHeader(signupResponse);
 
       console.log('\n🔌 Running deprecated Cursor connector smoke...');
-      await smokeDeprecatedCursorConnector(PORT, sessionCookie, serverStderr);
+      await smokeDeprecatedCursorConnector(PORT, sessionCookie, serverStderr.text());
 
       if (fakeChatGpt) {
         console.log('\n🔌 Running ChatGPT connector smoke...');
@@ -879,7 +854,7 @@ async function smokeTest(): Promise<void> {
   } finally {
     proc.kill();
     await proc.exited.catch(() => undefined as undefined);
-    await stderrPump.catch(() => undefined as undefined);
+    await serverStderr.done.catch(() => undefined as undefined);
     fakeChatGpt?.stop();
     removeTempDir(tmpHome);
   }
