@@ -531,8 +531,12 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
   it("reaps a crashed attempt's process group before retrying", async () => {
     const dir = await makeTemp();
     const marker = join(dir, 'first-attempt-ran');
-    const strayMarker = join(dir, 'stray-wrote');
-    const straySurvivalScript = `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(strayMarker)}, ""), 500)`;
+    // A bare relative name, not a path built from `dir`: the watchdog spawns
+    // the attempt with `cwd: dir`, and the stray inherits that same cwd, so
+    // the script text needs no dynamic value interpolated into it at all.
+    const strayMarkerName = 'stray-wrote';
+    const straySurvivalScript =
+      'setTimeout(() => require("node:fs").writeFileSync("stray-wrote", ""), 500)';
     const script = `
       const fs = require("node:fs");
       const { spawn } = require("node:child_process");
@@ -551,6 +555,6 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
 
     expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
     await Bun.sleep(800);
-    expect(await Bun.file(strayMarker).exists()).toBe(false);
+    expect(await Bun.file(join(dir, strayMarkerName)).exists()).toBe(false);
   });
 });
