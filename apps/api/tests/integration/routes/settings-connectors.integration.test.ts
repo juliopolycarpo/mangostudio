@@ -199,6 +199,13 @@ describe('settings connectors routes', () => {
       name: 'connector-owned-by-another-user',
       provider: 'openai',
     });
+    // The tripwire, for the same reason the placeholder test above needs one:
+    // `some(...)` is false for an empty list, so absence alone would also be
+    // satisfied by a regression that stops returning anyone's connectors.
+    const ownConnector = await insertTestConnector(TEST_USER.id, {
+      name: 'connector-owned-by-the-caller',
+      provider: 'openai',
+    });
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
     restoreAuth = restore;
@@ -210,11 +217,14 @@ describe('settings connectors routes', () => {
 
       const payload = (await response.json()) as ConnectorListPayload;
       expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
-      expect(payload.connectors.some((connector) => connector.id === foreignConnector.id)).toBe(
-        false
-      );
+      const connectorIds = payload.connectors.map((connector) => connector.id);
+      expect(connectorIds).not.toContain(foreignConnector.id);
+      expect(connectorIds).toContain(ownConnector.id);
     } finally {
-      await getDb().deleteFrom('secret_metadata').where('id', '=', foreignConnector.id).execute();
+      await getDb()
+        .deleteFrom('secret_metadata')
+        .where('id', 'in', [foreignConnector.id, ownConnector.id])
+        .execute();
     }
   });
 });
