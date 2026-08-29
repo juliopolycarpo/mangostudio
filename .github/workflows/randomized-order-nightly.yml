@@ -69,7 +69,9 @@ jobs:
   randomized:
     name: Randomized order (${{ matrix.lane }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Sized with the step and per-attempt bounds below — see the budget comment
+    # on the "Run in a randomized order" step before changing this.
+    timeout-minutes: 22
     strategy:
       # One lane's ordering bug says nothing about another's, and finding all of
       # them in one night beats finding the first one four nights running. Kept
@@ -122,12 +124,31 @@ jobs:
       # and it must not write JUnit reports or coverage that anything else
       # reads.
       #
-      # Step timeout is tighter than the job's so a hang dies here and still
-      # leaves time for the log upload. A job-level timeout cancels the job
-      # before that step can run, and the log is the finding.
+      # The three timeouts here are one budget; changing any of them alone
+      # breaks it:
+      #
+      #   --timeout-seconds=420  One attempt. Healthy lanes run 160-235s, so
+      #                          this is ~80% headroom. 300s left only ~28%,
+      #                          and a GitHub runner under noisy-neighbour load
+      #                          routinely costs 30-50% — a green night would
+      #                          be SIGTERM'd, reported as an
+      #                          oven-sh/bun#39709 hang that never happened,
+      #                          and burn a second full attempt proving it. A
+      #                          fabricated infra report is worse than a slow
+      #                          one: the step bound below already caps the
+      #                          true pathology, a run that never ends.
+      #   timeout-minutes: 16    This step. Two full attempts (14m) plus the
+      #                          kill grace, group reap and log flush between
+      #                          them.
+      #   timeout-minutes: 22    The job. The above plus checkout, setup,
+      #                          migrations and the artifact upload.
+      #
+      # The step bound stays tighter than the job's so even a double hang dies
+      # here and still leaves time for the log upload. A job-level timeout
+      # cancels the job before that step can run, and the log is the finding.
       - name: Run in a randomized order
         id: randomized
-        timeout-minutes: 12
+        timeout-minutes: 16
         working-directory: apps/${{ matrix.workspace }}
         env:
           MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
@@ -152,7 +173,7 @@ jobs:
           # step's own log, and bounds+retries a hang or a crash exactly like
           # the merge gate's shards (scripts/ci/run-tests-watchdog.ts).
           bun ../../scripts/ci/run-tests-watchdog.ts --label="${LANE}" \
-            --timeout-seconds=300 --retry-on-crash \
+            --timeout-seconds=420 --retry-on-crash \
             --log-file=run.log --meta-file=run-meta.json \
             -- bun test "${args[@]}"
 
