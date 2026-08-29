@@ -128,8 +128,26 @@ interface AttemptResult {
   readonly pid?: number;
 }
 
+/**
+ * Whether an attempt died of an isolate-runner abort rather than reporting
+ * test results.
+ *
+ * `CRASH_EXIT_CODE` is decisive on its own. The log markers are the fallback
+ * for a crash whose exit code got laundered on the way out — `bun run test`
+ * goes through turbo, which reports its own code for the task it ran — so they
+ * cannot be dropped, and exit 1 cannot be excluded.
+ *
+ * What they must not do is classify a *green* run whose output merely quotes
+ * those strings, which is not hypothetical: this repo's own watchdog fixtures
+ * print both markers, and `bun test scripts/` mirrors them into the parent's
+ * stdout. Hence the non-zero gate — without it, adding `--retry-on-crash` to
+ * the shard job would make every shard carrying the scripts lane retry itself
+ * and report `crashed=true` on a passing run.
+ * // Usage: isCrash({ exitCode: 1, hung: false }, 'panic(main thread): abort()') // → true
+ */
 const isCrash = (attempt: AttemptResult, logText: string): boolean =>
-  attempt.exitCode === CRASH_EXIT_CODE || CRASH_LOG_MARKERS.some((marker) => marker.test(logText));
+  attempt.exitCode === CRASH_EXIT_CODE ||
+  (attempt.exitCode !== 0 && CRASH_LOG_MARKERS.some((marker) => marker.test(logText)));
 
 /**
  * Whether an attempt's log reports at least one failing test.

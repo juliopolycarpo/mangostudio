@@ -444,6 +444,29 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
     expect(result).toMatchObject({ exitCode: 134, attempts: 2 });
   });
 
+  // A suite that *prints* the crash markers is not a crashed suite. This
+  // file's own fixtures do exactly that, and `bun test scripts/` mirrors them
+  // into the parent's stdout — so without the exit-code gate, every shard
+  // carrying the scripts lane would retry itself and report `crashed=true` on
+  // a run that passed.
+  it('does not treat a green run that quotes the crash markers as a crash', async () => {
+    const dir = await makeTemp();
+    const githubOutput = join(dir, 'github-output');
+    await writeFile(githubOutput, '');
+    process.env.GITHUB_OUTPUT = githubOutput;
+    const script = `
+      console.log("oh no: Bun has crashed");
+      console.log("panic(main thread): abort()");
+      process.exit(0);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 1 });
+    expect(await Bun.file(githubOutput).text()).toContain('crashed=false\n');
+  });
+
   // The no-retry-on-real-failure contract must survive crash mode: a plain
   // red run is not a crash and must not get a second roll of the dice.
   it('does not retry a plain failure even with retryOnCrash on', async () => {
