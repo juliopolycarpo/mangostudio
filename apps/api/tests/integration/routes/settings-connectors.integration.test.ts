@@ -151,6 +151,16 @@ describe('settings connectors routes', () => {
     // blocks create — which the managed config file is wiped between tests to
     // prevent, so those names could never appear and all three assertions
     // passed against nothing, in every order.
+    //
+    // Writing the file has a side effect worth naming: `listConnectors` syncs
+    // *every* registered provider, and a provider whose TOML section is absent
+    // reconciles to "no config-file connectors" — deleting every
+    // `source: 'config-file'` row visible to this caller (its own plus the
+    // shared `userId: null` ones). That is production behaviour, not a test
+    // artifact, but it means this test destroys shared config-file rows a
+    // sibling test left behind (measured: the `shared-compat-without-base-url`
+    // row from the test above). Nothing in the suite reads such a row across
+    // tests today; a future one must create its own row inside its own test.
     writeFileSync(
       TEST_MANAGED_CONFIG_PATH,
       [
