@@ -28,7 +28,7 @@ import {
   type SuccessPayload,
   withFetch,
 } from '../../support/connectors';
-import { ensureTestUsers, insertTestConnector, makeTestIdentity } from '../../support/factories';
+import { ensureTestUsers, insertTestConnector, insertTestUser } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const TEST_USER = {
@@ -203,8 +203,13 @@ describe('settings connectors routes', () => {
     // The scoping half of the list contract, which nothing else pins: the
     // empty-list test above filters by `userId` before asserting, so it cannot
     // notice a regression that starts handing out other people's rows.
-    const otherUser = makeTestIdentity('connector-scope-other', 'Connector Scope Other');
-    await ensureTestUsers(otherUser);
+    //
+    // Both identities are minted per test rather than reusing `TEST_USER`, so
+    // neither row is visible to any other test and none of this needs cleaning
+    // up — the "own your own state" convention in docs/reference/testing.md,
+    // instead of a hand-maintained delete list that the next row can outgrow.
+    const otherUser = await insertTestUser();
+    const caller = await insertTestUser();
     const foreignConnector = await insertTestConnector(otherUser.id, {
       name: 'connector-owned-by-another-user',
       provider: 'openai',
@@ -213,33 +218,28 @@ describe('settings connectors routes', () => {
     // `some(...)` is false for an empty list, so absence alone would also be
     // satisfied by a regression that stops returning anyone's connectors.
     // `source: 'bun-secrets'` keeps this row outside config-file reconciliation,
-    // which runs on every list request and deletes config-file rows that have
-    // no matching TOML entry — this fixture doesn't write one.
-    const ownConnector = await insertTestConnector(TEST_USER.id, {
+    // which deletes config-file rows with no matching TOML entry. That sync
+    // early-returns when the config file is absent, and this test writes none,
+    // so it is dormant here — the source is defence in depth against a future
+    // test in this file that does write one.
+    const ownConnector = await insertTestConnector(caller.id, {
       name: 'connector-owned-by-the-caller',
       provider: 'openai',
       source: 'bun-secrets',
     });
 
-    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    const { app, restore } = createAuthenticatedApiTestApp(caller, settingsRoutes);
     restoreAuth = restore;
 
-    try {
-      const response = await app.handle(new Request('http://localhost/settings/connectors'));
+    const response = await app.handle(new Request('http://localhost/settings/connectors'));
 
-      expect(response.status).toBe(200);
+    expect(response.status).toBe(200);
 
-      const payload = (await response.json()) as ConnectorListPayload;
-      expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
-      const connectorIds = payload.connectors.map((connector) => connector.id);
-      expect(connectorIds).not.toContain(foreignConnector.id);
-      expect(connectorIds).toContain(ownConnector.id);
-    } finally {
-      await getDb()
-        .deleteFrom('secret_metadata')
-        .where('id', 'in', [foreignConnector.id, ownConnector.id])
-        .execute();
-    }
+    const payload = (await response.json()) as ConnectorListPayload;
+    expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
+    const connectorIds = payload.connectors.map((connector) => connector.id);
+    expect(connectorIds).not.toContain(foreignConnector.id);
+    expect(connectorIds).toContain(ownConnector.id);
   });
 });
 
