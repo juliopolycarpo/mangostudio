@@ -37,14 +37,6 @@ const TEST_USER = {
   email: 'test-connectors@mangostudio.test',
 };
 
-/**
- * Two `[openai_api_keys]` entries the placeholder test writes into the managed
- * config file: one whose value `isPlaceholderConfigSecretValue` rejects, one it
- * accepts. The accepted one is what keeps the rejection assertion honest.
- */
-const PLACEHOLDER_CONNECTOR_NAME = 'openai-placeholder-from-dev-config';
-const REAL_CONFIG_CONNECTOR_NAME = 'openai-real-from-dev-config';
-
 const CURSOR_CONNECTOR_USER = {
   id: 'test-user-cursor-connectors',
   name: 'Cursor Test User',
@@ -161,6 +153,11 @@ describe('settings connectors routes', () => {
     // sibling test left behind (measured: the `shared-compat-without-base-url`
     // row from the test above). Nothing in the suite reads such a row across
     // tests today; a future one must create its own row inside its own test.
+    //
+    // Two entries, one rejected by `isPlaceholderConfigSecretValue` and one
+    // accepted; the accepted one is what keeps the rejection assertion honest.
+    const PLACEHOLDER_CONNECTOR_NAME = 'openai-placeholder-from-dev-config';
+    const REAL_CONFIG_CONNECTOR_NAME = 'openai-real-from-dev-config';
     writeFileSync(
       TEST_MANAGED_CONFIG_PATH,
       [
