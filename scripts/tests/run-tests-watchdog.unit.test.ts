@@ -361,6 +361,76 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
     expect(result.exitCode).not.toBe(0);
   });
 
+  // The shape the summary scan alone cannot see: the isolate runner aborts
+  // partway through the file list, so Bun never reaches its ` N fail` line —
+  // but it already printed the `(fail)` lines for the tests that did run. A
+  // clean retry must not report green over them.
+  it('reports a non-zero exit when a crash cut the run off before the summary', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        console.log("0 fail");
+        process.exit(0);
+      }
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      console.log("(fail) leaky > reads a stale database [1.20ms]");
+      console.log("panic(main thread): abort()");
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result.attempts).toBe(2);
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  // `bun run test` reaches the log through turbo `--ui=stream`, which prefixes
+  // every line with `<package>:<task>: `. A `^`-anchored scan of the raw text
+  // matches nothing under that caller — silently, and in the direction that
+  // reads as green.
+  it('finds failures behind a turbo stream prefix', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        console.log("@mangostudio/api:test:  0 fail");
+        process.exit(0);
+      }
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      console.log("@mangostudio/api:test:  2 fail");
+      process.exit(134);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result.attempts).toBe(2);
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  // Widening the scan to inline `(fail)` lines widens what a *green* run can
+  // match too: a suite that prints those strings as data — this very file
+  // does, through the fixtures above — would otherwise turn its own exit 0
+  // into a phantom 1. Bun cannot exit 0 with a failing test, so only a retry
+  // can legitimately hide findings.
+  it('does not turn a single green attempt into a failure over mirrored output', async () => {
+    const dir = await makeTemp();
+    const script = `
+      console.log("(fail) some suite > quoted by a fixture [1.00ms]");
+      console.log("2 fail");
+      process.exit(0);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 1 });
+  });
+
   it('reports a non-zero exit when the retry crashes again', async () => {
     const dir = await makeTemp();
     const script = `

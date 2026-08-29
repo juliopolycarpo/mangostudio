@@ -46,6 +46,7 @@ import { constants, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
+import { normalizeLogLine } from '../lib/log-lines';
 import { TIMINGS_DIR } from '../lib/test-lanes';
 
 export interface WatchdogOptions {
@@ -99,16 +100,26 @@ const HUNG_EXIT_CODE = 124;
 // checked the same way as a signal-derived one.
 const CRASH_EXIT_CODE = 134;
 const CRASH_LOG_MARKERS = [/oh no: Bun has crashed/, /panic\(main thread\)/];
-// A killed-mid-run attempt never reaches Bun's summary line at all — that
-// case is covered by the preserved attempt-1 log, not this scan. This only
-// needs to catch a crash that struck *after* the summary printed, and a full
-// panic dump (version, features, stack) can trail it by well over 200 lines,
-// so the scan covers the complete log rather than a tail slice — the
-// anchored `fail` shape makes a false match elsewhere implausible.
+// Bun reports a failing test twice, and the scan needs both shapes.
+//
+//   - Inline, the moment it fails: `(fail) suite > name [0.37ms]`.
+//   - Once more in the run summary, at the end: ` 2 fail`.
+//
+// The summary alone is not enough. A crash that struck mid-run never reaches
+// it, and that truncated attempt is exactly the one whose findings this scan
+// exists to keep — without the inline shape, a crash at file 60 of 101 lets a
+// clean retry report green over real failures from files 1-59.
+//
+// The summary shape is still scanned because it is the only one that survives
+// a reporter change, and it is cheap. Both run over the complete log rather
+// than a tail slice: a full panic dump (version, features, stack) can trail
+// the summary by well over 200 lines.
+//
 // `[1-9]\d*`, not `\d+`: Bun always prints a ` 0 fail` line on a clean run,
 // and `\d+` matches that zero — verified live, it turned a green shared-lane
 // run into a reported exit 1.
-const FAILURE_SUMMARY_RE = /^\s*[1-9]\d* fail/m;
+const INLINE_FAILURE_RE = /^\(fail\)/;
+const FAILURE_SUMMARY_RE = /^[1-9]\d* fail\b/;
 
 interface AttemptResult {
   readonly exitCode: number;
@@ -120,7 +131,21 @@ interface AttemptResult {
 const isCrash = (attempt: AttemptResult, logText: string): boolean =>
   attempt.exitCode === CRASH_EXIT_CODE || CRASH_LOG_MARKERS.some((marker) => marker.test(logText));
 
-const hasFailureSummary = (logText: string): boolean => FAILURE_SUMMARY_RE.test(logText);
+/**
+ * Whether an attempt's log reports at least one failing test.
+ *
+ * Line-wise via `normalizeLogLine` rather than a multiline regex over the raw
+ * text: `bun run test` goes through turbo `--ui=stream`, which prefixes every
+ * line with `<package>:<task>: `, so a `^`-anchored scan of the raw log
+ * matches nothing at all under that caller — silently, and in the direction
+ * that reads as green.
+ * // Usage: hasFailure('@mangostudio/api:test:  2 fail\n') // → true
+ */
+const hasFailure = (logText: string): boolean =>
+  logText.split('\n').some((rawLine) => {
+    const { body } = normalizeLogLine(rawLine);
+    return INLINE_FAILURE_RE.test(body) || FAILURE_SUMMARY_RE.test(body);
+  });
 
 /**
  * Rename attempt 1's log out of the retry's way. `logFile` usually exists
@@ -329,16 +354,24 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
   let failuresSeen = false;
   let logPreserved = false;
 
-  // Reads the attempt's log while it still sits at `options.logFile` — before
-  // any retry renames it out of the way — so both the crash check and the
-  // failure-summary scan see the bytes that attempt actually produced.
+  /**
+   * Classify a finished attempt from its log, and record what it saw.
+   *
+   * Reads the log while it still sits at `options.logFile` — before any retry
+   * renames it out of the way — so both the crash check and the failure scan
+   * see the bytes that attempt actually produced. Returns false whenever crash
+   * retry is off, which is what keeps every merge-gate caller on the old
+   * fail-once-and-surface contract.
+   */
   const observe = async (result: AttemptResult): Promise<boolean> => {
     if (!crashRetryEnabled) return false;
     const text = await Bun.file(options.logFile)
       .text()
       .catch(() => '');
-    if (hasFailureSummary(text)) failuresSeen = true;
-    return !result.hung && isCrash(result, text);
+    if (hasFailure(text)) failuresSeen = true;
+    const crashed = !result.hung && isCrash(result, text);
+    crashedAny ||= crashed;
+    return crashed;
   };
 
   const retry = async (): Promise<AttemptResult> => {
@@ -351,7 +384,6 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
   };
 
   let crashed = await observe(attempt);
-  crashedAny = crashedAny || crashed;
 
   if (attempt.hung) {
     // Leading newline, not cosmetic: GitHub parses a workflow command only
@@ -364,8 +396,7 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
     );
     attempt = await retry();
     crashed = await observe(attempt);
-    crashedAny = crashedAny || crashed;
-  } else if (crashRetryEnabled && crashed) {
+  } else if (crashed) {
     mirror.write(
       `\n::warning::Test invocation for '${options.label}' crashed (Bun isolate-runner ` +
         'abort, oven-sh/bun#39709 class — tracked in #889); retrying once with the same seed.\n'
@@ -381,7 +412,6 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
     }
     attempt = await retry();
     crashed = await observe(attempt);
-    crashedAny = crashedAny || crashed;
   }
   if (backup) await rm(backup, { recursive: true, force: true });
 
@@ -391,8 +421,14 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
   // the crashed attempt's own code: a plain `bun test` failure is never
   // retried, so the only way in here is a hang (124) or a crash (134/marker),
   // neither of which is a meaningful "test failure" exit code to persist.
+  //
+  // `attempts === 2` is what makes that safe to key off a log scan. Bun cannot
+  // exit 0 with a failing test, so a single green attempt whose log matched is
+  // always a mirror of someone else's output — a suite that prints `(fail)` or
+  // ` 2 fail` as *data*, which the watchdog's own fixtures below do. Only a
+  // retry can legitimately hide findings an earlier attempt already reported.
   let exitCode = attempt.exitCode;
-  if (crashRetryEnabled && failuresSeen && exitCode === 0) exitCode = 1;
+  if (crashRetryEnabled && attempts === 2 && failuresSeen && exitCode === 0) exitCode = 1;
 
   const durationSeconds = Math.round((Date.now() - startedAt) / 1000);
   const shard = /^\d+$/.test(options.label) ? Number(options.label) : options.label;
