@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 import { restoreGoogleGenAI } from '../../../support/mocks/google-genai';
 
 /**
@@ -30,22 +30,15 @@ function mockGeminiSecretModule() {
 }
 
 describe('GeminiProvider.generateTextStream', () => {
-  beforeEach(() => {
-    // Reset module mocks between tests
-  });
-
   afterEach(async () => {
     const { resetGeminiClientCache } = await import(
       '../../../../src/services/providers/gemini/client'
     );
     resetGeminiClientCache();
-    // Clear module cache between tests (Bun test isolation)
-    mock.restore();
-    // …which does not revert mock.module(). This file runs in the isolated unit
-    // lane, so no fake it installs can reach another file today. The explicit
-    // restore keeps one mechanism for undoing this mock across the suite; it
-    // covers `@google/genai` only, so running this file unisolated would still
-    // leak the `providers/gemini/secret` fake below and needs its own capture.
+    // `mock.restore()` cannot undo `mock.module()`, so re-register the real SDK
+    // instead. This covers `@google/genai` only: the `providers/gemini/secret`
+    // fake below has no capture, so this file relies on the isolated unit lane
+    // to keep it from reaching another file.
     await restoreGoogleGenAI();
   });
 
