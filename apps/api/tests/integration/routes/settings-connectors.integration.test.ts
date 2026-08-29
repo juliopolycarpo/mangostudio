@@ -212,9 +212,13 @@ describe('settings connectors routes', () => {
     // The tripwire, for the same reason the placeholder test above needs one:
     // `some(...)` is false for an empty list, so absence alone would also be
     // satisfied by a regression that stops returning anyone's connectors.
+    // `source: 'bun-secrets'` keeps this row outside config-file reconciliation,
+    // which runs on every list request and deletes config-file rows that have
+    // no matching TOML entry — this fixture doesn't write one.
     const ownConnector = await insertTestConnector(TEST_USER.id, {
       name: 'connector-owned-by-the-caller',
       provider: 'openai',
+      source: 'bun-secrets',
     });
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);

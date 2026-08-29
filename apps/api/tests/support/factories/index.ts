@@ -1,4 +1,5 @@
 import { faker } from '@faker-js/faker';
+import type { SecretSource } from '@mangostudio/shared/types';
 import { getDb } from '../../../src/db/database';
 
 export interface UserFixture {
@@ -19,6 +20,7 @@ export interface ConnectorFixture {
   provider: string;
   enabledModels: string[];
   userId: string;
+  source: SecretSource;
 }
 
 let identitySeq = 0;
@@ -150,6 +152,7 @@ export async function insertTestConnector(
     provider: 'openai-compatible',
     enabledModels: [],
     userId,
+    source: 'config-file',
     ...overrides,
   };
   const now = Date.now();
@@ -161,7 +164,7 @@ export async function insertTestConnector(
       name: connector.name,
       provider: connector.provider,
       configured: 1,
-      source: 'config-file',
+      source: connector.source,
       maskedSuffix: null,
       updatedAt: now,
       lastValidatedAt: now,
