@@ -110,6 +110,15 @@ export function useListboxSelect<Option extends ListboxOption>({
       return;
     }
 
+    // Tab moves focus off the trigger, and the panel is anchored to a trigger
+    // the user has left: without this it stays open, floating over the page,
+    // with `aria-activedescendant` still pointing at a row nothing can reach.
+    // No `preventDefault` — the focus move itself is what the user asked for.
+    if (event.key === 'Tab') {
+      if (open) setOpen(false);
+      return;
+    }
+
     if (!open) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter') {
         event.preventDefault();

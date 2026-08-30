@@ -65,6 +65,21 @@ describe('Select', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  // The panel is anchored to a trigger the user has left; left open it floats
+  // over the page with `aria-activedescendant` pointing at a row out of reach.
+  it('closes when focus tabs away from the trigger', () => {
+    render(<Select value="ask" options={OPTIONS} onChange={jest.fn()} ariaLabel="Behaviour" />);
+
+    const trigger = screen.getByRole('combobox', { name: 'Behaviour' });
+    fireEvent.click(trigger);
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+
+    fireEvent.keyDown(trigger, { key: 'Tab' });
+
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
   it('shows the placeholder when the value matches no option', () => {
     render(
       <Select
