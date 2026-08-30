@@ -102,6 +102,17 @@ describe('ClaudeTurnReducer, on a recorded read-a-file turn', () => {
     expect(events.some((event) => event.type === 'reasoning_delta')).toBe(false);
   });
 
+  /**
+   * The other side of the fix above: this phase produces zero `thinking_delta`
+   * text, but the recording's `content_block_start` for it still fires, which
+   * is the one signal a live render has to show the reasoning phase happened
+   * at all — without it the turn looks idle for the whole phase.
+   */
+  it('announces the reasoning phase even when the vendor withholds every delta', () => {
+    const { events } = reduceAll('claude-read-turn.jsonl');
+    expect(events.filter((event) => event.type === 'reasoning_started')).toHaveLength(1);
+  });
+
   it('streams thinking as reasoning, not as text, when the vendor sends it', () => {
     const subject = new ClaudeTurnReducer({ resumed: false });
     const events = subject.reduce({
@@ -113,6 +124,34 @@ describe('ClaudeTurnReducer, on a recorded read-a-file turn', () => {
       },
     }).events;
     expect(events).toEqual([{ type: 'reasoning_delta', text: 'weighing the options' }]);
+  });
+
+  it('announces a reasoning phase when the vendor opens a thinking block', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    const events = subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
+    }).events;
+    expect(events).toEqual([{ type: 'reasoning_started' }]);
+  });
+
+  it('does not announce a reasoning phase for a tool_use block opening', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    const events = subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use' } },
+    }).events;
+    expect(events).toEqual([]);
+  });
+
+  it("never announces a subagent's reasoning phase into the main transcript", () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    const events = subject.reduce({
+      type: 'stream_event',
+      parent_tool_use_id: 'toolu_task',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
+    }).events;
+    expect(events).toEqual([]);
   });
 
   it("labels the activity with Claude's own tool name, verbatim", () => {

@@ -36,6 +36,7 @@ const REDUCER_OPTIONS = { pendingSubagentName: 'Pending subagent' };
  * sparse usage reported before completion.
  */
 const TURN: readonly ExternalAgentEvent[] = [
+  { type: 'reasoning_started' },
   { type: 'reasoning_delta', text: 'I should look at ' },
   { type: 'reasoning_delta', text: 'the build script.' },
   { type: 'text_delta', text: 'Checking the build' },
@@ -169,7 +170,7 @@ describe('external turn: live stream vs reloaded transcript', () => {
   });
 
   it('agrees on a turn that ends the way only the hub can decide', () => {
-    const interrupted = TURN.slice(0, 6);
+    const interrupted = TURN.slice(0, 7);
     const stored = new ExternalTurnTranscript({
       targetId: 'codex',
       sessionId: 'hub-session-1',
@@ -200,6 +201,27 @@ describe('external turn: live stream vs reloaded transcript', () => {
   });
 
   /**
+   * `display: "omitted"` is the API default on current models, so a reasoning
+   * phase that opens and receives no `reasoning_delta` at all is the common
+   * case, not an edge case. Both `ExternalTurnTranscript#finalize` and the
+   * reducer's `external_turn_completed` case drop the same trailing empty
+   * `thinking` part, so a live render that pulsed briefly and a reload must
+   * agree there is nothing left to show for that phase.
+   */
+  it('agrees that an empty trailing reasoning phase does not survive the turn', () => {
+    const EMPTY_REASONING_TURN: readonly ExternalAgentEvent[] = [
+      { type: 'reasoning_started' },
+      { type: 'completed' },
+    ];
+    expect(comparable(streamedParts(EMPTY_REASONING_TURN))).toEqual(
+      comparable(storedParts(EMPTY_REASONING_TURN))
+    );
+    expect(streamedParts(EMPTY_REASONING_TURN).some((part) => part.type === 'thinking')).toBe(
+      false
+    );
+  });
+
+  /**
    * Steering is hub-originated rather than projected from a neutral event —
    * see `ExternalTurnTranscript.recordSteerAttempt` and `externalSteerChunk`
    * — so it needs its own parity check rather than a place in `TURN`.
@@ -211,7 +233,7 @@ describe('external turn: live stream vs reloaded transcript', () => {
         sessionId: 'hub-session-1',
         startedAt: 0,
       });
-      const prefix = TURN.slice(0, 3);
+      const prefix = TURN.slice(0, 4);
       prefix.forEach((event, index) => {
         transcript.apply(event, { sequence: index + 1, at: 0 });
       });
@@ -221,7 +243,7 @@ describe('external turn: live stream vs reloaded transcript', () => {
     }
 
     function streamedWithSteer(outcome: 'accepted' | 'rejected'): MessagePart[] {
-      const prefix = TURN.slice(0, 3);
+      const prefix = TURN.slice(0, 4);
       const chunks: StreamChunk[] = [
         externalSessionStartedChunk({
           sessionId: 'hub-session-1',

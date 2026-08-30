@@ -165,6 +165,8 @@ export function normalizeExternalAgentEvent(event: ExternalAgentEvent): External
     case 'thread_usage':
     case 'account_limits':
     case 'completed':
+    // No vendor text to bound — the whole event is its `type`.
+    case 'reasoning_started':
       return event;
   }
 }

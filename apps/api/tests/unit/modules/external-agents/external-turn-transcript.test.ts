@@ -67,6 +67,63 @@ describe('ExternalTurnTranscript', () => {
     ]);
   });
 
+  it('opens an empty thinking part when a reasoning phase starts', () => {
+    const target = transcript();
+    feed(target, [{ type: 'reasoning_started' }]);
+
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn', 'thinking']);
+    expect(target.parts.at(-1)).toMatchObject({ type: 'thinking', text: '' });
+  });
+
+  /**
+   * `display: "omitted"` is the API default on current models, so a reasoning
+   * phase producing zero characters is the common case. Left sealed, a reload
+   * would show a completed, permanently empty collapsed block for every
+   * ordinary turn — not a bug the user did anything to cause.
+   */
+  it('drops a trailing reasoning phase that received no text once the turn ends', () => {
+    const target = transcript();
+    feed(target, [{ type: 'reasoning_started' }, { type: 'completed' }]);
+
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn']);
+  });
+
+  it('keeps a reasoning phase that received text, even though the block started empty', () => {
+    const target = transcript();
+    feed(target, [
+      { type: 'reasoning_started' },
+      { type: 'reasoning_delta', text: 'weighing it' },
+      { type: 'completed' },
+    ]);
+
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn', 'thinking']);
+    expect(target.parts.at(-1)).toMatchObject({ type: 'thinking', text: 'weighing it' });
+  });
+
+  /**
+   * The drop rule is about a *trailing* loose end, not about emptiness on its
+   * own — an empty phase followed by real activity is closed history, the way
+   * interleaved activity already splits ordinary prose.
+   */
+  it('keeps an empty reasoning phase that is not the trailing part', () => {
+    const target = transcript();
+    feed(target, [
+      { type: 'reasoning_started' },
+      {
+        type: 'activity_started',
+        callId: 'call-1',
+        activity: { name: 'shell', kind: 'command', title: 'ls' },
+      },
+      { type: 'completed' },
+    ]);
+
+    expect(target.parts.map((part) => part.type)).toEqual([
+      'external_turn',
+      'thinking',
+      'external_activity',
+    ]);
+  });
+
   it('records activity as external_activity, never as a tool call', () => {
     const target = transcript();
     feed(target, [
@@ -254,6 +311,19 @@ describe('ExternalTurnTranscript', () => {
 
     expect(target.turnPart.terminalReason).toBe('cancelled-by-user');
     expect(target.turnPart.updatedAt).toBe(3_000);
+  });
+
+  /**
+   * A cancel is a controller-driven `finalize`, not a vendor `completed`
+   * event through `apply` — the empty-block drop has to be inside `finalize`
+   * itself, not something only the `completed`/`error` cases in `apply` do.
+   */
+  it('drops a trailing empty reasoning phase even when the controller finalizes directly', () => {
+    const target = transcript();
+    feed(target, [{ type: 'reasoning_started' }]);
+    target.finalize('cancelled-by-user', 5_000);
+
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn']);
   });
 
   it("never persists the vendor's own session handle", () => {

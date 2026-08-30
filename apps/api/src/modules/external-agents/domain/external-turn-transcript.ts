@@ -160,9 +160,25 @@ export class ExternalTurnTranscript {
   finalize(reason: ExternalTurnTerminalReason, at: number): void {
     if (this.#terminated) return;
     this.#terminated = true;
+    this.#dropTrailingEmptyThinking();
     this.#turnPart.status = 'terminal';
     this.#turnPart.terminalReason = reason;
     this.#turnPart.updatedAt = at;
+  }
+
+  /**
+   * `display: "omitted"` is the API default on current models, so a reasoning
+   * phase that opened via `reasoning_started` and never received a single
+   * `thinking_delta` is the common case, not the exception. Left alone, every
+   * such turn would persist a completed, permanently empty collapsed
+   * "Thinking" block — sealing a block a live render only ever showed as a
+   * transient pulse. Only the trailing part qualifies: an empty `thinking`
+   * part earlier in the transcript is real history that interleaved activity
+   * already closed.
+   */
+  #dropTrailingEmptyThinking(): void {
+    const last = this.#parts.at(-1);
+    if (last?.type === 'thinking' && last.text.length === 0) this.#parts.pop();
   }
 
   /**
@@ -275,6 +291,14 @@ export class ExternalTurnTranscript {
 
       case 'reasoning_delta':
         this.#appendText('thinking', event.text);
+        return { durable: false };
+
+      case 'reasoning_started':
+        // Opens the block a reload has to show too, the way `reduceThinkingStart`
+        // does for an internal turn. `#appendText` already coalesces onto an
+        // existing trailing `thinking` part, so a block that already received
+        // text is untouched; `finalize` drops one that received none.
+        this.#appendText('thinking', '');
         return { durable: false };
 
       case 'activity_started': {

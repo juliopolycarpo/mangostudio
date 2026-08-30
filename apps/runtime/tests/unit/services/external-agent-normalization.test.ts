@@ -34,3 +34,19 @@ describe('normalizeExternalAgentEvent commands_available', () => {
     });
   });
 });
+
+describe('normalizeExternalAgentEvent reasoning_started', () => {
+  /**
+   * This boundary's switch is exhaustive with no default, so a member missed
+   * here does not fail loudly — it falls off the end and the event is lost
+   * before it reaches the wire, silently, on every turn that opens a
+   * reasoning block. `external-turn-live-vs-reload.test.ts` drives the shared
+   * projections directly and would stay green regardless, because it never
+   * crosses this boundary.
+   */
+  it('passes the event through unchanged, having no vendor text to bound', () => {
+    expect(normalizeExternalAgentEvent({ type: 'reasoning_started' })).toEqual({
+      type: 'reasoning_started',
+    });
+  });
+});

@@ -274,6 +274,11 @@ export class ClaudeTurnReducer {
       if (typeof id === 'string' && id.length > 0) this.#streamingMessageId = id;
       return NOTHING;
     }
+    // Fires once per block, by protocol — this is the only signal a reasoning
+    // phase produces on an account whose `thinking_delta` text is withheld.
+    if (event?.type === 'content_block_start' && event.content_block?.type === 'thinking') {
+      return { events: [{ type: 'reasoning_started' }], finished: false };
+    }
     const delta = event?.delta;
     if (event?.type !== 'content_block_delta' || !delta) return NOTHING;
     if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0) {

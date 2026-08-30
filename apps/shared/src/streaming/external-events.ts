@@ -137,6 +137,9 @@ export function externalAgentEventToStreamChunk(
     case 'reasoning_delta':
       return { type: 'external_reasoning', text: event.text, done: false };
 
+    case 'reasoning_started':
+      return { type: 'external_reasoning_started', done: false };
+
     case 'activity_started':
       return {
         type: 'external_activity_started',

@@ -692,6 +692,15 @@ export const ExternalAgentEventSchema = Type.Union([
     { type: Type.Literal('reasoning_delta'), text: Type.String() },
     { additionalProperties: false }
   ),
+  /**
+   * A reasoning block opened. No payload: it means exactly that, nothing more.
+   *
+   * On current models the API default withholds `thinking_delta` text, so a
+   * whole reasoning phase can otherwise produce zero events while the vendor
+   * keeps the turn open. Driven by `content_block_start`, which fires once per
+   * block, so this never becomes a second per-token event to budget.
+   */
+  Type.Object({ type: Type.Literal('reasoning_started') }, { additionalProperties: false }),
   Type.Object(
     {
       type: Type.Literal('activity_started'),

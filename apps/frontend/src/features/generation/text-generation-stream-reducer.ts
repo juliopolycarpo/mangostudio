@@ -147,6 +147,12 @@ export function reduceTextGenerationStreamChunk(
       return reduceExternalSessionStarted(nextState, chunk);
     case 'external_text':
       return reduceExternalText(nextState, chunk.text);
+    case 'external_reasoning_started':
+      // Opens the same empty trailing `thinking` part a `thinking_start`
+      // chunk opens for an internal turn — `display: "omitted"` is the API
+      // default on current models, so this is often the only signal a whole
+      // reasoning phase produces.
+      return reduceExternalReasoning(nextState, '');
     case 'external_reasoning':
       return reduceExternalReasoning(nextState, chunk.text);
     case 'external_activity_started':
@@ -797,10 +803,21 @@ function reduceExternalTurnCompleted(
   state: TextGenerationStreamState,
   reason: ExternalTurnTerminalReason
 ) {
-  const parts = updateExternalTurn(state.parts, (part) =>
+  const parts = updateExternalTurn(dropTrailingEmptyThinking(state.parts), (part) =>
     part.status === 'terminal' ? part : { ...part, status: 'terminal', terminalReason: reason }
   );
   return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
+/**
+ * Mirrors `ExternalTurnTranscript`'s identical rule exactly, so a live render
+ * and a reload never disagree about whether an empty reasoning phase — the
+ * common case on a model whose API default withholds `thinking_delta` text —
+ * survives the end of the turn as a permanently blank collapsed block.
+ */
+function dropTrailingEmptyThinking(parts: MessagePart[]): MessagePart[] {
+  const last = parts.at(-1);
+  return last?.type === 'thinking' && last.text.length === 0 ? parts.slice(0, -1) : parts;
 }
 
 /**

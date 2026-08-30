@@ -365,6 +365,7 @@ describe('the neutral event contract', () => {
   const valid: readonly ExternalAgentEvent[] = [
     { type: 'session_started', sessionId: 'thread-1', resumed: false },
     { type: 'text_delta', text: 'hello' },
+    { type: 'reasoning_started' },
     { type: 'reasoning_delta', text: 'thinking' },
     {
       type: 'activity_started',
