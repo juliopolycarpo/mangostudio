@@ -12,8 +12,19 @@ import { type SettingsNavGroup, settingsNavGroups } from './settings-nav';
 // order alone.
 const LINK_BASE =
   'block rounded-lg px-3 py-2 text-sm transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40';
+/**
+ * The hover fill is a translucent `on-surface` wash, not a surface token.
+ *
+ * A named elevation cannot work here: the panel is already
+ * `surface-container-highest`, so `surface-container-high` — the tier the rest
+ * of the app hovers with — is a step *down* in the dark theme (#262320 under
+ * #322e29) and a barely-there step up in the light one. Either way the row
+ * gained nothing on hover and only the label changed colour. `on-surface` is
+ * near-white in dark and near-black in light, so an 8% wash of it always moves
+ * away from whatever it sits on, in the direction that theme has room for.
+ */
 const LINK_IDLE =
-  'font-medium text-on-surface-variant/70 hover:bg-surface-container-high/60 hover:text-on-surface';
+  'font-medium text-on-surface-variant/70 hover:bg-on-surface/8 hover:text-on-surface';
 const LINK_ACTIVE = 'font-semibold text-primary bg-primary/12';
 
 /**
@@ -34,8 +45,20 @@ const LINK_ACTIVE = 'font-semibold text-primary bg-primary/12';
  * sooner than it strictly must.
  */
 const PANEL_SURFACE = 'bg-surface-container-highest/60 border border-outline-variant/20';
-const PANEL_BASE = `app-scrollbar mt-2 space-y-5 rounded-2xl p-3 ${PANEL_SURFACE}`;
+const PANEL_BASE = `app-scrollbar mt-2 rounded-2xl p-3 ${PANEL_SURFACE}`;
 const PANEL_DESKTOP = 'lg:mt-0 lg:block lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto';
+
+/**
+ * A hairline between groups, with the gap split evenly around it.
+ *
+ * Spacing alone carried the division while the rows had no hover fill: once a
+ * row lights up on its own, a run of gaps reads as one list with uneven
+ * leading rather than five sections. The rule at `outline-variant/15` is
+ * quieter than the panel's own border, so the panel still reads as the outer
+ * object and the rules as its internal seams — not as a table's gridlines.
+ */
+const GROUP_BASE =
+  'space-y-1 border-t border-outline-variant/15 pt-4 mt-4 first:border-t-0 first:pt-0 first:mt-0';
 
 /**
  * Navigation for the settings surface: fifteen pages under five headings.
@@ -73,6 +96,7 @@ export function SettingsNav() {
         aria-controls={listId}
         className={cn(
           'flex w-full items-center justify-between gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-on-surface lg:hidden',
+          'transition-colors duration-200 hover:bg-on-surface/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
           PANEL_SURFACE
         )}
       >
@@ -87,10 +111,7 @@ export function SettingsNav() {
 
       <div id={listId} className={cn(PANEL_BASE, PANEL_DESKTOP, !open && 'hidden')}>
         {groups.map((group) => (
-          <div key={group.id} className="space-y-1">
-            {/* Padding under the heading rather than a rule between groups:
-                five sections in one panel separate on spacing alone, and four
-                hairlines would read as a table. */}
+          <div key={group.id} className={GROUP_BASE}>
             <MicroLabel as="h2" className="px-3 pb-1">
               {group.label}
             </MicroLabel>
