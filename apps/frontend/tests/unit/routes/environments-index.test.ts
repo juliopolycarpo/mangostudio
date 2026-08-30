@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'bun:test';
 import { OverviewPage } from '../../../src/features/environments/components/OverviewPage';
 import { Route as EnvironmentsIndexRoute } from '../../../src/routes/_authenticated/environments/index';
+import { Route as EnvironmentsIndexLazyRoute } from '../../../src/routes/_authenticated/environments/index.lazy';
 
 interface RouteInternals {
   readonly options: {
@@ -21,10 +22,11 @@ interface RouteInternals {
 
 describe('/environments', () => {
   const { options } = EnvironmentsIndexRoute as unknown as RouteInternals;
+  const { options: lazyOptions } = EnvironmentsIndexLazyRoute as unknown as RouteInternals;
 
   it('renders the overview rather than redirecting to a tab', () => {
     expect(options.beforeLoad).toBeUndefined();
-    expect(options.component).toBe(OverviewPage);
+    expect(lazyOptions.component).toBe(OverviewPage);
   });
 
   it('warms the queries its sections read instead of blocking on them', () => {

@@ -1,5 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { HealthPage } from '@/features/environments/components/HealthPage';
 import {
   agentCliStatusesQueryOptions,
   runtimeStatusesQueryOptions,
@@ -15,5 +14,4 @@ export const Route = createFileRoute('/_authenticated/environments/health')({
     void queryClient.prefetchQuery(versionManagerStatusesQueryOptions(deps.environmentId));
     void queryClient.prefetchQuery(agentCliStatusesQueryOptions(deps.environmentId));
   },
-  component: HealthPage,
 });

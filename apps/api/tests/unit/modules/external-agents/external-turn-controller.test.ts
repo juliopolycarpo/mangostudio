@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type {
   ExternalAgentConfiguration,
   ExternalAgentSteerResult,
@@ -28,6 +28,10 @@ import {
   type FakeExternalRuntimeOptions,
 } from '../../../support/external-agents/fake-external-runtime';
 import { insertTestUser } from '../../../support/factories';
+import {
+  installRecordingRealtimeBus,
+  restoreRealtimeBus,
+} from '../../../support/mocks/recording-realtime-bus';
 
 const CONFIGURATION: ExternalAgentConfiguration = {
   level: 'default',
@@ -153,6 +157,10 @@ beforeEach(async () => {
   assistantMessageId = `assistant-message-${crypto.randomUUID()}`;
 });
 
+afterEach(() => {
+  restoreRealtimeBus();
+});
+
 describe('external turn controller', () => {
   it('runs a turn to completion and finalizes the assistant message', async () => {
     const { runtime, controller } = harness();
@@ -266,6 +274,29 @@ describe('external turn controller', () => {
     expect(result.reason).toBe('vendor-error');
     expect(result.error).toMatchObject({ vendorCode: 'E_DEAD' });
     expect(turnPartOf((await readAssistantRow()).parts).error?.message).toBe('the process died');
+  });
+
+  it('signals the activity topic on a vendor error, without writing a feed row', async () => {
+    const bus = installRecordingRealtimeBus();
+    const { runtime, controller } = harness();
+    const running = startTurn(controller);
+    await waitForTurnStart(runtime);
+
+    runtime.emit({
+      type: 'error',
+      error: { code: 'adapter-stream', message: 'the process died', vendorCode: 'E_DEAD' },
+    });
+    await running;
+
+    expect(bus.activityFramesFor(userId)).toHaveLength(1);
+
+    const row = await getDb()
+      .selectFrom('activity_events')
+      .selectAll()
+      .where('userId', '=', userId)
+      .where('kind', '=', 'turn_completed')
+      .executeTakeFirst();
+    expect(row).toBeUndefined();
   });
 
   it('terminates when the runtime connection drops', async () => {

@@ -1,6 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { validateEnvironmentSearch } from '@/features/environments/use-environment-scope';
-import { LocationSettings } from '@/features/library/components/LocationSettings';
 import { libraryLocationsQueryOptions } from '@/features/library/queries';
 
 export const Route = createFileRoute('/_authenticated/environments/library/locations')({
@@ -8,5 +7,4 @@ export const Route = createFileRoute('/_authenticated/environments/library/locat
   loaderDeps: ({ search }) => ({ environmentId: search.environmentId }),
   loader: ({ context: { queryClient }, deps }) =>
     queryClient.prefetchQuery(libraryLocationsQueryOptions(deps.environmentId)),
-  component: LocationSettings,
 });

@@ -16,8 +16,8 @@ const { mockHistoryPush, mockNavigate, mockSignInEmail, mockSignUpEmail, searchS
 mock.module(
   '@tanstack/react-router',
   await routerWithLinkStub({
-    createFileRoute: () => (config: Record<string, unknown>) => ({
-      ...config,
+    createLazyFileRoute: () => (config: Record<string, unknown>) => ({
+      options: config,
       useSearch: () => searchState.current,
     }),
     useNavigate: () => mockNavigate,
@@ -27,11 +27,13 @@ mock.module(
 
 // Static imports are evaluated before any statement above runs, so the
 // routes have to come in afterwards or they bind the real router.
-const { Route: LoginRoute } = await import('../../../src/routes/login');
-const { Route: SignupRoute } = await import('../../../src/routes/signup');
+const { Route: LoginRoute } = await import('../../../src/routes/login.lazy');
+const { Route: SignupRoute } = await import('../../../src/routes/signup.lazy');
 
-const LoginPage = (LoginRoute as unknown as { component: ComponentType }).component;
-const SignupPage = (SignupRoute as unknown as { component: ComponentType }).component;
+const LoginPage = (LoginRoute as unknown as { options: { component: ComponentType } }).options
+  .component;
+const SignupPage = (SignupRoute as unknown as { options: { component: ComponentType } }).options
+  .component;
 
 describe('auth routes', () => {
   beforeEach(() => {

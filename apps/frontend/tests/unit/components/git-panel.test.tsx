@@ -9,7 +9,7 @@ import type {
   GitWorktreeListResponse,
 } from '@mangostudio/shared/git';
 import type { GithubContext } from '@mangostudio/shared/github';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AppContext } from '../../../src/lib/app-context';
 import { ApiError } from '../../../src/lib/utils';
@@ -582,6 +582,40 @@ describe('GitPanel', () => {
     });
   });
 
+  it('shows a loading spinner instead of a blank panel while the diff viewer chunk loads', async () => {
+    hooks.data = repoState({
+      status: {
+        branch: { name: 'feat/git-panel', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [{ path: 'src/panel.tsx', status: 'modified' }],
+        untracked: [],
+        conflicted: [],
+        clean: false,
+      },
+    });
+    hooks.diff = {
+      path: 'src/panel.tsx',
+      binary: false,
+      diff: '@@ -4,2 +4,2 @@\n-old title\n+new title\n',
+    };
+
+    render(<Panel />);
+    // This must run before any other test opens a diff: `LazyDiffViewer` holds
+    // a module-level `lazy()` singleton, and React never suspends on it again
+    // once its dynamic import has resolved once. `fireEvent` (unlike
+    // `userEvent`) dispatches synchronously, so this assertion lands before
+    // that import settles on the microtask queue -- the Suspense fallback,
+    // not a blank panel, is what's on screen at this point.
+    fireEvent.click(screen.getByRole('button', { name: 'View diff for src/panel.tsx' }));
+
+    expect(screen.getByText('Loading diff...')).toBeVisible();
+    expect(screen.queryByRole('region', { name: 'View diff for src/panel.tsx' })).toBeNull();
+
+    expect(
+      await screen.findByRole('region', { name: 'View diff for src/panel.tsx' })
+    ).toBeVisible();
+  });
+
   it('opens a line-numbered worktree diff from a changed file', async () => {
     const user = userEvent.setup();
     hooks.data = repoState({
@@ -603,7 +637,8 @@ describe('GitPanel', () => {
     render(<Panel />);
     await user.click(screen.getByRole('button', { name: 'View diff for src/panel.tsx' }));
 
-    const diff = screen.getByRole('region', { name: 'View diff for src/panel.tsx' });
+    // `findByRole`: the viewer is behind a lazy import that resolves after the click.
+    const diff = await screen.findByRole('region', { name: 'View diff for src/panel.tsx' });
     expect(diff).toBeVisible();
     expect(diff).toHaveTextContent('old title');
     expect(diff).toHaveTextContent('new title');
@@ -642,7 +677,7 @@ describe('GitPanel', () => {
     expect(screen.getByRole('region', { name: 'Commit details' })).toBeVisible();
     expect(screen.getByText('1234567890abcdef')).toBeVisible();
     await user.click(screen.getByRole('button', { name: /src\/git\.ts/ }));
-    expect(screen.getByRole('region', { name: 'View diff for src/git.ts' })).toBeVisible();
+    expect(await screen.findByRole('region', { name: 'View diff for src/git.ts' })).toBeVisible();
   });
 
   it('commits staged changes from the split button and reports the short hash', async () => {

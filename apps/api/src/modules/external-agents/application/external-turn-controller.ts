@@ -49,6 +49,7 @@ import type { TurnInterruptionReasonCode } from '@mangostudio/shared/turn-recove
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
+import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
 import { generateId } from '../../../utils/id';
 import { recordTurnCompletedActivity } from '../../chats/application/record-turn-activity';
 import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
@@ -894,9 +895,12 @@ export function createExternalTurnController(
     await updateChatAfterTurn(input.chatId, at, db);
     // Every terminal reason reaches here; only the one that produced work is
     // worth a feed row. A cancelled or errored turn is already visible in the
-    // chat it happened in.
+    // chat it happened in, but its `updatedAt` still moved — so the sidebar
+    // still needs the signal, just not a row to explain it.
     if (reason === 'completed') {
       void recordTurnCompletedActivity(input.userId, input.chatId, db);
+    } else {
+      publishActivityInvalidation(input.userId);
     }
 
     input.observer?.onTerminal?.(reason, transcript.turnPart.error);

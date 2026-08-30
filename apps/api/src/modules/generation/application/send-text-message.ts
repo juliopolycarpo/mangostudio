@@ -9,6 +9,7 @@ import {
 import { generateId } from '../../../utils/id';
 import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
 import { assertChatAttachmentIdsAvailable } from '../../attachments/infrastructure/attachment-repository';
+import { recordTurnCompletedActivity } from '../../chats/application/record-turn-activity';
 import { getOwnedChatOrThrow } from '../../chats/domain/chat-ownership';
 import { loadHistory } from '../../messages/infrastructure/message-repository';
 import {
@@ -151,6 +152,10 @@ export async function sendTextMessage(
   );
 
   await updateChatAfterTurn(input.chatId, aiTimestamp, db);
+  // The same turn the streaming sibling records, on the runner that returns in
+  // one response instead of a stream. Without it a `/api/respond` turn moves
+  // `updatedAt` and no tab hears about it.
+  void recordTurnCompletedActivity(input.userId, input.chatId, db);
 
   return {
     userMessage: {

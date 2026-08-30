@@ -16,8 +16,8 @@ import {
 } from '@tanstack/react-router';
 import { screen, within } from '@testing-library/react';
 import type { FunctionComponent } from 'react';
-import { Route as EnvironmentsRoute } from '../../../src/routes/_authenticated/environments';
-import { Route as LibraryRoute } from '../../../src/routes/_authenticated/environments/library';
+import { Route as LibraryRoute } from '../../../src/routes/_authenticated/environments/library.lazy';
+import { Route as EnvironmentsRoute } from '../../../src/routes/_authenticated/environments.lazy';
 import { act, flushAsyncRender, render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 

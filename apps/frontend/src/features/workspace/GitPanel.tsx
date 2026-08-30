@@ -33,7 +33,7 @@ import { resolveApiErrorMessage } from '@/lib/utils';
 import { BranchControl } from './BranchControl';
 import { BranchPrChip } from './BranchPrChip';
 import { CommitForm } from './CommitForm';
-import { type DiffSelection, DiffViewer } from './DiffViewer';
+import type { DiffSelection } from './DiffViewer';
 import { readGitPanelPrefs, writeGitPanelPrefs } from './git-panel-prefs';
 import {
   type GitDiscardSelection,
@@ -45,6 +45,7 @@ import {
   useUnstagePaths,
 } from './hooks/use-git-state';
 import { useGithubContext } from './hooks/use-github-context';
+import { LazyDiffViewer } from './LazyDiffViewer';
 import { RemoteActions } from './RemoteActions';
 import { RepositoryHistory } from './RepositoryHistory';
 import { StashSheet } from './StashSheet';
@@ -398,7 +399,7 @@ function RepositoryStatus({
 
       {view === 'history' ? (
         diffSelection ? (
-          <DiffViewer
+          <LazyDiffViewer
             chatId={chatId}
             selection={diffSelection}
             onClose={() => setDiffSelection(null)}
@@ -425,7 +426,7 @@ function RepositoryStatus({
             onRemoteFailure={setRemoteFailure}
           />
           {diffSelection ? (
-            <DiffViewer
+            <LazyDiffViewer
               chatId={chatId}
               selection={diffSelection}
               onClose={() => setDiffSelection(null)}
