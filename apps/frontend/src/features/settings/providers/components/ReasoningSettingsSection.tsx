@@ -8,6 +8,7 @@ import type {
   UpdateProviderRuntimeSettingsBody,
 } from '@mangostudio/shared/provider-settings';
 import { Card } from '@/components/ui/Card';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useI18n } from '@/hooks/use-i18n';
 import { EFFORT_DISPLAY_ORDER, EFFORT_LABEL_KEYS } from '../constants';
 
@@ -39,12 +40,10 @@ export function ReasoningSettingsSection({
           <label htmlFor="thinking-toggle" className="text-sm text-on-surface">
             {s.thinkingEnabled}
           </label>
-          <input
+          <Checkbox
             id="thinking-toggle"
-            type="checkbox"
             checked={form.thinkingEnabled ?? false}
             onChange={(e) => onChange({ ...form, thinkingEnabled: e.target.checked })}
-            className="h-4 w-4 rounded border-outline-variant/30 accent-primary"
           />
         </div>
       )}

@@ -9,6 +9,7 @@ import {
 } from '@mangostudio/shared/app-settings';
 import type { UpdateProviderRuntimeSettingsBody } from '@mangostudio/shared/provider-settings';
 import { Card } from '@/components/ui/Card';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useI18n } from '@/hooks/use-i18n';
 
 interface ToolSettingsSectionProps {
@@ -99,12 +100,10 @@ export function ToolSettingsSection({
           <label htmlFor="parallel-tool-calls" className="text-sm text-on-surface">
             {s.parallelToolCalls}
           </label>
-          <input
+          <Checkbox
             id="parallel-tool-calls"
-            type="checkbox"
             checked={form.parallelToolCallsEnabled ?? false}
             onChange={(e) => onChange({ ...form, parallelToolCallsEnabled: e.target.checked })}
-            className="h-4 w-4 rounded border-outline-variant/30 accent-primary"
           />
         </div>
       )}

@@ -5,6 +5,7 @@
 import type { SkillDescriptor } from '@mangostudio/shared/skills';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Card } from '@/components/ui/Card';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useI18n } from '@/hooks/use-i18n';
 import { useUpdateSkillSetting } from '../hooks/use-skill-settings';
 
@@ -82,12 +83,10 @@ export function SkillCard({ descriptor }: SkillCardProps) {
           <span className="text-xs text-on-surface-variant">
             {enabled ? s.enabled : s.disabled}
           </span>
-          <input
-            type="checkbox"
+          <Checkbox
             checked={enabled}
             onChange={() => void handleToggle()}
             aria-label={descriptor.name}
-            className="h-4 w-4 rounded border-outline-variant/30 accent-primary"
           />
         </label>
       </div>

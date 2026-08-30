@@ -30,6 +30,7 @@ import {
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
 import { useI18n } from '@/hooks/use-i18n';
 
@@ -199,12 +200,11 @@ export function GeneralSettings({
               {workspace.restrictToolsDescription}
             </p>
           </div>
-          <input
-            type="checkbox"
+          <Checkbox
             checked={workspaceSettings.restrictToolsToWorkdir}
             onChange={(event) => setRestrictToolsToWorkdir(event.target.checked)}
             aria-label={workspace.restrictToolsLabel}
-            className="mt-1 h-4 w-4 shrink-0 rounded border-outline-variant/30 accent-primary"
+            className="mt-1"
           />
         </div>
         <WorkdirPickerDialog
@@ -266,12 +266,10 @@ export function GeneralSettings({
                 key={panelId}
                 className="flex items-center gap-3 border-b border-outline-variant/15 px-3 py-2.5 last:border-b-0"
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={isVisible}
                   onChange={(event) => setWorkspacePanelVisible(panelId, event.target.checked)}
                   aria-label={workspace.sidePanelShow.replace('{panel}', label)}
-                  className="size-4 shrink-0 rounded border-outline-variant/30 accent-primary"
                 />
                 <Icon size={17} className="shrink-0 text-primary/80" />
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-on-surface">
@@ -346,12 +344,11 @@ export function GeneralSettings({
             </h3>
             <p className="text-sm text-on-surface-variant/60">{s.multiAgentDescription}</p>
           </div>
-          <input
-            type="checkbox"
+          <Checkbox
             checked={multiAgentSettings.enabled}
             onChange={(event) => setMultiAgentEnabled(event.target.checked)}
             aria-label={s.multiAgentEnabledLabel}
-            className="mt-1 h-4 w-4 rounded border-outline-variant/30 accent-primary"
+            className="mt-1"
           />
         </div>
 
@@ -434,12 +431,11 @@ export function GeneralSettings({
             </h3>
             <p className="text-sm text-on-surface-variant/60">{s.chatTitlesDescription}</p>
           </div>
-          <input
-            type="checkbox"
+          <Checkbox
             checked={chatTitleSettings.autoRenameEnabled}
             onChange={(event) => setChatAutoRenameEnabled(event.target.checked)}
             aria-label={s.chatTitlesToggleLabel}
-            className="mt-1 h-4 w-4 rounded border-outline-variant/30 accent-primary"
+            className="mt-1"
           />
         </div>
 

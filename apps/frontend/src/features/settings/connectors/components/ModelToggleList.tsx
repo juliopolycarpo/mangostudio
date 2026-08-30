@@ -1,4 +1,5 @@
 import type { ModelOption } from '@mangostudio/shared/catalog';
+import { Checkbox } from '@/components/ui/Checkbox';
 
 interface ModelToggleListProps {
   readonly title: string;
@@ -50,13 +51,11 @@ function ModelToggleRow({ model, isEnabled, onToggleModel }: ModelToggleRowProps
           : 'bg-surface-container-lowest border-outline-variant/10 hover:border-outline-variant/30'
       }`}
     >
-      <input
-        type="checkbox"
+      <Checkbox
         checked={isEnabled}
         onChange={(event) => {
           void onToggleModel(model.modelId, event.target.checked);
         }}
-        className="w-5 h-5 rounded border-outline-variant text-primary focus:ring-primary bg-surface-container-lowest"
       />
       <div className="space-y-0.5">
         <div className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}>

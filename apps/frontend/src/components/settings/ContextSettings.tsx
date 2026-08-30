@@ -4,6 +4,7 @@ import type {
   ContextSettings as ContextSettingsValue,
 } from '@mangostudio/shared/chat';
 import { Card } from '@/components/ui/Card';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useI18n } from '@/hooks/use-i18n';
 
 interface ContextSettingsProps {
@@ -83,12 +84,11 @@ export function ContextSettings({
             </h3>
             <p className="text-sm text-on-surface-variant/60">{s.providerCompactionDescription}</p>
           </div>
-          <input
-            type="checkbox"
+          <Checkbox
             checked={settings.providerCompactionEnabled}
             onChange={(event) => setProviderCompactionEnabled(event.target.checked)}
             aria-label={s.providerCompactionLabel}
-            className="mt-1 h-4 w-4 rounded border-outline-variant/30 accent-primary"
+            className="mt-1"
           />
         </div>
       </Card>

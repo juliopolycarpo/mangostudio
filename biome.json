@@ -33,6 +33,12 @@
     "enabled": true,
     "rules": {
       "preset": "recommended",
+      "a11y": {
+        "noLabelWithoutControl": {
+          "level": "error",
+          "options": { "inputComponents": ["Checkbox", "Input", "Select", "Toggle"] }
+        }
+      },
       "nursery": { "useAwaitThenable": "off" },
       "performance": { "noDelete": "warn" },
       "style": {

@@ -6,6 +6,7 @@ import type { ToolParameterDescriptor } from '@mangostudio/shared/tool-settings'
 import { Pencil, Trash2 } from 'lucide-react';
 import { useId, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
 
@@ -140,12 +141,10 @@ function PathListField({
               key={item.path}
               className="flex items-center gap-2 p-2 rounded-lg bg-surface-container-lowest border border-outline-variant/10"
             >
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={item.enabled}
                 onChange={() => handleToggle(index)}
                 disabled={disabled}
-                className="h-4 w-4 rounded border-outline-variant/30 accent-primary shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
               />
               {editingIndex === index ? (
                 <input
@@ -291,12 +290,10 @@ export function ToolParameterField({
     case 'boolean': {
       return (
         <label className="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={Boolean(descriptorValue)}
             onChange={(e) => onChange(e.target.checked)}
             disabled={disabled}
-            className="h-4 w-4 rounded border-outline-variant/30 accent-primary disabled:opacity-50 disabled:cursor-not-allowed"
           />
           {label}
         </label>

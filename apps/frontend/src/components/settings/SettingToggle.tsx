@@ -1,3 +1,5 @@
+import { Checkbox } from '@/components/ui/Checkbox';
+
 interface SettingToggleProps {
   readonly label: string;
   readonly description: string;
@@ -17,12 +19,11 @@ export function SettingToggle({ label, description, checked, onChange }: Setting
         <span className="block text-sm font-semibold text-on-surface">{label}</span>
         <span className="block text-sm text-on-surface-variant/60">{description}</span>
       </span>
-      <input
-        type="checkbox"
+      <Checkbox
         checked={checked}
         onChange={(event) => onChange(event.target.checked)}
         aria-label={label}
-        className="mt-1 h-4 w-4 shrink-0 rounded border-outline-variant/30 accent-primary"
+        className="mt-1"
       />
     </label>
   );

@@ -4,6 +4,7 @@ import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
 import { Eye } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Checkbox } from '@/components/ui/Checkbox';
 import type {
   AgentEditorLabels,
   EditableAgentProfile,
@@ -213,11 +214,9 @@ function AgentReasoningSection({ draft, labels, onDraftChange }: AgentReasoningS
     <AgentEditorSection title={labels.sectionReasoning}>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <label className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={draft.thinkingEnabled ?? false}
             onChange={(event) => onDraftChange({ thinkingEnabled: event.target.checked })}
-            className="accent-primary"
           />
           {labels.thinking}
         </label>
@@ -272,11 +271,9 @@ function AgentToolsSection({
   return (
     <AgentEditorSection title={labels.sectionTools}>
       <label className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface w-fit">
-        <input
-          type="checkbox"
+        <Checkbox
           checked={draft.toolsEnabled}
           onChange={(event) => onDraftChange({ toolsEnabled: event.target.checked })}
-          className="accent-primary"
         />
         {labels.toolsEnabled}
       </label>
@@ -301,8 +298,7 @@ function AgentToolsSection({
                 key={subagent.id}
                 className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface"
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={selectedSubagents.has(subagent.id)}
                   onChange={(event) => {
                     const subagentIds = event.target.checked
@@ -310,7 +306,6 @@ function AgentToolsSection({
                       : draft.subagentIds.filter((id) => id !== subagent.id);
                     onDraftChange({ subagentIds });
                   }}
-                  className="accent-primary"
                 />
                 {subagent.name}
               </label>

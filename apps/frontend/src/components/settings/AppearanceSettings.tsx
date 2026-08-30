@@ -1,5 +1,6 @@
 import type { DiffPreviewMode } from '@mangostudio/shared/app-settings';
 import { Card } from '@/components/ui/Card';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useGlobalSettings } from '@/hooks/use-global-settings';
 import { useI18n } from '@/hooks/use-i18n';
 import type { CodeThemeConfig, ThemeConfig } from '@/hooks/use-theme';
@@ -257,12 +258,11 @@ export function AppearanceSettings() {
       <SettingsSection title={s.fileChanges.label} description={s.fileChanges.description}>
         <div className="flex items-start justify-between gap-4">
           <p className="text-sm font-medium text-on-surface">{s.fileChanges.enabled}</p>
-          <input
-            type="checkbox"
+          <Checkbox
             checked={chatDisplaySettings.diffPreviewsEnabled}
             onChange={(event) => setDiffPreviewsEnabled(event.target.checked)}
             aria-label={s.fileChanges.enabled}
-            className="mt-1 h-4 w-4 shrink-0 rounded border-outline-variant/30 accent-primary"
+            className="mt-1"
           />
         </div>
         {chatDisplaySettings.diffPreviewsEnabled && (

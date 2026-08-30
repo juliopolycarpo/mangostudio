@@ -8,6 +8,7 @@ import type { SkillListResponse } from '@mangostudio/shared/skills';
 import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useI18n } from '@/hooks/use-i18n';
 import {
   type SkillSourceKey,
@@ -73,13 +74,11 @@ export function SkillSourceToggles({ sources }: SkillSourceTogglesProps) {
                 <span className="text-xs text-on-surface-variant">
                   {state.enabled ? s.enabled : s.disabled}
                 </span>
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={state.enabled}
                   disabled={isPending}
                   onChange={() => mutate({ source, enabled: !state.enabled })}
                   aria-label={s.sourceLabels[source]}
-                  className="h-4 w-4 rounded border-outline-variant/30 accent-primary"
                 />
               </label>
             </div>

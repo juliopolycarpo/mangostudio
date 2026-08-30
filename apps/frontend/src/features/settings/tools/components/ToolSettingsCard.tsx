@@ -5,6 +5,7 @@
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card } from '@/components/ui/Card';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useI18n } from '@/hooks/use-i18n';
 import { useUpdateToolSetting } from '../hooks/use-tool-settings';
 import { ToolParameterField } from './ToolParameterField';
@@ -245,12 +246,7 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
             <span className="text-xs text-on-surface-variant">
               {enabled ? s.enabled : s.disabled}
             </span>
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={() => void handleToggle()}
-              className="h-4 w-4 rounded border-outline-variant/30 accent-primary"
-            />
+            <Checkbox checked={enabled} onChange={() => void handleToggle()} />
           </label>
         ) : (
           <span className="text-xs text-on-surface-variant/50 italic shrink-0 text-right">

@@ -7,6 +7,7 @@ import type {
   UpdateProviderRuntimeSettingsBody,
 } from '@mangostudio/shared/provider-settings';
 import { Card } from '@/components/ui/Card';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useI18n } from '@/hooks/use-i18n';
 
 interface CacheSettingsSectionProps {
@@ -66,12 +67,10 @@ export function CacheSettingsSection({
         <label htmlFor="compaction-toggle" className="text-sm text-on-surface">
           {s.compaction}
         </label>
-        <input
+        <Checkbox
           id="compaction-toggle"
-          type="checkbox"
           checked={form.providerCompactionEnabled ?? false}
           onChange={(e) => update('providerCompactionEnabled', e.target.checked)}
-          className="h-4 w-4 rounded border-outline-variant/30 accent-primary"
         />
       </div>
     </Card>
