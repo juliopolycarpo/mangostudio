@@ -23,6 +23,7 @@ import type {
   ExternalAgentCommand,
   ExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
+import { setBounded } from '../../../lib/bounded-map';
 
 export interface ExternalCommandCatalogKey {
   readonly userId: string;
@@ -50,16 +51,7 @@ export function createExternalCommandCatalogCache(): ExternalCommandCatalogCache
       return byKey.get(keyOf(key));
     },
     write(key, commands) {
-      const cacheKey = keyOf(key);
-      // Re-inserting moves the key to the end of the Map's iteration order, so
-      // the eviction below drops the entry least recently *written*, not
-      // merely the one inserted longest ago.
-      byKey.delete(cacheKey);
-      byKey.set(cacheKey, commands);
-      if (byKey.size > MAX_ENTRIES) {
-        const oldest = byKey.keys().next().value;
-        if (oldest !== undefined) byKey.delete(oldest);
-      }
+      setBounded(byKey, keyOf(key), commands, MAX_ENTRIES);
     },
   };
 }

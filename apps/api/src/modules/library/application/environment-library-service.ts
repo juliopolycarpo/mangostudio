@@ -25,6 +25,7 @@ import type {
 } from '@mangostudio/shared/library';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { setBounded } from '../../../lib/bounded-map';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
@@ -113,16 +114,6 @@ export interface EnvironmentLibraryServiceOptions {
  * oldest entry costs one rescan.
  */
 const MAX_CACHE_ENTRIES = 64;
-
-function setBounded<K, V>(entries: Map<K, V>, key: K, value: V, maxEntries: number): void {
-  entries.delete(key);
-  entries.set(key, value);
-  while (entries.size > maxEntries) {
-    const oldest = entries.keys().next();
-    if (oldest.done) break;
-    entries.delete(oldest.value);
-  }
-}
 
 const DEFAULT_CACHE_TTL_MS = 2_000;
 const SCOPE_SEP = '\u001f';
