@@ -1,4 +1,5 @@
 import type { Chat, Message, UpdateChatBody } from '@mangostudio/shared';
+import { ACTIVITY_TOPIC } from '@mangostudio/shared/realtime';
 import {
   infiniteQueryOptions,
   type QueryClient,
@@ -11,6 +12,7 @@ import {
 import type { ContextInfo } from '@/features/generation/types';
 import { invalidateAllGitScopes } from '@/features/workspace/hooks/use-git-state';
 import { client } from '@/lib/api-client';
+import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
 import { invalidateChatCapabilities } from './hooks/capability-invalidation';
 
@@ -69,6 +71,16 @@ function applyChatUpdates<T extends ChatWithContext>(chat: T, updates: UpdateCha
 }
 
 export function useChatsQuery() {
+  const queryClient = useQueryClient();
+  // The activity topic is the chat list's staleness signal: `chat_created` and
+  // `turn_completed` land there for every tab of this account, so a turn
+  // finishing in another tab (or a long background turn) refreshes the row
+  // here instead of leaving it stale until this tab's next mutation. Signal
+  // only — mutation-driven cache updates above stay the fast path, and a dead
+  // socket degrades to exactly the behavior before this subscription.
+  useRealtimeInvalidation(ACTIVITY_TOPIC, 'chat-list', async () => {
+    await queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+  });
   return useQuery(chatListQueryOptions());
 }
 
