@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { Message } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import type { TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 import { findLatestInterruptedTurn } from '@/features/chat/lib/interrupted-turn';
 

@@ -1,4 +1,4 @@
-import type { Message } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import { isTurnCheckpointPart, type TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 
 /** The latest turn a user can resume, and the checkpoint evidence to offer. */
