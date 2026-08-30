@@ -384,6 +384,46 @@ describe('ToolSettingsPage', () => {
     expect(options.getByRole('option', { name: /DALL-E 3/ })).toBeInTheDocument();
   });
 
+  // A native `<select>` fell back to its first option; the drawn one has to be
+  // told to, or a stale saved value leaves the trigger naming nothing at all.
+  it('names the first option when the saved value is no longer offered', async () => {
+    fetchScenario.respondWithJson('GET', '/api/settings/tools', {
+      body: {
+        tools: [
+          {
+            name: 'generate_image',
+            title: 'Image generation',
+            description: 'Generate images from text.',
+            category: 'image',
+            enabled: true,
+            canDisable: true,
+            parameters: { defaultQuality: '8K' },
+            parameterDescriptors: [
+              {
+                name: 'defaultQuality',
+                label: 'Default image quality',
+                description: 'Quality used when the model does not request one.',
+                type: 'select',
+                required: true,
+                defaultValue: '8K',
+                options: [
+                  { value: '512px', label: '512px' },
+                  { value: '1K', label: '1K' },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    render(<ToolSettingsPage maxToolIterations={10} setMaxToolIterations={setMaxToolIterations} />);
+
+    await screen.findByText('Image generation');
+
+    expect(screen.getByRole('combobox')).toHaveTextContent('512px');
+  });
+
   it('disables quality dropdown when letAiDecideQuality is checked', async () => {
     const user = userEvent.setup();
 

@@ -30,6 +30,21 @@ function toSafeString(value: unknown): string {
   return '';
 }
 
+/**
+ * What a native `<select>` showed when its value matched no option: the first
+ * row. A parameter that has never been set, or one naming a model the catalog
+ * has since dropped, would otherwise leave the trigger blank — the control
+ * would name nothing while still reading as a chooser.
+ *
+ * Display only, exactly as the native element was: nothing is written back
+ * until the user picks.
+ *
+ * // Usage: displayedValue(toSafeString(value), options)
+ */
+function displayedValue(value: string, options: readonly { readonly value: string }[]): string {
+  return options.some((option) => option.value === value) ? value : (options[0]?.value ?? value);
+}
+
 function isPathListItem(item: unknown): item is PathListItem {
   return (
     typeof item === 'object' &&
@@ -258,6 +273,19 @@ export function ToolParameterField({
 
   // Model selector: backed by the catalog, not static options
   if (descriptor.modelType === 'image') {
+    const modelOptions = [
+      { value: 'auto', label: t.settings.tools.autoModelOption },
+      // The provider was an `<optgroup>` heading; the panel carries it on
+      // each row instead, which keeps one flat list for the keyboard to
+      // arrow through.
+      ...[...imageModels.groups.entries()].flatMap(([provider, models]) =>
+        models.map((model) => ({
+          value: model.modelId,
+          label: model.displayName,
+          description: provider,
+        }))
+      ),
+    ];
     return (
       <div className="space-y-1">
         {label && (
@@ -267,22 +295,10 @@ export function ToolParameterField({
         )}
         <Select
           id={`${fieldId}-model`}
-          value={toSafeString(descriptorValue)}
+          value={displayedValue(toSafeString(descriptorValue), modelOptions)}
           onChange={onChange}
           disabled={disabled}
-          options={[
-            { value: 'auto', label: t.settings.tools.autoModelOption },
-            // The provider was an `<optgroup>` heading; the panel carries it on
-            // each row instead, which keeps one flat list for the keyboard to
-            // arrow through.
-            ...[...imageModels.groups.entries()].flatMap(([provider, models]) =>
-              models.map((model) => ({
-                value: model.modelId,
-                label: model.displayName,
-                description: provider,
-              }))
-            ),
-          ]}
+          options={modelOptions}
         />
       </div>
     );
@@ -327,6 +343,7 @@ export function ToolParameterField({
     }
 
     case 'select': {
+      const options = descriptor.options ?? [];
       return (
         <div className="space-y-1">
           {label && (
@@ -336,10 +353,10 @@ export function ToolParameterField({
           )}
           <Select
             id={`${fieldId}-select`}
-            value={toSafeString(descriptorValue)}
+            value={displayedValue(toSafeString(descriptorValue), options)}
             onChange={onChange}
             disabled={disabled}
-            options={descriptor.options ?? []}
+            options={options}
           />
         </div>
       );
