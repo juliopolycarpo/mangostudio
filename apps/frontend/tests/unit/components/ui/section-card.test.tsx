@@ -43,13 +43,11 @@ describe('SectionCard', () => {
     expect(container.querySelector('section')?.className).toContain('sm:col-span-2');
   });
 
-  it('mounts plain outside a staggered grid', () => {
-    // The card carries variants but no `initial`/`animate`, so nothing drives
-    // it unless a grid does. A settings pane or the studio page must not have
-    // acquired an entrance animation from this change.
-    const { container } = render(<SectionCard label="AGENTS">body</SectionCard>);
-    const section = container.querySelector('section');
-    expect(section?.getAttribute('initial')).toBeNull();
-    expect(section?.getAttribute('animate')).toBeNull();
-  });
+  // Not asserted here: "the card carries variants but no `initial`/`animate`,
+  // so a settings pane or the studio page mounts it plain". `initial` and
+  // `animate` are React props that never reach the DOM — and the `motion/react`
+  // stub strips them regardless — so no query on the rendered tree can tell the
+  // two implementations apart. The guarantee lives in `SectionCard`'s own props
+  // and in `tests/unit/lib/motion/variants.test.ts`, which checks that the grid
+  // is the only thing driving `cardRest`/`cardEnter`.
 });
