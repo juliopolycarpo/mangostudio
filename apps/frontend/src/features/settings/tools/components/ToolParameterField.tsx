@@ -31,18 +31,21 @@ function toSafeString(value: unknown): string {
 }
 
 /**
- * What a native `<select>` showed when its value matched no option: the first
- * row. A parameter that has never been set, or one naming a model the catalog
- * has since dropped, would otherwise leave the trigger blank — the control
- * would name nothing while still reading as a chooser.
+ * What the trigger reads when the stored value matches no option: the first
+ * row's label, as a native `<select>` showed. A parameter that has never been
+ * set, or one naming a model the catalog has since dropped, would otherwise
+ * leave the trigger blank — the control would name nothing while still
+ * reading as a chooser.
  *
- * Display only, exactly as the native element was: nothing is written back
- * until the user picks.
+ * It goes to `Select`'s `placeholder`, never to its `value`. `value` is what
+ * `Select` compares each row against, and a row it believes is already chosen
+ * commits nothing: routing the fallback through it would make the very row
+ * shown on the trigger the one option the user could not pick.
  *
- * // Usage: displayedValue(toSafeString(value), options)
+ * // Usage: fallbackLabel(options)
  */
-function displayedValue(value: string, options: readonly { readonly value: string }[]): string {
-  return options.some((option) => option.value === value) ? value : (options[0]?.value ?? value);
+function fallbackLabel(options: readonly { readonly label: string }[]): string | undefined {
+  return options[0]?.label;
 }
 
 function isPathListItem(item: unknown): item is PathListItem {
@@ -295,10 +298,11 @@ export function ToolParameterField({
         )}
         <Select
           id={`${fieldId}-model`}
-          value={displayedValue(toSafeString(descriptorValue), modelOptions)}
+          value={toSafeString(descriptorValue)}
           onChange={onChange}
           disabled={disabled}
           options={modelOptions}
+          placeholder={fallbackLabel(modelOptions)}
         />
       </div>
     );
@@ -353,10 +357,11 @@ export function ToolParameterField({
           )}
           <Select
             id={`${fieldId}-select`}
-            value={displayedValue(toSafeString(descriptorValue), options)}
+            value={toSafeString(descriptorValue)}
             onChange={onChange}
             disabled={disabled}
             options={options}
+            placeholder={fallbackLabel(options)}
           />
         </div>
       );
