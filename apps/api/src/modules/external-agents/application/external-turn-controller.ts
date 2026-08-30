@@ -33,20 +33,22 @@
 
 import { RuntimeConsentDeniedError } from '@mangostudio/runtime';
 import type { InteractionMode } from '@mangostudio/shared';
-import type {
-  ExternalAgentConfiguration,
-  ExternalAgentError,
-  ExternalAgentEvent,
-  ExternalAgentSteerResult,
-  ExternalAgentTargetId,
-  ExternalApprovalRequest,
-  ExternalReviewTarget,
-  ExternalSteerRejectionReason,
-  ExternalTurnTerminalReason,
-  ExternalUsage,
+import {
+  type ExternalAgentConfiguration,
+  type ExternalAgentError,
+  type ExternalAgentEvent,
+  ExternalAgentEventSchema,
+  type ExternalAgentSteerResult,
+  type ExternalAgentTargetId,
+  type ExternalApprovalRequest,
+  type ExternalReviewTarget,
+  type ExternalSteerRejectionReason,
+  type ExternalTurnTerminalReason,
+  type ExternalUsage,
 } from '@mangostudio/shared/external-agents';
 import type { TurnInterruptionReasonCode } from '@mangostudio/shared/turn-recovery';
 import type { Kysely } from 'kysely';
+import Value from 'typebox/value';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
@@ -273,6 +275,12 @@ function terminalReasonForCallFailure(error: unknown): ExternalTurnTerminalReaso
 function vendorErrorFrom(error: unknown, code: string): ExternalAgentError {
   const message = error instanceof Error ? error.message : 'Unknown error';
   return { code, message: message.slice(0, 2_048) };
+}
+
+/** Best-effort discriminant read for logging an event this hub does not recognize. */
+function readEventType(event: unknown): string | undefined {
+  const type = (event as { readonly type?: unknown } | null)?.type;
+  return typeof type === 'string' ? type : undefined;
 }
 
 /**
@@ -695,6 +703,23 @@ export function createExternalTurnController(
             return;
           case 'apply':
             break;
+        }
+
+        // The sequencer only ever checked addressing, so an envelope can reach
+        // here with an `event` this hub's copy of `ExternalAgentEventSchema`
+        // does not recognize — a runtime newer than the hub. `transcript.apply`
+        // switches on `event.type` exhaustively and has no `default`: an
+        // unrecognized member would fall off the end and hand the caller
+        // `undefined` where an `ExternalTranscriptApplication` is expected.
+        // Inertness is decided here, at the one call site that would otherwise
+        // break, not by refusing the envelope earlier — its sequence is already
+        // spent, and that is the fix.
+        if (!Value.Check(ExternalAgentEventSchema, envelope.event)) {
+          logger.warn('unrecognized_event_type', {
+            sessionId: handle.sessionId,
+            type: readEventType(envelope.event),
+          });
+          return;
         }
 
         const application = transcript.apply(envelope.event, {

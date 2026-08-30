@@ -90,6 +90,8 @@ export {
   ExternalAgentErrorSchema,
   type ExternalAgentEvent,
   type ExternalAgentEventEnvelope,
+  type ExternalAgentEventEnvelopeFrame,
+  ExternalAgentEventEnvelopeFrameSchema,
   ExternalAgentEventEnvelopeSchema,
   ExternalAgentEventSchema,
   type ExternalAgentListSessionsParams,

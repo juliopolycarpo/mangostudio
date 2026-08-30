@@ -27,6 +27,7 @@ import {
   type FakeExternalRuntime,
   type FakeExternalRuntimeOptions,
 } from '../../../support/external-agents/fake-external-runtime';
+import { createRealExternalRuntime } from '../../../support/external-agents/real-external-runtime';
 import { insertTestUser } from '../../../support/factories';
 import {
   installRecordingRealtimeBus,
@@ -83,6 +84,29 @@ function harness(
     approvals,
     newId: () => ids.shift() ?? `id-${crypto.randomUUID()}`,
     ...(steerTerminationGraceMs !== undefined ? { steerTerminationGraceMs } : {}),
+  });
+  return { runtime, sessions, approvals, controller };
+}
+
+/**
+ * Same wiring as {@link harness}, but the runtime is a real
+ * `RuntimeClient` over an in-process protocol connection rather than
+ * `fake-external-runtime.ts`'s hand-built stub. Only #964's regression needs
+ * this: everywhere else, the stub's shortcut past `RuntimeClient.externalAgents.onEvent`'s
+ * own envelope filter is exactly what makes ordering and redelivery cheap to drive.
+ */
+async function realHarness() {
+  const runtime = await createRealExternalRuntime();
+  const sessions = createExternalSessionManager({
+    resolveRuntimeClient: () => Promise.resolve(runtime.client),
+    newSessionId: () => 'session-1',
+  });
+  const approvals = createExternalApprovalRegistry();
+  const ids = [userMessageId, assistantMessageId];
+  const controller = createExternalTurnController({
+    sessions,
+    approvals,
+    newId: () => ids.shift() ?? `id-${crypto.randomUUID()}`,
   });
   return { runtime, sessions, approvals, controller };
 }
@@ -245,6 +269,43 @@ describe('external turn controller', () => {
     const stored = await readAssistantRow();
     expect(stored.text).toBe('kept');
     expect(stored.generating).toBe(false);
+  });
+
+  /**
+   * #964. `fake-external-runtime.ts`'s `emitEnvelope` calls the stored
+   * listener directly and cannot reproduce this: the drop being fixed happens
+   * inside `RuntimeClient.externalAgents.onEvent`'s own schema check, one
+   * layer above anything that fake stands in for. Only a real `RuntimeClient`
+   * crosses that filter, so this is the one test in the file that pays for a
+   * real protocol connection instead of the stub.
+   *
+   * Before the fix this fails with `result.reason === 'sequence-gap'`: the
+   * envelope carrying the unrecognized event is dropped without consuming its
+   * sequence, so the *next*, perfectly ordinary event reads as a gap.
+   */
+  it('does not mistake an event type it has never seen for a sequence gap', async () => {
+    const { runtime, controller } = await realHarness();
+    try {
+      const running = startTurn(controller);
+      await waitFor(() => runtime.calls.turn.length === 1, 'the turn to reach the runtime');
+
+      runtime.emit({ type: 'text_delta', text: 'a' });
+      runtime.emitRawFrame({
+        sessionId: runtime.sessionId(),
+        nativeTurnId: 'native-turn-1',
+        sequence: runtime.nextSequence(),
+        emittedAtMs: Date.now(),
+        event: { type: 'future_event', shape: 'unknown' },
+      });
+      runtime.emit({ type: 'text_delta', text: 'b' });
+      runtime.emit({ type: 'completed' });
+
+      const result = await running;
+      expect(result.reason).toBe('completed');
+      expect((await readAssistantRow()).text).toBe('ab');
+    } finally {
+      await runtime.close();
+    }
   });
 
   it('drops events a vendor emits after saying it was done', async () => {

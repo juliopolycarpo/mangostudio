@@ -1347,3 +1347,29 @@ export const ExternalAgentEventEnvelopeSchema = Type.Object(
   { additionalProperties: false }
 );
 export type ExternalAgentEventEnvelope = Static<typeof ExternalAgentEventEnvelopeSchema>;
+
+/**
+ * The envelope's transport-level shape, with `event` left unchecked.
+ *
+ * A hub and a runtime never upgrade in lockstep, so a runtime can start
+ * emitting an event type this hub's copy of {@link ExternalAgentEventSchema}
+ * does not know yet. Checking the whole envelope in one pass makes that an
+ * indistinguishable case from a corrupt frame — both fail `Value.Check` — and
+ * a dropped frame's sequence number is never consumed, which turns the next,
+ * perfectly ordinary event into a gap that ends the turn. Validating the frame
+ * on its own lets the sequencer see and account for every envelope whose
+ * addressing is sound, so only the unrecognized *event* is inert rather than
+ * the whole turn. See #964.
+ */
+export const ExternalAgentEventEnvelopeFrameSchema = Type.Object(
+  {
+    sessionId: ExternalAgentOpaqueIdSchema,
+    nativeTurnId: Type.Optional(ExternalAgentOpaqueIdSchema),
+    sequence: Type.Integer({ minimum: 1 }),
+    emittedAtMs: Type.Integer({ minimum: 0 }),
+    idempotencyKey: Type.Optional(ExternalAgentOpaqueIdSchema),
+    event: Type.Unknown(),
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentEventEnvelopeFrame = Static<typeof ExternalAgentEventEnvelopeFrameSchema>;
