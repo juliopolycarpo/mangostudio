@@ -11,7 +11,7 @@
 import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 import { motion } from 'motion/react';
 import { ACTIVITY_STRIP_ROWS, ActivityCard } from '@/features/activity/ActivityCard';
-import { useMotionPresets } from '@/lib/motion/use-motion-presets';
+import { useCardGrid } from '@/lib/motion/use-card-grid';
 import { AgentsCard } from './widgets/AgentsCard';
 import { EnvironmentHealthCard } from './widgets/EnvironmentHealthCard';
 import { GreetingHeader } from './widgets/GreetingHeader';
@@ -47,7 +47,7 @@ export function WorkspaceHub({
   onSelectChat,
   onUsePrompt,
 }: WorkspaceHubProps) {
-  const { cardGrid } = useMotionPresets();
+  const cardGrid = useCardGrid();
   return (
     <div
       className="app-scrollbar flex flex-1 flex-col overflow-y-auto px-4 py-8 sm:px-6"

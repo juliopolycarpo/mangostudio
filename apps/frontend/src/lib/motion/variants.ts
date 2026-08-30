@@ -121,9 +121,13 @@ function buildPresets(reduced: boolean) {
       transition: { duration, ease },
     },
 
-    /** Container preset for a card grid: spread it onto the `motion.div` that
-     *  wraps a row of `SectionCard`s. Drives `cardItem` on every descendant
-     *  card through context — see `CARD_REST`. */
+    /** Container preset for a card grid, wrapping a row of `SectionCard`s.
+     *  Drives `cardItem` on every descendant card through context — see
+     *  `CARD_REST`.
+     *
+     *  Consume it through `useCardGrid()` rather than spreading it directly:
+     *  `initial` here is the pre-entrance state, and a grid that keeps it
+     *  forever hands it to cards that mount after the entrance has played. */
     cardGrid: {
       variants: {
         [CARD_REST]: {},
