@@ -35,6 +35,7 @@ import {
   type ExternalAgentCommand,
   externalAgentVendor,
 } from '@mangostudio/shared/external-agents';
+import type { LibraryResource } from '@mangostudio/shared/library';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { externalCommandKeys } from '@/features/external-agents/command-catalog';
@@ -189,62 +190,55 @@ export function useSlashCommands({
   }, [capabilitiesQuery.data]);
 
   const entries = useMemo(() => {
+    // Shared by the session and hub catalogs below: both are the vendor's own
+    // statement of what it loaded, differing only in whether it came from
+    // *this* process or a past one.
+    const toSessionEntries = (
+      commands: readonly ExternalAgentCommand[] | undefined
+    ): SlashCommandEntry[] =>
+      (commands ?? []).map((command) => ({
+        name: command.name,
+        ...(command.description ? { description: command.description } : {}),
+        origin: 'session' as const,
+      }));
+
+    // Shared by the library's command and skill scans below: both are a
+    // directory listing, not an authoritative answer the way the session and
+    // hub catalogs are. Anything but `absent`: `shadowed` means this target
+    // *does* read a copy, from `effectiveLocationId`, and merely has others
+    // behind it — the same predicate `presentTargetCount` in
+    // `features/library/format.ts` uses.
+    const toLibraryEntries = (
+      resources: readonly LibraryResource[] | undefined
+    ): SlashCommandEntry[] =>
+      (resources ?? [])
+        .filter((resource) =>
+          resource.coverage.some(
+            (coverage) => coverage.targetId === targetId && coverage.state !== 'absent'
+          )
+        )
+        .map((resource) => ({ name: resource.ref.slug, origin: 'library' as const }));
+
     // Gated on the runner like the other two sources. The catalog outlives the
     // session that announced it — nothing invalidates the key — so a chat moved
     // off its vendor onto MangoStudio's own runner would otherwise still be
     // offered the vendor's names, which reach a native turn as ordinary prose.
-    const sessionEntries: SlashCommandEntry[] =
-      targetId === null
-        ? []
-        : (session ?? []).map((command) => ({
-            name: command.name,
-            ...(command.description ? { description: command.description } : {}),
-            origin: 'session' as const,
-          }));
+    const sessionEntries: SlashCommandEntry[] = targetId === null ? [] : toSessionEntries(session);
 
     // The hub's own memory of the last catalog observed for this
-    // (environment, target). Same `origin` as the live session catalog: both
-    // are the vendor's own statement of what it loaded, and the only
-    // difference — whether it came from *this* process or a past one — is a
-    // staleness trade the module docblock states, not something the palette's
-    // secondary label needs to distinguish.
+    // (environment, target) — see the module docblock for why this is stale by
+    // design and acceptable anyway.
     const hubCatalogEntries: SlashCommandEntry[] =
-      targetId === null
-        ? []
-        : (hubCatalog?.commands ?? []).map((command) => ({
-            name: command.name,
-            ...(command.description ? { description: command.description } : {}),
-            origin: 'session' as const,
-          }));
+      targetId === null ? [] : toSessionEntries(hubCatalog?.commands);
 
-    // Anything but `absent`: `shadowed` means this target *does* read a copy,
-    // from `effectiveLocationId`, and merely has others behind it — the same
-    // predicate `presentTargetCount` in `features/library/format.ts` uses.
     const libraryEntries: SlashCommandEntry[] =
-      targetId === null
-        ? []
-        : (library?.resources ?? [])
-            .filter((resource) =>
-              resource.coverage.some(
-                (coverage) => coverage.targetId === targetId && coverage.state !== 'absent'
-              )
-            )
-            .map((resource) => ({ name: resource.ref.slug, origin: 'library' as const }));
+      targetId === null ? [] : toLibraryEntries(library?.resources);
 
-    // The library's scan of the same skill directories, offered only for a
-    // vendor whose own catalog already lists every skill under `/` — see
-    // `skillsAreSlashCommands` above. Same shape and the same `library`
-    // origin as the command scan: both are a directory listing, not an
-    // authoritative answer the way the session and hub catalogs are.
+    // Offered only for a vendor whose own catalog already lists every skill
+    // under `/` — see `skillsAreSlashCommands` above.
     const librarySkillEntries: SlashCommandEntry[] = !skillsAreSlashCommands
       ? []
-      : (librarySkills?.resources ?? [])
-          .filter((resource) =>
-            resource.coverage.some(
-              (coverage) => coverage.targetId === targetId && coverage.state !== 'absent'
-            )
-          )
-          .map((resource) => ({ name: resource.ref.slug, origin: 'library' as const }));
+      : toLibraryEntries(librarySkills?.resources);
 
     // The same three flags and the same ceiling `buildSkillsPromptSection`
     // applies, so the palette cannot offer a name the turn will not advertise:
