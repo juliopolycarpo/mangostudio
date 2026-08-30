@@ -94,6 +94,57 @@ describe('Select', () => {
     expect(onChange).toHaveBeenCalledWith('auto');
   });
 
+  // The native typeahead, without which a forty-model picker is reachable only
+  // by holding ArrowDown.
+  it('moves the cursor to the row a typed character names', () => {
+    render(<Select value="ask" options={OPTIONS} onChange={jest.fn()} ariaLabel="Behaviour" />);
+
+    const trigger = screen.getByRole('combobox', { name: 'Behaviour' });
+    fireEvent.click(trigger);
+    fireEvent.keyDown(trigger, { key: 'c' });
+
+    expect(trigger).toHaveAttribute(
+      'aria-activedescendant',
+      screen.getByRole('option', { name: /Compact automatically/ }).id
+    );
+  });
+
+  // Closed, a native select changed the value outright rather than opening.
+  it('chooses on a typed character while closed, as the native element did', () => {
+    const onChange = jest.fn();
+    render(<Select value="ask" options={OPTIONS} onChange={onChange} ariaLabel="Behaviour" />);
+
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Behaviour' }), { key: 'c' });
+
+    expect(onChange).toHaveBeenCalledWith('auto');
+  });
+
+  it('will not let typeahead land on a disabled row', () => {
+    const onChange = jest.fn();
+    render(<Select value="ask" options={OPTIONS} onChange={onChange} ariaLabel="Behaviour" />);
+
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Behaviour' }), { key: 'n' });
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('cycles through the rows sharing an initial when the character repeats', () => {
+    const sharing: readonly SelectOption[] = [
+      { value: 'alpha', label: 'Alpha' },
+      { value: 'anchor', label: 'Anchor' },
+    ];
+    render(<Select value="alpha" options={sharing} onChange={jest.fn()} ariaLabel="Letter" />);
+
+    const trigger = screen.getByRole('combobox', { name: 'Letter' });
+    fireEvent.click(trigger);
+    fireEvent.keyDown(trigger, { key: 'a' });
+
+    expect(trigger).toHaveAttribute(
+      'aria-activedescendant',
+      screen.getByRole('option', { name: 'Anchor' }).id
+    );
+  });
+
   // The panel is anchored to a trigger the user has left; left open it floats
   // over the page with `aria-activedescendant` pointing at a row out of reach.
   it('closes when focus tabs away from the trigger', () => {

@@ -30,7 +30,6 @@ import { type ListboxOption, useListboxSelect } from '@/hooks/use-listbox-select
 import { cn } from '@/lib/utils';
 
 export interface SelectOption extends ListboxOption {
-  readonly label: string;
   /** A second line under the label — a model's provider, a hint, a warning. */
   readonly description?: string;
 }

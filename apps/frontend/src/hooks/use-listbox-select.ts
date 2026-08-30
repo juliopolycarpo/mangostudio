@@ -28,8 +28,13 @@ import {
 
 export interface ListboxOption {
   readonly value: string;
+  /** What the row reads as, and what typeahead searches. */
+  readonly label: string;
   readonly disabled?: boolean;
 }
+
+/** How long a typed run stays one search before the next key starts a new one. */
+const TYPEAHEAD_WINDOW_MS = 500;
 
 interface Params<Option extends ListboxOption> {
   readonly value: string;
@@ -66,6 +71,7 @@ export function useListboxSelect<Option extends ListboxOption>({
   const [activeIndex, setActiveIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const typeahead = useRef({ query: '', at: 0 });
 
   const selected = options.find((option) => option.value === value);
   const selectedIndex = options.findIndex((option) => option.value === value);
@@ -88,13 +94,45 @@ export function useListboxSelect<Option extends ListboxOption>({
   // openings — must not leave the cursor pointing at whatever now sits at that
   // index, so each opening starts from the selection instead.
   useEffect(() => {
-    if (!open) setActiveIndex(-1);
+    if (open) return;
+    setActiveIndex(-1);
+    // So reopening within the typeahead window starts a fresh search rather
+    // than appending to the run that was interrupted.
+    typeahead.current = { query: '', at: 0 };
   }, [open]);
 
   const commit = (option: Option) => {
     if (option.disabled) return;
     setOpen(false);
     if (option.value !== value) onChange(option.value);
+  };
+
+  /**
+   * The index a typed run names, or -1 when nothing matches.
+   *
+   * A run of one repeated character means "the next option starting with it",
+   * which is how a native select cycles same-initial entries. Anything longer
+   * is a word being spelled out, so the search restarts from the current row
+   * rather than skipping the match already under the cursor.
+   */
+  const findByTypeahead = (key: string): number => {
+    const now = Date.now();
+    const expired = now - typeahead.current.at > TYPEAHEAD_WINDOW_MS;
+    const query = (expired ? '' : typeahead.current.query) + key;
+    typeahead.current = { query, at: now };
+
+    const cycling = [...query].every((character) => character === query[0]);
+    const needle = (cycling ? key : query).toLowerCase();
+    const from = activeIndex >= 0 ? activeIndex : selectedIndex;
+    const start = cycling ? from + 1 : from;
+
+    const count = options.length;
+    for (let offset = 0; offset < count; offset += 1) {
+      const index = (((start + offset) % count) + count) % count;
+      const option = options[index];
+      if (option && !option.disabled && option.label.toLowerCase().startsWith(needle)) return index;
+    }
+    return -1;
   };
 
   /** Skips disabled entries, so arrowing never parks on one that cannot be chosen. */
@@ -127,6 +165,33 @@ export function useListboxSelect<Option extends ListboxOption>({
     // No `preventDefault` — the focus move itself is what the user asked for.
     if (event.key === 'Tab') {
       if (open) setOpen(false);
+      return;
+    }
+
+    // The typeahead a native `<select>` had. Without it the only keyboard route
+    // into a forty-model picker is holding ArrowDown, and typing `g` — which
+    // used to jump to the first `g` model — does nothing at all.
+    //
+    // Space is the exception: it joins a run already in progress, so a label
+    // with a space in it can be spelled, but on its own it still commits.
+    const printable = event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
+    const spellingSpace =
+      event.key === ' ' &&
+      typeahead.current.query !== '' &&
+      Date.now() - typeahead.current.at <= TYPEAHEAD_WINDOW_MS;
+    if (printable && (event.key !== ' ' || spellingSpace)) {
+      event.preventDefault();
+      const match = findByTypeahead(event.key);
+      if (match < 0) return;
+      // Open, this only moves the cursor and Enter still decides. Closed, a
+      // native select changes the value outright, and every field behind one of
+      // these debounces its write, so a spelled-out run costs one save.
+      if (open) {
+        setActiveIndex(match);
+        return;
+      }
+      const option = options[match];
+      if (option) commit(option);
       return;
     }
 

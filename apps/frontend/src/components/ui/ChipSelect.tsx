@@ -25,7 +25,6 @@ import { type ListboxOption, useListboxSelect } from '@/hooks/use-listbox-select
 import { cn } from '@/lib/utils';
 
 export interface ChipSelectOption extends ListboxOption {
-  readonly label: string;
   /** A second line under the label — the vendor's reason, a hostname, a hint. */
   readonly description?: string;
 }
