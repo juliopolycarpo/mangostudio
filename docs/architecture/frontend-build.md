@@ -153,7 +153,13 @@ Six things in that build are load-bearing:
   at build time and the build fails.
 
 Chunking is Bun's automatic splitting; there is no `manualChunks` equivalent and none is
-reintroduced. Bundle size is tracked instead of controlled:
+reintroduced. What decides eager versus lazy is the import graph, and the route files are
+where that decision is made: every route except the chat surface (`_authenticated/index.tsx`,
+the first paint) keeps its `component` in a `.lazy.tsx` sibling — `tsr generate` turns the
+sibling into a dynamic import the splitter breaks out, while `loader`, `beforeLoad` and
+`validateSearch` stay in the route file so prefetching and redirects run before the chunk
+loads. A new route whose component is imported statically from the route file rides in the
+entry chunk on every page. Bundle size is tracked instead of controlled:
 
 ```bash
 bun ./scripts/ci/frontend-bundle-report.ts --baseline scripts/ci/frontend-bundle-baseline.json
