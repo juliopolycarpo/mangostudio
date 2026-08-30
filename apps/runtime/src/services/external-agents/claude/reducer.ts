@@ -164,6 +164,14 @@ export class ClaudeTurnReducer {
   readonly #openActivities = new Map<string, string>();
   /** Forwarded subagent text per parent call, so updates accumulate rather than replace. */
   readonly #nestedText = new Map<string, string>();
+  /**
+   * Main-conversation message ids that delivered at least one non-empty
+   * `text_delta` or `thinking_delta`. Everything else reaches the transcript
+   * only through its completed `assistant` record — see `#reduceAssistant`.
+   */
+  readonly #deliveredMessageIds = new Set<string>();
+  /** The `message.id` a `content_block_delta` belongs to; deltas carry no id of their own. */
+  #streamingMessageId: string | undefined;
   #sessionStarted = false;
   #finished = false;
 
@@ -239,9 +247,20 @@ export class ClaudeTurnReducer {
     // A subagent's own token stream, if one ever arrives, is nested through the
     // `assistant` path rather than promoted into the main transcript.
     if (parentToolUseId(record) !== undefined) return NOTHING;
-    const delta = record.event?.delta;
-    if (record.event?.type !== 'content_block_delta' || !delta) return NOTHING;
+    const event = record.event;
+    // Carries the id every block of this message will share. Deltas
+    // themselves are anonymous, so this is the only place that id is ever
+    // read — `#reduceAssistant` looks it up in `#deliveredMessageIds` rather
+    // than trusting a stream that may not have started yet.
+    if (event?.type === 'message_start') {
+      const id = event.message?.id;
+      if (typeof id === 'string' && id.length > 0) this.#streamingMessageId = id;
+      return NOTHING;
+    }
+    const delta = event?.delta;
+    if (event?.type !== 'content_block_delta' || !delta) return NOTHING;
     if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0) {
+      this.#markDelivered();
       return { events: [{ type: 'text_delta', text: delta.text }], finished: false };
     }
     if (
@@ -249,25 +268,58 @@ export class ClaudeTurnReducer {
       typeof delta.thinking === 'string' &&
       delta.thinking.length > 0
     ) {
+      this.#markDelivered();
       return { events: [{ type: 'reasoning_delta', text: delta.thinking }], finished: false };
     }
     return NOTHING;
   }
 
   /**
+   * Marks the message currently streaming as having produced a real
+   * character, so its completed `assistant` record is not replayed by
+   * `#reduceAssistant`.
+   */
+  #markDelivered(): void {
+    if (this.#streamingMessageId !== undefined) {
+      this.#deliveredMessageIds.add(this.#streamingMessageId);
+    }
+  }
+
+  /**
    * Completed assistant blocks.
    *
-   * Main-conversation `text` and `thinking` are skipped — they already arrived
-   * as deltas — so what survives is the `tool_use` block and anything a
-   * subagent produced.
+   * Main-conversation `text` and `thinking` are skipped when their message
+   * already delivered that content as deltas. When it did not —
+   * `--include-partial-messages` produced no deltas for this message at all,
+   * which is the whole run for an account like the denied-write fixture's —
+   * this completed record is the only copy of that block that will ever
+   * exist, so it is emitted here instead of silently dropped. The `tool_use`
+   * block and anything a subagent produced are handled unconditionally either
+   * way.
    */
   #reduceAssistant(record: ClaudeMessageRecord): ClaudeReduction {
     const parent = parentToolUseId(record);
+    const messageId = record.message?.id;
+    const undelivered =
+      parent === undefined &&
+      !(typeof messageId === 'string' && this.#deliveredMessageIds.has(messageId));
     const events: ExternalAgentEvent[] = [];
     for (const block of contentBlocks(record)) {
       if (block.type === 'tool_use') {
         const started = this.#startActivity(block);
         if (started) events.push(started);
+        continue;
+      }
+      if (undelivered) {
+        if (block.type === 'text' && typeof block.text === 'string' && block.text.length > 0) {
+          events.push({ type: 'text_delta', text: block.text });
+        } else if (
+          block.type === 'thinking' &&
+          typeof block.thinking === 'string' &&
+          block.thinking.length > 0
+        ) {
+          events.push({ type: 'reasoning_delta', text: block.thinking });
+        }
         continue;
       }
       // Only under a call that is still open. A completed activity has been

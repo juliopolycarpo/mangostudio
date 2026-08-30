@@ -74,6 +74,7 @@ export interface ClaudeInitRecord extends ClaudeStreamRecord {
 export interface ClaudeContentBlock {
   readonly type?: unknown;
   readonly text?: unknown;
+  readonly thinking?: unknown;
   readonly name?: unknown;
   readonly id?: unknown;
   readonly input?: unknown;
@@ -84,6 +85,8 @@ export interface ClaudeContentBlock {
 
 export interface ClaudeMessageRecord extends ClaudeStreamRecord {
   readonly message?: {
+    /** Shared by every block of this message, streamed or not — see `parentToolUseId`'s sibling use in the reducer. */
+    readonly id?: unknown;
     readonly role?: unknown;
     readonly content?: unknown;
   };
@@ -94,6 +97,8 @@ export interface ClaudeStreamEventRecord extends ClaudeStreamRecord {
   readonly event?: {
     readonly type?: unknown;
     readonly index?: unknown;
+    /** Present on `message_start`; correlates the deltas that follow to the completed record they will duplicate. */
+    readonly message?: { readonly id?: unknown };
     readonly content_block?: { readonly type?: unknown };
     readonly delta?: {
       readonly type?: unknown;

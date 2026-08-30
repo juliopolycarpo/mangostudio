@@ -178,6 +178,39 @@ describe('ClaudeTurnReducer, on a recorded denied write', () => {
     const { events } = reduceAll('claude-denied-write-turn.jsonl');
     expect(events.filter((event) => event.type === 'activity_completed')).toHaveLength(1);
   });
+
+  /**
+   * This recording has zero `stream_event` records — the fixture that exposed
+   * `#reduceAssistant` skipping main-conversation text unconditionally, on the
+   * assumption a delta stream had already delivered it. Nothing did, so the
+   * refusal was the vendor's entire visible reply and reached nothing.
+   */
+  it('delivers the assistant text even though the run carried no partial messages', () => {
+    const { events } = reduceAll('claude-denied-write-turn.jsonl');
+    const text = events
+      .filter((event) => event.type === 'text_delta')
+      .map((event) => event.text)
+      .join('');
+    expect(text).toBe(
+      'I need permission to write the file. Please approve the request to write to `denied.txt` so I can create the file with the content "hello".'
+    );
+  });
+
+  /**
+   * Same defect, same fix: a `thinking` block with real text is exactly as
+   * dependent on delta delivery as a `text` block is, and this run delivered
+   * neither. Two separate messages each reason once, in the order they ran.
+   */
+  it('delivers the assistant reasoning even though the run carried no partial messages', () => {
+    const { events } = reduceAll('claude-denied-write-turn.jsonl');
+    const reasoning = events
+      .filter((event) => event.type === 'reasoning_delta')
+      .map((event) => event.text);
+    expect(reasoning).toEqual([
+      'The user is asking me to create a file named denied.txt containing the word "hello" using the Write tool. This is a straightforward task.\n\nI need to use the Write tool with:\n- file_path: The absolute path to the file. The working directory is /work/repo, so the file should be at /work/repo/denied.txt\n- content: "hello"\n\nLet me create this file.',
+      "The user hasn't granted permission to write to that file yet. I need to wait for them to approve this action. Let me inform them that permission is needed.",
+    ]);
+  });
 });
 
 describe('ClaudeTurnReducer, on records it has never seen', () => {
