@@ -1,5 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { RuntimesPage } from '@/features/environments/components/RuntimesPage';
 import {
   installRecipesQueryOptions,
   runtimeStatusesQueryOptions,
@@ -17,5 +16,4 @@ export const Route = createFileRoute('/_authenticated/environments/runtimes')({
     void queryClient.prefetchQuery(versionManagerStatusesQueryOptions(deps.environmentId));
     void queryClient.prefetchQuery(installRecipesQueryOptions(deps.environmentId));
   },
-  component: RuntimesPage,
 });

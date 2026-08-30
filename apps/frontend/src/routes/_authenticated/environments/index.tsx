@@ -1,5 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { OverviewPage } from '@/features/environments/components/OverviewPage';
 import {
   agentCliStatusesQueryOptions,
   installRecipesQueryOptions,
@@ -21,5 +20,4 @@ export const Route = createFileRoute('/_authenticated/environments/')({
     void queryClient.prefetchQuery(libraryResourcesQueryOptions());
     void queryClient.prefetchQuery(libraryTargetsQueryOptions());
   },
-  component: OverviewPage,
 });

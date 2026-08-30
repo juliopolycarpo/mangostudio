@@ -60,12 +60,12 @@ const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any).lazy(() => import('./routes/login.lazy').then((d) => d.Route))
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
   path: '/signup',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any).lazy(() => import('./routes/signup.lazy').then((d) => d.Route))
 const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -76,57 +76,87 @@ const AuthenticatedEnvironmentsRoute =
     id: '/environments',
     path: '/environments',
     getParentRoute: () => AuthenticatedRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/environments.lazy').then((d) => d.Route),
+  )
 const AuthenticatedGalleryRoute = AuthenticatedGalleryRouteImport.update({
   id: '/gallery',
   path: '/gallery',
   getParentRoute: () => AuthenticatedRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/_authenticated/gallery.lazy').then((d) => d.Route),
+)
 const AuthenticatedHomeRoute = AuthenticatedHomeRouteImport.update({
   id: '/home',
   path: '/home',
   getParentRoute: () => AuthenticatedRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/_authenticated/home.lazy').then((d) => d.Route),
+)
 const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => AuthenticatedRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/_authenticated/settings.lazy').then((d) => d.Route),
+)
 const AuthenticatedStudioRoute = AuthenticatedStudioRouteImport.update({
   id: '/studio',
   path: '/studio',
   getParentRoute: () => AuthenticatedRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/_authenticated/studio.lazy').then((d) => d.Route),
+)
 const AuthenticatedEnvironmentsIndexRoute =
   AuthenticatedEnvironmentsIndexRouteImport.update({
     id: '/',
     path: '/',
     getParentRoute: () => AuthenticatedEnvironmentsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/environments/index.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedEnvironmentsAgentsRoute =
   AuthenticatedEnvironmentsAgentsRouteImport.update({
     id: '/agents',
     path: '/agents',
     getParentRoute: () => AuthenticatedEnvironmentsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/environments/agents.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedEnvironmentsHealthRoute =
   AuthenticatedEnvironmentsHealthRouteImport.update({
     id: '/health',
     path: '/health',
     getParentRoute: () => AuthenticatedEnvironmentsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/environments/health.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedEnvironmentsLibraryRoute =
   AuthenticatedEnvironmentsLibraryRouteImport.update({
     id: '/library',
     path: '/library',
     getParentRoute: () => AuthenticatedEnvironmentsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/environments/library.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedEnvironmentsRuntimesRoute =
   AuthenticatedEnvironmentsRuntimesRouteImport.update({
     id: '/runtimes',
     path: '/runtimes',
     getParentRoute: () => AuthenticatedEnvironmentsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/environments/runtimes.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedLibrarySplatRoute =
   AuthenticatedLibrarySplatRouteImport.update({
     id: '/library/$',
@@ -144,91 +174,139 @@ const AuthenticatedSettingsAgentsRoute =
     id: '/agents',
     path: '/agents',
     getParentRoute: () => AuthenticatedSettingsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/settings/agents.lazy').then((d) => d.Route),
+  )
 const AuthenticatedSettingsAppearanceRoute =
   AuthenticatedSettingsAppearanceRouteImport.update({
     id: '/appearance',
     path: '/appearance',
     getParentRoute: () => AuthenticatedSettingsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/settings/appearance.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedSettingsConnectorsRoute =
   AuthenticatedSettingsConnectorsRouteImport.update({
     id: '/connectors',
     path: '/connectors',
     getParentRoute: () => AuthenticatedSettingsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/settings/connectors.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedSettingsContextRoute =
   AuthenticatedSettingsContextRouteImport.update({
     id: '/context',
     path: '/context',
     getParentRoute: () => AuthenticatedSettingsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/settings/context.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedSettingsExternalAgentsRoute =
   AuthenticatedSettingsExternalAgentsRouteImport.update({
     id: '/external-agents',
     path: '/external-agents',
     getParentRoute: () => AuthenticatedSettingsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/settings/external-agents.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedSettingsExternalApiRoute =
   AuthenticatedSettingsExternalApiRouteImport.update({
     id: '/external-api',
     path: '/external-api',
     getParentRoute: () => AuthenticatedSettingsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/settings/external-api.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedSettingsGeneralRoute =
   AuthenticatedSettingsGeneralRouteImport.update({
     id: '/general',
     path: '/general',
     getParentRoute: () => AuthenticatedSettingsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/settings/general.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedSettingsGitRoute =
   AuthenticatedSettingsGitRouteImport.update({
     id: '/git',
     path: '/git',
     getParentRoute: () => AuthenticatedSettingsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/settings/git.lazy').then((d) => d.Route),
+  )
 const AuthenticatedSettingsLogsRoute =
   AuthenticatedSettingsLogsRouteImport.update({
     id: '/logs',
     path: '/logs',
     getParentRoute: () => AuthenticatedSettingsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/settings/logs.lazy').then((d) => d.Route),
+  )
 const AuthenticatedSettingsMcpRoute =
   AuthenticatedSettingsMcpRouteImport.update({
     id: '/mcp',
     path: '/mcp',
     getParentRoute: () => AuthenticatedSettingsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/settings/mcp.lazy').then((d) => d.Route),
+  )
 const AuthenticatedSettingsMetricsRoute =
   AuthenticatedSettingsMetricsRouteImport.update({
     id: '/metrics',
     path: '/metrics',
     getParentRoute: () => AuthenticatedSettingsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/settings/metrics.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedSettingsPromptsRoute =
   AuthenticatedSettingsPromptsRouteImport.update({
     id: '/prompts',
     path: '/prompts',
     getParentRoute: () => AuthenticatedSettingsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/settings/prompts.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedSettingsProvidersRoute =
   AuthenticatedSettingsProvidersRouteImport.update({
     id: '/providers',
     path: '/providers',
     getParentRoute: () => AuthenticatedSettingsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/settings/providers.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedSettingsSkillsRoute =
   AuthenticatedSettingsSkillsRouteImport.update({
     id: '/skills',
     path: '/skills',
     getParentRoute: () => AuthenticatedSettingsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/settings/skills.lazy').then((d) => d.Route),
+  )
 const AuthenticatedSettingsToolsRoute =
   AuthenticatedSettingsToolsRouteImport.update({
     id: '/tools',
     path: '/tools',
     getParentRoute: () => AuthenticatedSettingsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/settings/tools.lazy').then((d) => d.Route),
+  )
 const AuthenticatedEnvironmentsLibraryIndexRoute =
   AuthenticatedEnvironmentsLibraryIndexRouteImport.update({
     id: '/',
@@ -240,49 +318,81 @@ const AuthenticatedEnvironmentsLibraryResourceKeyRoute =
     id: '/$resourceKey',
     path: '/$resourceKey',
     getParentRoute: () => AuthenticatedEnvironmentsLibraryRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/environments/library/$resourceKey.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedEnvironmentsLibraryBackupsRoute =
   AuthenticatedEnvironmentsLibraryBackupsRouteImport.update({
     id: '/backups',
     path: '/backups',
     getParentRoute: () => AuthenticatedEnvironmentsLibraryRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/environments/library/backups.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedEnvironmentsLibraryCommandsRoute =
   AuthenticatedEnvironmentsLibraryCommandsRouteImport.update({
     id: '/commands',
     path: '/commands',
     getParentRoute: () => AuthenticatedEnvironmentsLibraryRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/environments/library/commands.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedEnvironmentsLibraryInstructionsRoute =
   AuthenticatedEnvironmentsLibraryInstructionsRouteImport.update({
     id: '/instructions',
     path: '/instructions',
     getParentRoute: () => AuthenticatedEnvironmentsLibraryRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/environments/library/instructions.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedEnvironmentsLibraryLocationsRoute =
   AuthenticatedEnvironmentsLibraryLocationsRouteImport.update({
     id: '/locations',
     path: '/locations',
     getParentRoute: () => AuthenticatedEnvironmentsLibraryRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/environments/library/locations.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedEnvironmentsLibrarySettingsRoute =
   AuthenticatedEnvironmentsLibrarySettingsRouteImport.update({
     id: '/settings',
     path: '/settings',
     getParentRoute: () => AuthenticatedEnvironmentsLibraryRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/environments/library/settings.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedEnvironmentsLibrarySkillsRoute =
   AuthenticatedEnvironmentsLibrarySkillsRouteImport.update({
     id: '/skills',
     path: '/skills',
     getParentRoute: () => AuthenticatedEnvironmentsLibraryRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/environments/library/skills.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedEnvironmentsLibrarySubagentsRoute =
   AuthenticatedEnvironmentsLibrarySubagentsRouteImport.update({
     id: '/subagents',
     path: '/subagents',
     getParentRoute: () => AuthenticatedEnvironmentsLibraryRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/environments/library/subagents.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedSettingsProvidersIndexRoute =
   AuthenticatedSettingsProvidersIndexRouteImport.update({
     id: '/',
@@ -294,7 +404,11 @@ const AuthenticatedSettingsProvidersProviderRoute =
     id: '/$provider',
     path: '/$provider',
     getParentRoute: () => AuthenticatedSettingsProvidersRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/_authenticated/settings/providers.$provider.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute

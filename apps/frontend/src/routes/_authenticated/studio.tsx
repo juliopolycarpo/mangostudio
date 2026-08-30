@@ -1,6 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { galleryListQueryOptions } from '@/features/gallery/queries';
-import { StudioPage } from '@/features/studio/StudioPage';
 
 export const Route = createFileRoute('/_authenticated/studio')({
   // The recent strip's page, fetched into the same cache `/gallery` reads, so
@@ -21,5 +20,4 @@ export const Route = createFileRoute('/_authenticated/studio')({
     if (queryClient.getQueryData(options.queryKey) !== undefined) return;
     return queryClient.prefetchInfiniteQuery(options);
   },
-  component: StudioPage,
 });

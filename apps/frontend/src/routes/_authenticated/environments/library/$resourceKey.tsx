@@ -3,7 +3,6 @@ import {
   type EnvironmentScopeSearch,
   validateEnvironmentSearch,
 } from '@/features/environments/use-environment-scope';
-import { ResourceDetail } from '@/features/library/components/ResourceDetail';
 import { libraryResourceQueryOptions } from '@/features/library/queries';
 
 interface ResourceDetailSearch extends EnvironmentScopeSearch {
@@ -26,11 +25,4 @@ export const Route = createFileRoute('/_authenticated/environments/library/$reso
   loaderDeps: ({ search }) => ({ environmentId: search.environmentId }),
   loader: ({ context: { queryClient }, params, deps }) =>
     queryClient.prefetchQuery(libraryResourceQueryOptions(params.resourceKey, deps.environmentId)),
-  component: ResourceDetailRoute,
 });
-
-function ResourceDetailRoute() {
-  const { resourceKey } = Route.useParams();
-  const { compare } = Route.useSearch();
-  return <ResourceDetail resourceKey={resourceKey} initialCompare={compare === true} />;
-}
