@@ -141,6 +141,10 @@ export function SettingsNav() {
 /**
  * The page the collapsed nav is standing in for. Longest matching path wins,
  * so `/settings/providers/openai` reports Providers rather than nothing.
+ *
+ * The match is on whole segments: a bare `startsWith` would let a future
+ * `/settings/git-hub` be reported as Git, which is the kind of wrong that
+ * looks right.
  */
 function currentSettingsLabel(
   groups: readonly SettingsNavGroup[],
@@ -148,6 +152,11 @@ function currentSettingsLabel(
 ): string | undefined {
   return groups
     .flatMap((group) => group.entries)
-    .filter((entry) => typeof entry.to === 'string' && pathname.startsWith(entry.to))
+    .filter((entry) => typeof entry.to === 'string' && isUnderPath(pathname, entry.to))
     .sort((a, b) => String(b.to).length - String(a.to).length)[0]?.label;
+}
+
+/** True when `pathname` is `base` or one of its descendants. */
+function isUnderPath(pathname: string, base: string): boolean {
+  return pathname === base || pathname.startsWith(`${base}/`);
 }
