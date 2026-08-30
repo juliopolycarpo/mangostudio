@@ -4,7 +4,6 @@ import type {
   ExternalAgentSteerResult,
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
-import { ACTIVITY_TOPIC, type RealtimeServerMessage } from '@mangostudio/shared/realtime';
 import type {
   ExternalApprovalPart,
   ExternalSteerPart,
@@ -24,35 +23,15 @@ import {
 import { readContinuation } from '../../../../src/modules/external-agents/infrastructure/external-session-continuation-repository';
 import { cancelActiveTurn } from '../../../../src/modules/generation/application/active-turn-registry';
 import {
-  type getRealtimeBus,
-  setRealtimeBusForTests,
-} from '../../../../src/services/realtime/realtime-bus';
-import {
   createFakeExternalRuntime,
   type FakeExternalRuntime,
   type FakeExternalRuntimeOptions,
 } from '../../../support/external-agents/fake-external-runtime';
 import { insertTestUser } from '../../../support/factories';
-
-interface Published {
-  readonly userId: string;
-  readonly message: RealtimeServerMessage;
-}
-
-/** Records what a turn publishes, without a socket on the other end. */
-class RecordingRealtimeBus {
-  readonly published: Published[] = [];
-
-  publish(userId: string, message: RealtimeServerMessage): void {
-    this.published.push({ userId, message });
-  }
-}
-
-function installRecordingBus(): RecordingRealtimeBus {
-  const bus = new RecordingRealtimeBus();
-  setRealtimeBusForTests(bus as unknown as ReturnType<typeof getRealtimeBus>);
-  return bus;
-}
+import {
+  installRecordingRealtimeBus,
+  restoreRealtimeBus,
+} from '../../../support/mocks/recording-realtime-bus';
 
 const CONFIGURATION: ExternalAgentConfiguration = {
   level: 'default',
@@ -179,7 +158,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  setRealtimeBusForTests(undefined);
+  restoreRealtimeBus();
 });
 
 describe('external turn controller', () => {
@@ -298,7 +277,7 @@ describe('external turn controller', () => {
   });
 
   it('signals the activity topic on a vendor error, without writing a feed row', async () => {
-    const bus = installRecordingBus();
+    const bus = installRecordingRealtimeBus();
     const { runtime, controller } = harness();
     const running = startTurn(controller);
     await waitForTurnStart(runtime);
@@ -309,13 +288,7 @@ describe('external turn controller', () => {
     });
     await running;
 
-    const activityFrames = bus.published.filter(
-      (entry) =>
-        entry.userId === userId &&
-        entry.message.type === 'invalidate' &&
-        entry.message.topic === ACTIVITY_TOPIC
-    );
-    expect(activityFrames).toHaveLength(1);
+    expect(bus.activityFramesFor(userId)).toHaveLength(1);
 
     const row = await getDb()
       .selectFrom('activity_events')
