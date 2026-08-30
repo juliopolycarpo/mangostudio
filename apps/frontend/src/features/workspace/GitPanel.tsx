@@ -11,6 +11,7 @@ import {
   Check,
   FileCode2,
   FolderGit2,
+  LoaderCircle,
   Minus,
   MoreHorizontal,
   Plus,
@@ -57,6 +58,17 @@ import { RemoteActions } from './RemoteActions';
 import { RepositoryHistory } from './RepositoryHistory';
 import { StashSheet } from './StashSheet';
 import { WorktreeSection } from './WorktreeSection';
+
+// Mirrors DiffViewer's own `query.isLoading` message so the chunk fetch and the
+// diff fetch read as one continuous load instead of a blank flash then a spinner.
+function DiffViewerFallback({ loadingLabel }: { readonly loadingLabel: string }) {
+  return (
+    <div className="flex min-h-32 flex-col items-center justify-center gap-2 px-4 text-center text-xs text-on-surface-variant">
+      <LoaderCircle size={18} className="animate-spin" />
+      <p>{loadingLabel}</p>
+    </div>
+  );
+}
 
 interface GitPanelProps {
   readonly chatId: string;
@@ -406,7 +418,7 @@ function RepositoryStatus({
 
       {view === 'history' ? (
         diffSelection ? (
-          <Suspense fallback={null}>
+          <Suspense fallback={<DiffViewerFallback loadingLabel={labels.diff.loading} />}>
             <DiffViewer
               chatId={chatId}
               selection={diffSelection}
