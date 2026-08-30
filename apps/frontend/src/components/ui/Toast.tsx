@@ -1,4 +1,5 @@
 import { X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   createContext,
   type ReactNode,
@@ -9,6 +10,7 @@ import {
   useState,
 } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
+import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 
 interface Toast {
   id: string;
@@ -25,6 +27,7 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 export function ToastProvider({ children }: { children: ReactNode }) {
   const { t } = useI18n();
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const { fadeRise } = useMotionPresets();
   /**
    * Auto-dismiss timers, keyed by toast id. They outlive the toast they were
    * scheduled for by up to 4s, so an unmount that leaves one pending fires
@@ -71,22 +74,25 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext value={{ toast }}>
       {children}
       <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
-        {toasts.map((toastItem) => (
-          <div
-            key={toastItem.id}
-            className={`glass-panel pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border text-sm max-w-sm ${typeStyles[toastItem.type]}`}
-          >
-            <span className="flex-1">{toastItem.message}</span>
-            <button
-              type="button"
-              onClick={() => dismiss(toastItem.id)}
-              aria-label={t.common.dismissToast}
-              className="shrink-0 opacity-50 hover:opacity-100 transition-opacity cursor-pointer"
+        <AnimatePresence initial={false}>
+          {toasts.map((toastItem) => (
+            <motion.div
+              key={toastItem.id}
+              {...fadeRise}
+              className={`glass-panel pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border text-sm max-w-sm ${typeStyles[toastItem.type]}`}
             >
-              <X size={14} />
-            </button>
-          </div>
-        ))}
+              <span className="flex-1">{toastItem.message}</span>
+              <button
+                type="button"
+                onClick={() => dismiss(toastItem.id)}
+                aria-label={t.common.dismissToast}
+                className="shrink-0 opacity-50 hover:opacity-100 transition-opacity cursor-pointer"
+              >
+                <X size={14} />
+              </button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
     </ToastContext>
   );

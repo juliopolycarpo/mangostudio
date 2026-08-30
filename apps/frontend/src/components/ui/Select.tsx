@@ -27,6 +27,7 @@ import { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useAnchoredPosition } from '@/hooks/use-anchored-position';
 import { type ListboxOption, useListboxSelect } from '@/hooks/use-listbox-select';
+import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
 
 export interface SelectOption extends ListboxOption {
@@ -66,6 +67,7 @@ export function Select({
   testId,
 }: SelectProps) {
   const listId = useId();
+  const { popoverBelow } = useMotionPresets();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const {
     open,
@@ -132,10 +134,7 @@ export function Select({
           {open && position ? (
             <motion.div
               ref={panelRef}
-              initial={{ opacity: 0, y: -6, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -6, scale: 0.98 }}
-              transition={{ duration: 0.15, ease: 'easeOut' }}
+              {...popoverBelow}
               // Placed by hand in `document.body` rather than `absolute` in the
               // wrapper: these sit inside dialogs and panes that scroll, and an
               // absolute panel is clipped by them — which is the one thing the

@@ -2,6 +2,7 @@ import { Check } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
+import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 
 /** Props the caller must spread onto whatever element opens the menu. */
 interface MenuTriggerProps {
@@ -31,6 +32,7 @@ export function Menu({
   children,
 }: MenuProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const { popoverBelow } = useMotionPresets();
 
   useEffect(() => {
     if (!open) return;
@@ -82,10 +84,7 @@ export function Menu({
       <AnimatePresence>
         {open ? (
           <motion.div
-            initial={{ opacity: 0, y: -4, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.97 }}
-            transition={{ duration: 0.12, ease: 'easeOut' }}
+            {...popoverBelow}
             role="menu"
             className={`dropdown-panel absolute top-full mt-1.5 py-1 ${
               align === 'right' ? 'right-0' : 'left-0'

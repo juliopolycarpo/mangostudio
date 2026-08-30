@@ -4,6 +4,7 @@ import { ArrowDown, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useMemo } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
+import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { useChatAutoFollow } from '../hooks/use-chat-auto-follow';
 import { useChatFileCheckpoints } from '../hooks/use-chat-file-checkpoints';
 import { ChatMessageRow } from './ChatMessageRow';
@@ -42,6 +43,7 @@ export function ChatFeed({
   onQuestionSubmit?: (prompt: string) => void;
 }) {
   const { t } = useI18n();
+  const { fadeRise } = useMotionPresets();
   const { data: checkpointData } = useChatFileCheckpoints(chatId);
   // The summary is both the revert affordance's gate and what the confirmation
   // needs to say about the writes it cannot undo, so the row carries the entry
@@ -103,10 +105,7 @@ export function ChatFeed({
         {showScrollButton && messages.length > 0 && (
           <motion.button
             key="scroll-to-bottom"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            transition={{ duration: 0.2 }}
+            {...fadeRise}
             type="button"
             onClick={scrollToBottom}
             className="glass-elevated sticky bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-on-surface-variant border border-outline-variant/30 cursor-pointer hover:border-outline-variant/50 hover:text-on-surface transition-colors duration-200"

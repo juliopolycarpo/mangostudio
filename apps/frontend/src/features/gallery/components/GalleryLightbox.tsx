@@ -5,6 +5,7 @@ import { useCallback, useRef } from 'react';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { buildGeneratedImageFilename } from '@/lib/download-filenames';
+import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 
 interface GalleryLightboxProps {
   /** The image on screen, or null for "closed" — the exit animation needs both. */
@@ -34,6 +35,7 @@ export function GalleryLightbox({ item, onClose }: GalleryLightboxProps) {
   onCloseRef.current = onClose;
   const handleEscape = useCallback(() => onCloseRef.current(), []);
   const dialogRef = useFocusTrap(handleEscape);
+  const { overlay, dialogPanel } = useMotionPresets();
 
   return (
     <AnimatePresence>
@@ -46,9 +48,7 @@ export function GalleryLightbox({ item, onClose }: GalleryLightboxProps) {
           // The overlay is the dialog rather than the panel inside it, so the
           // close button in its corner is part of the ring Tab cycles.
           tabIndex={-1}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
+          {...overlay}
           className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8 bg-black/90 backdrop-blur-sm outline-none"
           onClick={onClose}
         >
@@ -62,9 +62,7 @@ export function GalleryLightbox({ item, onClose }: GalleryLightboxProps) {
           </button>
 
           <motion.div
-            initial={{ scale: 0.9, y: 20 }}
-            animate={{ scale: 1, y: 0 }}
-            exit={{ scale: 0.9, y: 20 }}
+            {...dialogPanel}
             className="relative max-w-5xl w-full max-h-full flex flex-col items-center"
             onClick={(event) => event.stopPropagation()}
           >

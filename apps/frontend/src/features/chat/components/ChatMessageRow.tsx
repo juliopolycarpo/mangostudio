@@ -1,6 +1,5 @@
 import type { Message } from '@mangostudio/shared';
 import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpoints';
-import { motion } from 'motion/react';
 import { memo } from 'react';
 import { AssistantMessageBlock } from './AssistantMessageBlock';
 import { isImageInteraction } from './message-content';
@@ -54,9 +53,12 @@ function ChatMessageRowComponent({
         contain: 'layout style paint',
       }}
     >
-      <motion.div
-        initial={false}
-        animate={{ opacity: 1, y: 0 }}
+      {/* A plain div: this carried a `motion.div` whose `initial={false}` meant
+          it rendered straight at its `animate` target and never played, so
+          every virtualized row paid for a motion component that could not
+          animate. New rows arrive at the foot of a feed that is already
+          scrolling to meet them; there is no entrance to stage. */}
+      <div
         className={`flex flex-col gap-2 ${isUser ? 'items-end ml-auto max-w-[92%] sm:max-w-[85%] md:max-w-[80%]' : 'items-start mr-auto max-w-full'}`}
       >
         {isUser ? (
@@ -70,7 +72,7 @@ function ChatMessageRowComponent({
             onQuestionSubmit={onQuestionSubmit}
           />
         )}
-      </motion.div>
+      </div>
     </div>
   );
 }
