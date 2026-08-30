@@ -24,8 +24,6 @@ import {
   FolderOpen,
   GitPullRequest,
   ListTodo,
-  PanelLeft,
-  PanelRight,
   RotateCcw,
   X,
 } from 'lucide-react';
@@ -224,16 +222,11 @@ export function GeneralSettings({
       </Card>
 
       <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-        <div className="flex items-start gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <PanelLeft size={18} />
-          </span>
-          <div className="min-w-0 flex-1 space-y-1">
-            <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant/80">
-              {workspace.chatSidebarTitle}
-            </h3>
-            <p className="text-sm text-on-surface-variant/60">{workspace.chatSidebarDescription}</p>
-          </div>
+        <div className="space-y-1">
+          <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant/80">
+            {workspace.chatSidebarTitle}
+          </h3>
+          <p className="text-sm text-on-surface-variant/60">{workspace.chatSidebarDescription}</p>
         </div>
         <div className="flex items-center justify-between gap-3 text-xs text-on-surface-variant/60">
           <span>
@@ -256,16 +249,11 @@ export function GeneralSettings({
       </Card>
 
       <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-        <div className="flex items-start gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <PanelRight size={18} />
-          </span>
-          <div className="min-w-0 flex-1 space-y-1">
-            <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant/80">
-              {workspace.sidePanelTitle}
-            </h3>
-            <p className="text-sm text-on-surface-variant/60">{workspace.sidePanelDescription}</p>
-          </div>
+        <div className="space-y-1">
+          <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant/80">
+            {workspace.sidePanelTitle}
+          </h3>
+          <p className="text-sm text-on-surface-variant/60">{workspace.sidePanelDescription}</p>
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-lowest">
