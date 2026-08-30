@@ -23,7 +23,7 @@
 
 import { Check, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useId } from 'react';
+import { useEffect, useId } from 'react';
 import { type ListboxOption, useListboxSelect } from '@/hooks/use-listbox-select';
 import { cn } from '@/lib/utils';
 
@@ -74,6 +74,17 @@ export function Select({
     commit,
     handleKeyDown,
   } = useListboxSelect({ value, options, onChange, disabled });
+
+  // Focus never leaves the trigger, so nothing scrolls the panel on its own:
+  // past the sixth row of a capped list the cursor moves and the page does
+  // not, which is the one thing the native popup always got right. `nearest`
+  // is a no-op for a row already in view, so hovering does not yank the list.
+  // `useId` values contain characters a CSS selector cannot carry, hence
+  // `getElementById` rather than `querySelector`.
+  useEffect(() => {
+    if (!open || activeIndex < 0) return;
+    document.getElementById(`${listId}-${activeIndex}`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [open, activeIndex, listId]);
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the keys are handled for the combobox trigger and the options it owns, both inside this wrapper.
