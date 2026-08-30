@@ -1,5 +1,6 @@
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
 import { recordActivity } from '../../activity/application/record-activity';
 import { getById } from '../infrastructure/chat-repository';
 
@@ -16,6 +17,11 @@ import { getById } from '../infrastructure/chat-repository';
  *
  * Never rejects: a turn that produced work must not fail because the note about
  * it could not be written.
+ *
+ * The row and the signal do not share a fate. `recordActivity` announces the
+ * row it wrote, but a turn whose chat vanished mid-flight still moved something
+ * every other tab is showing — a chat that is no longer there. That case gets
+ * the bare invalidation, exactly as the terminal reasons that skip a row do.
  */
 export async function recordTurnCompletedActivity(
   userId: string,
@@ -24,7 +30,10 @@ export async function recordTurnCompletedActivity(
 ): Promise<void> {
   try {
     const chat = await getById(chatId, db);
-    if (!chat) return;
+    if (!chat) {
+      publishActivityInvalidation(userId);
+      return;
+    }
 
     await recordActivity(
       {

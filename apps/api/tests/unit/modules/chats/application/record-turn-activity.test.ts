@@ -2,8 +2,13 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { getDb } from '../../../../../src/db/database';
 import { recordTurnCompletedActivity } from '../../../../../src/modules/chats/application/record-turn-activity';
 import { insertTestChat, insertTestUser } from '../../../../support/factories';
+import {
+  installRecordingRealtimeBus,
+  restoreRealtimeBus,
+} from '../../../../support/mocks/recording-realtime-bus';
 
 afterEach(async () => {
+  restoreRealtimeBus();
   await getDb()
     .deleteFrom('activity_events')
     .where('userId', 'like', 'turn-activity-user-%')
@@ -31,7 +36,11 @@ describe('recordTurnCompletedActivity', () => {
     expect(payload.runner).toEqual({ kind: 'mangostudio', agentId: 'default' });
   });
 
-  it('does nothing when the chat cannot be found', async () => {
+  it('writes no row when the chat cannot be found, but still signals the topic', async () => {
+    // A chat deleted while its turn was running leaves nothing to describe in
+    // the feed — and leaves every other tab showing a row that is now gone. The
+    // signal is the only thing that corrects them.
+    const bus = installRecordingRealtimeBus();
     const user = await insertTestUser({ id: 'turn-activity-user-2' });
 
     await recordTurnCompletedActivity(user.id, 'missing-chat', getDb());
@@ -43,5 +52,6 @@ describe('recordTurnCompletedActivity', () => {
       .executeTakeFirst();
 
     expect(row).toBeUndefined();
+    expect(bus.activityFramesFor(user.id)).toHaveLength(1);
   });
 });
