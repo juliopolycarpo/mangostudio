@@ -515,6 +515,7 @@ export const messages: Messages = {
     title: 'Gallery',
     empty: 'Your creations will appear here.',
     download: 'Download Full Image',
+    downloadImage: 'Download image',
     view: 'View',
     lightboxLabel: 'Image preview',
     close: 'Close image',

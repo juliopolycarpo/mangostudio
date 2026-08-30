@@ -33,7 +33,12 @@ export function GalleryTile({ item, onView }: GalleryTileProps) {
         decoding="async"
       />
 
-      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-4">
+      {/*
+        `group-focus-within` and not `group-hover` alone: the two controls below
+        are tabbable, so revealing them on hover only hands a keyboard user a
+        focus ring on something invisible.
+      */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-4">
         <p className="text-white text-sm line-clamp-3 font-medium mb-3 drop-shadow-md">
           {item.prompt}
         </p>
@@ -46,11 +51,13 @@ export function GalleryTile({ item, onView }: GalleryTileProps) {
             <Maximize2 size={16} />
             <span className="text-xs font-bold uppercase tracking-wider">{t.gallery.view}</span>
           </button>
+          {/* Icon-only, so the label is the only name a screen reader can read out. */}
           <a
             href={item.imageUrl}
             download={buildGeneratedImageFilename(t.common.downloadFilenamePrefix, item.id)}
             target="_blank"
             rel="noreferrer"
+            aria-label={t.gallery.downloadImage}
             className="p-2 bg-primary hover:bg-primary/90 rounded-lg text-on-primary transition-colors flex items-center justify-center"
           >
             <Download size={16} />

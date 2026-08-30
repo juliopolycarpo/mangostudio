@@ -514,6 +514,7 @@ export const messages = {
     title: 'Galeria',
     empty: 'Suas criações aparecerão aqui.',
     download: 'Baixar imagem completa',
+    downloadImage: 'Baixar imagem',
     view: 'Ver',
     lightboxLabel: 'Visualização da imagem',
     close: 'Fechar imagem',
