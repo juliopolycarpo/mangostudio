@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { type MotionPresets, motionPresets } from './variants';
 
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
@@ -21,16 +21,21 @@ export function useMotionPresets(): MotionPresets {
   return motionPresets(useIsReducedMotion());
 }
 
+/** One `matchMedia` subscription for the whole app rather than one per
+ *  `useMotionPresets()` call site — every `SectionCard` and popover would
+ *  otherwise mount its own listener for the same global preference. */
+const reducedMotionQuery = () => window.matchMedia(REDUCED_MOTION_QUERY);
+
+function subscribeReducedMotion(onChange: () => void): () => void {
+  const mediaQuery = reducedMotionQuery();
+  mediaQuery.addEventListener('change', onChange);
+  return () => mediaQuery.removeEventListener('change', onChange);
+}
+
+function getReducedMotionSnapshot(): boolean {
+  return reducedMotionQuery().matches;
+}
+
 function useIsReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(() => window.matchMedia(REDUCED_MOTION_QUERY).matches);
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia(REDUCED_MOTION_QUERY);
-    const handleChange = () => setReduced(mediaQuery.matches);
-    mediaQuery.addEventListener('change', handleChange);
-    handleChange();
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, []);
-
-  return reduced;
+  return useSyncExternalStore(subscribeReducedMotion, getReducedMotionSnapshot);
 }
