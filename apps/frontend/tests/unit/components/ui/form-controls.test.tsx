@@ -45,6 +45,17 @@ describe('Select', () => {
     expect(screen.getAllByRole('option')).toHaveLength(OPTIONS.length);
   });
 
+  // The panel is portalled, so an external `<label htmlFor>` naming the trigger
+  // does not reach it. Only `ariaLabel` does, which is why the call sites pass
+  // it alongside a visible label that already says the same thing.
+  it('names the popup listbox, not just the trigger', () => {
+    render(<Select value="ask" options={OPTIONS} onChange={jest.fn()} ariaLabel="Behaviour" />);
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Behaviour' }));
+
+    expect(screen.getByRole('listbox', { name: 'Behaviour' })).toBeInTheDocument();
+  });
+
   it('reports the chosen value and closes', () => {
     const onChange = jest.fn();
     render(<Select value="ask" options={OPTIONS} onChange={onChange} ariaLabel="Behaviour" />);

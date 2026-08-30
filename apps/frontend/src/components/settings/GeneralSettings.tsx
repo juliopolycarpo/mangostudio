@@ -445,6 +445,7 @@ export function GeneralSettings({
             id="chat-title-strategy"
             value={chatTitleSettings.strategy}
             onChange={(value) => setChatTitleStrategy(value as ChatTitleStrategy)}
+            ariaLabel={s.chatTitleSourceLabel}
             disabled={!chatTitleSettings.autoRenameEnabled}
             options={[
               { value: 'prompt_prefix', label: s.chatTitleSourcePrompt },
@@ -466,6 +467,7 @@ export function GeneralSettings({
               id="chat-title-model"
               value={chatTitleSettings.preferredModel}
               onChange={setPreferredChatTitleModel}
+              ariaLabel={s.chatTitleModelLabel}
               disabled={!chatTitleSettings.autoRenameEnabled}
               options={modelSelectOptions(
                 { value: 'current_model', label: s.chatTitleModelCurrent },

@@ -17,11 +17,17 @@ import { fireEvent, screen, within } from '@testing-library/react';
  *
  * `name` is the trigger's accessible name — its `ariaLabel`, or the text of the
  * `<label htmlFor>` pointing at it. `option` matches the option's visible text.
+ *
+ * The popup is found by that same name rather than by role alone. `Select`
+ * draws its list in a portal, so a `<label htmlFor>` naming the trigger does
+ * not reach it: only `ariaLabel` does, and a call site that relies on the
+ * label alone ships an unnamed option list. Resolving the listbox by name is
+ * what makes every test through this helper hold its own call site to that.
  */
 export async function chooseOption(name: string | RegExp, option: string | RegExp): Promise<void> {
   const trigger = await screen.findByRole('combobox', { name });
   fireEvent.click(trigger);
 
-  const listbox = await screen.findByRole('listbox');
+  const listbox = await screen.findByRole('listbox', { name });
   fireEvent.click(within(listbox).getByRole('option', { name: option }));
 }

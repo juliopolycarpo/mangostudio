@@ -52,6 +52,7 @@ export function CacheSettingsSection({
             id="cache-preference"
             value={form.promptCachePreference ?? 'auto'}
             onChange={(value) => update('promptCachePreference', value)}
+            ariaLabel={s.cachePreference}
             options={CACHE_OPTIONS.map(({ value, labelKey }) => ({
               value,
               label: String(s[labelKey as keyof typeof s]),

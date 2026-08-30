@@ -300,6 +300,7 @@ export function ToolParameterField({
           id={`${fieldId}-model`}
           value={toSafeString(descriptorValue)}
           onChange={onChange}
+          ariaLabel={label}
           disabled={disabled}
           options={modelOptions}
           placeholder={fallbackLabel(modelOptions)}
@@ -359,6 +360,7 @@ export function ToolParameterField({
             id={`${fieldId}-select`}
             value={toSafeString(descriptorValue)}
             onChange={onChange}
+            ariaLabel={label}
             disabled={disabled}
             options={options}
             placeholder={fallbackLabel(options)}

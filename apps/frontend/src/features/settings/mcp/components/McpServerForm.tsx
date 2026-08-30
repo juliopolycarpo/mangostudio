@@ -151,6 +151,7 @@ export function McpServerForm({
               id="mcp-server-environment"
               value={state.environmentId}
               onChange={(environmentId) => patch({ environmentId })}
+              ariaLabel={s.environmentLabel}
               disabled={environments.isPending && !environments.data}
               options={[
                 ...(environments.isPending && !environments.data
