@@ -46,7 +46,6 @@ export interface ListboxSelect<Option extends ListboxOption> {
   /** Attach to the element wrapping trigger and panel — closes on outside click. */
   readonly containerRef: React.RefObject<HTMLDivElement | null>;
   readonly selected: Option | undefined;
-  readonly selectedIndex: number;
   readonly commit: (option: Option) => void;
   readonly handleKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
 }
@@ -154,7 +153,6 @@ export function useListboxSelect<Option extends ListboxOption>({
     setActiveIndex,
     containerRef,
     selected,
-    selectedIndex,
     commit,
     handleKeyDown,
   };

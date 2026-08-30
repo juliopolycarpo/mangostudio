@@ -102,7 +102,7 @@ export function GitSettingsPage({
           <p className="text-xs text-on-surface-variant/60">{commitMessageLabels.dataNotice}</p>
         </div>
 
-        <div className="block space-y-2">
+        <div className="space-y-2">
           <span className="block text-sm font-semibold text-on-surface">
             {commitMessageLabels.modelLabel}
           </span>

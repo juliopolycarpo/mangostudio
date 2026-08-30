@@ -140,7 +140,7 @@ function AgentIdentitySection({ draft, labels, isNew, onDraftChange }: AgentIden
           value={draft.description}
           onChange={(description) => onDraftChange({ description })}
         />
-        <div className="block space-y-2">
+        <div className="space-y-2">
           <span className="text-sm font-semibold text-on-surface">{labels.role}</span>
           <Select
             value={draft.role}
@@ -178,7 +178,7 @@ function AgentBehaviorSection({
           className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20 resize-y"
         />
       </label>
-      <div className="block space-y-2">
+      <div className="space-y-2">
         <span className="text-sm font-semibold text-on-surface">{labels.model}</span>
         <Select
           value={draft.model ?? ''}
@@ -208,7 +208,7 @@ function AgentReasoningSection({ draft, labels, onDraftChange }: AgentReasoningS
           />
           {labels.thinking}
         </label>
-        <div className="block space-y-2">
+        <div className="space-y-2">
           <span className="text-sm font-semibold text-on-surface">{labels.reasoningEffort}</span>
           <Select
             value={draft.reasoningEffort ?? ''}

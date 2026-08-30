@@ -40,7 +40,6 @@ interface SelectProps {
   /** Ties an external `<label htmlFor>` to the trigger, as a native select would. */
   readonly id?: string;
   readonly ariaLabel?: string;
-  readonly describedBy?: string;
   readonly disabled?: boolean;
   /** Shown when `value` matches no option — a model the catalog no longer lists. */
   readonly placeholder?: string;
@@ -57,7 +56,6 @@ export function Select({
   onChange,
   id,
   ariaLabel,
-  describedBy,
   disabled = false,
   placeholder,
   className,
@@ -107,7 +105,6 @@ export function Select({
         // announced rather than merely painted.
         aria-activedescendant={open && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined}
         aria-label={ariaLabel}
-        aria-describedby={describedBy}
         className={TRIGGER}
       >
         <span className={cn('truncate', !selected && 'text-on-surface-variant/60')}>

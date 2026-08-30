@@ -155,7 +155,7 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
               {nameError && <span className="block text-xs text-error">{nameError}</span>}
             </label>
 
-            <div className="block space-y-2">
+            <div className="space-y-2">
               <span className="block text-sm font-semibold text-on-surface">
                 {labels.scopeLabel}
               </span>

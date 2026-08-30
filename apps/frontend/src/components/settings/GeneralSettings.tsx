@@ -347,7 +347,7 @@ export function GeneralSettings({
           {/* A `<div>` and not the `<label>` this was: the control is now a
               button, and a label wrapping a button names it through a path no
               static check can follow. `ariaLabel` says it outright. */}
-          <div className="block space-y-2">
+          <div className="space-y-2">
             <span className="text-sm font-semibold text-on-surface">{s.traceVisibilityLabel}</span>
             <Select
               value={multiAgentSettings.traceVisibility}
