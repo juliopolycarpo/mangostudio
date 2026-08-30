@@ -30,6 +30,7 @@ import type {
   GenerationConfig,
   ToolDefinition,
 } from '../../../services/providers/types';
+import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
 import { GENERATE_IMAGE_TOOL_NAME } from '../../../services/tools/builtin/generate-image';
 import type { WorkdirPolicy } from '../../../services/tools/types';
 import { generateId } from '../../../utils/id';
@@ -1053,6 +1054,7 @@ export async function* finalizeToolLoopExhausted(
     );
     if (!finalized) return;
     await updateChatAfterTurn(chatId, Date.now(), db);
+    publishActivityInvalidation(userId);
   } catch {
     // best-effort
   }
@@ -1126,6 +1128,7 @@ export async function* finalizeTurnError(
     );
     if (finalized) {
       await updateChatAfterTurn(chatId, Date.now(), db);
+      publishActivityInvalidation(userId);
     }
   } catch {
     // best-effort
@@ -1168,6 +1171,7 @@ export async function finalizeInterruptedTurn(
   );
   if (!finalized) return;
   await updateChatAfterTurn(chatId, Date.now(), db);
+  publishActivityInvalidation(userId);
 }
 
 export function getAbortInterruptionReason(
