@@ -69,12 +69,12 @@ export function Select({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const {
     open,
-    setOpen,
     activeIndex,
     setActiveIndex,
     containerRef,
     panelRef,
     selected,
+    toggle,
     commit,
     handleKeyDown,
   } = useListboxSelect({ value, options, onChange, disabled });
@@ -105,7 +105,7 @@ export function Select({
         id={id}
         role="combobox"
         disabled={disabled}
-        onClick={() => setOpen((current) => !current)}
+        onClick={toggle}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}

@@ -72,11 +72,11 @@ export function ChipSelect({
   const listId = useId();
   const {
     open,
-    setOpen,
     activeIndex,
     setActiveIndex,
     containerRef,
     selected,
+    toggle,
     commit,
     handleKeyDown,
   } = useListboxSelect({ value, options, onChange, disabled });
@@ -94,7 +94,7 @@ export function ChipSelect({
         type="button"
         role="combobox"
         disabled={disabled}
-        onClick={() => setOpen((current) => !current)}
+        onClick={toggle}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}

@@ -94,6 +94,20 @@ describe('Select', () => {
     expect(onChange).toHaveBeenCalledWith('auto');
   });
 
+  // Opening by pointer used to leave the cursor nowhere, so on a list longer
+  // than the panel the selected row could open already scrolled out of sight.
+  it('opens with the cursor on the current selection when clicked', () => {
+    render(<Select value="auto" options={OPTIONS} onChange={jest.fn()} ariaLabel="Behaviour" />);
+
+    const trigger = screen.getByRole('combobox', { name: 'Behaviour' });
+    fireEvent.click(trigger);
+
+    expect(trigger).toHaveAttribute(
+      'aria-activedescendant',
+      screen.getByRole('option', { name: /Compact automatically/ }).id
+    );
+  });
+
   // The native typeahead, without which a forty-model picker is reachable only
   // by holding ArrowDown.
   it('moves the cursor to the row a typed character names', () => {

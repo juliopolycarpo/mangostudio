@@ -45,7 +45,6 @@ interface Params<Option extends ListboxOption> {
 
 export interface ListboxSelect<Option extends ListboxOption> {
   readonly open: boolean;
-  readonly setOpen: Dispatch<SetStateAction<boolean>>;
   readonly activeIndex: number;
   readonly setActiveIndex: Dispatch<SetStateAction<number>>;
   /** Attach to the element wrapping trigger and panel — closes on outside click. */
@@ -57,6 +56,8 @@ export interface ListboxSelect<Option extends ListboxOption> {
    */
   readonly panelRef: React.RefObject<HTMLDivElement | null>;
   readonly selected: Option | undefined;
+  /** The trigger's click handler: opens with the cursor on the selection, or closes. */
+  readonly toggle: () => void;
   readonly commit: (option: Option) => void;
   readonly handleKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
 }
@@ -146,6 +147,28 @@ export function useListboxSelect<Option extends ListboxOption>({
     return -1;
   };
 
+  /** Opens with the cursor already on the current selection, as a popup does. */
+  const openWithCursor = () => {
+    setActiveIndex(selectedIndex >= 0 ? selectedIndex : step(-1, 1));
+    setOpen(true);
+  };
+
+  /**
+   * What the trigger's click does.
+   *
+   * Opening this way used to leave the cursor nowhere, which on a list longer
+   * than the panel meant the selected row could be scrolled out of sight the
+   * moment it appeared — the keyboard path seeded the cursor and the pointer
+   * path did not.
+   */
+  const toggle = () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    openWithCursor();
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (disabled) return;
 
@@ -198,8 +221,7 @@ export function useListboxSelect<Option extends ListboxOption>({
     if (!open) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter') {
         event.preventDefault();
-        setOpen(true);
-        setActiveIndex(selectedIndex >= 0 ? selectedIndex : step(-1, 1));
+        openWithCursor();
       }
       return;
     }
@@ -225,12 +247,12 @@ export function useListboxSelect<Option extends ListboxOption>({
 
   return {
     open,
-    setOpen,
     activeIndex,
     setActiveIndex,
     containerRef,
     panelRef,
     selected,
+    toggle,
     commit,
     handleKeyDown,
   };
