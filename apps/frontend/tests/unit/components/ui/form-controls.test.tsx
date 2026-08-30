@@ -28,7 +28,6 @@ describe('Select', () => {
   it('takes its name from an external label, the way a native select did', () => {
     render(
       <>
-        {/* biome-ignore lint/a11y/noLabelWithoutControl: `htmlFor` points at the trigger, which is a labelable element. */}
         <label htmlFor="behaviour">Behaviour</label>
         <Select id="behaviour" value="ask" options={OPTIONS} onChange={jest.fn()} />
       </>

@@ -652,6 +652,7 @@ export const messages: Messages = {
       modelDefaultOption: 'Use the agent default model',
       thinking: 'Enable Thinking',
       reasoningEffort: 'Reasoning Effort',
+      reasoningEffortDefaultOption: 'Use the provider default',
       reasoningEfforts: {
         low: 'Low',
         medium: 'Medium',

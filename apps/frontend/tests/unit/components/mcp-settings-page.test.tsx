@@ -8,7 +8,8 @@ import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpServer } from '@mangostudio/shared/mcp';
 import userEvent from '@testing-library/user-event';
 import { McpSettingsPage } from '../../../src/features/settings/mcp/components/McpSettingsPage';
-import { render, screen, waitFor } from '../../support/harness/render';
+import { fireEvent, render, screen, waitFor, within } from '../../support/harness/render';
+import { chooseOption } from '../../support/harness/select';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const STDIO_SERVER: McpServer = {
@@ -311,8 +312,7 @@ describe('McpSettingsPage', () => {
     await user.type(screen.getByLabelText('JSON'), 'source text');
     await user.click(screen.getByRole('button', { name: /^preview$/i }));
 
-    const decision = await screen.findByLabelText('Decision for Remote');
-    await user.selectOptions(decision, 'replace');
+    await chooseOption('Decision for Remote', 'Replace');
     expect(screen.getByRole('button', { name: /apply changes/i })).toBeDisabled();
     await user.type(screen.getByLabelText('Secret value for Authorization'), 'destination-token');
     expect(screen.getByRole('button', { name: /apply changes/i })).toBeEnabled();
@@ -378,18 +378,22 @@ describe('McpSettingsPage', () => {
     await user.click(screen.getByRole('button', { name: /paste json/i }));
     await user.type(screen.getByLabelText('JSON'), 'source text');
     await user.click(screen.getByRole('button', { name: /^preview$/i }));
-    await user.selectOptions(await screen.findByLabelText('Decision for Incoming'), 'replace');
+    await chooseOption('Decision for Incoming', 'Replace');
 
-    expect(screen.getByRole('combobox', { name: 'Server to replace' })).toHaveValue(
-      'srv-foo-owner'
-    );
+    const target = screen.getByRole('combobox', { name: 'Server to replace' });
+    expect(target).toHaveTextContent('Foo owner (foo)');
+
+    // The candidates and the reason one of them is blocked live in the panel
+    // the trigger opens, not in the trigger.
+    fireEvent.click(target);
+    const candidates = within(screen.getByRole('listbox', { name: 'Server to replace' }));
     expect(
-      screen.getByRole('option', {
+      candidates.getByRole('option', {
         name: /URL match \(bar\).*will not free slug "foo".*"Foo owner"/,
       })
     ).toBeDisabled();
     expect(
-      screen.getByText(
+      candidates.getByText(
         'Replacing this server will not free slug "foo", which belongs to "Foo owner".'
       )
     ).toBeInTheDocument();

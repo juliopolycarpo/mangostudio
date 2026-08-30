@@ -10,6 +10,7 @@ import { AlertTriangle, Plus, X } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
@@ -146,29 +147,30 @@ export function McpServerForm({
             >
               {s.environmentLabel}
             </label>
-            <select
+            <Select
               id="mcp-server-environment"
               value={state.environmentId}
-              onChange={(event) => patch({ environmentId: event.target.value })}
+              onChange={(environmentId) => patch({ environmentId })}
               disabled={environments.isPending && !environments.data}
-              className="rounded-xl border border-outline-variant/20 bg-surface-container-high px-3 py-2 text-sm text-on-surface outline-none transition-colors hover:border-primary/30 focus:border-primary/60 disabled:opacity-60"
-            >
-              {environments.isPending && !environments.data ? (
-                <option value={state.environmentId}>{s.environmentsLoading}</option>
-              ) : null}
-              {/* An environment that vanished (or is not readable) still has to
-                  render, or editing an unrelated field would silently rehome
-                  the server to whichever option the browser picked first. */}
-              {environments.data?.some((environment) => environment.id === state.environmentId) ===
-              false ? (
-                <option value={state.environmentId}>{state.environmentId}</option>
-              ) : null}
-              {environments.data?.map((environment) => (
-                <option key={environment.id} value={environment.id} disabled={!environment.enabled}>
-                  {environment.name}
-                </option>
-              ))}
-            </select>
+              options={[
+                ...(environments.isPending && !environments.data
+                  ? [{ value: state.environmentId, label: s.environmentsLoading }]
+                  : []),
+                // An environment that vanished (or is not readable) still has to
+                // render, or editing an unrelated field would silently rehome
+                // the server to whichever option happened to come first.
+                ...(environments.data?.some(
+                  (environment) => environment.id === state.environmentId
+                ) === false
+                  ? [{ value: state.environmentId, label: state.environmentId }]
+                  : []),
+                ...(environments.data ?? []).map((environment) => ({
+                  value: environment.id,
+                  label: environment.name,
+                  disabled: !environment.enabled,
+                })),
+              ]}
+            />
             <p className="text-xs text-on-surface-variant/60">{s.environmentHint}</p>
             {carriesSecrets ? (
               <div className="flex items-start gap-2 rounded-xl border border-warning/25 bg-warning/5 p-3 text-xs text-on-surface-variant">

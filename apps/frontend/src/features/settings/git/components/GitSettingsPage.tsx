@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { SettingToggle } from '@/components/settings/SettingToggle';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
 
@@ -100,32 +101,26 @@ export function GitSettingsPage({
           <p className="text-xs text-on-surface-variant/60">{commitMessageLabels.dataNotice}</p>
         </div>
 
-        <label className="block space-y-2">
+        <div className="block space-y-2">
           <span className="block text-sm font-semibold text-on-surface">
             {commitMessageLabels.modelLabel}
           </span>
           <span className="block text-xs text-on-surface-variant/60">
             {commitMessageLabels.modelDescription}
           </span>
-          <select
+          <Select
             value={settings.commitMessage.preferredModel}
-            onChange={(event) => setPreferredCommitMessageModel(event.target.value)}
-            aria-label={commitMessageLabels.modelLabel}
-            className="w-full cursor-pointer rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-2.5 text-sm text-on-surface outline-none transition-colors focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
-          >
-            <option value="">{commitMessageLabels.modelCurrent}</option>
-            {missingModel.map((model) => (
-              <option key={model.modelId} value={model.modelId}>
-                {model.displayName}
-              </option>
-            ))}
-            {catalog.textModels.map((model) => (
-              <option key={model.modelId} value={model.modelId}>
-                {model.displayName}
-              </option>
-            ))}
-          </select>
-        </label>
+            onChange={setPreferredCommitMessageModel}
+            ariaLabel={commitMessageLabels.modelLabel}
+            options={[
+              { value: '', label: commitMessageLabels.modelCurrent },
+              ...[...missingModel, ...catalog.textModels].map((model) => ({
+                value: model.modelId,
+                label: model.displayName,
+              })),
+            ]}
+          />
+        </div>
 
         <label className="block space-y-2">
           <span className="block text-sm font-semibold text-on-surface">

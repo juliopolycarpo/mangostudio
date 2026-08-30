@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import userEvent from '@testing-library/user-event';
 import { ToolSettingsPage } from '../../../src/features/settings/tools/components/ToolSettingsPage';
-import { act, fireEvent, render, screen, waitFor } from '../../support/harness/render';
+import { act, fireEvent, render, screen, waitFor, within } from '../../support/harness/render';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
@@ -370,16 +370,18 @@ describe('ToolSettingsPage', () => {
 
     await screen.findByText('Image generation');
 
-    // The select should have "Auto (first available)" as first option
+    // The trigger shows the current choice; the catalog is in the panel it
+    // opens, so the options are only in the document once it is open.
     const select = screen.getByRole('combobox');
-    expect(select).toBeInTheDocument();
+    expect(select).toHaveTextContent('Auto (first available)');
 
-    // "Auto" option text should be visible
-    expect(screen.getByText('Auto (first available)')).toBeInTheDocument();
+    fireEvent.click(select);
 
-    // Image model options should be present (findByText waits for async catalog)
-    expect(await screen.findByText('Imagen 3')).toBeInTheDocument();
-    expect(screen.getByText('DALL-E 3')).toBeInTheDocument();
+    const options = within(screen.getByRole('listbox'));
+    expect(options.getByRole('option', { name: /Auto \(first available\)/ })).toBeInTheDocument();
+    // `findBy` waits for the async catalog behind the image models.
+    expect(await options.findByRole('option', { name: /Imagen 3/ })).toBeInTheDocument();
+    expect(options.getByRole('option', { name: /DALL-E 3/ })).toBeInTheDocument();
   });
 
   it('disables quality dropdown when letAiDecideQuality is checked', async () => {

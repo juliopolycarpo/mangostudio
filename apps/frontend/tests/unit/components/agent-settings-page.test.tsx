@@ -5,7 +5,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import { chatCapabilitiesQueryOptions } from '../../../src/features/chat/hooks/use-chat-capabilities';
 import { AgentSettingsPage } from '../../../src/features/settings/agents/components/AgentSettingsPage';
 import { AgentToolPicker } from '../../../src/features/settings/agents/components/AgentToolPicker';
-import { act, render, screen } from '../../support/harness/render';
+import { act, fireEvent, render, screen, within } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const AGENTS_RESPONSE = {
@@ -158,10 +158,14 @@ describe('AgentSettingsPage', () => {
 
     render(<AgentSettingsPage />);
 
-    const roleSelect = await screen.findByLabelText('Role');
-    expect(roleSelect).toHaveTextContent('Primary');
-    expect(roleSelect).toHaveTextContent('Subagent');
-    expect(roleSelect).toHaveTextContent('Both');
+    // The roles are in the panel the trigger opens, not in the trigger, which
+    // shows only the current one.
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Role' }));
+
+    const roles = within(await screen.findByRole('listbox', { name: 'Role' }));
+    expect(roles.getByRole('option', { name: 'Primary' })).toBeInTheDocument();
+    expect(roles.getByRole('option', { name: 'Subagent' })).toBeInTheDocument();
+    expect(roles.getByRole('option', { name: 'Both' })).toBeInTheDocument();
   });
 
   it('starts a draft agent from the populated header action', async () => {

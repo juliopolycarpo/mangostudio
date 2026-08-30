@@ -7,6 +7,7 @@ import { Pencil, Trash2 } from 'lucide-react';
 import { useId, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
+import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
 
@@ -264,24 +265,25 @@ export function ToolParameterField({
             {label}
           </label>
         )}
-        <select
+        <Select
           id={`${fieldId}-model`}
           value={toSafeString(descriptorValue)}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={onChange}
           disabled={disabled}
-          className={baseInputClass}
-        >
-          <option value="auto">{t.settings.tools.autoModelOption}</option>
-          {[...imageModels.groups.entries()].map(([provider, models]) => (
-            <optgroup key={provider} label={provider}>
-              {models.map((m) => (
-                <option key={m.modelId} value={m.modelId}>
-                  {m.displayName}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+          options={[
+            { value: 'auto', label: t.settings.tools.autoModelOption },
+            // The provider was an `<optgroup>` heading; the panel carries it on
+            // each row instead, which keeps one flat list for the keyboard to
+            // arrow through.
+            ...[...imageModels.groups.entries()].flatMap(([provider, models]) =>
+              models.map((model) => ({
+                value: model.modelId,
+                label: model.displayName,
+                description: provider,
+              }))
+            ),
+          ]}
+        />
       </div>
     );
   }
@@ -332,19 +334,13 @@ export function ToolParameterField({
               {label}
             </label>
           )}
-          <select
+          <Select
             id={`${fieldId}-select`}
             value={toSafeString(descriptorValue)}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={onChange}
             disabled={disabled}
-            className={baseInputClass}
-          >
-            {descriptor.options?.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+            options={descriptor.options ?? []}
+          />
         </div>
       );
     }

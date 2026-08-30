@@ -1,6 +1,7 @@
 import { describe, expect, it, jest, mock } from 'bun:test';
 import { fireEvent, screen } from '@testing-library/react';
 import { render } from '../../support/harness/render';
+import { chooseOption } from '../../support/harness/select';
 import { routerWithLinkStub } from '../../support/mocks/router';
 
 mock.module('@tanstack/react-router', await routerWithLinkStub());
@@ -43,12 +44,10 @@ describe('ContextSettings', () => {
     expect(screen.getByLabelText('Preferred summary model')).toBeInTheDocument();
   });
 
-  it('updates compaction behavior through the provided setter', () => {
+  it('updates compaction behavior through the provided setter', async () => {
     const props = renderSettings();
 
-    fireEvent.change(screen.getByLabelText('Compaction behavior'), {
-      target: { value: 'off' },
-    });
+    await chooseOption('Compaction behavior', 'Turn prompts off');
 
     expect(props.setCompactionBehavior).toHaveBeenCalledWith('off');
   });

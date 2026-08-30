@@ -655,6 +655,7 @@ export const messages = {
       modelDefaultOption: 'Usar o modelo padrão do agente',
       thinking: 'Ativar Raciocínio',
       reasoningEffort: 'Esforço de Raciocínio',
+      reasoningEffortDefaultOption: 'Usar o padrão do provedor',
       reasoningEfforts: {
         low: 'Baixo',
         medium: 'Médio',
