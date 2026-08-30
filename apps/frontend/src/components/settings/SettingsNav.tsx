@@ -1,6 +1,6 @@
 import { Link, useRouterState } from '@tanstack/react-router';
 import { ChevronDown } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { cn } from '@/lib/utils';
@@ -32,7 +32,14 @@ export function SettingsNav() {
   const [open, setOpen] = useState(false);
   const listId = useId();
   const groups = settingsNavGroups(t.settings);
-  const currentLabel = useCurrentSettingsLabel(groups);
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+
+  // Closing on the links' own `onClick` is not enough: this nav is mounted by
+  // the settings layout and only the page under it is swapped, so the command
+  // palette and the back button both change what is on screen without going
+  // through a link here. Left open, the list that exists to stay out of the way
+  // is sitting on top of the page you just reached.
+  useEffect(() => setOpen(false), [pathname]);
 
   return (
     <nav aria-label={t.common.settingsNavigation} className="lg:sticky lg:top-0 lg:self-start">
@@ -43,7 +50,9 @@ export function SettingsNav() {
         aria-controls={listId}
         className="flex w-full items-center justify-between gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-low/60 px-4 py-3 text-sm font-medium text-on-surface lg:hidden"
       >
-        <span className="truncate">{currentLabel}</span>
+        <span className="truncate">
+          {currentSettingsLabel(groups, pathname) ?? t.settings.title}
+        </span>
         <ChevronDown
           size={16}
           className={cn('shrink-0 transition-transform duration-200', open && 'rotate-180')}
@@ -83,12 +92,12 @@ export function SettingsNav() {
  * The page the collapsed nav is standing in for. Longest matching path wins,
  * so `/settings/providers/openai` reports Providers rather than nothing.
  */
-function useCurrentSettingsLabel(groups: readonly SettingsNavGroup[]): string {
-  const { t } = useI18n();
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const match = groups
+function currentSettingsLabel(
+  groups: readonly SettingsNavGroup[],
+  pathname: string
+): string | undefined {
+  return groups
     .flatMap((group) => group.entries)
     .filter((entry) => typeof entry.to === 'string' && pathname.startsWith(entry.to))
-    .sort((a, b) => String(b.to).length - String(a.to).length)[0];
-  return match?.label ?? t.settings.title;
+    .sort((a, b) => String(b.to).length - String(a.to).length)[0]?.label;
 }

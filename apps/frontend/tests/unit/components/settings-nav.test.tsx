@@ -50,9 +50,15 @@ const PAGES: ReadonlyArray<readonly [string, string, string]> = [
   ['Observability', 'Logs', '/settings/logs'],
 ];
 
+/** Every case starts on Metrics, which several of them then navigate away from. */
+function renderNav() {
+  routerState.location.pathname = '/settings/metrics';
+  return render(<SettingsNav />);
+}
+
 describe('SettingsNav', () => {
   it.each(PAGES)('files %s › %s under its heading', (group, label, href) => {
-    render(<SettingsNav />);
+    renderNav();
 
     const heading = screen.getByRole('heading', { name: group });
     const link = within(heading.parentElement as HTMLElement).getByRole('link', { name: label });
@@ -61,19 +67,19 @@ describe('SettingsNav', () => {
   });
 
   it('lists every settings page exactly once', () => {
-    render(<SettingsNav />);
+    renderNav();
 
     expect(screen.getAllByRole('link')).toHaveLength(PAGES.length);
   });
 
   it('names the surface for a screen reader', () => {
-    render(<SettingsNav />);
+    renderNav();
 
     expect(screen.getByRole('navigation')).toHaveAccessibleName(en.common.settingsNavigation);
   });
 
   it('stands in for the current page while collapsed, and expands on demand', () => {
-    render(<SettingsNav />);
+    renderNav();
 
     // The pathname the router stub reports.
     const toggle = screen.getByRole('button', { name: 'Metrics' });
@@ -82,6 +88,25 @@ describe('SettingsNav', () => {
     fireEvent.click(toggle);
 
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  /**
+   * The nav is mounted by the settings layout and only the page under it is
+   * swapped, so the command palette and the back button both move the user
+   * without touching a link in here.
+   */
+  it('gets out of the way when the page changes without going through it', () => {
+    const { rerender } = renderNav();
+    fireEvent.click(screen.getByRole('button', { name: 'Metrics' }));
+    expect(screen.getByRole('button', { name: 'Metrics' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+
+    routerState.location.pathname = '/settings/logs';
+    rerender(<SettingsNav />);
+
+    expect(screen.getByRole('button', { name: 'Logs' })).toHaveAttribute('aria-expanded', 'false');
   });
 });
 
