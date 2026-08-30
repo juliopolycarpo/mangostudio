@@ -1,4 +1,4 @@
-import type { Message, ReasoningEffort } from '@mangostudio/shared';
+import type { ReasoningEffort } from '@mangostudio/shared';
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import type { ContextSettings } from '@mangostudio/shared/chat';
@@ -7,7 +7,6 @@ import type {
   ExternalThreadUsage,
 } from '@mangostudio/shared/external-agents';
 import type { ModelUnavailableDetails } from '@mangostudio/shared/generation';
-import { isTurnCheckpointPart, type TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 import type { WorkspaceSettings } from '@mangostudio/shared/workspaces';
 import { type ComponentProps, useCallback, useMemo } from 'react';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
@@ -23,6 +22,7 @@ import { PinnedTodoPanel } from './components/PinnedTodoPanel';
 import { useChatHasTurns } from './hooks/use-chat-has-turns';
 import { useChatContextControls, useChatPageMessages } from './hooks/use-chat-page-state';
 import { requestComposerFocus, setComposerDraft } from './lib/composer-draft-store';
+import { findLatestInterruptedTurn } from './lib/interrupted-turn';
 
 interface ChatPageProps {
   chatId: string | null;
@@ -107,28 +107,6 @@ type ComposerRunnerProps = Pick<
   | 'onExternalEffortChange'
   | 'onExternalPermissionsChange'
 >;
-
-interface InterruptedTurn {
-  readonly messageId: string;
-  readonly checkpoint: TurnCheckpointPart;
-}
-
-function findLatestInterruptedTurn(messages: readonly Message[]): InterruptedTurn | null {
-  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
-    const message = messages[messageIndex];
-    if (message.role !== 'ai') continue;
-    // This runs on every message change, so every streaming delta re-scans the
-    // whole chat. Narrow on the discriminator first and pay for full schema
-    // validation only on a part that already claims to be an interrupted turn.
-    const candidate = message.parts?.find(
-      (part) => part.type === 'turn_checkpoint' && part.status === 'interrupted'
-    );
-    if (candidate && isTurnCheckpointPart(candidate)) {
-      return { messageId: message.id, checkpoint: candidate };
-    }
-  }
-  return null;
-}
 
 export function ChatPage({
   chatId,
