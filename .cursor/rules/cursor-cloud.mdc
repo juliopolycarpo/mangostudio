@@ -11,29 +11,39 @@ These notes apply only in a Cursor Cloud VM. Skip them in local Cursor Desktop.
 
 Cursor already loads root and workspace `AGENTS.md`. Do not duplicate those rules here.
 Shared commands live in `README.md` and root `package.json`. Dependencies are already
-installed by the startup update script.
+installed; if you need a refresh, use `bun install --ignore-scripts`.
 
-- **Runtime:** `bun` is the package manager and runtime. Node is also on `PATH` at
-  `/exec-daemon/node`, which matters for the dev-server gotcha below.
-- **Required secret:** the API refuses to boot without `BETTER_AUTH_SECRET` (min 32 chars).
-  In this VM it lives in `~/.mango/.env`; regenerate with
-  `printf 'BETTER_AUTH_SECRET=%s\n' "$(openssl rand -hex 32)" > ~/.mango/.env` if missing.
-- **Running dev servers — important gotcha:** the plain `bun run dev` from `README.md`
-  fails here. Vite's `bin` has a Node shebang, so with `/exec-daemon/node` on `PATH` it runs
-  under Node, which cannot load `@mangostudio/shared`'s raw `.ts` config exports
-  (`ERR_UNKNOWN_FILE_EXTENSION`). Do NOT "fix" this by forcing Bun (`bun --bun`): Bun's HTTP
-  proxy lacks `socket.destroySoon`, which crashes Vite's `/api` dev proxy on the first request.
-  The working command keeps Vite on Node but enables TS stripping:
-  `CI=1 NODE_OPTIONS="--experimental-strip-types" bun run dev`
-  (`CI=1` switches Turbo to stream UI, which logs cleanly for non-interactive runs). To run a
-  single service: API `cd apps/api && bun run dev` (Bun, port 3001);
-  frontend `cd apps/frontend && NODE_OPTIONS="--experimental-strip-types" bun run dev` (port 5173,
-  proxies `/api`, `/uploads`, `/images`, `/api/ws` to the API).
-- **Database:** SQLite at `~/.mango/database.sqlite`; migrations run automatically on API boot.
-- **No AI providers by default:** without a connector the UI shows "No models available" and
-  chat/image generation produces no reply — this is expected, not a bug. Signup/login, chat
-  creation, and settings all work without keys. Add a provider key in Settings → Connectors
-  (or `~/.mango/.env`, e.g. `GEMINI_API_KEY=...`) to exercise real generation.
-- **`bun install` and git hooks:** the root `prepare` step (`lefthook install`) fails in the VM
-  because Cursor sets a custom `core.hooksPath`; dependencies still install correctly. Use
-  `bun install --ignore-scripts` (what the startup update script runs) to skip the failing hook.
+- **Runtime:** `bun` is the package manager and runtime. `node` on `PATH` is
+  `/exec-daemon/node` (not nvm). Node-shebang bins (`turbo`, `tsc`, `lefthook`)
+  run there; that is fine. Do not add `NODE_OPTIONS=--experimental-strip-types`
+  or `bun --bun` — those were Vite-era workarounds. Vite is gone.
+- **Dev server:** `CI=1 bun run dev` (or `CI=1 bun run dev --api`). One process,
+  `http://localhost:3001`. `CI=1` only switches Turbo from TUI to stream logs.
+  There is no `:5173` and `apps/frontend` has no `dev` script.
+- **No frontend HMR.** After a UI edit: `bun run --filter @mangostudio/frontend build`,
+  then refresh. The API keeps serving the previous `dist/` until that rebuild.
+- **Required secret:** the API refuses to boot without `BETTER_AUTH_SECRET` (min 32 chars)
+  in `~/.mango/.env`. The environment start script appends one if missing. If you must
+  create it yourself, append — do not overwrite:
+
+  ```bash
+  mkdir -p ~/.mango
+  grep -qs '^BETTER_AUTH_SECRET=' ~/.mango/.env || \
+    printf 'BETTER_AUTH_SECRET=%s\n' "$(openssl rand -hex 32)" >> ~/.mango/.env
+  ```
+
+- **Database:** SQLite at `~/.mango/database.sqlite`; migrations run on API boot.
+  Snapshot images can already contain users/sessions/chats. Do not assume an empty DB.
+  Automated API tests must keep using the in-memory harness, never this file.
+- **No AI providers by default:** the UI shows "No models available" and generation
+  produces no reply — expected. Signup/login, chat creation, and settings work without
+  keys. To exercise real generation, put a key in `~/.mango/.env` (e.g. `GEMINI_API_KEY=…`)
+  and restart. Do not use Settings → Connectors here: `Bun.secrets.get` succeeds but
+  `Bun.secrets.set` hangs (no D-Bus keyring session), and ChatGPT connectors require
+  that OS store.
+- **`bun install` and git hooks:** `prepare` (`lefthook install`) fails because Cursor
+  sets `core.hooksPath`. Use `bun install --ignore-scripts`. Do not run
+  `lefthook install --reset-hooks-path` or unset `core.hooksPath` — that removes
+  Cursor's agent hooks, not just lefthook.
+- **Browsers:** computer-use Chrome is available (`DISPLAY=:1`). Playwright Chromium is
+  not preinstalled; run `bun run test:e2e:setup` before `bun run test --e2e`.
