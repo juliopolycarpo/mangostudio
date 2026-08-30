@@ -139,8 +139,10 @@ export function Select({
               // Placed by hand in `document.body` rather than `absolute` in the
               // wrapper: these sit inside dialogs and panes that scroll, and an
               // absolute panel is clipped by them — which is the one thing the
-              // platform popup this replaced never suffered from. Stacked above
-              // the dialog (`z-50`) and palette (`z-[60]`) layers it opens over.
+              // platform popup this replaced never suffered from. The stacking
+              // comes from `.dropdown-panel` (`z-index: 100`, unlayered, so it
+              // beats any utility set here), which already clears the dialog
+              // and palette layers this opens over.
               style={{
                 position: 'fixed',
                 top: position.top,
@@ -148,7 +150,7 @@ export function Select({
                 width: position.width,
                 maxHeight: position.maxHeight,
               }}
-              className="app-scrollbar dropdown-panel z-[70] overflow-y-auto py-1"
+              className="app-scrollbar dropdown-panel overflow-y-auto py-1"
             >
               <div id={listId} role="listbox" aria-label={ariaLabel}>
                 {options.map((option, index) => {
