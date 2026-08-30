@@ -133,6 +133,18 @@
   --duration-quick: 120ms;
   --duration-base: 200ms;
   --duration-slow: 320ms;
+
+  /* What a bare `transition-colors` / `transition-opacity` resolves to. Tailwind
+   * compiles those utilities to `var(--default-transition-*)` rather than
+   * inlining its own 150ms and `cubic-bezier(0.4, 0, 0.2, 1)`, so redeclaring
+   * the variables here retunes every such class at once — and this `:root` is
+   * unlayered, which outranks the `@layer theme` block Tailwind ships them in.
+   *
+   * Quick, not base: a class that opts out of naming a duration is nearly
+   * always hover or focus feedback, where the pointer is still on the control
+   * and 200ms reads as lag. Anything slower says so with `duration-(…)`. */
+  --default-transition-duration: var(--duration-quick);
+  --default-transition-timing-function: var(--ease-standard);
 }
 
 /* ── Light theme ── */
