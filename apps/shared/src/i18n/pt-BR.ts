@@ -1175,6 +1175,7 @@ export const messages = {
         reviewTitle: 'Revisar mudanças',
         conflictsTitle: 'Conflitos',
         replacementTargetLabel: 'Servidor a substituir',
+        replacementTargetNone: 'Nenhum servidor elegível',
         replaceBlockedBySlug:
           'Substituir este servidor não liberará o slug "{slug}", que pertence a "{holderName}".',
         noConflicts: 'Nenhum conflito detectado',

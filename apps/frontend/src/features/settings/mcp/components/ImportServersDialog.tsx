@@ -444,13 +444,17 @@ function PreviewStep({
             )}
 
             {state.decision === 'replace' && entry.conflicts.length > 1 && (
-              <div className="block space-y-1.5 text-xs text-on-surface-variant">
+              <div className="space-y-1.5 text-xs text-on-surface-variant">
                 <span>{s.portability.replacementTargetLabel}</span>
                 <Select
-                  // No target chosen yet shows the first candidate, which is
-                  // what the native list did with an undefined `value` and what
-                  // the import falls back to if the user never touches this.
-                  value={state.targetServerId ?? entry.conflicts[0]?.serverId ?? ''}
+                  // Choosing `replace` already picks the first *eligible*
+                  // candidate, so this fallback only runs when every candidate
+                  // is blocked — and then there is nothing true to name. The
+                  // native list skipped disabled options here too; naming one
+                  // would report a target the apply call never sends and that
+                  // `canApplyPreview` has already refused.
+                  value={state.targetServerId ?? ''}
+                  placeholder={s.portability.replacementTargetNone}
                   onChange={(serverId) => onReplaceTarget(entry.key, serverId)}
                   ariaLabel={s.portability.replacementTargetLabel}
                   options={entry.conflicts.map((candidate) => {

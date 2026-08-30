@@ -1165,6 +1165,7 @@ export const messages: Messages = {
         reviewTitle: 'Review changes',
         conflictsTitle: 'Conflicts',
         replacementTargetLabel: 'Server to replace',
+        replacementTargetNone: 'No eligible server',
         replaceBlockedBySlug:
           'Replacing this server will not free slug "{slug}", which belongs to "{holderName}".',
         noConflicts: 'No conflicts detected',
