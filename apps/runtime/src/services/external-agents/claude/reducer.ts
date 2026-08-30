@@ -36,6 +36,7 @@ import {
   type ClaudeContentBlock,
   type ClaudeInitRecord,
   type ClaudeMessageRecord,
+  type ClaudePermissionDeniedRecord,
   type ClaudeResultRecord,
   type ClaudeStreamEventRecord,
   type ClaudeStreamRecord,
@@ -172,6 +173,8 @@ export class ClaudeTurnReducer {
   readonly #deliveredMessageIds = new Set<string>();
   /** The `message.id` a `content_block_delta` belongs to; deltas carry no id of their own. */
   #streamingMessageId: string | undefined;
+  /** A held `system/permission_denied` reason, keyed by the call it refused, until its `tool_result` closes it. */
+  readonly #deniedActivities = new Map<string, string>();
   #sessionStarted = false;
   #finished = false;
 
@@ -189,7 +192,7 @@ export class ClaudeTurnReducer {
     if (this.#finished) return NOTHING;
     switch (recordType(record)) {
       case 'system':
-        return this.#reduceSystem(record as ClaudeInitRecord);
+        return this.#reduceSystem(record);
       case 'stream_event':
         return this.#reduceStreamEvent(record as ClaudeStreamEventRecord);
       case 'assistant':
@@ -204,14 +207,22 @@ export class ClaudeTurnReducer {
     }
   }
 
-  #reduceSystem(record: ClaudeInitRecord): ClaudeReduction {
+  #reduceSystem(record: ClaudeStreamRecord): ClaudeReduction {
+    const subtype = recordSubtype(record);
+    // Held rather than forwarded: it names the call it refuses, but the
+    // activity it belongs to closes through the `tool_result` that always
+    // follows, and that is the one rendering the user should see.
+    if (subtype === 'permission_denied') {
+      this.#recordDenial(record as ClaudePermissionDeniedRecord);
+      return NOTHING;
+    }
     // `status`, `thinking_tokens` and `api_retry` are progress reporting with no
     // neutral event behind them. They are read and dropped rather than
     // forwarded: the contract has no member that means "still working", and
     // inventing one out of a vendor's telemetry would put counts in a
     // transcript that no other adapter can produce.
-    if (recordSubtype(record) !== 'init') return NOTHING;
-    const init = readClaudeInit(record);
+    if (subtype !== 'init') return NOTHING;
+    const init = readClaudeInit(record as ClaudeInitRecord);
     this.#onInit?.(init);
 
     const events: ExternalAgentEvent[] = [];
@@ -233,6 +244,12 @@ export class ClaudeTurnReducer {
       });
     }
     return events.length > 0 ? { events, finished: false } : NOTHING;
+  }
+
+  #recordDenial(record: ClaudePermissionDeniedRecord): void {
+    const callId = typeof record.tool_use_id === 'string' ? record.tool_use_id : '';
+    const message = typeof record.message === 'string' ? record.message : '';
+    if (callId.length > 0 && message.length > 0) this.#deniedActivities.set(callId, message);
   }
 
   /**
@@ -373,9 +390,11 @@ export class ClaudeTurnReducer {
    * Tool results, which Claude reports as a `user` message.
    *
    * A denied tool lands here too, as a `tool_result` with `is_error: true` —
-   * which is why a denial needs no special case to close its pill. What the
-   * result record adds is the authoritative list of *which* failures were
-   * permission refusals rather than tool errors.
+   * closing the pill needs no special case for that. Its `detail` does: a
+   * held `system/permission_denied` is the vendor's own statement of why, and
+   * takes priority over whatever `tool_result.content` happens to carry,
+   * which is not guaranteed to say anything past "denied". One rendering
+   * either way — nothing else ever reports the same refusal.
    */
   #reduceUser(record: ClaudeMessageRecord): ClaudeReduction {
     const events: ExternalAgentEvent[] = [];
@@ -385,7 +404,9 @@ export class ClaudeTurnReducer {
       if (callId.length === 0 || !this.#openActivities.has(callId)) continue;
       this.#openActivities.delete(callId);
       this.#nestedText.delete(callId);
-      const detail = readToolResultText(block.content);
+      const denial = this.#deniedActivities.get(callId);
+      this.#deniedActivities.delete(callId);
+      const detail = denial ?? readToolResultText(block.content);
       events.push({
         type: 'activity_completed',
         callId,
@@ -494,6 +515,22 @@ function countOf(value: unknown): number | undefined {
 }
 
 /**
+ * The error arm's own text, joined.
+ *
+ * `error_max_turns`, `error_during_execution`, `error_max_budget_usd` and
+ * `error_max_structured_output_retries` carry their explanation in `errors`
+ * and have no `result` field at all — reading only `result` left every one of
+ * these showing the generic fallback message instead of what actually
+ * happened.
+ */
+function readResultErrorText(record: ClaudeResultRecord): string | undefined {
+  const errors = record.errors;
+  if (!Array.isArray(errors)) return undefined;
+  const joined = errors.filter((value): value is string => typeof value === 'string').join('\n');
+  return joined.length > 0 ? joined : undefined;
+}
+
+/**
  * Whether a `result` record is a failure, and what to call it.
  *
  * A run whose only problem was a refused tool is **not** an error.
@@ -505,14 +542,24 @@ function countOf(value: unknown): number | undefined {
 function readResultError(record: ClaudeResultRecord): ExternalAgentError | undefined {
   if (record.is_error !== true) return undefined;
   const subtype = recordSubtype(record) ?? 'error';
+  const terminalReason =
+    typeof record.terminal_reason === 'string' ? record.terminal_reason : undefined;
+  const resultText =
+    typeof record.result === 'string' && record.result.length > 0 ? record.result : undefined;
   const message =
-    typeof record.result === 'string' && record.result.length > 0
-      ? record.result
-      : `Claude Code ended the turn with "${subtype}".`;
+    readResultErrorText(record) ??
+    resultText ??
+    (terminalReason
+      ? `Claude Code ended the turn: ${terminalReason}.`
+      : `Claude Code ended the turn with "${subtype}".`);
   const status = record.api_error_status;
   return {
     code: `claude-${subtype}`,
     message,
-    ...(typeof status === 'number' ? { vendorCode: String(status) } : {}),
+    ...(typeof status === 'number'
+      ? { vendorCode: String(status) }
+      : terminalReason
+        ? { vendorCode: terminalReason }
+        : {}),
   };
 }

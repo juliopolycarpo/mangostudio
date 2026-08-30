@@ -211,6 +211,110 @@ describe('ClaudeTurnReducer, on a recorded denied write', () => {
       "The user hasn't granted permission to write to that file yet. I need to wait for them to approve this action. Let me inform them that permission is needed.",
     ]);
   });
+
+  it('names the refused tool and the reason in the activity Claude reports', () => {
+    const { events } = reduceAll('claude-denied-write-turn.jsonl');
+    expect(events.find((event) => event.type === 'activity_started')).toMatchObject({
+      activity: { name: 'Write' },
+    });
+    expect(events.find((event) => event.type === 'activity_completed')).toEqual({
+      type: 'activity_completed',
+      callId: 'toolu_01C6mrMsVYh8HA3A3tXLooH6',
+      result: {
+        status: 'failed',
+        detail:
+          "Claude requested permissions to write to /work/repo/denied.txt, but you haven't granted it yet.",
+      },
+    });
+  });
+});
+
+describe('ClaudeTurnReducer, merging a permission denial into its activity', () => {
+  /**
+   * The denied-write fixture's own `tool_result.content` happens to repeat
+   * `system/permission_denied`'s message verbatim, which is not something a
+   * future Claude Code build has to keep doing. This constructs the case
+   * where they diverge, to prove the merge reads the held denial rather than
+   * merely agreeing with a `tool_result` that already said the same thing.
+   */
+  it("prefers the vendor's own denial reason over a tool_result that does not explain itself", () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({
+      type: 'assistant',
+      parent_tool_use_id: null,
+      message: {
+        id: 'msg-1',
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'toolu_1',
+            name: 'Write',
+            input: { file_path: '/work/repo/x.txt' },
+          },
+        ],
+      },
+    });
+    subject.reduce({
+      type: 'system',
+      subtype: 'permission_denied',
+      tool_name: 'Write',
+      tool_use_id: 'toolu_1',
+      message:
+        'Claude requested permission to write to /work/repo/x.txt, but you have not granted it yet.',
+    });
+    const events = subject.reduce({
+      type: 'user',
+      parent_tool_use_id: null,
+      message: {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'toolu_1', content: 'Error', is_error: true },
+        ],
+      },
+    }).events;
+    expect(events).toEqual([
+      {
+        type: 'activity_completed',
+        callId: 'toolu_1',
+        result: {
+          status: 'failed',
+          detail:
+            'Claude requested permission to write to /work/repo/x.txt, but you have not granted it yet.',
+        },
+      },
+    ]);
+  });
+
+  it('falls back to the tool_result content when no denial was held for the call', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', id: 'toolu_2', name: 'Bash', input: { command: 'ls' } }],
+      },
+    });
+    const events = subject.reduce({
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'toolu_2',
+            content: 'command not found',
+            is_error: true,
+          },
+        ],
+      },
+    }).events;
+    expect(events).toEqual([
+      {
+        type: 'activity_completed',
+        callId: 'toolu_2',
+        result: { status: 'failed', detail: 'command not found' },
+      },
+    ]);
+  });
 });
 
 describe('ClaudeTurnReducer, on records it has never seen', () => {
@@ -334,6 +438,54 @@ describe('ClaudeTurnReducer termination', () => {
         code: 'claude-error_during_execution',
         message: 'No conversation found with session ID: abc',
         vendorCode: '404',
+      },
+    });
+  });
+
+  /**
+   * `error_max_turns`, `error_during_execution`, `error_max_budget_usd` and
+   * `error_max_structured_output_retries` carry their text in `errors` and
+   * have no `result` field at all — reading only `result` left every one of
+   * these showing the generic "ended the turn with ..." fallback.
+   */
+  it("surfaces the error arm's own text instead of the generic fallback", () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    const events = subject.reduce({
+      type: 'result',
+      subtype: 'error_max_turns',
+      is_error: true,
+      errors: ['Reached the maximum number of turns (50).'],
+      terminal_reason: 'max_turns',
+    }).events;
+    expect(events.at(-1)).toEqual({
+      type: 'error',
+      error: {
+        code: 'claude-error_max_turns',
+        message: 'Reached the maximum number of turns (50).',
+        vendorCode: 'max_turns',
+      },
+    });
+  });
+
+  /**
+   * `terminal_reason` is the vendor's own explanation and the last fallback,
+   * behind both `errors` and `result` — a run that gave real prose should
+   * never be overridden by a bare reason code.
+   */
+  it('names the vendor’s own terminal reason when nothing else explains the failure', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    const events = subject.reduce({
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      terminal_reason: 'hook_stopped',
+    }).events;
+    expect(events.at(-1)).toEqual({
+      type: 'error',
+      error: {
+        code: 'claude-error_during_execution',
+        message: 'Claude Code ended the turn: hook_stopped.',
+        vendorCode: 'hook_stopped',
       },
     });
   });

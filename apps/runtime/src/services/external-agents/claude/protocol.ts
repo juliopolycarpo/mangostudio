@@ -70,6 +70,16 @@ export interface ClaudeInitRecord extends ClaudeStreamRecord {
   readonly skills?: unknown;
 }
 
+/**
+ * `system/permission_denied` — the vendor's own statement of why a call was
+ * refused, reported before the `tool_result` that closes the call arrives.
+ */
+export interface ClaudePermissionDeniedRecord extends ClaudeStreamRecord {
+  readonly tool_use_id?: unknown;
+  readonly tool_name?: unknown;
+  readonly message?: unknown;
+}
+
 /** One block inside an `assistant` or `user` message. */
 export interface ClaudeContentBlock {
   readonly type?: unknown;
@@ -114,7 +124,21 @@ export interface ClaudeResultRecord extends ClaudeStreamRecord {
   readonly is_error?: unknown;
   readonly result?: unknown;
   readonly stop_reason?: unknown;
+  /**
+   * The vendor's own explanation for why the run ended — `max_turns`,
+   * `aborted_streaming`, `hook_stopped`, `prompt_too_long`, `budget_exhausted`,
+   * among others. Read as a fallback: `errors` and `result` are prose written
+   * for a human, this is a stable code written for a caller.
+   */
   readonly terminal_reason?: unknown;
+  /**
+   * The error arm's own explanation. `error_max_turns`, `error_during_execution`,
+   * `error_max_budget_usd` and `error_max_structured_output_retries` carry their
+   * text here and have no `result` field at all — reading only `result`, which
+   * is where the success arm puts its text, left every one of these showing the
+   * generic fallback message instead of what actually happened.
+   */
+  readonly errors?: unknown;
   /**
    * The refusals this run accumulated.
    *
