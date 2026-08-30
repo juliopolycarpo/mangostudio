@@ -10,7 +10,7 @@ export function ProviderAdvancedSection() {
   const s = t.settings.providers;
 
   return (
-    <Card variant="solid" className="p-6">
+    <Card variant="solid" padded={false} className="p-6">
       <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant">
         {t.settings.providers.sectionAdvanced}
       </h3>

@@ -40,7 +40,7 @@ export function ExternalAgentSettingsPage() {
   };
 
   return (
-    <Card className="space-y-4 p-5">
+    <Card padded={false} className="space-y-4 p-5">
       <div className="space-y-1">
         <h2 className="text-base font-semibold text-on-surface">{labels.manageTitle}</h2>
         <p className="text-xs leading-relaxed text-on-surface-variant">{labels.revokeHint}</p>

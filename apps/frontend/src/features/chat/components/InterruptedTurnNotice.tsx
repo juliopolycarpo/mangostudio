@@ -64,7 +64,11 @@ export function InterruptedTurnNotice({
 
   return (
     <div className="px-4 pt-3 sm:px-6" role="status" aria-live="polite">
-      <Card variant="solid" className="mx-auto max-w-4xl border-warning/25 bg-warning/8 p-4">
+      <Card
+        variant="solid"
+        padded={false}
+        className="mx-auto max-w-4xl border-warning/25 bg-warning/8 p-4"
+      >
         <div className="space-y-4">
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 shrink-0 text-warning" size={18} />
