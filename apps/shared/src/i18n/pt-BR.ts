@@ -3471,6 +3471,8 @@ export const messages = {
       usageCacheRead: 'cache lido',
       usageCacheWrite: 'cache escrito',
       usageTotal: 'total',
+      working: 'Trabalhando...',
+      incomplete: 'Interrompido.',
       terminal: {
         completed: 'Concluído.',
         'cancelled-by-user': 'Você interrompeu este turno.',

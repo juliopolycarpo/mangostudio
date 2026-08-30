@@ -3481,6 +3481,8 @@ export const messages: Messages = {
       usageCacheRead: 'cache read',
       usageCacheWrite: 'cache write',
       usageTotal: 'total',
+      working: 'Working...',
+      incomplete: 'Cut off.',
       terminal: {
         completed: 'Finished.',
         'cancelled-by-user': 'You stopped this turn.',

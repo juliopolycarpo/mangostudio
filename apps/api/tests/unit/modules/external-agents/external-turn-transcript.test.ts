@@ -326,6 +326,70 @@ describe('ExternalTurnTranscript', () => {
     expect(target.parts.map((part) => part.type)).toEqual(['external_turn']);
   });
 
+  /**
+   * No vendor event describes a sentence stopping mid-thought, so the turn's
+   * own terminal reason is the cheapest source that is still correct — and
+   * the only one that covers all nine terminal reasons, not just the ones an
+   * adapter happens to have a more specific signal for.
+   */
+  it('marks the trailing text as incomplete when the turn ends for any reason but completed', () => {
+    const target = transcript();
+    feed(target, [{ type: 'text_delta', text: 'partial' }]);
+    target.finalize('runtime-disconnected', 5_000);
+
+    expect(target.parts.at(-1)).toMatchObject({ type: 'text', text: 'partial', incomplete: true });
+  });
+
+  it('marks the trailing thinking part as incomplete the same way', () => {
+    const target = transcript();
+    feed(target, [{ type: 'reasoning_delta', text: 'weighing it' }]);
+    target.finalize('sequence-gap', 5_000);
+
+    expect(target.parts.at(-1)).toMatchObject({
+      type: 'thinking',
+      text: 'weighing it',
+      incomplete: true,
+    });
+  });
+
+  it('marks nothing when the turn completed normally', () => {
+    const target = transcript();
+    feed(target, [{ type: 'text_delta', text: 'done' }, { type: 'completed' }]);
+
+    expect(target.parts.at(-1)).not.toHaveProperty('incomplete');
+  });
+
+  it('does not mark a part that is not trailing', () => {
+    const target = transcript();
+    feed(target, [
+      { type: 'text_delta', text: 'before' },
+      {
+        type: 'activity_started',
+        callId: 'call-1',
+        activity: { name: 'shell', kind: 'command', title: 'ls' },
+      },
+    ]);
+    target.finalize('cancelled-by-user', 5_000);
+
+    const text = target.parts.find((part) => part.type === 'text');
+    expect(text).not.toHaveProperty('incomplete');
+  });
+
+  /**
+   * The ordering commit 4 and this one depend on: a cancelled turn can end
+   * with an empty thinking part trailing. Dropping it has to run first, so
+   * the mark lands on whatever is trailing *after* that — never on the empty
+   * block this same call is about to delete.
+   */
+  it('drops an empty trailing reasoning phase before marking anything incomplete', () => {
+    const target = transcript();
+    feed(target, [{ type: 'reasoning_started' }]);
+    target.finalize('cancelled-by-user', 5_000);
+
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn']);
+    expect(target.parts.some((part) => 'incomplete' in part)).toBe(false);
+  });
+
   it("never persists the vendor's own session handle", () => {
     const target = transcript();
     feed(target, [{ type: 'session_started', sessionId: 'vendor-secret', resumed: true }]);

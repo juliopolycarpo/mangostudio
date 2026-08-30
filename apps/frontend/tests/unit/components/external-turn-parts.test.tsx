@@ -230,6 +230,61 @@ describe('external turn summary', () => {
   });
 });
 
+describe('external turn: still working', () => {
+  it('shows a working row while the turn is active and has produced nothing yet', () => {
+    renderParts([turnPart({ status: 'active' })]);
+    expect(screen.getByText('Working...')).toBeInTheDocument();
+  });
+
+  it('shows a working row in the gap between two tool calls', () => {
+    renderParts([turnPart({ status: 'active' }), activityPart({ status: 'completed' })]);
+    expect(screen.getByText('Working...')).toBeInTheDocument();
+  });
+
+  it('stays quiet once the turn is terminal', () => {
+    renderParts([turnPart({ status: 'terminal', terminalReason: 'completed' })]);
+    expect(screen.queryByText('Working...')).toBeNull();
+  });
+
+  // The trailing text already shows its own caret while it streams — a second
+  // cue saying the same thing would be redundant right where it matters least.
+  it('does not duplicate the cue over text that is actively streaming', () => {
+    render(
+      <MessageParts
+        parts={[turnPart({ status: 'active' }), { type: 'text', text: 'partial' }]}
+        messageId="msg-1"
+        isStreaming
+      />
+    );
+    expect(screen.queryByText('Working...')).toBeNull();
+  });
+});
+
+describe('an unfinished section', () => {
+  it('marks the trailing text as cut off', () => {
+    renderParts([
+      turnPart({ status: 'terminal', terminalReason: 'cancelled-by-user' }),
+      { type: 'text', text: 'partial', incomplete: true },
+    ]);
+    expect(screen.getByText('Cut off.')).toBeInTheDocument();
+  });
+
+  it('marks the trailing thinking row as cut off, visible without expanding it', () => {
+    renderParts([
+      turnPart({ status: 'terminal', terminalReason: 'cancelled-by-user' }),
+      { type: 'thinking', text: 'reasoning', incomplete: true },
+    ]);
+    // The block auto-collapses once a finished turn stops streaming into it —
+    // the marker has to survive that collapse, which unmounts the disclosure.
+    expect(screen.getByText(/Cut off\./)).toBeInTheDocument();
+  });
+
+  it('says nothing extra about a part that finished normally', () => {
+    renderParts([turnPart(), { type: 'text', text: 'done' }]);
+    expect(screen.queryByText('Cut off.')).toBeNull();
+  });
+});
+
 describe('vendor prose', () => {
   const HOSTILE_MARKDOWN = '# Not a heading\n[link](https://evil.example)';
 

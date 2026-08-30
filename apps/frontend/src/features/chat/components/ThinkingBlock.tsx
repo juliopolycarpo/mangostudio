@@ -49,6 +49,13 @@ interface ThinkingBlockProps {
    * images into MangoStudio's own UI.
    */
   plainText?: boolean;
+  /**
+   * Set on the part trailing an external turn that ended for a reason other
+   * than `completed`. Rendered on the row itself, never only inside the
+   * disclosure — the block auto-collapses the moment streaming stops, which
+   * is exactly when this can first be true.
+   */
+  incomplete?: true;
 }
 
 /**
@@ -64,6 +71,7 @@ export function ThinkingBlock({
   text,
   isStreaming,
   plainText = false,
+  incomplete,
 }: ThinkingBlockProps) {
   const { t } = useI18n();
   const initialUiStateRef = useRef<ThinkingUiState>(
@@ -158,6 +166,11 @@ export function ThinkingBlock({
         >
           {label}
         </span>
+        {incomplete && !isStreaming ? (
+          <span className="shrink-0 text-on-surface-variant/40">
+            · {t.externalAgents.turn.incomplete}
+          </span>
+        ) : null}
       </TimelineRow>
       <TimelineDisclosure open={expanded}>
         <div

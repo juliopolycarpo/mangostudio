@@ -803,7 +803,15 @@ function reduceExternalTurnCompleted(
   state: TextGenerationStreamState,
   reason: ExternalTurnTerminalReason
 ) {
-  const parts = updateExternalTurn(dropTrailingEmptyThinking(state.parts), (part) =>
+  // Order matters, and mirrors `ExternalTurnTranscript.finalize` exactly: drop
+  // an empty trailing reasoning phase first, then mark whatever is trailing
+  // *after* that. Marking first would leave a block this same call is about
+  // to delete carrying the marker, and the two projections would disagree
+  // about which part — if any — is incomplete.
+  const withoutEmptyThinking = dropTrailingEmptyThinking(state.parts);
+  const marked =
+    reason === 'completed' ? withoutEmptyThinking : markTrailingIncomplete(withoutEmptyThinking);
+  const parts = updateExternalTurn(marked, (part) =>
     part.status === 'terminal' ? part : { ...part, status: 'terminal', terminalReason: reason }
   );
   return withAiMessageUpdate({ ...state, parts }, { parts });
@@ -818,6 +826,19 @@ function reduceExternalTurnCompleted(
 function dropTrailingEmptyThinking(parts: MessagePart[]): MessagePart[] {
   const last = parts.at(-1);
   return last?.type === 'thinking' && last.text.length === 0 ? parts.slice(0, -1) : parts;
+}
+
+/**
+ * Mirrors `ExternalTurnTranscript#markTrailingIncomplete` exactly: no vendor
+ * event describes a sentence stopping mid-thought, so the turn's own terminal
+ * reason is the cheapest source that is still correct, for every reason but
+ * `completed`.
+ */
+function markTrailingIncomplete(parts: MessagePart[]): MessagePart[] {
+  const last = parts.at(-1);
+  if (!last || (last.type !== 'text' && last.type !== 'thinking')) return parts;
+  const marked: MessagePart = { ...last, incomplete: true };
+  return [...parts.slice(0, -1), marked];
 }
 
 /**

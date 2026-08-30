@@ -282,8 +282,19 @@ export interface ExternalSteerPart {
 
 /** Discriminated union of all content block types in an assistant message. */
 export type MessagePart =
-  | { type: 'text'; text: string }
-  | { type: 'thinking'; text: string; redacted?: boolean }
+  | {
+      type: 'text';
+      text: string;
+      /**
+       * Set only on the part trailing an external turn that ended for a
+       * reason other than `completed` — a cancel, a dropped connection, a
+       * budget hit. No vendor event describes "this sentence stopped short",
+       * so it is derived once, at the turn's own terminal reason, rather than
+       * guessed from the text itself.
+       */
+      incomplete?: true;
+    }
+  | { type: 'thinking'; text: string; redacted?: boolean; incomplete?: true }
   | {
       type: 'tool_call';
       toolCallId: string;

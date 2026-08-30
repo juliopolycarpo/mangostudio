@@ -2,7 +2,7 @@ import type { MessagePart } from '@mangostudio/shared';
 import { ASK_USER_QUESTION_TOOL_NAME } from '@mangostudio/shared/questions';
 import { TODO_WRITE_TOOL_NAME } from '@mangostudio/shared/todos';
 import type { ExternalTurnPart } from '@mangostudio/shared/types';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Ellipsis } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
@@ -20,6 +20,7 @@ import { QuestionCard } from './QuestionCard';
 import { SystemEventMarker } from './SystemEventMarker';
 import { ThinkingBlock } from './ThinkingBlock';
 import { TimelineItem } from './TimelineItem';
+import { TimelineRow } from './TimelineRow';
 import { TodoListPart } from './TodoListPart';
 import { ToolCallBlock } from './ToolCallBlock';
 import { ToolCallGroupBlock } from './ToolCallGroupBlock';
@@ -56,6 +57,21 @@ export function MessageParts({
   // process, and vendor text renders as plain text — markdown here would let a
   // third party emit links, images and formatting into MangoStudio's own UI.
   const vendorAuthored = externalTurn !== undefined;
+  // Covers the gaps no vendor event describes: waiting on the API before the
+  // first token, a long-running activity between updates, the turn between
+  // two tool calls. Two trailing shapes already say enough on their own and
+  // must not get a second, redundant (or outright wrong) cue stacked on top:
+  // `text`/`thinking` mid-stream already shows its own caret or pulse, and an
+  // approval nobody has answered yet is waiting on the *user*, not the vendor
+  // — "Working..." under an unresolved decision would claim the opposite of
+  // what is actually true.
+  const trailingPart = parts.at(-1);
+  const trailingIsLiveText =
+    isStreaming && (trailingPart?.type === 'text' || trailingPart?.type === 'thinking');
+  const trailingAwaitsDecision =
+    trailingPart?.type === 'external_approval' && trailingPart.decisionSource === undefined;
+  const showWorkingIndicator =
+    externalTurn?.status === 'active' && !trailingIsLiveText && !trailingAwaitsDecision;
   return (
     <>
       <div className="chat-timeline min-w-0">
@@ -94,6 +110,7 @@ export function MessageParts({
                   text={part.text}
                   isStreaming={isStreaming && idx === parts.length - 1}
                   plainText={vendorAuthored}
+                  incomplete={part.incomplete}
                 />
               );
             }
@@ -194,6 +211,11 @@ export function MessageParts({
                         codeCopiedLabel={t.chat.codeCopied}
                       />
                     )}
+                    {part.incomplete ? (
+                      <span className="mt-1 block text-xs italic text-on-surface-variant/50">
+                        {t.externalAgents.turn.incomplete}
+                      </span>
+                    ) : null}
                   </div>
                 </TimelineItem>
               );
@@ -243,11 +265,36 @@ export function MessageParts({
               return null;
           }
         })}
+        {showWorkingIndicator ? <ExternalTurnWorkingIndicator /> : null}
       </div>
       {externalTurn?.type === 'external_turn' ? (
         <ExternalTurnFooter part={externalTurn} isStreaming={isStreaming} />
       ) : null}
     </>
+  );
+}
+
+/**
+ * A trailing row saying the turn has not gone idle, for whatever gap no
+ * vendor event describes: no `system_event` for "still waiting on the API",
+ * no delta for a long `Bash` between chunks of output, nothing at all for the
+ * pause between one tool call ending and the next one starting.
+ */
+function ExternalTurnWorkingIndicator() {
+  const { t } = useI18n();
+  return (
+    <TimelineItem tone="active">
+      <TimelineRow
+        expanded={false}
+        onToggle={() => undefined}
+        disclosable={false}
+        glyph={<Ellipsis size={11} className="animate-pulse shrink-0" />}
+      >
+        <span className="animate-pulse text-on-surface-variant">
+          {t.externalAgents.turn.working}
+        </span>
+      </TimelineRow>
+    </TimelineItem>
   );
 }
 

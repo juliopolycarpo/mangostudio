@@ -222,6 +222,54 @@ describe('external turn: live stream vs reloaded transcript', () => {
   });
 
   /**
+   * No vendor event describes a sentence stopping mid-thought, so the marker
+   * is derived once, at the turn's own terminal reason, in both projections —
+   * `ExternalTurnTranscript.finalize` and the reducer's
+   * `external_turn_completed` case. A test that only drove one of them could
+   * not tell a persisted marker from one that only ever existed live.
+   */
+  it('agrees that a turn cut short marks its trailing prose as incomplete', () => {
+    const cutShort = TURN.slice(0, 4);
+    const stored = new ExternalTurnTranscript({
+      targetId: 'codex',
+      sessionId: 'hub-session-1',
+      startedAt: 0,
+    });
+    cutShort.forEach((event, index) => {
+      stored.apply(event, { sequence: index + 1, at: 0 });
+    });
+    stored.finalize('runtime-disconnected', 0);
+
+    const chunks: StreamChunk[] = [
+      externalSessionStartedChunk({
+        sessionId: 'hub-session-1',
+        targetId: 'codex',
+        resumed: false,
+      }),
+      ...cutShort
+        .map((event) => externalAgentEventToStreamChunk(event))
+        .filter((chunk): chunk is StreamChunk => chunk !== null),
+      externalTurnCompletedChunk('runtime-disconnected'),
+    ];
+    const live = chunks.reduce(
+      (current, chunk) => reduceTextGenerationStreamChunk(current, chunk, REDUCER_OPTIONS),
+      createTextGenerationStreamState({ userMessageId: 'user-1', aiMessageId: 'ai-1' })
+    );
+
+    expect(comparable(live.parts)).toEqual(comparable(stored.parts));
+    const text = live.parts.find((part) => part.type === 'text');
+    expect(text).toMatchObject({ incomplete: true });
+  });
+
+  it('agrees that a turn which finished normally marks nothing incomplete', () => {
+    expect(comparable(streamedParts(TURN))).toEqual(comparable(storedParts(TURN)));
+    const text = streamedParts(TURN)
+      .filter((part) => part.type === 'text')
+      .at(-1);
+    expect(text).not.toHaveProperty('incomplete');
+  });
+
+  /**
    * Steering is hub-originated rather than projected from a neutral event —
    * see `ExternalTurnTranscript.recordSteerAttempt` and `externalSteerChunk`
    * — so it needs its own parity check rather than a place in `TURN`.

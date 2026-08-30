@@ -160,7 +160,14 @@ export class ExternalTurnTranscript {
   finalize(reason: ExternalTurnTerminalReason, at: number): void {
     if (this.#terminated) return;
     this.#terminated = true;
+    // Order matters: a cancelled turn can end with an empty thinking part
+    // trailing. Dropping it first means the mark below lands on whatever is
+    // trailing *after* that — never on a part this same call is about to
+    // delete, which would leave the live projection (whose identical rule
+    // runs in the same order) disagreeing with this one about which part, if
+    // any, carries the marker.
     this.#dropTrailingEmptyThinking();
+    if (reason !== 'completed') this.#markTrailingIncomplete();
     this.#turnPart.status = 'terminal';
     this.#turnPart.terminalReason = reason;
     this.#turnPart.updatedAt = at;
@@ -179,6 +186,18 @@ export class ExternalTurnTranscript {
   #dropTrailingEmptyThinking(): void {
     const last = this.#parts.at(-1);
     if (last?.type === 'thinking' && last.text.length === 0) this.#parts.pop();
+  }
+
+  /**
+   * Marks the trailing prose as cut short, for any terminal reason but
+   * `completed`. No vendor event describes a sentence stopping mid-thought,
+   * so this is the cheapest source that is still correct: it needs no vendor
+   * data and covers all nine terminal reasons, including ones no adapter has
+   * a more specific signal for.
+   */
+  #markTrailingIncomplete(): void {
+    const last = this.#parts.at(-1);
+    if (last && (last.type === 'text' || last.type === 'thinking')) last.incomplete = true;
   }
 
   /**
