@@ -15,6 +15,10 @@ import {
   registerProvider,
 } from '../../../../src/services/providers/core/provider-registry';
 import type { AIProvider, TextGenerationRequest } from '../../../../src/services/providers/types';
+import {
+  installRecordingRealtimeBus,
+  restoreRealtimeBus,
+} from '../../../support/mocks/recording-realtime-bus';
 
 const TEST_USER = {
   id: 'test-user-send-text-attachments',
@@ -61,6 +65,8 @@ afterAll(() => {
 });
 
 afterEach(() => {
+  restoreRealtimeBus();
+
   for (const filePath of createdUploadFiles.splice(0)) {
     rmSync(filePath, { force: true });
   }
@@ -284,6 +290,36 @@ describe('sendTextMessage attachments', () => {
       .where('chatId', '=', chatId)
       .execute();
     expect(messages).toHaveLength(0);
+  });
+});
+
+describe('sendTextMessage activity signal', () => {
+  it('records the completed turn and signals the chat list', async () => {
+    // `POST /api/respond` runs a whole turn and moves `updatedAt`, exactly like
+    // its streaming sibling. Without the signal every other tab keeps the old
+    // timestamp and the old ordering until an unrelated mutation fires.
+    const bus = installRecordingRealtimeBus();
+    const db = getDb();
+    const modelId = `send-text-activity-model-${Date.now()}`;
+    registerTextProvider([], 'Activity response');
+    await seedConnector(modelId);
+    const chat = await createChat({ title: 'Send Text Activity Chat', userId: TEST_USER.id }, db);
+
+    await sendTextMessage(
+      { chatId: chat.id, userId: TEST_USER.id, prompt: 'Say something.', model: modelId },
+      db
+    );
+
+    // The recorder is deliberately not awaited by the turn, so poll for it.
+    expect(await bus.waitForActivityFrames(TEST_USER.id, 1)).toHaveLength(1);
+
+    const row = await db
+      .selectFrom('activity_events')
+      .selectAll()
+      .where('chatId', '=', chat.id)
+      .where('kind', '=', 'turn_completed')
+      .executeTakeFirstOrThrow();
+    expect(JSON.parse(row.payloadJson).title).toBe('Send Text Activity Chat');
   });
 });
 

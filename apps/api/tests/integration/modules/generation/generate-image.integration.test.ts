@@ -11,6 +11,10 @@ import {
   registerProvider,
 } from '../../../../src/services/providers/core/provider-registry';
 import type { AIProvider, ImageGenerationRequest } from '../../../../src/services/providers/types';
+import {
+  installRecordingRealtimeBus,
+  restoreRealtimeBus,
+} from '../../../support/mocks/recording-realtime-bus';
 
 const TEST_USER = {
   id: 'test-user-generate-image',
@@ -229,5 +233,33 @@ describe('generateImage', () => {
     expect(generatedImages).toHaveLength(1);
     expect(generatedImages[0].imageUrl).toBe('https://example.com/cat.png');
     expect(generatedImages[0].modelName).toBe(modelId);
+  });
+});
+
+describe('generateImage realtime invalidation', () => {
+  afterEach(() => {
+    restoreRealtimeBus();
+  });
+
+  it('publishes exactly one activity invalidation for the acting user', async () => {
+    const db = getDb();
+    registerImageProvider([], 'https://example.com/realtime.png');
+
+    const now = Date.now();
+    const modelId = `realtime-model-${now}`;
+    await seedConnector(modelId);
+
+    const chat = await createChat(
+      { title: 'Generate Image Realtime Chat', userId: TEST_USER.id },
+      db
+    );
+    const bus = installRecordingRealtimeBus();
+
+    await generateImage(
+      { chatId: chat.id, userId: TEST_USER.id, prompt: 'A calm lake at sunrise.', model: modelId },
+      db
+    );
+
+    expect(bus.activityFramesFor(TEST_USER.id)).toHaveLength(1);
   });
 });

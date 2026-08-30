@@ -1,6 +1,7 @@
 import type { InteractionMode } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { insertMessage } from '../infrastructure/message-repository';
 
@@ -49,4 +50,9 @@ export async function createMessageUseCase(
     .set({ updatedAt: input.timestamp })
     .where('id', '=', input.chatId)
     .execute();
+
+  // No feed row: a message written straight through this route is not a turn
+  // anything ran, so there is nothing to describe. The signal is still owed —
+  // the row it reordered is on screen in every other tab.
+  publishActivityInvalidation(input.userId);
 }

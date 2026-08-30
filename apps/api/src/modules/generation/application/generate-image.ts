@@ -8,6 +8,7 @@ import {
   getProvider,
   getProviderForModel,
 } from '../../../services/providers/core/provider-registry';
+import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
 import { generateId } from '../../../utils/id';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { composePrompt } from '../../prompt-rules/application/prompt-composer';
@@ -151,6 +152,10 @@ export async function generateImage(
     },
     db
   );
+  // `persistImageTurn` moves `updatedAt` inside its transaction, so the signal
+  // waits until the transaction has committed. No feed row: the timeline tracks
+  // turns a runner executed, and an image generation is not one of those yet.
+  publishActivityInvalidation(input.userId);
 
   return {
     userMessage: {
