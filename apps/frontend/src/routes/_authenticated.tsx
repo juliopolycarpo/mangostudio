@@ -5,6 +5,7 @@ import {
   useNavigate,
   useRouterState,
 } from '@tanstack/react-router';
+import { motion } from 'motion/react';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Layout } from '@/components/layout/Layout';
@@ -25,10 +26,11 @@ import { appSettingsQueryOptions } from '@/features/settings/app/queries';
 import { WorkspaceBreadcrumb } from '@/features/workspace/components/WorkspaceBreadcrumb';
 import { useBatchedGitSummaries } from '@/features/workspace/hooks/use-git-state';
 import { useAppState } from '@/hooks/use-app-state';
-import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
+import { activePageForPath } from '@/lib/active-page';
 import { AppContext } from '@/lib/app-context';
 import { isNewChatShortcut } from '@/lib/keyboard';
+import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: ({ context, location }) => {
@@ -67,6 +69,7 @@ function AuthenticatedLayout() {
   const currentPath = routerState.location.pathname;
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const commandPalette = useCommandPalette();
+  const { fade } = useMotionPresets();
   // Only chats with a workdir can have git state. `app.chats` holds its
   // identity between query updates, so memoizing here hands the hook the same
   // array on every one of this layout's per-token re-renders and it can bail
@@ -126,15 +129,7 @@ function AuthenticatedLayout() {
     return null;
   }
 
-  let activePage: AppPage = 'chat';
-  if (currentPath.includes('/home')) activePage = 'home';
-  if (currentPath.includes('/gallery')) activePage = 'gallery';
-  if (currentPath.includes('/settings')) activePage = 'settings';
-  if (currentPath.includes('/studio')) activePage = 'studio';
-  // `/library/*` only ever redirects into the umbrella now, but it stays mapped
-  // so the nav does not flash a different entry while the redirect resolves.
-  if (currentPath.includes('/environments') || currentPath.includes('/library'))
-    activePage = 'environments';
+  const activePage = activePageForPath(currentPath);
 
   return (
     <AppContext value={app}>
@@ -194,7 +189,28 @@ function AuthenticatedLayout() {
           onMobileMenuToggle={() => setIsMobileSidebarOpen((v) => !v)}
         />
 
-        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+        {/* Keyed on the page rather than the pathname, so switching chats — or
+            settings tabs — changes nothing here. Only a move between top-level
+            destinations remounts this and plays the fade.
+
+            No `AnimatePresence`: with one, the outgoing page would stay mounted
+            for the length of its exit, holding a second copy of its queries and
+            realtime subscriptions open. Re-keying instead unmounts it on the
+            same tick React swaps the route, so the new page fades up over the
+            shell with nothing lingering behind it and rapid navigation cannot
+            stack exits.
+
+            Opacity only, deliberately. A `transform` here would make this the
+            containing block for every `position: fixed` descendant, and the
+            pages below hold ~28 of them — dialogs, wizards, the gallery
+            lightbox — none of which are portaled out. */}
+        <motion.div
+          key={activePage}
+          initial={fade.initial}
+          animate={fade.animate}
+          transition={fade.transition}
+          className="flex-1 min-h-0 overflow-hidden flex flex-col"
+        >
           <Suspense
             fallback={
               <div className="flex items-center justify-center h-full">
@@ -204,7 +220,7 @@ function AuthenticatedLayout() {
           >
             <Outlet />
           </Suspense>
-        </div>
+        </motion.div>
 
         {/* Mounted once, above every page: the send it gates can be raised from
             the composer on any of them, and the answer belongs to the workspace
