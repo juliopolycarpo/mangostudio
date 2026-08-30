@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/Card';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
+import { modelSelectOptions } from '@/lib/model-select-options';
 
 interface ContextSettingsProps {
   settings: ContextSettingsValue;
@@ -125,13 +126,11 @@ export function ContextSettings({
           value={settings.preferredSummaryModel}
           onChange={setPreferredSummaryModel}
           ariaLabel={s.summaryModelLabel}
-          options={[
+          options={modelSelectOptions(
             { value: 'current_model', label: s.summaryModelCurrent },
-            ...[...missingModelOption, ...availableModels].map((model) => ({
-              value: model.modelId,
-              label: model.displayName,
-            })),
-          ]}
+            missingModelOption,
+            availableModels
+          )}
         />
       </Card>
     </div>

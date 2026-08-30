@@ -34,6 +34,7 @@ import { Checkbox } from '@/components/ui/Checkbox';
 import { Select } from '@/components/ui/Select';
 import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
 import { useI18n } from '@/hooks/use-i18n';
+import { modelSelectOptions } from '@/lib/model-select-options';
 
 interface GeneralSettingsProps {
   imageQuality: string;
@@ -466,13 +467,11 @@ export function GeneralSettings({
               value={chatTitleSettings.preferredModel}
               onChange={setPreferredChatTitleModel}
               disabled={!chatTitleSettings.autoRenameEnabled}
-              options={[
+              options={modelSelectOptions(
                 { value: 'current_model', label: s.chatTitleModelCurrent },
-                ...[...missingTitleModelOption, ...availableTitleModels].map((model) => ({
-                  value: model.modelId,
-                  label: model.displayName,
-                })),
-              ]}
+                missingTitleModelOption,
+                availableTitleModels
+              )}
             />
           </div>
         ) : null}

@@ -12,6 +12,7 @@ import { Card } from '@/components/ui/Card';
 import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
+import { modelSelectOptions } from '@/lib/model-select-options';
 
 interface GitSettingsPageProps {
   readonly settings: GitSettings;
@@ -112,13 +113,11 @@ export function GitSettingsPage({
             value={settings.commitMessage.preferredModel}
             onChange={setPreferredCommitMessageModel}
             ariaLabel={commitMessageLabels.modelLabel}
-            options={[
+            options={modelSelectOptions(
               { value: '', label: commitMessageLabels.modelCurrent },
-              ...[...missingModel, ...catalog.textModels].map((model) => ({
-                value: model.modelId,
-                label: model.displayName,
-              })),
-            ]}
+              missingModel,
+              catalog.textModels
+            )}
           />
         </div>
 
