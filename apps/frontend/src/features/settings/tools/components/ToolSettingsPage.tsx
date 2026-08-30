@@ -81,7 +81,7 @@ export function ToolSettingsPage({
             value={maxToolIterations}
             onChange={(e) => setMaxToolIterations(Number(e.target.value))}
             aria-label={s.maxToolIterationsLabel}
-            className="flex-1 h-2 bg-surface-container-lowest rounded-full appearance-none cursor-pointer accent-primary"
+            className="range-input flex-1"
           />
           <input
             type="number"

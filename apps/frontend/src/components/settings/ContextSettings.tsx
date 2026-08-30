@@ -4,7 +4,10 @@ import type {
   ContextSettings as ContextSettingsValue,
 } from '@mangostudio/shared/chat';
 import { Card } from '@/components/ui/Card';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
+import { modelSelectOptions } from '@/lib/model-select-options';
 
 interface ContextSettingsProps {
   settings: ContextSettingsValue;
@@ -60,19 +63,17 @@ export function ContextSettings({
           {s.behaviorLabel}
         </h3>
         <p className="text-sm text-on-surface-variant/60">{s.behaviorDescription}</p>
-        <select
+        <Select
           value={settings.compactionBehavior}
-          onChange={(event) =>
-            setCompactionBehavior(event.target.value as ContextCompactionBehavior)
-          }
-          aria-label={s.behaviorLabel}
-          className="w-full rounded-xl px-4 py-2.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors cursor-pointer"
-        >
-          <option value="ask">{s.behaviorOptions.ask}</option>
-          <option value="auto_compact_current_chat">{s.behaviorOptions.autoCompact}</option>
-          <option value="continue_with_summary_new_chat">{s.behaviorOptions.newChat}</option>
-          <option value="off">{s.behaviorOptions.off}</option>
-        </select>
+          onChange={(value) => setCompactionBehavior(value as ContextCompactionBehavior)}
+          ariaLabel={s.behaviorLabel}
+          options={[
+            { value: 'ask', label: s.behaviorOptions.ask },
+            { value: 'auto_compact_current_chat', label: s.behaviorOptions.autoCompact },
+            { value: 'continue_with_summary_new_chat', label: s.behaviorOptions.newChat },
+            { value: 'off', label: s.behaviorOptions.off },
+          ]}
+        />
       </Card>
 
       <Card variant="solid" className="space-y-3 p-4 sm:p-6">
@@ -83,12 +84,11 @@ export function ContextSettings({
             </h3>
             <p className="text-sm text-on-surface-variant/60">{s.providerCompactionDescription}</p>
           </div>
-          <input
-            type="checkbox"
+          <Checkbox
             checked={settings.providerCompactionEnabled}
             onChange={(event) => setProviderCompactionEnabled(event.target.checked)}
             aria-label={s.providerCompactionLabel}
-            className="mt-1 h-4 w-4 rounded border-outline-variant/30 accent-primary"
+            className="mt-1"
           />
         </div>
       </Card>
@@ -122,24 +122,16 @@ export function ContextSettings({
           {s.summaryModelLabel}
         </h3>
         <p className="text-sm text-on-surface-variant/60">{s.summaryModelDescription}</p>
-        <select
+        <Select
           value={settings.preferredSummaryModel}
-          onChange={(event) => setPreferredSummaryModel(event.target.value)}
-          aria-label={s.summaryModelLabel}
-          className="w-full rounded-xl px-4 py-2.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors cursor-pointer"
-        >
-          <option value="current_model">{s.summaryModelCurrent}</option>
-          {missingModelOption.map((model) => (
-            <option key={model.modelId} value={model.modelId}>
-              {model.displayName}
-            </option>
-          ))}
-          {availableModels.map((model) => (
-            <option key={model.modelId} value={model.modelId}>
-              {model.displayName}
-            </option>
-          ))}
-        </select>
+          onChange={setPreferredSummaryModel}
+          ariaLabel={s.summaryModelLabel}
+          options={modelSelectOptions(
+            { value: 'current_model', label: s.summaryModelCurrent },
+            missingModelOption,
+            availableModels
+          )}
+        />
       </Card>
     </div>
   );
@@ -176,7 +168,7 @@ function ThresholdControl({
           value={value}
           onChange={(event) => onChange(Number(event.target.value))}
           aria-label={label}
-          className="flex-1 h-2 bg-surface-container-lowest rounded-full appearance-none cursor-pointer accent-primary"
+          className="range-input flex-1"
         />
         <input
           type="number"

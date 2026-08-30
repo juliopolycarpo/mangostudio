@@ -491,14 +491,33 @@ export const messages = {
 
   studio: {
     title: 'Studio',
-    empty: 'Espaço de criação de imagens — em breve.',
+    subtitle: 'Crie imagens e reveja o que já saiu daqui.',
+    generate: {
+      label: 'Criar imagens',
+      description: 'Abre o chat com a ferramenta de imagem já ligada. Descreva o que você quer.',
+      action: 'Começar no chat',
+    },
+    gallery: {
+      label: 'Galeria',
+      description: 'Tudo que este espaço já gerou, do mais recente ao mais antigo.',
+      action: 'Abrir galeria',
+    },
+    recent: {
+      label: 'Recentes',
+      empty: 'Nada gerado ainda.',
+      error: 'Não foi possível carregar as imagens recentes.',
+      viewAll: 'Ver tudo',
+    },
   },
 
   gallery: {
     title: 'Galeria',
     empty: 'Suas criações aparecerão aqui.',
     download: 'Baixar imagem completa',
+    downloadImage: 'Baixar imagem',
     view: 'Ver',
+    lightboxLabel: 'Visualização da imagem',
+    close: 'Fechar imagem',
   },
 
   settings: {
@@ -510,6 +529,13 @@ export const messages = {
       errorToast: 'Não foi possível salvar as configurações.',
       errorRevertedToast:
         'Não foi possível salvar as configurações. Sua última alteração foi revertida.',
+    },
+    groups: {
+      general: 'Geral',
+      models: 'Modelos e provedores',
+      agents: 'Agentes e ferramentas',
+      integrations: 'Integrações',
+      observability: 'Observabilidade',
     },
     tabs: {
       general: 'Geral',
@@ -633,6 +659,7 @@ export const messages = {
       modelDefaultOption: 'Usar o modelo padrão do agente',
       thinking: 'Ativar Raciocínio',
       reasoningEffort: 'Esforço de Raciocínio',
+      reasoningEffortDefaultOption: 'Usar o padrão do provedor',
       reasoningEfforts: {
         low: 'Baixo',
         medium: 'Médio',
@@ -1151,6 +1178,7 @@ export const messages = {
         reviewTitle: 'Revisar mudanças',
         conflictsTitle: 'Conflitos',
         replacementTargetLabel: 'Servidor a substituir',
+        replacementTargetNone: 'Nenhum servidor elegível',
         replaceBlockedBySlug:
           'Substituir este servidor não liberará o slug "{slug}", que pertence a "{holderName}".',
         noConflicts: 'Nenhum conflito detectado',

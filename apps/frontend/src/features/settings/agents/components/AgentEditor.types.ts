@@ -26,6 +26,7 @@ export interface AgentEditorLabels {
   readonly modelDefaultOption: string;
   readonly thinking: string;
   readonly reasoningEffort: string;
+  readonly reasoningEffortDefaultOption: string;
   readonly reasoningEfforts: Record<NonNullable<AgentProfile['reasoningEffort']>, string>;
   readonly maxToolIterations: string;
   readonly toolsEnabled: string;

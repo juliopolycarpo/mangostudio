@@ -2,6 +2,7 @@ import type { Connector } from '@mangostudio/shared';
 import { KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
 import { USAGE_ALERT_THRESHOLDS, type UsageAlertThreshold } from '../lib/usage-alerts';
 import { ConnectorCard } from './ConnectorCard';
@@ -37,25 +38,24 @@ export function ConnectorList({
         </h2>
         <div className="flex items-center gap-3">
           {hasChatGpt && (
-            <label className="flex items-center gap-1.5 text-[10px] text-on-surface-variant/60">
+            <div className="flex items-center gap-1.5 text-[10px] text-on-surface-variant/60">
               {s.chatgptAlertThresholdLabel}
-              <select
+              <Select
                 value={alertThreshold === null ? 'off' : String(alertThreshold)}
-                onChange={(e) =>
-                  onAlertThresholdChange(
-                    e.target.value === 'off' ? null : (Number(e.target.value) as 75 | 90)
-                  )
+                onChange={(value) =>
+                  onAlertThresholdChange(value === 'off' ? null : (Number(value) as 75 | 90))
                 }
-                className="rounded-lg border border-outline-variant/20 bg-surface-container-high px-2 py-1 text-xs text-on-surface"
-              >
-                <option value="off">{s.chatgptAlertThresholdOff}</option>
-                {USAGE_ALERT_THRESHOLDS.map((percent) => (
-                  <option key={percent} value={percent}>
-                    {s.chatgptAlertThresholdOption.replace('{percent}', String(percent))}
-                  </option>
-                ))}
-              </select>
-            </label>
+                ariaLabel={s.chatgptAlertThresholdLabel}
+                className="w-32"
+                options={[
+                  { value: 'off', label: s.chatgptAlertThresholdOff },
+                  ...USAGE_ALERT_THRESHOLDS.map((percent) => ({
+                    value: String(percent),
+                    label: s.chatgptAlertThresholdOption.replace('{percent}', String(percent)),
+                  })),
+                ]}
+              />
+            </div>
           )}
           <Button variant="secondary" size="sm" onClick={onAddConnector} className="gap-1.5">
             <span className="text-base leading-none">+</span>

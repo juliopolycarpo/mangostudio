@@ -24,16 +24,17 @@ import {
   FolderOpen,
   GitPullRequest,
   ListTodo,
-  PanelLeft,
-  PanelRight,
   RotateCcw,
   X,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Select } from '@/components/ui/Select';
 import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
 import { useI18n } from '@/hooks/use-i18n';
+import { modelSelectOptions } from '@/lib/model-select-options';
 
 interface GeneralSettingsProps {
   imageQuality: string;
@@ -133,24 +134,13 @@ export function GeneralSettings({
           {s.languageLabel}
         </h3>
         <p className="text-sm text-on-surface-variant/60">{s.languageDescription}</p>
-        <select
-          value={locale}
-          onChange={(e) => setLocale(e.target.value as Locale)}
+        <Select
           id="language-select"
-          className="
-            w-full rounded-xl px-4 py-2.5 text-sm
-            bg-surface-container-lowest text-on-surface
-            border border-outline-variant/20
-            focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20
-            transition-colors cursor-pointer
-          "
-        >
-          {LOCALE_OPTIONS.map(({ value, label }) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
+          value={locale}
+          onChange={(value) => setLocale(value as Locale)}
+          ariaLabel={s.languageLabel}
+          options={LOCALE_OPTIONS}
+        />
       </Card>
 
       <Card variant="solid" className="space-y-4 p-4 sm:p-6">
@@ -201,12 +191,11 @@ export function GeneralSettings({
               {workspace.restrictToolsDescription}
             </p>
           </div>
-          <input
-            type="checkbox"
+          <Checkbox
             checked={workspaceSettings.restrictToolsToWorkdir}
             onChange={(event) => setRestrictToolsToWorkdir(event.target.checked)}
             aria-label={workspace.restrictToolsLabel}
-            className="mt-1 h-4 w-4 shrink-0 rounded border-outline-variant/30 accent-primary"
+            className="mt-1"
           />
         </div>
         <WorkdirPickerDialog
@@ -224,16 +213,11 @@ export function GeneralSettings({
       </Card>
 
       <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-        <div className="flex items-start gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <PanelLeft size={18} />
-          </span>
-          <div className="min-w-0 flex-1 space-y-1">
-            <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant/80">
-              {workspace.chatSidebarTitle}
-            </h3>
-            <p className="text-sm text-on-surface-variant/60">{workspace.chatSidebarDescription}</p>
-          </div>
+        <div className="space-y-1">
+          <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant/80">
+            {workspace.chatSidebarTitle}
+          </h3>
+          <p className="text-sm text-on-surface-variant/60">{workspace.chatSidebarDescription}</p>
         </div>
         <div className="flex items-center justify-between gap-3 text-xs text-on-surface-variant/60">
           <span>
@@ -256,16 +240,11 @@ export function GeneralSettings({
       </Card>
 
       <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-        <div className="flex items-start gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <PanelRight size={18} />
-          </span>
-          <div className="min-w-0 flex-1 space-y-1">
-            <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant/80">
-              {workspace.sidePanelTitle}
-            </h3>
-            <p className="text-sm text-on-surface-variant/60">{workspace.sidePanelDescription}</p>
-          </div>
+        <div className="space-y-1">
+          <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant/80">
+            {workspace.sidePanelTitle}
+          </h3>
+          <p className="text-sm text-on-surface-variant/60">{workspace.sidePanelDescription}</p>
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-lowest">
@@ -278,12 +257,10 @@ export function GeneralSettings({
                 key={panelId}
                 className="flex items-center gap-3 border-b border-outline-variant/15 px-3 py-2.5 last:border-b-0"
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={isVisible}
                   onChange={(event) => setWorkspacePanelVisible(panelId, event.target.checked)}
                   aria-label={workspace.sidePanelShow.replace('{panel}', label)}
-                  className="size-4 shrink-0 rounded border-outline-variant/30 accent-primary"
                 />
                 <Icon size={17} className="shrink-0 text-primary/80" />
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-on-surface">
@@ -358,31 +335,34 @@ export function GeneralSettings({
             </h3>
             <p className="text-sm text-on-surface-variant/60">{s.multiAgentDescription}</p>
           </div>
-          <input
-            type="checkbox"
+          <Checkbox
             checked={multiAgentSettings.enabled}
             onChange={(event) => setMultiAgentEnabled(event.target.checked)}
             aria-label={s.multiAgentEnabledLabel}
-            className="mt-1 h-4 w-4 rounded border-outline-variant/30 accent-primary"
+            className="mt-1"
           />
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <label className="block space-y-2">
+          {/* A `<div>` and not the `<label>` this was: the control is now a
+              button, and a label wrapping a button names it through a path no
+              static check can follow. `ariaLabel` says it outright. */}
+          <div className="space-y-2">
             <span className="text-sm font-semibold text-on-surface">{s.traceVisibilityLabel}</span>
-            <select
+            <Select
               value={multiAgentSettings.traceVisibility}
-              onChange={(event) =>
-                setTraceVisibility(event.target.value as MultiAgentSettings['traceVisibility'])
+              onChange={(value) =>
+                setTraceVisibility(value as MultiAgentSettings['traceVisibility'])
               }
               disabled={!multiAgentSettings.enabled}
-              className="w-full rounded-xl px-3 py-2 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 disabled:opacity-50"
-            >
-              <option value="compact">{s.traceVisibilityCompact}</option>
-              <option value="full">{s.traceVisibilityFull}</option>
-              <option value="off">{s.traceVisibilityOff}</option>
-            </select>
-          </label>
+              ariaLabel={s.traceVisibilityLabel}
+              options={[
+                { value: 'compact', label: s.traceVisibilityCompact },
+                { value: 'full', label: s.traceVisibilityFull },
+                { value: 'off', label: s.traceVisibilityOff },
+              ]}
+            />
+          </div>
           <NumberSetting
             label={s.maxDepthLabel}
             value={multiAgentSettings.maxDepth}
@@ -433,7 +413,7 @@ export function GeneralSettings({
             value={multiAgentSettings.timeoutMs}
             onChange={(event) => setSubagentTimeoutMs(Number(event.target.value))}
             disabled={!multiAgentSettings.enabled}
-            className="w-full h-2 bg-surface-container-lowest rounded-full appearance-none cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+            className="range-input w-full"
           />
         </div>
       </Card>
@@ -446,12 +426,11 @@ export function GeneralSettings({
             </h3>
             <p className="text-sm text-on-surface-variant/60">{s.chatTitlesDescription}</p>
           </div>
-          <input
-            type="checkbox"
+          <Checkbox
             checked={chatTitleSettings.autoRenameEnabled}
             onChange={(event) => setChatAutoRenameEnabled(event.target.checked)}
             aria-label={s.chatTitlesToggleLabel}
-            className="mt-1 h-4 w-4 rounded border-outline-variant/30 accent-primary"
+            className="mt-1"
           />
         </div>
 
@@ -462,16 +441,17 @@ export function GeneralSettings({
           >
             {s.chatTitleSourceLabel}
           </label>
-          <select
+          <Select
             id="chat-title-strategy"
             value={chatTitleSettings.strategy}
-            onChange={(event) => setChatTitleStrategy(event.target.value as ChatTitleStrategy)}
+            onChange={(value) => setChatTitleStrategy(value as ChatTitleStrategy)}
+            ariaLabel={s.chatTitleSourceLabel}
             disabled={!chatTitleSettings.autoRenameEnabled}
-            className="w-full rounded-xl px-4 py-2.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <option value="prompt_prefix">{s.chatTitleSourcePrompt}</option>
-            <option value="model">{s.chatTitleSourceModel}</option>
-          </select>
+            options={[
+              { value: 'prompt_prefix', label: s.chatTitleSourcePrompt },
+              { value: 'model', label: s.chatTitleSourceModel },
+            ]}
+          />
         </div>
 
         {chatTitleSettings.strategy === 'model' ? (
@@ -483,25 +463,18 @@ export function GeneralSettings({
               {s.chatTitleModelLabel}
             </label>
             <p className="text-sm text-on-surface-variant/60">{s.chatTitleModelDescription}</p>
-            <select
+            <Select
               id="chat-title-model"
               value={chatTitleSettings.preferredModel}
-              onChange={(event) => setPreferredChatTitleModel(event.target.value)}
+              onChange={setPreferredChatTitleModel}
+              ariaLabel={s.chatTitleModelLabel}
               disabled={!chatTitleSettings.autoRenameEnabled}
-              className="w-full rounded-xl px-4 py-2.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <option value="current_model">{s.chatTitleModelCurrent}</option>
-              {missingTitleModelOption.map((model) => (
-                <option key={model.modelId} value={model.modelId}>
-                  {model.displayName}
-                </option>
-              ))}
-              {availableTitleModels.map((model) => (
-                <option key={model.modelId} value={model.modelId}>
-                  {model.displayName}
-                </option>
-              ))}
-            </select>
+              options={modelSelectOptions(
+                { value: 'current_model', label: s.chatTitleModelCurrent },
+                missingTitleModelOption,
+                availableTitleModels
+              )}
+            />
           </div>
         ) : null}
 
@@ -530,7 +503,7 @@ export function GeneralSettings({
             value={chatTitleSettings.promptPrefixLength}
             onChange={(event) => setChatTitlePromptPrefixLength(Number(event.target.value))}
             disabled={!chatTitleSettings.autoRenameEnabled}
-            className="w-full h-2 bg-surface-container-lowest rounded-full appearance-none cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+            className="range-input w-full"
           />
         </div>
       </Card>

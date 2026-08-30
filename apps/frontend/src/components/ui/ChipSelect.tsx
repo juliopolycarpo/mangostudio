@@ -20,13 +20,11 @@
 
 import { Check, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import { type ReactNode, useId } from 'react';
+import { type ListboxOption, useListboxSelect } from '@/hooks/use-listbox-select';
 import { cn } from '@/lib/utils';
 
-export interface ChipSelectOption {
-  readonly value: string;
-  readonly label: string;
-  readonly disabled?: boolean;
+export interface ChipSelectOption extends ListboxOption {
   /** A second line under the label — the vendor's reason, a hostname, a hint. */
   readonly description?: string;
 }
@@ -71,87 +69,17 @@ export function ChipSelect({
   testId,
   dataState,
 }: ChipSelectProps) {
-  const [open, setOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(-1);
-  const containerRef = useRef<HTMLDivElement>(null);
   const listId = useId();
-
-  const selected = options.find((option) => option.value === value);
-  const selectedIndex = options.findIndex((option) => option.value === value);
-
-  useEffect(() => {
-    if (!open) return;
-    function handlePointerDown(event: MouseEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
-    }
-    document.addEventListener('mousedown', handlePointerDown);
-    return () => document.removeEventListener('mousedown', handlePointerDown);
-  }, [open]);
-
-  // A list that changes under a closed menu — a catalog refetch between two
-  // openings — must not leave the cursor pointing at whatever now sits at that
-  // index, so each opening starts from the selection instead.
-  useEffect(() => {
-    if (!open) setActiveIndex(-1);
-  }, [open]);
-
-  const commit = (option: ChipSelectOption) => {
-    if (option.disabled) return;
-    setOpen(false);
-    if (option.value !== value) onChange(option.value);
-  };
-
-  /** Skips disabled entries, so arrowing never parks on one that cannot be chosen. */
-  const step = (from: number, direction: 1 | -1): number => {
-    const count = options.length;
-    if (count === 0) return -1;
-    for (let offset = 1; offset <= count; offset += 1) {
-      const next = (((from + direction * offset) % count) + count) % count;
-      if (!options[next]?.disabled) return next;
-    }
-    return -1;
-  };
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (disabled) return;
-
-    if (event.key === 'Escape') {
-      if (!open) return;
-      // The chip may live inside a dialog that also closes on Escape; the
-      // innermost layer is the one the user meant to dismiss.
-      event.stopPropagation();
-      event.preventDefault();
-      setOpen(false);
-      return;
-    }
-
-    if (!open) {
-      if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter') {
-        event.preventDefault();
-        setOpen(true);
-        setActiveIndex(selectedIndex >= 0 ? selectedIndex : step(-1, 1));
-      }
-      return;
-    }
-
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      const from = activeIndex >= 0 ? activeIndex : selectedIndex;
-      setActiveIndex(step(from, event.key === 'ArrowDown' ? 1 : -1));
-      return;
-    }
-    if (event.key === 'Home' || event.key === 'End') {
-      event.preventDefault();
-      setActiveIndex(event.key === 'Home' ? step(-1, 1) : step(options.length, -1));
-      return;
-    }
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      const option = options[activeIndex];
-      if (option) commit(option);
-      else setOpen(false);
-    }
-  };
+  const {
+    open,
+    activeIndex,
+    setActiveIndex,
+    containerRef,
+    selected,
+    toggle,
+    commit,
+    handleKeyDown,
+  } = useListboxSelect({ value, options, onChange, disabled });
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the keys are handled for the combobox trigger and the options it owns, both inside this wrapper.
@@ -166,7 +94,7 @@ export function ChipSelect({
         type="button"
         role="combobox"
         disabled={disabled}
-        onClick={() => setOpen((current) => !current)}
+        onClick={toggle}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}

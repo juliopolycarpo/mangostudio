@@ -174,7 +174,7 @@ Abra estes arquivos primeiro:
 - `apps/api/src/modules/tool-settings/http/tool-settings-routes.ts`
 - `apps/api/src/services/tools/settings-policy.ts`
 - `apps/frontend/src/routes/_authenticated/settings/` (árvore de rotas de settings)
-- `apps/frontend/src/components/settings/` (painéis compartilhados + `SettingsTabs.tsx`)
+- `apps/frontend/src/components/settings/` (painéis compartilhados + `settings-nav.ts`, a lista agrupada de páginas que a barra lateral e a paleta de comandos leem)
 - `apps/frontend/src/features/settings/app/`
 - `apps/frontend/src/features/settings/providers/`
 - `apps/frontend/src/features/settings/tools/`

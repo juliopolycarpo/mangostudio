@@ -1,15 +1,9 @@
-import { describe, expect, it, jest, mock } from 'bun:test';
+import { describe, expect, it, jest } from 'bun:test';
 import { fireEvent, screen } from '@testing-library/react';
+import { ContextSettings } from '../../../src/components/settings/ContextSettings';
+import { DEFAULT_CONTEXT_SETTINGS } from '../../../src/hooks/use-global-settings';
 import { render } from '../../support/harness/render';
-import { routerWithLinkStub } from '../../support/mocks/router';
-
-mock.module('@tanstack/react-router', await routerWithLinkStub());
-
-// After the mock, never before: a static import is evaluated first and would
-// bind SettingsTabs to the real router.
-const { ContextSettings } = await import('../../../src/components/settings/ContextSettings');
-const { SettingsTabs } = await import('../../../src/components/settings/SettingsTabs');
-const { DEFAULT_CONTEXT_SETTINGS } = await import('../../../src/hooks/use-global-settings');
+import { chooseOption } from '../../support/harness/select';
 
 function renderSettings(overrides: Partial<React.ComponentProps<typeof ContextSettings>> = {}) {
   const props: React.ComponentProps<typeof ContextSettings> = {
@@ -44,12 +38,10 @@ describe('ContextSettings', () => {
     expect(screen.getByLabelText('Preferred summary model')).toBeInTheDocument();
   });
 
-  it('updates compaction behavior through the provided setter', () => {
+  it('updates compaction behavior through the provided setter', async () => {
     const props = renderSettings();
 
-    fireEvent.change(screen.getByLabelText('Compaction behavior'), {
-      target: { value: 'off' },
-    });
+    await chooseOption('Compaction behavior', 'Turn prompts off');
 
     expect(props.setCompactionBehavior).toHaveBeenCalledWith('off');
   });
@@ -60,16 +52,5 @@ describe('ContextSettings', () => {
     fireEvent.click(screen.getByLabelText('Allow provider-side compaction'));
 
     expect(props.setProviderCompactionEnabled).toHaveBeenCalledWith(false);
-  });
-});
-
-describe('SettingsTabs', () => {
-  it('renders a context tab link', () => {
-    render(<SettingsTabs />);
-
-    expect(screen.getByRole('link', { name: 'Context' })).toHaveAttribute(
-      'href',
-      '/settings/context'
-    );
   });
 });

@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import userEvent from '@testing-library/user-event';
 import { ToolSettingsPage } from '../../../src/features/settings/tools/components/ToolSettingsPage';
-import { act, fireEvent, render, screen, waitFor } from '../../support/harness/render';
+import { act, fireEvent, render, screen, waitFor, within } from '../../support/harness/render';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
@@ -370,16 +370,58 @@ describe('ToolSettingsPage', () => {
 
     await screen.findByText('Image generation');
 
-    // The select should have "Auto (first available)" as first option
+    // The trigger shows the current choice; the catalog is in the panel it
+    // opens, so the options are only in the document once it is open.
     const select = screen.getByRole('combobox');
-    expect(select).toBeInTheDocument();
+    expect(select).toHaveTextContent('Auto (first available)');
 
-    // "Auto" option text should be visible
-    expect(screen.getByText('Auto (first available)')).toBeInTheDocument();
+    fireEvent.click(select);
 
-    // Image model options should be present (findByText waits for async catalog)
-    expect(await screen.findByText('Imagen 3')).toBeInTheDocument();
-    expect(screen.getByText('DALL-E 3')).toBeInTheDocument();
+    const options = within(screen.getByRole('listbox'));
+    expect(options.getByRole('option', { name: /Auto \(first available\)/ })).toBeInTheDocument();
+    // `findBy` waits for the async catalog behind the image models.
+    expect(await options.findByRole('option', { name: /Imagen 3/ })).toBeInTheDocument();
+    expect(options.getByRole('option', { name: /DALL-E 3/ })).toBeInTheDocument();
+  });
+
+  // A native `<select>` fell back to its first option; the drawn one has to be
+  // told to, or a stale saved value leaves the trigger naming nothing at all.
+  it('names the first option when the saved value is no longer offered', async () => {
+    fetchScenario.respondWithJson('GET', '/api/settings/tools', {
+      body: {
+        tools: [
+          {
+            name: 'generate_image',
+            title: 'Image generation',
+            description: 'Generate images from text.',
+            category: 'image',
+            enabled: true,
+            canDisable: true,
+            parameters: { defaultQuality: '8K' },
+            parameterDescriptors: [
+              {
+                name: 'defaultQuality',
+                label: 'Default image quality',
+                description: 'Quality used when the model does not request one.',
+                type: 'select',
+                required: true,
+                defaultValue: '8K',
+                options: [
+                  { value: '512px', label: '512px' },
+                  { value: '1K', label: '1K' },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    render(<ToolSettingsPage maxToolIterations={10} setMaxToolIterations={setMaxToolIterations} />);
+
+    await screen.findByText('Image generation');
+
+    expect(screen.getByRole('combobox')).toHaveTextContent('512px');
   });
 
   it('disables quality dropdown when letAiDecideQuality is checked', async () => {

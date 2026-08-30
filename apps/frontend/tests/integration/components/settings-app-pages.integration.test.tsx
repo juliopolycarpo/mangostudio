@@ -10,6 +10,7 @@ import { GeneralSettings } from '../../../src/components/settings/GeneralSetting
 import { PromptSettings } from '../../../src/components/settings/PromptSettings';
 import { useGlobalSettings } from '../../../src/hooks/use-global-settings';
 import { render, screen, waitFor } from '../../support/harness/render';
+import { chooseOption } from '../../support/harness/select';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const TITLE_MODELS = [
@@ -250,7 +251,6 @@ describe('app settings pages integration', () => {
   });
 
   it('persists model title source decisions from general settings', async () => {
-    const user = userEvent.setup();
     const initialSettings: AppSettings = {
       ...DEFAULT_APP_SETTINGS,
       chatTitleSettings: {
@@ -275,7 +275,7 @@ describe('app settings pages integration', () => {
 
     render(<GeneralSettingsHarness />);
 
-    await user.selectOptions(await screen.findByLabelText('Title source'), 'model');
+    await chooseOption('Title source', 'Generate with a model');
 
     await waitFor(() => {
       const body = getLatestRequestBody(
@@ -299,7 +299,7 @@ describe('app settings pages integration', () => {
       },
     });
 
-    await user.selectOptions(await screen.findByLabelText('Title model'), 'title-model');
+    await chooseOption('Title model', 'Title Model');
 
     await waitFor(() => {
       const body = getLatestRequestBody(

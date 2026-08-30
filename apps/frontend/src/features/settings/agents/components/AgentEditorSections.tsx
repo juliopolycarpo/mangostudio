@@ -4,6 +4,8 @@ import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
 import { Eye } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Select } from '@/components/ui/Select';
 import type {
   AgentEditorLabels,
   EditableAgentProfile,
@@ -138,20 +140,15 @@ function AgentIdentitySection({ draft, labels, isNew, onDraftChange }: AgentIden
           value={draft.description}
           onChange={(description) => onDraftChange({ description })}
         />
-        <label className="block space-y-2">
+        <div className="space-y-2">
           <span className="text-sm font-semibold text-on-surface">{labels.role}</span>
-          <select
+          <Select
             value={draft.role}
-            onChange={(event) => onDraftChange({ role: event.target.value as AgentRole })}
-            className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20"
-          >
-            {ROLE_OPTIONS.map((role) => (
-              <option key={role} value={role}>
-                {labels.roles[role]}
-              </option>
-            ))}
-          </select>
-        </label>
+            onChange={(value) => onDraftChange({ role: value as AgentRole })}
+            ariaLabel={labels.role}
+            options={ROLE_OPTIONS.map((role) => ({ value: role, label: labels.roles[role] }))}
+          />
+        </div>
       </div>
     </AgentEditorSection>
   );
@@ -181,23 +178,15 @@ function AgentBehaviorSection({
           className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20 resize-y"
         />
       </label>
-      <label className="block space-y-2">
+      <div className="space-y-2">
         <span className="text-sm font-semibold text-on-surface">{labels.model}</span>
-        <select
+        <Select
           value={draft.model ?? ''}
-          onChange={(event) =>
-            onDraftChange({ model: event.target.value ? event.target.value : undefined })
-          }
-          className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20"
-        >
-          <option value="">{labels.modelDefaultOption}</option>
-          {modelOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
+          onChange={(value) => onDraftChange({ model: value ? value : undefined })}
+          ariaLabel={labels.model}
+          options={[{ value: '', label: labels.modelDefaultOption }, ...modelOptions]}
+        />
+      </div>
     </AgentEditorSection>
   );
 }
@@ -213,35 +202,33 @@ function AgentReasoningSection({ draft, labels, onDraftChange }: AgentReasoningS
     <AgentEditorSection title={labels.sectionReasoning}>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <label className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={draft.thinkingEnabled ?? false}
             onChange={(event) => onDraftChange({ thinkingEnabled: event.target.checked })}
-            className="accent-primary"
           />
           {labels.thinking}
         </label>
-        <label className="block space-y-2">
+        <div className="space-y-2">
           <span className="text-sm font-semibold text-on-surface">{labels.reasoningEffort}</span>
-          <select
+          <Select
             value={draft.reasoningEffort ?? ''}
-            onChange={(event) =>
+            onChange={(value) =>
               onDraftChange({
-                reasoningEffort: event.target.value
-                  ? (event.target.value as AgentProfile['reasoningEffort'])
-                  : undefined,
+                reasoningEffort: value ? (value as AgentProfile['reasoningEffort']) : undefined,
               })
             }
-            className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20"
-          >
-            <option value="" />
-            {REASONING_EFFORT_OPTIONS.map((effort) => (
-              <option key={effort} value={effort}>
-                {labels.reasoningEfforts[effort]}
-              </option>
-            ))}
-          </select>
-        </label>
+            ariaLabel={labels.reasoningEffort}
+            options={[
+              // The blank row the native list had: it is how the field is put
+              // back to "inherit", and it is the value the draft starts on.
+              { value: '', label: labels.reasoningEffortDefaultOption },
+              ...REASONING_EFFORT_OPTIONS.map((effort) => ({
+                value: effort,
+                label: labels.reasoningEfforts[effort],
+              })),
+            ]}
+          />
+        </div>
         <NumberField
           label={labels.maxToolIterations}
           value={draft.maxToolIterations ?? ''}
@@ -272,11 +259,9 @@ function AgentToolsSection({
   return (
     <AgentEditorSection title={labels.sectionTools}>
       <label className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface w-fit">
-        <input
-          type="checkbox"
+        <Checkbox
           checked={draft.toolsEnabled}
           onChange={(event) => onDraftChange({ toolsEnabled: event.target.checked })}
-          className="accent-primary"
         />
         {labels.toolsEnabled}
       </label>
@@ -301,8 +286,7 @@ function AgentToolsSection({
                 key={subagent.id}
                 className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface"
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={selectedSubagents.has(subagent.id)}
                   onChange={(event) => {
                     const subagentIds = event.target.checked
@@ -310,7 +294,6 @@ function AgentToolsSection({
                       : draft.subagentIds.filter((id) => id !== subagent.id);
                     onDraftChange({ subagentIds });
                   }}
-                  className="accent-primary"
                 />
                 {subagent.name}
               </label>

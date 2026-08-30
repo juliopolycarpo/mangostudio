@@ -3,6 +3,7 @@ import { DEFAULT_GIT_SETTINGS } from '@mangostudio/shared/app-settings';
 import { fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../support/harness/render';
+import { chooseOption } from '../../support/harness/select';
 
 mock.module('@/hooks/use-model-catalog', () => ({
   catalogKeys: { all: ['model-catalog'] },
@@ -53,10 +54,7 @@ describe('GitSettingsPage', () => {
     expect(setSignCommits).toHaveBeenCalledWith(true);
     expect(setSignOff).toHaveBeenCalledWith(false);
 
-    await user.selectOptions(
-      screen.getByRole('combobox', { name: 'Preferred model' }),
-      'fast-model'
-    );
+    await chooseOption('Preferred model', 'Fast Model');
     expect(setPreferredCommitMessageModel).toHaveBeenCalledWith('fast-model');
 
     const prompt = screen.getByRole('textbox', { name: 'System prompt' });

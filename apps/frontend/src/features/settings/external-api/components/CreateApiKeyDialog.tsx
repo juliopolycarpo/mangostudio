@@ -8,6 +8,7 @@ import {
 import { Check, Copy, KeyRound, X } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Select } from '@/components/ui/Select';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
@@ -154,23 +155,20 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
               {nameError && <span className="block text-xs text-error">{nameError}</span>}
             </label>
 
-            <label className="block space-y-2">
+            <div className="space-y-2">
               <span className="block text-sm font-semibold text-on-surface">
                 {labels.scopeLabel}
               </span>
-              <select
+              <Select
                 value={scope}
-                onChange={(event) => setScope(event.target.value as ApiKeyScope)}
-                aria-label={labels.scopeLabel}
-                className={`cursor-pointer ${FIELD_CLASS}`}
-              >
-                {API_KEY_SCOPES.map((value) => (
-                  <option key={value} value={value}>
-                    {scopeLabel(t, value)}
-                  </option>
-                ))}
-              </select>
-            </label>
+                onChange={(value) => setScope(value as ApiKeyScope)}
+                ariaLabel={labels.scopeLabel}
+                options={API_KEY_SCOPES.map((value) => ({
+                  value,
+                  label: scopeLabel(t, value),
+                }))}
+              />
+            </div>
 
             <label className="block space-y-2">
               <span className="block text-sm font-semibold text-on-surface">

@@ -6,6 +6,8 @@ import type { ToolParameterDescriptor } from '@mangostudio/shared/tool-settings'
 import { Pencil, Trash2 } from 'lucide-react';
 import { useId, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
 
@@ -26,6 +28,24 @@ function toSafeString(value: unknown): string {
     return String(value);
   }
   return '';
+}
+
+/**
+ * What the trigger reads when the stored value matches no option: the first
+ * row's label, as a native `<select>` showed. A parameter that has never been
+ * set, or one naming a model the catalog has since dropped, would otherwise
+ * leave the trigger blank — the control would name nothing while still
+ * reading as a chooser.
+ *
+ * It goes to `Select`'s `placeholder`, never to its `value`. `value` is what
+ * `Select` compares each row against, and a row it believes is already chosen
+ * commits nothing: routing the fallback through it would make the very row
+ * shown on the trigger the one option the user could not pick.
+ *
+ * // Usage: fallbackLabel(options)
+ */
+function fallbackLabel(options: readonly { readonly label: string }[]): string | undefined {
+  return options[0]?.label;
 }
 
 function isPathListItem(item: unknown): item is PathListItem {
@@ -140,12 +160,10 @@ function PathListField({
               key={item.path}
               className="flex items-center gap-2 p-2 rounded-lg bg-surface-container-lowest border border-outline-variant/10"
             >
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={item.enabled}
                 onChange={() => handleToggle(index)}
                 disabled={disabled}
-                className="h-4 w-4 rounded border-outline-variant/30 accent-primary shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
               />
               {editingIndex === index ? (
                 <input
@@ -258,6 +276,19 @@ export function ToolParameterField({
 
   // Model selector: backed by the catalog, not static options
   if (descriptor.modelType === 'image') {
+    const modelOptions = [
+      { value: 'auto', label: t.settings.tools.autoModelOption },
+      // The provider was an `<optgroup>` heading; the panel carries it on
+      // each row instead, which keeps one flat list for the keyboard to
+      // arrow through.
+      ...[...imageModels.groups.entries()].flatMap(([provider, models]) =>
+        models.map((model) => ({
+          value: model.modelId,
+          label: model.displayName,
+          description: provider,
+        }))
+      ),
+    ];
     return (
       <div className="space-y-1">
         {label && (
@@ -265,24 +296,15 @@ export function ToolParameterField({
             {label}
           </label>
         )}
-        <select
+        <Select
           id={`${fieldId}-model`}
           value={toSafeString(descriptorValue)}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={onChange}
+          ariaLabel={label}
           disabled={disabled}
-          className={baseInputClass}
-        >
-          <option value="auto">{t.settings.tools.autoModelOption}</option>
-          {[...imageModels.groups.entries()].map(([provider, models]) => (
-            <optgroup key={provider} label={provider}>
-              {models.map((m) => (
-                <option key={m.modelId} value={m.modelId}>
-                  {m.displayName}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+          options={modelOptions}
+          placeholder={fallbackLabel(modelOptions)}
+        />
       </div>
     );
   }
@@ -291,12 +313,10 @@ export function ToolParameterField({
     case 'boolean': {
       return (
         <label className="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={Boolean(descriptorValue)}
             onChange={(e) => onChange(e.target.checked)}
             disabled={disabled}
-            className="h-4 w-4 rounded border-outline-variant/30 accent-primary disabled:opacity-50 disabled:cursor-not-allowed"
           />
           {label}
         </label>
@@ -328,6 +348,7 @@ export function ToolParameterField({
     }
 
     case 'select': {
+      const options = descriptor.options ?? [];
       return (
         <div className="space-y-1">
           {label && (
@@ -335,19 +356,15 @@ export function ToolParameterField({
               {label}
             </label>
           )}
-          <select
+          <Select
             id={`${fieldId}-select`}
             value={toSafeString(descriptorValue)}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={onChange}
+            ariaLabel={label}
             disabled={disabled}
-            className={baseInputClass}
-          >
-            {descriptor.options?.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+            options={options}
+            placeholder={fallbackLabel(options)}
+          />
         </div>
       );
     }

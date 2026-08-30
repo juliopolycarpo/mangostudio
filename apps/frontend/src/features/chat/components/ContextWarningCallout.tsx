@@ -30,7 +30,7 @@ export function ContextWarningCallout({
   onContinue,
 }: ContextWarningCalloutProps) {
   return (
-    <Card variant="solid" className="border-warning/20 bg-warning/8 p-4">
+    <Card variant="solid" padded={false} className="border-warning/20 bg-warning/8 p-4">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-warning">

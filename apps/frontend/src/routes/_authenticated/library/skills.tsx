@@ -1,7 +1,0 @@
-import { createFileRoute, redirect } from '@tanstack/react-router';
-
-export const Route = createFileRoute('/_authenticated/library/skills')({
-  beforeLoad: () => {
-    redirect({ to: '/environments/library/skills', throw: true });
-  },
-});

@@ -492,14 +492,33 @@ export const messages: Messages = {
 
   studio: {
     title: 'Studio',
-    empty: 'Image creation workspace — coming soon.',
+    subtitle: 'Make images, and look back at the ones that came out of here.',
+    generate: {
+      label: 'Create images',
+      description: 'Opens the chat with the image tool already on. Describe what you want.',
+      action: 'Start in chat',
+    },
+    gallery: {
+      label: 'Gallery',
+      description: 'Everything this workspace has generated, newest first.',
+      action: 'Open gallery',
+    },
+    recent: {
+      label: 'Recent',
+      empty: 'Nothing generated yet.',
+      error: 'Could not load recent images.',
+      viewAll: 'View all',
+    },
   },
 
   gallery: {
     title: 'Gallery',
     empty: 'Your creations will appear here.',
     download: 'Download Full Image',
+    downloadImage: 'Download image',
     view: 'View',
+    lightboxLabel: 'Image preview',
+    close: 'Close image',
   },
 
   settings: {
@@ -510,6 +529,13 @@ export const messages: Messages = {
       error: 'Not saved',
       errorToast: 'Could not save settings.',
       errorRevertedToast: 'Could not save settings. Your last change was reverted.',
+    },
+    groups: {
+      general: 'General',
+      models: 'Models & providers',
+      agents: 'Agents & tools',
+      integrations: 'Integrations',
+      observability: 'Observability',
     },
     tabs: {
       general: 'General',
@@ -630,6 +656,7 @@ export const messages: Messages = {
       modelDefaultOption: 'Use the agent default model',
       thinking: 'Enable Thinking',
       reasoningEffort: 'Reasoning Effort',
+      reasoningEffortDefaultOption: 'Use the provider default',
       reasoningEfforts: {
         low: 'Low',
         medium: 'Medium',
@@ -1141,6 +1168,7 @@ export const messages: Messages = {
         reviewTitle: 'Review changes',
         conflictsTitle: 'Conflicts',
         replacementTargetLabel: 'Server to replace',
+        replacementTargetNone: 'No eligible server',
         replaceBlockedBySlug:
           'Replacing this server will not free slug "{slug}", which belongs to "{holderName}".',
         noConflicts: 'No conflicts detected',

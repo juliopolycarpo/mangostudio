@@ -196,6 +196,7 @@ export function AgentSettingsPage() {
             modelDefaultOption: labels.modelDefaultOption,
             thinking: labels.thinking,
             reasoningEffort: labels.reasoningEffort,
+            reasoningEffortDefaultOption: labels.reasoningEffortDefaultOption,
             reasoningEfforts: labels.reasoningEfforts,
             maxToolIterations: labels.maxToolIterations,
             toolsEnabled: labels.toolsEnabled,

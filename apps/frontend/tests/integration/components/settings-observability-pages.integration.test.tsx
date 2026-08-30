@@ -22,7 +22,6 @@ mock.module(
 );
 
 // Below the mock, never as static imports.
-const { SettingsTabs } = await import('../../../src/components/settings/SettingsTabs');
 const { LogsSettingsPage, MetricsSettingsPage } = await import(
   '../../../src/features/settings/observability'
 );
@@ -270,17 +269,5 @@ describe('Observability settings pages', () => {
     render(withApp(<LogsSettingsPage />, null));
 
     await screen.findByText('Probed');
-  });
-});
-
-describe('SettingsTabs includes observability pages', () => {
-  it('renders Metrics and Logs links', () => {
-    render(<SettingsTabs />);
-
-    expect(screen.getByRole('link', { name: 'Metrics' })).toHaveAttribute(
-      'href',
-      '/settings/metrics'
-    );
-    expect(screen.getByRole('link', { name: 'Logs' })).toHaveAttribute('href', '/settings/logs');
   });
 });

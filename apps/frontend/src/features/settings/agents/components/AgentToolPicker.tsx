@@ -1,5 +1,6 @@
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
 import { Wrench } from 'lucide-react';
+import { Checkbox } from '@/components/ui/Checkbox';
 
 interface AgentToolPickerProps {
   readonly label: string;
@@ -38,8 +39,7 @@ export function AgentToolPicker({
                     : 'border-outline-variant/20 bg-surface-container-lowest hover:border-outline-variant/40 hover:bg-surface-container-high cursor-pointer'
               }`}
             >
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={selected.has(tool.name)}
                 onChange={(event) => {
                   const next = event.target.checked
@@ -47,7 +47,7 @@ export function AgentToolPicker({
                     : selectedToolNames.filter((name) => name !== tool.name);
                   onChange(next);
                 }}
-                className="mt-0.5 accent-primary"
+                className="mt-0.5"
               />
               <span className="flex-1 min-w-0">
                 <span className="flex items-center gap-1.5">

@@ -6,6 +6,7 @@
 
 import type { McpServer } from '@mangostudio/shared/mcp';
 import { useQuery } from '@tanstack/react-query';
+import { Checkbox } from '@/components/ui/Checkbox';
 import {
   useToolSettings,
   useUpdateToolSetting,
@@ -66,15 +67,13 @@ export function McpServerTools({ server }: McpServerToolsProps) {
               <span className="text-xs text-on-surface-variant">
                 {enabled ? s.enabledLabel : s.disabledLabel}
               </span>
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={enabled}
                 disabled={isPending}
                 onChange={() =>
                   updateToolSetting({ toolName: settingsName, body: { enabled: !enabled } })
                 }
                 aria-label={tool.name}
-                className="h-4 w-4 rounded border-outline-variant/30 accent-primary"
               />
             </label>
           </li>

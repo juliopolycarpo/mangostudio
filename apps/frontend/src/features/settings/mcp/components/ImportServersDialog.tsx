@@ -10,6 +10,7 @@ import { AlertTriangle, CheckCircle2, X } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useApplyPortableMcpImport, usePreviewPortableMcpImport } from '../hooks/use-mcp-servers';
@@ -382,25 +383,18 @@ function PreviewStep({
                   {entry.slug} · {entry.command ?? entry.url ?? entry.key}
                 </p>
               </div>
-              <select
-                aria-label={s.portability.decisionLabel.replace('{name}', entry.name)}
+              <Select
+                ariaLabel={s.portability.decisionLabel.replace('{name}', entry.name)}
                 value={state.decision}
                 disabled={entry.status === 'invalid'}
-                onChange={(event) =>
-                  onDecision(entry, event.target.value as McpPortabilityDecision)
-                }
-                className="rounded-xl border border-outline-variant/30 bg-surface-container-high px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none"
-              >
-                {entry.allowedDecisions.map((decision) => (
-                  <option
-                    key={decision}
-                    value={decision}
-                    disabled={decision === 'replace' && eligibleReplacementCount === 0}
-                  >
-                    {s.portability.decisions[decision]}
-                  </option>
-                ))}
-              </select>
+                onChange={(value) => onDecision(entry, value as McpPortabilityDecision)}
+                className="w-44 shrink-0"
+                options={entry.allowedDecisions.map((decision) => ({
+                  value: decision,
+                  label: s.portability.decisions[decision],
+                  disabled: decision === 'replace' && eligibleReplacementCount === 0,
+                }))}
+              />
             </div>
 
             {entry.status === 'invalid' && entry.reason && (
@@ -450,34 +444,38 @@ function PreviewStep({
             )}
 
             {state.decision === 'replace' && entry.conflicts.length > 1 && (
-              <label className="block space-y-1.5 text-xs text-on-surface-variant">
+              <div className="space-y-1.5 text-xs text-on-surface-variant">
                 <span>{s.portability.replacementTargetLabel}</span>
-                <select
-                  value={state.targetServerId}
-                  onChange={(event) => onReplaceTarget(entry.key, event.target.value)}
-                  className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-high px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none"
-                >
-                  {entry.conflicts.map((candidate) => {
+                <Select
+                  // Choosing `replace` already picks the first *eligible*
+                  // candidate, so this fallback only runs when every candidate
+                  // is blocked — and then there is nothing true to name. The
+                  // native list skipped disabled options here too; naming one
+                  // would report a target the apply call never sends and that
+                  // `canApplyPreview` has already refused.
+                  value={state.targetServerId ?? ''}
+                  placeholder={s.portability.replacementTargetNone}
+                  onChange={(serverId) => onReplaceTarget(entry.key, serverId)}
+                  ariaLabel={s.portability.replacementTargetLabel}
+                  options={entry.conflicts.map((candidate) => {
                     const blockedMessage = candidate.replaceBlockedBySlug
                       ? formatReplaceBlockedBySlug(
                           s.portability.replaceBlockedBySlug,
                           candidate.replaceBlockedBySlug
                         )
                       : undefined;
-                    return (
-                      <option
-                        key={candidate.serverId}
-                        value={candidate.serverId}
-                        disabled={blockedMessage !== undefined}
-                        title={blockedMessage}
-                      >
-                        {candidate.name} ({candidate.slug})
-                        {blockedMessage ? ` — ${blockedMessage}` : ''}
-                      </option>
-                    );
+                    return {
+                      value: candidate.serverId,
+                      label: `${candidate.name} (${candidate.slug})`,
+                      // The blocked reason was crammed into the option's text
+                      // because a native list has nowhere else to put it; the
+                      // panel has a second line for exactly this.
+                      description: blockedMessage,
+                      disabled: blockedMessage !== undefined,
+                    };
                   })}
-                </select>
-              </label>
+                />
+              </div>
             )}
 
             {state.decision === 'copy' && entry.copyName && entry.copySlug && (
