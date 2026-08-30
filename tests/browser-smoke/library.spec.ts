@@ -48,9 +48,13 @@ test('library surface renders its coverage matrix', async ({ page }) => {
   });
 
   // The bookmark promise, in a real browser: a pre-move URL still lands on the
-  // page it used to name.
-  await page.goto('/library/subagents');
-  await expect(page).toHaveURL(/\/environments\/library\/subagents$/, { timeout: 10_000 });
+  // page it used to name, with the scope it named it in. The search half is the
+  // part that fails silently — a redirect that drops `environmentId` lands on a
+  // page that looks right and describes a different machine.
+  await page.goto('/library/subagents?environmentId=local');
+  await expect(page).toHaveURL(/\/environments\/library\/subagents\?environmentId=local$/, {
+    timeout: 10_000,
+  });
 
   expect(consoleErrors).toEqual([]);
 });
