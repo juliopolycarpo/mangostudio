@@ -600,8 +600,8 @@ describe('GitPanel', () => {
     };
 
     render(<Panel />);
-    // This must run before any other test opens a diff: `DiffViewer` is a
-    // module-level `lazy()` singleton, and React never suspends on it again
+    // This must run before any other test opens a diff: `LazyDiffViewer` holds
+    // a module-level `lazy()` singleton, and React never suspends on it again
     // once its dynamic import has resolved once. `fireEvent` (unlike
     // `userEvent`) dispatches synchronously, so this assertion lands before
     // that import settles on the microtask queue -- the Suspense fallback,
