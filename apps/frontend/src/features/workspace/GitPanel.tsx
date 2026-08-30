@@ -447,7 +447,7 @@ function RepositoryStatus({
             onRemoteFailure={setRemoteFailure}
           />
           {diffSelection ? (
-            <Suspense fallback={null}>
+            <Suspense fallback={<DiffViewerFallback loadingLabel={labels.diff.loading} />}>
               <DiffViewer
                 chatId={chatId}
                 selection={diffSelection}
