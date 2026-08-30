@@ -9,7 +9,9 @@
  */
 
 import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents';
+import { motion } from 'motion/react';
 import { ACTIVITY_STRIP_ROWS, ActivityCard } from '@/features/activity/ActivityCard';
+import { useCardGrid } from '@/lib/motion/use-card-grid';
 import { AgentsCard } from './widgets/AgentsCard';
 import { EnvironmentHealthCard } from './widgets/EnvironmentHealthCard';
 import { GreetingHeader } from './widgets/GreetingHeader';
@@ -45,6 +47,7 @@ export function WorkspaceHub({
   onSelectChat,
   onUsePrompt,
 }: WorkspaceHubProps) {
+  const cardGrid = useCardGrid();
   return (
     <div
       className="app-scrollbar flex flex-1 flex-col overflow-y-auto px-4 py-8 sm:px-6"
@@ -56,7 +59,9 @@ export function WorkspaceHub({
       <div className="mx-auto my-auto flex w-full max-w-4xl flex-col gap-6">
         <GreetingHeader userName={userName} />
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {/* Drives the `SectionCard` each of these renders through, via motion's
+            variant context — the cards need no prop and no index. */}
+        <motion.div {...cardGrid} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {chatId ? (
             <WorkspaceCard chatId={chatId} workdir={workdir} onChooseWorkdir={onChooseWorkdir} />
           ) : null}
@@ -78,7 +83,7 @@ export function WorkspaceHub({
             <UncommittedWorkCard currentChatId={chatId} onSelectChat={onSelectChat} />
           ) : null}
           <ActivityCard limit={ACTIVITY_STRIP_ROWS} compact className="sm:col-span-2" />
-        </div>
+        </motion.div>
 
         <SuggestedActions chatId={chatId} onSelect={onUsePrompt} />
       </div>

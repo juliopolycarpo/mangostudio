@@ -18,7 +18,7 @@
  */
 
 import { Search, SearchX } from 'lucide-react';
-import { motion, useReducedMotion } from 'motion/react';
+import { motion } from 'motion/react';
 import {
   memo,
   useCallback,
@@ -38,6 +38,7 @@ import { onFocusTrapEngaged } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import type { CommandItem } from './lib/command-item';
 import { activeCommandIndex, rankCommands } from './lib/match';
 
@@ -73,7 +74,7 @@ export const CommandPalette = memo(function CommandPalette({
    * on a row the user never chose.
    */
   const [pinnedId, setPinnedId] = useState<string | null>(null);
-  const reduceMotion = useReducedMotion();
+  const { dialogPanel } = useMotionPresets();
 
   // Deferred for the same reason the sidebar's search is: every keystroke
   // rescores the whole registry, and the input must not wait for it.
@@ -247,10 +248,7 @@ export const CommandPalette = memo(function CommandPalette({
         onMouseDown={(event) => {
           if (event.target !== inputRef.current) event.preventDefault();
         }}
-        initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.97, y: -8 }}
-        animate={reduceMotion ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
-        exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.98, y: -4 }}
-        transition={{ duration: reduceMotion ? 0.12 : 0.16, ease: [0.2, 0, 0, 1] }}
+        {...dialogPanel}
         className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-highest shadow-2xl"
         data-testid="command-palette"
       >

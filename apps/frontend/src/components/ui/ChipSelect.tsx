@@ -22,6 +22,7 @@ import { Check, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { type ReactNode, useId } from 'react';
 import { type ListboxOption, useListboxSelect } from '@/hooks/use-listbox-select';
+import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
 
 export interface ChipSelectOption extends ListboxOption {
@@ -80,6 +81,7 @@ export function ChipSelect({
     commit,
     handleKeyDown,
   } = useListboxSelect({ value, options, onChange, disabled });
+  const { popoverAbove } = useMotionPresets();
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the keys are handled for the combobox trigger and the options it owns, both inside this wrapper.
@@ -125,10 +127,7 @@ export function ChipSelect({
       <AnimatePresence>
         {open ? (
           <motion.div
-            initial={{ opacity: 0, y: 6, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 6, scale: 0.95 }}
-            transition={{ duration: 0.15, ease: 'easeOut' }}
+            {...popoverAbove}
             className={cn(
               // Always opens upward: every chip sits on the composer's status
               // strip at the foot of the viewport.

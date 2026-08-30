@@ -12,6 +12,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 import { triggerImageDownload } from '@/lib/download-image';
+import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { ReservedAspectImage } from './ReservedAspectImage';
 
 interface Props {
@@ -22,6 +23,7 @@ export function GeneratedImagePart({ part }: Props) {
   const { t } = useI18n();
   const [loadError, setLoadError] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const { collapse } = useMotionPresets();
 
   const promptSnippet =
     part.prompt && part.prompt.length > 80 ? `${part.prompt.slice(0, 80)}\u2026` : part.prompt;
@@ -55,13 +57,7 @@ export function GeneratedImagePart({ part }: Props) {
 
         <AnimatePresence initial={false}>
           {!collapsed && (
-            <motion.div
-              key="image-content"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
-            >
+            <motion.div key="image-content" {...collapse}>
               {/* Meta bar: model + generation time */}
               {(modelLabel || generationTimeLabel) && (
                 <div className="flex items-center gap-2 flex-wrap px-4 pb-2">

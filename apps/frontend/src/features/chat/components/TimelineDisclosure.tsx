@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react';
 import type { ReactNode } from 'react';
+import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 
 /**
  * The surface a timeline row opens onto. Exported for the one body that needs
@@ -36,17 +37,11 @@ export function TimelineDisclosure({
   children,
   className = `${TIMELINE_PANEL_CLASS} overflow-hidden`,
 }: TimelineDisclosureProps) {
+  const { collapse } = useMotionPresets();
   return (
     <AnimatePresence initial={false}>
       {open && (
-        <motion.div
-          key="timeline-body"
-          initial={{ opacity: 0, height: 0, y: -4 }}
-          animate={{ opacity: 1, height: 'auto', y: 0 }}
-          exit={{ opacity: 0, height: 0, y: -6 }}
-          transition={{ duration: 0.2, ease: 'easeOut' }}
-          className={className}
-        >
+        <motion.div key="timeline-body" {...collapse} className={className}>
           {children}
         </motion.div>
       )}

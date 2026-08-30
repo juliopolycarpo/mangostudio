@@ -22,8 +22,10 @@
  */
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { motion } from 'motion/react';
 import { ACTIVITY_PANEL_ROWS, ActivityCard } from '@/features/activity/ActivityCard';
 import { useI18n } from '@/hooks/use-i18n';
+import { useCardGrid } from '@/lib/motion/use-card-grid';
 import { AgentsCard } from './widgets/AgentsCard';
 import { EnvironmentHealthCard } from './widgets/EnvironmentHealthCard';
 import { GithubInboxCard } from './widgets/GithubInboxCard';
@@ -54,6 +56,7 @@ export function HomePage({
   onNewChatInWorkdir,
 }: HomePageProps) {
   const { t } = useI18n();
+  const cardGrid = useCardGrid();
 
   return (
     <div
@@ -67,7 +70,10 @@ export function HomePage({
             the tall one, so it gets its own track rather than a cell in the
             card grid — a feed inside a masonry-less grid stretches every card
             in its row to its own height. */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+        {/* Drives every `SectionCard` below through motion's variant context,
+            which reaches them past these two plain column wrappers — the cards
+            take no prop and no index for it. */}
+        <motion.div {...cardGrid} className="grid grid-cols-1 gap-4 lg:grid-cols-12">
           <div className="flex flex-col gap-4 lg:col-span-8">
             <WorkspacesGrid
               recentWorkdirs={recentWorkdirs}
@@ -97,7 +103,7 @@ export function HomePage({
             <MachinesCard />
             <ToolchainHealthCard />
           </div>
-        </div>
+        </motion.div>
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import { Activity, Check, ChevronDown, Cpu, Lock, Sparkles, Zap } from 'lucide-r
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
+import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
 import { getModelSelectorPlaceholder } from '../../utils/model-utils';
 
@@ -24,6 +25,7 @@ export function ModelSelector({
   lockedProvider,
 }: ModelSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const { popoverAbove } = useMotionPresets();
   const containerRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
 
@@ -113,10 +115,7 @@ export function ModelSelector({
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, y: 8, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.95 }}
-            transition={{ duration: 0.15, ease: 'easeOut' }}
+            {...popoverAbove}
             /* Upward: this control lives in the composer at the foot of the
                viewport, and the downward panel it inherited from the header
                opened off the bottom of the screen. */
