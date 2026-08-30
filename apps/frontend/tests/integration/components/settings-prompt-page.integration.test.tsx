@@ -2,17 +2,11 @@
  * Integration tests for the Prompt settings page.
  */
 
-import { describe, expect, it, jest, mock } from 'bun:test';
+import { describe, expect, it, jest } from 'bun:test';
 import { fireEvent, screen } from '@testing-library/react';
+import { PromptSettings } from '../../../src/components/settings/PromptSettings';
 import { DEFAULT_PROMPT_SETTINGS } from '../../../src/hooks/use-global-settings';
 import { render } from '../../support/harness/render';
-import { routerWithLinkStub } from '../../support/mocks/router';
-
-// Registered before the subjects are imported: `mock.module` is not hoisted and
-// static imports are.
-mock.module('@tanstack/react-router', await routerWithLinkStub());
-
-const { PromptSettings } = await import('../../../src/components/settings/PromptSettings');
 
 function createDefaultProps() {
   return {

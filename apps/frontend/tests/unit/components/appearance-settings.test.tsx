@@ -2,23 +2,11 @@
  * Unit tests for AppearanceSettings component and useTheme hook.
  */
 
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { act, fireEvent, screen } from '@testing-library/react';
+import { AppearanceSettings } from '../../../src/components/settings/AppearanceSettings';
+import { useTheme } from '../../../src/hooks/use-theme';
 import { render, renderHook } from '../../support/harness/render';
-import { routerWithLinkStub } from '../../support/mocks/router';
-
-// SettingsTabs uses TanStack Router Link — mock it to a simple anchor
-mock.module(
-  '@tanstack/react-router',
-  await routerWithLinkStub({
-    useRouterState: () => ({ location: { pathname: '/settings/appearance' } }),
-  })
-);
-
-// After the mock, never before: a static import is evaluated first and would
-// bind SettingsTabs to the real router.
-const { AppearanceSettings } = await import('../../../src/components/settings/AppearanceSettings');
-const { useTheme } = await import('../../../src/hooks/use-theme');
 
 describe('AppearanceSettings', () => {
   beforeEach(() => {

@@ -1,15 +1,9 @@
-import { describe, expect, it, jest, mock } from 'bun:test';
+import { describe, expect, it, jest } from 'bun:test';
 import { fireEvent, screen } from '@testing-library/react';
+import { ContextSettings } from '../../../src/components/settings/ContextSettings';
+import { DEFAULT_CONTEXT_SETTINGS } from '../../../src/hooks/use-global-settings';
 import { render } from '../../support/harness/render';
 import { chooseOption } from '../../support/harness/select';
-import { routerWithLinkStub } from '../../support/mocks/router';
-
-mock.module('@tanstack/react-router', await routerWithLinkStub());
-
-// After the mock, never before: a static import is evaluated first and would
-// bind SettingsTabs to the real router.
-const { ContextSettings } = await import('../../../src/components/settings/ContextSettings');
-const { DEFAULT_CONTEXT_SETTINGS } = await import('../../../src/hooks/use-global-settings');
 
 function renderSettings(overrides: Partial<React.ComponentProps<typeof ContextSettings>> = {}) {
   const props: React.ComponentProps<typeof ContextSettings> = {
