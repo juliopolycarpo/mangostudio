@@ -622,7 +622,7 @@ Open these first:
 - `apps/api/src/modules/tool-settings/http/tool-settings-routes.ts`
 - `apps/api/src/services/tools/settings-policy.ts`
 - `apps/frontend/src/routes/_authenticated/settings/` (settings route tree)
-- `apps/frontend/src/components/settings/` (shared panels + `SettingsTabs.tsx`)
+- `apps/frontend/src/components/settings/` (shared panels + `settings-nav.ts`, the grouped page list both the sidebar and the command palette read)
 - `apps/frontend/src/features/settings/app/`
 - `apps/frontend/src/features/settings/external-api/`
 - `apps/frontend/src/features/settings/providers/`
