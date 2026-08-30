@@ -35,7 +35,10 @@ import {
   type ExternalDisclosureRequest,
   promptExternalDisclosure,
 } from '@/features/external-agents/disclosure-prompt';
-import { publishExternalAccountLimits } from '@/features/external-agents/queries';
+import {
+  publishExternalAccountLimits,
+  publishExternalCommandCatalog,
+} from '@/features/external-agents/queries';
 import { promptExternalWorkspaceTrust } from '@/features/external-agents/workspace-trust-prompt';
 import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import {
@@ -538,8 +541,18 @@ export function useTextGeneration({
             // What this session will expand as `/name`. Filed against the chat
             // so the composer's palette can offer the vendor's own list rather
             // than a guess rebuilt from directories the CLI may not have read.
+            //
+            // Also filed against the hub-catalog key so the next chat opened
+            // against this (environment, target) — not just this one — sees
+            // it too, instead of whatever the first cold GET in the tab saw.
             if (chunk.type === 'external_commands') {
               publishExternalCommands(queryClient, activeChatId, chunk.commands);
+              publishExternalCommandCatalog(
+                queryClient,
+                externalTargetId ?? null,
+                activeEnvironmentId,
+                chunk.commands
+              );
             }
           };
 

@@ -15,6 +15,7 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type {
   ExternalAccountLimits,
+  ExternalAgentCommand,
   ExternalAgentDescriptor,
   ExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
@@ -151,7 +152,7 @@ export function publishExternalAccountLimits(
   );
 }
 
-function externalCommandCatalogKey(targetId: string, environmentId: string) {
+export function externalCommandCatalogKey(targetId: string, environmentId: string) {
   return ['external-command-catalog', targetId, environmentId] as const;
 }
 
@@ -163,7 +164,8 @@ function externalCommandCatalogKey(targetId: string, environmentId: string) {
  *
  * Never stales on its own: nothing about this answer changes without a new
  * turn running against that (environment, target), and the live session
- * catalog already outranks it the moment one exists.
+ * catalog already outranks it the moment one exists. `publishExternalCommandCatalog`
+ * is what keeps it from being stuck with whatever the first GET in the tab saw.
  */
 export function externalCommandCatalogQueryOptions(
   targetId: ExternalAgentTargetId | null,
@@ -175,4 +177,30 @@ export function externalCommandCatalogQueryOptions(
     queryFn: () => getExternalCommandCatalog(targetId ?? '', { environmentId: envId }),
     staleTime: Number.POSITIVE_INFINITY,
   });
+}
+
+/**
+ * Files the catalog a turn's stream carried, under the same (environment,
+ * target) key the cold GET above answers.
+ *
+ * Without this, only a hard reload ever sees a session's plugin or skill
+ * commands: the query above never refetches, so the first GET in a tab wins
+ * for every chat against that (environment, target) for the rest of the tab
+ * — including a chat opened *after* a turn already told the hub what this
+ * session can expand. `publishExternalCommands` files the same list under the
+ * chat-scoped key the live session catalog reads; this is the sibling write
+ * that keeps the hub-catalog fallback honest for the next chat, not just this
+ * one.
+ */
+export function publishExternalCommandCatalog(
+  queryClient: QueryClient,
+  targetId: ExternalAgentTargetId | null,
+  environmentId: string | null,
+  commands: readonly ExternalAgentCommand[]
+): void {
+  if (!targetId) return;
+  queryClient.setQueryData(
+    externalCommandCatalogKey(targetId, environmentId ?? LOCAL_ENVIRONMENT_ID),
+    { commands }
+  );
 }
