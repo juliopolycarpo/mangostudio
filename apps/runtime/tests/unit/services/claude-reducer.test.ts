@@ -60,15 +60,31 @@ describe('ClaudeTurnReducer, on a recorded read-a-file turn', () => {
 
   /**
    * The recording is a `2.1.226` run: it lists 71 names under `slash_commands`
-   * — `gh` and `dataviz` among them, but `doctor`, `color`, `clear` and
-   * `heapdump` too — and carries no `terminal_slash_commands`. That build is
-   * inside the supported range, so this is the shape a real user hits, and the
-   * only honest answer to it is no catalog at all. `the init record’s
-   * slash-command list` covers the runs that do state their exclusions.
+   * and carries no `terminal_slash_commands`, so the exclusion list this
+   * catalog would normally subtract is unreadable. The provenance rule
+   * publishes the subset whose *origin* the same record states instead of
+   * withholding the whole thing: every name here is either in `skills`,
+   * namespaced `plugin:command` against a real `init.plugins[].name` (this
+   * fixture's own `code-review` plugin), or prefixed `mcp__`.
+   *
+   * `doctor` is both a real skill this account installed *and* the name of a
+   * terminal-only Claude Code builtin on a build new enough to say so — this
+   * record cannot tell those two apart, and publishes it anyway, because the
+   * statement it makes is "this is a skill", not "this is interactive".
+   * `color`, `clear` and `heapdump` have no such statement behind them in
+   * this recording and stay withheld.
    */
-  it('announces no catalog for a run that predates the terminal-only list', () => {
+  it('publishes the names whose origin the record states, when the exclusion list is unreadable', () => {
     const { events } = reduceAll('claude-read-turn.jsonl');
-    expect(events.find((event) => event.type === 'commands_available')).toBeUndefined();
+    const catalog = events.find((event) => event.type === 'commands_available');
+    const names =
+      catalog?.type === 'commands_available' ? catalog.commands.map((command) => command.name) : [];
+
+    expect(names).toContain('doctor');
+    expect(names).toContain('code-review:code-review');
+    expect(names).not.toContain('color');
+    expect(names).not.toContain('clear');
+    expect(names).not.toContain('heapdump');
   });
 
   it('reports the resume state it was opened with rather than inferring one', () => {
@@ -628,6 +644,35 @@ describe('the init record’s slash-command list', () => {
     expect(catalogFrom({ session_id: 'a', slash_commands: ['review', 'doctor', 'color'] })).toEqual(
       []
     );
+  });
+
+  /**
+   * The provenance rule this fallback uses: a name is offered anyway, without
+   * a readable exclusion list, when the record itself states where it came
+   * from — a skill, a plugin's own command, or an MCP server's — and
+   * withheld when it does not.
+   */
+  it('falls back to the names whose provenance the record states', () => {
+    const commands = catalogFrom({
+      session_id: 'a',
+      slash_commands: ['review', 'dataviz', 'my-plugin:deploy', 'mcp__github__list_prs', 'compact'],
+      skills: ['dataviz'],
+      plugins: [{ name: 'my-plugin' }],
+    });
+    expect(commands.map((command) => command.name)).toEqual([
+      'dataviz',
+      'my-plugin:deploy',
+      'mcp__github__list_prs',
+    ]);
+  });
+
+  it('does not treat a colon in an unrelated name as a plugin prefix', () => {
+    const commands = catalogFrom({
+      session_id: 'a',
+      slash_commands: ['weird:name', 'compact'],
+      plugins: [{ name: 'other-plugin' }],
+    });
+    expect(commands).toEqual([]);
   });
 
   it('withholds the CLI’s private plumbing', () => {

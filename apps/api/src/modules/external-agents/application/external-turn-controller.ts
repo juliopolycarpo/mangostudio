@@ -78,6 +78,10 @@ import {
   externalApprovalRegistry,
 } from './external-approval-registry';
 import {
+  type ExternalCommandCatalogCache,
+  externalCommandCatalogCache,
+} from './external-command-catalog-cache';
+import {
   type ExternalSessionHandle,
   type ExternalSessionManager,
   externalSessionManager,
@@ -229,6 +233,7 @@ export interface ExternalTurnResult {
 export interface ExternalTurnControllerDependencies {
   readonly sessions?: ExternalSessionManager;
   readonly approvals?: ExternalApprovalRegistry;
+  readonly commandCatalog?: ExternalCommandCatalogCache;
   readonly now?: () => number;
   readonly newId?: () => string;
   /** Overrides {@link STEER_TERMINATION_GRACE_MS}; a test's only hook for it. */
@@ -502,6 +507,7 @@ export function createExternalTurnController(
 ): ExternalTurnController {
   const sessions = dependencies.sessions ?? externalSessionManager;
   const approvals = dependencies.approvals ?? externalApprovalRegistry;
+  const commandCatalog = dependencies.commandCatalog ?? externalCommandCatalogCache;
   const now = dependencies.now ?? Date.now;
   const newId = dependencies.newId ?? generateId;
   const steerTerminationGraceMs =
@@ -756,6 +762,17 @@ export function createExternalTurnController(
             },
             envelope.event.limits,
             { sessionId: handle.sessionId }
+          );
+        }
+
+        if (envelope.event.type === 'commands_available') {
+          // Last-known, not this chat's: a reload before this chat's own first
+          // turn re-announces its catalog reads whatever a turn against this
+          // (user, environment, target) wrote most recently, even one from a
+          // different chat.
+          commandCatalog.write(
+            { userId: input.userId, environmentId: context.chat.environmentId, targetId },
+            envelope.event.commands
           );
         }
 

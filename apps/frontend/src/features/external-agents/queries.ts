@@ -12,13 +12,19 @@
  * being signed in on the laptop says nothing about the build server.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type {
   ExternalAccountLimits,
   ExternalAgentDescriptor,
+  ExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
 import type { QueryClient } from '@tanstack/react-query';
 import { queryOptions } from '@tanstack/react-query';
-import { getExternalAccountLimits, listExternalAgents } from '@/services/external-agent-service';
+import {
+  getExternalAccountLimits,
+  getExternalCommandCatalog,
+  listExternalAgents,
+} from '@/services/external-agent-service';
 
 export const externalAgentKeys = {
   all: ['external-agents'] as const,
@@ -143,4 +149,30 @@ export function publishExternalAccountLimits(
     externalAccountLimitsKeyFor(limits.targetId, environmentId, vendorAccountFingerprint),
     limits
   );
+}
+
+function externalCommandCatalogKey(targetId: string, environmentId: string) {
+  return ['external-command-catalog', targetId, environmentId] as const;
+}
+
+/**
+ * The hub's last-known catalog for one (environment, target) — the
+ * composer's palette reads this as the source ranked between the live
+ * session catalog and the library scan, for a reload before this chat's own
+ * first turn re-announces one of its own.
+ *
+ * Never stales on its own: nothing about this answer changes without a new
+ * turn running against that (environment, target), and the live session
+ * catalog already outranks it the moment one exists.
+ */
+export function externalCommandCatalogQueryOptions(
+  targetId: ExternalAgentTargetId | null,
+  environmentId: string | null
+) {
+  const envId = environmentId ?? LOCAL_ENVIRONMENT_ID;
+  return queryOptions({
+    queryKey: externalCommandCatalogKey(targetId ?? '', envId),
+    queryFn: () => getExternalCommandCatalog(targetId ?? '', { environmentId: envId }),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
 }

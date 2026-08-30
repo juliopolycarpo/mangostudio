@@ -73,6 +73,8 @@ export {
   type ExternalAgentCloseParams,
   ExternalAgentCloseParamsSchema,
   type ExternalAgentCommand,
+  type ExternalAgentCommandCatalogResponse,
+  ExternalAgentCommandCatalogResponseSchema,
   ExternalAgentCommandSchema,
   type ExternalAgentConfiguration,
   ExternalAgentConfigurationSchema,

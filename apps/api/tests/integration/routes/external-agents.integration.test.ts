@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type {
   ExternalAgentCapabilities,
+  ExternalAgentCommandCatalogResponse,
   ExternalAgentDescriptor,
   ExternalAgentDescriptorListResponse,
   ExternalSupportedConfiguration,
@@ -16,6 +17,7 @@ import type {
   DiscoveredExternalAgent,
   ExternalAgentDiscoveryService,
 } from '../../../src/modules/external-agents/application/external-agent-discovery';
+import { createExternalCommandCatalogCache } from '../../../src/modules/external-agents/application/external-command-catalog-cache';
 import { createExternalAgentRoutes } from '../../../src/modules/external-agents/http/external-agent-routes';
 import { insertTestUser } from '../../support/factories';
 import {
@@ -96,6 +98,16 @@ class FakeDiscovery implements Pick<ExternalAgentDiscoveryService, 'describeExte
 function createTestRoutes() {
   const discovery = new FakeDiscovery();
   return { routes: createExternalAgentRoutes({ discovery }), discovery };
+}
+
+function createTestRoutesWithCatalog() {
+  const discovery = new FakeDiscovery();
+  const commandCatalog = createExternalCommandCatalogCache();
+  return {
+    routes: createExternalAgentRoutes({ discovery, commandCatalog }),
+    discovery,
+    commandCatalog,
+  };
 }
 
 async function agentsIn(response: Response): Promise<readonly ExternalAgentDescriptor[]> {
@@ -230,5 +242,87 @@ describe('external agent disclosure routes', () => {
       await app.handle(new Request('http://localhost/external-agents'))
     );
     expect(agents[0]?.unavailableReason).toBe('disclosure-required');
+  });
+});
+
+/**
+ * A reload's last resort before this chat's own first turn re-announces a
+ * catalog: whatever a turn against this (user, environment, target) wrote
+ * most recently, even one from a different chat.
+ */
+describe('external agent command catalog route', () => {
+  it('answers empty for a target nothing has ever announced', async () => {
+    const { routes } = createTestRoutesWithCatalog();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, routes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/external-agents/claude/commands')
+    );
+    const payload = (await response.json()) as ExternalAgentCommandCatalogResponse;
+
+    expect(response.status).toBe(200);
+    expect(payload.commands).toEqual([]);
+  });
+
+  it('returns the last catalog written for that user, environment and target', async () => {
+    const { routes, commandCatalog } = createTestRoutesWithCatalog();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, routes);
+    restoreAuth = restore;
+
+    commandCatalog.write({ userId: TEST_USER.id, environmentId: 'local', targetId: 'claude' }, [
+      { name: 'review' },
+      { name: 'dataviz', description: 'Draws charts' },
+    ]);
+
+    const response = await app.handle(
+      new Request('http://localhost/external-agents/claude/commands')
+    );
+    const payload = (await response.json()) as ExternalAgentCommandCatalogResponse;
+
+    expect(payload.commands).toEqual([
+      { name: 'review' },
+      { name: 'dataviz', description: 'Draws charts' },
+    ]);
+  });
+
+  it('keys by environment, so a different one is not served this one’s hint', async () => {
+    const { routes, commandCatalog } = createTestRoutesWithCatalog();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, routes);
+    restoreAuth = restore;
+
+    commandCatalog.write({ userId: TEST_USER.id, environmentId: 'env-7', targetId: 'claude' }, [
+      { name: 'review' },
+    ]);
+
+    const response = await app.handle(
+      new Request('http://localhost/external-agents/claude/commands')
+    );
+    const payload = (await response.json()) as ExternalAgentCommandCatalogResponse;
+
+    expect(payload.commands).toEqual([]);
+  });
+
+  it('rejects a target that is not a real vendor', async () => {
+    const { routes } = createTestRoutesWithCatalog();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, routes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/external-agents/not-a-vendor/commands')
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it('tells an unauthenticated caller nothing', async () => {
+    const { routes } = createTestRoutesWithCatalog();
+    const app = createApiTestApp(routes);
+
+    const response = await app.handle(
+      new Request('http://localhost/external-agents/claude/commands')
+    );
+
+    expect(response.status).toBe(401);
   });
 });

@@ -43,7 +43,6 @@ export interface ClaudeInitRecord extends ClaudeStreamRecord {
   readonly model?: unknown;
   readonly mcp_servers?: unknown;
   readonly mcp_server_errors?: unknown;
-  readonly plugins?: unknown;
   readonly plugin_errors?: unknown;
   /**
    * Every name this run will expand as `/name`, without descriptions.
@@ -60,14 +59,23 @@ export interface ClaudeInitRecord extends ClaudeStreamRecord {
    */
   readonly terminal_slash_commands?: unknown;
   /**
-   * Skills, which are also listed in `slash_commands`.
-   *
-   * Read for nothing today: a skill is invoked as `/name` like anything else,
-   * and offering it twice under two headings would suggest a distinction the
-   * prompt does not have. Declared because it is part of the record and the
-   * next person to look will otherwise wonder where it went.
+   * Skills, which are also listed in `slash_commands` rather than under a
+   * heading of their own — a skill is invoked as `/name` like anything else.
+   * Read by `initSlashCommands` only on a build that never named its own
+   * `terminal_slash_commands` exclusion list, as one of the three provenance
+   * statements that make a subset of `slash_commands` safe to publish
+   * without one.
    */
   readonly skills?: unknown;
+  /**
+   * Marketplace plugins this run loaded, each carrying at least its own
+   * `name` — never observed non-empty in a recorded fixture. Read the same
+   * way `initSlashCommands` reads everything else: a plugin's own commands
+   * are namespaced `plugin:command`, and matching that prefix here is what
+   * tells a plugin's command apart from a CLI builtin that happens to
+   * contain a colon.
+   */
+  readonly plugins?: unknown;
 }
 
 /**
@@ -204,35 +212,85 @@ function terminalOnlyCommands(record: ClaudeInitRecord): ReadonlySet<string> | u
 }
 
 /**
+ * Every plugin's own name, off `init.plugins` — never observed non-empty in a
+ * recorded fixture, so this reads it exactly as defensively as every other
+ * field here: an array of objects, each read for a `name` string and nothing
+ * assumed about the rest of its shape.
+ */
+function pluginNames(record: ClaudeInitRecord): ReadonlySet<string> {
+  const plugins = record.plugins;
+  if (!Array.isArray(plugins)) return new Set();
+  return new Set(
+    plugins
+      .map((plugin) =>
+        typeof plugin === 'object' && plugin !== null
+          ? (plugin as { readonly name?: unknown }).name
+          : undefined
+      )
+      .filter((name): name is string => typeof name === 'string')
+  );
+}
+
+/**
+ * Whether `name`'s own origin is stated by this record, rather than guessed.
+ *
+ * Three shapes, each a statement about where the CLI read the name from
+ * rather than a guess about whether it happens to work outside a terminal: a
+ * user skill (`skills` repeats every skill name also present in
+ * `slash_commands`), a plugin's own command (`plugin:command`, namespaced
+ * with the `:` Claude Code — and only Claude Code — uses, matched against the
+ * plugin names above), or an MCP server's (`mcp__*`, the same prefix
+ * `claudeActivityKind` recognizes for tool names). All three are user content
+ * the vendor read off disk or a server; none of them is a CLI terminal
+ * builtin, which is what makes them safe to publish without the exclusion
+ * list that would normally vouch for that.
+ */
+function originIsKnown(
+  name: string,
+  skills: ReadonlySet<string>,
+  plugins: ReadonlySet<string>
+): boolean {
+  if (skills.has(name)) return true;
+  if (name.startsWith('mcp__')) return true;
+  const separator = name.indexOf(':');
+  return separator > 0 && plugins.has(name.slice(0, separator));
+}
+
+/**
  * The commands this run can expand, in the order the CLI announced them.
  *
- * Two kinds are withheld, and only two. `terminal_slash_commands` is the
+ * A `__`-prefixed name is always withheld — the CLI's private plumbing,
+ * `__remote-workflow` being not something a user types — and so is one
+ * `terminal_slash_commands` names, when the run stated that list: the
  * vendor's own statement that a name needs the interactive terminal this
- * adapter does not give it. A `__`-prefixed name is the CLI's private
- * plumbing — `__remote-workflow` is not something a user types.
+ * adapter does not give it.
  *
- * Everything else is passed through, builtins included. Whether `/compact`
- * behaves the same in `--print` as it does in the REPL is the vendor's answer
- * to give, and a hand-maintained blocklist of "commands we think are
- * interactive" would go stale the first time that list changes.
+ * A run that did not state that list at all — a build older than the field,
+ * or one that answered with something this cannot read — gets a narrower
+ * catalog rather than none: only the names whose *origin* this same record
+ * states, per {@link originIsKnown}. That is a statement about provenance,
+ * not a guess about interactivity — a user skill named the same as a
+ * terminal-only builtin (this machine has a `doctor` skill) still publishes,
+ * because the record says it is a skill, regardless of what the *builtin*
+ * `/doctor` would have been on a build new enough to say so.
  */
 export function initSlashCommands(record: ClaudeInitRecord): readonly string[] | undefined {
   const names = record.slash_commands;
   if (!Array.isArray(names)) return undefined;
-  const terminalOnly = terminalOnlyCommands(record);
-  // Withholding is the promise this catalog makes, so a run that did not state
-  // its exclusion list — because it answered with a scalar, or because it is a
-  // build from before the field existed — gets no catalog rather than one that
-  // quietly includes names the vendor needs a terminal for. The composer still
-  // has the library's scan of the same directories to fall back on.
-  if (!terminalOnly) return undefined;
-  return names.filter(
+  const usable = names.filter(
     (value): value is string =>
-      typeof value === 'string' &&
-      value.length > 0 &&
-      !value.startsWith('__') &&
-      !terminalOnly.has(value)
+      typeof value === 'string' && value.length > 0 && !value.startsWith('__')
   );
+  const terminalOnly = terminalOnlyCommands(record);
+  if (terminalOnly) return usable.filter((name) => !terminalOnly.has(name));
+
+  const skills = new Set(
+    Array.isArray(record.skills)
+      ? record.skills.filter((value): value is string => typeof value === 'string')
+      : []
+  );
+  const plugins = pluginNames(record);
+  return usable.filter((name) => originIsKnown(name, skills, plugins));
 }
 
 /**

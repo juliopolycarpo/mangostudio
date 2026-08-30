@@ -1,16 +1,23 @@
 /**
  * What the composer's `/` palette can offer this chat.
  *
- * Three sources, layered in order of how much they know:
+ * Four sources, layered in order of how much they know:
  *
  * 1. **The session's own catalog**, announced by the vendor mid-turn. The only
  *    source that knows about plugin commands and the skills a build ships, and
  *    the only one that describes the process actually running.
- * 2. **The library scan**, for external chats that have not run a turn yet.
- *    Commands only: whether a *skill* is reachable as `/name` is a per-vendor
- *    fact the vendor's own catalog already answers, and guessing it from a
- *    directory listing would offer names the CLI never registers.
- * 3. **The user's skills**, for MangoStudio's own runner, which has no commands
+ * 2. **The hub's last-known catalog** for this (environment, target) — a hint
+ *    surviving a reload before this chat's own first turn re-announces one of
+ *    its own. Stale by design: it can be another chat's, or another workspace's
+ *    project-scoped commands, until this chat's first turn overwrites it with
+ *    its own. Acceptable for a hint, the same trade the library scan below
+ *    already makes.
+ * 3. **The library scan**, for external chats that have not run a turn yet.
+ *    Commands always; skills too, for a vendor whose own catalog already lists
+ *    every skill under `/` — `externalAgentVendor(targetId).skillsAreSlashCommands`
+ *    is the declared fact that answers that per vendor, so this file never
+ *    guesses it from a directory listing on its own.
+ * 4. **The user's skills**, for MangoStudio's own runner, which has no commands
  *    of its own (issue #961). Filtered and capped the way
  *    `buildSkillsPromptSection` filters and caps, so the palette offers what the
  *    turn will advertise. Read user-scoped rather than through the chat's
@@ -24,10 +31,14 @@
  */
 
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
-import type { ExternalAgentCommand } from '@mangostudio/shared/external-agents';
+import {
+  type ExternalAgentCommand,
+  externalAgentVendor,
+} from '@mangostudio/shared/external-agents';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { externalCommandKeys } from '@/features/external-agents/command-catalog';
+import { externalCommandCatalogQueryOptions } from '@/features/external-agents/queries';
 import { libraryResourcesQueryOptions } from '@/features/library/queries';
 import { skillSettingsListQueryOptions } from '@/features/settings/skills/queries';
 import { mergeSlashCommands, type SlashCommandEntry } from '../lib/slash-commands';
@@ -121,6 +132,24 @@ export function useSlashCommands({
     enabled: active && targetId !== null,
   });
 
+  // Only for a vendor whose own catalog already lists every skill under `/` —
+  // declared once, as a shared fact, rather than guessed here from a listing
+  // Codex would never register any of these names against.
+  const skillsAreSlashCommands =
+    targetId !== null && externalAgentVendor(targetId).skillsAreSlashCommands;
+  const librarySkillsQuery = useQuery({
+    ...libraryResourcesQueryOptions('skill', environmentId ?? undefined),
+    enabled: active && skillsAreSlashCommands,
+  });
+
+  // The hub's own memory of the last catalog observed for this
+  // (environment, target) — see the module docblock for why this is stale by
+  // design and acceptable anyway.
+  const hubCatalogQuery = useQuery({
+    ...externalCommandCatalogQueryOptions(targetId, environmentId),
+    enabled: active && targetId !== null,
+  });
+
   const skillsQuery = useQuery({
     ...skillSettingsListQueryOptions(),
     enabled: active && targetId === null,
@@ -138,7 +167,9 @@ export function useSlashCommands({
   });
 
   const session = sessionQuery.data;
+  const hubCatalog = hubCatalogQuery.data;
   const library = libraryQuery.data;
+  const librarySkills = librarySkillsQuery.data;
   const skills = skillsQuery.data;
 
   /**
@@ -171,6 +202,21 @@ export function useSlashCommands({
             origin: 'session' as const,
           }));
 
+    // The hub's own memory of the last catalog observed for this
+    // (environment, target). Same `origin` as the live session catalog: both
+    // are the vendor's own statement of what it loaded, and the only
+    // difference — whether it came from *this* process or a past one — is a
+    // staleness trade the module docblock states, not something the palette's
+    // secondary label needs to distinguish.
+    const hubCatalogEntries: SlashCommandEntry[] =
+      targetId === null
+        ? []
+        : (hubCatalog?.commands ?? []).map((command) => ({
+            name: command.name,
+            ...(command.description ? { description: command.description } : {}),
+            origin: 'session' as const,
+          }));
+
     // Anything but `absent`: `shadowed` means this target *does* read a copy,
     // from `effectiveLocationId`, and merely has others behind it — the same
     // predicate `presentTargetCount` in `features/library/format.ts` uses.
@@ -184,6 +230,21 @@ export function useSlashCommands({
               )
             )
             .map((resource) => ({ name: resource.ref.slug, origin: 'library' as const }));
+
+    // The library's scan of the same skill directories, offered only for a
+    // vendor whose own catalog already lists every skill under `/` — see
+    // `skillsAreSlashCommands` above. Same shape and the same `library`
+    // origin as the command scan: both are a directory listing, not an
+    // authoritative answer the way the session and hub catalogs are.
+    const librarySkillEntries: SlashCommandEntry[] = !skillsAreSlashCommands
+      ? []
+      : (librarySkills?.resources ?? [])
+          .filter((resource) =>
+            resource.coverage.some(
+              (coverage) => coverage.targetId === targetId && coverage.state !== 'absent'
+            )
+          )
+          .map((resource) => ({ name: resource.ref.slug, origin: 'library' as const }));
 
     // The same three flags and the same ceiling `buildSkillsPromptSection`
     // applies, so the palette cannot offer a name the turn will not advertise:
@@ -214,19 +275,35 @@ export function useSlashCommands({
               origin: 'skill' as const,
             }));
 
-    return mergeSlashCommands(sessionEntries, libraryEntries, skillEntries);
-  }, [session, library, skills, targetId, advertisedKeys, capabilitiesQuery.isLoading]);
+    return mergeSlashCommands(
+      sessionEntries,
+      hubCatalogEntries,
+      libraryEntries,
+      librarySkillEntries,
+      skillEntries
+    );
+  }, [
+    session,
+    hubCatalog,
+    library,
+    librarySkills,
+    skillsAreSlashCommands,
+    skills,
+    targetId,
+    advertisedKeys,
+    capabilitiesQuery.isLoading,
+  ]);
 
-  // Only the source this runner actually reads can hold the palette back, and
-  // only while it is fetching: a *disabled* query reports `isPending` forever,
-  // so the other one would keep the menu silent for good. The capability
-  // projection joins the skill side for the same reason it withholds entries
-  // above — `isLoading` is `false` while it is disabled, so the home-screen
-  // case is unaffected.
+  // Only the sources this runner actually reads can hold the palette back,
+  // and only while they are fetching: a *disabled* query reports `isPending`
+  // forever, so an unconditional wait would keep the menu silent for good.
+  // The capability projection joins the skill side for the same reason it
+  // withholds entries above — `isLoading` is `false` while it is disabled, so
+  // the home-screen case is unaffected.
   const loading =
     targetId === null
       ? skillsQuery.isLoading || capabilitiesQuery.isLoading
-      : libraryQuery.isLoading;
+      : libraryQuery.isLoading || hubCatalogQuery.isLoading || librarySkillsQuery.isLoading;
 
   return { entries, loading };
 }

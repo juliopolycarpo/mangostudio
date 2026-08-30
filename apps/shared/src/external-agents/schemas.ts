@@ -650,6 +650,27 @@ export type ExternalAgentCommand = Static<typeof ExternalAgentCommandSchema>;
 export const EXTERNAL_COMMAND_CATALOG_MAX_ITEMS = 256;
 
 /**
+ * The last catalog the hub observed for a `(user, environment, target)`, read
+ * back before this chat's own first turn has announced one of its own.
+ *
+ * `commands` is an empty array rather than an absent field when nothing has
+ * ever been observed — a hint with nothing to offer yet, not a different
+ * shape the caller has to branch on.
+ */
+export const ExternalAgentCommandCatalogResponseSchema = Type.Object(
+  {
+    commands: ReadonlyArraySchema(ExternalAgentCommandSchema, {
+      maxItems: EXTERNAL_COMMAND_CATALOG_MAX_ITEMS,
+    }),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalAgentCommandCatalogResponse = Static<
+  typeof ExternalAgentCommandCatalogResponseSchema
+>;
+
+/**
  * The neutral event contract every adapter normalizes onto.
  *
  * Ordering and idempotency are *not* here: every event travels inside the

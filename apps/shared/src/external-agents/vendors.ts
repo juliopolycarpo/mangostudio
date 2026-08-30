@@ -46,6 +46,19 @@ export interface ExternalAgentVendor {
    */
   readonly termsUrl: string;
   readonly privacyUrl: string;
+  /**
+   * Whether this vendor's own skills double as `/name` slash commands.
+   *
+   * Probed live against each CLI, not inferred from docs (see the
+   * `vendor-slash-command-behaviour` note this fact was pulled from): Claude
+   * Code and Cursor both list every skill under `/` in their own catalog, so
+   * a chat with no announced catalog yet can still offer them from the
+   * library's scan of the same directories. Codex reads skills into a prompt
+   * section instead — nothing there is ever typed as `/name`, and offering
+   * one from a directory listing would advertise a command the CLI never
+   * registers.
+   */
+  readonly skillsAreSlashCommands: boolean;
 }
 
 export const EXTERNAL_AGENT_VENDORS: Readonly<Record<ExternalAgentTargetId, ExternalAgentVendor>> =
@@ -54,16 +67,19 @@ export const EXTERNAL_AGENT_VENDORS: Readonly<Record<ExternalAgentTargetId, Exte
       company: 'OpenAI',
       termsUrl: 'https://openai.com/policies/terms-of-use/',
       privacyUrl: 'https://openai.com/policies/privacy-policy/',
+      skillsAreSlashCommands: false,
     },
     cursor: {
       company: 'Anysphere',
       termsUrl: 'https://cursor.com/terms-of-service',
       privacyUrl: 'https://cursor.com/privacy',
+      skillsAreSlashCommands: true,
     },
     claude: {
       company: 'Anthropic',
       termsUrl: 'https://www.anthropic.com/legal/consumer-terms',
       privacyUrl: 'https://www.anthropic.com/legal/privacy',
+      skillsAreSlashCommands: true,
     },
   };
 

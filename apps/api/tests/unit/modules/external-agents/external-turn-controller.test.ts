@@ -12,6 +12,7 @@ import type {
 } from '@mangostudio/shared/types';
 import { getDb } from '../../../../src/db/database';
 import { createExternalApprovalRegistry } from '../../../../src/modules/external-agents/application/external-approval-registry';
+import { createExternalCommandCatalogCache } from '../../../../src/modules/external-agents/application/external-command-catalog-cache';
 import { createExternalSessionManager } from '../../../../src/modules/external-agents/application/external-session-manager';
 import {
   createExternalTurnController,
@@ -78,14 +79,18 @@ function harness(
     newSessionId: () => 'session-1',
   });
   const approvals = createExternalApprovalRegistry();
+  // Fresh per test: the production default is a process-wide singleton, and
+  // sharing it here would leak one test's catalog into the next.
+  const commandCatalog = createExternalCommandCatalogCache();
   const ids = [userMessageId, assistantMessageId];
   const controller = createExternalTurnController({
     sessions,
     approvals,
+    commandCatalog,
     newId: () => ids.shift() ?? `id-${crypto.randomUUID()}`,
     ...(steerTerminationGraceMs !== undefined ? { steerTerminationGraceMs } : {}),
   });
-  return { runtime, sessions, approvals, controller };
+  return { runtime, sessions, approvals, commandCatalog, controller };
 }
 
 /**
@@ -207,6 +212,29 @@ describe('external turn controller', () => {
       terminalReason: 'completed',
       nativeTurnId: 'native-turn-1',
     });
+  });
+
+  /**
+   * The hub-side half of surviving a reload before this chat's own first turn
+   * re-announces its catalog: whatever the last turn against this
+   * (user, environment, target) wrote, even after this turn itself ends.
+   */
+  it('files the announced catalog in the hub-side cache for a reload to read', async () => {
+    const { runtime, controller, commandCatalog } = harness();
+    const running = startTurn(controller);
+    await waitForTurnStart(runtime);
+
+    runtime.emit({
+      type: 'commands_available',
+      commands: [{ name: 'review' }, { name: 'dataviz', description: 'Draws charts' }],
+    });
+    runtime.emit({ type: 'completed' });
+    await running;
+
+    expect(commandCatalog.read({ userId, environmentId: 'local', targetId: 'codex' })).toEqual([
+      { name: 'review' },
+      { name: 'dataviz', description: 'Draws charts' },
+    ]);
   });
 
   it('leaves a readable prefix on disk while the turn is still running', async () => {
