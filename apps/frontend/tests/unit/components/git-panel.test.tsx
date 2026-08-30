@@ -603,7 +603,8 @@ describe('GitPanel', () => {
     render(<Panel />);
     await user.click(screen.getByRole('button', { name: 'View diff for src/panel.tsx' }));
 
-    const diff = screen.getByRole('region', { name: 'View diff for src/panel.tsx' });
+    // `findByRole`: the viewer is behind a lazy import that resolves after the click.
+    const diff = await screen.findByRole('region', { name: 'View diff for src/panel.tsx' });
     expect(diff).toBeVisible();
     expect(diff).toHaveTextContent('old title');
     expect(diff).toHaveTextContent('new title');
@@ -642,7 +643,7 @@ describe('GitPanel', () => {
     expect(screen.getByRole('region', { name: 'Commit details' })).toBeVisible();
     expect(screen.getByText('1234567890abcdef')).toBeVisible();
     await user.click(screen.getByRole('button', { name: /src\/git\.ts/ }));
-    expect(screen.getByRole('region', { name: 'View diff for src/git.ts' })).toBeVisible();
+    expect(await screen.findByRole('region', { name: 'View diff for src/git.ts' })).toBeVisible();
   });
 
   it('commits staged changes from the split button and reports the short hash', async () => {

@@ -19,7 +19,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Menu';
@@ -33,7 +33,15 @@ import { resolveApiErrorMessage } from '@/lib/utils';
 import { BranchControl } from './BranchControl';
 import { BranchPrChip } from './BranchPrChip';
 import { CommitForm } from './CommitForm';
-import { type DiffSelection, DiffViewer } from './DiffViewer';
+import type { DiffSelection } from './DiffViewer';
+
+// Loaded on the first opened diff, mirroring `MarkdownContent`: the viewer
+// statically pulls the shiki engine, and every chat pays for this panel's
+// imports at startup whether or not a diff is ever opened.
+const DiffViewer = lazy(() =>
+  import('./DiffViewer').then((module) => ({ default: module.DiffViewer }))
+);
+
 import { readGitPanelPrefs, writeGitPanelPrefs } from './git-panel-prefs';
 import {
   type GitDiscardSelection,
@@ -398,11 +406,13 @@ function RepositoryStatus({
 
       {view === 'history' ? (
         diffSelection ? (
-          <DiffViewer
-            chatId={chatId}
-            selection={diffSelection}
-            onClose={() => setDiffSelection(null)}
-          />
+          <Suspense fallback={null}>
+            <DiffViewer
+              chatId={chatId}
+              selection={diffSelection}
+              onClose={() => setDiffSelection(null)}
+            />
+          </Suspense>
         ) : (
           <RepositoryHistory chatId={chatId} onOpenDiff={setDiffSelection} />
         )
@@ -425,11 +435,13 @@ function RepositoryStatus({
             onRemoteFailure={setRemoteFailure}
           />
           {diffSelection ? (
-            <DiffViewer
-              chatId={chatId}
-              selection={diffSelection}
-              onClose={() => setDiffSelection(null)}
-            />
+            <Suspense fallback={null}>
+              <DiffViewer
+                chatId={chatId}
+                selection={diffSelection}
+                onClose={() => setDiffSelection(null)}
+              />
+            </Suspense>
           ) : status.clean ? (
             <EmptyState
               icon={<Check size={22} />}
