@@ -286,11 +286,7 @@ const AuthenticatedSettingsProvidersRoute =
     id: '/providers',
     path: '/providers',
     getParentRoute: () => AuthenticatedSettingsRoute,
-  } as any).lazy(() =>
-    import('./routes/_authenticated/settings/providers.lazy').then(
-      (d) => d.Route,
-    ),
-  )
+  } as any)
 const AuthenticatedSettingsSkillsRoute =
   AuthenticatedSettingsSkillsRouteImport.update({
     id: '/skills',
