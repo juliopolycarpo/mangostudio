@@ -15,7 +15,7 @@ const harnessMatchMedia = globalThis.matchMedia;
 function stubReducedMotion(initialMatches: boolean) {
   const listeners = new Set<() => void>();
   let matches = initialMatches;
-  globalThis.matchMedia = jest.fn().mockImplementation((query: string) => ({
+  const matchMedia = jest.fn().mockImplementation((query: string) => ({
     get matches() {
       return matches;
     },
@@ -26,9 +26,11 @@ function stubReducedMotion(initialMatches: boolean) {
     addEventListener: (_event: string, listener: () => void) => listeners.add(listener),
     removeEventListener: (_event: string, listener: () => void) => listeners.delete(listener),
     dispatchEvent: jest.fn(),
-  })) as unknown as typeof globalThis.matchMedia;
+  }));
+  globalThis.matchMedia = matchMedia as unknown as typeof globalThis.matchMedia;
 
   return {
+    matchMedia,
     flip(next: boolean) {
       matches = next;
       for (const listener of listeners) listener();
@@ -53,6 +55,18 @@ describe('useMotionPresets', () => {
     const first = result.current;
     rerender();
     expect(result.current).toBe(first);
+  });
+
+  it('opens one MediaQueryList for the whole app, however many callers there are', () => {
+    // `getSnapshot` runs on every render of every subscriber, and the chat route
+    // re-renders per streamed token. A live query per call would be a live query
+    // per card and popover on screen.
+    const query = stubReducedMotion(false);
+    const first = renderHook(() => useMotionPresets());
+    renderHook(() => useMotionPresets());
+    first.rerender();
+
+    expect(query.matchMedia).toHaveBeenCalledTimes(1);
   });
 
   it('switches presets when the OS preference flips while mounted', () => {
