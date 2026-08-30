@@ -12,7 +12,6 @@ import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents'
 import { motion } from 'motion/react';
 import { ACTIVITY_STRIP_ROWS, ActivityCard } from '@/features/activity/ActivityCard';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
-import { CARD_ENTER, CARD_REST } from '@/lib/motion/variants';
 import { AgentsCard } from './widgets/AgentsCard';
 import { EnvironmentHealthCard } from './widgets/EnvironmentHealthCard';
 import { GreetingHeader } from './widgets/GreetingHeader';
@@ -62,12 +61,7 @@ export function WorkspaceHub({
 
         {/* Drives the `SectionCard` each of these renders through, via motion's
             variant context — the cards need no prop and no index. */}
-        <motion.div
-          variants={cardGrid}
-          initial={CARD_REST}
-          animate={CARD_ENTER}
-          className="grid grid-cols-1 gap-3 sm:grid-cols-2"
-        >
+        <motion.div {...cardGrid} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {chatId ? (
             <WorkspaceCard chatId={chatId} workdir={workdir} onChooseWorkdir={onChooseWorkdir} />
           ) : null}

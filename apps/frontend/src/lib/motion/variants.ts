@@ -121,13 +121,18 @@ function buildPresets(reduced: boolean) {
       transition: { duration, ease },
     },
 
-    /** Container variants for a card grid. Drives `cardItem` on every
-     *  descendant card through context — see `CARD_REST`. */
+    /** Container preset for a card grid: spread it onto the `motion.div` that
+     *  wraps a row of `SectionCard`s. Drives `cardItem` on every descendant
+     *  card through context — see `CARD_REST`. */
     cardGrid: {
-      [CARD_REST]: {},
-      [CARD_ENTER]: {
-        transition: { delayChildren: reduced ? 0 : staggerBy(CARD_STAGGER_STEP) },
+      variants: {
+        [CARD_REST]: {},
+        [CARD_ENTER]: {
+          transition: { delayChildren: reduced ? 0 : staggerBy(CARD_STAGGER_STEP) },
+        },
       },
+      initial: CARD_REST,
+      animate: CARD_ENTER,
     },
 
     /** Item variants for one card inside a `cardGrid`. */

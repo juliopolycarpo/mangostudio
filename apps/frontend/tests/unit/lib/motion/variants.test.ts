@@ -104,12 +104,17 @@ describe('motionPresets', () => {
 
 describe('card grid variants', () => {
   it('staggers children when motion is allowed', () => {
-    const delay = MOVING.cardGrid[CARD_ENTER].transition.delayChildren;
+    const delay = MOVING.cardGrid.variants[CARD_ENTER].transition.delayChildren;
     expect(typeof delay).toBe('function');
   });
 
   it('drops the stagger to a flat zero when motion is reduced', () => {
-    expect(STILL.cardGrid[CARD_ENTER].transition.delayChildren).toBe(0);
+    expect(STILL.cardGrid.variants[CARD_ENTER].transition.delayChildren).toBe(0);
+  });
+
+  it('drives its own variants through initial/animate, so a consumer only spreads it', () => {
+    expect(MOVING.cardGrid.initial).toBe(CARD_REST);
+    expect(MOVING.cardGrid.animate).toBe(CARD_ENTER);
   });
 
   it('names its labels distinctly, so an unrelated ancestor cannot drive it', () => {

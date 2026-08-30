@@ -26,7 +26,6 @@ import { motion } from 'motion/react';
 import { ACTIVITY_PANEL_ROWS, ActivityCard } from '@/features/activity/ActivityCard';
 import { useI18n } from '@/hooks/use-i18n';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
-import { CARD_ENTER, CARD_REST } from '@/lib/motion/variants';
 import { AgentsCard } from './widgets/AgentsCard';
 import { EnvironmentHealthCard } from './widgets/EnvironmentHealthCard';
 import { GithubInboxCard } from './widgets/GithubInboxCard';
@@ -74,12 +73,7 @@ export function HomePage({
         {/* Drives every `SectionCard` below through motion's variant context,
             which reaches them past these two plain column wrappers — the cards
             take no prop and no index for it. */}
-        <motion.div
-          variants={cardGrid}
-          initial={CARD_REST}
-          animate={CARD_ENTER}
-          className="grid grid-cols-1 gap-4 lg:grid-cols-12"
-        >
+        <motion.div {...cardGrid} className="grid grid-cols-1 gap-4 lg:grid-cols-12">
           <div className="flex flex-col gap-4 lg:col-span-8">
             <WorkspacesGrid
               recentWorkdirs={recentWorkdirs}
