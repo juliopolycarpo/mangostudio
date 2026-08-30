@@ -39,7 +39,7 @@ const mockGet = jest.fn();
 mock.module('../../../src/lib/api-client', () => ({
   client: {
     api: { chats: Object.assign(jest.fn(), { get: mockGet }) },
-  } as unknown as typeof ApiClient,
+  } as unknown as typeof ApiClient.client,
 }));
 
 // Static imports are evaluated before any statement above runs, so the module
