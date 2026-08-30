@@ -13,7 +13,6 @@ import { routerWithLinkStub } from '../../support/mocks/router';
 mock.module('@tanstack/react-router', await routerWithLinkStub());
 
 const { PromptSettings } = await import('../../../src/components/settings/PromptSettings');
-const { SettingsTabs } = await import('../../../src/components/settings/SettingsTabs');
 
 function createDefaultProps() {
   return {
@@ -80,16 +79,5 @@ describe('Settings Prompts Page — Integration', () => {
 
     const radiogroups = screen.getAllByRole('radiogroup');
     expect(radiogroups.length).toBeGreaterThanOrEqual(4); // 2 fixed rules × 2 groups each
-  });
-});
-
-describe('SettingsTabs includes Prompts', () => {
-  it('renders a Prompts tab linking to /settings/prompts', () => {
-    render(<SettingsTabs />);
-
-    expect(screen.getByRole('link', { name: 'Prompts' })).toHaveAttribute(
-      'href',
-      '/settings/prompts'
-    );
   });
 });

@@ -18,7 +18,6 @@ mock.module(
 // After the mock, never before: a static import is evaluated first and would
 // bind SettingsTabs to the real router.
 const { AppearanceSettings } = await import('../../../src/components/settings/AppearanceSettings');
-const { SettingsTabs } = await import('../../../src/components/settings/SettingsTabs');
 const { useTheme } = await import('../../../src/hooks/use-theme');
 
 describe('AppearanceSettings', () => {
@@ -234,15 +233,6 @@ describe('useTheme hook', () => {
       string
     >;
     expect(stored.appTheme).toBe('light');
-  });
-});
-
-describe('SettingsTabs — appearance tab present', () => {
-  it('renders an Appearance tab link', () => {
-    render(<SettingsTabs />);
-    const links = screen.getAllByRole('link');
-    const appearanceLink = links.find((l) => l.textContent?.toLowerCase().includes('appearance'));
-    expect(appearanceLink).toBeTruthy();
   });
 });
 

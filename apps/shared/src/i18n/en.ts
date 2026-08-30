@@ -511,6 +511,13 @@ export const messages: Messages = {
       errorToast: 'Could not save settings.',
       errorRevertedToast: 'Could not save settings. Your last change was reverted.',
     },
+    groups: {
+      general: 'General',
+      models: 'Models & providers',
+      agents: 'Agents & tools',
+      integrations: 'Integrations',
+      observability: 'Observability',
+    },
     tabs: {
       general: 'General',
       connectors: 'Connectors',

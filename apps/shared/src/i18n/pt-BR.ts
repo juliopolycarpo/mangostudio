@@ -511,6 +511,13 @@ export const messages = {
       errorRevertedToast:
         'Não foi possível salvar as configurações. Sua última alteração foi revertida.',
     },
+    groups: {
+      general: 'Geral',
+      models: 'Modelos e provedores',
+      agents: 'Agentes e ferramentas',
+      integrations: 'Integrações',
+      observability: 'Observabilidade',
+    },
     tabs: {
       general: 'Geral',
       connectors: 'Conectores',

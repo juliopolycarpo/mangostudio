@@ -8,7 +8,6 @@ mock.module('@tanstack/react-router', await routerWithLinkStub());
 // After the mock, never before: a static import is evaluated first and would
 // bind SettingsTabs to the real router.
 const { ContextSettings } = await import('../../../src/components/settings/ContextSettings');
-const { SettingsTabs } = await import('../../../src/components/settings/SettingsTabs');
 const { DEFAULT_CONTEXT_SETTINGS } = await import('../../../src/hooks/use-global-settings');
 
 function renderSettings(overrides: Partial<React.ComponentProps<typeof ContextSettings>> = {}) {
@@ -60,16 +59,5 @@ describe('ContextSettings', () => {
     fireEvent.click(screen.getByLabelText('Allow provider-side compaction'));
 
     expect(props.setProviderCompactionEnabled).toHaveBeenCalledWith(false);
-  });
-});
-
-describe('SettingsTabs', () => {
-  it('renders a context tab link', () => {
-    render(<SettingsTabs />);
-
-    expect(screen.getByRole('link', { name: 'Context' })).toHaveAttribute(
-      'href',
-      '/settings/context'
-    );
   });
 });

@@ -1,7 +1,7 @@
 import { createFileRoute, Outlet } from '@tanstack/react-router';
 import { Settings } from 'lucide-react';
+import { SettingsNav } from '@/components/settings/SettingsNav';
 import { SettingsSaveIndicator } from '@/components/settings/SettingsSaveIndicator';
-import { SettingsTabs } from '@/components/settings/SettingsTabs';
 import { useSettingsRealtimeInvalidation } from '@/features/settings/hooks/use-settings-realtime';
 import { useI18n } from '@/hooks/use-i18n';
 
@@ -25,8 +25,14 @@ function SettingsLayout() {
           </h1>
           <SettingsSaveIndicator />
         </div>
-        <SettingsTabs />
-        <Outlet />
+        {/* The nav is a column beside the content once there is width for it,
+            and stacks above it below `lg`, where it collapses itself. */}
+        <div className="grid gap-4 sm:gap-6 lg:grid-cols-[13rem_minmax(0,1fr)] lg:gap-8">
+          <SettingsNav />
+          <div className="min-w-0">
+            <Outlet />
+          </div>
+        </div>
       </div>
     </div>
   );
