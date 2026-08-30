@@ -492,7 +492,22 @@ export const messages: Messages = {
 
   studio: {
     title: 'Studio',
-    empty: 'Image creation workspace — coming soon.',
+    subtitle: 'Make images, and look back at the ones that came out of here.',
+    generate: {
+      label: 'Create images',
+      description: 'Opens the chat with the image tool already on. Describe what you want.',
+      action: 'Start in chat',
+    },
+    gallery: {
+      label: 'Gallery',
+      description: 'Everything this workspace has generated, newest first.',
+      action: 'Open gallery',
+    },
+    recent: {
+      label: 'Recent',
+      empty: 'Nothing generated yet.',
+      viewAll: 'View all',
+    },
   },
 
   gallery: {

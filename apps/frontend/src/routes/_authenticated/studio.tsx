@@ -1,21 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { Image } from 'lucide-react';
-import { useI18n } from '@/hooks/use-i18n';
+import { galleryListQueryOptions } from '@/features/gallery/queries';
+import { StudioPage } from '@/features/studio/StudioPage';
 
 export const Route = createFileRoute('/_authenticated/studio')({
+  // The recent strip's page, prefetched into the same cache `/gallery` reads,
+  // so moving between the two costs nothing either way.
+  loader: ({ context: { queryClient } }) =>
+    queryClient.prefetchInfiniteQuery(galleryListQueryOptions()),
   component: StudioPage,
 });
-
-export function StudioPage() {
-  const { t } = useI18n();
-
-  return (
-    <div className="flex flex-col items-center justify-center h-full gap-4 px-4">
-      <div className="rounded-full bg-surface-container-high p-4">
-        <Image size={32} className="text-primary" />
-      </div>
-      <h1 className="text-xl font-semibold text-on-surface">{t.studio.title}</h1>
-      <p className="text-sm text-on-surface-variant text-center max-w-sm">{t.studio.empty}</p>
-    </div>
-  );
-}

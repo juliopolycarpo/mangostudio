@@ -1,11 +1,11 @@
 import type { GalleryItem } from '@mangostudio/shared';
-import { Download, LayoutGrid, Loader2, Maximize2, X } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
+import { LayoutGrid, Loader2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useI18n } from '@/hooks/use-i18n';
-import { buildGeneratedImageFilename } from '@/lib/download-filenames';
+import { GalleryLightbox } from './components/GalleryLightbox';
+import { GalleryTile } from './components/GalleryTile';
 import { useGalleryQuery } from './queries';
 
 export function GalleryPage() {
@@ -61,46 +61,7 @@ export function GalleryPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-12">
           {items.map((item) => (
-            <div
-              key={item.id}
-              className="group relative aspect-square rounded-2xl overflow-hidden bg-surface-container-high border border-outline-variant/20 shadow-sm hover:shadow-xl transition-all duration-300"
-            >
-              <img
-                src={item.imageUrl}
-                alt={item.prompt}
-                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                referrerPolicy="no-referrer"
-                loading="lazy"
-                decoding="async"
-              />
-
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-4">
-                <p className="text-white text-sm line-clamp-3 font-medium mb-3 drop-shadow-md">
-                  {item.prompt}
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedImage(item)}
-                    className="p-2 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-lg text-white transition-colors flex-1 flex items-center justify-center gap-2"
-                  >
-                    <Maximize2 size={16} />
-                    <span className="text-xs font-bold uppercase tracking-wider">
-                      {t.gallery.view}
-                    </span>
-                  </button>
-                  <a
-                    href={item.imageUrl}
-                    download={buildGeneratedImageFilename(t.common.downloadFilenamePrefix, item.id)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="p-2 bg-primary hover:bg-primary/90 rounded-lg text-on-primary transition-colors flex items-center justify-center"
-                  >
-                    <Download size={16} />
-                  </a>
-                </div>
-              </div>
-            </div>
+            <GalleryTile key={item.id} item={item} onView={setSelectedImage} />
           ))}
 
           <div ref={loadMoreRef} className="col-span-full h-10 flex justify-center items-center">
@@ -109,56 +70,7 @@ export function GalleryPage() {
         </div>
       )}
 
-      <AnimatePresence>
-        {selectedImage && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8 bg-black/90 backdrop-blur-sm"
-            onClick={() => setSelectedImage(null)}
-          >
-            <button
-              type="button"
-              className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
-              onClick={() => setSelectedImage(null)}
-            >
-              <X size={24} />
-            </button>
-
-            <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              className="relative max-w-5xl w-full max-h-full flex flex-col items-center"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <img
-                src={selectedImage.imageUrl}
-                alt={selectedImage.prompt}
-                className="max-w-full max-h-[75vh] object-contain rounded-lg shadow-2xl"
-                referrerPolicy="no-referrer"
-              />
-              <div className="mt-6 p-4 bg-surface-container-highest/80 backdrop-blur-md rounded-xl max-w-2xl w-full text-center border border-outline-variant/20">
-                <p className="text-on-surface font-medium">{selectedImage.prompt}</p>
-                <a
-                  href={selectedImage.imageUrl}
-                  download={buildGeneratedImageFilename(
-                    t.common.downloadFilenamePrefix,
-                    selectedImage.id
-                  )}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-full text-sm font-bold hover:bg-primary/90 transition-colors"
-                >
-                  <Download size={16} />
-                  {t.gallery.download}
-                </a>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <GalleryLightbox item={selectedImage} onClose={() => setSelectedImage(null)} />
     </div>
   );
 }

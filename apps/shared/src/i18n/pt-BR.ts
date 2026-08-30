@@ -491,7 +491,22 @@ export const messages = {
 
   studio: {
     title: 'Studio',
-    empty: 'Espaço de criação de imagens — em breve.',
+    subtitle: 'Crie imagens e reveja o que já saiu daqui.',
+    generate: {
+      label: 'Criar imagens',
+      description: 'Abre o chat com a ferramenta de imagem já ligada. Descreva o que você quer.',
+      action: 'Começar no chat',
+    },
+    gallery: {
+      label: 'Galeria',
+      description: 'Tudo que este espaço já gerou, do mais recente ao mais antigo.',
+      action: 'Abrir galeria',
+    },
+    recent: {
+      label: 'Recentes',
+      empty: 'Nada gerado ainda.',
+      viewAll: 'Ver tudo',
+    },
   },
 
   gallery: {
