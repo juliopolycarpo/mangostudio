@@ -505,6 +505,7 @@ export const messages = {
     recent: {
       label: 'Recentes',
       empty: 'Nada gerado ainda.',
+      error: 'Não foi possível carregar as imagens recentes.',
       viewAll: 'Ver tudo',
     },
   },

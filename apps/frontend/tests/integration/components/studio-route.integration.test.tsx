@@ -6,7 +6,7 @@
  * a second copy of the gallery's pagination tests.
  */
 
-import { describe, expect, it, jest, mock } from 'bun:test';
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { GalleryItem } from '@mangostudio/shared';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -14,8 +14,10 @@ import { AppContext } from '../../../src/lib/app-context';
 import { render } from '../../support/harness/render';
 import { routerWithLinkStub } from '../../support/mocks/router';
 
+type GalleryStatus = 'pending' | 'error' | 'success';
+
 const navigateMock = jest.fn();
-const galleryState = { items: [] as GalleryItem[], status: 'success' as 'pending' | 'success' };
+const galleryState = { items: [] as GalleryItem[], status: 'success' as GalleryStatus };
 
 // The module under test is imported afterwards so it binds to the mocks rather
 // than to the originals: `mock.module` is not hoisted and static imports are.
@@ -37,6 +39,16 @@ mock.module('../../../src/features/gallery/queries', () => ({
 const { StudioPage } = await import('../../../src/features/studio/StudioPage');
 
 const setImageToolIntent = jest.fn();
+
+// The fake query reads module state, so a case that leaves images or a status
+// behind decides what the next one renders. Reset rather than depend on the
+// order the runner happens to pick.
+beforeEach(() => {
+  galleryState.items = [];
+  galleryState.status = 'success';
+  setImageToolIntent.mockReset();
+  navigateMock.mockReset();
+});
 
 function renderStudio() {
   return render(
@@ -66,8 +78,6 @@ describe('Studio landing', () => {
 
   it('hands the composer over with the image tool already on', async () => {
     const user = userEvent.setup();
-    setImageToolIntent.mockReset();
-    navigateMock.mockReset();
     renderStudio();
 
     await user.click(screen.getByRole('button', { name: /start in chat/i }));
@@ -83,11 +93,27 @@ describe('Studio landing', () => {
   });
 
   it('says so plainly when nothing has been generated', () => {
-    galleryState.items = [];
     renderStudio();
 
     expect(screen.getByText(/nothing generated yet/i)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /view all/i })).not.toBeInTheDocument();
+  });
+
+  // An unreachable gallery is not an empty one: reporting the failure as
+  // "nothing generated yet" tells the user their work is gone.
+  it('distinguishes a failed load from an empty gallery', () => {
+    galleryState.status = 'error';
+    renderStudio();
+
+    expect(screen.getByText(/could not load recent images/i)).toBeInTheDocument();
+    expect(screen.queryByText(/nothing generated yet/i)).not.toBeInTheDocument();
+  });
+
+  it('holds the strip while the first page is in flight', () => {
+    galleryState.status = 'pending';
+    renderStudio();
+
+    expect(screen.queryByText(/nothing generated yet/i)).not.toBeInTheDocument();
   });
 
   it('shows the newest images only, not the whole first page', () => {

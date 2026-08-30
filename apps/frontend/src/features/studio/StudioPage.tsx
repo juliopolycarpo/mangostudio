@@ -128,25 +128,61 @@ function RecentImages({ onView }: { onView: (item: GalleryItem) => void }) {
         ) : null
       }
     >
-      {status === 'pending' ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {Array.from({ length: RECENT_LIMIT }, (_, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder list
-            <Skeleton key={index} className="aspect-square rounded-2xl" />
-          ))}
-        </div>
-      ) : items.length === 0 ? (
-        <EmptyState
-          icon={<Image size={32} className="opacity-50" />}
-          title={t.studio.recent.empty}
-        />
-      ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {items.map((item) => (
-            <GalleryTile key={item.id} item={item} onView={onView} />
-          ))}
-        </div>
-      )}
+      <RecentStrip status={status} items={items} onView={onView} />
     </SectionCard>
+  );
+}
+
+/**
+ * The strip's four states, each said out loud.
+ *
+ * A failed request is its own answer and not the empty one: reporting an
+ * unreachable gallery as "nothing generated yet" tells the user their work is
+ * gone when it is only out of reach.
+ */
+function RecentStrip({
+  status,
+  items,
+  onView,
+}: {
+  status: ReturnType<typeof useGalleryQuery>['status'];
+  items: readonly GalleryItem[];
+  onView: (item: GalleryItem) => void;
+}) {
+  const { t } = useI18n();
+
+  if (status === 'pending') {
+    return (
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {Array.from({ length: RECENT_LIMIT }, (_, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder list
+          <Skeleton key={index} className="aspect-square rounded-2xl" />
+        ))}
+      </div>
+    );
+  }
+
+  if (status === 'error') {
+    return (
+      <EmptyState
+        icon={<Image size={32} className="opacity-50" />}
+        title={t.studio.recent.error}
+        tone="error"
+      />
+    );
+  }
+
+  if (items.length === 0) {
+    return (
+      <EmptyState icon={<Image size={32} className="opacity-50" />} title={t.studio.recent.empty} />
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {items.map((item) => (
+        <GalleryTile key={item.id} item={item} onView={onView} />
+      ))}
+    </div>
   );
 }
