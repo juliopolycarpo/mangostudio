@@ -23,7 +23,9 @@
 
 import { Check, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useId } from 'react';
+import { useEffect, useId, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { useAnchoredPosition } from '@/hooks/use-anchored-position';
 import { type ListboxOption, useListboxSelect } from '@/hooks/use-listbox-select';
 import { cn } from '@/lib/utils';
 
@@ -50,6 +52,9 @@ interface SelectProps {
 const TRIGGER =
   'flex w-full items-center justify-between gap-2 rounded-xl px-4 py-2.5 text-sm text-left bg-surface-container-lowest text-on-surface border border-outline-variant/20 transition-colors cursor-pointer hover:border-outline-variant/40 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 aria-expanded:border-primary/60';
 
+/** The `max-h-[16rem]` the panel used to carry, now a number the anchor needs. */
+const PANEL_MAX_HEIGHT = 256;
+
 export function Select({
   value,
   options,
@@ -62,16 +67,19 @@ export function Select({
   testId,
 }: SelectProps) {
   const listId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const {
     open,
     setOpen,
     activeIndex,
     setActiveIndex,
     containerRef,
+    panelRef,
     selected,
     commit,
     handleKeyDown,
   } = useListboxSelect({ value, options, onChange, disabled });
+  const position = useAnchoredPosition(triggerRef, open, PANEL_MAX_HEIGHT);
 
   // Focus never leaves the trigger, so nothing scrolls the panel on its own:
   // past the sixth row of a capped list the cursor moves and the page does
@@ -93,6 +101,7 @@ export function Select({
       data-testid={testId}
     >
       <button
+        ref={triggerRef}
         type="button"
         id={id}
         role="combobox"
@@ -119,66 +128,80 @@ export function Select({
         />
       </button>
 
-      <AnimatePresence>
-        {open ? (
-          <motion.div
-            initial={{ opacity: 0, y: -6, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -6, scale: 0.98 }}
-            transition={{ duration: 0.15, ease: 'easeOut' }}
-            // Downward, unlike `ChipSelect`: these sit in the body of a page,
-            // not on the strip pinned to the bottom of the viewport.
-            className="app-scrollbar dropdown-panel absolute left-0 right-0 top-full z-50 mt-2 max-h-[16rem] overflow-y-auto py-1"
-          >
-            <div id={listId} role="listbox" aria-label={ariaLabel}>
-              {options.map((option, index) => {
-                const isSelected = option.value === value;
-                return (
-                  <button
-                    key={option.value}
-                    id={`${listId}-${index}`}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    // Focus stays on the trigger and the cursor travels by
-                    // `aria-activedescendant`, so the options must not also be
-                    // their own tab stops.
-                    tabIndex={-1}
-                    disabled={option.disabled}
-                    onClick={() => commit(option)}
-                    onMouseEnter={() => setActiveIndex(index)}
-                    className={cn(
-                      'flex w-full items-start justify-between gap-2 px-4 py-2 text-left text-sm transition-colors',
-                      'disabled:cursor-not-allowed disabled:opacity-40',
-                      index === activeIndex && !option.disabled && 'bg-primary/10',
-                      isSelected && 'bg-primary/5'
-                    )}
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span
-                        className={cn(
-                          'block truncate',
-                          isSelected ? 'font-medium text-primary' : 'text-on-surface'
-                        )}
-                      >
-                        {option.label}
-                      </span>
-                      {option.description ? (
-                        <span className="mt-0.5 block text-xs leading-relaxed text-on-surface-variant/80">
-                          {option.description}
+      {createPortal(
+        <AnimatePresence>
+          {open && position ? (
+            <motion.div
+              ref={panelRef}
+              initial={{ opacity: 0, y: -6, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -6, scale: 0.98 }}
+              transition={{ duration: 0.15, ease: 'easeOut' }}
+              // Placed by hand in `document.body` rather than `absolute` in the
+              // wrapper: these sit inside dialogs and panes that scroll, and an
+              // absolute panel is clipped by them — which is the one thing the
+              // platform popup this replaced never suffered from. Stacked above
+              // the dialog (`z-50`) and palette (`z-[60]`) layers it opens over.
+              style={{
+                position: 'fixed',
+                top: position.top,
+                left: position.left,
+                width: position.width,
+                maxHeight: position.maxHeight,
+              }}
+              className="app-scrollbar dropdown-panel z-[70] overflow-y-auto py-1"
+            >
+              <div id={listId} role="listbox" aria-label={ariaLabel}>
+                {options.map((option, index) => {
+                  const isSelected = option.value === value;
+                  return (
+                    <button
+                      key={option.value}
+                      id={`${listId}-${index}`}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      // Focus stays on the trigger and the cursor travels by
+                      // `aria-activedescendant`, so the options must not also be
+                      // their own tab stops.
+                      tabIndex={-1}
+                      disabled={option.disabled}
+                      onClick={() => commit(option)}
+                      onMouseEnter={() => setActiveIndex(index)}
+                      className={cn(
+                        'flex w-full items-start justify-between gap-2 px-4 py-2 text-left text-sm transition-colors',
+                        'disabled:cursor-not-allowed disabled:opacity-40',
+                        index === activeIndex && !option.disabled && 'bg-primary/10',
+                        isSelected && 'bg-primary/5'
+                      )}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span
+                          className={cn(
+                            'block truncate',
+                            isSelected ? 'font-medium text-primary' : 'text-on-surface'
+                          )}
+                        >
+                          {option.label}
                         </span>
+                        {option.description ? (
+                          <span className="mt-0.5 block text-xs leading-relaxed text-on-surface-variant/80">
+                            {option.description}
+                          </span>
+                        ) : null}
+                      </span>
+                      {isSelected ? (
+                        <Check size={14} className="mt-0.5 shrink-0 text-primary" />
                       ) : null}
-                    </span>
-                    {isSelected ? (
-                      <Check size={14} className="mt-0.5 shrink-0 text-primary" />
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 }

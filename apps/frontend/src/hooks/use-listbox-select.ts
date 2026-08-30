@@ -45,6 +45,12 @@ export interface ListboxSelect<Option extends ListboxOption> {
   readonly setActiveIndex: Dispatch<SetStateAction<number>>;
   /** Attach to the element wrapping trigger and panel — closes on outside click. */
   readonly containerRef: React.RefObject<HTMLDivElement | null>;
+  /**
+   * Attach to a panel rendered outside `containerRef` — a portal, say — so a
+   * click on one of its rows still counts as inside. Leave unattached when the
+   * panel is a descendant of the container.
+   */
+  readonly panelRef: React.RefObject<HTMLDivElement | null>;
   readonly selected: Option | undefined;
   readonly commit: (option: Option) => void;
   readonly handleKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
@@ -59,6 +65,7 @@ export function useListboxSelect<Option extends ListboxOption>({
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const selected = options.find((option) => option.value === value);
   const selectedIndex = options.findIndex((option) => option.value === value);
@@ -66,7 +73,12 @@ export function useListboxSelect<Option extends ListboxOption>({
   useEffect(() => {
     if (!open) return;
     function handlePointerDown(event: MouseEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      // A portaled panel is not a descendant of the container, so without the
+      // second test the press that chooses a row would close the list before
+      // the click that commits it ever lands.
+      if (containerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
@@ -152,6 +164,7 @@ export function useListboxSelect<Option extends ListboxOption>({
     activeIndex,
     setActiveIndex,
     containerRef,
+    panelRef,
     selected,
     commit,
     handleKeyDown,

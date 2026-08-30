@@ -65,6 +65,35 @@ describe('Select', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  // Placed `absolute` in the wrapper, the panel is clipped by any ancestor that
+  // scrolls — and these live inside dialogs that do. It has to leave the
+  // subtree entirely, which is what the platform popup did for free.
+  it('renders the panel outside the wrapper, where no scroll container clips it', () => {
+    const { container } = render(
+      <Select value="ask" options={OPTIONS} onChange={jest.fn()} ariaLabel="Behaviour" />
+    );
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Behaviour' }));
+
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+    expect(container.querySelector('[role="listbox"]')).toBeNull();
+  });
+
+  // The press that chooses a row now lands outside the wrapper, so the
+  // dismiss-on-outside-press teardown would close the list before the click
+  // that commits it ever arrived.
+  it('commits a row pressed in the panel rather than treating it as an outside press', () => {
+    const onChange = jest.fn();
+    render(<Select value="ask" options={OPTIONS} onChange={onChange} ariaLabel="Behaviour" />);
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Behaviour' }));
+    const option = screen.getByRole('option', { name: /Compact automatically/ });
+    fireEvent.mouseDown(option);
+    fireEvent.click(option);
+
+    expect(onChange).toHaveBeenCalledWith('auto');
+  });
+
   // The panel is anchored to a trigger the user has left; left open it floats
   // over the page with `aria-activedescendant` pointing at a row out of reach.
   it('closes when focus tabs away from the trigger', () => {
