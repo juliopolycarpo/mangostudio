@@ -98,6 +98,21 @@ export function claudeActivityKind(toolName: string): ExternalActivityKind {
   }
 }
 
+/** The delta event a `text` or `thinking` block replays as, or `undefined` for neither. */
+function undeliveredEventFor(block: ClaudeContentBlock): ExternalAgentEvent | undefined {
+  if (block.type === 'text' && typeof block.text === 'string' && block.text.length > 0) {
+    return { type: 'text_delta', text: block.text };
+  }
+  if (
+    block.type === 'thinking' &&
+    typeof block.thinking === 'string' &&
+    block.thinking.length > 0
+  ) {
+    return { type: 'reasoning_delta', text: block.thinking };
+  }
+  return undefined;
+}
+
 /** A one-line summary of a tool call's input, for the pill's title. */
 function summarizeToolInput(input: unknown): string {
   if (typeof input !== 'object' || input === null) return '';
@@ -333,15 +348,8 @@ export class ClaudeTurnReducer {
         continue;
       }
       if (undelivered) {
-        if (block.type === 'text' && typeof block.text === 'string' && block.text.length > 0) {
-          events.push({ type: 'text_delta', text: block.text });
-        } else if (
-          block.type === 'thinking' &&
-          typeof block.thinking === 'string' &&
-          block.thinking.length > 0
-        ) {
-          events.push({ type: 'reasoning_delta', text: block.thinking });
-        }
+        const event = undeliveredEventFor(block);
+        if (event) events.push(event);
         continue;
       }
       // Only under a call that is still open. A completed activity has been
@@ -558,13 +566,10 @@ function readResultError(record: ClaudeResultRecord): ExternalAgentError | undef
       ? `Claude Code ended the turn: ${terminalReason}.`
       : `Claude Code ended the turn with "${subtype}".`);
   const status = record.api_error_status;
+  const vendorCode = typeof status === 'number' ? String(status) : terminalReason;
   return {
     code: `claude-${subtype}`,
     message,
-    ...(typeof status === 'number'
-      ? { vendorCode: String(status) }
-      : terminalReason
-        ? { vendorCode: terminalReason }
-        : {}),
+    ...(vendorCode ? { vendorCode } : {}),
   };
 }
