@@ -176,7 +176,7 @@ function ThresholdControl({
           value={value}
           onChange={(event) => onChange(Number(event.target.value))}
           aria-label={label}
-          className="flex-1 h-2 bg-surface-container-lowest rounded-full appearance-none cursor-pointer accent-primary"
+          className="range-input flex-1"
         />
         <input
           type="number"

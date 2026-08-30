@@ -51,7 +51,7 @@ export function ToolSettingsSection({
               step={1}
               value={form.maxToolIterations ?? MAX_TOOL_ITERATIONS_DEFAULT}
               onChange={(e) => onChange({ ...form, maxToolIterations: Number(e.target.value) })}
-              className="flex-1 h-2 bg-surface-container-lowest rounded-full appearance-none cursor-pointer accent-primary"
+              className="range-input flex-1"
             />
             <input
               type="number"

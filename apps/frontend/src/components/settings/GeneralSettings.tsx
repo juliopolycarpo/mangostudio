@@ -421,7 +421,7 @@ export function GeneralSettings({
             value={multiAgentSettings.timeoutMs}
             onChange={(event) => setSubagentTimeoutMs(Number(event.target.value))}
             disabled={!multiAgentSettings.enabled}
-            className="w-full h-2 bg-surface-container-lowest rounded-full appearance-none cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+            className="range-input w-full"
           />
         </div>
       </Card>
@@ -518,7 +518,7 @@ export function GeneralSettings({
             value={chatTitleSettings.promptPrefixLength}
             onChange={(event) => setChatTitlePromptPrefixLength(Number(event.target.value))}
             disabled={!chatTitleSettings.autoRenameEnabled}
-            className="w-full h-2 bg-surface-container-lowest rounded-full appearance-none cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+            className="range-input w-full"
           />
         </div>
       </Card>
