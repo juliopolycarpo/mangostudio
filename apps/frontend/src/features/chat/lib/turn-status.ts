@@ -110,10 +110,13 @@ export function deriveTurnStatus(parts: readonly MessagePart[], isStreaming: boo
   const trailingIsRunningActivity =
     trailingPart?.type === 'external_activity' && trailingPart.status === 'running';
   const trailingAwaitsDecision = awaitsUserDecision(trailingPart);
+  const phase = derivePhase({ running, trailingAwaitsDecision, streamedInto });
   return {
-    phase: derivePhase({ running, trailingAwaitsDecision, streamedInto }),
+    phase,
     livePartIndex: streamedInto === null ? null : parts.length - 1,
-    showWorkingRow:
-      running && streamedInto === null && !trailingIsRunningActivity && !trailingAwaitsDecision,
+    // `phase === 'working'` is exactly `running && !trailingAwaitsDecision &&
+    // streamedInto === null` — the only remaining exclusion is the running
+    // activity, which `derivePhase` does not know about.
+    showWorkingRow: phase === 'working' && !trailingIsRunningActivity,
   };
 }
