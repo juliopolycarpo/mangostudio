@@ -107,13 +107,19 @@ async function realHarness() {
     newSessionId: () => 'session-1',
   });
   const approvals = createExternalApprovalRegistry();
+  // Fresh per test for the same reason {@link harness} builds one: the
+  // production default is a process-wide singleton, and letting this harness
+  // fall through to it would write one test's catalog where the next test's
+  // assertions can see it.
+  const commandCatalog = createExternalCommandCatalogCache();
   const ids = [userMessageId, assistantMessageId];
   const controller = createExternalTurnController({
     sessions,
     approvals,
+    commandCatalog,
     newId: () => ids.shift() ?? `id-${crypto.randomUUID()}`,
   });
-  return { runtime, sessions, approvals, controller };
+  return { runtime, sessions, approvals, commandCatalog, controller };
 }
 
 function startTurn(
