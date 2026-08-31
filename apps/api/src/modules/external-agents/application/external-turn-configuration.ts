@@ -73,6 +73,13 @@ export type ExternalTurnConfigurationResolution =
        * only the second has an operator action behind it.
        */
       readonly isolationUnproven?: true;
+      /**
+       * Set when nothing was refused so much as not yet answered: the
+       * discovery cache was cold, so this run has a placeholder descriptor
+       * rather than a finding. Retrying is the whole remedy, which is the one
+       * thing the configuration arm must not say.
+       */
+      readonly notReady?: true;
     };
 
 export interface ResolveExternalTurnConfigurationInput {
@@ -85,7 +92,7 @@ export interface ResolveExternalTurnConfigurationInput {
 
 export interface ExternalTurnConfigurationDependencies {
   /** Descriptors only: this resolver reads what the agent can do, never why. */
-  readonly discovery?: Pick<ExternalAgentDiscoveryService, 'listExternalAgents'>;
+  readonly discovery?: Pick<ExternalAgentDiscoveryService, 'describeExternalAgents'>;
   readonly resolveRuntimeClient?: typeof getRuntimeClient;
   readonly isolationRegistry?: ExternalIdentityIsolationRegistry;
 }
@@ -125,14 +132,18 @@ export function createExternalTurnConfigurationResolver(
       };
     }
 
-    const agents = await discovery.listExternalAgents({
+    // Described rather than listed, for the provenance flag: a descriptor the
+    // cheap pass produced carries no `supportedConfigurations` at all, and the
+    // pair check below cannot tell that from a vendor that answered and said no.
+    const agents = await discovery.describeExternalAgents({
       userId: input.userId,
       environmentId: input.chat.environmentId,
     });
-    const descriptor = agents.find((agent) => agent.targetId === input.targetId);
-    if (!descriptor) {
+    const found = agents.find((agent) => agent.descriptor.targetId === input.targetId);
+    if (!found) {
       return { ok: false, message: 'This agent is not available on that machine.' };
     }
+    const descriptor = found.descriptor;
     if (descriptor.unavailableReason) {
       return {
         ok: false,
@@ -142,6 +153,17 @@ export function createExternalTurnConfigurationResolver(
 
     const level = normalizePermissionLevel(input.chat.runnerPermissions.level).value;
     const routing = normalizeApprovalRouting(input.chat.runnerPermissions.routing).value;
+    // A cheap-pass descriptor has an empty `supportedConfigurations`, so the
+    // check below refuses every send against a cold cache — and told the user
+    // to change a permission setting, which fixes nothing. Nothing has been
+    // asked yet, and the remedy is to wait rather than to change anything.
+    if (!found.adapterAnswered) {
+      return {
+        ok: false,
+        notReady: true,
+        message: 'This agent has not finished reporting what it can do here yet. Try again.',
+      };
+    }
     if (!isSupportedPair(descriptor, level, routing)) {
       return {
         ok: false,

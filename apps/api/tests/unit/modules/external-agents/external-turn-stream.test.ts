@@ -92,6 +92,8 @@ function chatRecord(overrides: Partial<OwnedChatRecord> = {}): OwnedChatRecord {
 function harness(
   options: {
     readonly agents?: readonly ExternalAgentDescriptor[];
+    /** False for a cold discovery cache: descriptors are placeholders, not findings. */
+    readonly adapterAnswered?: boolean;
     /** Stands in for the runtime's `git rev-parse`; null is "not a repository". */
     readonly repoRoot?: (workdir: string) => string | null | Promise<string | null>;
     readonly repoRootFailure?: () => Error;
@@ -111,7 +113,15 @@ function harness(
   const resolveConfiguration = createExternalTurnConfigurationResolver({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
     discovery: {
-      listExternalAgents: () => Promise.resolve(options.agents ?? [descriptor()]),
+      // `adapterAnswered` unless a case says otherwise: every existing test here
+      // is about what a vendor that *did* answer supports, not about a cold cache.
+      describeExternalAgents: () =>
+        Promise.resolve(
+          (options.agents ?? [descriptor()]).map((agent) => ({
+            descriptor: agent,
+            adapterAnswered: options.adapterAnswered ?? true,
+          }))
+        ),
     },
   });
   const repoRootCalls: Array<{ workdir: string; selection: unknown }> = [];
@@ -605,6 +615,38 @@ describe('external turn stream', () => {
       getDb()
     );
     expect(result).toMatchObject({ ok: false, failure: { kind: 'unsupported' } });
+  });
+
+  /**
+   * A cold discovery cache serves a cheap-pass descriptor, whose
+   * `supportedConfigurations` is empty — so the pair check refuses every send
+   * and used to blame the chat's permission setting. Nothing was asked and
+   * nothing is wrong with the setting; the remedy is to try again once the
+   * authoritative pass lands, and telling the user to change something sends
+   * them to fix a setting that was never the problem.
+   */
+  it('says a send against a cold cache is not ready yet, not that the pair is unsupported', async () => {
+    // The cheap pass's own shape: a binary was found, and nothing has been
+    // asked what it will do, so the pair list is empty rather than restrictive.
+    const { stream } = harness({
+      adapterAnswered: false,
+      agents: [descriptor({ supportedConfigurations: [] })],
+    });
+    const result = await stream(
+      {
+        userId,
+        chat: chatRecord(),
+        chatId,
+        prompt: 'anything',
+        attachmentIds: [],
+        externalTurn: undefined,
+      },
+      getDb()
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.message).not.toContain('permission combination');
+    expect(result.failure.message).toContain('Try again');
   });
 
   it('refuses a second send while a turn is live', async () => {
