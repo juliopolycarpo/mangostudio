@@ -32,6 +32,7 @@ export function SubagentTracePart({ part }: SubagentTracePartProps) {
     <div className="max-w-2xl rounded-2xl border border-outline-variant/15 bg-surface-container-low text-sm text-on-surface">
       <button
         type="button"
+        aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
         className="flex w-full items-start gap-3 p-4 text-left"
       >

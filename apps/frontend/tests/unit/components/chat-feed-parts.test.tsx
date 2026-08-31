@@ -496,8 +496,12 @@ describe('ChatFeed — generated_image part rendering', () => {
     expect(screen.getByText('Subagent trace')).toBeInTheDocument();
     expect(screen.getByText('I used Explore.')).toBeInTheDocument();
 
+    // The disclosure state has to reach assistive technology, not just the chevron.
+    expect(screen.getByRole('button', { expanded: false })).toBeInTheDocument();
+
     fireEvent.click(screen.getByText('Explore'));
 
+    expect(screen.getByRole('button', { expanded: true })).toBeInTheDocument();
     expect(screen.getByText('Messages')).toBeInTheDocument();
     expect(screen.getByText('Tool calls')).toBeInTheDocument();
     expect(screen.getByText('read_file')).toBeInTheDocument();
