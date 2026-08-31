@@ -645,6 +645,10 @@ describe('external turn stream', () => {
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
+    // Not `unsupported`: that is the permission-pair refusal, and a cold cache
+    // was never asked what it supports. `unavailable` is the same kind the
+    // disclosure route already uses for this exact `!adapterAnswered` case.
+    expect(result.failure.kind).toBe('unavailable');
     expect(result.failure.message).not.toContain('permission combination');
     expect(result.failure.message).toContain('Try again');
   });
