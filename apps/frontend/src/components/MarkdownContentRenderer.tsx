@@ -151,7 +151,9 @@ function createRenderer(
 function renderLink({ href, title, tokens }: Parameters<Renderer['link']>[0]): string {
   const text =
     tokens
-      ?.map((token): string => escapeHtml('text' in token ? (token.text as string) : token.raw))
+      ?.map((token): string =>
+        escapeMarkdownText('text' in token ? (token.text as string) : token.raw)
+      )
       .join('') ?? '';
   const safeHref = safeMarkdownUrl(href);
   const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
@@ -330,6 +332,32 @@ function copyButton(ariaLabel: string): string {
 function escapeHtml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+/** An `&` the source did not already spend on an entity of its own. */
+const UNENCODED_AMPERSAND = /&(?!#?\w+;)/g;
+
+/**
+ * Escapes markup in text markdown handed over already-decoded, leaving an
+ * entity the source wrote alone.
+ *
+ * The strict `escapeHtml` is right for a value MangoStudio built — an href, a
+ * title, a code body. It is wrong for markdown's own text, which reaches the
+ * renderer with its entities intact: re-escaping the `&` in `&amp;` renders
+ * the entity rather than the character, so `[a &amp; b](…)` read `a &amp; b`
+ * on screen while the same source outside a link read `a & b`. `<`, `>`, `"`
+ * and `'` are still escaped unconditionally, so nothing here can open a tag;
+ * a decoded entity is a text node either way.
+ *
+ * Usage: escapeMarkdownText('a &amp; <b>') === 'a &amp; &lt;b&gt;'
+ */
+function escapeMarkdownText(value: string): string {
+  return value
+    .replace(UNENCODED_AMPERSAND, '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')

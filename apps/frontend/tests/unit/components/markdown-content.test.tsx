@@ -137,6 +137,18 @@ describe('MarkdownContent', () => {
     expect(container.querySelector('svg')).not.toBeInTheDocument();
   });
 
+  // Markdown hands the renderer text with its entities still written out, so
+  // escaping the `&` in `&amp;` a second time renders the entity instead of
+  // the character it stands for — a link label reading `a &amp; b` where the
+  // same source outside a link reads `a & b`.
+  it('leaves an entity the source already wrote intact in link text', () => {
+    const { container } = render(
+      <MarkdownContentRenderer content={'[a &amp; b](https://ok.example)'} />
+    );
+
+    expect(container.querySelector('a')).toHaveTextContent('a & b');
+  });
+
   it('escapes html inside a code span used as link text', () => {
     const { container } = render(
       <MarkdownContentRenderer content={'[`<b>ok</b>`](https://ok.example)'} />
