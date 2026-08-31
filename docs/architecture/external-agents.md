@@ -260,8 +260,8 @@ adapter opts in — a disclosure that cannot name what it covers is a dialog peo
 ## Vendor text is bounded
 
 Everything a vendor emits is text MangoStudio did not write, rendered in MangoStudio's UI and
-stored in MangoStudio's database. It passes through untranslated and is rendered as **plain text,
-never markdown or HTML**. Before an event is persisted or rendered, at the runtime boundary:
+stored in MangoStudio's database. It passes through untranslated. Before an event is persisted or
+rendered, at the runtime boundary:
 
 - C0 and C1 control characters are stripped, keeping only tab and newline.
 - Bidirectional overrides and isolates are stripped — they let a label render in an order its code
@@ -276,9 +276,18 @@ The limits live in `apps/shared/src/external-agents/vendor-text.ts`.
 The transcript keeps vendor prose in ordinary `text` and `thinking` parts, so a partial turn is
 still readable everywhere a message is. What marks it as vendor-authored is the message itself:
 an assistant message whose parts contain an `external_turn` record was produced by a vendor and
-by nothing else, and **that record is the discriminator a renderer keys off** to hold the
-plain-text rule above. There is no mixed message to disambiguate — a chat runs one kind of turn,
-and a MangoStudio turn never writes an `external_turn` part.
+by nothing else. There is no mixed message to disambiguate — a chat runs one kind of turn, and a
+MangoStudio turn never writes an `external_turn` part.
+
+Vendor prose renders **as markdown, through the same renderer as a MangoStudio turn's**. A vendor
+writes markdown because it assumes a terminal renders it, so rendering it literally showed `##`
+and `**` raw rather than hiding anything. The safety property is not the caller's choice of
+renderer, it is what the renderer emits: `MarkdownContentRenderer` escapes raw HTML instead of
+parsing it, resolves every link and image target through a scheme allowlist
+(`http`/`https`/`mailto`, everything else becomes `#`), escapes link *label* text so markup cannot
+be smuggled past a safe href, and downgrades an image to an anchor so no vendor-named URL is ever
+fetched. A renderer that leaked any of those would leak them for MangoStudio's own model output
+too — which is equally model-written — so the boundary belongs there and not at a per-caller flag.
 
 ## Credentials
 

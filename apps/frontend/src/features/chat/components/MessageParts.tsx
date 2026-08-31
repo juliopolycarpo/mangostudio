@@ -52,11 +52,6 @@ export function MessageParts({
   // The turn record is written first so nothing is ever a bare text blob with no
   // record of who produced it, but it *reads* as a summary, so it renders last.
   const externalTurn = useMemo(() => parts.find((part) => part.type === 'external_turn'), [parts]);
-  // The turn record is also the message-level marker for *who wrote the prose*.
-  // Every `text` and `thinking` part in a message carrying it came from a vendor
-  // process, and vendor text renders as plain text — markdown here would let a
-  // third party emit links, images and formatting into MangoStudio's own UI.
-  const vendorAuthored = externalTurn !== undefined;
   // Covers the gaps no vendor event describes: waiting on the API before the
   // first token, a long-running activity between updates, the turn between
   // two tool calls. Two trailing shapes already say enough on their own and
@@ -109,7 +104,6 @@ export function MessageParts({
                   messageId={blockId}
                   text={part.text}
                   isStreaming={isStreaming && idx === parts.length - 1}
-                  plainText={vendorAuthored}
                   incomplete={part.incomplete}
                 />
               );
@@ -196,21 +190,19 @@ export function MessageParts({
                   variant="block"
                 >
                   <div className="chat-message-body max-w-2xl font-body leading-relaxed text-on-surface">
-                    {vendorAuthored ? (
-                      <span
-                        data-vendor-text
-                        className={`block whitespace-pre-wrap break-words${isStreamingIntoPart ? ' streaming-caret' : ''}`}
-                      >
-                        {part.text}
-                      </span>
-                    ) : (
-                      <MarkdownContent
-                        content={part.text}
-                        isStreaming={isStreamingIntoPart}
-                        copyCodeLabel={t.chat.copyCode}
-                        codeCopiedLabel={t.chat.codeCopied}
-                      />
-                    )}
+                    {/* Vendor prose goes through the same renderer as a
+                        MangoStudio turn's. A vendor writes markdown because it
+                        assumes a terminal renders it, so plain text showed its
+                        `##` and `**` raw. The renderer — not the caller — is the
+                        trust boundary: raw html is escaped, link and image
+                        targets are scheme-checked, and an image is downgraded to
+                        an anchor, so no vendor markup reaches the DOM live. */}
+                    <MarkdownContent
+                      content={part.text}
+                      isStreaming={isStreamingIntoPart}
+                      copyCodeLabel={t.chat.copyCode}
+                      codeCopiedLabel={t.chat.codeCopied}
+                    />
                     {part.incomplete ? (
                       <span className="mt-1 block text-xs italic text-on-surface-variant/50">
                         {t.externalAgents.turn.incomplete}

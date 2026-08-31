@@ -1,7 +1,7 @@
 /**
  * What an external turn puts on screen, and — just as important — what it does
  * not: no re-run, no retry, no open-in-editor on a tool MangoStudio never ran,
- * and no markdown rendering of text a third-party process wrote.
+ * and no live markup from text a third-party process wrote.
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
@@ -286,29 +286,58 @@ describe('an unfinished section', () => {
 });
 
 describe('vendor prose', () => {
-  const HOSTILE_MARKDOWN = '# Not a heading\n[link](https://evil.example)';
+  const VENDOR_MARKDOWN = '# A heading\n\n**bold** and [link](https://ok.example)';
+  // Everything a renderer is asked to neutralize, in one blob: raw html, an
+  // unsafe scheme, an image that would otherwise fetch a remote pixel, and
+  // html smuggled into a link label.
+  const HOSTILE_MARKDOWN = [
+    '<img src=x onerror="alert(1)">',
+    '[js](javascript:alert(1))',
+    '![pixel](https://evil.example/p.png)',
+    '[label <svg onload="alert(1)">](https://ok.example)',
+  ].join('\n\n');
 
-  it('renders vendor prose literally', () => {
-    const { container } = renderParts([turnPart(), { type: 'text', text: HOSTILE_MARKDOWN }]);
-    expect(container.querySelectorAll('[data-vendor-text]')).toHaveLength(1);
-    expect(container.querySelector('a')).toBeNull();
-    expect(container.querySelector('h1')).toBeNull();
+  it('renders vendor prose as markdown, the same as a MangoStudio turn', async () => {
+    const { container } = renderParts([turnPart(), { type: 'text', text: VENDOR_MARKDOWN }]);
+
+    // The markdown renderer is lazy-loaded behind Suspense, whose fallback
+    // prints the source text — a synchronous query would read the fallback and
+    // pass against the very output this asserts on.
+    await screen.findByText('A heading');
+    expect(container.querySelector('h1')).toHaveTextContent('A heading');
+    expect(container.querySelector('strong')).toHaveTextContent('bold');
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('https://ok.example');
   });
 
-  it('renders vendor reasoning literally once its block is opened', () => {
-    const { container } = renderParts([turnPart(), { type: 'thinking', text: HOSTILE_MARKDOWN }]);
+  it('renders vendor reasoning as markdown once its block is opened', async () => {
+    const { container } = renderParts([turnPart(), { type: 'thinking', text: VENDOR_MARKDOWN }]);
     // The thinking block starts collapsed on a finished turn, so its body is not
     // in the document until it is opened.
     fireEvent.click(screen.getAllByRole('button')[0] as HTMLElement);
-    expect(container.querySelectorAll('[data-vendor-text]')).toHaveLength(1);
-    expect(container.querySelector('a')).toBeNull();
+
+    await screen.findByText('A heading');
+    expect(container.querySelector('h1')).toHaveTextContent('A heading');
+  });
+
+  it('keeps hostile vendor markup inert', async () => {
+    const { container } = renderParts([turnPart(), { type: 'text', text: HOSTILE_MARKDOWN }]);
+    await screen.findByText(/<img src=x/);
+
+    // Raw html is escaped rather than parsed, no scheme outside http(s)/mailto
+    // survives, and an image renders as a link instead of fetching anything.
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('svg')).toBeNull();
+    const hrefs = Array.from(container.querySelectorAll('a'), (a) => a.getAttribute('href'));
+    expect(hrefs).toContain('#');
+    expect(hrefs).not.toContain('javascript:alert(1)');
+    for (const anchor of container.querySelectorAll('a')) {
+      expect(anchor.getAttribute('rel')).toBe('noopener noreferrer');
+    }
   });
 
   it('leaves a MangoStudio turn on the markdown path', async () => {
-    const { container } = renderParts([{ type: 'text', text: HOSTILE_MARKDOWN }]);
-    // The lazy-loaded markdown renderer settles asynchronously; wait for its
-    // output before asserting on the vendor-text marker it never adds.
-    await screen.findByText('Not a heading');
-    expect(container.querySelector('[data-vendor-text]')).toBeNull();
+    const { container } = renderParts([{ type: 'text', text: VENDOR_MARKDOWN }]);
+    await screen.findByText('A heading');
+    expect(container.querySelector('h1')).toBeInTheDocument();
   });
 });
