@@ -1,5 +1,6 @@
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
+import { MessageBubble } from '../MessageBubble';
 
 interface AssistantProsePartProps {
   text: string;
@@ -10,14 +11,16 @@ interface AssistantProsePartProps {
 }
 
 /**
- * The prose an assistant turn wrote, rendered as markdown.
+ * The prose an assistant turn wrote, rendered as markdown in the same balloon a
+ * user's own message gets — the visible break between what the agent did and
+ * what it said.
  *
  * // Usage: <AssistantProsePart text={part.text} isStreaming={false} />
  */
 export function AssistantProsePart({ text, isStreaming, incomplete }: AssistantProsePartProps) {
   const { t } = useI18n();
   return (
-    <div className="chat-message-body max-w-2xl font-body leading-relaxed text-on-surface">
+    <MessageBubble className="max-w-2xl">
       {/* Vendor prose goes through the same renderer as a MangoStudio turn's. A
           vendor writes markdown because it assumes a terminal renders it, so
           plain text showed its `##` and `**` raw. The renderer — not the caller
@@ -35,6 +38,6 @@ export function AssistantProsePart({ text, isStreaming, incomplete }: AssistantP
           {t.externalAgents.turn.incomplete}
         </span>
       ) : null}
-    </div>
+    </MessageBubble>
   );
 }

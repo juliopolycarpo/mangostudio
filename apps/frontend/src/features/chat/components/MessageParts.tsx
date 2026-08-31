@@ -174,7 +174,7 @@ export function MessageParts({
                   // ordinal index is a valid identity. No part-level ID exists.
                   // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
                   key={`${messageId}-text-${idx}`}
-                  variant="block"
+                  variant="bubble"
                 >
                   <AssistantProsePart
                     text={part.text}

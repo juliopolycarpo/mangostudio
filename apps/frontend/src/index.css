@@ -890,6 +890,26 @@ pre:hover .copy-code-btn {
   content: none;
 }
 
+/* What the turn *said*, as opposed to what it did. It cuts the rail like a
+ * divider, but keeps block spacing so the balloon breathes against the steps
+ * above it. */
+.chat-timeline-item--bubble {
+  padding-left: 0;
+  padding-block: var(--timeline-block-gap);
+}
+
+.chat-timeline-item--bubble::before,
+.chat-timeline-item--bubble::after {
+  content: none;
+}
+
+/* Terminate the rail on the last *step*, not the last item: once an item that
+ * draws no rail is last, `:last-child` no longer clips anything and the final
+ * step's rail runs past its own dot as a dangling stub. */
+.chat-timeline-item:has(+ .chat-timeline-item--bubble, + .chat-timeline-item--divider)::before {
+  bottom: calc(100% - var(--timeline-dot-top));
+}
+
 @keyframes timeline-node-pulse {
   0%,
   100% {

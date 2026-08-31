@@ -67,6 +67,27 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(screen.getByText('The answer is 42.')).toBeInTheDocument();
   });
 
+  it('puts the assistant prose in a balloon off the rail, not on it', async () => {
+    const parts: MessagePart[] = [
+      { type: 'thinking', text: 'weighing it up' },
+      { type: 'tool_call', toolCallId: 'c1', name: 'Bash', args: {} },
+      { type: 'tool_result', toolCallId: 'c1', content: '{}' },
+      { type: 'text', text: 'Created /tmp/probe.txt.' },
+    ];
+    const msg = makeMessage({ parts });
+
+    const { container } = render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
+
+    // The prose item cuts the rail (`--bubble`) instead of hanging off it as
+    // one more step (`--block`), and it draws the same balloon a user gets.
+    const bubbleItems = container.querySelectorAll('.chat-timeline-item--bubble');
+    expect(bubbleItems).toHaveLength(1);
+    expect(bubbleItems[0]?.querySelector('.rounded-2xl.bg-surface-container-low')).not.toBeNull();
+    expect(screen.getByText('Created /tmp/probe.txt.')).toBeInTheDocument();
+  });
+
   it('renders multiple thinking blocks for multiple thinking parts', async () => {
     const parts: MessagePart[] = [
       { type: 'thinking', text: 'initial thinking' },

@@ -7,7 +7,7 @@ import type { ReactNode } from 'react';
  */
 export type TimelineTone = 'neutral' | 'muted' | 'active' | 'success' | 'error';
 
-type TimelineVariant = 'row' | 'block' | 'divider';
+type TimelineVariant = 'row' | 'block' | 'divider' | 'bubble';
 
 interface TimelineItemProps {
   children: ReactNode;
@@ -15,7 +15,9 @@ interface TimelineItemProps {
   /**
    * `row` is a single-line step (a tool call, a thought); `block` is prose or a
    * card; `divider` is a full-bleed marker that cuts the rail instead of
-   * hanging off it.
+   * hanging off it; `bubble` cuts the rail the same way a divider does but
+   * keeps block spacing, so what the turn *said* sits off the rail of what it
+   * *did*.
    */
   variant?: TimelineVariant;
 }
@@ -32,6 +34,7 @@ const VARIANT_CLASS: Record<TimelineVariant, string> = {
   row: '',
   block: 'chat-timeline-item--block',
   divider: 'chat-timeline-item--divider',
+  bubble: 'chat-timeline-item--bubble',
 };
 
 /**

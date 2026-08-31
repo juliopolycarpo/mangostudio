@@ -4,6 +4,7 @@ import { FileText, Image, ImageOff } from 'lucide-react';
 import { useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
+import { MessageBubble } from './MessageBubble';
 import { ReservedAspectImage } from './ReservedAspectImage';
 
 interface UserMessageBubbleProps {
@@ -57,13 +58,13 @@ export function UserMessageBubble({ msg, isImageTurn }: UserMessageBubbleProps) 
             ))}
           </div>
         )}
-        <div className="px-5 py-3 rounded-2xl bg-surface-container-low text-on-surface border border-outline-variant/10 font-body chat-message-body leading-relaxed">
+        <MessageBubble>
           <MarkdownContent
             content={msg.text}
             copyCodeLabel={t.chat.copyCode}
             codeCopiedLabel={t.chat.codeCopied}
           />
-        </div>
+        </MessageBubble>
         {isImageTurn && (
           <span className="flex items-center gap-1 text-[10px] font-bold text-primary/70 font-label px-1">
             <Image size={11} />
