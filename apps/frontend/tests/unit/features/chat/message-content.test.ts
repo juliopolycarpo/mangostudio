@@ -102,6 +102,19 @@ describe('normalizeMessageParts', () => {
     ]);
   });
 
+  /**
+   * `reasoning_started` opens a `thinking` part with no text, because
+   * `display: "omitted"` is the API default and that empty part is the whole
+   * of what the reader ever sees of the phase. Rebuilding runs from their text
+   * alone deleted it before it could render, so the one event announcing a
+   * withheld reasoning phase showed nothing at all.
+   */
+  it('keeps a reasoning phase that opened with no text yet', () => {
+    const parts: MessagePart[] = [{ type: 'thinking', text: '' }];
+
+    expect(normalizeMessageParts(parts)).toEqual([{ type: 'thinking', text: '' }]);
+  });
+
   it('returns an empty array for empty input', () => {
     expect(normalizeMessageParts([])).toEqual([]);
   });
