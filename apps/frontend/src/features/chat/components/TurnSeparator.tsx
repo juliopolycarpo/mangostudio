@@ -82,9 +82,15 @@ export function TurnSeparator({
   // cannot disagree.
   const agent = identity.kind === 'agent' ? resolve('agent', identity.targetId) : null;
   const name = agent?.name ?? (identity.kind === 'model' ? identity.name : '');
+  // `msg.isGenerating` is only *this session* receiving tokens — a vendor turn
+  // reopened mid-flight reads false on reload even though `deriveTurnStatus`
+  // still reports `working` from the turn record. The derived phase is what
+  // actually knows the vendor is still writing, so actions gate on it instead.
+  const turnIsSettledEnoughForActions =
+    status.phase === 'settled' || status.phase === 'awaiting-user';
   // An image turn has no markdown to copy and no checkpoint to revert, and a
   // turn still running has nothing settled enough to act on.
-  const showTurnActions = !msg.isGenerating && !isImageTurn;
+  const showTurnActions = turnIsSettledEnoughForActions && !isImageTurn;
 
   return (
     <div className="flex items-center gap-2">
@@ -123,7 +129,7 @@ export function TurnSeparator({
           uncheckpointedSources={fileCheckpoint.uncheckpointedSources}
         />
       )}
-      {!msg.isGenerating && (
+      {turnIsSettledEnoughForActions && (
         <span className="shrink-0 font-label text-[10px] text-on-surface-variant/50 opacity-0 transition-opacity duration-(--duration-base) group-hover:opacity-100">
           {format(msg.timestamp, 'h:mm a')}
         </span>

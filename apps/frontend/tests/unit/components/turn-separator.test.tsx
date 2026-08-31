@@ -127,3 +127,63 @@ describe('TurnSeparator status while an image generates', () => {
     expect(screen.queryByText('Working')).not.toBeInTheDocument();
   });
 });
+
+/**
+ * `msg.isGenerating` is only whether *this session* is receiving tokens. A
+ * vendor turn reopened mid-flight reads `isGenerating: false` on reload, but
+ * its turn record still says the vendor is writing — `deriveTurnStatus` picks
+ * that up from `external_turn.status === 'active'` and reports `working`.
+ * Copy, revert, and the timestamp used to read `isGenerating` directly and
+ * missed this case entirely.
+ */
+describe('TurnSeparator actions on a reopened vendor turn', () => {
+  it('hides copy and the timestamp while a reopened turn is still working', () => {
+    const parts: MessagePart[] = [
+      {
+        type: 'external_turn',
+        version: 1,
+        targetId: 'codex',
+        sessionId: 's1',
+        status: 'active',
+        startedAt: 0,
+        updatedAt: 0,
+        lastSequence: 0,
+        eventCount: 0,
+        persistedBytes: 0,
+      },
+    ];
+    const msg = createMockMessage({ role: 'ai', modelName: 'codex', isGenerating: false });
+    const status = deriveTurnStatus(parts, false);
+
+    expect(status.phase).toBe('working');
+    render(<TurnSeparator msg={msg} parts={parts} status={status} isImageTurn={false} />);
+
+    expect(screen.queryByTitle('Copy message')).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d{1,2}:\d{2}\s?(AM|PM)/i)).not.toBeInTheDocument();
+  });
+
+  it('shows copy and the timestamp once the reopened turn settles', () => {
+    const parts: MessagePart[] = [
+      {
+        type: 'external_turn',
+        version: 1,
+        targetId: 'codex',
+        sessionId: 's1',
+        status: 'terminal',
+        terminalReason: 'completed',
+        startedAt: 0,
+        updatedAt: 0,
+        lastSequence: 0,
+        eventCount: 0,
+        persistedBytes: 0,
+      },
+    ];
+    const msg = createMockMessage({ role: 'ai', modelName: 'codex', isGenerating: false });
+    const status = deriveTurnStatus(parts, false);
+
+    expect(status.phase).toBe('settled');
+    render(<TurnSeparator msg={msg} parts={parts} status={status} isImageTurn={false} />);
+
+    expect(screen.getByTitle('Copy message')).toBeInTheDocument();
+  });
+});
