@@ -174,7 +174,13 @@ export function externalCommandCatalogQueryOptions(
   const envId = environmentId ?? LOCAL_ENVIRONMENT_ID;
   return queryOptions({
     queryKey: externalCommandCatalogKey(targetId ?? '', envId),
-    queryFn: () => getExternalCommandCatalog(targetId ?? '', { environmentId: envId }),
+    queryFn: () => {
+      // A native runner has no target, and the caller is expected to leave the
+      // query disabled for one. Saying so beats interpolating the empty string
+      // into `/external-agents//commands` and reading the 404 as "no commands".
+      if (!targetId) throw new Error('No external agent target to read a command catalog for.');
+      return getExternalCommandCatalog(targetId, { environmentId: envId });
+    },
     staleTime: Number.POSITIVE_INFINITY,
   });
 }
