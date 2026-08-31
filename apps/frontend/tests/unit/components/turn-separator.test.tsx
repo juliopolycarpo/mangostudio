@@ -99,3 +99,31 @@ describe('TurnSeparator identity mark', () => {
     expect(screen.getByText('GP')).toBeInTheDocument();
   });
 });
+
+/**
+ * The chip yields to the working row, which only exists on the timeline. An
+ * image turn has no timeline: `AssistantTurnBody` swaps the whole thing for
+ * the generating placeholder, so the row the chip defers to is never drawn and
+ * deferring left the separator saying nothing at all.
+ */
+describe('TurnSeparator status while an image generates', () => {
+  it('names the phase for an image turn, which draws no working row to yield to', () => {
+    const msg = createMockMessage({ role: 'ai', modelName: 'gpt-image-2', isGenerating: true });
+    const status = deriveTurnStatus([], true);
+
+    expect(status.showWorkingRow).toBe(true);
+    render(<TurnSeparator msg={msg} parts={[]} status={status} isImageTurn />);
+
+    expect(screen.getByText('Working')).toBeInTheDocument();
+  });
+
+  it('still yields to the row a text turn does draw', () => {
+    const msg = createMockMessage({ role: 'ai', modelName: 'gpt-5.2', isGenerating: true });
+
+    render(
+      <TurnSeparator msg={msg} parts={[]} status={deriveTurnStatus([], true)} isImageTurn={false} />
+    );
+
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
+  });
+});

@@ -101,7 +101,11 @@ export function TurnSeparator({
         <ModelMonogram monogram={identity.kind === 'model' ? identity.monogram : ''} />
       )}
       <span className="shrink-0 text-[11px] text-on-surface-variant/70">{name}</span>
-      <TurnStatusChip phase={status.phase} showWorkingRow={status.showWorkingRow} />
+      {/* The chip yields to the working row, but an image turn never draws one:
+          `AssistantTurnBody` swaps the whole timeline for the generating
+          placeholder, so deferring to it here would leave the separator silent
+          for the one turn kind that has nothing else to say. */}
+      <TurnStatusChip phase={status.phase} showWorkingRow={status.showWorkingRow && !isImageTurn} />
       {/* The rule takes the slack, so the actions stay pinned right however
           long the name is. */}
       <span aria-hidden="true" className="h-px min-w-4 flex-1 bg-outline-variant/25" />
