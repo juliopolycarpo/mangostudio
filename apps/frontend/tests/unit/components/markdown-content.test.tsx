@@ -120,6 +120,32 @@ describe('MarkdownContent', () => {
     expect(screen.getByText('pic').getAttribute('href')).toBe('#');
   });
 
+  // A safe href is not enough: the anchor's *body* is interpolated into the
+  // same `dangerouslySetInnerHTML` string, so raw html smuggled into the link
+  // label lands in the document as live markup unless it is escaped too.
+  it.each([
+    [
+      'an image with an error handler',
+      '[click <img src=x onerror="alert(1)">](https://ok.example)',
+    ],
+    ['an svg with a load handler', '[x<svg onload="alert(1)">](https://ok.example)'],
+  ])('escapes raw html in link text rather than emitting %s', (_label, content) => {
+    const { container } = render(<MarkdownContentRenderer content={content} />);
+
+    expect(container.querySelector('a')).toBeInTheDocument();
+    expect(container.querySelector('img')).not.toBeInTheDocument();
+    expect(container.querySelector('svg')).not.toBeInTheDocument();
+  });
+
+  it('escapes html inside a code span used as link text', () => {
+    const { container } = render(
+      <MarkdownContentRenderer content={'[`<b>ok</b>`](https://ok.example)'} />
+    );
+
+    expect(container.querySelector('a')).toHaveTextContent('<b>ok</b>');
+    expect(container.querySelector('a b')).not.toBeInTheDocument();
+  });
+
   it('renders GFM tables', () => {
     const table = '| A | B |\n|---|---|\n| 1 | 2 |';
     const { container } = render(<MarkdownContentRenderer content={table} />);

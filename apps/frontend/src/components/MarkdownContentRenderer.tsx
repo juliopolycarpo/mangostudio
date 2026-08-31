@@ -139,10 +139,19 @@ function createRenderer(
   return renderer;
 }
 
+/**
+ * Renders a link whose href *and* body are both inert.
+ *
+ * Child tokens are flattened to their source text and escaped: the result is
+ * interpolated into the same `dangerouslySetInnerHTML` string as everything
+ * else, so unescaped label text is live markup — `[x<img src=y onerror=…>](…)`
+ * is a script-execution path that a safe href does nothing to close.
+ * // Usage: renderLink({ href: 'https://a.example', tokens: [] })
+ */
 function renderLink({ href, title, tokens }: Parameters<Renderer['link']>[0]): string {
   const text =
     tokens
-      ?.map((token): string => ('text' in token ? (token.text as string) : token.raw))
+      ?.map((token): string => escapeHtml('text' in token ? (token.text as string) : token.raw))
       .join('') ?? '';
   const safeHref = safeMarkdownUrl(href);
   const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
