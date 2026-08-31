@@ -3535,9 +3535,7 @@ export const messages = {
   },
 
   thinking: {
-    labelContinued: 'Continuação do raciocínio',
     streaming: 'Pensando...',
-    streamingContinued: 'Pensando novamente...',
     thought: 'Pensou',
     withheld: 'Pensou, raciocínio não compartilhado',
     toggle: 'Ver raciocínio',

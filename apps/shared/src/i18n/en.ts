@@ -3546,9 +3546,7 @@ export const messages: Messages = {
   },
 
   thinking: {
-    labelContinued: 'Continued thinking',
     streaming: 'Thinking...',
-    streamingContinued: 'Thinking again...',
     thought: 'Thought',
     withheld: 'Thought, reasoning not shared',
     toggle: 'View reasoning',
