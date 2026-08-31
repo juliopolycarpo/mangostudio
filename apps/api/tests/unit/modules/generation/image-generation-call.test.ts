@@ -118,6 +118,20 @@ describe('executeImageGenerationCall — abandoned images', () => {
     expect(payload.errors).toHaveLength(2);
   });
 
+  it('files a partly generated call as failed so the resume prompt can retry it', async () => {
+    const { allParts } = await runImageCall({ reachedCount: 1, count: 3, aborted: true });
+
+    const result = allParts.find((part) => part.type === 'tool_result');
+    expect(result).toMatchObject({ isError: true });
+    const payload = JSON.parse(result?.type === 'tool_result' ? result.content : '{}') as {
+      count: number;
+      errors?: Array<{ error: string }>;
+    };
+    // The model still sees what landed; only the verdict on the call changes.
+    expect(payload.count).toBe(1);
+    expect(payload.errors).toHaveLength(2);
+  });
+
   it('still settles a fully generated call as succeeded', async () => {
     const { allParts } = await runImageCall({ reachedCount: 2, count: 2, aborted: false });
 

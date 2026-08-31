@@ -321,7 +321,14 @@ export async function* executeImageGenerationCall(
 
     const imageResult = summarizeGenerateImageToolResult(outcomes);
     result = imageResult;
-    isError = imageResult.images.length === 0 && (imageResult.errors?.length ?? 0) > 0;
+    // A call cut short is a failed call even when some pictures landed: the
+    // checkpoint files a `tool_result` without `isError` under succeeded calls,
+    // so a partial abort would tell the resume prompt this call worked and drop
+    // it off the retry list. The payload still carries `images` and `errors`,
+    // so the model sees exactly how far the batch got.
+    isError =
+      abandonedCount > 0 ||
+      (imageResult.images.length === 0 && (imageResult.errors?.length ?? 0) > 0);
   } catch (error) {
     result = { error: errorToToolMessage(error) };
     isError = true;
@@ -331,7 +338,7 @@ export async function* executeImageGenerationCall(
   if (thrown) {
     const failure = classifyToolExecutionFailure(thrown.error, ctx.signal);
     lifecycle.transition(failure.status, failure.reasonCode);
-  } else if (isError || abandonedCount > 0) {
+  } else if (isError) {
     // Two failures reach here without an exception. `generateImagesForToolPlan`
     // stops yielding rather than throwing, so the turn signal — not a caught
     // error — is what names the cause, and a call cut short is cancelled even
