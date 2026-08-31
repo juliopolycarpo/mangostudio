@@ -63,27 +63,37 @@ function streamedIntoKind(
  * transcript alone. A `question` part deliberately does not qualify: it has no
  * answered field, and whether it can still be answered is decided by whether
  * the feed threaded `onQuestionSubmit` in — which is not knowable from here.
+ *
+ * A vendor approval is read off the trailing part, because the vendor drives
+ * one turn at a time and the approval is the last thing it wrote. An
+ * elicitation is read off the whole transcript instead: parallel tool calls
+ * mean the call that came back *after* the form was raised appends its
+ * `tool_result` behind it, and the form is still blocking either way. An
+ * answered approval falls through rather than returning, so the two rules
+ * cannot mask one another.
  */
-function awaitsUserDecision(trailingPart: MessagePart | undefined): boolean {
-  if (trailingPart?.type === 'external_approval') return trailingPart.decisionSource === undefined;
+function awaitsUserDecision(parts: readonly MessagePart[]): boolean {
+  const trailingPart = parts.at(-1);
+  if (trailingPart?.type === 'external_approval' && trailingPart.decisionSource === undefined) {
+    return true;
+  }
   // The internal turn's counterpart. An elicitation blocks the tool call that
   // raised it, so the turn keeps `isGenerating` while waiting on a form nobody
   // has filled in yet — and a "Working…" row under that form would claim the
   // opposite of what is true.
-  if (trailingPart?.type === 'mcp_elicitation') return trailingPart.status === 'pending';
-  return false;
+  return parts.some((part) => part.type === 'mcp_elicitation' && part.status === 'pending');
 }
 
 interface PhaseInputs {
   readonly running: boolean;
-  readonly trailingAwaitsDecision: boolean;
+  readonly awaitsDecision: boolean;
   readonly streamedInto: LiveTextKind | null;
 }
 
 /** First match wins: a settled turn is never anything else, and so on down. */
-function derivePhase({ running, trailingAwaitsDecision, streamedInto }: PhaseInputs): TurnPhase {
+function derivePhase({ running, awaitsDecision, streamedInto }: PhaseInputs): TurnPhase {
   if (!running) return 'settled';
-  if (trailingAwaitsDecision) return 'awaiting-user';
+  if (awaitsDecision) return 'awaiting-user';
   if (streamedInto === 'thinking') return 'thinking';
   if (streamedInto === 'text') return 'responding';
   return 'working';
@@ -92,13 +102,13 @@ function derivePhase({ running, trailingAwaitsDecision, streamedInto }: PhaseInp
 /**
  * Derives one turn's status from the parts being rendered, for every provider.
  *
- * The working row is suppressed under three trailing shapes that already say
- * enough on their own and must not get a second, redundant (or outright wrong)
- * cue stacked on top: `text`/`thinking` mid-stream already shows its own caret
- * or pulse; an activity still running already renders as running, and a row
- * under it would read as a *second* thing happening; and an approval nobody has
- * answered yet is waiting on the *user*, not on the agent — "Working..." under
- * an unresolved decision would claim the opposite of what is true.
+ * The working row is suppressed under three shapes that already say enough on
+ * their own and must not get a second, redundant (or outright wrong) cue
+ * stacked on top: trailing `text`/`thinking` mid-stream already shows its own
+ * caret or pulse; a trailing activity still running already renders as running,
+ * and a row under it would read as a *second* thing happening; and a decision
+ * nobody has answered yet is waiting on the *user*, not on the agent —
+ * "Working..." under one would claim the opposite of what is true.
  *
  * @example
  * deriveTurnStatus(parts, msg.isGenerating ?? false).phase // => 'working'
@@ -109,12 +119,12 @@ export function deriveTurnStatus(parts: readonly MessagePart[], isStreaming: boo
   const trailingPart = parts.at(-1);
   const trailingIsRunningActivity =
     trailingPart?.type === 'external_activity' && trailingPart.status === 'running';
-  const trailingAwaitsDecision = awaitsUserDecision(trailingPart);
-  const phase = derivePhase({ running, trailingAwaitsDecision, streamedInto });
+  const awaitsDecision = awaitsUserDecision(parts);
+  const phase = derivePhase({ running, awaitsDecision, streamedInto });
   return {
     phase,
     livePartIndex: streamedInto === null ? null : parts.length - 1,
-    // `phase === 'working'` is exactly `running && !trailingAwaitsDecision &&
+    // `phase === 'working'` is exactly `running && !awaitsDecision &&
     // streamedInto === null` — the only remaining exclusion is the running
     // activity, which `derivePhase` does not know about.
     showWorkingRow: phase === 'working' && !trailingIsRunningActivity,

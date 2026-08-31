@@ -260,4 +260,22 @@ describe('deriveTurnStatus — a turn stopped on an MCP elicitation', () => {
     expect(status.phase).toBe('working');
     expect(status.showWorkingRow).toBe(true);
   });
+
+  /**
+   * A form is blocking wherever it sits. Tool calls run in parallel, so the
+   * sibling that came back *after* the form was raised appends its result
+   * behind it — reading only the trailing part put "Working" under a form
+   * nobody had filled in, which is the exact claim the exclusion exists to
+   * prevent. A vendor approval keeps the trailing rule: one vendor turn writes
+   * one thing at a time, and the approval is the last thing it wrote.
+   */
+  it('stays waiting when a later tool result lands behind the open form', () => {
+    const status = deriveTurnStatus(
+      [pendingElicitation, { type: 'tool_result', toolCallId: 't2', content: '{}' }],
+      true
+    );
+
+    expect(status.phase).toBe('awaiting-user');
+    expect(status.showWorkingRow).toBe(false);
+  });
 });
