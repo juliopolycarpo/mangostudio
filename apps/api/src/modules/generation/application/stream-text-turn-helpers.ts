@@ -203,6 +203,8 @@ export async function* executeImageGenerationCall(
   let result: unknown;
   let isError = false;
   let thrown: { error: unknown } | undefined;
+  /** Images the generator never reached — see `abandonUnreachedImages`. */
+  let abandonedCount = 0;
 
   // This path yields stream events directly instead of routing through the
   // async queue, so lifecycle transitions buffer here and drain between stages.
@@ -311,6 +313,8 @@ export async function* executeImageGenerationCall(
       }
     }
 
+    abandonedCount = abandonUnreachedImages(imagePartsById, outcomes);
+
     const imageResult = summarizeGenerateImageToolResult(outcomes);
     result = imageResult;
     isError = imageResult.images.length === 0 && (imageResult.errors?.length ?? 0) > 0;
@@ -323,8 +327,17 @@ export async function* executeImageGenerationCall(
   if (thrown) {
     const failure = classifyToolExecutionFailure(thrown.error, ctx.signal);
     lifecycle.transition(failure.status, failure.reasonCode);
+  } else if (isError || abandonedCount > 0) {
+    // Two failures reach here without an exception. `generateImagesForToolPlan`
+    // stops yielding rather than throwing, so the turn signal — not a caught
+    // error — is what names the cause, and a call cut short is cancelled even
+    // when the images it did reach came back: producing two of three pictures
+    // is not the same as being asked for two. With nothing aborted this
+    // classifies exactly as the plain `execution_error` it replaces.
+    const failure = classifyToolExecutionFailure(undefined, ctx.signal);
+    lifecycle.transition(failure.status, failure.reasonCode);
   } else {
-    lifecycle.transition(isError ? 'failed' : 'succeeded', isError ? 'execution_error' : undefined);
+    lifecycle.transition('succeeded');
   }
   toolCallPart.execution = lifecycle.current;
   yield* drainLifecycleEvents(lifecycleEvents);
@@ -335,6 +348,51 @@ export async function* executeImageGenerationCall(
   await ctx.checkpoint?.();
   yield { type: 'tool_result', callId, name, result, isError };
   ctx.nextToolResults.push({ callId, name, result: resultStr, isError });
+}
+
+/** What a planned image records when the turn ended before it was generated. */
+const IMAGE_ABANDONED_ERROR = 'The turn was interrupted before this image was generated.';
+
+/**
+ * Records a failed outcome for every planned image the generator never reached.
+ *
+ * `generateImagesForToolPlan` stops at its abort check by returning rather than
+ * throwing, and says nothing about the images it had left. Without this an
+ * interrupted call summarizes to `count: 0` with no errors — which reads as a
+ * call that succeeded and chose to produce nothing, and settles the lifecycle
+ * as `succeeded` — while every unreached part stays at `generating` for the
+ * life of the message, spinning on each reload.
+ *
+ * The parts are the whole record here: the only thing that stops that loop is a
+ * client already gone, so there is nobody left to send an event to.
+ *
+ * Returns how many images were abandoned, which is what tells the caller the
+ * call was cut short rather than finished.
+ *
+ * // Usage: const abandoned = abandonUnreachedImages(imagePartsById, outcomes);
+ */
+function abandonUnreachedImages(
+  imagePartsById: ReadonlyMap<string, GeneratedImagePart>,
+  outcomes: GenerateImageToolOutcome[]
+): number {
+  const reached = new Set(outcomes.map((outcome) => outcome.imageId));
+  let abandoned = 0;
+
+  for (const [imageId, part] of imagePartsById) {
+    if (reached.has(imageId)) continue;
+    part.status = 'error';
+    part.error = IMAGE_ABANDONED_ERROR;
+    outcomes.push({
+      type: 'failed',
+      imageId,
+      prompt: part.prompt,
+      error: IMAGE_ABANDONED_ERROR,
+      createdAt: Date.now(),
+    });
+    abandoned += 1;
+  }
+
+  return abandoned;
 }
 
 export function upsertToolCallPart(
