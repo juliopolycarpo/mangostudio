@@ -88,7 +88,7 @@ describe('deriveTurnStatus: an internal turn, with no turn record to consult', (
   });
 });
 
-describe('deriveTurnStatus: the three working-row exclusions', () => {
+describe('deriveTurnStatus: the four working-row exclusions', () => {
   it('excludes trailing live text, which already shows its own caret', () => {
     expect(deriveTurnStatus([TOOL_CALL, TEXT], true).showWorkingRow).toBe(false);
   });
@@ -114,6 +114,38 @@ describe('deriveTurnStatus: the three working-row exclusions', () => {
 
   it('restores the row once the activity finishes', () => {
     const parts = [turnPart(), activityPart({ status: 'completed' })];
+    expect(deriveTurnStatus(parts, true).showWorkingRow).toBe(true);
+  });
+
+  it('excludes a trailing generating image, which already pulses its own progress bar', () => {
+    // The `generate_image` tool on a text turn leaves `[tool_call,
+    // generated_image, …]` trailing on the card, not on `external_activity` —
+    // the dedicated image-turn path never applies here.
+    const parts: MessagePart[] = [
+      TOOL_CALL,
+      {
+        type: 'generated_image',
+        imageId: 'img-1',
+        toolCallId: 'call-1',
+        status: 'generating',
+        prompt: 'a polar bear',
+      },
+    ];
+    expect(deriveTurnStatus(parts, true).showWorkingRow).toBe(false);
+  });
+
+  it('restores the row once the generated image finishes', () => {
+    const parts: MessagePart[] = [
+      TOOL_CALL,
+      {
+        type: 'generated_image',
+        imageId: 'img-1',
+        toolCallId: 'call-1',
+        status: 'completed',
+        prompt: 'a polar bear',
+        imageUrl: 'https://example.test/img-1.png',
+      },
+    ];
     expect(deriveTurnStatus(parts, true).showWorkingRow).toBe(true);
   });
 });

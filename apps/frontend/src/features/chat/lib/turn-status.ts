@@ -119,14 +119,21 @@ export function deriveTurnStatus(parts: readonly MessagePart[], isStreaming: boo
   const trailingPart = parts.at(-1);
   const trailingIsRunningActivity =
     trailingPart?.type === 'external_activity' && trailingPart.status === 'running';
+  // A `generate_image` tool call on a text turn leaves `[tool_call,
+  // generated_image, …]` trailing on the card, not on `external_activity`.
+  // `GeneratedImagePart` already pulses "Generating image..." for it, so a
+  // working row underneath would stack a second, redundant cue on top.
+  const trailingIsGeneratingImage =
+    trailingPart?.type === 'generated_image' && trailingPart.status === 'generating';
   const awaitsDecision = awaitsUserDecision(parts);
   const phase = derivePhase({ running, awaitsDecision, streamedInto });
   return {
     phase,
     livePartIndex: streamedInto === null ? null : parts.length - 1,
     // `phase === 'working'` is exactly `running && !awaitsDecision &&
-    // streamedInto === null` — the only remaining exclusion is the running
-    // activity, which `derivePhase` does not know about.
-    showWorkingRow: phase === 'working' && !trailingIsRunningActivity,
+    // streamedInto === null` — the remaining exclusions are the running
+    // activity and the generating image card, which `derivePhase` does not
+    // know about.
+    showWorkingRow: phase === 'working' && !trailingIsRunningActivity && !trailingIsGeneratingImage,
   };
 }
