@@ -1,5 +1,6 @@
 import type { MessagePart } from '@mangostudio/shared';
 import { useMemo } from 'react';
+import { deriveTurnStatus } from '../lib/turn-status';
 import { ContinuationEventMarker } from './ContinuationEventMarker';
 import { ElicitationCard } from './ElicitationCard';
 import { ExternalActivityBlock } from './ExternalActivityBlock';
@@ -46,27 +47,12 @@ export function MessageParts({
   // The turn record is written first so nothing is ever a bare text blob with no
   // record of who produced it, but it *reads* as a summary, so it renders last.
   const externalTurn = useMemo(() => parts.find((part) => part.type === 'external_turn'), [parts]);
-  // Covers the gaps no vendor event describes: waiting on the API before the
-  // first token, the pause between one tool call ending and the next starting.
-  // Three trailing shapes already say enough on their own and must not get a
-  // second, redundant (or outright wrong) cue stacked on top: `text`/`thinking`
-  // mid-stream already shows its own caret or pulse; a call still running
-  // already renders as running, and a second row under it would read as a
-  // *second* thing happening; and an approval nobody has answered yet is
-  // waiting on the *user*, not the vendor — "Working..." under an unresolved
-  // decision would claim the opposite of what is actually true.
-  const trailingPart = parts.at(-1);
-  const trailingIsLiveText =
-    isStreaming && (trailingPart?.type === 'text' || trailingPart?.type === 'thinking');
-  const trailingIsRunningActivity =
-    trailingPart?.type === 'external_activity' && trailingPart.status === 'running';
-  const trailingAwaitsDecision =
-    trailingPart?.type === 'external_approval' && trailingPart.decisionSource === undefined;
-  const showWorkingIndicator =
-    externalTurn?.status === 'active' &&
-    !trailingIsLiveText &&
-    !trailingIsRunningActivity &&
-    !trailingAwaitsDecision;
+  // Which part is receiving tokens and whether the turn is between steps are
+  // one question with one answer, and `deriveTurnStatus` owns it for every
+  // provider. Deriving here rather than taking a prop keeps this component
+  // callable with nothing but the parts it renders, at the cost of one extra
+  // memoized derivation per turn.
+  const status = useMemo(() => deriveTurnStatus(parts, isStreaming), [parts, isStreaming]);
   return (
     <>
       <div className="chat-timeline min-w-0">
@@ -93,17 +79,16 @@ export function MessageParts({
             case 'thinking': {
               const blockId = `${messageId}-thinking-${idx}`;
               // A thought is over the moment anything follows it: the reducer
-              // clears its active index on every other kind of chunk, so the
-              // thinking part being streamed into is always the last one.
-              // Asking instead whether a *later thinking part* exists left the
-              // finished thought pulsing, expanded and uncounted for the rest
-              // of the turn.
+              // clears its active index on every other kind of chunk, which is
+              // why `livePartIndex` can be purely positional. Asking instead
+              // whether a *later thinking part* exists left the finished
+              // thought pulsing, expanded and uncounted for the rest of the turn.
               return (
                 <ThinkingBlock
                   key={blockId}
                   messageId={blockId}
                   text={part.text}
-                  isStreaming={isStreaming && idx === parts.length - 1}
+                  isStreaming={idx === status.livePartIndex}
                   incomplete={part.incomplete}
                 />
               );
@@ -178,7 +163,7 @@ export function MessageParts({
                 >
                   <AssistantProsePart
                     text={part.text}
-                    isStreaming={isStreaming && idx === parts.length - 1}
+                    isStreaming={idx === status.livePartIndex}
                     incomplete={part.incomplete}
                   />
                 </TimelineItem>
@@ -232,7 +217,7 @@ export function MessageParts({
             }
           }
         })}
-        {showWorkingIndicator ? <TurnWorkingRow /> : null}
+        {status.showWorkingRow ? <TurnWorkingRow /> : null}
       </div>
       {externalTurn?.type === 'external_turn' ? (
         <ExternalTurnFooter part={externalTurn} isStreaming={isStreaming} />

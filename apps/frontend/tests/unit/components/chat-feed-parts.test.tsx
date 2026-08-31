@@ -157,6 +157,9 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(container.querySelector('.markdown-content--streaming')).toHaveTextContent(
       'Here is the answer.'
     );
+    // The trailing prose is what the turn is streaming into, so the working row
+    // stays suppressed even though the turn is running.
+    expect(screen.queryByText('Working...')).toBeNull();
   });
 
   it('renders tool call block with pending state when no matching result', async () => {
@@ -175,6 +178,9 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
       btn.textContent?.includes('calculator')
     );
     expect(toolButtons.length).toBeGreaterThan(0);
+    // The turn is streaming and the call has not answered, so the gap under it
+    // now carries the working row an internal turn never used to get.
+    expect(screen.getByText('Working...')).toBeInTheDocument();
   });
 
   it('skips tool_result parts (rendered inline with tool_call)', async () => {
@@ -540,5 +546,52 @@ describe('ChatFeed — generated_image part rendering', () => {
     expect(screen.getByText('Attempt 2')).toBeInTheDocument();
     expect(screen.getByText('Delegation completed')).toBeInTheDocument();
     expect(screen.queryByText(/call=delegate-1/)).not.toBeInTheDocument();
+  });
+});
+
+// A MangoStudio turn carries no `external_turn` record to consult, so until the
+// derived status ORed `isStreaming` into liveness it was the one provider that
+// never got this cue. These are the rendered counterparts of the pure-function
+// cases in `tests/unit/features/chat/turn-status.test.ts`: they prove something
+// actually draws the row, not just that the derivation asked for it.
+describe('ChatFeed — an internal turn that is still working', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('says so before the first token, where the skeleton used to be', async () => {
+    const msg = makeMessage({ parts: [], isGenerating: true });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
+
+    expect(screen.getByText('Working...')).toBeInTheDocument();
+  });
+
+  it('says so in the gap under a tool call that has not answered yet', async () => {
+    const parts: MessagePart[] = [
+      { type: 'tool_call', toolCallId: 'c9', name: 'calculator', args: {} },
+    ];
+    const msg = makeMessage({ parts, isGenerating: true });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
+
+    expect(screen.getByText('Working...')).toBeInTheDocument();
+  });
+
+  // The prose already carries its own caret. A row under it saying the same
+  // thing would be redundant exactly where it matters least.
+  it('stays quiet under text that is actively streaming', async () => {
+    const parts: MessagePart[] = [{ type: 'text', text: 'Here is the ans' }];
+    const msg = makeMessage({ parts, isGenerating: true });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
+
+    expect(screen.queryByText('Working...')).toBeNull();
   });
 });
