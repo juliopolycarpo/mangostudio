@@ -3550,6 +3550,7 @@ export const messages: Messages = {
     streaming: 'Thinking...',
     streamingContinued: 'Thinking again...',
     thought: 'Thought',
+    withheld: 'Thought, reasoning not shared',
     toggle: 'View reasoning',
     enable: 'Thinking',
     enabled: 'Thinking enabled',

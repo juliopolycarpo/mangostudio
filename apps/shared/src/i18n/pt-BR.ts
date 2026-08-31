@@ -3539,6 +3539,7 @@ export const messages = {
     streaming: 'Pensando...',
     streamingContinued: 'Pensando novamente...',
     thought: 'Pensou',
+    withheld: 'Pensou, raciocínio não compartilhado',
     toggle: 'Ver raciocínio',
     enable: 'Raciocinar',
     enabled: 'Raciocínio ativo',
