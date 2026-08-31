@@ -36,6 +36,7 @@ import {
   type ClaudeContentBlock,
   type ClaudeInitRecord,
   type ClaudeMessageRecord,
+  type ClaudePermissionDeniedRecord,
   type ClaudeResultRecord,
   type ClaudeStreamEventRecord,
   type ClaudeStreamRecord,
@@ -95,6 +96,47 @@ export function claudeActivityKind(toolName: string): ExternalActivityKind {
       // rather than a tool name, so it cannot collide with a built-in.
       return toolName.startsWith('mcp__') ? 'mcp' : 'other';
   }
+}
+
+/** A completed block's renderable content, and the delta event it belongs in. */
+interface RenderableBlock {
+  readonly type: 'text_delta' | 'reasoning_delta';
+  readonly text: string;
+}
+
+/** The renderable content of a `text` or `thinking` block, or `undefined` for neither. */
+function renderableBlock(block: ClaudeContentBlock): RenderableBlock | undefined {
+  if (block.type === 'text' && typeof block.text === 'string' && block.text.length > 0) {
+    return { type: 'text_delta', text: block.text };
+  }
+  if (
+    block.type === 'thinking' &&
+    typeof block.thinking === 'string' &&
+    block.thinking.length > 0
+  ) {
+    return { type: 'reasoning_delta', text: block.thinking };
+  }
+  return undefined;
+}
+
+/** Whether an opening content block is a reasoning phase, redacted or not. */
+function isReasoningBlock(blockType: unknown): boolean {
+  return blockType === 'thinking' || blockType === 'redacted_thinking';
+}
+
+/** Which delivery channel an opening content block will stream on, if either. */
+function openingBlockKind(blockType: unknown): RenderableBlock['type'] | undefined {
+  if (blockType === 'text') return 'text_delta';
+  // `redacted_thinking` streams no deltas at all — its text is encrypted — but
+  // it is still a reasoning-kind block for the purpose of not colliding with a
+  // `text` buffer, so it is included here rather than only `isReasoningBlock`'s
+  // narrower announcement use.
+  return isReasoningBlock(blockType) ? 'reasoning_delta' : undefined;
+}
+
+/** A block index the stream stated, or undefined for one it did not. */
+function blockIndex(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
 /** A one-line summary of a tool call's input, for the pill's title. */
@@ -164,6 +206,34 @@ export class ClaudeTurnReducer {
   readonly #openActivities = new Map<string, string>();
   /** Forwarded subagent text per parent call, so updates accumulate rather than replace. */
   readonly #nestedText = new Map<string, string>();
+  /**
+   * What the deltas have actually delivered for each block of the message now
+   * streaming, keyed by the block index the stream itself supplies.
+   *
+   * This is the whole of what `#reduceAssistant` needs to tell an already-seen
+   * block from one that reached nobody — see `#undeliveredRemainder`. Cleared
+   * at every message boundary: block indices restart at 0 for each message, so
+   * a buffer that outlived its own would be matched against the next one's
+   * blocks.
+   *
+   * Delivery kind travels with the text because `#undeliveredRemainder` cannot
+   * trust the index the completed record arrives at (see there): a `thinking`
+   * buffer and a `text` buffer that happen to share a prefix — Claude often
+   * restates the same sentence in both — would otherwise let the wrong block
+   * claim the other's delivery.
+   */
+  readonly #deliveredByBlock = new Map<number, { kind: RenderableBlock['type']; text: string }>();
+  /**
+   * Indices of the reasoning blocks this message opened and has not closed.
+   *
+   * `content_block_stop` states an index and nothing else — not the type of
+   * the block it closes — so the type has to be remembered from the
+   * `content_block_start` that opened it. Scoped to one message for the same
+   * reason `#deliveredByBlock` is.
+   */
+  readonly #openReasoningBlocks = new Set<number>();
+  /** A held `system/permission_denied` reason, keyed by the call it refused, until its `tool_result` closes it. */
+  readonly #deniedActivities = new Map<string, string>();
   #sessionStarted = false;
   #finished = false;
 
@@ -181,7 +251,7 @@ export class ClaudeTurnReducer {
     if (this.#finished) return NOTHING;
     switch (recordType(record)) {
       case 'system':
-        return this.#reduceSystem(record as ClaudeInitRecord);
+        return this.#reduceSystem(record);
       case 'stream_event':
         return this.#reduceStreamEvent(record as ClaudeStreamEventRecord);
       case 'assistant':
@@ -196,14 +266,22 @@ export class ClaudeTurnReducer {
     }
   }
 
-  #reduceSystem(record: ClaudeInitRecord): ClaudeReduction {
+  #reduceSystem(record: ClaudeStreamRecord): ClaudeReduction {
+    const subtype = recordSubtype(record);
+    // Held rather than forwarded: it names the call it refuses, but the
+    // activity it belongs to closes through the `tool_result` that always
+    // follows, and that is the one rendering the user should see.
+    if (subtype === 'permission_denied') {
+      this.#recordDenial(record as ClaudePermissionDeniedRecord);
+      return NOTHING;
+    }
     // `status`, `thinking_tokens` and `api_retry` are progress reporting with no
     // neutral event behind them. They are read and dropped rather than
     // forwarded: the contract has no member that means "still working", and
     // inventing one out of a vendor's telemetry would put counts in a
     // transcript that no other adapter can produce.
-    if (recordSubtype(record) !== 'init') return NOTHING;
-    const init = readClaudeInit(record);
+    if (subtype !== 'init') return NOTHING;
+    const init = readClaudeInit(record as ClaudeInitRecord);
     this.#onInit?.(init);
 
     const events: ExternalAgentEvent[] = [];
@@ -227,6 +305,12 @@ export class ClaudeTurnReducer {
     return events.length > 0 ? { events, finished: false } : NOTHING;
   }
 
+  #recordDenial(record: ClaudePermissionDeniedRecord): void {
+    const callId = typeof record.tool_use_id === 'string' ? record.tool_use_id : '';
+    const message = typeof record.message === 'string' ? record.message : '';
+    if (callId.length > 0 && message.length > 0) this.#deniedActivities.set(callId, message);
+  }
+
   /**
    * Token-level output. The only source of `text_delta` and `reasoning_delta`.
    *
@@ -239,9 +323,46 @@ export class ClaudeTurnReducer {
     // A subagent's own token stream, if one ever arrives, is nested through the
     // `assistant` path rather than promoted into the main transcript.
     if (parentToolUseId(record) !== undefined) return NOTHING;
-    const delta = record.event?.delta;
-    if (record.event?.type !== 'content_block_delta' || !delta) return NOTHING;
+    const event = record.event;
+    // Both ends of a message. Block indices are scoped to the message that
+    // opened them, so they mean nothing once it is over — but a reasoning
+    // phase still open here was closed by the message ending, whether or not
+    // its own `content_block_stop` arrived, and has to say so before the
+    // index it is keyed by is discarded.
+    if (event?.type === 'message_start' || event?.type === 'message_stop') {
+      const closing = this.#closeReasoningBlocks();
+      this.#deliveredByBlock.clear();
+      return closing;
+    }
+    const index = blockIndex(event?.index);
+    if (event?.type === 'content_block_start') {
+      // Opened with nothing delivered yet. Recorded even so: an `omitted`
+      // reasoning phase streams only empty `thinking_delta`s, and this is what
+      // says those deltas were still this block's delivery channel. A block
+      // whose kind will never be renderable — `tool_use` chief among them —
+      // gets no entry at all, since one would never be eligible to match
+      // anything in `#undeliveredRemainder`.
+      const kind = openingBlockKind(event.content_block?.type);
+      if (index !== undefined && kind) this.#deliveredByBlock.set(index, { kind, text: '' });
+      // Fires once per block, by protocol — this is the only signal a reasoning
+      // phase produces on an account whose `thinking_delta` text is withheld.
+      // `redacted_thinking` qualifies for the same reason and then some: its
+      // text is encrypted, so no renderable delta can ever follow and the
+      // announcement is the whole of what that phase will show.
+      if (!isReasoningBlock(event.content_block?.type)) return NOTHING;
+      // Remembered by index, because `content_block_stop` states only that —
+      // it does not repeat the type of the block it closes.
+      if (index !== undefined) this.#openReasoningBlocks.add(index);
+      return { events: [{ type: 'reasoning_started' }], finished: false };
+    }
+    if (event?.type === 'content_block_stop') {
+      if (index === undefined || !this.#openReasoningBlocks.delete(index)) return NOTHING;
+      return { events: [{ type: 'reasoning_ended' }], finished: false };
+    }
+    const delta = event?.delta;
+    if (event?.type !== 'content_block_delta' || !delta) return NOTHING;
     if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0) {
+      this.#recordDelivered(index, 'text_delta', delta.text);
       return { events: [{ type: 'text_delta', text: delta.text }], finished: false };
     }
     if (
@@ -249,17 +370,87 @@ export class ClaudeTurnReducer {
       typeof delta.thinking === 'string' &&
       delta.thinking.length > 0
     ) {
+      this.#recordDelivered(index, 'reasoning_delta', delta.thinking);
       return { events: [{ type: 'reasoning_delta', text: delta.thinking }], finished: false };
     }
     return NOTHING;
   }
 
   /**
+   * Closes every reasoning phase still open, one `reasoning_ended` each.
+   *
+   * The safety net for a message that ended without a `content_block_stop` for
+   * its reasoning block: the phase is over either way, and a projection left
+   * holding an open one would go on treating a finished turn as stopped inside
+   * it. A no-op on every recorded run — the stops do arrive.
+   */
+  #closeReasoningBlocks(): ClaudeReduction {
+    if (this.#openReasoningBlocks.size === 0) return NOTHING;
+    const events = [...this.#openReasoningBlocks].map(
+      () => ({ type: 'reasoning_ended' }) as const satisfies ExternalAgentEvent
+    );
+    this.#openReasoningBlocks.clear();
+    return { events, finished: false };
+  }
+
+  /** Appends what one delta just delivered to its own block's running copy. */
+  #recordDelivered(index: number | undefined, kind: RenderableBlock['type'], text: string): void {
+    if (index === undefined) return;
+    const previous = this.#deliveredByBlock.get(index);
+    this.#deliveredByBlock.set(index, { kind, text: (previous?.text ?? '') + text });
+  }
+
+  /**
+   * The part of a completed block that reached nobody.
+   *
+   * Blocks are matched by what streamed for them rather than by index: the
+   * `assistant` record arrives interleaved with its own `content_block_stop`,
+   * so whichever index is open at that moment is not reliably the record's.
+   * The longest delivered buffer of the same kind that this text extends is
+   * that block's own copy, and the empty string is a prefix of everything —
+   * so a block nothing streamed for matches nothing, and its whole content is
+   * the remainder.
+   *
+   * Restricted to buffers of the matching kind, and the match is consumed once
+   * found: a `thinking` buffer and a `text` buffer often carry the same
+   * sentence (Claude restates the plan it just reasoned through), and without
+   * that restriction the shorter, wrong-kind buffer could be picked as the
+   * text block's own delivery — leaving only the tail past where the thinking
+   * text stopped matching as the "remainder", silently dropping the rest of a
+   * reply that never actually streamed as text.
+   *
+   * Usage: `#undeliveredRemainder('text_delta', 'mango')` is `''` after the
+   * deltas already carried `mango` as text, and `' juice'` when they stopped
+   * after `mango`.
+   */
+  #undeliveredRemainder(kind: RenderableBlock['type'], text: string): string {
+    let matchedIndex: number | undefined;
+    let delivered = '';
+    for (const [index, entry] of this.#deliveredByBlock) {
+      if (entry.kind !== kind) continue;
+      if (entry.text.length > delivered.length && text.startsWith(entry.text)) {
+        delivered = entry.text;
+        matchedIndex = index;
+      }
+    }
+    if (matchedIndex !== undefined) this.#deliveredByBlock.delete(matchedIndex);
+    return text.slice(delivered.length);
+  }
+
+  /**
    * Completed assistant blocks.
    *
-   * Main-conversation `text` and `thinking` are skipped — they already arrived
-   * as deltas — so what survives is the `tool_use` block and anything a
-   * subagent produced.
+   * Main-conversation `text` and `thinking` are emitted here for exactly the
+   * part of themselves the deltas never carried. Usually that is nothing —
+   * the deltas delivered the block in full, and replaying it would double
+   * every reply. When `--include-partial-messages` produced no deltas for the
+   * block at all, which is the whole run for an account like the denied-write
+   * fixture's, the remainder is the block entire and this completed record is
+   * the only copy of it that will ever exist. A stream cut off mid-block lands
+   * between the two and contributes its tail, which is the case neither
+   * all-or-nothing reading of "already delivered" could express. The
+   * `tool_use` block and anything a subagent produced are handled
+   * unconditionally either way.
    */
   #reduceAssistant(record: ClaudeMessageRecord): ClaudeReduction {
     const parent = parentToolUseId(record);
@@ -270,11 +461,16 @@ export class ClaudeTurnReducer {
         if (started) events.push(started);
         continue;
       }
+      if (parent === undefined) {
+        const replay = this.#undeliveredEventFor(block);
+        if (replay) events.push(replay);
+        continue;
+      }
       // Only under a call that is still open. A completed activity has been
       // removed from the map, and both consumers *replace* an activity's detail
       // on update — so a late message would reopen a closed pill, and one for a
       // parent that never existed would address a pill that is not there.
-      if (parent === undefined || !this.#openActivities.has(parent)) continue;
+      if (!this.#openActivities.has(parent)) continue;
       // A subagent's text, nested under the `Task` call that spawned it. The
       // parent activity is the unit the user sees; promoting this would render
       // a second agent's narration as MangoStudio's own.
@@ -289,14 +485,22 @@ export class ClaudeTurnReducer {
         events.push({
           type: 'activity_updated',
           callId: parent,
-          update: {
-            detail: merged.slice(0, NESTED_TEXT_MAX_CHARS),
-            ...(merged.length > NESTED_TEXT_MAX_CHARS ? { truncated: true } : {}),
-          },
+          update: boundedDetail(merged),
         });
       }
     }
     return events.length > 0 ? { events, finished: false } : NOTHING;
+  }
+
+  /**
+   * The delta event carrying whatever of a completed main-conversation block
+   * the stream never delivered, or `undefined` when it delivered all of it.
+   */
+  #undeliveredEventFor(block: ClaudeContentBlock): ExternalAgentEvent | undefined {
+    const renderable = renderableBlock(block);
+    if (!renderable) return undefined;
+    const remainder = this.#undeliveredRemainder(renderable.type, renderable.text);
+    return remainder.length > 0 ? { type: renderable.type, text: remainder } : undefined;
   }
 
   #startActivity(block: ClaudeContentBlock): ExternalAgentEvent | undefined {
@@ -321,9 +525,11 @@ export class ClaudeTurnReducer {
    * Tool results, which Claude reports as a `user` message.
    *
    * A denied tool lands here too, as a `tool_result` with `is_error: true` —
-   * which is why a denial needs no special case to close its pill. What the
-   * result record adds is the authoritative list of *which* failures were
-   * permission refusals rather than tool errors.
+   * closing the pill needs no special case for that. Its `detail` does: a
+   * held `system/permission_denied` is the vendor's own statement of why, and
+   * takes priority over whatever `tool_result.content` happens to carry,
+   * which is not guaranteed to say anything past "denied". One rendering
+   * either way — nothing else ever reports the same refusal.
    */
   #reduceUser(record: ClaudeMessageRecord): ClaudeReduction {
     const events: ExternalAgentEvent[] = [];
@@ -333,18 +539,15 @@ export class ClaudeTurnReducer {
       if (callId.length === 0 || !this.#openActivities.has(callId)) continue;
       this.#openActivities.delete(callId);
       this.#nestedText.delete(callId);
-      const detail = readToolResultText(block.content);
+      const denial = this.#deniedActivities.get(callId);
+      this.#deniedActivities.delete(callId);
+      const detail = denial ?? readToolResultText(block.content);
       events.push({
         type: 'activity_completed',
         callId,
         result: {
           status: block.is_error === true ? 'failed' : 'completed',
-          ...(detail.length > 0
-            ? {
-                detail: detail.slice(0, NESTED_TEXT_MAX_CHARS),
-                ...(detail.length > NESTED_TEXT_MAX_CHARS ? { truncated: true } : {}),
-              }
-            : {}),
+          ...boundedDetail(detail),
         },
       });
     }
@@ -360,12 +563,7 @@ export class ClaudeTurnReducer {
    */
   #reduceResult(record: ClaudeResultRecord): ClaudeReduction {
     this.#finished = true;
-    const events: ExternalAgentEvent[] = [];
-
-    for (const [callId] of this.#openActivities) {
-      events.push({ type: 'activity_completed', callId, result: { status: 'cancelled' } });
-    }
-    this.#openActivities.clear();
+    const events: ExternalAgentEvent[] = this.#closeOpenActivities();
 
     const usage = readUsage(record);
     if (usage) events.push({ type: 'usage', usage });
@@ -389,14 +587,43 @@ export class ClaudeTurnReducer {
   abort(error: ExternalAgentError): readonly ExternalAgentEvent[] {
     if (this.#finished) return [];
     this.#finished = true;
-    const events: ExternalAgentEvent[] = [];
-    for (const [callId] of this.#openActivities) {
-      events.push({ type: 'activity_completed', callId, result: { status: 'cancelled' } });
-    }
-    this.#openActivities.clear();
+    const events: ExternalAgentEvent[] = this.#closeOpenActivities();
     events.push({ type: 'error', error });
     return events;
   }
+
+  /**
+   * Closes every call the run ended without reporting, as `cancelled`.
+   *
+   * A call the vendor already refused carries that refusal into its close. The
+   * `tool_result` that normally delivers the reason never arrived, so the held
+   * `system/permission_denied` is the only statement anyone made about why
+   * that call did not happen — a pill reading "Cancelled." with nothing else
+   * throws it away.
+   */
+  #closeOpenActivities(): ExternalAgentEvent[] {
+    const events: ExternalAgentEvent[] = [];
+    for (const [callId] of this.#openActivities) {
+      const denial = this.#deniedActivities.get(callId);
+      events.push({
+        type: 'activity_completed',
+        callId,
+        result: { status: 'cancelled', ...boundedDetail(denial ?? '') },
+      });
+    }
+    this.#openActivities.clear();
+    this.#deniedActivities.clear();
+    return events;
+  }
+}
+
+/** A `detail` field bounded to what one activity update carries, or nothing for empty text. */
+function boundedDetail(detail: string): { detail?: string; truncated?: boolean } {
+  if (detail.length === 0) return {};
+  return {
+    detail: detail.slice(0, NESTED_TEXT_MAX_CHARS),
+    ...(detail.length > NESTED_TEXT_MAX_CHARS ? { truncated: true } : {}),
+  };
 }
 
 /**
@@ -442,6 +669,22 @@ function countOf(value: unknown): number | undefined {
 }
 
 /**
+ * The error arm's own text, joined.
+ *
+ * `error_max_turns`, `error_during_execution`, `error_max_budget_usd` and
+ * `error_max_structured_output_retries` carry their explanation in `errors`
+ * and have no `result` field at all — reading only `result` left every one of
+ * these showing the generic fallback message instead of what actually
+ * happened.
+ */
+function readResultErrorText(record: ClaudeResultRecord): string | undefined {
+  const errors = record.errors;
+  if (!Array.isArray(errors)) return undefined;
+  const joined = errors.filter((value): value is string => typeof value === 'string').join('\n');
+  return joined.length > 0 ? joined : undefined;
+}
+
+/**
  * Whether a `result` record is a failure, and what to call it.
  *
  * A run whose only problem was a refused tool is **not** an error.
@@ -453,14 +696,21 @@ function countOf(value: unknown): number | undefined {
 function readResultError(record: ClaudeResultRecord): ExternalAgentError | undefined {
   if (record.is_error !== true) return undefined;
   const subtype = recordSubtype(record) ?? 'error';
+  const terminalReason =
+    typeof record.terminal_reason === 'string' ? record.terminal_reason : undefined;
+  const resultText =
+    typeof record.result === 'string' && record.result.length > 0 ? record.result : undefined;
   const message =
-    typeof record.result === 'string' && record.result.length > 0
-      ? record.result
-      : `Claude Code ended the turn with "${subtype}".`;
+    readResultErrorText(record) ??
+    resultText ??
+    (terminalReason
+      ? `Claude Code ended the turn: ${terminalReason}.`
+      : `Claude Code ended the turn with "${subtype}".`);
   const status = record.api_error_status;
+  const vendorCode = typeof status === 'number' ? String(status) : terminalReason;
   return {
     code: `claude-${subtype}`,
     message,
-    ...(typeof status === 'number' ? { vendorCode: String(status) } : {}),
+    ...(vendorCode ? { vendorCode } : {}),
   };
 }

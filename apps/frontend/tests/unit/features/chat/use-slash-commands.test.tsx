@@ -11,6 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { ChatCapabilitiesResponse } from '@mangostudio/shared/capabilities';
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+import type { LibraryResource, LibraryScanResult } from '@mangostudio/shared/library';
 import type { SkillListResponse } from '@mangostudio/shared/skills';
 import { waitFor } from '@testing-library/react';
 import { useSlashCommands } from '../../../../src/features/chat/hooks/use-slash-commands';
@@ -18,6 +19,26 @@ import { renderHook } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 
 const RUNNER: ChatRunnerConfiguration = { kind: 'mangostudio', agentId: 'default' };
+const CLAUDE_RUNNER: ChatRunnerConfiguration = { kind: 'external', targetId: 'claude' };
+const CODEX_RUNNER: ChatRunnerConfiguration = { kind: 'external', targetId: 'codex' };
+
+const EMPTY_SCAN: LibraryScanResult = { resources: [], unreadableEntries: [] };
+
+function libraryResource(
+  kind: 'command' | 'skill',
+  slug: string,
+  targetId: 'claude' | 'codex'
+): LibraryResource {
+  return {
+    ref: { kind, slug },
+    key: `${kind}:${slug}`,
+    instances: [],
+    coverage: [{ targetId, state: 'present', shadowedLocationIds: [] }],
+    divergence: 'single',
+    whitespaceOnlyDivergence: false,
+    contentGroups: [],
+  };
+}
 
 const SKILLS: SkillListResponse = {
   skills: [
@@ -174,6 +195,109 @@ describe('useSlashCommands — skills', () => {
 
     await waitFor(() => {
       expect(result.current.entries.map((entry) => entry.name)).toEqual(['dataviz']);
+    });
+  });
+});
+
+/**
+ * The two fallback sources for an external chat that has not run a turn
+ * yet: the library's scan (commands always, skills for a vendor whose own
+ * catalog already lists them under `/`) and the hub's last-known catalog.
+ */
+describe('useSlashCommands — external agents', () => {
+  function renderExternalPalette(
+    runner: ChatRunnerConfiguration,
+    environmentId: string | null = null
+  ) {
+    return renderHook(() =>
+      useSlashCommands({ chatId: 'chat-1', runner, environmentId, active: true })
+    );
+  }
+
+  it('offers a skill from the library scan for a vendor whose own catalog lists skills under /', async () => {
+    scenario.respondWithJson('GET', '/api/library/resources?kind=command', { body: EMPTY_SCAN });
+    scenario.respondWithJson('GET', '/api/library/resources?kind=skill', {
+      body: { resources: [libraryResource('skill', 'dataviz', 'claude')], unreadableEntries: [] },
+    });
+    scenario.respondWithJson('GET', '/api/external-agents/claude/commands?environmentId=local', {
+      body: { commands: [] },
+    });
+
+    const { result } = renderExternalPalette(CLAUDE_RUNNER);
+
+    await waitFor(() => {
+      expect(result.current.entries.map((entry) => entry.name)).toContain('dataviz');
+    });
+  });
+
+  /**
+   * Codex reads skills into a prompt section instead of exposing them under
+   * `/` — `externalAgentVendor('codex').skillsAreSlashCommands` is `false` —
+   * so the hook must not even ask the library to scan that kind for it.
+   */
+  it('does not scan skills at all for a vendor whose skills are not slash commands', async () => {
+    scenario.respondWithJson('GET', '/api/library/resources?kind=command', { body: EMPTY_SCAN });
+    scenario.respondWithJson('GET', '/api/external-agents/codex/commands?environmentId=local', {
+      body: { commands: [] },
+    });
+
+    const { result } = renderExternalPalette(CODEX_RUNNER);
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.entries).toEqual([]);
+    expect(
+      scenario.fetchMock.mock.calls.some(([input]) =>
+        (input instanceof Request ? input.url : String(input)).includes('kind=skill')
+      )
+    ).toBe(false);
+  });
+
+  it('offers a command from the library scan, unconditionally on the vendor', async () => {
+    scenario.respondWithJson('GET', '/api/library/resources?kind=command', {
+      body: { resources: [libraryResource('command', 'review', 'codex')], unreadableEntries: [] },
+    });
+    scenario.respondWithJson('GET', '/api/external-agents/codex/commands?environmentId=local', {
+      body: { commands: [] },
+    });
+
+    const { result } = renderExternalPalette(CODEX_RUNNER);
+
+    await waitFor(() => {
+      expect(result.current.entries.map((entry) => entry.name)).toEqual(['review']);
+    });
+  });
+
+  /**
+   * The reload gap #964's sibling work covers: before this chat's own first
+   * turn re-announces a catalog, the hub's last-known one for this
+   * (environment, target) is what the palette has to offer instead of
+   * nothing.
+   */
+  it('offers the hub’s last-known catalog before this chat’s first turn has announced one', async () => {
+    scenario.respondWithJson('GET', '/api/library/resources?kind=command', { body: EMPTY_SCAN });
+    scenario.respondWithJson('GET', '/api/library/resources?kind=skill', { body: EMPTY_SCAN });
+    scenario.respondWithJson('GET', '/api/external-agents/claude/commands?environmentId=local', {
+      body: { commands: [{ name: 'review' }, { name: 'dataviz', description: 'Draws charts' }] },
+    });
+
+    const { result } = renderExternalPalette(CLAUDE_RUNNER);
+
+    await waitFor(() => {
+      expect(result.current.entries.map((entry) => entry.name)).toEqual(['review', 'dataviz']);
+    });
+  });
+
+  it('scopes the hub catalog request to the chat’s own environment', async () => {
+    scenario.respondWithJson('GET', '/api/library/resources?kind=command', { body: EMPTY_SCAN });
+    scenario.respondWithJson('GET', '/api/library/resources?kind=skill', { body: EMPTY_SCAN });
+    scenario.respondWithJson('GET', '/api/external-agents/claude/commands?environmentId=env-7', {
+      body: { commands: [{ name: 'review' }] },
+    });
+
+    const { result } = renderExternalPalette(CLAUDE_RUNNER, 'env-7');
+
+    await waitFor(() => {
+      expect(result.current.entries.map((entry) => entry.name)).toEqual(['review']);
     });
   });
 });

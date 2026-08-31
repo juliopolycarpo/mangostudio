@@ -200,17 +200,18 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
       };
     }
     if (!resolution.ok) {
-      // Two different refusals with two different remedies. "Change a setting"
-      // is on the user; "this machine cannot keep vendor logins separate" is on
-      // whoever administers it, and flattening them into one message would send
-      // people to the wrong place.
-      return {
-        ok: false,
-        failure: {
-          kind: resolution.isolationUnproven ? 'isolation-unproven' : 'unsupported',
-          message: resolution.message,
-        },
-      };
+      // Three different refusals with three different remedies. "Change a
+      // setting" is on the user; "this machine cannot keep vendor logins
+      // separate" is on whoever administers it; "not ready yet" has no action
+      // behind it but retrying — which is exactly what `unavailable` already
+      // means for the disclosure route's own `!adapterAnswered` case. Flattening
+      // any of these into another would send people to the wrong remedy.
+      const kind = resolution.isolationUnproven
+        ? 'isolation-unproven'
+        : resolution.notReady
+          ? 'unavailable'
+          : 'unsupported';
+      return { ok: false, failure: { kind, message: resolution.message } };
     }
 
     // The descriptor this machine actually answered with, before anything is

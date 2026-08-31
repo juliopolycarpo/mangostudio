@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import type {
   ExternalAgentConfiguration,
   ExternalAgentSteerResult,
@@ -12,6 +12,7 @@ import type {
 } from '@mangostudio/shared/types';
 import { getDb } from '../../../../src/db/database';
 import { createExternalApprovalRegistry } from '../../../../src/modules/external-agents/application/external-approval-registry';
+import { createExternalCommandCatalogCache } from '../../../../src/modules/external-agents/application/external-command-catalog-cache';
 import { createExternalSessionManager } from '../../../../src/modules/external-agents/application/external-session-manager';
 import {
   createExternalTurnController,
@@ -27,6 +28,7 @@ import {
   type FakeExternalRuntime,
   type FakeExternalRuntimeOptions,
 } from '../../../support/external-agents/fake-external-runtime';
+import { createRealExternalRuntime } from '../../../support/external-agents/real-external-runtime';
 import { insertTestUser } from '../../../support/factories';
 import {
   installRecordingRealtimeBus,
@@ -77,14 +79,47 @@ function harness(
     newSessionId: () => 'session-1',
   });
   const approvals = createExternalApprovalRegistry();
+  // Fresh per test: the production default is a process-wide singleton, and
+  // sharing it here would leak one test's catalog into the next.
+  const commandCatalog = createExternalCommandCatalogCache();
   const ids = [userMessageId, assistantMessageId];
   const controller = createExternalTurnController({
     sessions,
     approvals,
+    commandCatalog,
     newId: () => ids.shift() ?? `id-${crypto.randomUUID()}`,
     ...(steerTerminationGraceMs !== undefined ? { steerTerminationGraceMs } : {}),
   });
-  return { runtime, sessions, approvals, controller };
+  return { runtime, sessions, approvals, commandCatalog, controller };
+}
+
+/**
+ * Same wiring as {@link harness}, but the runtime is a real
+ * `RuntimeClient` over an in-process protocol connection rather than
+ * `fake-external-runtime.ts`'s hand-built stub. Only #964's regression needs
+ * this: everywhere else, the stub's shortcut past `RuntimeClient.externalAgents.onEvent`'s
+ * own envelope filter is exactly what makes ordering and redelivery cheap to drive.
+ */
+async function realHarness() {
+  const runtime = await createRealExternalRuntime();
+  const sessions = createExternalSessionManager({
+    resolveRuntimeClient: () => Promise.resolve(runtime.client),
+    newSessionId: () => 'session-1',
+  });
+  const approvals = createExternalApprovalRegistry();
+  // Fresh per test for the same reason {@link harness} builds one: the
+  // production default is a process-wide singleton, and letting this harness
+  // fall through to it would write one test's catalog where the next test's
+  // assertions can see it.
+  const commandCatalog = createExternalCommandCatalogCache();
+  const ids = [userMessageId, assistantMessageId];
+  const controller = createExternalTurnController({
+    sessions,
+    approvals,
+    commandCatalog,
+    newId: () => ids.shift() ?? `id-${crypto.randomUUID()}`,
+  });
+  return { runtime, sessions, approvals, commandCatalog, controller };
 }
 
 function startTurn(
@@ -185,6 +220,29 @@ describe('external turn controller', () => {
     });
   });
 
+  /**
+   * The hub-side half of surviving a reload before this chat's own first turn
+   * re-announces its catalog: whatever the last turn against this
+   * (user, environment, target) wrote, even after this turn itself ends.
+   */
+  it('files the announced catalog in the hub-side cache for a reload to read', async () => {
+    const { runtime, controller, commandCatalog } = harness();
+    const running = startTurn(controller);
+    await waitForTurnStart(runtime);
+
+    runtime.emit({
+      type: 'commands_available',
+      commands: [{ name: 'review' }, { name: 'dataviz', description: 'Draws charts' }],
+    });
+    runtime.emit({ type: 'completed' });
+    await running;
+
+    expect(commandCatalog.read({ userId, environmentId: 'local', targetId: 'codex' })).toEqual([
+      { name: 'review' },
+      { name: 'dataviz', description: 'Draws charts' },
+    ]);
+  });
+
   it('leaves a readable prefix on disk while the turn is still running', async () => {
     const { runtime, controller } = harness();
     const running = startTurn(controller);
@@ -245,6 +303,82 @@ describe('external turn controller', () => {
     const stored = await readAssistantRow();
     expect(stored.text).toBe('kept');
     expect(stored.generating).toBe(false);
+  });
+
+  /**
+   * #964. `fake-external-runtime.ts`'s `emitEnvelope` calls the stored
+   * listener directly and cannot reproduce this: the drop being fixed happens
+   * inside `RuntimeClient.externalAgents.onEvent`'s own schema check, one
+   * layer above anything that fake stands in for. Only a real `RuntimeClient`
+   * crosses that filter, so this is the one test in the file that pays for a
+   * real protocol connection instead of the stub.
+   *
+   * Before the fix this fails with `result.reason === 'sequence-gap'`: the
+   * envelope carrying the unrecognized event is dropped without consuming its
+   * sequence, so the *next*, perfectly ordinary event reads as a gap.
+   */
+  it('does not mistake an event type it has never seen for a sequence gap', async () => {
+    const { runtime, controller } = await realHarness();
+    try {
+      const running = startTurn(controller);
+      await waitFor(() => runtime.calls.turn.length === 1, 'the turn to reach the runtime');
+
+      runtime.emit({ type: 'text_delta', text: 'a' });
+      runtime.emitRawFrame({
+        sessionId: runtime.sessionId(),
+        nativeTurnId: 'native-turn-1',
+        sequence: runtime.nextSequence(),
+        emittedAtMs: Date.now(),
+        event: { type: 'future_event', shape: 'unknown' },
+      });
+      runtime.emit({ type: 'text_delta', text: 'b' });
+      runtime.emit({ type: 'completed' });
+
+      const result = await running;
+      expect(result.reason).toBe('completed');
+      expect((await readAssistantRow()).text).toBe('ab');
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  /**
+   * The discriminant is read off the one payload on this path that nothing has
+   * validated — failing that validation is the entire reason the branch runs —
+   * so its length is whatever the runtime put there.
+   */
+  it('bounds the unrecognized event type it writes to the log', async () => {
+    const { runtime, controller } = await realHarness();
+    // The unit lane runs with diagnostics off, and this asserts on what the
+    // log actually receives. Restored below, so no later test inherits it.
+    const previousGate = process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
+    process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = '1';
+    const warn = spyOn(console, 'warn');
+    try {
+      const running = startTurn(controller);
+      await waitFor(() => runtime.calls.turn.length === 1, 'the turn to reach the runtime');
+
+      runtime.emitRawFrame({
+        sessionId: runtime.sessionId(),
+        nativeTurnId: 'native-turn-1',
+        sequence: runtime.nextSequence(),
+        emittedAtMs: Date.now(),
+        event: { type: 'x'.repeat(10_000) },
+      });
+      runtime.emit({ type: 'completed' });
+      await running;
+
+      const logged = warn.mock.calls
+        .map(([line]) => (typeof line === 'string' ? line : ''))
+        .find((line) => line.includes('unrecognized_event_type'));
+      expect(logged).toBeDefined();
+      expect(JSON.parse(logged ?? '{}').metadata.type).toHaveLength(128);
+    } finally {
+      warn.mockRestore();
+      if (previousGate === undefined) delete process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
+      else process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = previousGate;
+      await runtime.close();
+    }
   });
 
   it('drops events a vendor emits after saying it was done', async () => {

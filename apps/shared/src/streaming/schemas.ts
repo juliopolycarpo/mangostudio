@@ -363,6 +363,32 @@ const SSEExternalTextEventSchema = Type.Object({
   done: Type.Literal(false),
 });
 
+/**
+ * A reasoning phase opened, with nothing to show yet.
+ *
+ * On current models the API default is `thinking.display: "omitted"`: the
+ * block opens and closes with zero `thinking_delta` text, so without this a
+ * whole reasoning phase renders as nothing — not even a pulse — while the
+ * vendor keeps the turn open. Internal turns have `thinking_start` for
+ * exactly this; external turns had no equivalent until now.
+ */
+const SSEExternalReasoningStartedEventSchema = Type.Object({
+  type: Type.Literal('external_reasoning_started'),
+  done: Type.Literal(false),
+});
+
+/**
+ * The reasoning phase opened by `external_reasoning_started` closed.
+ *
+ * What lets the live transcript decide the same way a reloaded one does: a
+ * phase that closed with no text was withheld and is dropped, wherever it sits;
+ * one still open when the turn ends is the part the turn stopped inside.
+ */
+const SSEExternalReasoningEndedEventSchema = Type.Object({
+  type: Type.Literal('external_reasoning_ended'),
+  done: Type.Literal(false),
+});
+
 const SSEExternalReasoningEventSchema = Type.Object({
   type: Type.Literal('external_reasoning'),
   text: Type.String(),
@@ -565,6 +591,8 @@ export const StreamChunkSchema = Type.Union([
   SSEContinuationTransitionEventSchema,
   SSEExternalSessionStartedEventSchema,
   SSEExternalTextEventSchema,
+  SSEExternalReasoningStartedEventSchema,
+  SSEExternalReasoningEndedEventSchema,
   SSEExternalReasoningEventSchema,
   SSEExternalActivityStartedEventSchema,
   SSEExternalActivityUpdatedEventSchema,

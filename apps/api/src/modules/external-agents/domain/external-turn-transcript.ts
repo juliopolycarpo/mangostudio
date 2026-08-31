@@ -33,6 +33,9 @@ import type {
   MessagePart,
 } from '@mangostudio/shared/types';
 
+/** The reasoning block of the message-part union, which has no name of its own. */
+type ThinkingPart = Extract<MessagePart, { type: 'thinking' }>;
+
 export interface ExternalTurnTranscriptOptions {
   readonly targetId: ExternalAgentTargetId;
   readonly sessionId: string;
@@ -67,6 +70,14 @@ export class ExternalTurnTranscript {
   readonly #maxBytes: number;
   readonly #maxEvents: number;
   #text = '';
+  /**
+   * The reasoning phase `reasoning_started` opened and `reasoning_ended` has
+   * not closed, if any.
+   *
+   * The vendor's own statement of where the turn currently is, which is what
+   * both of {@link finalize}'s decisions turn on — see there.
+   */
+  #openThinking: ThinkingPart | undefined;
   #terminated = false;
 
   constructor(options: ExternalTurnTranscriptOptions) {
@@ -160,9 +171,66 @@ export class ExternalTurnTranscript {
   finalize(reason: ExternalTurnTerminalReason, at: number): void {
     if (this.#terminated) return;
     this.#terminated = true;
+    // An open reasoning phase that is still the trailing part is where this
+    // turn stopped, so it is the part the marker belongs on — not whatever
+    // happens to be last. The prose before it is prose the vendor finished and
+    // moved on from, and marking that would tell the reader a completed
+    // paragraph was cut short. An empty one is dropped and marks nothing:
+    // there is no text to have been cut off, only a phase that never produced
+    // any.
+    //
+    // A phase that is open but no longer trailing was displaced by output the
+    // vendor produced after it, which closed it in fact if not in word — the
+    // shape a runtime too old to send `reasoning_ended` always produces. The
+    // turn stopped in whatever is trailing there, which is the rule that
+    // predates any of this.
+    const stoppedInReasoning =
+      this.#openThinking !== undefined && this.#openThinking === this.#parts.at(-1);
+    const openPhase = this.#closeThinking();
+    if (reason !== 'completed') {
+      this.#markIncomplete(stoppedInReasoning ? openPhase : this.#parts.at(-1));
+    }
     this.#turnPart.status = 'terminal';
     this.#turnPart.terminalReason = reason;
     this.#turnPart.updatedAt = at;
+  }
+
+  /**
+   * Closes the open reasoning phase, and answers with the part that survived.
+   *
+   * `display: "omitted"` is the API default on current models, so a phase that
+   * opens and receives no `thinking_delta` at all is the common case rather
+   * than the exception. Persisting one would seal a permanently blank
+   * collapsed "Thinking" block out of something a live render only ever showed
+   * as a transient pulse, so an empty phase is removed and answers
+   * `undefined` — a part that no longer exists cannot carry a marker either.
+   */
+  #closeThinking(): ThinkingPart | undefined {
+    const open = this.#openThinking;
+    this.#openThinking = undefined;
+    if (!open) return undefined;
+    if (open.text.length > 0) return open;
+    const at = this.#parts.lastIndexOf(open);
+    if (at >= 0) this.#parts.splice(at, 1);
+    return undefined;
+  }
+
+  /** The trailing part, when it is the reasoning block `reasoning_started` just opened. */
+  #trailingThinking(): ThinkingPart | undefined {
+    const last = this.#parts.at(-1);
+    return last?.type === 'thinking' ? last : undefined;
+  }
+
+  /**
+   * Marks prose as cut short, for any terminal reason but `completed`.
+   *
+   * No vendor event describes a sentence stopping mid-word, so the part the
+   * turn was inside when it stopped is the closest true statement available,
+   * and it covers all nine terminal reasons — including the ones no adapter
+   * has a more specific signal for.
+   */
+  #markIncomplete(part: MessagePart | undefined): void {
+    if (part && (part.type === 'text' || part.type === 'thinking')) part.incomplete = true;
   }
 
   /**
@@ -275,6 +343,30 @@ export class ExternalTurnTranscript {
 
       case 'reasoning_delta':
         this.#appendText('thinking', event.text);
+        return { durable: false };
+
+      case 'reasoning_started':
+        // A phase still open when the next one starts was displaced by output
+        // the vendor produced in between and never closed in word — the shape a
+        // runtime too old to send `reasoning_ended` always produces. Closing it
+        // here discards it when it is empty, rather than stranding a blank
+        // "Thinking" row mid-transcript for the rest of the turn.
+        this.#closeThinking();
+        // Opens the block a reload has to show too, the way `reduceThinkingStart`
+        // does for an internal turn. `#appendText` already coalesces onto an
+        // existing trailing `thinking` part, so a phase that already received
+        // text is untouched rather than opened twice.
+        this.#appendText('thinking', '');
+        this.#openThinking = this.#trailingThinking();
+        return { durable: false };
+
+      case 'reasoning_ended':
+        // The vendor says the phase is over, so a phase with nothing in it was
+        // withheld rather than still running, and sealing it would persist a
+        // permanently blank "Thinking" section. Dropped here, at the moment
+        // that becomes knowable, rather than by a rule about which part
+        // happens to be last — this holds at any position in the transcript.
+        this.#closeThinking();
         return { durable: false };
 
       case 'activity_started': {

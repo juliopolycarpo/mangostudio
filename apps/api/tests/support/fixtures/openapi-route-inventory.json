@@ -55,6 +55,7 @@
   "/api/external-agents/sessions": ["get"],
   "/api/external-agents/{targetId}/account-limits": ["get"],
   "/api/external-agents/{targetId}/account-limits/refresh": ["post"],
+  "/api/external-agents/{targetId}/commands": ["get"],
   "/api/external-agents/{targetId}/disclosure": ["delete", "post"],
   "/api/generate": ["post"],
   "/api/git/branches": ["delete", "get", "post"],

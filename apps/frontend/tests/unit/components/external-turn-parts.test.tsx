@@ -1,7 +1,7 @@
 /**
  * What an external turn puts on screen, and — just as important — what it does
  * not: no re-run, no retry, no open-in-editor on a tool MangoStudio never ran,
- * and no markdown rendering of text a third-party process wrote.
+ * and no live markup from text a third-party process wrote.
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
@@ -230,30 +230,121 @@ describe('external turn summary', () => {
   });
 });
 
-describe('vendor prose', () => {
-  const HOSTILE_MARKDOWN = '# Not a heading\n[link](https://evil.example)';
-
-  it('renders vendor prose literally', () => {
-    const { container } = renderParts([turnPart(), { type: 'text', text: HOSTILE_MARKDOWN }]);
-    expect(container.querySelectorAll('[data-vendor-text]')).toHaveLength(1);
-    expect(container.querySelector('a')).toBeNull();
-    expect(container.querySelector('h1')).toBeNull();
+describe('external turn: still working', () => {
+  it('shows a working row while the turn is active and has produced nothing yet', () => {
+    renderParts([turnPart({ status: 'active' })]);
+    expect(screen.getByText('Working...')).toBeInTheDocument();
   });
 
-  it('renders vendor reasoning literally once its block is opened', () => {
-    const { container } = renderParts([turnPart(), { type: 'thinking', text: HOSTILE_MARKDOWN }]);
+  it('shows a working row in the gap between two tool calls', () => {
+    renderParts([turnPart({ status: 'active' }), activityPart({ status: 'completed' })]);
+    expect(screen.getByText('Working...')).toBeInTheDocument();
+  });
+
+  // A call still running already renders as running. A second row under it
+  // reads as a *second* thing happening, which is one more than there is.
+  it('does not duplicate the cue under a call that is still running', () => {
+    renderParts([turnPart({ status: 'active' }), activityPart({ status: 'running' })]);
+    expect(screen.queryByText('Working...')).toBeNull();
+  });
+
+  it('stays quiet once the turn is terminal', () => {
+    renderParts([turnPart({ status: 'terminal', terminalReason: 'completed' })]);
+    expect(screen.queryByText('Working...')).toBeNull();
+  });
+
+  // The trailing text already shows its own caret while it streams — a second
+  // cue saying the same thing would be redundant right where it matters least.
+  it('does not duplicate the cue over text that is actively streaming', () => {
+    render(
+      <MessageParts
+        parts={[turnPart({ status: 'active' }), { type: 'text', text: 'partial' }]}
+        messageId="msg-1"
+        isStreaming
+      />
+    );
+    expect(screen.queryByText('Working...')).toBeNull();
+  });
+});
+
+describe('an unfinished section', () => {
+  it('marks the trailing text as cut off', () => {
+    renderParts([
+      turnPart({ status: 'terminal', terminalReason: 'cancelled-by-user' }),
+      { type: 'text', text: 'partial', incomplete: true },
+    ]);
+    expect(screen.getByText('Cut off.')).toBeInTheDocument();
+  });
+
+  it('marks the trailing thinking row as cut off, visible without expanding it', () => {
+    renderParts([
+      turnPart({ status: 'terminal', terminalReason: 'cancelled-by-user' }),
+      { type: 'thinking', text: 'reasoning', incomplete: true },
+    ]);
+    // The block auto-collapses once a finished turn stops streaming into it —
+    // the marker has to survive that collapse, which unmounts the disclosure.
+    expect(screen.getByText(/Cut off\./)).toBeInTheDocument();
+  });
+
+  it('says nothing extra about a part that finished normally', () => {
+    renderParts([turnPart(), { type: 'text', text: 'done' }]);
+    expect(screen.queryByText('Cut off.')).toBeNull();
+  });
+});
+
+describe('vendor prose', () => {
+  const VENDOR_MARKDOWN = '# A heading\n\n**bold** and [link](https://ok.example)';
+  // Everything a renderer is asked to neutralize, in one blob: raw html, an
+  // unsafe scheme, an image that would otherwise fetch a remote pixel, and
+  // html smuggled into a link label.
+  const HOSTILE_MARKDOWN = [
+    '<img src=x onerror="alert(1)">',
+    '[js](javascript:alert(1))',
+    '![pixel](https://evil.example/p.png)',
+    '[label <svg onload="alert(1)">](https://ok.example)',
+  ].join('\n\n');
+
+  it('renders vendor prose as markdown, the same as a MangoStudio turn', async () => {
+    const { container } = renderParts([turnPart(), { type: 'text', text: VENDOR_MARKDOWN }]);
+
+    // The markdown renderer is lazy-loaded behind Suspense, whose fallback
+    // prints the source text — a synchronous query would read the fallback and
+    // pass against the very output this asserts on.
+    await screen.findByText('A heading');
+    expect(container.querySelector('h1')).toHaveTextContent('A heading');
+    expect(container.querySelector('strong')).toHaveTextContent('bold');
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('https://ok.example');
+  });
+
+  it('renders vendor reasoning as markdown once its block is opened', async () => {
+    const { container } = renderParts([turnPart(), { type: 'thinking', text: VENDOR_MARKDOWN }]);
     // The thinking block starts collapsed on a finished turn, so its body is not
     // in the document until it is opened.
     fireEvent.click(screen.getAllByRole('button')[0] as HTMLElement);
-    expect(container.querySelectorAll('[data-vendor-text]')).toHaveLength(1);
-    expect(container.querySelector('a')).toBeNull();
+
+    await screen.findByText('A heading');
+    expect(container.querySelector('h1')).toHaveTextContent('A heading');
+  });
+
+  it('keeps hostile vendor markup inert', async () => {
+    const { container } = renderParts([turnPart(), { type: 'text', text: HOSTILE_MARKDOWN }]);
+    await screen.findByText(/<img src=x/);
+
+    // Raw html is escaped rather than parsed, no scheme outside http(s)/mailto
+    // survives, and an image renders as a link instead of fetching anything.
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('svg')).toBeNull();
+    const hrefs = Array.from(container.querySelectorAll('a'), (a) => a.getAttribute('href'));
+    expect(hrefs).toContain('#');
+    expect(hrefs).not.toContain('javascript:alert(1)');
+    for (const anchor of container.querySelectorAll('a')) {
+      expect(anchor.getAttribute('rel')).toBe('noopener noreferrer');
+    }
   });
 
   it('leaves a MangoStudio turn on the markdown path', async () => {
-    const { container } = renderParts([{ type: 'text', text: HOSTILE_MARKDOWN }]);
-    // The lazy-loaded markdown renderer settles asynchronously; wait for its
-    // output before asserting on the vendor-text marker it never adds.
-    await screen.findByText('Not a heading');
-    expect(container.querySelector('[data-vendor-text]')).toBeNull();
+    const { container } = renderParts([{ type: 'text', text: VENDOR_MARKDOWN }]);
+    await screen.findByText('A heading');
+    expect(container.querySelector('h1')).toBeInTheDocument();
   });
 });

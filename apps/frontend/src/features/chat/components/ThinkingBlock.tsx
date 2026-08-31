@@ -44,11 +44,12 @@ interface ThinkingBlockProps {
   text: string;
   isStreaming: boolean;
   /**
-   * True when a vendor process wrote this, not a MangoStudio model. Vendor text
-   * is rendered literally — markdown here would let a third party emit links and
-   * images into MangoStudio's own UI.
+   * Set on the part trailing an external turn that ended for a reason other
+   * than `completed`. Rendered on the row itself, never only inside the
+   * disclosure — the block auto-collapses the moment streaming stops, which
+   * is exactly when this can first be true.
    */
-  plainText?: boolean;
+  incomplete?: true;
 }
 
 /**
@@ -59,12 +60,7 @@ interface ThinkingBlockProps {
  * reads "Thought for 4s", and one restored from a reloaded transcript reads
  * "Thought". Naming a duration nobody measured would be worse than omitting it.
  */
-export function ThinkingBlock({
-  messageId,
-  text,
-  isStreaming,
-  plainText = false,
-}: ThinkingBlockProps) {
+export function ThinkingBlock({ messageId, text, isStreaming, incomplete }: ThinkingBlockProps) {
   const { t } = useI18n();
   const initialUiStateRef = useRef<ThinkingUiState>(
     thinkingUiStateByMessage.get(messageId) ?? {
@@ -158,6 +154,11 @@ export function ThinkingBlock({
         >
           {label}
         </span>
+        {incomplete && !isStreaming ? (
+          <span className="shrink-0 text-on-surface-variant/40">
+            · {t.externalAgents.turn.incomplete}
+          </span>
+        ) : null}
       </TimelineRow>
       <TimelineDisclosure open={expanded}>
         <div
@@ -166,21 +167,12 @@ export function ThinkingBlock({
           className="app-scrollbar max-h-48 overflow-y-auto p-3.5 sm:max-h-72 md:max-h-96"
         >
           <div className="markdown-content--thinking text-xs leading-relaxed text-on-surface-variant/60">
-            {plainText ? (
-              <span
-                data-vendor-text
-                className={`block whitespace-pre-wrap break-words${isStreaming ? ' streaming-caret' : ''}`}
-              >
-                {text}
-              </span>
-            ) : (
-              <MarkdownContent
-                content={text}
-                isStreaming={isStreaming}
-                copyCodeLabel={t.chat.copyCode}
-                codeCopiedLabel={t.chat.codeCopied}
-              />
-            )}
+            <MarkdownContent
+              content={text}
+              isStreaming={isStreaming}
+              copyCodeLabel={t.chat.copyCode}
+              codeCopiedLabel={t.chat.codeCopied}
+            />
           </div>
         </div>
       </TimelineDisclosure>

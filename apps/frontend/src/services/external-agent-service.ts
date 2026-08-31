@@ -9,6 +9,7 @@
 
 import type { Chat, ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type {
+  ExternalAgentCommandCatalogResponse,
   ExternalAgentDescriptorListResponse,
   ExternalAgentSteerResult,
   ExternalNativeSession,
@@ -236,4 +237,20 @@ export async function refreshExternalAccountLimits(
   });
   if (error) throw new ApiError(error.value);
   return data as { limits?: import('@mangostudio/shared/external-agents').ExternalAccountLimits };
+}
+
+/**
+ * The last catalog the hub observed for this (user, environment, target), for
+ * a reload before this chat's own first turn re-announces one of its own. An
+ * empty `commands` array means nothing has ever been observed, not a failure.
+ */
+export async function getExternalCommandCatalog(
+  targetId: string,
+  query: { environmentId: string }
+): Promise<ExternalAgentCommandCatalogResponse> {
+  const { data, error } = await client.api['external-agents']({ targetId }).commands.get({
+    query: { environmentId: query.environmentId },
+  });
+  if (error) throw new ApiError(error.value);
+  return data as ExternalAgentCommandCatalogResponse;
 }

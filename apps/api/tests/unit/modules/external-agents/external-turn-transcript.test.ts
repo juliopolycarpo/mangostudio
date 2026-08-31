@@ -67,6 +67,74 @@ describe('ExternalTurnTranscript', () => {
     ]);
   });
 
+  it('opens an empty thinking part when a reasoning phase starts', () => {
+    const target = transcript();
+    feed(target, [{ type: 'reasoning_started' }]);
+
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn', 'thinking']);
+    expect(target.parts.at(-1)).toMatchObject({ type: 'thinking', text: '' });
+  });
+
+  /**
+   * `display: "omitted"` is the API default on current models, so a reasoning
+   * phase producing zero characters is the common case. Left sealed, a reload
+   * would show a completed, permanently empty collapsed block for every
+   * ordinary turn — not a bug the user did anything to cause.
+   */
+  it('drops a trailing reasoning phase that received no text once the turn ends', () => {
+    const target = transcript();
+    feed(target, [{ type: 'reasoning_started' }, { type: 'completed' }]);
+
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn']);
+  });
+
+  it('keeps a reasoning phase that received text, even though the block started empty', () => {
+    const target = transcript();
+    feed(target, [
+      { type: 'reasoning_started' },
+      { type: 'reasoning_delta', text: 'weighing it' },
+      { type: 'completed' },
+    ]);
+
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn', 'thinking']);
+    expect(target.parts.at(-1)).toMatchObject({ type: 'thinking', text: 'weighing it' });
+  });
+
+  /**
+   * The vendor closing an empty phase is a statement that it was withheld, not
+   * that it is still running — so it goes at that moment, wherever it sits.
+   * Position never enters into it: a blank collapsed block in the middle of a
+   * transcript is exactly as unreadable as one at the end.
+   */
+  it('drops an empty reasoning phase the vendor closed, mid-transcript', () => {
+    const target = transcript();
+    feed(target, [
+      { type: 'reasoning_started' },
+      { type: 'reasoning_ended' },
+      {
+        type: 'activity_started',
+        callId: 'call-1',
+        activity: { name: 'shell', kind: 'command', title: 'ls' },
+      },
+      { type: 'completed' },
+    ]);
+
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn', 'external_activity']);
+  });
+
+  it('keeps a closed reasoning phase that received text', () => {
+    const target = transcript();
+    feed(target, [
+      { type: 'reasoning_started' },
+      { type: 'reasoning_delta', text: 'weighing it' },
+      { type: 'reasoning_ended' },
+      { type: 'text_delta', text: 'here it is' },
+      { type: 'completed' },
+    ]);
+
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn', 'thinking', 'text']);
+  });
+
   it('records activity as external_activity, never as a tool call', () => {
     const target = transcript();
     feed(target, [
@@ -254,6 +322,131 @@ describe('ExternalTurnTranscript', () => {
 
     expect(target.turnPart.terminalReason).toBe('cancelled-by-user');
     expect(target.turnPart.updatedAt).toBe(3_000);
+  });
+
+  /**
+   * A cancel is a controller-driven `finalize`, not a vendor `completed`
+   * event through `apply` — the empty-block drop has to be inside `finalize`
+   * itself, not something only the `completed`/`error` cases in `apply` do.
+   */
+  it('drops a trailing empty reasoning phase even when the controller finalizes directly', () => {
+    const target = transcript();
+    feed(target, [{ type: 'reasoning_started' }]);
+    target.finalize('cancelled-by-user', 5_000);
+
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn']);
+  });
+
+  /**
+   * No vendor event describes a sentence stopping mid-thought, so the turn's
+   * own terminal reason is the cheapest source that is still correct — and
+   * the only one that covers all nine terminal reasons, not just the ones an
+   * adapter happens to have a more specific signal for.
+   */
+  it('marks the trailing text as incomplete when the turn ends for any reason but completed', () => {
+    const target = transcript();
+    feed(target, [{ type: 'text_delta', text: 'partial' }]);
+    target.finalize('runtime-disconnected', 5_000);
+
+    expect(target.parts.at(-1)).toMatchObject({ type: 'text', text: 'partial', incomplete: true });
+  });
+
+  it('marks the trailing thinking part as incomplete the same way', () => {
+    const target = transcript();
+    feed(target, [{ type: 'reasoning_delta', text: 'weighing it' }]);
+    target.finalize('sequence-gap', 5_000);
+
+    expect(target.parts.at(-1)).toMatchObject({
+      type: 'thinking',
+      text: 'weighing it',
+      incomplete: true,
+    });
+  });
+
+  /**
+   * The turn stopped inside the reasoning phase, not inside the paragraph
+   * before it — the vendor finished that paragraph and moved on. Marking it
+   * would tell the reader a completed sentence was cut off, and the phase
+   * itself has no text to have been cut off, so nothing is marked at all.
+   */
+  it('marks nothing when the turn stopped inside a reasoning phase that produced no text', () => {
+    const target = transcript();
+    feed(target, [
+      { type: 'text_delta', text: 'Here is the plan.' },
+      { type: 'reasoning_started' },
+    ]);
+    target.finalize('cancelled-by-user', 5_000);
+
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn', 'text']);
+    expect(target.parts.at(-1)).not.toHaveProperty('incomplete');
+  });
+
+  /** The phase itself is what was cut short when it had already produced text. */
+  it('marks the open reasoning phase when the turn stopped inside one that had text', () => {
+    const target = transcript();
+    feed(target, [
+      { type: 'text_delta', text: 'Here is the plan.' },
+      { type: 'reasoning_started' },
+      { type: 'reasoning_delta', text: 'weighing' },
+    ]);
+    target.finalize('cancelled-by-user', 5_000);
+
+    expect(target.parts.at(-1)).toMatchObject({ type: 'thinking', incomplete: true });
+    expect(target.parts.at(-2)).not.toHaveProperty('incomplete');
+  });
+
+  /**
+   * The phase the vendor closed is history: the turn was not inside it when it
+   * stopped, so the trailing prose is what got cut short.
+   */
+  it('marks the trailing prose when the reasoning phase had already closed', () => {
+    const target = transcript();
+    feed(target, [
+      { type: 'reasoning_started' },
+      { type: 'reasoning_ended' },
+      { type: 'text_delta', text: 'partial' },
+    ]);
+    target.finalize('cancelled-by-user', 5_000);
+
+    expect(target.parts.at(-1)).toMatchObject({ type: 'text', text: 'partial', incomplete: true });
+  });
+
+  it('marks nothing when the turn completed normally', () => {
+    const target = transcript();
+    feed(target, [{ type: 'text_delta', text: 'done' }, { type: 'completed' }]);
+
+    expect(target.parts.at(-1)).not.toHaveProperty('incomplete');
+  });
+
+  it('does not mark a part that is not trailing', () => {
+    const target = transcript();
+    feed(target, [
+      { type: 'text_delta', text: 'before' },
+      {
+        type: 'activity_started',
+        callId: 'call-1',
+        activity: { name: 'shell', kind: 'command', title: 'ls' },
+      },
+    ]);
+    target.finalize('cancelled-by-user', 5_000);
+
+    const text = target.parts.find((part) => part.type === 'text');
+    expect(text).not.toHaveProperty('incomplete');
+  });
+
+  /**
+   * The ordering commit 4 and this one depend on: a cancelled turn can end
+   * with an empty thinking part trailing. Dropping it has to run first, so
+   * the mark lands on whatever is trailing *after* that — never on the empty
+   * block this same call is about to delete.
+   */
+  it('drops an empty trailing reasoning phase before marking anything incomplete', () => {
+    const target = transcript();
+    feed(target, [{ type: 'reasoning_started' }]);
+    target.finalize('cancelled-by-user', 5_000);
+
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn']);
+    expect(target.parts.some((part) => 'incomplete' in part)).toBe(false);
   });
 
   it("never persists the vendor's own session handle", () => {

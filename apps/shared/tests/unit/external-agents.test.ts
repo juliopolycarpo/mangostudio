@@ -20,6 +20,7 @@ import {
   ExternalAgentDiscoverParamsSchema,
   ExternalAgentDiscoverResultSchema,
   type ExternalAgentEvent,
+  ExternalAgentEventEnvelopeFrameSchema,
   ExternalAgentEventEnvelopeSchema,
   ExternalAgentEventSchema,
   ExternalAgentOpenParamsSchema,
@@ -273,6 +274,34 @@ describe('runtime external-agent protocol payloads', () => {
     ).toBe(true);
   });
 
+  /**
+   * #964. A hub and a runtime never upgrade in lockstep, so the frame schema
+   * has to accept an `event` this build's `ExternalAgentEventSchema` has never
+   * seen — that is exactly the envelope a newer runtime sends, and the whole
+   * point of splitting it from the full schema is that its sequence number
+   * must still be counted rather than silently lost.
+   */
+  it('checks the envelope frame without checking the event it carries', () => {
+    const frame = {
+      sessionId: 'session-1',
+      nativeTurnId: 'turn-1',
+      sequence: 1,
+      emittedAtMs: 1_700_000_000_000,
+      event: { type: 'future_event', shape: 'unknown' },
+    } as const;
+
+    expect(Value.Check(ExternalAgentEventEnvelopeFrameSchema, frame)).toBe(true);
+    expect(Value.Check(ExternalAgentEventEnvelopeSchema, frame)).toBe(false);
+    expect(Value.Check(ExternalAgentEventEnvelopeFrameSchema, { ...frame, sequence: 0 })).toBe(
+      false
+    );
+    expect(Value.Check(ExternalAgentEventEnvelopeFrameSchema, { ...frame, sessionId: 1 })).toBe(
+      false
+    );
+    const { event: _event, ...withoutEvent } = frame;
+    expect(Value.Check(ExternalAgentEventEnvelopeFrameSchema, withoutEvent)).toBe(false);
+  });
+
   it('requires a closed, positive identity-isolation attestation', () => {
     const isolation = {
       method: 'single-user-host',
@@ -336,6 +365,8 @@ describe('the neutral event contract', () => {
   const valid: readonly ExternalAgentEvent[] = [
     { type: 'session_started', sessionId: 'thread-1', resumed: false },
     { type: 'text_delta', text: 'hello' },
+    { type: 'reasoning_started' },
+    { type: 'reasoning_ended' },
     { type: 'reasoning_delta', text: 'thinking' },
     {
       type: 'activity_started',

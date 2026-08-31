@@ -650,6 +650,27 @@ export type ExternalAgentCommand = Static<typeof ExternalAgentCommandSchema>;
 export const EXTERNAL_COMMAND_CATALOG_MAX_ITEMS = 256;
 
 /**
+ * The last catalog the hub observed for a `(user, environment, target)`, read
+ * back before this chat's own first turn has announced one of its own.
+ *
+ * `commands` is an empty array rather than an absent field when nothing has
+ * ever been observed — a hint with nothing to offer yet, not a different
+ * shape the caller has to branch on.
+ */
+export const ExternalAgentCommandCatalogResponseSchema = Type.Object(
+  {
+    commands: ReadonlyArraySchema(ExternalAgentCommandSchema, {
+      maxItems: EXTERNAL_COMMAND_CATALOG_MAX_ITEMS,
+    }),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalAgentCommandCatalogResponse = Static<
+  typeof ExternalAgentCommandCatalogResponseSchema
+>;
+
+/**
  * The neutral event contract every adapter normalizes onto.
  *
  * Ordering and idempotency are *not* here: every event travels inside the
@@ -692,6 +713,29 @@ export const ExternalAgentEventSchema = Type.Union([
     { type: Type.Literal('reasoning_delta'), text: Type.String() },
     { additionalProperties: false }
   ),
+  /**
+   * A reasoning block opened. No payload: it means exactly that, nothing more.
+   *
+   * On current models the API default withholds `thinking_delta` text, so a
+   * whole reasoning phase can otherwise produce zero events while the vendor
+   * keeps the turn open. Driven by `content_block_start`, which fires once per
+   * block, so this never becomes a second per-token event to budget.
+   */
+  Type.Object({ type: Type.Literal('reasoning_started') }, { additionalProperties: false }),
+  /**
+   * The reasoning block opened by the last `reasoning_started` closed.
+   *
+   * The other half of the pair, and what turns "is this phase empty because it
+   * is still running, or because the vendor withheld it?" from a guess into a
+   * statement. A phase that closes with no text is one the vendor omitted, at
+   * any position in the transcript; a phase still open when the turn reaches a
+   * terminal state is where that turn actually stopped. Both projections read
+   * it for exactly those two decisions.
+   *
+   * Payload-free and driven by `content_block_stop`, so it costs one event per
+   * reasoning phase — the same budget `reasoning_started` already spends.
+   */
+  Type.Object({ type: Type.Literal('reasoning_ended') }, { additionalProperties: false }),
   Type.Object(
     {
       type: Type.Literal('activity_started'),
@@ -1347,3 +1391,30 @@ export const ExternalAgentEventEnvelopeSchema = Type.Object(
   { additionalProperties: false }
 );
 export type ExternalAgentEventEnvelope = Static<typeof ExternalAgentEventEnvelopeSchema>;
+
+/**
+ * The envelope's transport-level shape, with `event` left unchecked.
+ *
+ * A hub and a runtime never upgrade in lockstep, so a runtime can start
+ * emitting an event type this hub's copy of {@link ExternalAgentEventSchema}
+ * does not know yet. Checking the whole envelope in one pass makes that an
+ * indistinguishable case from a corrupt frame — both fail `Value.Check` — and
+ * a dropped frame's sequence number is never consumed, which turns the next,
+ * perfectly ordinary event into a gap that ends the turn. Validating the frame
+ * on its own lets the sequencer see and account for every envelope whose
+ * addressing is sound, so only the unrecognized *event* is inert rather than
+ * the whole turn. See #964.
+ *
+ * Derived from the envelope rather than restated beside it: two hand-written
+ * copies of the same five addressing fields is two places a future envelope
+ * field has to be added, and the one that gets forgotten is this one — which
+ * would refuse the frame outright and reproduce #964 one level up.
+ */
+export const ExternalAgentEventEnvelopeFrameSchema = Type.Object(
+  {
+    ...Type.Omit(ExternalAgentEventEnvelopeSchema, ['event']).properties,
+    event: Type.Unknown(),
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentEventEnvelopeFrame = Static<typeof ExternalAgentEventEnvelopeFrameSchema>;

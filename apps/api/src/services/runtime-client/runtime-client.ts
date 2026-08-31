@@ -126,7 +126,7 @@ import {
   StaleLineNumbersError,
   UnobservedLineNumbersError,
 } from '@mangostudio/runtime';
-import { ExternalAgentEventEnvelopeSchema } from '@mangostudio/shared/external-agents';
+import { ExternalAgentEventEnvelopeFrameSchema } from '@mangostudio/shared/external-agents';
 import { directoryHashDomainOf } from '@mangostudio/shared/library';
 import type {
   RuntimeEventFrame,
@@ -326,7 +326,10 @@ interface RuntimeExternalAgentsClient {
     params: ExternalAgentListSessionsParams,
     options?: RuntimeRequestOptions
   ): Promise<ExternalAgentListSessionsResult>;
-  /** Subscribes only to validated semantic events for one hub-owned session. */
+  /**
+   * Subscribes to one hub-owned session's events. Only the envelope frame is
+   * validated; `event` itself may be a type this build doesn't recognize.
+   */
   onEvent(sessionId: string, listener: (event: ExternalAgentEventEnvelope) => void): () => void;
 }
 
@@ -504,8 +507,17 @@ export class RuntimeClient {
           // session match runs before the envelope validation: a delta stream
           // otherwise pays one full schema check per unrelated subscriber.
           if ((frame.payload as { sessionId?: unknown } | null)?.sessionId !== sessionId) return;
-          if (!Value.Check(ExternalAgentEventEnvelopeSchema, frame.payload)) return;
-          listener(frame.payload);
+          // Only the frame — sessionId, sequence, nativeTurnId — is checked
+          // here. `event` is deliberately left unvalidated: a runtime newer
+          // than this hub's copy of `ExternalAgentEventSchema` can emit an
+          // event type this build has never heard of, and rejecting the whole
+          // envelope for that would drop its sequence number uncounted, so the
+          // *next*, perfectly ordinary event reads as a gap and ends the turn.
+          // The sequencer has to see every well-addressed envelope to keep
+          // counting; whether the event inside it means anything is decided
+          // downstream, per event, not here, per envelope. See #964.
+          if (!Value.Check(ExternalAgentEventEnvelopeFrameSchema, frame.payload)) return;
+          listener(frame.payload as ExternalAgentEventEnvelope);
         }),
     };
     this.install = {

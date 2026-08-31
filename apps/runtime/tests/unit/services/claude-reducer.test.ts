@@ -60,15 +60,31 @@ describe('ClaudeTurnReducer, on a recorded read-a-file turn', () => {
 
   /**
    * The recording is a `2.1.226` run: it lists 71 names under `slash_commands`
-   * — `gh` and `dataviz` among them, but `doctor`, `color`, `clear` and
-   * `heapdump` too — and carries no `terminal_slash_commands`. That build is
-   * inside the supported range, so this is the shape a real user hits, and the
-   * only honest answer to it is no catalog at all. `the init record’s
-   * slash-command list` covers the runs that do state their exclusions.
+   * and carries no `terminal_slash_commands`, so the exclusion list this
+   * catalog would normally subtract is unreadable. The provenance rule
+   * publishes the subset whose *origin* the same record states instead of
+   * withholding the whole thing: every name here is either in `skills`,
+   * namespaced `plugin:command` against a real `init.plugins[].name` (this
+   * fixture's own `code-review` plugin), or prefixed `mcp__`.
+   *
+   * `doctor` is both a real skill this account installed *and* the name of a
+   * terminal-only Claude Code builtin on a build new enough to say so — this
+   * record cannot tell those two apart, and publishes it anyway, because the
+   * statement it makes is "this is a skill", not "this is interactive".
+   * `color`, `clear` and `heapdump` have no such statement behind them in
+   * this recording and stay withheld.
    */
-  it('announces no catalog for a run that predates the terminal-only list', () => {
+  it('publishes the names whose origin the record states, when the exclusion list is unreadable', () => {
     const { events } = reduceAll('claude-read-turn.jsonl');
-    expect(events.find((event) => event.type === 'commands_available')).toBeUndefined();
+    const catalog = events.find((event) => event.type === 'commands_available');
+    const names =
+      catalog?.type === 'commands_available' ? catalog.commands.map((command) => command.name) : [];
+
+    expect(names).toContain('doctor');
+    expect(names).toContain('code-review:code-review');
+    expect(names).not.toContain('color');
+    expect(names).not.toContain('clear');
+    expect(names).not.toContain('heapdump');
   });
 
   it('reports the resume state it was opened with rather than inferring one', () => {
@@ -102,6 +118,17 @@ describe('ClaudeTurnReducer, on a recorded read-a-file turn', () => {
     expect(events.some((event) => event.type === 'reasoning_delta')).toBe(false);
   });
 
+  /**
+   * The other side of the fix above: this phase produces zero `thinking_delta`
+   * text, but the recording's `content_block_start` for it still fires, which
+   * is the one signal a live render has to show the reasoning phase happened
+   * at all — without it the turn looks idle for the whole phase.
+   */
+  it('announces the reasoning phase even when the vendor withholds every delta', () => {
+    const { events } = reduceAll('claude-read-turn.jsonl');
+    expect(events.filter((event) => event.type === 'reasoning_started')).toHaveLength(1);
+  });
+
   it('streams thinking as reasoning, not as text, when the vendor sends it', () => {
     const subject = new ClaudeTurnReducer({ resumed: false });
     const events = subject.reduce({
@@ -113,6 +140,112 @@ describe('ClaudeTurnReducer, on a recorded read-a-file turn', () => {
       },
     }).events;
     expect(events).toEqual([{ type: 'reasoning_delta', text: 'weighing the options' }]);
+  });
+
+  it('announces a reasoning phase when the vendor opens a thinking block', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    const events = subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
+    }).events;
+    expect(events).toEqual([{ type: 'reasoning_started' }]);
+  });
+
+  it('does not announce a reasoning phase for a tool_use block opening', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    const events = subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use' } },
+    }).events;
+    expect(events).toEqual([]);
+  });
+
+  /**
+   * A redacted block's text is encrypted, so no renderable delta can ever
+   * follow it and the announcement is the whole of what that phase will show.
+   * Without it a turn that reasons entirely under redaction renders as
+   * nothing — the same defect this event exists to fix for plain thinking.
+   */
+  it('announces a reasoning phase for a redacted thinking block too', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    const events = subject.reduce({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'redacted_thinking' },
+      },
+    }).events;
+    expect(events).toEqual([{ type: 'reasoning_started' }]);
+  });
+
+  /**
+   * The other half of the pair. `content_block_stop` states an index and
+   * nothing else, so the block's type has to be remembered from the start that
+   * opened it — a `tool_use` block closing must not report a reasoning phase
+   * ending.
+   */
+  it('ends the reasoning phase when the block that opened it closes', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
+    });
+    subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use' } },
+    });
+
+    expect(
+      subject.reduce({ type: 'stream_event', event: { type: 'content_block_stop', index: 1 } })
+        .events
+    ).toEqual([]);
+    expect(
+      subject.reduce({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } })
+        .events
+    ).toEqual([{ type: 'reasoning_ended' }]);
+  });
+
+  it('does not end a reasoning phase twice', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
+    });
+    subject.reduce({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } });
+
+    expect(
+      subject.reduce({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } })
+        .events
+    ).toEqual([]);
+  });
+
+  /**
+   * The safety net for a message that ends without a `content_block_stop` for
+   * its reasoning block. Every recorded run does send the stop, so this pins
+   * the behaviour rather than a bug: a projection left holding an open phase
+   * would go on treating a finished turn as stopped inside it.
+   */
+  it('ends a reasoning phase the message boundary closed for it', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
+    });
+
+    expect(
+      subject.reduce({ type: 'stream_event', event: { type: 'message_stop' } }).events
+    ).toEqual([{ type: 'reasoning_ended' }]);
+  });
+
+  it("never announces a subagent's reasoning phase into the main transcript", () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    const events = subject.reduce({
+      type: 'stream_event',
+      parent_tool_use_id: 'toolu_task',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
+    }).events;
+    expect(events).toEqual([]);
   });
 
   it("labels the activity with Claude's own tool name, verbatim", () => {
@@ -177,6 +310,302 @@ describe('ClaudeTurnReducer, on a recorded denied write', () => {
   it('reports the denial once, through the activity that was refused', () => {
     const { events } = reduceAll('claude-denied-write-turn.jsonl');
     expect(events.filter((event) => event.type === 'activity_completed')).toHaveLength(1);
+  });
+
+  /**
+   * This recording has zero `stream_event` records — the fixture that exposed
+   * `#reduceAssistant` skipping main-conversation text unconditionally, on the
+   * assumption a delta stream had already delivered it. Nothing did, so the
+   * refusal was the vendor's entire visible reply and reached nothing.
+   */
+  it('delivers the assistant text even though the run carried no partial messages', () => {
+    const { events } = reduceAll('claude-denied-write-turn.jsonl');
+    const text = events
+      .filter((event) => event.type === 'text_delta')
+      .map((event) => event.text)
+      .join('');
+    expect(text).toBe(
+      'I need permission to write the file. Please approve the request to write to `denied.txt` so I can create the file with the content "hello".'
+    );
+  });
+
+  /**
+   * Same defect, same fix: a `thinking` block with real text is exactly as
+   * dependent on delta delivery as a `text` block is, and this run delivered
+   * neither. Two separate messages each reason once, in the order they ran.
+   */
+  it('delivers the assistant reasoning even though the run carried no partial messages', () => {
+    const { events } = reduceAll('claude-denied-write-turn.jsonl');
+    const reasoning = events
+      .filter((event) => event.type === 'reasoning_delta')
+      .map((event) => event.text);
+    expect(reasoning).toEqual([
+      'The user is asking me to create a file named denied.txt containing the word "hello" using the Write tool. This is a straightforward task.\n\nI need to use the Write tool with:\n- file_path: The absolute path to the file. The working directory is /work/repo, so the file should be at /work/repo/denied.txt\n- content: "hello"\n\nLet me create this file.',
+      "The user hasn't granted permission to write to that file yet. I need to wait for them to approve this action. Let me inform them that permission is needed.",
+    ]);
+  });
+
+  it('names the refused tool and the reason in the activity Claude reports', () => {
+    const { events } = reduceAll('claude-denied-write-turn.jsonl');
+    expect(events.find((event) => event.type === 'activity_started')).toMatchObject({
+      activity: { name: 'Write' },
+    });
+    expect(events.find((event) => event.type === 'activity_completed')).toEqual({
+      type: 'activity_completed',
+      callId: 'toolu_01C6mrMsVYh8HA3A3tXLooH6',
+      result: {
+        status: 'failed',
+        detail:
+          "Claude requested permissions to write to /work/repo/denied.txt, but you haven't granted it yet.",
+      },
+    });
+  });
+});
+
+describe('ClaudeTurnReducer, merging a permission denial into its activity', () => {
+  /**
+   * The denied-write fixture's own `tool_result.content` happens to repeat
+   * `system/permission_denied`'s message verbatim, which is not something a
+   * future Claude Code build has to keep doing. This constructs the case
+   * where they diverge, to prove the merge reads the held denial rather than
+   * merely agreeing with a `tool_result` that already said the same thing.
+   */
+  it("prefers the vendor's own denial reason over a tool_result that does not explain itself", () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({
+      type: 'assistant',
+      parent_tool_use_id: null,
+      message: {
+        id: 'msg-1',
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'toolu_1',
+            name: 'Write',
+            input: { file_path: '/work/repo/x.txt' },
+          },
+        ],
+      },
+    });
+    subject.reduce({
+      type: 'system',
+      subtype: 'permission_denied',
+      tool_name: 'Write',
+      tool_use_id: 'toolu_1',
+      message:
+        'Claude requested permission to write to /work/repo/x.txt, but you have not granted it yet.',
+    });
+    const events = subject.reduce({
+      type: 'user',
+      parent_tool_use_id: null,
+      message: {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'toolu_1', content: 'Error', is_error: true },
+        ],
+      },
+    }).events;
+    expect(events).toEqual([
+      {
+        type: 'activity_completed',
+        callId: 'toolu_1',
+        result: {
+          status: 'failed',
+          detail:
+            'Claude requested permission to write to /work/repo/x.txt, but you have not granted it yet.',
+        },
+      },
+    ]);
+  });
+
+  /**
+   * A run can end with the refused call still open — the process died, or the
+   * budget ran out, before the `tool_result` that normally carries the reason.
+   * `cancelled` with no detail throws away the only statement anyone made
+   * about why that call did not happen.
+   */
+  it('carries the held denial into a call the run ended without closing', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({
+      type: 'assistant',
+      message: {
+        id: 'msg-1',
+        content: [{ type: 'tool_use', id: 'toolu_3', name: 'Write', input: { file_path: '/x' } }],
+      },
+    });
+    subject.reduce({
+      type: 'system',
+      subtype: 'permission_denied',
+      tool_name: 'Write',
+      tool_use_id: 'toolu_3',
+      message: 'Claude requested permission to write to /x, but you have not granted it yet.',
+    });
+    const events = subject.reduce({ type: 'result', subtype: 'success', is_error: false }).events;
+    expect(events[0]).toEqual({
+      type: 'activity_completed',
+      callId: 'toolu_3',
+      result: {
+        status: 'cancelled',
+        detail: 'Claude requested permission to write to /x, but you have not granted it yet.',
+      },
+    });
+  });
+
+  it('falls back to the tool_result content when no denial was held for the call', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', id: 'toolu_2', name: 'Bash', input: { command: 'ls' } }],
+      },
+    });
+    const events = subject.reduce({
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'toolu_2',
+            content: 'command not found',
+            is_error: true,
+          },
+        ],
+      },
+    }).events;
+    expect(events).toEqual([
+      {
+        type: 'activity_completed',
+        callId: 'toolu_2',
+        result: { status: 'failed', detail: 'command not found' },
+      },
+    ]);
+  });
+});
+
+/**
+ * Reconciling a completed `assistant` block against the deltas that streamed
+ * it. Both directions are failures the user sees: replaying a block the deltas
+ * already carried doubles the reply, and skipping one they did not carry loses
+ * it outright.
+ */
+describe('ClaudeTurnReducer, reconciling a completed block with its deltas', () => {
+  function streaming() {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({ type: 'stream_event', event: { type: 'message_start', message: {} } });
+    subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } },
+    });
+    return subject;
+  }
+
+  function deliver(subject: ClaudeTurnReducer, text: string, index = 0) {
+    subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_delta', index, delta: { type: 'text_delta', text } },
+    });
+  }
+
+  function completes(subject: ClaudeTurnReducer, text: string) {
+    return subject.reduce({
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'text', text }] },
+    }).events;
+  }
+
+  it('emits nothing for a block its deltas already delivered in full', () => {
+    const subject = streaming();
+    deliver(subject, 'mango');
+    expect(completes(subject, 'mango')).toEqual([]);
+  });
+
+  /**
+   * The guard the message-level reading could not express. A stream that
+   * stopped mid-block delivered *something*, so "did this message stream?"
+   * answers yes and drops the tail — the completed record is the only place
+   * the rest of that sentence exists.
+   */
+  it('emits only the tail the deltas stopped short of', () => {
+    const subject = streaming();
+    deliver(subject, 'mango');
+    expect(completes(subject, 'mango juice')).toEqual([{ type: 'text_delta', text: ' juice' }]);
+  });
+
+  /** The denied-write shape: no partial messages at all, so the record is the only copy. */
+  it('emits the whole block when nothing streamed for it', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    expect(completes(subject, 'mango')).toEqual([{ type: 'text_delta', text: 'mango' }]);
+  });
+
+  /**
+   * `thinking.display: "omitted"` streams the phase as empty deltas and
+   * completes it as `thinking: ""`. There is nothing to recover, and nothing
+   * to double.
+   */
+  it('emits nothing for a reasoning phase the vendor withheld', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({ type: 'stream_event', event: { type: 'message_start', message: {} } });
+    subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
+    });
+    const events = subject.reduce({
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'thinking', thinking: '' }] },
+    }).events;
+    expect(events).toEqual([]);
+  });
+
+  /**
+   * Block indices restart at 0 for every message. A buffer kept past its own
+   * message would be compared against the next message's block 0 and call a
+   * reply already delivered.
+   */
+  it('does not credit a new message with the previous one’s delivery', () => {
+    const subject = streaming();
+    deliver(subject, 'mango');
+    subject.reduce({ type: 'stream_event', event: { type: 'message_stop' } });
+    subject.reduce({ type: 'stream_event', event: { type: 'message_start', message: {} } });
+    expect(completes(subject, 'mango')).toEqual([{ type: 'text_delta', text: 'mango' }]);
+  });
+
+  /**
+   * Claude often restates the same sentence as thinking and then as reply text,
+   * so a delivered `thinking` buffer can be a prefix of the completed `text`
+   * block. Matching by content alone, across kinds, would let that shorter
+   * buffer stand in for the text block's own (never-streamed) delivery and
+   * report only the tail past where the two diverge — dropping the reply in
+   * everything but its last character.
+   */
+  it('does not let a delivered reasoning buffer stand in for an echoing text block', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({ type: 'stream_event', event: { type: 'message_start', message: {} } });
+    subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
+    });
+    subject.reduce({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'thinking_delta', thinking: "I'll create the file" },
+      },
+    });
+    subject.reduce({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } });
+    // The text block itself streamed no deltas at all for this message.
+    const events = subject.reduce({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: "I'll create the file" },
+          { type: 'text', text: "I'll create the file." },
+        ],
+      },
+    }).events;
+    expect(events).toContainEqual({ type: 'text_delta', text: "I'll create the file." });
   });
 });
 
@@ -305,6 +734,54 @@ describe('ClaudeTurnReducer termination', () => {
     });
   });
 
+  /**
+   * `error_max_turns`, `error_during_execution`, `error_max_budget_usd` and
+   * `error_max_structured_output_retries` carry their text in `errors` and
+   * have no `result` field at all — reading only `result` left every one of
+   * these showing the generic "ended the turn with ..." fallback.
+   */
+  it("surfaces the error arm's own text instead of the generic fallback", () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    const events = subject.reduce({
+      type: 'result',
+      subtype: 'error_max_turns',
+      is_error: true,
+      errors: ['Reached the maximum number of turns (50).'],
+      terminal_reason: 'max_turns',
+    }).events;
+    expect(events.at(-1)).toEqual({
+      type: 'error',
+      error: {
+        code: 'claude-error_max_turns',
+        message: 'Reached the maximum number of turns (50).',
+        vendorCode: 'max_turns',
+      },
+    });
+  });
+
+  /**
+   * `terminal_reason` is the vendor's own explanation and the last fallback,
+   * behind both `errors` and `result` — a run that gave real prose should
+   * never be overridden by a bare reason code.
+   */
+  it('names the vendor’s own terminal reason when nothing else explains the failure', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    const events = subject.reduce({
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      terminal_reason: 'hook_stopped',
+    }).events;
+    expect(events.at(-1)).toEqual({
+      type: 'error',
+      error: {
+        code: 'claude-error_during_execution',
+        message: 'Claude Code ended the turn: hook_stopped.',
+        vendorCode: 'hook_stopped',
+      },
+    });
+  });
+
   it('stops reducing after the result', () => {
     const subject = new ClaudeTurnReducer({ resumed: false });
     subject.reduce({ type: 'result', subtype: 'success', is_error: false });
@@ -404,6 +881,65 @@ describe('the init record’s slash-command list', () => {
     expect(catalogFrom({ session_id: 'a', slash_commands: ['review', 'doctor', 'color'] })).toEqual(
       []
     );
+  });
+
+  /**
+   * The provenance rule this fallback uses: a name is offered anyway, without
+   * a readable exclusion list, when the record itself states where it came
+   * from — a skill, a plugin's own command, or an MCP server's — and
+   * withheld when it does not.
+   */
+  it('falls back to the names whose provenance the record states', () => {
+    const commands = catalogFrom({
+      session_id: 'a',
+      slash_commands: ['review', 'dataviz', 'my-plugin:deploy', 'mcp__github__list_prs', 'compact'],
+      skills: ['dataviz'],
+      plugins: [{ name: 'my-plugin' }],
+    });
+    expect(commands.map((command) => command.name)).toEqual([
+      'dataviz',
+      'my-plugin:deploy',
+      'mcp__github__list_prs',
+    ]);
+  });
+
+  it('does not treat a colon in an unrelated name as a plugin prefix', () => {
+    const commands = catalogFrom({
+      session_id: 'a',
+      slash_commands: ['weird:name', 'compact'],
+      plugins: [{ name: 'other-plugin' }],
+    });
+    expect(commands).toEqual([]);
+  });
+
+  /** Whether the run announced a catalog *at all*, which an empty one is not. */
+  function announcesCatalog(record: Record<string, unknown>): boolean {
+    const reducer = new ClaudeTurnReducer({ resumed: false });
+    const events = reducer.reduce({ type: 'system', subtype: 'init', ...record }).events;
+    return events.some((event) => event.type === 'commands_available');
+  }
+
+  /**
+   * Withholding and announcing nothing are different statements, and the
+   * difference is destructive: the last `commands_available` wins wherever it
+   * lands — the hub's `(user, environment, target)` cache and the chat's own
+   * session catalog both take it — so a run that can attribute nothing must
+   * stay silent rather than erase a real catalog an earlier run published.
+   */
+  it('stays silent rather than announcing an empty provenance subset', () => {
+    expect(
+      announcesCatalog({ session_id: 'a', slash_commands: ['compact', 'clear'], skills: [] })
+    ).toBe(false);
+  });
+
+  it('still announces an empty catalog when the run stated its own exclusions', () => {
+    expect(
+      announcesCatalog({
+        session_id: 'a',
+        slash_commands: ['compact'],
+        terminal_slash_commands: ['compact'],
+      })
+    ).toBe(true);
   });
 
   it('withholds the CLI’s private plumbing', () => {

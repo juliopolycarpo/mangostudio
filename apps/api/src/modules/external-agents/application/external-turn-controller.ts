@@ -33,20 +33,22 @@
 
 import { RuntimeConsentDeniedError } from '@mangostudio/runtime';
 import type { InteractionMode } from '@mangostudio/shared';
-import type {
-  ExternalAgentConfiguration,
-  ExternalAgentError,
-  ExternalAgentEvent,
-  ExternalAgentSteerResult,
-  ExternalAgentTargetId,
-  ExternalApprovalRequest,
-  ExternalReviewTarget,
-  ExternalSteerRejectionReason,
-  ExternalTurnTerminalReason,
-  ExternalUsage,
+import {
+  type ExternalAgentConfiguration,
+  type ExternalAgentError,
+  type ExternalAgentEvent,
+  ExternalAgentEventSchema,
+  type ExternalAgentSteerResult,
+  type ExternalAgentTargetId,
+  type ExternalApprovalRequest,
+  type ExternalReviewTarget,
+  type ExternalSteerRejectionReason,
+  type ExternalTurnTerminalReason,
+  type ExternalUsage,
 } from '@mangostudio/shared/external-agents';
 import type { TurnInterruptionReasonCode } from '@mangostudio/shared/turn-recovery';
 import type { Kysely } from 'kysely';
+import Value from 'typebox/value';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
@@ -75,6 +77,10 @@ import {
   type ExternalApprovalRegistry,
   externalApprovalRegistry,
 } from './external-approval-registry';
+import {
+  type ExternalCommandCatalogCache,
+  externalCommandCatalogCache,
+} from './external-command-catalog-cache';
 import {
   type ExternalSessionHandle,
   type ExternalSessionManager,
@@ -227,6 +233,7 @@ export interface ExternalTurnResult {
 export interface ExternalTurnControllerDependencies {
   readonly sessions?: ExternalSessionManager;
   readonly approvals?: ExternalApprovalRegistry;
+  readonly commandCatalog?: ExternalCommandCatalogCache;
   readonly now?: () => number;
   readonly newId?: () => string;
   /** Overrides {@link STEER_TERMINATION_GRACE_MS}; a test's only hook for it. */
@@ -273,6 +280,19 @@ function terminalReasonForCallFailure(error: unknown): ExternalTurnTerminalReaso
 function vendorErrorFrom(error: unknown, code: string): ExternalAgentError {
   const message = error instanceof Error ? error.message : 'Unknown error';
   return { code, message: message.slice(0, 2_048) };
+}
+
+/**
+ * Best-effort discriminant read for logging an event this hub does not
+ * recognize.
+ *
+ * Bounded, because this reads the one payload on the path that nothing has
+ * validated — that is the entire reason the caller is in this branch — so the
+ * string is whatever the runtime put there, at whatever length.
+ */
+function readEventType(event: unknown): string | undefined {
+  const type = (event as { readonly type?: unknown } | null)?.type;
+  return typeof type === 'string' ? type.slice(0, 128) : undefined;
 }
 
 /**
@@ -494,6 +514,7 @@ export function createExternalTurnController(
 ): ExternalTurnController {
   const sessions = dependencies.sessions ?? externalSessionManager;
   const approvals = dependencies.approvals ?? externalApprovalRegistry;
+  const commandCatalog = dependencies.commandCatalog ?? externalCommandCatalogCache;
   const now = dependencies.now ?? Date.now;
   const newId = dependencies.newId ?? generateId;
   const steerTerminationGraceMs =
@@ -697,6 +718,23 @@ export function createExternalTurnController(
             break;
         }
 
+        // The sequencer only ever checked addressing, so an envelope can reach
+        // here with an `event` this hub's copy of `ExternalAgentEventSchema`
+        // does not recognize — a runtime newer than the hub. `transcript.apply`
+        // switches on `event.type` exhaustively and has no `default`: an
+        // unrecognized member would fall off the end and hand the caller
+        // `undefined` where an `ExternalTranscriptApplication` is expected.
+        // Inertness is decided here, at the one call site that would otherwise
+        // break, not by refusing the envelope earlier — its sequence is already
+        // spent, and that is the fix.
+        if (!Value.Check(ExternalAgentEventSchema, envelope.event)) {
+          logger.warn('unrecognized_event_type', {
+            sessionId: handle.sessionId,
+            type: readEventType(envelope.event),
+          });
+          return;
+        }
+
         const application = transcript.apply(envelope.event, {
           sequence: envelope.sequence,
           at: now(),
@@ -731,6 +769,17 @@ export function createExternalTurnController(
             },
             envelope.event.limits,
             { sessionId: handle.sessionId }
+          );
+        }
+
+        if (envelope.event.type === 'commands_available') {
+          // Last-known, not this chat's: a reload before this chat's own first
+          // turn re-announces its catalog reads whatever a turn against this
+          // (user, environment, target) wrote most recently, even one from a
+          // different chat.
+          commandCatalog.write(
+            { userId: input.userId, environmentId: context.chat.environmentId, targetId },
+            envelope.event.commands
           );
         }
 

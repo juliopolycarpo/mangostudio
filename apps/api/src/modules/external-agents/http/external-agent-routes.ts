@@ -24,6 +24,7 @@ import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors'
 import {
   type ExternalAccountLimits,
   ExternalAccountLimitsSchema,
+  ExternalAgentCommandCatalogResponseSchema,
   type ExternalAgentDescriptor,
   ExternalAgentDescriptorListResponseSchema,
   isExternalAgentTargetId,
@@ -40,6 +41,10 @@ import {
   type ExternalAgentDiscoveryService,
   externalAgentDiscoveryService,
 } from '../application/external-agent-discovery';
+import {
+  type ExternalCommandCatalogCache,
+  externalCommandCatalogCache,
+} from '../application/external-command-catalog-cache';
 import {
   acknowledgeExternalDisclosure,
   listExternalDisclosures,
@@ -92,6 +97,8 @@ export interface ExternalAgentRouteDependencies {
   readonly discovery?: Pick<ExternalAgentDiscoveryService, 'describeExternalAgents'>;
   /** How revocation stops what is already running. */
   readonly sessions?: Pick<ExternalSessionManager, 'reapScope'>;
+  /** The same process-wide cache `external-turn-controller.ts` writes on `commands_available`. */
+  readonly commandCatalog?: Pick<ExternalCommandCatalogCache, 'read'>;
 }
 
 /**
@@ -119,6 +126,7 @@ const UNAUTHENTICATED = {
 export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDependencies = {}) {
   const discovery = dependencies.discovery ?? externalAgentDiscoveryService;
   const sessions = dependencies.sessions ?? externalSessionManager;
+  const commandCatalog = dependencies.commandCatalog ?? externalCommandCatalogCache;
 
   return new Elysia()
     .use(requireAuth)
@@ -323,6 +331,36 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
           vendorAccountFingerprint: query.vendorAccountFingerprint ?? null,
         });
         return limits ? { limits } : {};
+      }
+    )
+    .get(
+      '/external-agents/:targetId/commands',
+      {
+        params: t.Object({ targetId: t.String({ minLength: 1, maxLength: 64 }) }),
+        query: environmentQuery,
+        response: {
+          200: ExternalAgentCommandCatalogResponseSchema,
+          401: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+        },
+      },
+      ({ params, query, user, set }) => {
+        const userId = authenticatedUserId(user);
+        if (!userId) {
+          set.status = 401;
+          return UNAUTHENTICATED;
+        }
+        if (!isExternalAgentTargetId(params.targetId)) {
+          set.status = 404;
+          return { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND };
+        }
+        const environmentId = query.environmentId ?? LOCAL_ENVIRONMENT_ID;
+        // Absent means nothing has been observed for this key yet, which is not
+        // a 404: the hint is legitimately empty, not addressed to an unknown
+        // agent — `isExternalAgentTargetId` above already refused that.
+        const commands =
+          commandCatalog.read({ userId, environmentId, targetId: params.targetId }) ?? [];
+        return { commands };
       }
     );
 }
