@@ -910,6 +910,17 @@ pre:hover .copy-code-btn {
   bottom: calc(100% - var(--timeline-dot-top));
 }
 
+/* And start it on the first step *after* a break, for the same reason at the
+ * other end. A turn that thinks, calls, answers, calls and answers again is a
+ * run of rail segments separated by balloons, and each segment has to begin and
+ * end on a node — otherwise the step resuming after a balloon trails a stub
+ * upward toward it. This is `:first-child`'s rule, applied wherever the item
+ * above draws no rail of its own. */
+.chat-timeline-item--bubble + .chat-timeline-item::before,
+.chat-timeline-item--divider + .chat-timeline-item::before {
+  top: var(--timeline-dot-top);
+}
+
 @keyframes timeline-node-pulse {
   0%,
   100% {
