@@ -160,6 +160,25 @@ describe('ClaudeTurnReducer, on a recorded read-a-file turn', () => {
     expect(events).toEqual([]);
   });
 
+  /**
+   * A redacted block's text is encrypted, so no renderable delta can ever
+   * follow it and the announcement is the whole of what that phase will show.
+   * Without it a turn that reasons entirely under redaction renders as
+   * nothing — the same defect this event exists to fix for plain thinking.
+   */
+  it('announces a reasoning phase for a redacted thinking block too', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    const events = subject.reduce({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'redacted_thinking' },
+      },
+    }).events;
+    expect(events).toEqual([{ type: 'reasoning_started' }]);
+  });
+
   it("never announces a subagent's reasoning phase into the main transcript", () => {
     const subject = new ClaudeTurnReducer({ resumed: false });
     const events = subject.reduce({

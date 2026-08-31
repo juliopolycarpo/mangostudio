@@ -119,6 +119,11 @@ function renderableBlock(block: ClaudeContentBlock): RenderableBlock | undefined
   return undefined;
 }
 
+/** Whether an opening content block is a reasoning phase, redacted or not. */
+function isReasoningBlock(blockType: unknown): boolean {
+  return blockType === 'thinking' || blockType === 'redacted_thinking';
+}
+
 /** A block index the stream stated, or undefined for one it did not. */
 function blockIndex(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
@@ -308,7 +313,10 @@ export class ClaudeTurnReducer {
       if (index !== undefined) this.#deliveredByBlock.set(index, '');
       // Fires once per block, by protocol — this is the only signal a reasoning
       // phase produces on an account whose `thinking_delta` text is withheld.
-      if (event.content_block?.type === 'thinking') {
+      // `redacted_thinking` qualifies for the same reason and then some: its
+      // text is encrypted, so no renderable delta can ever follow and the
+      // announcement is the whole of what that phase will show.
+      if (isReasoningBlock(event.content_block?.type)) {
         return { events: [{ type: 'reasoning_started' }], finished: false };
       }
       return NOTHING;
