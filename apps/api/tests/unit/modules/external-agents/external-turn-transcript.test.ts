@@ -101,14 +101,16 @@ describe('ExternalTurnTranscript', () => {
   });
 
   /**
-   * The drop rule is about a *trailing* loose end, not about emptiness on its
-   * own — an empty phase followed by real activity is closed history, the way
-   * interleaved activity already splits ordinary prose.
+   * The vendor closing an empty phase is a statement that it was withheld, not
+   * that it is still running — so it goes at that moment, wherever it sits.
+   * Position never enters into it: a blank collapsed block in the middle of a
+   * transcript is exactly as unreadable as one at the end.
    */
-  it('keeps an empty reasoning phase that is not the trailing part', () => {
+  it('drops an empty reasoning phase the vendor closed, mid-transcript', () => {
     const target = transcript();
     feed(target, [
       { type: 'reasoning_started' },
+      { type: 'reasoning_ended' },
       {
         type: 'activity_started',
         callId: 'call-1',
@@ -117,11 +119,20 @@ describe('ExternalTurnTranscript', () => {
       { type: 'completed' },
     ]);
 
-    expect(target.parts.map((part) => part.type)).toEqual([
-      'external_turn',
-      'thinking',
-      'external_activity',
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn', 'external_activity']);
+  });
+
+  it('keeps a closed reasoning phase that received text', () => {
+    const target = transcript();
+    feed(target, [
+      { type: 'reasoning_started' },
+      { type: 'reasoning_delta', text: 'weighing it' },
+      { type: 'reasoning_ended' },
+      { type: 'text_delta', text: 'here it is' },
+      { type: 'completed' },
     ]);
+
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn', 'thinking', 'text']);
   });
 
   it('records activity as external_activity, never as a tool call', () => {
@@ -350,6 +361,54 @@ describe('ExternalTurnTranscript', () => {
       text: 'weighing it',
       incomplete: true,
     });
+  });
+
+  /**
+   * The turn stopped inside the reasoning phase, not inside the paragraph
+   * before it — the vendor finished that paragraph and moved on. Marking it
+   * would tell the reader a completed sentence was cut off, and the phase
+   * itself has no text to have been cut off, so nothing is marked at all.
+   */
+  it('marks nothing when the turn stopped inside a reasoning phase that produced no text', () => {
+    const target = transcript();
+    feed(target, [
+      { type: 'text_delta', text: 'Here is the plan.' },
+      { type: 'reasoning_started' },
+    ]);
+    target.finalize('cancelled-by-user', 5_000);
+
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn', 'text']);
+    expect(target.parts.at(-1)).not.toHaveProperty('incomplete');
+  });
+
+  /** The phase itself is what was cut short when it had already produced text. */
+  it('marks the open reasoning phase when the turn stopped inside one that had text', () => {
+    const target = transcript();
+    feed(target, [
+      { type: 'text_delta', text: 'Here is the plan.' },
+      { type: 'reasoning_started' },
+      { type: 'reasoning_delta', text: 'weighing' },
+    ]);
+    target.finalize('cancelled-by-user', 5_000);
+
+    expect(target.parts.at(-1)).toMatchObject({ type: 'thinking', incomplete: true });
+    expect(target.parts.at(-2)).not.toHaveProperty('incomplete');
+  });
+
+  /**
+   * The phase the vendor closed is history: the turn was not inside it when it
+   * stopped, so the trailing prose is what got cut short.
+   */
+  it('marks the trailing prose when the reasoning phase had already closed', () => {
+    const target = transcript();
+    feed(target, [
+      { type: 'reasoning_started' },
+      { type: 'reasoning_ended' },
+      { type: 'text_delta', text: 'partial' },
+    ]);
+    target.finalize('cancelled-by-user', 5_000);
+
+    expect(target.parts.at(-1)).toMatchObject({ type: 'text', text: 'partial', incomplete: true });
   });
 
   it('marks nothing when the turn completed normally', () => {

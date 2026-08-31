@@ -722,6 +722,20 @@ export const ExternalAgentEventSchema = Type.Union([
    * block, so this never becomes a second per-token event to budget.
    */
   Type.Object({ type: Type.Literal('reasoning_started') }, { additionalProperties: false }),
+  /**
+   * The reasoning block opened by the last `reasoning_started` closed.
+   *
+   * The other half of the pair, and what turns "is this phase empty because it
+   * is still running, or because the vendor withheld it?" from a guess into a
+   * statement. A phase that closes with no text is one the vendor omitted, at
+   * any position in the transcript; a phase still open when the turn reaches a
+   * terminal state is where that turn actually stopped. Both projections read
+   * it for exactly those two decisions.
+   *
+   * Payload-free and driven by `content_block_stop`, so it costs one event per
+   * reasoning phase — the same budget `reasoning_started` already spends.
+   */
+  Type.Object({ type: Type.Literal('reasoning_ended') }, { additionalProperties: false }),
   Type.Object(
     {
       type: Type.Literal('activity_started'),

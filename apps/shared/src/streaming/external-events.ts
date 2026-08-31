@@ -140,6 +140,9 @@ export function externalAgentEventToStreamChunk(
     case 'reasoning_started':
       return { type: 'external_reasoning_started', done: false };
 
+    case 'reasoning_ended':
+      return { type: 'external_reasoning_ended', done: false };
+
     case 'activity_started':
       return {
         type: 'external_activity_started',

@@ -37,6 +37,15 @@ export interface TextGenerationStreamState {
   readonly receivedServerUserMessageId: boolean;
   readonly receivedServerAiMessageId: boolean;
   readonly activeThinkingIndex: number | null;
+  /**
+   * Where in `parts` the reasoning phase an external turn opened sits, until
+   * `external_reasoning_ended` closes it.
+   *
+   * Mirrors `ExternalTurnTranscript`'s `#openThinking`, by index rather than
+   * by reference because this state is rebuilt on every chunk. The vendor's
+   * own statement of where the turn is — see `reduceExternalTurnCompleted`.
+   */
+  readonly openExternalThinkingIndex: number | null;
   readonly userMessageUpdate: TextGenerationStreamMessageUpdate | null;
   readonly aiMessageUpdate: TextGenerationStreamMessageUpdate | null;
   /** Cumulative thread usage from the vendor — separate from per-turn `usage` on the turn part. */
@@ -76,6 +85,7 @@ export function createTextGenerationStreamState({
     receivedServerUserMessageId: false,
     receivedServerAiMessageId: false,
     activeThinkingIndex: null,
+    openExternalThinkingIndex: null,
     userMessageUpdate: null,
     aiMessageUpdate: null,
     threadUsage: null,
@@ -152,7 +162,9 @@ export function reduceTextGenerationStreamChunk(
       // chunk opens for an internal turn — `display: "omitted"` is the API
       // default on current models, so this is often the only signal a whole
       // reasoning phase produces.
-      return reduceExternalReasoning(nextState, '');
+      return reduceExternalReasoningStarted(nextState);
+    case 'external_reasoning_ended':
+      return reduceExternalReasoningEnded(nextState);
     case 'external_reasoning':
       return reduceExternalReasoning(nextState, chunk.text);
     case 'external_activity_started':
@@ -632,6 +644,33 @@ function reduceExternalReasoning(state: TextGenerationStreamState, textDelta: st
   return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
+/**
+ * Opens the reasoning phase and remembers where it sits.
+ *
+ * `appendExternalText` coalesces onto a trailing `thinking` part, so a phase
+ * that already received text is not opened a second time.
+ */
+function reduceExternalReasoningStarted(state: TextGenerationStreamState) {
+  const parts = appendExternalText(state.parts, 'thinking', '');
+  return withAiMessageUpdate(
+    { ...state, parts, openExternalThinkingIndex: parts.length - 1 },
+    { parts }
+  );
+}
+
+/**
+ * Closes the reasoning phase the vendor just ended.
+ *
+ * Mirrors `ExternalTurnTranscript`'s `reasoning_ended`: a phase that closes
+ * with nothing in it was withheld rather than still running, so it is dropped
+ * at the moment that becomes knowable rather than by a rule about which part
+ * happens to be last.
+ */
+function reduceExternalReasoningEnded(state: TextGenerationStreamState) {
+  const { parts } = closeThinkingAt(state.parts, state.openExternalThinkingIndex);
+  return withAiMessageUpdate({ ...state, parts, openExternalThinkingIndex: null }, { parts });
+}
+
 function reduceExternalActivityStarted(
   state: TextGenerationStreamState,
   chunk: Extract<StreamChunk, { type: 'external_activity_started' }>
@@ -803,42 +842,58 @@ function reduceExternalTurnCompleted(
   state: TextGenerationStreamState,
   reason: ExternalTurnTerminalReason
 ) {
-  // Order matters, and mirrors `ExternalTurnTranscript.finalize` exactly: drop
-  // an empty trailing reasoning phase first, then mark whatever is trailing
-  // *after* that. Marking first would leave a block this same call is about
-  // to delete carrying the marker, and the two projections would disagree
-  // about which part — if any — is incomplete.
-  const withoutEmptyThinking = dropTrailingEmptyThinking(state.parts);
+  // Mirrors `ExternalTurnTranscript.finalize` exactly. A reasoning phase the
+  // vendor never closed is where the turn stopped, so it is the part that
+  // carries the marker; an empty one is dropped and marks nothing, because
+  // there is no text to have been cut off. With no phase open the turn stopped
+  // in whatever is trailing, which is the case that predates this rule.
+  const closed = closeThinkingAt(state.parts, state.openExternalThinkingIndex);
   const marked =
-    reason === 'completed' ? withoutEmptyThinking : markTrailingIncomplete(withoutEmptyThinking);
+    reason === 'completed' ? closed.parts : markIncompleteAt(closed.parts, closed.stoppedInside);
   const parts = updateExternalTurn(marked, (part) =>
     part.status === 'terminal' ? part : { ...part, status: 'terminal', terminalReason: reason }
   );
-  return withAiMessageUpdate({ ...state, parts }, { parts });
+  return withAiMessageUpdate({ ...state, parts, openExternalThinkingIndex: null }, { parts });
 }
 
 /**
- * Mirrors `ExternalTurnTranscript`'s identical rule exactly, so a live render
- * and a reload never disagree about whether an empty reasoning phase — the
- * common case on a model whose API default withholds `thinking_delta` text —
- * survives the end of the turn as a permanently blank collapsed block.
+ * Closes the open reasoning phase, and says which part the turn stopped inside.
+ *
+ * Mirrors `ExternalTurnTranscript#closeThinking` exactly, so a live render and
+ * a reload never disagree. An empty phase is dropped — the common case on a
+ * model whose API default withholds `thinking_delta` text, and one that would
+ * otherwise survive as a permanently blank collapsed block — and nothing is
+ * left to mark. A phase with text is where the turn stopped. With no phase
+ * open at all, the turn stopped in whatever is trailing.
+ *
+ * Usage: `closeThinkingAt(parts, state.openExternalThinkingIndex)`
  */
-function dropTrailingEmptyThinking(parts: MessagePart[]): MessagePart[] {
-  const last = parts.at(-1);
-  return last?.type === 'thinking' && last.text.length === 0 ? parts.slice(0, -1) : parts;
+function closeThinkingAt(
+  parts: MessagePart[],
+  open: number | null
+): { readonly parts: MessagePart[]; readonly stoppedInside: number } {
+  if (open === null) return { parts, stoppedInside: parts.length - 1 };
+  const phase = parts[open];
+  if (phase?.type !== 'thinking') return { parts, stoppedInside: parts.length - 1 };
+  // Displaced by output the vendor produced after it — closed in fact if not
+  // in word, which is what a runtime too old to send `reasoning_ended` always
+  // produces. An empty one still goes; the marker belongs on the trailing part.
+  const displaced = open !== parts.length - 1;
+  if (phase.text.length > 0) return { parts, stoppedInside: displaced ? parts.length - 1 : open };
+  const kept = [...parts.slice(0, open), ...parts.slice(open + 1)];
+  return { parts: kept, stoppedInside: displaced ? kept.length - 1 : -1 };
 }
 
 /**
- * Mirrors `ExternalTurnTranscript#markTrailingIncomplete` exactly: no vendor
- * event describes a sentence stopping mid-thought, so the turn's own terminal
- * reason is the cheapest source that is still correct, for every reason but
- * `completed`.
+ * Marks one part as cut short. No vendor event describes a sentence stopping
+ * mid-word, so the part the turn was inside when it stopped is the closest
+ * true statement available. An index of -1 marks nothing.
  */
-function markTrailingIncomplete(parts: MessagePart[]): MessagePart[] {
-  const last = parts.at(-1);
-  if (!last || (last.type !== 'text' && last.type !== 'thinking')) return parts;
-  const marked: MessagePart = { ...last, incomplete: true };
-  return [...parts.slice(0, -1), marked];
+function markIncompleteAt(parts: MessagePart[], index: number): MessagePart[] {
+  const part = parts[index];
+  if (!part || (part.type !== 'text' && part.type !== 'thinking')) return parts;
+  const marked: MessagePart = { ...part, incomplete: true };
+  return [...parts.slice(0, index), marked, ...parts.slice(index + 1)];
 }
 
 /**

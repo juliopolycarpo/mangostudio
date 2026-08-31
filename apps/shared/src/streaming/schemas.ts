@@ -377,6 +377,18 @@ const SSEExternalReasoningStartedEventSchema = Type.Object({
   done: Type.Literal(false),
 });
 
+/**
+ * The reasoning phase opened by `external_reasoning_started` closed.
+ *
+ * What lets the live transcript decide the same way a reloaded one does: a
+ * phase that closed with no text was withheld and is dropped, wherever it sits;
+ * one still open when the turn ends is the part the turn stopped inside.
+ */
+const SSEExternalReasoningEndedEventSchema = Type.Object({
+  type: Type.Literal('external_reasoning_ended'),
+  done: Type.Literal(false),
+});
+
 const SSEExternalReasoningEventSchema = Type.Object({
   type: Type.Literal('external_reasoning'),
   text: Type.String(),
@@ -580,6 +592,7 @@ export const StreamChunkSchema = Type.Union([
   SSEExternalSessionStartedEventSchema,
   SSEExternalTextEventSchema,
   SSEExternalReasoningStartedEventSchema,
+  SSEExternalReasoningEndedEventSchema,
   SSEExternalReasoningEventSchema,
   SSEExternalActivityStartedEventSchema,
   SSEExternalActivityUpdatedEventSchema,

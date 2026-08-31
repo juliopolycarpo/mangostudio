@@ -261,6 +261,66 @@ describe('external turn: live stream vs reloaded transcript', () => {
     expect(text).toMatchObject({ incomplete: true });
   });
 
+  /**
+   * The vendor closing an empty reasoning phase says it was withheld, not that
+   * it is still running — so both projections drop it right there, wherever it
+   * sits, rather than waiting to see whether it ends up trailing.
+   */
+  it('agrees that a closed empty reasoning phase leaves nothing behind', () => {
+    const CLOSED_EMPTY_PHASE: readonly ExternalAgentEvent[] = [
+      { type: 'reasoning_started' },
+      { type: 'reasoning_ended' },
+      { type: 'text_delta', text: 'here it is' },
+      { type: 'completed' },
+    ];
+    expect(comparable(streamedParts(CLOSED_EMPTY_PHASE))).toEqual(
+      comparable(storedParts(CLOSED_EMPTY_PHASE))
+    );
+    expect(streamedParts(CLOSED_EMPTY_PHASE).some((part) => part.type === 'thinking')).toBe(false);
+  });
+
+  /**
+   * The reported defect, in both projections at once: the turn stopped inside
+   * the reasoning phase, so the paragraph before it — which the vendor
+   * finished and moved on from — must not be labelled cut off, and the empty
+   * phase itself has no text to have been cut off either.
+   */
+  it('agrees that stopping inside an empty reasoning phase marks nothing', () => {
+    const stoppedInReasoning: readonly ExternalAgentEvent[] = [
+      { type: 'text_delta', text: 'Here is the plan.' },
+      { type: 'reasoning_started' },
+    ];
+    const stored = new ExternalTurnTranscript({
+      targetId: 'codex',
+      sessionId: 'hub-session-1',
+      startedAt: 0,
+    });
+    stoppedInReasoning.forEach((event, index) => {
+      stored.apply(event, { sequence: index + 1, at: 0 });
+    });
+    stored.finalize('cancelled-by-user', 0);
+
+    const chunks: StreamChunk[] = [
+      externalSessionStartedChunk({
+        sessionId: 'hub-session-1',
+        targetId: 'codex',
+        resumed: false,
+      }),
+      ...stoppedInReasoning
+        .map((event) => externalAgentEventToStreamChunk(event))
+        .filter((chunk): chunk is StreamChunk => chunk !== null),
+      externalTurnCompletedChunk('cancelled-by-user'),
+    ];
+    const live = chunks.reduce(
+      (current, chunk) => reduceTextGenerationStreamChunk(current, chunk, REDUCER_OPTIONS),
+      createTextGenerationStreamState({ userMessageId: 'user-1', aiMessageId: 'ai-1' })
+    );
+
+    expect(comparable(live.parts)).toEqual(comparable(stored.parts));
+    expect(live.parts.some((part) => part.type === 'thinking')).toBe(false);
+    expect(live.parts.find((part) => part.type === 'text')).not.toHaveProperty('incomplete');
+  });
+
   it('agrees that a turn which finished normally marks nothing incomplete', () => {
     expect(comparable(streamedParts(TURN))).toEqual(comparable(storedParts(TURN)));
     const text = streamedParts(TURN)

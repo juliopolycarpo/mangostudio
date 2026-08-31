@@ -179,6 +179,65 @@ describe('ClaudeTurnReducer, on a recorded read-a-file turn', () => {
     expect(events).toEqual([{ type: 'reasoning_started' }]);
   });
 
+  /**
+   * The other half of the pair. `content_block_stop` states an index and
+   * nothing else, so the block's type has to be remembered from the start that
+   * opened it — a `tool_use` block closing must not report a reasoning phase
+   * ending.
+   */
+  it('ends the reasoning phase when the block that opened it closes', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
+    });
+    subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use' } },
+    });
+
+    expect(
+      subject.reduce({ type: 'stream_event', event: { type: 'content_block_stop', index: 1 } })
+        .events
+    ).toEqual([]);
+    expect(
+      subject.reduce({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } })
+        .events
+    ).toEqual([{ type: 'reasoning_ended' }]);
+  });
+
+  it('does not end a reasoning phase twice', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
+    });
+    subject.reduce({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } });
+
+    expect(
+      subject.reduce({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } })
+        .events
+    ).toEqual([]);
+  });
+
+  /**
+   * The safety net for a message that ends without a `content_block_stop` for
+   * its reasoning block. Every recorded run does send the stop, so this pins
+   * the behaviour rather than a bug: a projection left holding an open phase
+   * would go on treating a finished turn as stopped inside it.
+   */
+  it('ends a reasoning phase the message boundary closed for it', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
+    });
+
+    expect(
+      subject.reduce({ type: 'stream_event', event: { type: 'message_stop' } }).events
+    ).toEqual([{ type: 'reasoning_ended' }]);
+  });
+
   it("never announces a subagent's reasoning phase into the main transcript", () => {
     const subject = new ClaudeTurnReducer({ resumed: false });
     const events = subject.reduce({

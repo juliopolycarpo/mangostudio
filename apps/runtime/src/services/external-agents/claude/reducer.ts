@@ -207,6 +207,15 @@ export class ClaudeTurnReducer {
    * blocks.
    */
   readonly #deliveredByBlock = new Map<number, string>();
+  /**
+   * Indices of the reasoning blocks this message opened and has not closed.
+   *
+   * `content_block_stop` states an index and nothing else — not the type of
+   * the block it closes — so the type has to be remembered from the
+   * `content_block_start` that opened it. Scoped to one message for the same
+   * reason `#deliveredByBlock` is.
+   */
+  readonly #openReasoningBlocks = new Set<number>();
   /** A held `system/permission_denied` reason, keyed by the call it refused, until its `tool_result` closes it. */
   readonly #deniedActivities = new Map<string, string>();
   #sessionStarted = false;
@@ -300,10 +309,14 @@ export class ClaudeTurnReducer {
     if (parentToolUseId(record) !== undefined) return NOTHING;
     const event = record.event;
     // Both ends of a message. Block indices are scoped to the message that
-    // opened them, so they mean nothing once it is over.
+    // opened them, so they mean nothing once it is over — but a reasoning
+    // phase still open here was closed by the message ending, whether or not
+    // its own `content_block_stop` arrived, and has to say so before the
+    // index it is keyed by is discarded.
     if (event?.type === 'message_start' || event?.type === 'message_stop') {
+      const closing = this.#closeReasoningBlocks();
       this.#deliveredByBlock.clear();
-      return NOTHING;
+      return closing;
     }
     const index = blockIndex(event?.index);
     if (event?.type === 'content_block_start') {
@@ -316,10 +329,15 @@ export class ClaudeTurnReducer {
       // `redacted_thinking` qualifies for the same reason and then some: its
       // text is encrypted, so no renderable delta can ever follow and the
       // announcement is the whole of what that phase will show.
-      if (isReasoningBlock(event.content_block?.type)) {
-        return { events: [{ type: 'reasoning_started' }], finished: false };
-      }
-      return NOTHING;
+      if (!isReasoningBlock(event.content_block?.type)) return NOTHING;
+      // Remembered by index, because `content_block_stop` states only that —
+      // it does not repeat the type of the block it closes.
+      if (index !== undefined) this.#openReasoningBlocks.add(index);
+      return { events: [{ type: 'reasoning_started' }], finished: false };
+    }
+    if (event?.type === 'content_block_stop') {
+      if (index === undefined || !this.#openReasoningBlocks.delete(index)) return NOTHING;
+      return { events: [{ type: 'reasoning_ended' }], finished: false };
     }
     const delta = event?.delta;
     if (event?.type !== 'content_block_delta' || !delta) return NOTHING;
@@ -336,6 +354,23 @@ export class ClaudeTurnReducer {
       return { events: [{ type: 'reasoning_delta', text: delta.thinking }], finished: false };
     }
     return NOTHING;
+  }
+
+  /**
+   * Closes every reasoning phase still open, one `reasoning_ended` each.
+   *
+   * The safety net for a message that ended without a `content_block_stop` for
+   * its reasoning block: the phase is over either way, and a projection left
+   * holding an open one would go on treating a finished turn as stopped inside
+   * it. A no-op on every recorded run — the stops do arrive.
+   */
+  #closeReasoningBlocks(): ClaudeReduction {
+    if (this.#openReasoningBlocks.size === 0) return NOTHING;
+    const events = [...this.#openReasoningBlocks].map(
+      () => ({ type: 'reasoning_ended' }) as const satisfies ExternalAgentEvent
+    );
+    this.#openReasoningBlocks.clear();
+    return { events, finished: false };
   }
 
   /** Appends what one delta just delivered to its own block's running copy. */

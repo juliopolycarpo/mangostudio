@@ -167,6 +167,7 @@ export function normalizeExternalAgentEvent(event: ExternalAgentEvent): External
     case 'completed':
     // No vendor text to bound — the whole event is its `type`.
     case 'reasoning_started':
+    case 'reasoning_ended':
       return event;
   }
 }

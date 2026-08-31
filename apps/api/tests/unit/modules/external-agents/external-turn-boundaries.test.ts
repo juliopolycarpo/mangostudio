@@ -192,6 +192,7 @@ describe('external turn boundaries', () => {
       'completed',
       'error',
       'reasoning_delta',
+      'reasoning_ended',
       'reasoning_started',
       'session_started',
       'text_delta',
