@@ -19,6 +19,7 @@ import {
   assertTurnCanCancel,
   buildRecoveryPrompt,
   inspectInterruptedTurnResume,
+  reconcileInterruptedMessageParts,
   reconcileStaleTurns,
   reserveInterruptedTurnResume,
   STALE_TURN_CHECKPOINT_AGE_MS,
@@ -355,6 +356,41 @@ describe('interrupted turn recovery', () => {
         expect.objectContaining({ callId: 'write-1', outcome: 'unknown' }),
       ])
     );
+  });
+
+  it('settles an image the turn never generated instead of reloading it as pending', () => {
+    // The in-process seal in `abandonUnreachedImages` only runs when the
+    // generator returns. A crash mid-batch — or a throw that skips it — leaves
+    // these parts durable at `generating`, and every reload replays the spinner.
+    const parts: MessagePart[] = [
+      {
+        type: 'generated_image',
+        imageId: 'img-1',
+        toolCallId: 'image-1',
+        status: 'generating',
+        prompt: 'Paint mangoes',
+      },
+      {
+        type: 'generated_image',
+        imageId: 'img-2',
+        toolCallId: 'image-1',
+        status: 'completed',
+        prompt: 'Paint mangoes',
+        imageUrl: '/images/img-2.png',
+      },
+    ];
+
+    reconcileInterruptedMessageParts(parts);
+
+    const pending = parts.find(
+      (part) => part.type === 'generated_image' && part.imageId === 'img-1'
+    );
+    const landed = parts.find(
+      (part) => part.type === 'generated_image' && part.imageId === 'img-2'
+    );
+    expect(pending).toMatchObject({ status: 'error', error: expect.any(String) });
+    // An image that did land keeps its result: reconcile seals, it does not undo.
+    expect(landed).toMatchObject({ status: 'completed', imageUrl: '/images/img-2.png' });
   });
 
   it('keeps the common recovery prompt stable when no trimming is needed', () => {

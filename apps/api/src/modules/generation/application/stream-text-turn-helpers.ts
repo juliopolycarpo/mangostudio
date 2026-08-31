@@ -48,6 +48,7 @@ import {
   ToolPolicyError,
 } from './tool-execution-lifecycle';
 import { errorToToolMessage, parseToolArgs, stringifyToolResult } from './tool-result-utils';
+import { IMAGE_ABANDONED_ERROR } from './turn-recovery';
 
 /** Accumulators a completed tool execution writes into for the turn. */
 interface ToolResultSink {
@@ -361,9 +362,6 @@ export async function* executeImageGenerationCall(
   ctx.nextToolResults.push({ callId, name, result: resultStr, isError });
 }
 
-/** What a planned image records when the turn ended before it was generated. */
-const IMAGE_ABANDONED_ERROR = 'The turn was interrupted before this image was generated.';
-
 /**
  * Records a failed outcome for every planned image the generator never reached.
  *
@@ -374,8 +372,11 @@ const IMAGE_ABANDONED_ERROR = 'The turn was interrupted before this image was ge
  * as `succeeded` — while every unreached part stays at `generating` for the
  * life of the message, spinning on each reload.
  *
- * The parts are the whole record here: the only thing that stops that loop is a
- * client already gone, so there is nobody left to send an event to.
+ * This is only the in-process half. A stop keeps the tab open, and a crash or a
+ * throw mid-batch skips this function entirely, so the durable seal for a part
+ * left at `generating` lives in `reconcileInterruptedMessageParts`. What this
+ * adds is the tool result: the outcomes it pushes are how the model learns the
+ * batch was cut short.
  *
  * Returns how many images were abandoned, which is what tells the caller the
  * call was cut short rather than finished.
