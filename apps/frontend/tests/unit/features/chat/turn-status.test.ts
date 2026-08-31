@@ -2,7 +2,7 @@
  * One turn status for every provider: MangoStudio's own harness has no turn
  * record and is known to be running only while this session streams, while a
  * vendor turn keeps its record across a reload. Both must read the same, and
- * the exclusions that keep a redundant "Working..." row off the screen must
+ * the exclusions that keep a redundant "Working" row off the screen must
  * survive being lifted out of the renderer.
  */
 

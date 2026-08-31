@@ -5,7 +5,7 @@ import { TimelineRow } from '../TimelineRow';
 
 /**
  * A trailing row saying the turn has not gone idle, for whatever gap no
- * vendor event describes: no `system_event` for "still waiting on the API",
+ * event describes: no `system_event` for "still waiting on the API",
  * no delta for a long `Bash` between chunks of output, nothing at all for the
  * pause between one tool call ending and the next one starting.
  *
@@ -20,9 +20,7 @@ export function TurnWorkingRow() {
         disclosable={false}
         glyph={<Ellipsis size={11} className="animate-pulse shrink-0" />}
       >
-        <span className="animate-pulse text-on-surface-variant">
-          {t.externalAgents.turn.working}
-        </span>
+        <span className="animate-pulse text-on-surface-variant">{t.chat.feed.statusWorking}</span>
       </TimelineRow>
     </TimelineItem>
   );

@@ -3472,7 +3472,6 @@ export const messages = {
       usageCacheRead: 'cache lido',
       usageCacheWrite: 'cache escrito',
       usageTotal: 'total',
-      working: 'Trabalhando...',
       incomplete: 'Interrompido.',
       terminal: {
         completed: 'Concluído.',

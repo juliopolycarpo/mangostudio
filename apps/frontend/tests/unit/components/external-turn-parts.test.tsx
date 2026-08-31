@@ -236,24 +236,24 @@ describe('external turn summary', () => {
 describe('external turn: still working', () => {
   it('shows a working row while the turn is active and has produced nothing yet', () => {
     renderParts([turnPart({ status: 'active' })]);
-    expect(screen.getByText('Working...')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
   });
 
   it('shows a working row in the gap between two tool calls', () => {
     renderParts([turnPart({ status: 'active' }), activityPart({ status: 'completed' })]);
-    expect(screen.getByText('Working...')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
   });
 
   // A call still running already renders as running. A second row under it
   // reads as a *second* thing happening, which is one more than there is.
   it('does not duplicate the cue under a call that is still running', () => {
     renderParts([turnPart({ status: 'active' }), activityPart({ status: 'running' })]);
-    expect(screen.queryByText('Working...')).toBeNull();
+    expect(screen.queryByText('Working')).toBeNull();
   });
 
   it('stays quiet once the turn is terminal', () => {
     renderParts([turnPart({ status: 'terminal', terminalReason: 'completed' })]);
-    expect(screen.queryByText('Working...')).toBeNull();
+    expect(screen.queryByText('Working')).toBeNull();
   });
 
   // The trailing text already shows its own caret while it streams — a second
@@ -266,7 +266,7 @@ describe('external turn: still working', () => {
         isStreaming
       />
     );
-    expect(screen.queryByText('Working...')).toBeNull();
+    expect(screen.queryByText('Working')).toBeNull();
   });
 });
 

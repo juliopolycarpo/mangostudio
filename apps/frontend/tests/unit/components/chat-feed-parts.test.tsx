@@ -159,7 +159,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     );
     // The trailing prose is what the turn is streaming into, so the working row
     // stays suppressed even though the turn is running.
-    expect(screen.queryByText('Working...')).toBeNull();
+    expect(screen.queryByText('Working')).toBeNull();
   });
 
   it('renders tool call block with pending state when no matching result', async () => {
@@ -180,7 +180,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(toolButtons.length).toBeGreaterThan(0);
     // The turn is streaming and the call has not answered, so the gap under it
     // now carries the working row an internal turn never used to get.
-    expect(screen.getByText('Working...')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
   });
 
   it('skips tool_result parts (rendered inline with tool_call)', async () => {
@@ -569,7 +569,7 @@ describe('ChatFeed — an internal turn that is still working', () => {
 
     await flushAsyncRender();
 
-    expect(screen.getByText('Working...')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
   });
 
   it('says so in the gap under a tool call that has not answered yet', async () => {
@@ -582,7 +582,7 @@ describe('ChatFeed — an internal turn that is still working', () => {
 
     await flushAsyncRender();
 
-    expect(screen.getByText('Working...')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
   });
 
   // The prose already carries its own caret. A row under it saying the same
@@ -595,6 +595,6 @@ describe('ChatFeed — an internal turn that is still working', () => {
 
     await flushAsyncRender();
 
-    expect(screen.queryByText('Working...')).toBeNull();
+    expect(screen.queryByText('Working')).toBeNull();
   });
 });
