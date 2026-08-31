@@ -124,6 +124,16 @@ function isReasoningBlock(blockType: unknown): boolean {
   return blockType === 'thinking' || blockType === 'redacted_thinking';
 }
 
+/** Which delivery channel an opening content block will stream on, if either. */
+function openingBlockKind(blockType: unknown): RenderableBlock['type'] | undefined {
+  if (blockType === 'text') return 'text_delta';
+  // `redacted_thinking` streams no deltas at all — its text is encrypted — but
+  // it is still a reasoning-kind block for the purpose of not colliding with a
+  // `text` buffer, so it is included here rather than only `isReasoningBlock`'s
+  // narrower announcement use.
+  return isReasoningBlock(blockType) ? 'reasoning_delta' : undefined;
+}
+
 /** A block index the stream stated, or undefined for one it did not. */
 function blockIndex(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
@@ -205,8 +215,14 @@ export class ClaudeTurnReducer {
    * at every message boundary: block indices restart at 0 for each message, so
    * a buffer that outlived its own would be matched against the next one's
    * blocks.
+   *
+   * Delivery kind travels with the text because `#undeliveredRemainder` cannot
+   * trust the index the completed record arrives at (see there): a `thinking`
+   * buffer and a `text` buffer that happen to share a prefix — Claude often
+   * restates the same sentence in both — would otherwise let the wrong block
+   * claim the other's delivery.
    */
-  readonly #deliveredByBlock = new Map<number, string>();
+  readonly #deliveredByBlock = new Map<number, { kind: RenderableBlock['type']; text: string }>();
   /**
    * Indices of the reasoning blocks this message opened and has not closed.
    *
@@ -322,8 +338,12 @@ export class ClaudeTurnReducer {
     if (event?.type === 'content_block_start') {
       // Opened with nothing delivered yet. Recorded even so: an `omitted`
       // reasoning phase streams only empty `thinking_delta`s, and this is what
-      // says those deltas were still this block's delivery channel.
-      if (index !== undefined) this.#deliveredByBlock.set(index, '');
+      // says those deltas were still this block's delivery channel. A block
+      // whose kind will never be renderable — `tool_use` chief among them —
+      // gets no entry at all, since one would never be eligible to match
+      // anything in `#undeliveredRemainder`.
+      const kind = openingBlockKind(event.content_block?.type);
+      if (index !== undefined && kind) this.#deliveredByBlock.set(index, { kind, text: '' });
       // Fires once per block, by protocol — this is the only signal a reasoning
       // phase produces on an account whose `thinking_delta` text is withheld.
       // `redacted_thinking` qualifies for the same reason and then some: its
@@ -342,7 +362,7 @@ export class ClaudeTurnReducer {
     const delta = event?.delta;
     if (event?.type !== 'content_block_delta' || !delta) return NOTHING;
     if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0) {
-      this.#recordDelivered(index, delta.text);
+      this.#recordDelivered(index, 'text_delta', delta.text);
       return { events: [{ type: 'text_delta', text: delta.text }], finished: false };
     }
     if (
@@ -350,7 +370,7 @@ export class ClaudeTurnReducer {
       typeof delta.thinking === 'string' &&
       delta.thinking.length > 0
     ) {
-      this.#recordDelivered(index, delta.thinking);
+      this.#recordDelivered(index, 'reasoning_delta', delta.thinking);
       return { events: [{ type: 'reasoning_delta', text: delta.thinking }], finished: false };
     }
     return NOTHING;
@@ -374,9 +394,10 @@ export class ClaudeTurnReducer {
   }
 
   /** Appends what one delta just delivered to its own block's running copy. */
-  #recordDelivered(index: number | undefined, text: string): void {
+  #recordDelivered(index: number | undefined, kind: RenderableBlock['type'], text: string): void {
     if (index === undefined) return;
-    this.#deliveredByBlock.set(index, (this.#deliveredByBlock.get(index) ?? '') + text);
+    const previous = this.#deliveredByBlock.get(index);
+    this.#deliveredByBlock.set(index, { kind, text: (previous?.text ?? '') + text });
   }
 
   /**
@@ -385,18 +406,34 @@ export class ClaudeTurnReducer {
    * Blocks are matched by what streamed for them rather than by index: the
    * `assistant` record arrives interleaved with its own `content_block_stop`,
    * so whichever index is open at that moment is not reliably the record's.
-   * The longest delivered buffer this text extends is that block's own copy,
-   * and the empty string is a prefix of everything — so a block nothing
-   * streamed for matches nothing, and its whole content is the remainder.
+   * The longest delivered buffer of the same kind that this text extends is
+   * that block's own copy, and the empty string is a prefix of everything —
+   * so a block nothing streamed for matches nothing, and its whole content is
+   * the remainder.
    *
-   * Usage: `#undeliveredRemainder('mango')` is `''` after the deltas already
-   * carried `mango`, and `' juice'` when they stopped after `mango`.
+   * Restricted to buffers of the matching kind, and the match is consumed once
+   * found: a `thinking` buffer and a `text` buffer often carry the same
+   * sentence (Claude restates the plan it just reasoned through), and without
+   * that restriction the shorter, wrong-kind buffer could be picked as the
+   * text block's own delivery — leaving only the tail past where the thinking
+   * text stopped matching as the "remainder", silently dropping the rest of a
+   * reply that never actually streamed as text.
+   *
+   * Usage: `#undeliveredRemainder('text_delta', 'mango')` is `''` after the
+   * deltas already carried `mango` as text, and `' juice'` when they stopped
+   * after `mango`.
    */
-  #undeliveredRemainder(text: string): string {
+  #undeliveredRemainder(kind: RenderableBlock['type'], text: string): string {
+    let matchedIndex: number | undefined;
     let delivered = '';
-    for (const streamed of this.#deliveredByBlock.values()) {
-      if (streamed.length > delivered.length && text.startsWith(streamed)) delivered = streamed;
+    for (const [index, entry] of this.#deliveredByBlock) {
+      if (entry.kind !== kind) continue;
+      if (entry.text.length > delivered.length && text.startsWith(entry.text)) {
+        delivered = entry.text;
+        matchedIndex = index;
+      }
     }
+    if (matchedIndex !== undefined) this.#deliveredByBlock.delete(matchedIndex);
     return text.slice(delivered.length);
   }
 
@@ -462,7 +499,7 @@ export class ClaudeTurnReducer {
   #undeliveredEventFor(block: ClaudeContentBlock): ExternalAgentEvent | undefined {
     const renderable = renderableBlock(block);
     if (!renderable) return undefined;
-    const remainder = this.#undeliveredRemainder(renderable.text);
+    const remainder = this.#undeliveredRemainder(renderable.type, renderable.text);
     return remainder.length > 0 ? { type: renderable.type, text: remainder } : undefined;
   }
 

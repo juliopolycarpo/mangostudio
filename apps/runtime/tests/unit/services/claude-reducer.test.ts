@@ -581,6 +581,44 @@ describe('ClaudeTurnReducer, reconciling a completed block with its deltas', () 
     subject.reduce({ type: 'stream_event', event: { type: 'message_start', message: {} } });
     expect(completes(subject, 'mango')).toEqual([{ type: 'text_delta', text: 'mango' }]);
   });
+
+  /**
+   * Claude often restates the same sentence as thinking and then as reply text,
+   * so a delivered `thinking` buffer can be a prefix of the completed `text`
+   * block. Matching by content alone, across kinds, would let that shorter
+   * buffer stand in for the text block's own (never-streamed) delivery and
+   * report only the tail past where the two diverge — dropping the reply in
+   * everything but its last character.
+   */
+  it('does not let a delivered reasoning buffer stand in for an echoing text block', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({ type: 'stream_event', event: { type: 'message_start', message: {} } });
+    subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
+    });
+    subject.reduce({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'thinking_delta', thinking: "I'll create the file" },
+      },
+    });
+    subject.reduce({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } });
+    // The text block itself streamed no deltas at all for this message.
+    const events = subject.reduce({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: "I'll create the file" },
+          { type: 'text', text: "I'll create the file." },
+        ],
+      },
+    }).events;
+    expect(events).toContainEqual({ type: 'text_delta', text: "I'll create the file." });
+  });
 });
 
 describe('ClaudeTurnReducer, on records it has never seen', () => {
