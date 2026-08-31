@@ -42,16 +42,25 @@ function NoResponseNotice() {
   );
 }
 
-/** Whether the turn left behind anything a reader would call a response. */
+/** Part kinds `MessageParts` never draws as a timeline row: pure bookkeeping,
+ * and a thought, which is reasoning rather than a response. */
+const NON_RESPONSE_PART_TYPES: ReadonlySet<MessagePart['type']> = new Set([
+  'external_turn',
+  'turn_checkpoint',
+  'tool_result',
+  'thinking',
+]);
+
+/**
+ * Whether the turn left behind anything a reader would call a response.
+ *
+ * Phrased as "not bookkeeping and not thinking" rather than an allowlist of
+ * content kinds, so it tracks whatever `MessageParts` draws instead of a
+ * second list that can drift from it — `external_approval`/`external_steer`
+ * have no `tool_call` sibling to save them the way `question`/`todo` do.
+ */
 function producedSomething(parts: readonly MessagePart[]): boolean {
-  return parts.some(
-    (part) =>
-      part.type === 'text' ||
-      part.type === 'tool_call' ||
-      part.type === 'external_activity' ||
-      part.type === 'error' ||
-      part.type === 'generated_image'
-  );
+  return parts.some((part) => !NON_RESPONSE_PART_TYPES.has(part.type));
 }
 
 /**

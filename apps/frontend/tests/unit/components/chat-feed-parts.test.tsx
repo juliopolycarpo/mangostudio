@@ -261,6 +261,47 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(screen.queryByText('No response')).not.toBeInTheDocument();
   });
 
+  it('does not show No response for a settled turn that only asked for approval', async () => {
+    // `external_approval`/`external_steer` have no `tool_call` sibling the way
+    // `question`/`todo` do, so an inclusion list of "content" kinds misses them
+    // the same way it missed activities. An expired/decided approval is a
+    // settled turn (deriveTurnStatus reads `external_turn.status` for that),
+    // and the card still renders under a false "No response".
+    const parts: MessagePart[] = [
+      {
+        type: 'external_turn',
+        version: 1,
+        targetId: 'codex',
+        sessionId: 'session-1',
+        status: 'terminal',
+        terminalReason: 'completed',
+        startedAt: 0,
+        updatedAt: 0,
+        lastSequence: 1,
+        eventCount: 1,
+        persistedBytes: 10,
+      },
+      {
+        type: 'external_approval',
+        targetId: 'codex',
+        requestId: 'req-1',
+        kind: 'command',
+        title: 'Run `rm -rf build`',
+        options: [{ id: 'approve', rawLabel: 'Approve', isDestructive: false }],
+        expiresAtMs: 600_000,
+        decisionSource: 'expired',
+      },
+    ];
+    const msg = makeMessage({ parts });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
+
+    expect(screen.getByText('Run `rm -rf build`')).toBeInTheDocument();
+    expect(screen.queryByText('No response')).not.toBeInTheDocument();
+  });
+
   it('uses a neutral fallback label when assistant model name is missing', async () => {
     const msg = makeMessage({
       parts: undefined,
