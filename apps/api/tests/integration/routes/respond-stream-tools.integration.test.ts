@@ -158,6 +158,15 @@ describe('POST /respond/stream — tools', () => {
     const imageParts = parts.filter((part) => part.type === 'generated_image');
     expect(imageParts).toHaveLength(2);
     expect(toolCallIndex).toBeGreaterThanOrEqual(0);
+    // The provider announced this call through `tool_call_completed` before the
+    // image tool ran, so the two writers must land on one row: a second one
+    // renders as a duplicate step sharing the first's React key, and only the
+    // later row is settled when the tool returns.
+    const imageToolCalls = parts.filter(
+      (part) => part.type === 'tool_call' && part.toolCallId === 'image-call-1'
+    );
+    expect(imageToolCalls).toHaveLength(1);
+    expect(imageToolCalls[0]).toMatchObject({ execution: { status: 'succeeded' } });
     expect(parts.indexOf(imageParts[0])).toBeGreaterThan(toolCallIndex);
     expect(parts.indexOf(imageParts[1])).toBeGreaterThan(parts.indexOf(imageParts[0]));
     expect(imageParts[0]).toMatchObject({

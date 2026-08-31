@@ -214,14 +214,18 @@ export async function* executeImageGenerationCall(
   );
   lifecycle.emitQueued();
 
-  const toolCallPart: Extract<MessagePart, { type: 'tool_call' }> = {
+  // Upsert, not push: a provider that announced this call through
+  // `tool_call_completed` already put a row for it in `allParts`, and pushing a
+  // second one gave the turn two rows per image call — rendered as duplicate
+  // steps under one React key, the first of them never settling because only
+  // this one is updated when the tool returns.
+  const toolCallPart = upsertToolCallPart(ctx.allParts, {
     type: 'tool_call',
     toolCallId: callId,
     name,
     args,
     execution: lifecycle.current,
-  };
-  ctx.allParts.push(toolCallPart);
+  });
   yield* drainLifecycleEvents(lifecycleEvents);
   await ctx.checkpoint?.();
 
@@ -395,24 +399,37 @@ function abandonUnreachedImages(
   return abandoned;
 }
 
+/**
+ * Writes a tool call into the turn's parts, merging onto the row that already
+ * carries this `toolCallId` instead of adding a second one.
+ *
+ * Returns the part now held in the array, which is not always `next`: merging
+ * builds a new object, and a caller that goes on to mutate the call — settling
+ * its execution once the tool returns — has to hold the stored one or its
+ * writes land on an orphan.
+ *
+ * // Usage: const stored = upsertToolCallPart(parts, { type: 'tool_call', ... });
+ */
 export function upsertToolCallPart(
   parts: MessagePart[],
   next: Extract<MessagePart, { type: 'tool_call' }>
-): void {
+): Extract<MessagePart, { type: 'tool_call' }> {
   const index = parts.findIndex(
     (part) => part.type === 'tool_call' && part.toolCallId === next.toolCallId
   );
   if (index === -1) {
     parts.push(next);
-    return;
+    return next;
   }
   const current = parts[index];
-  if (current?.type !== 'tool_call') return;
-  parts[index] = {
+  if (current?.type !== 'tool_call') return next;
+  const merged: Extract<MessagePart, { type: 'tool_call' }> = {
     ...current,
     ...next,
     args: Object.keys(next.args).length > 0 ? next.args : current.args,
   };
+  parts[index] = merged;
+  return merged;
 }
 
 export function upsertToolResultPart(
