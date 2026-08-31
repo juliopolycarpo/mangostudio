@@ -53,20 +53,26 @@ export function MessageParts({
   // record of who produced it, but it *reads* as a summary, so it renders last.
   const externalTurn = useMemo(() => parts.find((part) => part.type === 'external_turn'), [parts]);
   // Covers the gaps no vendor event describes: waiting on the API before the
-  // first token, a long-running activity between updates, the turn between
-  // two tool calls. Two trailing shapes already say enough on their own and
-  // must not get a second, redundant (or outright wrong) cue stacked on top:
-  // `text`/`thinking` mid-stream already shows its own caret or pulse, and an
-  // approval nobody has answered yet is waiting on the *user*, not the vendor
-  // — "Working..." under an unresolved decision would claim the opposite of
-  // what is actually true.
+  // first token, the pause between one tool call ending and the next starting.
+  // Three trailing shapes already say enough on their own and must not get a
+  // second, redundant (or outright wrong) cue stacked on top: `text`/`thinking`
+  // mid-stream already shows its own caret or pulse; a call still running
+  // already renders as running, and a second row under it would read as a
+  // *second* thing happening; and an approval nobody has answered yet is
+  // waiting on the *user*, not the vendor — "Working..." under an unresolved
+  // decision would claim the opposite of what is actually true.
   const trailingPart = parts.at(-1);
   const trailingIsLiveText =
     isStreaming && (trailingPart?.type === 'text' || trailingPart?.type === 'thinking');
+  const trailingIsRunningActivity =
+    trailingPart?.type === 'external_activity' && trailingPart.status === 'running';
   const trailingAwaitsDecision =
     trailingPart?.type === 'external_approval' && trailingPart.decisionSource === undefined;
   const showWorkingIndicator =
-    externalTurn?.status === 'active' && !trailingIsLiveText && !trailingAwaitsDecision;
+    externalTurn?.status === 'active' &&
+    !trailingIsLiveText &&
+    !trailingIsRunningActivity &&
+    !trailingAwaitsDecision;
   return (
     <>
       <div className="chat-timeline min-w-0">

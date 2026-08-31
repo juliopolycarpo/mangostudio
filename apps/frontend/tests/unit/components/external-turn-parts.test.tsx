@@ -241,6 +241,13 @@ describe('external turn: still working', () => {
     expect(screen.getByText('Working...')).toBeInTheDocument();
   });
 
+  // A call still running already renders as running. A second row under it
+  // reads as a *second* thing happening, which is one more than there is.
+  it('does not duplicate the cue under a call that is still running', () => {
+    renderParts([turnPart({ status: 'active' }), activityPart({ status: 'running' })]);
+    expect(screen.queryByText('Working...')).toBeNull();
+  });
+
   it('stays quiet once the turn is terminal', () => {
     renderParts([turnPart({ status: 'terminal', terminalReason: 'completed' })]);
     expect(screen.queryByText('Working...')).toBeNull();
