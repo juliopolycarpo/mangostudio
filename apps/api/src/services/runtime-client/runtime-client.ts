@@ -326,7 +326,10 @@ interface RuntimeExternalAgentsClient {
     params: ExternalAgentListSessionsParams,
     options?: RuntimeRequestOptions
   ): Promise<ExternalAgentListSessionsResult>;
-  /** Subscribes only to validated semantic events for one hub-owned session. */
+  /**
+   * Subscribes to one hub-owned session's events. Only the envelope frame is
+   * validated; `event` itself may be a type this build doesn't recognize.
+   */
   onEvent(sessionId: string, listener: (event: ExternalAgentEventEnvelope) => void): () => void;
 }
 
