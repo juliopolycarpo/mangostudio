@@ -1,4 +1,5 @@
 export type { GeneratedMessage, GenerateImageResponse, GenerateTextResponse } from './contracts';
+export { mergeMessageParts } from './merge-message-parts';
 export {
   type ExternalTurnRequest,
   ExternalTurnRequestSchema,

@@ -6,6 +6,7 @@ import type {
 } from '@mangostudio/shared';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
+import { mergeMessageParts } from '@mangostudio/shared/generation';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { getErrorCode } from '../../../lib/error-code';
@@ -43,7 +44,6 @@ import {
   persistTextTurnStart,
   updateChatAfterTurn,
 } from '../infrastructure/conversation-persistence';
-import { mergeMessageParts } from './merge-message-parts';
 import type { ResolvedAgentRuntime } from './resolve-agent-runtime';
 import type { ResolvedModel } from './resolve-model';
 import { resolveTurnContext } from './resolve-turn-context';

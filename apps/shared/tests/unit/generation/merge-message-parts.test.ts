@@ -1,14 +1,12 @@
 /**
- * Unit tests for the part-coalescing rule applied before a turn is persisted.
- *
- * This is the persistence half of one rule the app applies in three places —
- * the other two are the frontend's `normalizeMessageParts` and the streaming
- * reducer. If they disagree, a live turn and its reloaded self disagree, so
- * every case here has a counterpart in `message-content.test.ts`.
+ * Unit tests for the part-coalescing rule shared by the render path (the
+ * frontend's `normalizeMessageParts`, which re-exports this same function),
+ * the API's stream-finalization path, and the streaming reducer. If any of
+ * them disagreed, a live turn and its reloaded self would disagree.
  */
 import { describe, expect, it } from 'bun:test';
-import type { MessagePart } from '@mangostudio/shared';
-import { mergeMessageParts } from '../../../../src/modules/generation/application/merge-message-parts';
+import { mergeMessageParts } from '../../../src/generation';
+import type { MessagePart } from '../../../src/types/agent-events';
 
 describe('mergeMessageParts — interleaved thinking segments', () => {
   it('preserves interleaved order: thinking, tool_call, tool_result, thinking, text', () => {

@@ -5,11 +5,11 @@
  *
  * Two independent pieces of code build message parts from one ordered sequence
  * of provider output: this app's reducer, which produces what is on screen
- * while the turn runs, and the API's `mergeMessageParts`, which produces what
- * is stored. A divergence between them is invisible until someone reloads the
- * page and the turn they just watched looks different — which is exactly what
- * happened here, with prose written *before* a tool call rendering *after* it
- * live and before it on reload.
+ * while the turn runs, and the shared `mergeMessageParts`, which the API calls
+ * to produce what is stored. A divergence between them is invisible until
+ * someone reloads the page and the turn they just watched looks different —
+ * which is exactly what happened here, with prose written *before* a tool call
+ * rendering *after* it live and before it on reload.
  *
  * `mergeMessageParts` is imported rather than re-implemented. Its input, the
  * per-delta `session.allParts`, is built here by hand because accumulating it
@@ -18,7 +18,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { mergeMessageParts } from '@mangostudio/api/internal/modules/generation/application/merge-message-parts';
+import { mergeMessageParts } from '@mangostudio/shared/generation';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import type { MessagePart } from '@mangostudio/shared/types';
 import {
