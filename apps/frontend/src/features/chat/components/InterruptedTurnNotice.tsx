@@ -7,6 +7,7 @@ import { AlertTriangle, CheckCircle2, RotateCcw, ShieldAlert } from 'lucide-reac
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 
@@ -121,12 +122,10 @@ export function InterruptedTurnNotice({
                     key={call.callId}
                     className="flex cursor-pointer items-center gap-3 rounded-xl border border-outline-variant/15 bg-surface-container-low px-3 py-2 text-sm"
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={selectedRetries.has(call.callId)}
                       disabled={disabled || isPending}
                       onChange={() => toggleRetry(call.callId)}
-                      className="h-4 w-4 accent-primary"
                     />
                     <span className="min-w-0 flex-1 truncate font-mono text-xs text-on-surface">
                       {call.name}
