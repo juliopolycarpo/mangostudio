@@ -41,6 +41,13 @@ function TurnCostRow({ generationTime }: { generationTime: string }) {
   );
 }
 
+interface AssistantTurnSectionProps extends DerivedTurn {
+  msg: Message;
+  isImageTurn: boolean;
+  chatId?: string | null;
+  onQuestionSubmit?: (prompt: string) => void;
+}
+
 /** Routes an assistant turn to the body its generation state calls for. */
 function AssistantTurnSection({
   msg,
@@ -50,7 +57,7 @@ function AssistantTurnSection({
   isImageTurn,
   chatId,
   onQuestionSubmit,
-}: AssistantMessageBlockProps & DerivedTurn) {
+}: AssistantTurnSectionProps) {
   // A settled image turn is its picture plus the controls that act on it, none
   // of which belong on a timeline.
   if (isImageTurn && !isStreaming) return <AssistantImageTurn msg={msg} />;
@@ -82,8 +89,13 @@ function AssistantTurnSection({
  *
  * Usage: <AssistantMessageBlock msg={msg} isImageTurn={isImageTurn} />
  */
-export function AssistantMessageBlock(props: AssistantMessageBlockProps) {
-  const { msg, isImageTurn, chatId, fileCheckpoint } = props;
+export function AssistantMessageBlock({
+  msg,
+  isImageTurn,
+  chatId,
+  fileCheckpoint,
+  onQuestionSubmit,
+}: AssistantMessageBlockProps) {
   const parts = useMemo(() => messagePartsFromMessage(msg), [msg]);
   const isStreaming = msg.isGenerating ?? false;
   const status = useMemo(() => deriveTurnStatus(parts, isStreaming), [parts, isStreaming]);
@@ -98,7 +110,15 @@ export function AssistantMessageBlock(props: AssistantMessageBlockProps) {
         chatId={chatId}
         fileCheckpoint={fileCheckpoint}
       />
-      <AssistantTurnSection {...props} parts={parts} status={status} isStreaming={isStreaming} />
+      <AssistantTurnSection
+        msg={msg}
+        parts={parts}
+        status={status}
+        isStreaming={isStreaming}
+        isImageTurn={isImageTurn}
+        chatId={chatId}
+        onQuestionSubmit={onQuestionSubmit}
+      />
     </div>
   );
 }
