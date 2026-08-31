@@ -463,6 +463,15 @@ export const respondStreamRoutes = (app: Elysia) =>
           }
         }
 
+        // `abortController.signal.aborted` also goes true for an in-place Stop
+        // (`cancelActiveTurn` aborts the same signal from a separate request),
+        // which leaves this connection open and its controller writable. Only
+        // the ReadableStream's own `cancel()` means the browser is gone and
+        // `controller.enqueue` would throw, so trailing events a cancelled
+        // turn still yields — like `image_generation_failed` for the images it
+        // never reached — must gate on this instead of the abort signal.
+        let clientDisconnected = false;
+
         const stream = new ReadableStream({
           async start(controller) {
             const heartbeat = setInterval(() => {
@@ -503,7 +512,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                 },
                 db
               )) {
-                if (!abortController.signal.aborted) {
+                if (!clientDisconnected) {
                   controller.enqueue(sseEvent(toSsePayload(event)));
                 }
               }
@@ -530,6 +539,7 @@ export const respondStreamRoutes = (app: Elysia) =>
             }
           },
           cancel() {
+            clientDisconnected = true;
             abortController.abort('client_disconnect');
           },
         });
