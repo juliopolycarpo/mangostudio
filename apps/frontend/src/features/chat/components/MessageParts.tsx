@@ -1,4 +1,6 @@
 import type { MessagePart } from '@mangostudio/shared';
+import { ASK_USER_QUESTION_TOOL_NAME } from '@mangostudio/shared/questions';
+import { TODO_WRITE_TOOL_NAME } from '@mangostudio/shared/todos';
 import { useMemo } from 'react';
 import type { TurnStatus } from '../lib/turn-status';
 import { ContinuationEventMarker } from './ContinuationEventMarker';
@@ -90,7 +92,14 @@ export function MessageParts({
                 />
               );
             }
-            case 'tool_call':
+            case 'tool_call': {
+              // The question card and the todo checklist supersede the generic
+              // collapsed tool block for their calls, and a call already drawn
+              // by an earlier group renders nothing here.
+              if (part.name === ASK_USER_QUESTION_TOOL_NAME) return null;
+              if (part.name === TODO_WRITE_TOOL_NAME) return null;
+              if (consumed.has(idx)) return null;
+
               return (
                 <ToolCallPart
                   key={part.toolCallId}
@@ -99,10 +108,10 @@ export function MessageParts({
                   index={idx}
                   isStreaming={isStreaming}
                   group={groups.get(idx)}
-                  consumed={consumed.has(idx)}
                   latestFileChangeId={latestFileChangeId}
                 />
               );
+            }
             case 'tool_result':
               return null;
             case 'generated_image':

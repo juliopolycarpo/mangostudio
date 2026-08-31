@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
 import { MessageBubble } from '../MessageBubble';
@@ -15,9 +16,14 @@ interface AssistantProsePartProps {
  * user's own message gets — the visible break between what the agent did and
  * what it said.
  *
+ * A tool-interleaved turn splits prose into one part per contiguous run, so a
+ * turn with several tool calls mounts several of these. Memoized because every
+ * settled run's props are unchanged by a delta landing in a later part of the
+ * same turn.
+ *
  * // Usage: <AssistantProsePart text={part.text} isStreaming={false} />
  */
-export function AssistantProsePart({ text, isStreaming, incomplete }: AssistantProsePartProps) {
+function AssistantProsePartComponent({ text, isStreaming, incomplete }: AssistantProsePartProps) {
   const { t } = useI18n();
   return (
     <MessageBubble className="max-w-2xl">
@@ -41,3 +47,5 @@ export function AssistantProsePart({ text, isStreaming, incomplete }: AssistantP
     </MessageBubble>
   );
 }
+
+export const AssistantProsePart = memo(AssistantProsePartComponent);
