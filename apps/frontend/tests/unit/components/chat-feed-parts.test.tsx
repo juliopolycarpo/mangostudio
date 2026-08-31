@@ -88,14 +88,16 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(thoughtRows).toHaveLength(2);
   });
 
-  it('normalizes token-level interleaving into one thinking block and one text block', async () => {
+  it('collapses a run of deltas but leaves an alternating turn alternating', async () => {
     const parts: MessagePart[] = [
       { type: 'thinking', text: 'The ' },
-      { type: 'text', text: 'Let ' },
       { type: 'thinking', text: 'user ' },
-      { type: 'text', text: 'me ' },
       { type: 'thinking', text: 'wants me' },
+      { type: 'text', text: 'Let ' },
+      { type: 'text', text: 'me ' },
       { type: 'text', text: 'first explore' },
+      { type: 'thinking', text: 'Second look.' },
+      { type: 'text', text: 'Then answer.' },
     ];
     const msg = makeMessage({ parts });
 
@@ -103,13 +105,15 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     await flushAsyncRender();
 
-    const thinkingButtons = container.querySelectorAll('button');
-    const thoughtRows = Array.from(thinkingButtons).filter((btn) =>
+    // Each run of same-kind deltas becomes one block; the two reasoning phases
+    // stay two, in the places the model produced them.
+    const thoughtRows = Array.from(container.querySelectorAll('button')).filter((btn) =>
       btn.textContent?.includes('Thought')
     );
 
-    expect(thoughtRows).toHaveLength(1);
+    expect(thoughtRows).toHaveLength(2);
     expect(screen.getByText('Let me first explore')).toBeInTheDocument();
+    expect(screen.getByText('Then answer.')).toBeInTheDocument();
   });
 
   it('settles a thought as soon as the turn streams past it', async () => {

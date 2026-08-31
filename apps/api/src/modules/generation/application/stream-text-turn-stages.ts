@@ -43,6 +43,7 @@ import {
   persistTextTurnStart,
   updateChatAfterTurn,
 } from '../infrastructure/conversation-persistence';
+import { mergeMessageParts } from './merge-message-parts';
 import type { ResolvedAgentRuntime } from './resolve-agent-runtime';
 import type { ResolvedModel } from './resolve-model';
 import { resolveTurnContext } from './resolve-turn-context';
@@ -56,7 +57,6 @@ import {
   executeImageGenerationCall,
   finalizeDanglingToolExecutions,
   handleTurnCompleted,
-  mergeMessageParts,
   synchronizeToolProgressForCheckpoint,
   upsertToolCallPart,
   upsertToolResultPart,

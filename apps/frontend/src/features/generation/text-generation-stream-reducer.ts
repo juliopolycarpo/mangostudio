@@ -238,8 +238,10 @@ function reduceThinkingDelta(state: TextGenerationStreamState, text: string) {
 }
 
 function reduceTextDelta(state: TextGenerationStreamState, textDelta: string) {
+  // `state.text` still accumulates every delta for the legacy `msg.text` patch;
+  // the parts array gets the delta alone, appended to the trailing text part.
   const text = `${state.text}${textDelta}`;
-  const parts = upsertTextPart(state.parts, text);
+  const parts = appendTrailingText(state.parts, 'text', textDelta);
   return withAiMessageUpdate({ ...state, text, parts, activeThinkingIndex: null }, { text, parts });
 }
 
@@ -598,14 +600,11 @@ function reduceDone(
  *
  * The hub builds the durable transcript from the same neutral events these
  * chunks were projected from, so every function below has an exact counterpart
- * in `ExternalTurnTranscript` and has to agree with it — including the parts
- * that look like details, such as appending a delta to the *trailing* part
- * rather than to the first `text` part found. `upsertTextPart` moves the text
- * block to the end, which is right for a MangoStudio turn whose prose is one
- * block, and wrong for a vendor that interleaves prose with its own activity.
+ * in `ExternalTurnTranscript` and has to agree with it.
  *
  * `apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts`
- * drives both paths from one event sequence and compares the results.
+ * drives both paths from one event sequence and compares the results, and
+ * `internal-turn-live-vs-reload.test.ts` does the same for the internal one.
  */
 function reduceExternalSessionStarted(
   state: TextGenerationStreamState,
@@ -635,12 +634,12 @@ function reduceExternalSessionStarted(
 
 function reduceExternalText(state: TextGenerationStreamState, textDelta: string) {
   const text = `${state.text}${textDelta}`;
-  const parts = appendExternalText(state.parts, 'text', textDelta);
+  const parts = appendTrailingText(state.parts, 'text', textDelta);
   return withAiMessageUpdate({ ...state, text, parts, activeThinkingIndex: null }, { text, parts });
 }
 
 function reduceExternalReasoning(state: TextGenerationStreamState, textDelta: string) {
-  const parts = appendExternalText(state.parts, 'thinking', textDelta);
+  const parts = appendTrailingText(state.parts, 'thinking', textDelta);
   return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
@@ -651,12 +650,12 @@ function reduceExternalReasoning(state: TextGenerationStreamState, textDelta: st
  * vendor produced in between and never closed in word — what a runtime too old
  * to send `external_reasoning_ended` always produces. Closing it first discards
  * it when it is empty, instead of stranding a blank block mid-transcript.
- * `appendExternalText` then coalesces onto a trailing `thinking` part, so a
+ * `appendTrailingText` then coalesces onto a trailing `thinking` part, so a
  * phase that already received text is not opened a second time.
  */
 function reduceExternalReasoningStarted(state: TextGenerationStreamState) {
   const closed = closeThinkingAt(state.parts, state.openExternalThinkingIndex);
-  const parts = appendExternalText(closed.parts, 'thinking', '');
+  const parts = appendTrailingText(closed.parts, 'thinking', '');
   return withAiMessageUpdate(
     { ...state, parts, openExternalThinkingIndex: parts.length - 1 },
     { parts }
@@ -935,10 +934,13 @@ function updateExternalActivity(
  * Appends to the trailing part when it is already of this kind.
  *
  * A stream of deltas becomes one block, and interleaved activity still splits
- * the prose where the vendor split it — which is what the persisted transcript
- * records, so it is what a live render has to produce.
+ * the prose where the producer split it — which is what the persisted
+ * transcript records, so it is what a live render has to produce. True of a
+ * vendor CLI and of MangoStudio's own harness alike: prose written before a
+ * tool call belongs before it, and the previous rule — remove the text part,
+ * re-append it with the whole accumulated text — moved it after.
  */
-function appendExternalText(
+function appendTrailingText(
   parts: MessagePart[],
   kind: 'text' | 'thinking',
   text: string
@@ -980,13 +982,6 @@ function withAiMessageUpdate(
 
 function replacePartAt(parts: MessagePart[], index: number, nextPart: MessagePart): MessagePart[] {
   return parts.map((part, partIndex) => (partIndex === index ? nextPart : part));
-}
-
-function upsertTextPart(parts: MessagePart[], text: string): MessagePart[] {
-  const textIndex = parts.findIndex((part) => part.type === 'text');
-  if (textIndex === -1) return [...parts, { type: 'text', text }];
-  const nextParts = [...parts.slice(0, textIndex), ...parts.slice(textIndex + 1)];
-  return [...nextParts, { type: 'text', text }];
 }
 
 function parseToolArguments(argumentsText: string): Record<string, unknown> {

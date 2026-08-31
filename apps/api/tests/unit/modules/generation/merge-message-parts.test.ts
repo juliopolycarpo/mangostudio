@@ -1,47 +1,16 @@
 /**
- * Unit tests for the interleaved thinking segment-merging algorithm used in
- * respond-stream.ts before persisting the final message parts.
+ * Unit tests for the part-coalescing rule applied before a turn is persisted.
+ *
+ * This is the persistence half of one rule the app applies in three places —
+ * the other two are the frontend's `normalizeMessageParts` and the streaming
+ * reducer. If they disagree, a live turn and its reloaded self disagree, so
+ * every case here has a counterpart in `message-content.test.ts`.
  */
 import { describe, expect, it } from 'bun:test';
 import type { MessagePart } from '@mangostudio/shared';
+import { mergeMessageParts } from '../../../../src/modules/generation/application/merge-message-parts';
 
-/**
- * Replicates the merging algorithm from respond-stream.ts.
- * Merges all thinking/text deltas within a structural section so token-level
- * interleaving from the provider does not create one block per word.
- */
-function mergePartsForPersistence(allParts: MessagePart[]): MessagePart[] {
-  const finalParts: MessagePart[] = [];
-  let currentThinkingRun = '';
-  let currentTextRun = '';
-
-  const flushRuns = () => {
-    if (currentThinkingRun) {
-      finalParts.push({ type: 'thinking', text: currentThinkingRun });
-      currentThinkingRun = '';
-    }
-    if (currentTextRun) {
-      finalParts.push({ type: 'text', text: currentTextRun });
-      currentTextRun = '';
-    }
-  };
-
-  for (const part of allParts) {
-    if (part.type === 'thinking') {
-      currentThinkingRun += part.text;
-    } else if (part.type === 'text') {
-      currentTextRun += part.text;
-    } else {
-      flushRuns();
-      finalParts.push(part);
-    }
-  }
-
-  flushRuns();
-  return finalParts;
-}
-
-describe('mergePartsForPersistence — interleaved thinking segments', () => {
+describe('mergeMessageParts — interleaved thinking segments', () => {
   it('preserves interleaved order: thinking, tool_call, tool_result, thinking, text', () => {
     const input: MessagePart[] = [
       { type: 'thinking', text: 'initial ' },
@@ -52,7 +21,7 @@ describe('mergePartsForPersistence — interleaved thinking segments', () => {
       { type: 'text', text: 'final answer' },
     ];
 
-    const result = mergePartsForPersistence(input);
+    const result = mergeMessageParts(input);
 
     expect(result).toHaveLength(5);
     expect(result[0]).toEqual({ type: 'thinking', text: 'initial reasoning' });
@@ -69,7 +38,7 @@ describe('mergePartsForPersistence — interleaved thinking segments', () => {
       { type: 'text', text: 'answer' },
     ];
 
-    const result = mergePartsForPersistence(input);
+    const result = mergeMessageParts(input);
 
     expect(result).toHaveLength(2);
     expect(result[0]).toEqual({ type: 'thinking', text: 'chunk1 chunk2' });
@@ -82,7 +51,7 @@ describe('mergePartsForPersistence — interleaved thinking segments', () => {
       { type: 'text', text: 'world' },
     ];
 
-    const result = mergePartsForPersistence(input);
+    const result = mergeMessageParts(input);
 
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({ type: 'text', text: 'hello world' });
@@ -96,7 +65,7 @@ describe('mergePartsForPersistence — interleaved thinking segments', () => {
       { type: 'thinking', text: 'post-tool reasoning' },
     ];
 
-    const result = mergePartsForPersistence(input);
+    const result = mergeMessageParts(input);
 
     expect(result).toHaveLength(3);
     expect(result[2]).toEqual({ type: 'thinking', text: 'post-tool reasoning' });
@@ -114,7 +83,7 @@ describe('mergePartsForPersistence — interleaved thinking segments', () => {
       { type: 'text', text: 'done' },
     ];
 
-    const result = mergePartsForPersistence(input);
+    const result = mergeMessageParts(input);
 
     const thinkingParts = result.filter((p) => p.type === 'thinking');
     expect(thinkingParts).toHaveLength(3);
@@ -130,31 +99,77 @@ describe('mergePartsForPersistence — interleaved thinking segments', () => {
       { type: 'text', text: 'part3' },
     ];
 
-    const result = mergePartsForPersistence(input);
+    const result = mergeMessageParts(input);
 
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({ type: 'text', text: 'part1 part2 part3' });
   });
 
   it('returns an empty array for empty input', () => {
-    expect(mergePartsForPersistence([])).toEqual([]);
+    expect(mergeMessageParts([])).toEqual([]);
   });
 
-  it('collapses token-level interleaving into one thinking block and one text block', () => {
+  /**
+   * A run ends where a part of another kind begins. Holding a pending text run
+   * open across a reasoning phase stored prose the model wrote *before* it
+   * thought again as if it came after, and flushed thinking first, so a turn
+   * that answered, reconsidered and answered again was persisted with its two
+   * answers welded together above the thought that separated them.
+   */
+  it('does not move prose across a reasoning phase that interrupted it', () => {
+    const input: MessagePart[] = [
+      { type: 'text', text: 'a' },
+      { type: 'thinking', text: 'b' },
+      { type: 'text', text: 'c' },
+    ];
+
+    expect(mergeMessageParts(input)).toEqual([
+      { type: 'text', text: 'a' },
+      { type: 'thinking', text: 'b' },
+      { type: 'text', text: 'c' },
+    ]);
+  });
+
+  it('merges token-level interleaving only where the kinds are adjacent', () => {
     const input: MessagePart[] = [
       { type: 'thinking', text: 'The ' },
-      { type: 'text', text: 'Let ' },
       { type: 'thinking', text: 'user ' },
-      { type: 'text', text: 'me ' },
       { type: 'thinking', text: 'wants me' },
+      { type: 'text', text: 'Let ' },
+      { type: 'text', text: 'me ' },
       { type: 'text', text: 'first explore' },
     ];
 
-    const result = mergePartsForPersistence(input);
-
-    expect(result).toEqual([
+    expect(mergeMessageParts(input)).toEqual([
       { type: 'thinking', text: 'The user wants me' },
       { type: 'text', text: 'Let me first explore' },
+    ]);
+  });
+
+  /**
+   * Already-persisted rows are re-merged on every continuation, so the rule has
+   * to be a no-op on its own output or a stored turn would drift each time it
+   * was touched.
+   */
+  it('is idempotent over an already-merged row', () => {
+    const stored: MessagePart[] = [
+      { type: 'thinking', text: 'plan' },
+      { type: 'tool_call', toolCallId: 'c1', name: 'fn', args: {} },
+      { type: 'text', text: 'answer' },
+    ];
+
+    expect(mergeMessageParts(mergeMessageParts(stored))).toEqual(mergeMessageParts(stored));
+    expect(mergeMessageParts(stored)).toEqual(stored);
+  });
+
+  it('drops an empty text part, which no event opens on purpose', () => {
+    const input: MessagePart[] = [
+      { type: 'text', text: '' },
+      { type: 'tool_call', toolCallId: 'c1', name: 'fn', args: {} },
+    ];
+
+    expect(mergeMessageParts(input)).toEqual([
+      { type: 'tool_call', toolCallId: 'c1', name: 'fn', args: {} },
     ]);
   });
 });

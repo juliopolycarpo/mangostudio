@@ -1,71 +1,75 @@
 import type { Message, MessagePart } from '@mangostudio/shared';
 
+/** The two part kinds that arrive as a stream of deltas and read as one block. */
+type MergeableRun = Extract<MessagePart, { type: 'thinking' | 'text' }>;
+
+function isMergeable(part: MessagePart): part is MergeableRun {
+  return part.type === 'thinking' || part.type === 'text';
+}
+
 /**
  * Collapses token-level streaming parts into stable display blocks.
  *
  * Streaming emits thinking/text one token at a time, so a single logical
- * paragraph can arrive as dozens of adjacent parts. Merging consecutive runs
+ * paragraph can arrive as dozens of adjacent parts. Merging *adjacent* runs
  * keeps the rendered list short and prevents per-token remounts.
+ *
+ * Adjacency is the whole rule, and it is deliberately narrow. Holding a run
+ * open across the other kind reordered the turn: a model that answers,
+ * reconsiders and answers again had both answers welded together beneath the
+ * thought that separated them, and the live thought — now sitting at index 0 —
+ * stopped being the last part, which is how the renderer decides what is still
+ * streaming. Alternation is not a glitch to smooth over; it is the tool loop
+ * made visible, and it is what the turn actually did.
+ *
+ * The fold reads exactly two things per step: the incoming part and the
+ * trailing one. No earlier entry is revisited or reordered, so appending to
+ * `parts` never changes an index below the last — which is what makes the
+ * positional liveness check and the `${messageId}-thinking-${idx}` keys sound.
+ * One caveat, and only one: the stream reducer's `closeThinkingAt` splices out
+ * a *displaced* empty thinking phase, which shifts later indices down. It fires
+ * only against a runtime too old to send `reasoning_ended`, and only on a
+ * contentless phase, so nothing may be built that needs the invariant absolute.
+ *
+ * The same rule is applied by `mergeMessageParts` before persisting and by the
+ * stream reducer while streaming. All three have to agree, or a live turn and
+ * its reloaded self disagree.
  *
  * Usage: normalizeMessageParts([{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }])
  */
 export function normalizeMessageParts(parts: MessagePart[]): MessagePart[] {
   const normalized: MessagePart[] = [];
-  // Held on one object rather than in four `let`s: `flushRuns` closes over
-  // them, and a captured binding seeded with `null` reads as `null` inside the
-  // closure however it is reassigned afterwards.
-  const pending: { thinking: MergedRun | null; text: MergedRun | null } = {
-    thinking: null,
-    text: null,
-  };
-
-  const flushRuns = () => {
-    const { thinking, text } = pending;
-    pending.thinking = null;
-    pending.text = null;
-    // The thinking run is emitted on *existence*, not on having text. A
-    // reasoning phase that received no `thinking_delta` at all is the common
-    // case rather than the exception — `display: "omitted"` is the API default
-    // on current models — and `reasoning_started` opens an empty `thinking`
-    // part precisely so the reader sees that phase happening. Keying this on
-    // the text instead deleted that part before it could ever render, so the
-    // one event announcing a withheld reasoning phase showed nothing at all.
-    // Dropping an empty phase is decided where it becomes knowable — the
-    // transcript's `#closeThinking` and the stream reducer's `closeThinkingAt`
-    // — not here.
-    if (thinking) normalized.push({ type: 'thinking', text: thinking.text, ...thinking.flags });
-    if (text?.text) normalized.push({ type: 'text', text: text.text, ...text.flags });
-  };
 
   for (const part of parts) {
-    if (part.type === 'thinking') {
-      pending.thinking = extendRun(pending.thinking, part);
+    if (!isMergeable(part)) {
+      normalized.push(part);
       continue;
     }
-    if (part.type === 'text') {
-      pending.text = extendRun(pending.text, part);
+    // Prose with no text says nothing. Unlike `thinking`, no event opens an
+    // empty text phase, so an empty text part is noise rather than a signal.
+    //
+    // An empty `thinking` part survives unconditionally. A reasoning phase that
+    // received no `thinking_delta` at all is the common case rather than the
+    // exception — `display: "omitted"` is the API default on current models —
+    // and `reasoning_started` opens an empty `thinking` part precisely so the
+    // reader sees that phase happening. Dropping an empty phase is decided
+    // where it becomes knowable — the transcript's `#closeThinking` and the
+    // stream reducer's `closeThinkingAt` — not here.
+    if (part.type === 'text' && part.text === '') continue;
+
+    const previous = normalized.at(-1);
+    if (!previous || !isMergeable(previous) || previous.type !== part.type) {
+      normalized.push(part);
       continue;
     }
-    flushRuns();
-    normalized.push(part);
+    normalized[normalized.length - 1] = {
+      type: part.type,
+      text: previous.text + part.text,
+      ...mergeFlags(previous, part),
+    } as MergeableRun;
   }
 
-  flushRuns();
   return normalized;
-}
-
-/** One run of same-kind parts, joined: its text and the flags it carries. */
-interface MergedRun {
-  readonly text: string;
-  readonly flags: PartFlags;
-}
-
-/** Folds one more part into the run it is joining, opening the run if it is the first. */
-function extendRun(
-  run: MergedRun | null,
-  part: { text: string; redacted?: boolean; incomplete?: true }
-): MergedRun {
-  return { text: (run?.text ?? '') + part.text, flags: mergeFlags(run?.flags ?? {}, part) };
 }
 
 /** Everything a merged run has to carry besides its text. */
@@ -82,9 +86,12 @@ interface PartFlags {
  * was not cut short. `redacted` sticks, because a run that hid any of its
  * content is not fully shown no matter what followed.
  */
-function mergeFlags(flags: PartFlags, part: { redacted?: boolean; incomplete?: true }): PartFlags {
+function mergeFlags(
+  previous: { redacted?: boolean; incomplete?: true },
+  part: { redacted?: boolean; incomplete?: true }
+): PartFlags {
   return {
-    ...(flags.redacted || part.redacted ? { redacted: true } : {}),
+    ...(previous.redacted || part.redacted ? { redacted: true } : {}),
     ...(part.incomplete ? { incomplete: true } : {}),
   };
 }
