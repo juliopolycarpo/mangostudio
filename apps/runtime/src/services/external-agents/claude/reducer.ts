@@ -405,10 +405,7 @@ export class ClaudeTurnReducer {
         events.push({
           type: 'activity_updated',
           callId: parent,
-          update: {
-            detail: merged.slice(0, NESTED_TEXT_MAX_CHARS),
-            ...(merged.length > NESTED_TEXT_MAX_CHARS ? { truncated: true } : {}),
-          },
+          update: boundedDetail(merged),
         });
       }
     }
@@ -470,12 +467,7 @@ export class ClaudeTurnReducer {
         callId,
         result: {
           status: block.is_error === true ? 'failed' : 'completed',
-          ...(detail.length > 0
-            ? {
-                detail: detail.slice(0, NESTED_TEXT_MAX_CHARS),
-                ...(detail.length > NESTED_TEXT_MAX_CHARS ? { truncated: true } : {}),
-              }
-            : {}),
+          ...boundedDetail(detail),
         },
       });
     }
@@ -491,12 +483,7 @@ export class ClaudeTurnReducer {
    */
   #reduceResult(record: ClaudeResultRecord): ClaudeReduction {
     this.#finished = true;
-    const events: ExternalAgentEvent[] = [];
-
-    for (const [callId] of this.#openActivities) {
-      events.push({ type: 'activity_completed', callId, result: { status: 'cancelled' } });
-    }
-    this.#openActivities.clear();
+    const events: ExternalAgentEvent[] = this.#closeOpenActivities();
 
     const usage = readUsage(record);
     if (usage) events.push({ type: 'usage', usage });
@@ -520,14 +507,43 @@ export class ClaudeTurnReducer {
   abort(error: ExternalAgentError): readonly ExternalAgentEvent[] {
     if (this.#finished) return [];
     this.#finished = true;
-    const events: ExternalAgentEvent[] = [];
-    for (const [callId] of this.#openActivities) {
-      events.push({ type: 'activity_completed', callId, result: { status: 'cancelled' } });
-    }
-    this.#openActivities.clear();
+    const events: ExternalAgentEvent[] = this.#closeOpenActivities();
     events.push({ type: 'error', error });
     return events;
   }
+
+  /**
+   * Closes every call the run ended without reporting, as `cancelled`.
+   *
+   * A call the vendor already refused carries that refusal into its close. The
+   * `tool_result` that normally delivers the reason never arrived, so the held
+   * `system/permission_denied` is the only statement anyone made about why
+   * that call did not happen — a pill reading "Cancelled." with nothing else
+   * throws it away.
+   */
+  #closeOpenActivities(): ExternalAgentEvent[] {
+    const events: ExternalAgentEvent[] = [];
+    for (const [callId] of this.#openActivities) {
+      const denial = this.#deniedActivities.get(callId);
+      events.push({
+        type: 'activity_completed',
+        callId,
+        result: { status: 'cancelled', ...boundedDetail(denial ?? '') },
+      });
+    }
+    this.#openActivities.clear();
+    this.#deniedActivities.clear();
+    return events;
+  }
+}
+
+/** A `detail` field bounded to what one activity update carries, or nothing for empty text. */
+function boundedDetail(detail: string): { detail?: string; truncated?: boolean } {
+  if (detail.length === 0) return {};
+  return {
+    detail: detail.slice(0, NESTED_TEXT_MAX_CHARS),
+    ...(detail.length > NESTED_TEXT_MAX_CHARS ? { truncated: true } : {}),
+  };
 }
 
 /**

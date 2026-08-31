@@ -341,6 +341,39 @@ describe('ClaudeTurnReducer, merging a permission denial into its activity', () 
     ]);
   });
 
+  /**
+   * A run can end with the refused call still open — the process died, or the
+   * budget ran out, before the `tool_result` that normally carries the reason.
+   * `cancelled` with no detail throws away the only statement anyone made
+   * about why that call did not happen.
+   */
+  it('carries the held denial into a call the run ended without closing', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({
+      type: 'assistant',
+      message: {
+        id: 'msg-1',
+        content: [{ type: 'tool_use', id: 'toolu_3', name: 'Write', input: { file_path: '/x' } }],
+      },
+    });
+    subject.reduce({
+      type: 'system',
+      subtype: 'permission_denied',
+      tool_name: 'Write',
+      tool_use_id: 'toolu_3',
+      message: 'Claude requested permission to write to /x, but you have not granted it yet.',
+    });
+    const events = subject.reduce({ type: 'result', subtype: 'success', is_error: false }).events;
+    expect(events[0]).toEqual({
+      type: 'activity_completed',
+      callId: 'toolu_3',
+      result: {
+        status: 'cancelled',
+        detail: 'Claude requested permission to write to /x, but you have not granted it yet.',
+      },
+    });
+  });
+
   it('falls back to the tool_result content when no denial was held for the call', () => {
     const subject = new ClaudeTurnReducer({ resumed: false });
     subject.reduce({
