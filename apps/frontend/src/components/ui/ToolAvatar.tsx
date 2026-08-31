@@ -30,7 +30,8 @@ export interface ToolImageDisplay {
   readonly remote: boolean;
 }
 
-const SIZE_CLASS: Record<ToolAvatarSize, string> = {
+/** The size/shape/type-scale classes for each avatar size, reusable by chips that draw beside one but aren't a `ToolAvatar` themselves. */
+export const TOOL_AVATAR_SIZE_CLASS: Record<ToolAvatarSize, string> = {
   /** Inline in a chat timeline row, where a 20px avatar outweighs the status glyph. */
   '2xs': 'size-4 rounded-sm text-[8px]',
   /** Dense lists — the capability inspector, where rows are 11px tall text. */
@@ -87,7 +88,7 @@ export function ToolAvatar({
       // announcing it here would say the tool's name twice.
       aria-hidden="true"
       title={name}
-      className={`inline-flex shrink-0 select-none items-center justify-center overflow-hidden font-bold uppercase leading-none ${SIZE_CLASS[size]} ${className}`}
+      className={`inline-flex shrink-0 select-none items-center justify-center overflow-hidden font-bold uppercase leading-none ${TOOL_AVATAR_SIZE_CLASS[size]} ${className}`}
     >
       {showImage ? (
         <img

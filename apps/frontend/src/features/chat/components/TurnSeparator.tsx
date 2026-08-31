@@ -2,7 +2,7 @@ import type { Message, MessagePart } from '@mangostudio/shared';
 import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpoints';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
 import { format } from 'date-fns';
-import { ToolAvatar } from '@/components/ui/ToolAvatar';
+import { TOOL_AVATAR_SIZE_CLASS, ToolAvatar } from '@/components/ui/ToolAvatar';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { MANGO_IDENTITY } from '@/lib/agent-identity';
@@ -28,13 +28,15 @@ interface TurnSeparatorProps {
  * Not a `ToolAvatar`: that draws a *subject*, and the identity kinds are a
  * closed union with no `model` member. A `model:gpt-5` subject key would be a
  * key the API rejects and no user could ever edit, so the chip is drawn plainly
- * rather than pretending to an identity that has nowhere to live.
+ * rather than pretending to an identity that has nowhere to live. It shares
+ * `ToolAvatar`'s `xs` size class so the two chips — which sit in the same slot
+ * of the same row, one per turn kind — line up.
  */
 function ModelMonogram({ monogram }: { monogram: string }) {
   return (
     <span
       aria-hidden="true"
-      className="flex size-5 shrink-0 items-center justify-center rounded-md text-[9px] font-semibold"
+      className={`flex shrink-0 items-center justify-center font-semibold ${TOOL_AVATAR_SIZE_CLASS.xs}`}
       style={{
         backgroundColor: `color-mix(in srgb, ${MANGO_IDENTITY.colorVar} 18%, transparent)`,
         color: MANGO_IDENTITY.colorVar,
