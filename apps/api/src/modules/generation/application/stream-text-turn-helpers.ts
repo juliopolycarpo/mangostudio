@@ -318,7 +318,8 @@ export async function* executeImageGenerationCall(
       }
     }
 
-    abandonedCount = abandonUnreachedImages(imagePartsById, outcomes);
+    abandonedCount = yield* abandonUnreachedImages(imagePartsById, outcomes, callId);
+    await ctx.checkpoint?.();
 
     const imageResult = summarizeGenerateImageToolResult(outcomes);
     result = imageResult;
@@ -363,30 +364,39 @@ export async function* executeImageGenerationCall(
 }
 
 /**
- * Records a failed outcome for every planned image the generator never reached.
+ * Records a failed outcome for every planned image the generator never reached,
+ * and streams the failure so the tab that started the call stops showing it as
+ * generating.
  *
  * `generateImagesForToolPlan` stops at its abort check by returning rather than
  * throwing, and says nothing about the images it had left. Without this an
  * interrupted call summarizes to `count: 0` with no errors — which reads as a
  * call that succeeded and chose to produce nothing, and settles the lifecycle
  * as `succeeded` — while every unreached part stays at `generating` for the
- * life of the message, spinning on each reload.
+ * life of the message, spinning on each reload. The browser's parts array is
+ * separate from the API's, and only a completion/failure event moves a card
+ * off `generating` there, so pushing to `outcomes` without also yielding
+ * leaves the open tab spinning even though the API and a reload both agree
+ * the image failed.
  *
- * This is only the in-process half. A stop keeps the tab open, and a crash or a
- * throw mid-batch skips this function entirely, so the durable seal for a part
- * left at `generating` lives in `reconcileInterruptedMessageParts`. What this
- * adds is the tool result: the outcomes it pushes are how the model learns the
- * batch was cut short.
+ * A stop keeps the tab open for this to reach; a crash or a throw mid-batch
+ * skips this function entirely, so the durable seal for a part left at
+ * `generating` still lives in `reconcileInterruptedMessageParts` for that
+ * case. What this adds on top of the tool result is the live signal: the
+ * outcomes it pushes are how the model learns the batch was cut short, and
+ * the events it yields are how the open tab learns the same thing without a
+ * reload.
  *
  * Returns how many images were abandoned, which is what tells the caller the
  * call was cut short rather than finished.
  *
- * // Usage: const abandoned = abandonUnreachedImages(imagePartsById, outcomes);
+ * // Usage: const abandoned = yield* abandonUnreachedImages(imagePartsById, outcomes, callId);
  */
-function abandonUnreachedImages(
+function* abandonUnreachedImages(
   imagePartsById: ReadonlyMap<string, GeneratedImagePart>,
-  outcomes: GenerateImageToolOutcome[]
-): number {
+  outcomes: GenerateImageToolOutcome[],
+  toolCallId: string
+): Generator<StreamEvent, number> {
   const reached = new Set(outcomes.map((outcome) => outcome.imageId));
   let abandoned = 0;
 
@@ -401,6 +411,13 @@ function abandonUnreachedImages(
       error: IMAGE_ABANDONED_ERROR,
       createdAt: Date.now(),
     });
+    yield {
+      type: 'image_generation_failed',
+      imageId,
+      toolCallId,
+      prompt: part.prompt,
+      error: IMAGE_ABANDONED_ERROR,
+    };
     abandoned += 1;
   }
 

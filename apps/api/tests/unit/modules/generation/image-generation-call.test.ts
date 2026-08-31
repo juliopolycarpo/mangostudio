@@ -39,7 +39,7 @@ async function runImageCall(options: {
   reachedCount: number;
   count: number;
   aborted: boolean;
-}): Promise<{ allParts: MessagePart[] }> {
+}): Promise<{ allParts: MessagePart[]; events: Array<{ type: string }> }> {
   const generator = new TruncatingImageGenerator(options.reachedCount);
   await mock.module('../../../../src/services/tools/builtin/generate-image', () => ({
     ...realGenerateImage,
@@ -69,11 +69,12 @@ async function runImageCall(options: {
       nextToolResults: [],
     }
   );
-  for await (const _event of call) {
-    // Drain: the parts the turn persists are what this test asserts on.
+  const events: Array<{ type: string }> = [];
+  for await (const event of call) {
+    events.push(event);
   }
 
-  return { allParts };
+  return { allParts, events };
 }
 
 function toolCallExecution(parts: MessagePart[]) {
@@ -137,5 +138,12 @@ describe('executeImageGenerationCall — abandoned images', () => {
 
     expect(toolCallExecution(allParts)).toMatchObject({ status: 'succeeded' });
     expect(imageStatuses(allParts)).toEqual(['completed', 'completed']);
+  });
+
+  it('streams a failure event for every unreached image so the open tab stops showing it as generating', async () => {
+    const { events } = await runImageCall({ reachedCount: 1, count: 3, aborted: true });
+
+    const failed = events.filter((event) => event.type === 'image_generation_failed');
+    expect(failed).toHaveLength(2);
   });
 });
