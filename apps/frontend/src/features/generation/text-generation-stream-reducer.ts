@@ -647,11 +647,16 @@ function reduceExternalReasoning(state: TextGenerationStreamState, textDelta: st
 /**
  * Opens the reasoning phase and remembers where it sits.
  *
- * `appendExternalText` coalesces onto a trailing `thinking` part, so a phase
- * that already received text is not opened a second time.
+ * A phase still open when the next one starts was displaced by output the
+ * vendor produced in between and never closed in word — what a runtime too old
+ * to send `external_reasoning_ended` always produces. Closing it first discards
+ * it when it is empty, instead of stranding a blank block mid-transcript.
+ * `appendExternalText` then coalesces onto a trailing `thinking` part, so a
+ * phase that already received text is not opened a second time.
  */
 function reduceExternalReasoningStarted(state: TextGenerationStreamState) {
-  const parts = appendExternalText(state.parts, 'thinking', '');
+  const closed = closeThinkingAt(state.parts, state.openExternalThinkingIndex);
+  const parts = appendExternalText(closed.parts, 'thinking', '');
   return withAiMessageUpdate(
     { ...state, parts, openExternalThinkingIndex: parts.length - 1 },
     { parts }

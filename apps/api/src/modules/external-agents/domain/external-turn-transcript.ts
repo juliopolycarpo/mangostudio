@@ -346,6 +346,12 @@ export class ExternalTurnTranscript {
         return { durable: false };
 
       case 'reasoning_started':
+        // A phase still open when the next one starts was displaced by output
+        // the vendor produced in between and never closed in word — the shape a
+        // runtime too old to send `reasoning_ended` always produces. Closing it
+        // here discards it when it is empty, rather than stranding a blank
+        // "Thinking" row mid-transcript for the rest of the turn.
+        this.#closeThinking();
         // Opens the block a reload has to show too, the way `reduceThinkingStart`
         // does for an internal turn. `#appendText` already coalesces onto an
         // existing trailing `thinking` part, so a phase that already received

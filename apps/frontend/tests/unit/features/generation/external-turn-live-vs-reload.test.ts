@@ -321,6 +321,28 @@ describe('external turn: live stream vs reloaded transcript', () => {
     expect(live.parts.find((part) => part.type === 'text')).not.toHaveProperty('incomplete');
   });
 
+  /**
+   * A runtime older than this hub emits `reasoning_started` and never the
+   * matching end, so the first phase is still open when output displaces it and
+   * a second one begins. Neither projection may leave the first behind as a
+   * permanently blank block.
+   */
+  it('agrees that an unclosed empty phase does not survive the next one', () => {
+    const UNCLOSED_PHASES: readonly ExternalAgentEvent[] = [
+      { type: 'reasoning_started' },
+      { type: 'text_delta', text: 'first' },
+      { type: 'reasoning_started' },
+      { type: 'reasoning_delta', text: 'weighing' },
+      { type: 'completed' },
+    ];
+    expect(comparable(streamedParts(UNCLOSED_PHASES))).toEqual(
+      comparable(storedParts(UNCLOSED_PHASES))
+    );
+    expect(streamedParts(UNCLOSED_PHASES).filter((part) => part.type === 'thinking')).toHaveLength(
+      1
+    );
+  });
+
   it('agrees that a turn which finished normally marks nothing incomplete', () => {
     expect(comparable(streamedParts(TURN))).toEqual(comparable(storedParts(TURN)));
     const text = streamedParts(TURN)
