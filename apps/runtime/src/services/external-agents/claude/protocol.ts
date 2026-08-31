@@ -290,7 +290,16 @@ export function initSlashCommands(record: ClaudeInitRecord): readonly string[] |
       : []
   );
   const plugins = pluginNames(record);
-  return usable.filter((name) => originIsKnown(name, skills, plugins));
+  const attributable = usable.filter((name) => originIsKnown(name, skills, plugins));
+  // Nothing to attribute is not the same as an empty catalog. A run with no
+  // skills, plugins or MCP prompts would otherwise announce `[]`, and the last
+  // announcement wins everywhere it lands — the hub's `(user, environment,
+  // target)` cache and the chat's own session catalog both take it — so an
+  // ordinary turn on a build that cannot state its exclusions would erase a
+  // real catalog an earlier run already published. Withholding leaves the
+  // library's scan of the same directories as the palette's fallback, which is
+  // what this path had before the subset existed.
+  return attributable.length > 0 ? attributable : undefined;
 }
 
 /**

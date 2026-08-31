@@ -675,6 +675,36 @@ describe('the init record’s slash-command list', () => {
     expect(commands).toEqual([]);
   });
 
+  /** Whether the run announced a catalog *at all*, which an empty one is not. */
+  function announcesCatalog(record: Record<string, unknown>): boolean {
+    const reducer = new ClaudeTurnReducer({ resumed: false });
+    const events = reducer.reduce({ type: 'system', subtype: 'init', ...record }).events;
+    return events.some((event) => event.type === 'commands_available');
+  }
+
+  /**
+   * Withholding and announcing nothing are different statements, and the
+   * difference is destructive: the last `commands_available` wins wherever it
+   * lands — the hub's `(user, environment, target)` cache and the chat's own
+   * session catalog both take it — so a run that can attribute nothing must
+   * stay silent rather than erase a real catalog an earlier run published.
+   */
+  it('stays silent rather than announcing an empty provenance subset', () => {
+    expect(
+      announcesCatalog({ session_id: 'a', slash_commands: ['compact', 'clear'], skills: [] })
+    ).toBe(false);
+  });
+
+  it('still announces an empty catalog when the run stated its own exclusions', () => {
+    expect(
+      announcesCatalog({
+        session_id: 'a',
+        slash_commands: ['compact'],
+        terminal_slash_commands: ['compact'],
+      })
+    ).toBe(true);
+  });
+
   it('withholds the CLI’s private plumbing', () => {
     const commands = catalogFrom({
       session_id: 'a',
