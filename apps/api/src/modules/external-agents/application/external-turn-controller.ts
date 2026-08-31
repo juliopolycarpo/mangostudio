@@ -282,10 +282,17 @@ function vendorErrorFrom(error: unknown, code: string): ExternalAgentError {
   return { code, message: message.slice(0, 2_048) };
 }
 
-/** Best-effort discriminant read for logging an event this hub does not recognize. */
+/**
+ * Best-effort discriminant read for logging an event this hub does not
+ * recognize.
+ *
+ * Bounded, because this reads the one payload on the path that nothing has
+ * validated — that is the entire reason the caller is in this branch — so the
+ * string is whatever the runtime put there, at whatever length.
+ */
 function readEventType(event: unknown): string | undefined {
   const type = (event as { readonly type?: unknown } | null)?.type;
-  return typeof type === 'string' ? type : undefined;
+  return typeof type === 'string' ? type.slice(0, 128) : undefined;
 }
 
 /**

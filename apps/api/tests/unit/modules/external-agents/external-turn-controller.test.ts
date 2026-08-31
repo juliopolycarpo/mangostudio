@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import type {
   ExternalAgentConfiguration,
   ExternalAgentSteerResult,
@@ -332,6 +332,45 @@ describe('external turn controller', () => {
       expect(result.reason).toBe('completed');
       expect((await readAssistantRow()).text).toBe('ab');
     } finally {
+      await runtime.close();
+    }
+  });
+
+  /**
+   * The discriminant is read off the one payload on this path that nothing has
+   * validated — failing that validation is the entire reason the branch runs —
+   * so its length is whatever the runtime put there.
+   */
+  it('bounds the unrecognized event type it writes to the log', async () => {
+    const { runtime, controller } = await realHarness();
+    // The unit lane runs with diagnostics off, and this asserts on what the
+    // log actually receives. Restored below, so no later test inherits it.
+    const previousGate = process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
+    process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = '1';
+    const warn = spyOn(console, 'warn');
+    try {
+      const running = startTurn(controller);
+      await waitFor(() => runtime.calls.turn.length === 1, 'the turn to reach the runtime');
+
+      runtime.emitRawFrame({
+        sessionId: runtime.sessionId(),
+        nativeTurnId: 'native-turn-1',
+        sequence: runtime.nextSequence(),
+        emittedAtMs: Date.now(),
+        event: { type: 'x'.repeat(10_000) },
+      });
+      runtime.emit({ type: 'completed' });
+      await running;
+
+      const logged = warn.mock.calls
+        .map(([line]) => (typeof line === 'string' ? line : ''))
+        .find((line) => line.includes('unrecognized_event_type'));
+      expect(logged).toBeDefined();
+      expect(JSON.parse(logged ?? '{}').metadata.type).toHaveLength(128);
+    } finally {
+      warn.mockRestore();
+      if (previousGate === undefined) delete process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
+      else process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = previousGate;
       await runtime.close();
     }
   });
