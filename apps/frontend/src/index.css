@@ -28,9 +28,12 @@
 
 /* `static` because the light theme below is plain CSS that Tailwind does not
  * tree-shake, while a bare `@theme` drops any token no utility references. The
- * two disagree: `--color-agent-*` and `--color-accent-muted` have no consumer
- * yet, so they were emitted for the light theme only and a `var()` reading
- * them resolved to nothing in the dark default. */
+ * two disagree for any token reached through `var()` in an inline style, which
+ * Tailwind does not scan: `--color-agent-*` and `--color-accent-muted` are read
+ * that way by the composer accent, the home agents card, the sidebar runner
+ * badge and the turn separator, so a bare `@theme` would emit them for the
+ * light theme only and a `var()` reading them would resolve to nothing in the
+ * dark default. */
 @theme static {
   /* Dark (default): warm blue-free near-black neutrals, mango accent. */
   --color-surface-dim: #141210;

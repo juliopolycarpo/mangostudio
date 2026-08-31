@@ -284,7 +284,10 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     await flushAsyncRender();
 
-    expect(screen.getByText('Generated with: gpt-image-2')).toBeInTheDocument();
+    // The separator names the producer and nothing else: a stored status verb
+    // goes stale the moment a turn is reloaded, so the turn's phase is derived
+    // and only stated while it is still true.
+    expect(screen.getByText('gpt-image-2')).toBeInTheDocument();
     expect(screen.getByAltText('Generated')).toHaveAttribute('src', '/images/generated-123.png');
     expect(screen.getByText(/Thought for/)).toBeInTheDocument();
     expect(screen.getByText('1K')).toBeInTheDocument();

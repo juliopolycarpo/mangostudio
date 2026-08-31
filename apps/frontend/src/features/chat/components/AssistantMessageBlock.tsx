@@ -6,9 +6,9 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { deriveTurnStatus, type TurnStatus } from '../lib/turn-status';
 import { AssistantImageTurn } from './AssistantImageTurn';
-import { AssistantMessageHeader } from './AssistantMessageHeader';
 import { AssistantTurnBody } from './AssistantTurnBody';
 import { messagePartsFromMessage } from './message-content';
+import { TurnSeparator } from './TurnSeparator';
 
 interface AssistantMessageBlockProps {
   msg: Message;
@@ -90,8 +90,10 @@ export function AssistantMessageBlock(props: AssistantMessageBlockProps) {
 
   return (
     <div className="group flex w-full flex-col gap-2">
-      <AssistantMessageHeader
+      <TurnSeparator
         msg={msg}
+        parts={parts}
+        status={status}
         isImageTurn={isImageTurn}
         chatId={chatId}
         fileCheckpoint={fileCheckpoint}
