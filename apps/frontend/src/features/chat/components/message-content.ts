@@ -12,26 +12,32 @@ import type { Message, MessagePart } from '@mangostudio/shared';
 export function normalizeMessageParts(parts: MessagePart[]): MessagePart[] {
   const normalized: MessagePart[] = [];
   let thinkingRun = '';
+  let thinkingFlags: PartFlags = {};
   let textRun = '';
+  let textFlags: PartFlags = {};
 
   const flushRuns = () => {
     if (thinkingRun) {
-      normalized.push({ type: 'thinking', text: thinkingRun });
+      normalized.push({ type: 'thinking', text: thinkingRun, ...thinkingFlags });
       thinkingRun = '';
+      thinkingFlags = {};
     }
     if (textRun) {
-      normalized.push({ type: 'text', text: textRun });
+      normalized.push({ type: 'text', text: textRun, ...textFlags });
       textRun = '';
+      textFlags = {};
     }
   };
 
   for (const part of parts) {
     if (part.type === 'thinking') {
       thinkingRun += part.text;
+      thinkingFlags = mergeFlags(thinkingFlags, part);
       continue;
     }
     if (part.type === 'text') {
       textRun += part.text;
+      textFlags = mergeFlags(textFlags, part);
       continue;
     }
     flushRuns();
@@ -40,6 +46,27 @@ export function normalizeMessageParts(parts: MessagePart[]): MessagePart[] {
 
   flushRuns();
   return normalized;
+}
+
+/** Everything a merged run has to carry besides its text. */
+interface PartFlags {
+  redacted?: true;
+  incomplete?: true;
+}
+
+/**
+ * Folds one part's flags into the run it is joining.
+ *
+ * `incomplete` is taken from the newest part rather than sticking, because it
+ * describes where the run *ends*: a block that was cut short and then continued
+ * was not cut short. `redacted` sticks, because a run that hid any of its
+ * content is not fully shown no matter what followed.
+ */
+function mergeFlags(flags: PartFlags, part: { redacted?: boolean; incomplete?: true }): PartFlags {
+  return {
+    ...(flags.redacted || part.redacted ? { redacted: true } : {}),
+    ...(part.incomplete ? { incomplete: true } : {}),
+  };
 }
 
 /**

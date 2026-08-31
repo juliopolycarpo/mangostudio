@@ -34,6 +34,42 @@ describe('normalizeMessageParts', () => {
     expect(normalizeMessageParts(parts)).toEqual([{ type: 'text', text: 'Hello world' }]);
   });
 
+  /**
+   * The marker an external turn writes on the part it stopped inside. Rebuilding
+   * the run from its text alone dropped it, so a cancelled turn rendered as an
+   * ordinary one — on the live path and after a reload alike, since both read
+   * their parts through here.
+   */
+  it('keeps the incomplete marker when it rebuilds a run', () => {
+    const parts: MessagePart[] = [{ type: 'text', text: 'Here is the pla', incomplete: true }];
+
+    expect(normalizeMessageParts(parts)).toEqual([
+      { type: 'text', text: 'Here is the pla', incomplete: true },
+    ]);
+  });
+
+  /** A block that was cut short and then continued was not cut short. */
+  it('takes the marker from where the run ends, not from anywhere in it', () => {
+    const parts: MessagePart[] = [
+      { type: 'text', text: 'first', incomplete: true },
+      { type: 'text', text: ' second' },
+    ];
+
+    expect(normalizeMessageParts(parts)).toEqual([{ type: 'text', text: 'first second' }]);
+  });
+
+  /** Unlike `incomplete`, hidden content stays hidden whatever followed it. */
+  it('keeps a redacted run marked redacted', () => {
+    const parts: MessagePart[] = [
+      { type: 'thinking', text: 'a', redacted: true },
+      { type: 'thinking', text: 'b' },
+    ];
+
+    expect(normalizeMessageParts(parts)).toEqual([
+      { type: 'thinking', text: 'ab', redacted: true },
+    ]);
+  });
+
   it('merges interleaved thinking and text into one block each, preserving order', () => {
     const parts: MessagePart[] = [
       { type: 'thinking', text: 'The ' },
