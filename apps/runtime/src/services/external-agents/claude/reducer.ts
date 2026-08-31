@@ -98,8 +98,14 @@ export function claudeActivityKind(toolName: string): ExternalActivityKind {
   }
 }
 
-/** The delta event a `text` or `thinking` block replays as, or `undefined` for neither. */
-function undeliveredEventFor(block: ClaudeContentBlock): ExternalAgentEvent | undefined {
+/** A completed block's renderable content, and the delta event it belongs in. */
+interface RenderableBlock {
+  readonly type: 'text_delta' | 'reasoning_delta';
+  readonly text: string;
+}
+
+/** The renderable content of a `text` or `thinking` block, or `undefined` for neither. */
+function renderableBlock(block: ClaudeContentBlock): RenderableBlock | undefined {
   if (block.type === 'text' && typeof block.text === 'string' && block.text.length > 0) {
     return { type: 'text_delta', text: block.text };
   }
@@ -111,6 +117,11 @@ function undeliveredEventFor(block: ClaudeContentBlock): ExternalAgentEvent | un
     return { type: 'reasoning_delta', text: block.thinking };
   }
   return undefined;
+}
+
+/** A block index the stream stated, or undefined for one it did not. */
+function blockIndex(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
 /** A one-line summary of a tool call's input, for the pill's title. */
@@ -181,13 +192,16 @@ export class ClaudeTurnReducer {
   /** Forwarded subagent text per parent call, so updates accumulate rather than replace. */
   readonly #nestedText = new Map<string, string>();
   /**
-   * Main-conversation message ids that delivered at least one non-empty
-   * `text_delta` or `thinking_delta`. Everything else reaches the transcript
-   * only through its completed `assistant` record — see `#reduceAssistant`.
+   * What the deltas have actually delivered for each block of the message now
+   * streaming, keyed by the block index the stream itself supplies.
+   *
+   * This is the whole of what `#reduceAssistant` needs to tell an already-seen
+   * block from one that reached nobody — see `#undeliveredRemainder`. Cleared
+   * at every message boundary: block indices restart at 0 for each message, so
+   * a buffer that outlived its own would be matched against the next one's
+   * blocks.
    */
-  readonly #deliveredMessageIds = new Set<string>();
-  /** The `message.id` a `content_block_delta` belongs to; deltas carry no id of their own. */
-  #streamingMessageId: string | undefined;
+  readonly #deliveredByBlock = new Map<number, string>();
   /** A held `system/permission_denied` reason, keyed by the call it refused, until its `tool_result` closes it. */
   readonly #deniedActivities = new Map<string, string>();
   #sessionStarted = false;
@@ -280,24 +294,29 @@ export class ClaudeTurnReducer {
     // `assistant` path rather than promoted into the main transcript.
     if (parentToolUseId(record) !== undefined) return NOTHING;
     const event = record.event;
-    // Carries the id every block of this message will share. Deltas
-    // themselves are anonymous, so this is the only place that id is ever
-    // read — `#reduceAssistant` looks it up in `#deliveredMessageIds` rather
-    // than trusting a stream that may not have started yet.
-    if (event?.type === 'message_start') {
-      const id = event.message?.id;
-      if (typeof id === 'string' && id.length > 0) this.#streamingMessageId = id;
+    // Both ends of a message. Block indices are scoped to the message that
+    // opened them, so they mean nothing once it is over.
+    if (event?.type === 'message_start' || event?.type === 'message_stop') {
+      this.#deliveredByBlock.clear();
       return NOTHING;
     }
-    // Fires once per block, by protocol — this is the only signal a reasoning
-    // phase produces on an account whose `thinking_delta` text is withheld.
-    if (event?.type === 'content_block_start' && event.content_block?.type === 'thinking') {
-      return { events: [{ type: 'reasoning_started' }], finished: false };
+    const index = blockIndex(event?.index);
+    if (event?.type === 'content_block_start') {
+      // Opened with nothing delivered yet. Recorded even so: an `omitted`
+      // reasoning phase streams only empty `thinking_delta`s, and this is what
+      // says those deltas were still this block's delivery channel.
+      if (index !== undefined) this.#deliveredByBlock.set(index, '');
+      // Fires once per block, by protocol — this is the only signal a reasoning
+      // phase produces on an account whose `thinking_delta` text is withheld.
+      if (event.content_block?.type === 'thinking') {
+        return { events: [{ type: 'reasoning_started' }], finished: false };
+      }
+      return NOTHING;
     }
     const delta = event?.delta;
     if (event?.type !== 'content_block_delta' || !delta) return NOTHING;
     if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0) {
-      this.#markDelivered();
+      this.#recordDelivered(index, delta.text);
       return { events: [{ type: 'text_delta', text: delta.text }], finished: false };
     }
     if (
@@ -305,41 +324,56 @@ export class ClaudeTurnReducer {
       typeof delta.thinking === 'string' &&
       delta.thinking.length > 0
     ) {
-      this.#markDelivered();
+      this.#recordDelivered(index, delta.thinking);
       return { events: [{ type: 'reasoning_delta', text: delta.thinking }], finished: false };
     }
     return NOTHING;
   }
 
+  /** Appends what one delta just delivered to its own block's running copy. */
+  #recordDelivered(index: number | undefined, text: string): void {
+    if (index === undefined) return;
+    this.#deliveredByBlock.set(index, (this.#deliveredByBlock.get(index) ?? '') + text);
+  }
+
   /**
-   * Marks the message currently streaming as having produced a real
-   * character, so its completed `assistant` record is not replayed by
-   * `#reduceAssistant`.
+   * The part of a completed block that reached nobody.
+   *
+   * Blocks are matched by what streamed for them rather than by index: the
+   * `assistant` record arrives interleaved with its own `content_block_stop`,
+   * so whichever index is open at that moment is not reliably the record's.
+   * The longest delivered buffer this text extends is that block's own copy,
+   * and the empty string is a prefix of everything — so a block nothing
+   * streamed for matches nothing, and its whole content is the remainder.
+   *
+   * Usage: `#undeliveredRemainder('mango')` is `''` after the deltas already
+   * carried `mango`, and `' juice'` when they stopped after `mango`.
    */
-  #markDelivered(): void {
-    if (this.#streamingMessageId !== undefined) {
-      this.#deliveredMessageIds.add(this.#streamingMessageId);
+  #undeliveredRemainder(text: string): string {
+    let delivered = '';
+    for (const streamed of this.#deliveredByBlock.values()) {
+      if (streamed.length > delivered.length && text.startsWith(streamed)) delivered = streamed;
     }
+    return text.slice(delivered.length);
   }
 
   /**
    * Completed assistant blocks.
    *
-   * Main-conversation `text` and `thinking` are skipped when their message
-   * already delivered that content as deltas. When it did not —
-   * `--include-partial-messages` produced no deltas for this message at all,
-   * which is the whole run for an account like the denied-write fixture's —
-   * this completed record is the only copy of that block that will ever
-   * exist, so it is emitted here instead of silently dropped. The `tool_use`
-   * block and anything a subagent produced are handled unconditionally either
-   * way.
+   * Main-conversation `text` and `thinking` are emitted here for exactly the
+   * part of themselves the deltas never carried. Usually that is nothing —
+   * the deltas delivered the block in full, and replaying it would double
+   * every reply. When `--include-partial-messages` produced no deltas for the
+   * block at all, which is the whole run for an account like the denied-write
+   * fixture's, the remainder is the block entire and this completed record is
+   * the only copy of it that will ever exist. A stream cut off mid-block lands
+   * between the two and contributes its tail, which is the case neither
+   * all-or-nothing reading of "already delivered" could express. The
+   * `tool_use` block and anything a subagent produced are handled
+   * unconditionally either way.
    */
   #reduceAssistant(record: ClaudeMessageRecord): ClaudeReduction {
     const parent = parentToolUseId(record);
-    const messageId = record.message?.id;
-    const undelivered =
-      parent === undefined &&
-      !(typeof messageId === 'string' && this.#deliveredMessageIds.has(messageId));
     const events: ExternalAgentEvent[] = [];
     for (const block of contentBlocks(record)) {
       if (block.type === 'tool_use') {
@@ -347,16 +381,16 @@ export class ClaudeTurnReducer {
         if (started) events.push(started);
         continue;
       }
-      if (undelivered) {
-        const event = undeliveredEventFor(block);
-        if (event) events.push(event);
+      if (parent === undefined) {
+        const replay = this.#undeliveredEventFor(block);
+        if (replay) events.push(replay);
         continue;
       }
       // Only under a call that is still open. A completed activity has been
       // removed from the map, and both consumers *replace* an activity's detail
       // on update — so a late message would reopen a closed pill, and one for a
       // parent that never existed would address a pill that is not there.
-      if (parent === undefined || !this.#openActivities.has(parent)) continue;
+      if (!this.#openActivities.has(parent)) continue;
       // A subagent's text, nested under the `Task` call that spawned it. The
       // parent activity is the unit the user sees; promoting this would render
       // a second agent's narration as MangoStudio's own.
@@ -379,6 +413,17 @@ export class ClaudeTurnReducer {
       }
     }
     return events.length > 0 ? { events, finished: false } : NOTHING;
+  }
+
+  /**
+   * The delta event carrying whatever of a completed main-conversation block
+   * the stream never delivered, or `undefined` when it delivered all of it.
+   */
+  #undeliveredEventFor(block: ClaudeContentBlock): ExternalAgentEvent | undefined {
+    const renderable = renderableBlock(block);
+    if (!renderable) return undefined;
+    const remainder = this.#undeliveredRemainder(renderable.text);
+    return remainder.length > 0 ? { type: renderable.type, text: remainder } : undefined;
   }
 
   #startActivity(block: ClaudeContentBlock): ExternalAgentEvent | undefined {

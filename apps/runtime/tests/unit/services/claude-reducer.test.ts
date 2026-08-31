@@ -372,6 +372,106 @@ describe('ClaudeTurnReducer, merging a permission denial into its activity', () 
   });
 });
 
+/**
+ * Reconciling a completed `assistant` block against the deltas that streamed
+ * it. Both directions are failures the user sees: replaying a block the deltas
+ * already carried doubles the reply, and skipping one they did not carry loses
+ * it outright.
+ */
+describe('ClaudeTurnReducer, reconciling a completed block with its deltas', () => {
+  function streaming() {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({ type: 'stream_event', event: { type: 'message_start', message: {} } });
+    subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } },
+    });
+    return subject;
+  }
+
+  function deliver(subject: ClaudeTurnReducer, text: string, index = 0) {
+    subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_delta', index, delta: { type: 'text_delta', text } },
+    });
+  }
+
+  function completes(subject: ClaudeTurnReducer, text: string) {
+    return subject.reduce({
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'text', text }] },
+    }).events;
+  }
+
+  it('emits nothing for a block its deltas already delivered in full', () => {
+    const subject = streaming();
+    deliver(subject, 'mango');
+    expect(completes(subject, 'mango')).toEqual([]);
+  });
+
+  /**
+   * The guard the message-level reading could not express. A stream that
+   * stopped mid-block delivered *something*, so "did this message stream?"
+   * answers yes and drops the tail — the completed record is the only place
+   * the rest of that sentence exists.
+   */
+  it('emits only the tail the deltas stopped short of', () => {
+    const subject = streaming();
+    deliver(subject, 'mango');
+    expect(completes(subject, 'mango juice')).toEqual([{ type: 'text_delta', text: ' juice' }]);
+  });
+
+  /** The denied-write shape: no partial messages at all, so the record is the only copy. */
+  it('emits the whole block when nothing streamed for it', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    expect(completes(subject, 'mango')).toEqual([{ type: 'text_delta', text: 'mango' }]);
+  });
+
+  /**
+   * The record carries no `message.id` here, which is the shape the previous
+   * message-keyed correlation failed open on: unable to name the message, it
+   * called the block undelivered and appended it under the deltas the user had
+   * already read.
+   */
+  it('does not replay a record that cannot name its own message', () => {
+    const subject = streaming();
+    deliver(subject, 'mango');
+    expect(completes(subject, 'mango')).toEqual([]);
+  });
+
+  /**
+   * `thinking.display: "omitted"` streams the phase as empty deltas and
+   * completes it as `thinking: ""`. There is nothing to recover, and nothing
+   * to double.
+   */
+  it('emits nothing for a reasoning phase the vendor withheld', () => {
+    const subject = new ClaudeTurnReducer({ resumed: false });
+    subject.reduce({ type: 'stream_event', event: { type: 'message_start', message: {} } });
+    subject.reduce({
+      type: 'stream_event',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
+    });
+    const events = subject.reduce({
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'thinking', thinking: '' }] },
+    }).events;
+    expect(events).toEqual([]);
+  });
+
+  /**
+   * Block indices restart at 0 for every message. A buffer kept past its own
+   * message would be compared against the next message's block 0 and call a
+   * reply already delivered.
+   */
+  it('does not credit a new message with the previous one’s delivery', () => {
+    const subject = streaming();
+    deliver(subject, 'mango');
+    subject.reduce({ type: 'stream_event', event: { type: 'message_stop' } });
+    subject.reduce({ type: 'stream_event', event: { type: 'message_start', message: {} } });
+    expect(completes(subject, 'mango')).toEqual([{ type: 'text_delta', text: 'mango' }]);
+  });
+});
+
 describe('ClaudeTurnReducer, on records it has never seen', () => {
   const reducer = () => new ClaudeTurnReducer({ resumed: false });
 
