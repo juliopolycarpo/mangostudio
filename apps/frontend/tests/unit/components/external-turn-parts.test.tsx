@@ -11,6 +11,7 @@ import type {
   MessagePart,
 } from '@mangostudio/shared/types';
 import { fireEvent, screen } from '@testing-library/react';
+import { deriveTurnStatus } from '../../../src/features/chat/lib/turn-status';
 import { render, waitFor } from '../../support/harness/render';
 
 const answerExternalApproval =
@@ -74,7 +75,13 @@ function approvalPart(overrides: Partial<ExternalApprovalPart> = {}): ExternalAp
 
 function renderParts(parts: MessagePart[], chatId: string | null = 'chat-1') {
   return render(
-    <MessageParts parts={parts} messageId="msg-1" isStreaming={false} chatId={chatId} />
+    <MessageParts
+      parts={parts}
+      messageId="msg-1"
+      isStreaming={false}
+      status={deriveTurnStatus(parts, false)}
+      chatId={chatId}
+    />
   );
 }
 
@@ -259,11 +266,16 @@ describe('external turn: still working', () => {
   // The trailing text already shows its own caret while it streams — a second
   // cue saying the same thing would be redundant right where it matters least.
   it('does not duplicate the cue over text that is actively streaming', () => {
+    const parts: MessagePart[] = [
+      turnPart({ status: 'active' }),
+      { type: 'text', text: 'partial' },
+    ];
     render(
       <MessageParts
-        parts={[turnPart({ status: 'active' }), { type: 'text', text: 'partial' }]}
+        parts={parts}
         messageId="msg-1"
         isStreaming
+        status={deriveTurnStatus(parts, true)}
       />
     );
     expect(screen.queryByText('Working')).toBeNull();

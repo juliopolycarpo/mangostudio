@@ -1,6 +1,6 @@
 import type { MessagePart } from '@mangostudio/shared';
 import { useMemo } from 'react';
-import { deriveTurnStatus } from '../lib/turn-status';
+import type { TurnStatus } from '../lib/turn-status';
 import { ContinuationEventMarker } from './ContinuationEventMarker';
 import { ElicitationCard } from './ElicitationCard';
 import { ExternalActivityBlock } from './ExternalActivityBlock';
@@ -26,6 +26,8 @@ interface MessagePartsProps {
   parts: MessagePart[];
   messageId: string;
   isStreaming: boolean;
+  /** Derived once per row by `AssistantMessageBlock`, not recomputed here. */
+  status: TurnStatus;
   /** The chat an approval would be answered against; absent makes cards inert. */
   chatId?: string | null;
   /** Present only while question cards are answerable (last message, idle). */
@@ -36,6 +38,7 @@ export function MessageParts({
   parts,
   messageId,
   isStreaming,
+  status,
   chatId = null,
   onQuestionSubmit,
 }: MessagePartsProps) {
@@ -47,12 +50,6 @@ export function MessageParts({
   // The turn record is written first so nothing is ever a bare text blob with no
   // record of who produced it, but it *reads* as a summary, so it renders last.
   const externalTurn = useMemo(() => parts.find((part) => part.type === 'external_turn'), [parts]);
-  // Which part is receiving tokens and whether the turn is between steps are
-  // one question with one answer, and `deriveTurnStatus` owns it for every
-  // provider. Deriving here rather than taking a prop keeps this component
-  // callable with nothing but the parts it renders, at the cost of one extra
-  // memoized derivation per turn.
-  const status = useMemo(() => deriveTurnStatus(parts, isStreaming), [parts, isStreaming]);
   return (
     <>
       <div className="chat-timeline min-w-0">

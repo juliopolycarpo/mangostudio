@@ -75,6 +75,7 @@ export function AssistantTurnBody({
       <MessageParts
         parts={parts}
         messageId={messageId}
+        status={status}
         chatId={chatId}
         isStreaming={isStreaming}
         onQuestionSubmit={onQuestionSubmit}
