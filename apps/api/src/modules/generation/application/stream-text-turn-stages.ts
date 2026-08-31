@@ -426,6 +426,15 @@ export async function* emitAgentStreamEvent(
 
   switch (event.type) {
     case 'reasoning_delta':
+      // A delta with no text is not a withheld reasoning phase, and this path
+      // has no way to say it is one: `thinking_start` is synthesized from the
+      // first delta rather than announced by the provider, unlike an external
+      // turn's `reasoning_started`. Opening a segment for it stored an empty
+      // `thinking` part that rendered as "reasoning not shared", claiming the
+      // model withheld reasoning it never produced. The legacy arm below has
+      // always guarded its text this way; two adapters already drop these at
+      // the source, and the two that do not pass the vendor's value verbatim.
+      if (!event.text) break;
       if (!loop.inThinkingSegment) {
         loop.inThinkingSegment = true;
         yield { type: 'thinking_start' };

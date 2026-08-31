@@ -173,3 +173,29 @@ describe('mergeMessageParts — interleaved thinking segments', () => {
     ]);
   });
 });
+
+/**
+ * An empty reasoning *delta* is not an announced-but-withheld reasoning phase.
+ *
+ * The internal path has no `reasoning_started`: `thinking_start` is synthesized
+ * from the first delta, so an empty one carries no meaning at all — unlike the
+ * external path, where `reasoning_started` opens an empty part on purpose. The
+ * old merge accumulated into a string and emitted only a non-empty run, so an
+ * empty delta vanished; the adjacency rule keeps every `thinking` part, which
+ * made it persist and render as "reasoning not shared" — asserting the model
+ * withheld reasoning it never produced.
+ *
+ * Guarding the push (`stream-text-turn-stages.ts`) is what keeps that part out
+ * of here in the first place. This pins the half that is this module's own: an
+ * empty thinking part is still kept, because the *external* path needs it.
+ */
+describe('mergeMessageParts — an empty reasoning phase', () => {
+  it('keeps an empty thinking part, which reasoning_started opens on purpose', () => {
+    const input: MessagePart[] = [
+      { type: 'thinking', text: '' },
+      { type: 'text', text: 'answer' },
+    ];
+
+    expect(mergeMessageParts(input)).toEqual(input);
+  });
+});
