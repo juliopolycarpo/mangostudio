@@ -1404,14 +1404,15 @@ export type ExternalAgentEventEnvelope = Static<typeof ExternalAgentEventEnvelop
  * on its own lets the sequencer see and account for every envelope whose
  * addressing is sound, so only the unrecognized *event* is inert rather than
  * the whole turn. See #964.
+ *
+ * Derived from the envelope rather than restated beside it: two hand-written
+ * copies of the same five addressing fields is two places a future envelope
+ * field has to be added, and the one that gets forgotten is this one — which
+ * would refuse the frame outright and reproduce #964 one level up.
  */
 export const ExternalAgentEventEnvelopeFrameSchema = Type.Object(
   {
-    sessionId: ExternalAgentOpaqueIdSchema,
-    nativeTurnId: Type.Optional(ExternalAgentOpaqueIdSchema),
-    sequence: Type.Integer({ minimum: 1 }),
-    emittedAtMs: Type.Integer({ minimum: 0 }),
-    idempotencyKey: Type.Optional(ExternalAgentOpaqueIdSchema),
+    ...Type.Omit(ExternalAgentEventEnvelopeSchema, ['event']).properties,
     event: Type.Unknown(),
   },
   { additionalProperties: false }
