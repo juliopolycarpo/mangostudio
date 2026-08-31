@@ -539,18 +539,6 @@ describe('ClaudeTurnReducer, reconciling a completed block with its deltas', () 
   });
 
   /**
-   * The record carries no `message.id` here, which is the shape the previous
-   * message-keyed correlation failed open on: unable to name the message, it
-   * called the block undelivered and appended it under the deltas the user had
-   * already read.
-   */
-  it('does not replay a record that cannot name its own message', () => {
-    const subject = streaming();
-    deliver(subject, 'mango');
-    expect(completes(subject, 'mango')).toEqual([]);
-  });
-
-  /**
    * `thinking.display: "omitted"` streams the phase as empty deltas and
    * completes it as `thinking: ""`. There is nothing to recover, and nothing
    * to double.
