@@ -425,12 +425,15 @@ export function upsertToolCallPart(
   const index = parts.findIndex(
     (part) => part.type === 'tool_call' && part.toolCallId === next.toolCallId
   );
-  if (index === -1) {
+  const current = index === -1 ? undefined : parts[index];
+  // The narrowing arm is unreachable — `findIndex` already matched on the type
+  // — but it must still append rather than hand back an unstored part: the
+  // whole point of the return value is that a caller can mutate what is in the
+  // array, and returning `next` without storing it silently breaks that.
+  if (current?.type !== 'tool_call') {
     parts.push(next);
     return next;
   }
-  const current = parts[index];
-  if (current?.type !== 'tool_call') return next;
   const merged: Extract<MessagePart, { type: 'tool_call' }> = {
     ...current,
     ...next,
