@@ -236,6 +236,31 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(screen.getByText('No response')).toBeInTheDocument();
   });
 
+  it('does not show No response for a settled vendor turn with only activities', async () => {
+    // A Codex/Claude turn that only ran commands never writes `tool_call` —
+    // it writes `external_activity`. The old `text`-or-`tool_call` heuristic
+    // missed this and drew the activity timeline plus a false "No response".
+    const parts: MessagePart[] = [
+      {
+        type: 'external_activity',
+        targetId: 'codex',
+        callId: 'call-1',
+        name: 'shell',
+        kind: 'command',
+        title: 'bun run build',
+        status: 'completed',
+      },
+    ];
+    const msg = makeMessage({ parts });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
+
+    expect(screen.getByText('bun run build')).toBeInTheDocument();
+    expect(screen.queryByText('No response')).not.toBeInTheDocument();
+  });
+
   it('uses a neutral fallback label when assistant model name is missing', async () => {
     const msg = makeMessage({
       parts: undefined,

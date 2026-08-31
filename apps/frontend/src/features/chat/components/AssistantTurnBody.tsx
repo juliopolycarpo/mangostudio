@@ -44,7 +44,14 @@ function NoResponseNotice() {
 
 /** Whether the turn left behind anything a reader would call a response. */
 function producedSomething(parts: readonly MessagePart[]): boolean {
-  return parts.some((part) => part.type === 'text' || part.type === 'tool_call');
+  return parts.some(
+    (part) =>
+      part.type === 'text' ||
+      part.type === 'tool_call' ||
+      part.type === 'external_activity' ||
+      part.type === 'error' ||
+      part.type === 'generated_image'
+  );
 }
 
 /**
