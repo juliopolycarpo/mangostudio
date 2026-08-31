@@ -1,0 +1,201 @@
+- generic [ref=f3e3]:
+    - complementary [ref=f3e4]:
+        - generic [ref=f3e5]:
+            - img "Mango Studio Logo" [ref=f3e6]
+            - heading "Mango Studio" [level=1] [ref=f3e7]
+        - button "New Chat" [ref=f3e9] [cursor=pointer]:
+            - generic [ref=f3e13]: Ctrl+N
+        - textbox "Search chats…" [ref=f3e16]
+        - navigation "Chats" [ref=f3e17]:
+            - generic [ref=f3e18]:
+                - generic [ref=f3e19]: Today
+                - list [ref=f3e20]:
+                    - listitem [ref=f3e21]:
+                        - button "Divider rail" [ref=f3e22] [cursor=pointer]
+                        - generic [ref=f3e27]: mango
+                    - listitem [ref=f3e29]:
+                        - button "Native, pre-first-token" [ref=f3e30] [cursor=pointer]
+                        - generic [ref=f3e35]: mango
+                    - listitem [ref=f3e37]:
+                        - button "Native turn" [ref=f3e38] [cursor=pointer]
+                        - generic [ref=f3e43]: mango
+                    - listitem [ref=f3e45]:
+                        - button "Claude Code turn" [ref=f3e46] [cursor=pointer]
+                        - generic [ref=f3e51]: mango
+        - generic [ref=f3e53]:
+            - button "Home" [ref=f3e54]
+            - button "Studio" [ref=f3e61]
+            - button "Gallery" [ref=f3e67]
+            - button "Environments" [ref=f3e74]
+            - button "Settings" [ref=f3e87]
+        - separator "Resize chat sidebar" [ref=f3e92]
+    - main [ref=f3e93]:
+        - generic [ref=f3e94]:
+            - generic [ref=f3e95]:
+                - button "Who runs this chat" [ref=f3e98]:
+                    - generic [ref=f3e100]: Default
+                - generic [ref=f3e104]:
+                    - generic [ref=f3e105]: Connected
+                    - combobox "Select execution environment" [disabled] [ref=f3e107]:
+                        - generic [ref=f3e112]: "env:"
+                        - generic [ref=f3e113]: Local
+            - generic [ref=f3e116]:
+                - button "Open command palette" [ref=f3e117] [cursor=pointer]:
+                    - generic [ref=f3e121]: Ctrl+K
+                - button "New Chat" [ref=f3e123] [cursor=pointer]
+                - button "Settings" [ref=f3e126] [cursor=pointer]
+                - generic [ref=f3e130]:
+                    - generic [ref=f3e131]: Live Pass
+                    - button "Sign Out" [ref=f3e132] [cursor=pointer]
+        - generic [ref=f3e135]:
+            - generic [ref=f3e136]:
+                - generic [ref=f3e138]:
+                    - generic [ref=f3e140]:
+                        - paragraph [ref=f3e144]: Switch provider mid-turn.
+                        - generic [ref=f3e145]: 4:07 AM
+                    - generic [ref=f3e148]:
+                        - generic [ref=f3e149]:
+                            - generic [ref=f3e150]: GP
+                            - generic [ref=f3e151]: gpt-5
+                            - button "Copy message" [ref=f3e153] [cursor=pointer]
+                            - generic [ref=f3e157]: 4:07 AM
+                        - generic [ref=f3e158]:
+                            - generic [ref=f3e159]:
+                                - button "Thought" [ref=f3e161] [cursor=pointer]
+                                - button "search" [ref=f3e166] [cursor=pointer]
+                                - generic [ref=f3e173]: moved to fallback
+                                - paragraph [ref=f3e181]: Answering after the hand-off.
+                            - generic [ref=f3e182]: Responded in 3.1s
+                - generic [ref=f3e188]:
+                    - generic [ref=f3e189]:
+                        - generic [ref=f3e191]:
+                            - generic [ref=f3e192]:
+                                - combobox "Select agent" [disabled] [ref=f3e193]:
+                                    - generic [ref=f3e194]: "agent:"
+                                    - generic [ref=f3e195]: Default
+                                - text: ·
+                            - button "model" [disabled] [ref=f3e199]:
+                                - generic [ref=f3e200]: "model:"
+                                - generic [ref=f3e201]: No models available
+                        - generic [ref=f3e204]:
+                            - generic [ref=f3e205]: ❯
+                            - textbox "Ask the AI model anything..." [ref=f3e206]
+                        - generic [ref=f3e207]:
+                            - generic [ref=f3e208]:
+                                - button "MCP" [ref=f3e210]
+                                - button "Capabilities" [ref=f3e215]
+                                - button "Create images" [ref=f3e218]
+                            - button "Send" [disabled] [ref=f3e225]:
+                                - generic [ref=f3e227]: ⏎
+                    - paragraph [ref=f3e229]: AI can make mistakes. Double-check the results.
+            - complementary "Agent side panel" [ref=f3e230]:
+                - separator "Resize agent side panel" [ref=f3e231]
+                - navigation "Agent panels" [ref=f3e232]:
+                    - button "Show GitHub panel" [pressed] [ref=f3e233] [cursor=pointer]
+                - generic [ref=f3e240]:
+                    - generic [ref=f3e241]:
+                        - heading "GitHub" [level=2] [ref=f3e247]
+                        - button "Collapse agent side panel" [ref=f3e248] [cursor=pointer]
+                    - region "GitHub" [ref=f3e252]:
+                        - generic [ref=f3e253]:
+                            - generic [ref=f3e254]:
+                                - button [expanded] [ref=f3e255] [cursor=pointer]:
+                                    - heading "Waiting on you" [level=3] [ref=f3e258]
+                                - generic "2026-08-31T07:07:49.729Z" [ref=f3e259]: Updated 2 minutes ago
+                                - button "Refresh" [ref=f3e260] [cursor=pointer]
+                            - list [ref=f3e267]:
+                                - listitem [ref=f3e268]:
+                                    - 'link "chore(deps): bump the cargo-minor-patch group across 1 directory with 2 updates juliopolycarpo/mangostudio #990" [ref=f3e269] [cursor=pointer]':
+                                        - /url: https://github.com/juliopolycarpo/mangostudio/pull/990
+                                        - generic [ref=f3e270]: "chore(deps): bump the cargo-minor-patch group across 1 directory with 2 updates"
+                                        - generic [ref=f3e271]: "juliopolycarpo/mangostudio #990"
+                                    - generic [ref=f3e272]: Open
+                                    - button "Open menu" [ref=f3e274] [cursor=pointer]
+                                - listitem [ref=f3e279]:
+                                    - 'link "chore(deps): bump the dev-minor-patch group across 1 directory with 13 updates juliopolycarpo/mangostudio #989" [ref=f3e280] [cursor=pointer]':
+                                        - /url: https://github.com/juliopolycarpo/mangostudio/pull/989
+                                        - generic [ref=f3e281]: "chore(deps): bump the dev-minor-patch group across 1 directory with 13 updates"
+                                        - generic [ref=f3e282]: "juliopolycarpo/mangostudio #989"
+                                    - generic [ref=f3e283]: Open
+                                    - button "Open menu" [ref=f3e285] [cursor=pointer]
+                                - listitem [ref=f3e290]:
+                                    - 'link "chore(ci): bump github/codeql-action/init from 4.37.0 to 4.37.8 juliopolycarpo/mangostudio #960" [ref=f3e291] [cursor=pointer]':
+                                        - /url: https://github.com/juliopolycarpo/mangostudio/pull/960
+                                        - generic [ref=f3e292]: "chore(ci): bump github/codeql-action/init from 4.37.0 to 4.37.8"
+                                        - generic [ref=f3e293]: "juliopolycarpo/mangostudio #960"
+                                    - generic [ref=f3e294]: Open
+                                    - button "Open menu" [ref=f3e296] [cursor=pointer]
+                                - listitem [ref=f3e301]:
+                                    - 'link "chore(ci): bump github/codeql-action/analyze from 4.37.0 to 4.37.8 juliopolycarpo/mangostudio #959" [ref=f3e302] [cursor=pointer]':
+                                        - /url: https://github.com/juliopolycarpo/mangostudio/pull/959
+                                        - generic [ref=f3e303]: "chore(ci): bump github/codeql-action/analyze from 4.37.0 to 4.37.8"
+                                        - generic [ref=f3e304]: "juliopolycarpo/mangostudio #959"
+                                    - generic [ref=f3e305]: Open
+                                    - button "Open menu" [ref=f3e307] [cursor=pointer]
+                                - listitem [ref=f3e312]:
+                                    - 'link "chore(deps): bump the prod-minor-patch group across 1 directory with 19 updates juliopolycarpo/mangostudio #953" [ref=f3e313] [cursor=pointer]':
+                                        - /url: https://github.com/juliopolycarpo/mangostudio/pull/953
+                                        - generic [ref=f3e314]: "chore(deps): bump the prod-minor-patch group across 1 directory with 19 updates"
+                                        - generic [ref=f3e315]: "juliopolycarpo/mangostudio #953"
+                                    - generic [ref=f3e316]: Open
+                                    - button "Open menu" [ref=f3e318] [cursor=pointer]
+                                - listitem [ref=f3e323]:
+                                    - 'link "chore: Bump the dependencies group across 1 directory with 12 updates juliopolycarpo/mangostudio.dev #67" [ref=f3e324] [cursor=pointer]':
+                                        - /url: https://github.com/juliopolycarpo/mangostudio.dev/pull/67
+                                        - generic [ref=f3e325]: "chore: Bump the dependencies group across 1 directory with 12 updates"
+                                        - generic [ref=f3e326]: "juliopolycarpo/mangostudio.dev #67"
+                                    - generic [ref=f3e327]: Open
+                                    - button "Open menu" [ref=f3e329] [cursor=pointer]
+                                - listitem [ref=f3e334]:
+                                    - 'link "chore(ci): bump docker/setup-buildx-action from 4.2.0 to 4.3.0 juliopolycarpo/mangostudio #933" [ref=f3e335] [cursor=pointer]':
+                                        - /url: https://github.com/juliopolycarpo/mangostudio/pull/933
+                                        - generic [ref=f3e336]: "chore(ci): bump docker/setup-buildx-action from 4.2.0 to 4.3.0"
+                                        - generic [ref=f3e337]: "juliopolycarpo/mangostudio #933"
+                                    - generic [ref=f3e338]: Open
+                                    - button "Open menu" [ref=f3e340] [cursor=pointer]
+                                - listitem [ref=f3e345]:
+                                    - 'link "chore(ci): bump actions/attest-build-provenance from 4.1.1 to 4.2.2 juliopolycarpo/mangostudio #845" [ref=f3e346] [cursor=pointer]':
+                                        - /url: https://github.com/juliopolycarpo/mangostudio/pull/845
+                                        - generic [ref=f3e347]: "chore(ci): bump actions/attest-build-provenance from 4.1.1 to 4.2.2"
+                                        - generic [ref=f3e348]: "juliopolycarpo/mangostudio #845"
+                                    - generic [ref=f3e349]: Open
+                                    - button "Open menu" [ref=f3e351] [cursor=pointer]
+                                - listitem [ref=f3e356]:
+                                    - 'link "chore(deps): bump @testing-library/jest-dom from 6.9.1 to 7.0.1 juliopolycarpo/mangostudio #828" [ref=f3e357] [cursor=pointer]':
+                                        - /url: https://github.com/juliopolycarpo/mangostudio/pull/828
+                                        - generic [ref=f3e358]: "chore(deps): bump @testing-library/jest-dom from 6.9.1 to 7.0.1"
+                                        - generic [ref=f3e359]: "juliopolycarpo/mangostudio #828"
+                                    - generic [ref=f3e360]: Open
+                                    - button "Open menu" [ref=f3e362] [cursor=pointer]
+                                - listitem [ref=f3e367]:
+                                    - 'link "chore(deps): bump @google/genai from 1.52.0 to 2.16.0 juliopolycarpo/mangostudio #827" [ref=f3e368] [cursor=pointer]':
+                                        - /url: https://github.com/juliopolycarpo/mangostudio/pull/827
+                                        - generic [ref=f3e369]: "chore(deps): bump @google/genai from 1.52.0 to 2.16.0"
+                                        - generic [ref=f3e370]: "juliopolycarpo/mangostudio #827"
+                                    - generic [ref=f3e371]: Open
+                                    - button "Open menu" [ref=f3e373] [cursor=pointer]
+                                - listitem [ref=f3e378]:
+                                    - 'link "chore(ci): bump alpine from 3.21 to 3.24 juliopolycarpo/mangostudio #669" [ref=f3e379] [cursor=pointer]':
+                                        - /url: https://github.com/juliopolycarpo/mangostudio/pull/669
+                                        - generic [ref=f3e380]: "chore(ci): bump alpine from 3.21 to 3.24"
+                                        - generic [ref=f3e381]: "juliopolycarpo/mangostudio #669"
+                                    - generic [ref=f3e382]: Open
+                                    - button "Open menu" [ref=f3e384] [cursor=pointer]
+                                - listitem [ref=f3e389]:
+                                    - 'link "ci: Bump the actions group across 1 directory with 5 updates juliopolycarpo/mangostudio.dev #64" [ref=f3e390] [cursor=pointer]':
+                                        - /url: https://github.com/juliopolycarpo/mangostudio.dev/pull/64
+                                        - generic [ref=f3e391]: "ci: Bump the actions group across 1 directory with 5 updates"
+                                        - generic [ref=f3e392]: "juliopolycarpo/mangostudio.dev #64"
+                                    - generic [ref=f3e393]: Open
+                                    - button "Open menu" [ref=f3e395] [cursor=pointer]
+                                - listitem [ref=f3e400]:
+                                    - 'link "chore: Bump the dependencies group across 1 directory with 4 updates juliopolycarpo/mangostudio.dev #4" [ref=f3e401] [cursor=pointer]':
+                                        - /url: https://github.com/juliopolycarpo/mangostudio.dev/pull/4
+                                        - generic [ref=f3e402]: "chore: Bump the dependencies group across 1 directory with 4 updates"
+                                        - generic [ref=f3e403]: "juliopolycarpo/mangostudio.dev #4"
+                                    - generic [ref=f3e404]: Open
+                                    - button "Open menu" [ref=f3e406] [cursor=pointer]
+                        - generic [ref=f3e411]:
+                            - button [expanded] [ref=f3e413] [cursor=pointer]:
+                                - heading "This repo" [level=3] [ref=f3e416]
+                            - paragraph [ref=f3e423]: Point this chat at a folder to see its pull requests and issues.

@@ -1,0 +1,84 @@
+- generic [ref=f1e23]:
+    - complementary [ref=f1e24]:
+        - generic [ref=f1e25]:
+            - img "Mango Studio Logo" [ref=f1e26]
+            - heading "Mango Studio" [level=1] [ref=f1e27]
+        - button "New Chat" [ref=f1e29] [cursor=pointer]:
+            - generic [ref=f1e33]: Ctrl+N
+        - textbox "Search chats…" [ref=f1e36]
+        - navigation "Chats" [ref=f1e37]
+        - generic [ref=f1e38]:
+            - button "Home" [ref=f1e39]
+            - button "Studio" [ref=f1e46]
+            - button "Gallery" [ref=f1e52]
+            - button "Environments" [ref=f1e59]
+            - button "Settings" [ref=f1e72]
+        - separator "Resize chat sidebar" [ref=f1e77]
+    - main [ref=f1e78]:
+        - generic [ref=f1e79]:
+            - button "Who runs this chat" [ref=f1e83]:
+                - generic [ref=f1e85]: Default
+            - generic [ref=f1e88]:
+                - button "Open command palette" [ref=f1e89] [cursor=pointer]:
+                    - generic [ref=f1e93]: Ctrl+K
+                - button "New Chat" [ref=f1e95] [cursor=pointer]
+                - button "Settings" [ref=f1e98] [cursor=pointer]
+                - generic [ref=f1e102]:
+                    - generic [ref=f1e103]: Live Pass
+                    - button "Sign Out" [ref=f1e104] [cursor=pointer]
+        - generic [ref=f1e108]:
+            - generic [ref=f1e110]:
+                - generic [ref=f1e111]:
+                    - heading "Good evening, Live." [level=2] [ref=f1e112]
+                    - paragraph [ref=f1e113]: Your workspace is ready. Here is where it stands.
+                - generic [ref=f1e114]:
+                    - generic [ref=f1e115]:
+                        - generic [ref=f1e116]:
+                            - heading "Agents" [level=3] [ref=f1e117]
+                            - link "Manage agents" [ref=f1e120] [cursor=pointer]:
+                                - /url: /environments/agents
+                        - paragraph [ref=f1e121]: No agent CLI detected in this environment.
+                    - generic [ref=f1e122]:
+                        - heading "Skills — 2 divergence(s)" [level=3] [ref=f1e124]
+                        - generic [ref=f1e127]:
+                            - paragraph [ref=f1e128]:
+                                - generic [ref=f1e129]: playwright-cli
+                            - paragraph [ref=f1e131]: MangoStudio, Claude Code, and Codex read different versions of this skill.
+                            - generic [ref=f1e132]:
+                                - link "Propagate" [ref=f1e133] [cursor=pointer]:
+                                    - /url: /environments/library/skill%3Aplaywright-cli
+                                - link "View diff" [ref=f1e134] [cursor=pointer]:
+                                    - /url: /environments/library/skill%3Aplaywright-cli?compare=true
+                        - paragraph [ref=f1e135]: 1 more skill(s) diverge.
+                        - paragraph [ref=f1e136]:
+                            - text: 24 skill(s) live in a single agent.
+                            - link "Open in the library" [ref=f1e137] [cursor=pointer]:
+                                - /url: /environments/library/skills
+                - generic [ref=f1e138]:
+                    - heading "Start with" [level=3] [ref=f1e139]
+                    - generic [ref=f1e140]:
+                        - button "Explain a complex concept simply" [ref=f1e141]
+                        - button "Write a Python script to..." [ref=f1e142]
+                        - button "Help me debug a problem" [ref=f1e143]
+            - generic [ref=f1e145]:
+                - generic [ref=f1e146]:
+                    - generic [ref=f1e148]:
+                        - generic [ref=f1e149]:
+                            - combobox "Select agent" [ref=f1e150]:
+                                - generic [ref=f1e151]: "agent:"
+                                - generic [ref=f1e152]: Default
+                            - text: ·
+                        - button "model" [disabled] [ref=f1e156]:
+                            - generic [ref=f1e157]: "model:"
+                            - generic [ref=f1e158]: No models available
+                    - generic [ref=f1e161]:
+                        - generic [ref=f1e162]: ❯
+                        - textbox "Ask the AI model anything..." [ref=f1e163]
+                    - generic [ref=f1e164]:
+                        - generic [ref=f1e165]:
+                            - button "MCP" [ref=f1e167]
+                            - button "Capabilities" [ref=f1e172]
+                            - button "Create images" [ref=f1e175]
+                        - button "Send" [disabled] [ref=f1e182]:
+                            - generic [ref=f1e184]: ⏎
+                - paragraph [ref=f1e186]: AI can make mistakes. Double-check the results.

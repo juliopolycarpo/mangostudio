@@ -56,6 +56,24 @@ function streamedIntoKind(
   return null;
 }
 
+/**
+ * Whether the turn has stopped on something only the user can answer.
+ *
+ * Both kinds carry the answer on the part itself, so this is decidable from the
+ * transcript alone. A `question` part deliberately does not qualify: it has no
+ * answered field, and whether it can still be answered is decided by whether
+ * the feed threaded `onQuestionSubmit` in — which is not knowable from here.
+ */
+function awaitsUserDecision(trailingPart: MessagePart | undefined): boolean {
+  if (trailingPart?.type === 'external_approval') return trailingPart.decisionSource === undefined;
+  // The internal turn's counterpart. An elicitation blocks the tool call that
+  // raised it, so the turn keeps `isGenerating` while waiting on a form nobody
+  // has filled in yet — and a "Working…" row under that form would claim the
+  // opposite of what is true.
+  if (trailingPart?.type === 'mcp_elicitation') return trailingPart.status === 'pending';
+  return false;
+}
+
 interface PhaseInputs {
   readonly running: boolean;
   readonly trailingAwaitsDecision: boolean;
@@ -91,8 +109,7 @@ export function deriveTurnStatus(parts: readonly MessagePart[], isStreaming: boo
   const trailingPart = parts.at(-1);
   const trailingIsRunningActivity =
     trailingPart?.type === 'external_activity' && trailingPart.status === 'running';
-  const trailingAwaitsDecision =
-    trailingPart?.type === 'external_approval' && trailingPart.decisionSource === undefined;
+  const trailingAwaitsDecision = awaitsUserDecision(trailingPart);
   return {
     phase: derivePhase({ running, trailingAwaitsDecision, streamedInto }),
     livePartIndex: streamedInto === null ? null : parts.length - 1,

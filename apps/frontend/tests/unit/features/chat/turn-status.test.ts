@@ -227,3 +227,37 @@ describe('deriveTurnStatus: a vendor turn reopened mid-flight', () => {
     expect(deriveTurnStatus(parts, false).phase).toBe('settled');
   });
 });
+
+/**
+ * The internal-turn counterpart of an unanswered approval. Widening `running`
+ * to MangoStudio's own harness is what made this reachable: an internal turn
+ * has no `external_approval`, but it does block on a pending `mcp_elicitation`
+ * while the tool call that raised it waits, and `isGenerating` stays true the
+ * whole time.
+ */
+describe('deriveTurnStatus — a turn stopped on an MCP elicitation', () => {
+  const pendingElicitation: MessagePart = {
+    type: 'mcp_elicitation',
+    elicitationId: 'e1',
+    toolCallId: 't1',
+    serverSlug: 'files',
+    message: 'Which folder?',
+    fields: [],
+    status: 'pending',
+  };
+
+  it('is waiting on the user, not working', () => {
+    const status = deriveTurnStatus([pendingElicitation], true);
+
+    expect(status.phase).toBe('awaiting-user');
+    expect(status.showWorkingRow).toBe(false);
+  });
+
+  /** Once answered it is the agent's turn again, so the filler row comes back. */
+  it('goes back to working once the elicitation is answered', () => {
+    const status = deriveTurnStatus([{ ...pendingElicitation, status: 'accepted' }], true);
+
+    expect(status.phase).toBe('working');
+    expect(status.showWorkingRow).toBe(true);
+  });
+});
