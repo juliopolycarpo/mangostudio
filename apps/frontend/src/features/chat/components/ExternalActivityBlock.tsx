@@ -128,8 +128,8 @@ export function ExternalActivityBlock({ part }: ExternalActivityBlockProps) {
   return (
     <TimelineItem tone={tone}>
       <TimelineRow
-        expanded={hasDetail ? expanded : false}
-        onToggle={() => hasDetail && setExpanded((value) => !value)}
+        expanded={hasDetail && expanded}
+        onToggle={() => setExpanded((value) => !value)}
         disclosable={hasDetail}
         glyph={<StatusGlyph part={part} />}
       >

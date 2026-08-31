@@ -3,7 +3,8 @@ import type { ReactNode } from 'react';
 
 interface TimelineRowProps {
   expanded: boolean;
-  onToggle: () => void;
+  /** Omitted by a row that is not disclosable — there is nothing to toggle. */
+  onToggle?: () => void;
   /** Status glyph. Rendered in a fixed-width slot so the label never shifts. */
   glyph?: ReactNode;
   /** Left cluster: the tool name, its argument hint, any badges. */
@@ -19,6 +20,11 @@ interface TimelineRowProps {
   disclosable?: boolean;
 }
 
+/** Shared by both shells so the two branches cannot drift apart on layout. */
+const ROW_CLASS = `group/row -ml-1.5 flex w-full min-h-(--timeline-row-height) items-center gap-2
+                   rounded-md px-1.5 text-left text-xs transition-colors
+                   duration-(--duration-quick)`;
+
 /**
  * The single-line disclosure row every timeline step is built from.
  *
@@ -26,6 +32,10 @@ interface TimelineRowProps {
  * chevron are always present at fixed widths, and the outcome is right-aligned,
  * so a call resolving from running to done repaints in place instead of
  * nudging the label sideways as its status, duration and summary arrive.
+ *
+ * A row with nothing to open is a `<div>`, not a disabled-looking `<button>`:
+ * a vendor turn that ran twenty commands would otherwise put twenty dead tab
+ * stops between the reader and the next control that actually does something.
  *
  * Usage: <TimelineRow expanded={open} onToggle={toggle} summary="12 items" duration="33ms">…</TimelineRow>
  */
@@ -39,17 +49,8 @@ export function TimelineRow({
   disclosable = true,
 }: TimelineRowProps) {
   const hasMeta = Boolean(summary) || Boolean(duration);
-
-  return (
-    <button
-      type="button"
-      aria-expanded={disclosable ? expanded : undefined}
-      onClick={onToggle}
-      className={`group/row -ml-1.5 flex w-full min-h-(--timeline-row-height) items-center gap-2
-                  rounded-md px-1.5 text-left text-xs transition-colors
-                  duration-(--duration-quick)
-                  ${disclosable ? 'cursor-pointer hover:bg-surface-container-low' : 'cursor-default'}`}
-    >
+  const content = (
+    <>
       <span className="flex w-3 shrink-0 items-center justify-center">{glyph}</span>
       {children}
       {hasMeta && (
@@ -59,17 +60,35 @@ export function TimelineRow({
           {duration && <span>{duration}</span>}
         </span>
       )}
-      {disclosable ? (
-        <ChevronDown
-          size={11}
-          aria-hidden="true"
-          className={`shrink-0 text-on-surface-variant/40 transition-all duration-(--duration-base)
-                      ${hasMeta ? '' : 'ml-auto'}
-                      ${expanded ? 'rotate-180 opacity-100' : 'opacity-0 group-hover/row:opacity-100'}`}
-        />
-      ) : (
+    </>
+  );
+
+  // The chevron's slot is held open either way — that is what keeps a row
+  // resolving from running to done from nudging sideways as its status arrives.
+  if (!disclosable) {
+    return (
+      <div className={`${ROW_CLASS} cursor-default`}>
+        {content}
         <span aria-hidden="true" className={`w-[11px] shrink-0 ${hasMeta ? '' : 'ml-auto'}`} />
-      )}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      aria-expanded={expanded}
+      onClick={onToggle}
+      className={`${ROW_CLASS} cursor-pointer hover:bg-surface-container-low`}
+    >
+      {content}
+      <ChevronDown
+        size={11}
+        aria-hidden="true"
+        className={`shrink-0 text-on-surface-variant/40 transition-all duration-(--duration-base)
+                    ${hasMeta ? '' : 'ml-auto'}
+                    ${expanded ? 'rotate-180 opacity-100' : 'opacity-0 group-hover/row:opacity-100'}`}
+      />
     </button>
   );
 }

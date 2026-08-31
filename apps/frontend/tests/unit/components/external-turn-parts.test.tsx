@@ -106,10 +106,13 @@ describe('external activity row', () => {
     expect(screen.getByText('commandExecution').className).toContain('text-error');
   });
 
-  // A row with nothing to open must not advertise a disclosure it cannot honour.
-  it('drops the disclosure for an activity with no detail', () => {
-    renderParts([turnPart(), activityPart({ detail: undefined })]);
-    expect(screen.getByRole('button')).not.toHaveAttribute('aria-expanded');
+  // A row with nothing to open must not advertise a disclosure it cannot
+  // honour — nor cost a tab stop for it. A turn that ran twenty commands would
+  // otherwise put twenty dead stops between the user and the next real control.
+  it('renders an activity with no detail as an inert row, not a tab stop', () => {
+    const { container } = renderParts([turnPart(), activityPart({ detail: undefined })]);
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.querySelector('[aria-expanded]')).toBeNull();
   });
 
   it("shows the vendor's own tool name verbatim", () => {

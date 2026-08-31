@@ -17,7 +17,6 @@ export function TurnWorkingRow() {
     <TimelineItem tone="active">
       <TimelineRow
         expanded={false}
-        onToggle={() => undefined}
         disclosable={false}
         glyph={<Ellipsis size={11} className="animate-pulse shrink-0" />}
       >
