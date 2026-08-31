@@ -229,12 +229,17 @@ export interface ExternalApprovalPart {
  * What an external turn needs recorded instead is which session and native turn
  * produced the transcript, how far the ordered stream got, and why it stopped.
  *
- * It is also the message-level marker a renderer keys off. Every `text` and
- * `thinking` part in a message carrying this one was written by the vendor, not
- * by MangoStudio, and vendor text is rendered as **plain text, never markdown or
- * HTML** — see `docs/architecture/external-agents.md`. A renderer that treats
- * such a message like any other assistant message would interpret vendor-
- * controlled markup as links, images and formatting.
+ * It is also the message-level marker telling a renderer who wrote the prose:
+ * every `text` and `thinking` part in a message carrying this one came from the
+ * vendor, not from MangoStudio.
+ *
+ * That prose renders **as markdown, through the same renderer as a MangoStudio
+ * turn's** — a vendor writes markdown because it assumes a terminal renders it,
+ * so showing it literally hid nothing and printed `##` and `**` raw. The safety
+ * property is not the caller's choice of renderer but what the renderer emits:
+ * it escapes raw HTML rather than parsing it, resolves every link and image
+ * target through a scheme allowlist, and downgrades an image to an anchor so no
+ * vendor-named URL is fetched. See `docs/architecture/external-agents.md`.
  */
 export interface ExternalTurnPart {
   type: 'external_turn';
