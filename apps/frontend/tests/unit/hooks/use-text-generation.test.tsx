@@ -1675,6 +1675,65 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
     expect(messagesInvalidations(invalidateSpy)).toHaveLength(2);
   });
 
+  // `invalidateQueries` writes whatever the server currently has before the
+  // settled check runs. If the server is mid-unwind that write is a row still
+  // at `isGenerating: true`, landing straight over a terminal optimistic row
+  // the client already painted (the error state a dropped socket produces).
+  // The reconcile must restore that terminal snapshot rather than leave the
+  // mid-unwind write on screen.
+  it('restores the terminal optimistic row when a mid-unwind refetch is not settled', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({ type: 'user_message_id', messageId: 'server-user', done: false });
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai', done: false });
+        return Promise.reject(new Error('network error'));
+      }
+    );
+
+    type MessagesQueryData = {
+      pages: Array<{ messages: Array<{ id: string; isGenerating?: boolean; error?: string }> }>;
+      pageParams: Array<string | null>;
+    };
+
+    const { result } = renderWithQueryClient(props);
+    const queryKey = ['messages', 'chat-1'];
+    const terminalSnapshot: MessagesQueryData = {
+      pages: [{ messages: [{ id: 'server-ai', isGenerating: false, error: 'network error' }] }],
+      pageParams: [null],
+    };
+
+    await act(async () => {
+      await result.current.generation.handleRespond('draw');
+    });
+
+    // The client already settled the row locally; the server is still
+    // mid-unwind and would answer the refetch with `isGenerating: true`.
+    result.current.queryClient.setQueryData<MessagesQueryData>(queryKey, terminalSnapshot);
+    spyOn(result.current.queryClient, 'invalidateQueries').mockImplementation(
+      (filters?: { queryKey?: unknown }) => {
+        if (Array.isArray(filters?.queryKey) && filters.queryKey[0] === 'messages') {
+          result.current.queryClient.setQueryData<MessagesQueryData>(queryKey, {
+            pages: [{ messages: [{ id: 'server-ai', isGenerating: true }] }],
+            pageParams: [null],
+          });
+        }
+        return Promise.resolve();
+      }
+    );
+
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+
+    expect(result.current.queryClient.getQueryData<MessagesQueryData>(queryKey)).toEqual(
+      terminalSnapshot
+    );
+  });
+
   // A vendor turn record outlives `isGenerating` — it is the second piece of
   // evidence `isRunning` consults — so a reader torn down before the vendor's
   // terminal chunk must seal it locally or the row reads as working forever.

@@ -221,6 +221,10 @@ interface UseTextGenerationOptions {
 
 type RecoveryRequest = NonNullable<RespondStreamBody['recovery']>;
 
+type TranscriptListQueryData = {
+  pages: Array<{ messages: Array<{ isGenerating?: boolean }> }>;
+};
+
 /**
  * One turn, however it was started.
  *
@@ -381,20 +385,31 @@ export function useTextGeneration({
    * chance. An evicted query is retired — with nothing cached there is nothing
    * stale, and the next mount fetches fresh anyway.
    *
+   * The refetch this triggers can land mid-unwind and write a server row that
+   * still reads `isGenerating` over a terminal optimistic row the client
+   * already painted (e.g. the error state a dropped socket produced). That
+   * would undo the client's own settled state until the next signal arrives.
+   * Snapshot before refetching and restore it whenever the re-read is not
+   * actually settled — only an unsettled snapshot has anything worth undoing.
+   *
    * @example
    * await reconcilePendingTranscripts((chatId) => chatId !== justArmedChatId);
    */
   const reconcilePendingTranscripts = useCallback(
     async (include: (chatId: string) => boolean = () => true) => {
       for (const chatId of [...pendingTranscriptReconciles.current].filter(include)) {
-        await queryClient.invalidateQueries({ queryKey: messageKeys.list(chatId) });
-        const data = queryClient.getQueryData<{
-          pages: Array<{ messages: Array<{ isGenerating?: boolean }> }>;
-        }>(messageKeys.list(chatId));
+        const queryKey = messageKeys.list(chatId);
+        const snapshot = queryClient.getQueryData<TranscriptListQueryData>(queryKey);
+        await queryClient.invalidateQueries({ queryKey });
+        const data = queryClient.getQueryData<TranscriptListQueryData>(queryKey);
         const settled =
           data === undefined ||
           !data.pages.some((page) => page.messages.some((message) => message.isGenerating));
-        if (settled) pendingTranscriptReconciles.current.delete(chatId);
+        if (settled) {
+          pendingTranscriptReconciles.current.delete(chatId);
+          continue;
+        }
+        if (snapshot !== undefined) queryClient.setQueryData(queryKey, snapshot);
       }
     },
     [queryClient]
