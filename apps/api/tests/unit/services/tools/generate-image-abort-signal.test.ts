@@ -1,8 +1,11 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import type { AgentEvent } from '@mangostudio/shared';
+import { getDb } from '../../../../src/db/database';
 import {
   IMAGE_ABANDONED_ERROR,
   IMAGE_ABANDONED_ERROR_CODE,
 } from '../../../../src/modules/generation/application/image-interruption';
+import type { SubagentTurnSession } from '../../../../src/modules/generation/application/subagent-turn-stages';
 import {
   getProvider,
   registerProvider,
@@ -12,6 +15,7 @@ import type {
   ImageGenerationRequest,
   ImageGenerationResult,
 } from '../../../../src/services/providers/types';
+import { GENERATE_IMAGE_TOOL_NAME } from '../../../../src/services/tools/builtin/generate-image';
 import { ensureTestUsers, insertTestConnector } from '../../../support/factories';
 
 const USER_ID = 'user-generate-image-abort-signal';
@@ -27,6 +31,7 @@ class AbortObservingImageProvider implements AIProvider {
   readonly providerType = 'openai-compatible' as const;
   observedSignal: AbortSignal | undefined;
   callCount = 0;
+  private readonly pendingRejects: Array<(error: Error) => void> = [];
 
   generateText: AIProvider['generateText'] = () => Promise.resolve({ text: '' });
   listModels: AIProvider['listModels'] = () => Promise.resolve([]);
@@ -44,11 +49,24 @@ class AbortObservingImageProvider implements AIProvider {
       return Promise.reject(new DOMException('The image request was aborted.', 'AbortError'));
     }
     return new Promise((_resolve, reject) => {
+      this.pendingRejects.push(reject);
       request.signal?.addEventListener('abort', () => {
         reject(new DOMException('The image request was aborted.', 'AbortError'));
       });
     });
   };
+
+  /**
+   * Settles every call still in flight. A test whose subject is the signal it
+   * *observed* has nothing left to abort, and without this the unsettled
+   * promise would hold the caller open until the test timeout instead of the
+   * assertion deciding the outcome.
+   */
+  releasePending(): void {
+    for (const reject of this.pendingRejects.splice(0)) {
+      reject(new Error('Provider call released by the test.'));
+    }
+  }
 }
 
 /**
@@ -174,5 +192,80 @@ describe('generateImagesForToolPlan — abort signal threading', () => {
         errorCode: IMAGE_ABANDONED_ERROR_CODE,
       }),
     ]);
+  }, 5000);
+});
+
+/**
+ * Drives one subagent tool loop: announces a single `generate_image` call, then
+ * completes the turn. Enough of a provider for `runSubagentStreamLoop`, which
+ * only reads the agent-event stream.
+ */
+class SingleImageCallAgentProvider {
+  readonly providerType = 'openai-compatible' as const;
+
+  // biome-ignore lint/suspicious/useAwait: an async generator is the stream contract.
+  generateAgentTurnStream = async function* (): AsyncIterable<AgentEvent> {
+    yield {
+      type: 'tool_call_completed',
+      callId: 'subagent-call-1',
+      name: GENERATE_IMAGE_TOOL_NAME,
+      arguments: JSON.stringify({ prompt: 'Paint mangoes', model: MODEL_ID }),
+    };
+    yield { type: 'turn_completed' };
+  };
+}
+
+/** Minimal session for `runSubagentStreamLoop`, carrying the delegating signal. */
+function createSubagentSession(signal: AbortSignal): SubagentTurnSession {
+  return {
+    input: {
+      userId: USER_ID,
+      chatId: 'chat-generate-image-abort-signal',
+      db: getDb(),
+      signal,
+      request: {},
+      settings: { defaultMaxTurns: 1 },
+    },
+    resolvedModel: {
+      modelId: MODEL_ID,
+      capabilities: { text: true, image: true, streaming: true },
+    },
+    provider: new SingleImageCallAgentProvider(),
+    runtime: {
+      profile: { id: 'default' },
+      runtimeHash: 'subagent-abort-signal-hash',
+      effectiveSystemPrompt: undefined,
+      runtimeSettings: {},
+      toolSettingsByName: new Map(),
+    },
+    toolDefinitions: [],
+    allowedToolNames: new Set([GENERATE_IMAGE_TOOL_NAME]),
+    prompt: 'Paint mangoes.',
+    transcript: [],
+    tools: [],
+    summary: '',
+  } as unknown as SubagentTurnSession;
+}
+
+describe('executeSubagentTools — abort signal threading', () => {
+  it('forwards the delegating turn signal into a builtin the subagent runs', async () => {
+    const fake = withFakeProvider();
+    const { runSubagentStreamLoop } = await import(
+      '../../../../src/modules/generation/application/subagent-turn-stages'
+    );
+
+    const controller = new AbortController();
+    const loop = runSubagentStreamLoop(createSubagentSession(controller.signal));
+
+    await waitFor(() => fake.callCount >= 1, 'the subagent provider call to start');
+    const observed = fake.observedSignal;
+    fake.releasePending();
+    await loop;
+
+    // A subagent's `generate_image` reaches the provider through the same
+    // request as the parent's, so a Stop has to reach it the same way. Without
+    // the forward this is `undefined` and the request outlives the turn.
+    expect(observed).toBeInstanceOf(AbortSignal);
+    expect(observed).toBe(controller.signal);
   }, 5000);
 });
