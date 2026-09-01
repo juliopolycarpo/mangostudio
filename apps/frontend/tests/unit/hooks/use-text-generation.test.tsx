@@ -3,9 +3,10 @@
  * Verifies that multiple thinking blocks are built correctly during SSE streaming.
  */
 
-import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+import { beforeEach, describe, expect, it, jest, mock, spyOn } from 'bun:test';
 import type { MessagePart } from '@mangostudio/shared';
 import { en } from '@mangostudio/shared/i18n';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
@@ -44,6 +45,46 @@ mock.module('../../../src/features/chat/queries', () => ({
 
 mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
   invalidateGitState: mockInvalidateGitState,
+}));
+
+/**
+ * Stands in for the realtime socket: records the latest handler per
+ * `(topic, concern)` and lets a test deliver a signal the way the server's
+ * activity publish would.
+ */
+class FakeRealtimeInvalidations {
+  private readonly handlers = new Map<string, (signal: { type: string }) => void | Promise<void>>();
+
+  register(
+    topic: string | null,
+    concern: string,
+    onSignal: (signal: { type: string }) => void | Promise<void>
+  ): void {
+    if (topic === null) return;
+    this.handlers.set(`${topic}\0${concern}`, onSignal);
+  }
+
+  async emit(topic: string): Promise<void> {
+    for (const [key, handler] of this.handlers) {
+      if (key.startsWith(`${topic}\0`)) await handler({ type: 'invalidate' });
+    }
+  }
+
+  reset(): void {
+    this.handlers.clear();
+  }
+}
+
+const fakeRealtime = new FakeRealtimeInvalidations();
+
+mock.module('../../../src/lib/realtime/use-realtime-invalidation', () => ({
+  useRealtimeInvalidation: (
+    topic: string | null,
+    concern: string,
+    onSignal: (signal: { type: string }) => void | Promise<void>
+  ) => {
+    fakeRealtime.register(topic, concern, onSignal);
+  },
 }));
 
 // Static imports are evaluated before any statement above runs, so the hook
@@ -1473,5 +1514,171 @@ describe('useTextGeneration — interrupted turn actions', () => {
     });
 
     expect(mockDismissInterruptedTurn).toHaveBeenCalledWith('chat-1', 'interrupted-ai');
+  });
+});
+
+describe('useTextGeneration — transcript reconciliation with the persisted turn', () => {
+  const ACTIVITY_TOPIC = 'activity';
+
+  beforeEach(() => {
+    mockStream.mockReset();
+    mockCancelInterruptedTurn.mockReset();
+    fakeRealtime.reset();
+  });
+
+  /** Renders the hook plus a probe for the QueryClient the wrapper installed. */
+  function renderWithQueryClient(props: TextGenerationProps) {
+    return renderHook(() => ({
+      generation: useTextGeneration(props),
+      queryClient: useQueryClient(),
+    }));
+  }
+
+  function messagesInvalidations(spy: ReturnType<typeof spyOn>) {
+    return spy.mock.calls.filter(([filters]: [{ queryKey?: unknown } | undefined]) => {
+      const queryKey = filters?.queryKey;
+      return Array.isArray(queryKey) && queryKey[0] === 'messages';
+    });
+  }
+
+  // The checkpoint's resume affordance travels only in the persisted parts —
+  // no stream event carries it — and the server has always persisted before it
+  // closes the stream. A stopped turn that skipped this re-read left the
+  // banner behind a reload.
+  it('re-reads the transcript when the stream closes cleanly without done', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([
+        { type: 'user_message_id', messageId: 'server-user', done: false },
+        { type: 'assistant_message_id', messageId: 'server-ai', done: false },
+        { type: 'text', text: 'partial', done: false },
+      ])
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    await act(async () => {
+      await result.current.generation.handleRespond('stop me');
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toContainEqual([
+      { queryKey: ['messages', 'chat-1'] },
+    ]);
+  });
+
+  it('does not re-read after a turn that ended in done with known ids', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([
+        { type: 'user_message_id', messageId: 'server-user', done: false },
+        { type: 'assistant_message_id', messageId: 'server-ai', done: false },
+        { type: 'done', done: true, messageId: 'server-ai', generationTime: '0.5s' },
+      ])
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    await act(async () => {
+      await result.current.generation.handleRespond('ping');
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+  });
+
+  // A dropped socket leaves the server mid-unwind: it learns the reader is gone
+  // at its next write, which can be a whole tool call away. An immediate
+  // re-read would replace the terminal error row with a persisted row still at
+  // `isGenerating`. The activity publish every finalizer sends is what says the
+  // persisted row is now the truth.
+  it('reconciles a thrown stream on the activity signal, not immediately', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({ type: 'user_message_id', messageId: 'server-user', done: false });
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai', done: false });
+        return Promise.reject(new Error('network error'));
+      }
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    await act(async () => {
+      await result.current.generation.handleRespond('draw');
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toContainEqual([
+      { queryKey: ['messages', 'chat-1'] },
+    ]);
+  });
+
+  // The gate must defer, not drop: a signal that lands while the next turn is
+  // still streaming would otherwise be the last one, and the reconcile the
+  // thrown turn armed would wait forever.
+  it('holds a pending reconcile through a live stream and settles it at turn end', async () => {
+    const props = makeProps();
+    mockStream.mockImplementationOnce(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({ type: 'user_message_id', messageId: 'server-user-1', done: false });
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai-1', done: false });
+        return Promise.reject(new Error('network error'));
+      }
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    await act(async () => {
+      await result.current.generation.handleRespond('draw');
+    });
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+
+    const secondTurnGate = createDeferred<void>();
+    mockStream.mockImplementationOnce(
+      async (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({ type: 'user_message_id', messageId: 'server-user-2', done: false });
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai-2', done: false });
+        await secondTurnGate.promise;
+        onChunk({ type: 'done', done: true, messageId: 'server-ai-2', generationTime: '0.5s' });
+      }
+    );
+
+    let secondTurn!: Promise<void>;
+    await act(async () => {
+      secondTurn = result.current.generation.handleRespond('again');
+      await Promise.resolve();
+    });
+
+    // Mid-stream: the signal must not clobber the optimistic state being built.
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+
+    await act(async () => {
+      secondTurnGate.resolve();
+      await secondTurn;
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toContainEqual([
+      { queryKey: ['messages', 'chat-1'] },
+    ]);
   });
 });

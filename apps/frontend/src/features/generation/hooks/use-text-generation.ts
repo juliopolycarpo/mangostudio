@@ -20,6 +20,7 @@ import type {
   ToolIntent,
 } from '@mangostudio/shared/generation';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
+import { ACTIVITY_TOPIC } from '@mangostudio/shared/realtime';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
@@ -49,6 +50,7 @@ import {
 } from '@/features/generation/text-generation-stream-reducer';
 import { invalidateGitState } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
+import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
 import {
   cancelInterruptedTurn,
@@ -337,6 +339,18 @@ export function useTextGeneration({
   );
   /** The turn a stop has already been handed to the server for — see `handleStop`. */
   const stopRequestedRef = useRef<string | null>(null);
+  /**
+   * The chat whose transcript still owes a re-read of the server's truth.
+   *
+   * Armed when a stream ends by throwing — a dropped socket, a hard kill — and
+   * the server may still be unwinding the turn: it only learns the reader is
+   * gone at its next write, so for up to the length of an in-flight tool call
+   * the persisted row still says `isGenerating`. Refetching right then would
+   * replace the terminal error row with one that reads as working forever.
+   * Instead the refetch waits for the signal below, or for the next turn's
+   * `finally`, whichever comes first.
+   */
+  const transcriptReconcileRef = useRef<string | null>(null);
   const [pendingContextAction, setPendingContextAction] = useState<'compact' | 'new-chat' | null>(
     null
   );
@@ -352,6 +366,21 @@ export function useTextGeneration({
     chatId: string;
     details: ModelUnavailableDetails;
   } | null>(null);
+
+  // Every turn finalizer — success, interrupt, error, exhausted — publishes on
+  // the activity topic once the row is persisted, and the subscription's
+  // `subscribed` ack fires on reconnect, so a finalize published while the
+  // socket was down is not lost. That makes this the one signal that can end
+  // the wait armed above. Gated off while a stream is being read: mid-turn the
+  // optimistic state is fresher than the database, and the turn's own end
+  // paths decide what reconciliation it needs.
+  useRealtimeInvalidation(ACTIVITY_TOPIC, 'transcript-reconcile', async () => {
+    if (stream.abortControllerRef.current) return;
+    const pendingChatId = transcriptReconcileRef.current;
+    if (!pendingChatId) return;
+    transcriptReconcileRef.current = null;
+    await queryClient.invalidateQueries({ queryKey: messageKeys.list(pendingChatId) });
+  });
 
   const syncContextInfo = useCallback(
     (response: ContextCompactionResponse) => {
@@ -471,6 +500,12 @@ export function useTextGeneration({
         userMessageId: optimisticUserMsgId,
         aiMessageId: optimisticAiMsgId,
       });
+      // How the stream ended decides whether the server's persisted row can be
+      // trusted yet — see the `finally`. `sealed` cannot stand in for the first:
+      // it also goes true on a terminal `error` chunk, whose turn still wants a
+      // re-read for the checkpoint the wire never carries.
+      let sawDoneChunk = false;
+      let streamThrew = false;
 
       try {
         // Late on purpose. The turn is dispatched on the runner the hub has
@@ -482,6 +517,7 @@ export function useTextGeneration({
 
         await sendWithExternalConsent(activeChatId, () => {
           const onChunk = (chunk: StreamChunk) => {
+            if (chunk.type === 'done') sawDoneChunk = true;
             streamState = reduceTextGenerationStreamChunk(streamState, chunk, {
               pendingSubagentName,
             });
@@ -612,6 +648,7 @@ export function useTextGeneration({
           });
         }
       } catch (error: unknown) {
+        streamThrew = true;
         // Every end that reaches this catch is one a card at `generating` never
         // hears about — an abort, a dropped socket, a provider that threw. The
         // events that would settle it are in a stream nobody is reading any
@@ -665,10 +702,32 @@ export function useTextGeneration({
         // the user's message. The server's timestamp is the one that counts, so
         // this re-reads rather than bumping the cached row by hand.
         void queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+        // A reconcile an earlier turn armed must not wait forever on a signal
+        // that may never come — consume it here, before this turn decides its
+        // own. By now that turn has long since finalized, so the read is safe.
+        const reconcileEarlier = transcriptReconcileRef.current;
+        transcriptReconcileRef.current = null;
+        if (reconcileEarlier && reconcileEarlier !== activeChatId) {
+          void queryClient.invalidateQueries({ queryKey: messageKeys.list(reconcileEarlier) });
+        }
+        if (streamThrew) {
+          transcriptReconcileRef.current = activeChatId;
+        }
+        // A clean close is the server's word that the turn was finalized: the
+        // route closes the stream only after the generator — finalizers
+        // included — has returned. So a clean close without `done` (a stopped
+        // turn, a terminal error chunk) re-reads now, which is what puts the
+        // persisted checkpoint's resume affordance on screen without a reload.
+        // A thrown end gets no immediate re-read (see `transcriptReconcileRef`)
+        // unless the server ids never arrived, where the optimistic rows are
+        // provisional and the persisted user message is worth having even
+        // mid-unwind.
         if (
           recovery ||
           !streamState.receivedServerUserMessageId ||
-          !streamState.receivedServerAiMessageId
+          !streamState.receivedServerAiMessageId ||
+          (!streamThrew && !sawDoneChunk) ||
+          reconcileEarlier === activeChatId
         ) {
           void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId) });
         }
