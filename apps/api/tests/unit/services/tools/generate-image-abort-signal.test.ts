@@ -36,12 +36,34 @@ class AbortObservingImageProvider implements AIProvider {
   generateImage = (request: ImageGenerationRequest): Promise<ImageGenerationResult> => {
     this.callCount += 1;
     this.observedSignal = request.signal;
+    // An already-aborted signal rejects up front, the way `fetch` and the
+    // provider SDKs do. Waiting on the `abort` event alone would never settle
+    // for a signal that fired before this call, and the generator awaiting it
+    // would hang to the test timeout instead of failing on the assertion.
+    if (request.signal?.aborted) {
+      return Promise.reject(new DOMException('The image request was aborted.', 'AbortError'));
+    }
     return new Promise((_resolve, reject) => {
       request.signal?.addEventListener('abort', () => {
         reject(new DOMException('The image request was aborted.', 'AbortError'));
       });
     });
   };
+}
+
+/**
+ * Blocks until `predicate` holds, so a test can meet the generator where it
+ * actually is instead of guessing how many macrotasks `resolveModel`, the
+ * connector lookup and `warmProviderForRequest` need to reach the provider.
+ *
+ * // Usage: await waitFor(() => fake.callCount >= 1, 'the first provider call');
+ */
+async function waitFor(predicate: () => boolean, label: string): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error(`Timed out waiting for ${label}`);
 }
 
 let previousProvider: AIProvider | null = null;
@@ -121,8 +143,7 @@ describe('generateImagesForToolPlan — abort signal threading', () => {
     })[Symbol.asyncIterator]();
     const pending = iterator.next();
 
-    // Give the generator a macrotask to reach the provider call before asserting.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitFor(() => fake.callCount >= 1, 'the provider call to start');
 
     expect(fake.observedSignal).toBeInstanceOf(AbortSignal);
     expect(fake.observedSignal).toBe(controller.signal);
@@ -156,10 +177,9 @@ describe('generateImagesForToolPlan — abort signal threading', () => {
       }
     })();
 
-    // Abort mid-flight, while the fake provider's promise is still pending.
-    // resolveModel/getProvider/warmProviderForRequest all resolve first, so
-    // give the generator a macrotask to reach the provider call.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Abort mid-flight, while the fake provider's promise is still pending —
+    // which is only true once the call has actually started.
+    await waitFor(() => fake.callCount >= 1, 'the first provider call to start');
     controller.abort();
     await drain;
 
