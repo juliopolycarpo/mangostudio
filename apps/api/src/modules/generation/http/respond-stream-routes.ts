@@ -52,7 +52,12 @@ import {
 } from '../application/turn-recovery';
 import { modelUnavailableResponse } from './model-unavailable-response';
 
-const KEEPALIVE_INTERVAL_MS = 15_000;
+// Tight on purpose. The silent stretch of an image generation is where flaky
+// intermediaries (observed: the WSL2 localhost relay, issue #994) kill an idle
+// connection — twice measured dying 8–11s into the gap, before a 15s beat
+// could fire. A comment frame every 5s costs ~15 bytes and keeps the
+// connection visibly alive through the longest tool call.
+const KEEPALIVE_INTERVAL_MS = 5_000;
 
 function sseEvent(data: object): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
