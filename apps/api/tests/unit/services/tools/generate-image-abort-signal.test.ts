@@ -1,5 +1,4 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import { getDb } from '../../../../src/db/database';
 import {
   IMAGE_ABANDONED_ERROR,
   IMAGE_ABANDONED_ERROR_CODE,
@@ -13,6 +12,7 @@ import type {
   ImageGenerationRequest,
   ImageGenerationResult,
 } from '../../../../src/services/providers/types';
+import { ensureTestUsers, insertTestConnector } from '../../../support/factories';
 
 const USER_ID = 'user-generate-image-abort-signal';
 const MODEL_ID = 'fake-abort-signal-image-model';
@@ -69,44 +69,20 @@ async function waitFor(predicate: () => boolean, label: string): Promise<void> {
 let previousProvider: AIProvider | null = null;
 
 beforeAll(async () => {
-  const db = getDb();
-  await db
-    .insertInto('user')
-    .values({
-      id: USER_ID,
-      name: 'Abort Signal Test User',
-      email: `${USER_ID}@mangostudio.test`,
-      emailVerified: 0,
-      image: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    })
-    .onConflict((oc) => oc.column('id').doNothing())
-    .execute();
+  await ensureTestUsers({
+    id: USER_ID,
+    name: 'Abort Signal Test User',
+    email: `${USER_ID}@mangostudio.test`,
+  });
   // Routes `resolveModel`/`getProviderForModel` to the fake provider through
   // the real connector-lookup path, instead of mocking a shared module —
   // `resolve-model.ts` is imported by other test files, and Bun's
   // `mock.module` replaces it process-wide for the rest of the run.
-  await db
-    .insertInto('secret_metadata')
-    .values({
-      id: `generate-image-abort-signal-${MODEL_ID}`,
-      name: 'Abort Signal Test Connector',
-      provider: 'openai-compatible',
-      configured: 1,
-      source: 'config-file',
-      maskedSuffix: 'test',
-      updatedAt: Date.now(),
-      lastValidatedAt: Date.now(),
-      lastValidationError: null,
-      enabledModels: JSON.stringify([MODEL_ID]),
-      userId: USER_ID,
-      baseUrl: null,
-      organizationId: null,
-      projectId: null,
-    })
-    .onConflict((oc) => oc.column('id').doNothing())
-    .execute();
+  await insertTestConnector(USER_ID, {
+    id: `generate-image-abort-signal-${MODEL_ID}`,
+    name: 'Abort Signal Test Connector',
+    enabledModels: [MODEL_ID],
+  });
 });
 
 afterEach(() => {
