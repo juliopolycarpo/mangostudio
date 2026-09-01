@@ -1,6 +1,7 @@
 import type { Message } from '@mangostudio/shared';
 import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpoints';
 import { memo } from 'react';
+import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import { AssistantMessageBlock } from './AssistantMessageBlock';
 import { isImageInteraction } from './message-content';
 import { UserMessageBubble } from './UserMessageBubble';
@@ -15,6 +16,8 @@ interface ChatMessageRowProps {
   fileCheckpoint?: ChatFileCheckpointSummary;
   /** Present only on the last row while question cards may be answered. */
   onQuestionSubmit?: (prompt: string) => void;
+  /** Resolved once per feed by `ChatFeed`; only an assistant row reads it. */
+  toolIdentities: ToolIdentityResolver;
 }
 
 /**
@@ -24,7 +27,7 @@ interface ChatMessageRowProps {
  * Memoized so streaming updates to the latest message do not re-render the
  * settled rows above it — only the row whose message object changed re-renders.
  *
- * Usage: <ChatMessageRow message={msg} index={i} start={top} measureRef={measure} />
+ * Usage: <ChatMessageRow message={msg} index={i} start={top} measureRef={measure} toolIdentities={identities} />
  */
 function ChatMessageRowComponent({
   message,
@@ -34,6 +37,7 @@ function ChatMessageRowComponent({
   chatId,
   fileCheckpoint,
   onQuestionSubmit,
+  toolIdentities,
 }: ChatMessageRowProps) {
   const isImageTurn = isImageInteraction(message);
   const isUser = message.role === 'user';
@@ -70,6 +74,7 @@ function ChatMessageRowComponent({
             chatId={chatId}
             fileCheckpoint={fileCheckpoint}
             onQuestionSubmit={onQuestionSubmit}
+            toolIdentities={toolIdentities}
           />
         )}
       </div>

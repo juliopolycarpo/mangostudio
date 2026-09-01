@@ -9,6 +9,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import type { Message } from '@mangostudio/shared';
 import { useCallback } from 'react';
 import { render } from '../../../support/harness/render';
+import { ToolIdentitiesProbe } from '../../../support/mocks/tool-identities';
 
 // `vi.hoisted` existed because `vi.mock` is hoisted above the file's own
 // statements. `mock.module` is not hoisted, so a plain const is enough.
@@ -43,18 +44,25 @@ function makeMessage(id: string, overrides: Partial<Message> = {}): Message {
 function RowList({ messages }: { messages: Message[] }) {
   // Stable no-op stand-in for the virtualizer's measureElement callback.
   const measureRef = useCallback((_element: Element | null) => undefined, []);
+  // Every message here is a user row, so the resolver is never read — it is
+  // still a required prop, since `ChatFeed` now owns the one live instance.
   return (
-    <>
-      {messages.map((message, index) => (
-        <ChatMessageRow
-          key={message.id}
-          message={message}
-          index={index}
-          start={index * 100}
-          measureRef={measureRef}
-        />
-      ))}
-    </>
+    <ToolIdentitiesProbe>
+      {(toolIdentities) => (
+        <>
+          {messages.map((message, index) => (
+            <ChatMessageRow
+              key={message.id}
+              message={message}
+              index={index}
+              start={index * 100}
+              measureRef={measureRef}
+              toolIdentities={toolIdentities}
+            />
+          ))}
+        </>
+      )}
+    </ToolIdentitiesProbe>
   );
 }
 

@@ -13,6 +13,7 @@ import type {
 import { fireEvent, screen } from '@testing-library/react';
 import { deriveTurnStatus } from '../../../src/features/chat/lib/turn-status';
 import { render, waitFor } from '../../support/harness/render';
+import { ToolIdentitiesProbe } from '../../support/mocks/tool-identities';
 
 const answerExternalApproval =
   jest.fn<(chatId: string, body: { requestId: string; optionId: string }) => Promise<unknown>>();
@@ -75,13 +76,18 @@ function approvalPart(overrides: Partial<ExternalApprovalPart> = {}): ExternalAp
 
 function renderParts(parts: MessagePart[], chatId: string | null = 'chat-1') {
   return render(
-    <MessageParts
-      parts={parts}
-      messageId="msg-1"
-      isStreaming={false}
-      status={deriveTurnStatus(parts, false)}
-      chatId={chatId}
-    />
+    <ToolIdentitiesProbe>
+      {(toolIdentities) => (
+        <MessageParts
+          parts={parts}
+          messageId="msg-1"
+          isStreaming={false}
+          status={deriveTurnStatus(parts, false)}
+          chatId={chatId}
+          toolIdentities={toolIdentities}
+        />
+      )}
+    </ToolIdentitiesProbe>
   );
 }
 
@@ -271,12 +277,17 @@ describe('external turn: still working', () => {
       { type: 'text', text: 'partial' },
     ];
     render(
-      <MessageParts
-        parts={parts}
-        messageId="msg-1"
-        isStreaming
-        status={deriveTurnStatus(parts, true)}
-      />
+      <ToolIdentitiesProbe>
+        {(toolIdentities) => (
+          <MessageParts
+            parts={parts}
+            messageId="msg-1"
+            isStreaming
+            status={deriveTurnStatus(parts, true)}
+            toolIdentities={toolIdentities}
+          />
+        )}
+      </ToolIdentitiesProbe>
     );
     expect(screen.queryByText('Working')).toBeNull();
   });

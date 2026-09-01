@@ -14,16 +14,22 @@ import { screen } from '@testing-library/react';
 import { TurnSeparator } from '../../../src/features/chat/components/TurnSeparator';
 import { deriveTurnStatus } from '../../../src/features/chat/lib/turn-status';
 import { render } from '../../support/harness/render';
+import { ToolIdentitiesProbe } from '../../support/mocks/tool-identities';
 
 function renderSeparator(modelName: string | undefined, parts: MessagePart[] = []) {
   const msg = createMockMessage({ role: 'ai', modelName, isGenerating: false });
   return render(
-    <TurnSeparator
-      msg={msg}
-      parts={parts}
-      status={deriveTurnStatus(parts, false)}
-      isImageTurn={false}
-    />
+    <ToolIdentitiesProbe>
+      {(toolIdentities) => (
+        <TurnSeparator
+          msg={msg}
+          parts={parts}
+          status={deriveTurnStatus(parts, false)}
+          isImageTurn={false}
+          toolIdentities={toolIdentities}
+        />
+      )}
+    </ToolIdentitiesProbe>
   );
 }
 
@@ -112,7 +118,19 @@ describe('TurnSeparator status while an image generates', () => {
     const status = deriveTurnStatus([], true);
 
     expect(status.showWorkingRow).toBe(true);
-    render(<TurnSeparator msg={msg} parts={[]} status={status} isImageTurn />);
+    render(
+      <ToolIdentitiesProbe>
+        {(toolIdentities) => (
+          <TurnSeparator
+            msg={msg}
+            parts={[]}
+            status={status}
+            isImageTurn
+            toolIdentities={toolIdentities}
+          />
+        )}
+      </ToolIdentitiesProbe>
+    );
 
     expect(screen.getByText('Working')).toBeInTheDocument();
   });
@@ -121,7 +139,17 @@ describe('TurnSeparator status while an image generates', () => {
     const msg = createMockMessage({ role: 'ai', modelName: 'gpt-5.2', isGenerating: true });
 
     render(
-      <TurnSeparator msg={msg} parts={[]} status={deriveTurnStatus([], true)} isImageTurn={false} />
+      <ToolIdentitiesProbe>
+        {(toolIdentities) => (
+          <TurnSeparator
+            msg={msg}
+            parts={[]}
+            status={deriveTurnStatus([], true)}
+            isImageTurn={false}
+            toolIdentities={toolIdentities}
+          />
+        )}
+      </ToolIdentitiesProbe>
     );
 
     expect(screen.queryByText('Working')).not.toBeInTheDocument();
@@ -156,7 +184,19 @@ describe('TurnSeparator actions on a reopened vendor turn', () => {
     const status = deriveTurnStatus(parts, false);
 
     expect(status.phase).toBe('working');
-    render(<TurnSeparator msg={msg} parts={parts} status={status} isImageTurn={false} />);
+    render(
+      <ToolIdentitiesProbe>
+        {(toolIdentities) => (
+          <TurnSeparator
+            msg={msg}
+            parts={parts}
+            status={status}
+            isImageTurn={false}
+            toolIdentities={toolIdentities}
+          />
+        )}
+      </ToolIdentitiesProbe>
+    );
 
     expect(screen.queryByTitle('Copy message')).not.toBeInTheDocument();
     expect(screen.queryByText(/\d{1,2}:\d{2}\s?(AM|PM)/i)).not.toBeInTheDocument();
@@ -182,7 +222,19 @@ describe('TurnSeparator actions on a reopened vendor turn', () => {
     const status = deriveTurnStatus(parts, false);
 
     expect(status.phase).toBe('settled');
-    render(<TurnSeparator msg={msg} parts={parts} status={status} isImageTurn={false} />);
+    render(
+      <ToolIdentitiesProbe>
+        {(toolIdentities) => (
+          <TurnSeparator
+            msg={msg}
+            parts={parts}
+            status={status}
+            isImageTurn={false}
+            toolIdentities={toolIdentities}
+          />
+        )}
+      </ToolIdentitiesProbe>
+    );
 
     expect(screen.getByTitle('Copy message')).toBeInTheDocument();
   });

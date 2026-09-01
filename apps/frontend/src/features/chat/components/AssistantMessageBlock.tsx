@@ -2,6 +2,7 @@ import type { Message, MessagePart } from '@mangostudio/shared';
 import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpoints';
 import { Sparkles } from 'lucide-react';
 import { useMemo } from 'react';
+import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { deriveTurnStatus, type TurnStatus } from '../lib/turn-status';
@@ -18,6 +19,8 @@ interface AssistantMessageBlockProps {
   fileCheckpoint?: ChatFileCheckpointSummary;
   /** Present only on the last message while question cards may be answered. */
   onQuestionSubmit?: (prompt: string) => void;
+  /** Resolved once per feed by `ChatFeed`, threaded down to every row. */
+  toolIdentities: ToolIdentityResolver;
 }
 
 /** What the block derives once and every child below it reads. */
@@ -46,6 +49,7 @@ interface AssistantTurnSectionProps extends DerivedTurn {
   isImageTurn: boolean;
   chatId?: string | null;
   onQuestionSubmit?: (prompt: string) => void;
+  toolIdentities: ToolIdentityResolver;
 }
 
 /** Routes an assistant turn to the body its generation state calls for. */
@@ -57,6 +61,7 @@ function AssistantTurnSection({
   isImageTurn,
   chatId,
   onQuestionSubmit,
+  toolIdentities,
 }: AssistantTurnSectionProps) {
   // A settled image turn is its picture plus the controls that act on it, none
   // of which belong on a timeline.
@@ -72,6 +77,7 @@ function AssistantTurnSection({
         isImageTurn={isImageTurn}
         chatId={chatId}
         onQuestionSubmit={onQuestionSubmit}
+        toolIdentities={toolIdentities}
       />
       {!isStreaming && msg.generationTime ? (
         <TurnCostRow generationTime={msg.generationTime} />
@@ -87,7 +93,7 @@ function AssistantTurnSection({
  * The parts and their derived status are computed here, once per row, so every
  * child under this wrapper reads one answer rather than recomputing its own.
  *
- * Usage: <AssistantMessageBlock msg={msg} isImageTurn={isImageTurn} />
+ * Usage: <AssistantMessageBlock msg={msg} isImageTurn={isImageTurn} toolIdentities={identities} />
  */
 export function AssistantMessageBlock({
   msg,
@@ -95,6 +101,7 @@ export function AssistantMessageBlock({
   chatId,
   fileCheckpoint,
   onQuestionSubmit,
+  toolIdentities,
 }: AssistantMessageBlockProps) {
   const parts = useMemo(() => messagePartsFromMessage(msg), [msg]);
   const isStreaming = msg.isGenerating ?? false;
@@ -109,6 +116,7 @@ export function AssistantMessageBlock({
         isImageTurn={isImageTurn}
         chatId={chatId}
         fileCheckpoint={fileCheckpoint}
+        toolIdentities={toolIdentities}
       />
       <AssistantTurnSection
         msg={msg}
@@ -118,6 +126,7 @@ export function AssistantMessageBlock({
         isImageTurn={isImageTurn}
         chatId={chatId}
         onQuestionSubmit={onQuestionSubmit}
+        toolIdentities={toolIdentities}
       />
     </div>
   );

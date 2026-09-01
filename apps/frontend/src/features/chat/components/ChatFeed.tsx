@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useMemo } from 'react';
+import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { useChatAutoFollow } from '../hooks/use-chat-auto-follow';
@@ -44,6 +45,11 @@ export function ChatFeed({
 }) {
   const { t } = useI18n();
   const { fadeRise } = useMotionPresets();
+  // Resolved once for the whole feed and threaded down to every row: rows used
+  // to call this themselves, so an N-message chat registered N react-query
+  // observers and N realtime-invalidation listeners for a resolver almost none
+  // of them needed.
+  const toolIdentities = useToolIdentities();
   const { data: checkpointData } = useChatFileCheckpoints(chatId);
   // The summary is both the revert affordance's gate and what the confirmation
   // needs to say about the writes it cannot undo, so the row carries the entry
@@ -96,6 +102,7 @@ export function ChatFeed({
               onQuestionSubmit={
                 virtualRow.index === messages.length - 1 ? onQuestionSubmit : undefined
               }
+              toolIdentities={toolIdentities}
             />
           ))}
         </div>

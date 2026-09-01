@@ -1,4 +1,5 @@
 import type { MessagePart } from '@mangostudio/shared';
+import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import type { TurnStatus } from '../lib/turn-status';
 import { MessageParts } from './MessageParts';
@@ -15,6 +16,8 @@ interface AssistantTurnBodyProps {
   chatId?: string | null;
   /** Present only while question cards are answerable (last message, idle). */
   onQuestionSubmit?: (prompt: string) => void;
+  /** Resolved once per feed by `ChatFeed`, threaded down to the activity row. */
+  toolIdentities: ToolIdentityResolver;
 }
 
 /** The one turn kind with nothing to put on a timeline until it has finished. */
@@ -73,7 +76,7 @@ function producedSomething(parts: readonly MessagePart[]): boolean {
  * placeholders are the ones the timeline genuinely cannot draw: an image turn
  * mid-generation, and a settled turn that produced neither text nor tool calls.
  *
- * Usage: <AssistantTurnBody parts={parts} status={status} messageId={msg.id} isStreaming />
+ * Usage: <AssistantTurnBody parts={parts} status={status} messageId={msg.id} isStreaming toolIdentities={identities} />
  */
 export function AssistantTurnBody({
   parts,
@@ -83,6 +86,7 @@ export function AssistantTurnBody({
   isImageTurn,
   chatId = null,
   onQuestionSubmit,
+  toolIdentities,
 }: AssistantTurnBodyProps) {
   if (isStreaming && isImageTurn) return <GeneratingImagePlaceholder />;
 
@@ -95,6 +99,7 @@ export function AssistantTurnBody({
         chatId={chatId}
         isStreaming={isStreaming}
         onQuestionSubmit={onQuestionSubmit}
+        toolIdentities={toolIdentities}
       />
       {status.phase === 'settled' && !producedSomething(parts) ? <NoResponseNotice /> : null}
     </>

@@ -2,6 +2,7 @@ import type { MessagePart } from '@mangostudio/shared';
 import { ASK_USER_QUESTION_TOOL_NAME } from '@mangostudio/shared/questions';
 import { TODO_WRITE_TOOL_NAME } from '@mangostudio/shared/todos';
 import { useMemo } from 'react';
+import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import type { TurnStatus } from '../lib/turn-status';
 import { ContinuationEventMarker } from './ContinuationEventMarker';
 import { ElicitationCard } from './ElicitationCard';
@@ -34,6 +35,8 @@ interface MessagePartsProps {
   chatId?: string | null;
   /** Present only while question cards are answerable (last message, idle). */
   onQuestionSubmit?: (prompt: string) => void;
+  /** Resolved once per feed by `ChatFeed`, threaded down to the activity row. */
+  toolIdentities: ToolIdentityResolver;
 }
 
 export function MessageParts({
@@ -43,6 +46,7 @@ export function MessageParts({
   status,
   chatId = null,
   onQuestionSubmit,
+  toolIdentities,
 }: MessagePartsProps) {
   const { groups, consumed } = useMemo(
     () => planToolGroups(parts, isStreaming),
@@ -62,7 +66,13 @@ export function MessageParts({
             // Owns its own timeline item: the vendor's status decides the node
             // tone, the same way a MangoStudio tool call does.
             case 'external_activity':
-              return <ExternalActivityBlock key={`${part.callId}-activity`} part={part} />;
+              return (
+                <ExternalActivityBlock
+                  key={`${part.callId}-activity`}
+                  part={part}
+                  toolIdentities={toolIdentities}
+                />
+              );
             case 'external_approval':
               return (
                 <TimelineItem key={`${part.requestId}-approval`} variant="block">

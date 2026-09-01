@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
-import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
+import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { TIMELINE_PANEL_CLASS } from './TimelineDisclosure';
@@ -106,15 +106,17 @@ function statusLabel(
 
 export interface ExternalActivityBlockProps {
   part: ExternalActivityPart;
+  /** Resolved once per feed by `ChatFeed`, not once per row. */
+  toolIdentities: ToolIdentityResolver;
 }
 
 /**
- * Usage: <ExternalActivityBlock part={part} />
+ * Usage: <ExternalActivityBlock part={part} toolIdentities={identities} />
  */
-export function ExternalActivityBlock({ part }: ExternalActivityBlockProps) {
+export function ExternalActivityBlock({ part, toolIdentities }: ExternalActivityBlockProps) {
   const { t } = useI18n();
   const labels = t.externalAgents.activity;
-  const { resolve } = useToolIdentities();
+  const { resolve } = toolIdentities;
   const [expanded, setExpanded] = useState(false);
 
   // `agent:<targetId>` is already a valid identity subject with storage, an

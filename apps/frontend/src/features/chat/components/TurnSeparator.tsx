@@ -3,7 +3,7 @@ import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpo
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
 import { format } from 'date-fns';
 import { TOOL_AVATAR_SIZE_CLASS, ToolAvatar } from '@/components/ui/ToolAvatar';
-import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
+import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { MANGO_IDENTITY } from '@/lib/agent-identity';
 import { deriveTurnIdentity } from '../lib/turn-identity';
@@ -20,6 +20,8 @@ interface TurnSeparatorProps {
   chatId?: string | null;
   /** Present when this turn has a revertable manifest; absent means no affordance. */
   fileCheckpoint?: ChatFileCheckpointSummary;
+  /** Resolved once per feed by `ChatFeed`, not once per row. */
+  toolIdentities: ToolIdentityResolver;
 }
 
 /**
@@ -58,7 +60,7 @@ function ModelMonogram({ monogram }: { monogram: string }) {
  * boundary; what the turn is *doing* is derived rather than stored, so it can
  * only be said while it is true.
  *
- * Usage: <TurnSeparator msg={msg} parts={parts} status={status} isImageTurn={false} />
+ * Usage: <TurnSeparator msg={msg} parts={parts} status={status} isImageTurn={false} toolIdentities={identities} />
  */
 export function TurnSeparator({
   msg,
@@ -67,9 +69,10 @@ export function TurnSeparator({
   isImageTurn,
   chatId,
   fileCheckpoint,
+  toolIdentities,
 }: TurnSeparatorProps) {
   const { t } = useI18n();
-  const { resolve } = useToolIdentities();
+  const { resolve } = toolIdentities;
   const identity = deriveTurnIdentity(
     msg,
     parts,
