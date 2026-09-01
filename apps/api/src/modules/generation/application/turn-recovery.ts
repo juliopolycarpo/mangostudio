@@ -1,6 +1,5 @@
 import type { MessagePart } from '@mangostudio/shared';
 import type { AgentId } from '@mangostudio/shared/agents';
-import type { ImageGenerationErrorCode } from '@mangostudio/shared/generation';
 import {
   applyToolExecutionTransition,
   createToolExecutionSnapshot,
@@ -18,6 +17,7 @@ import type { Database } from '../../../db/types';
 import { generateId } from '../../../utils/id';
 import { linkAttachmentsToMessage } from '../../attachments/infrastructure/attachment-repository';
 import { insertMessage } from '../../messages/infrastructure/message-repository';
+import { IMAGE_ABANDONED_ERROR, IMAGE_ABANDONED_ERROR_CODE } from './image-interruption';
 import type { ResolvedModel } from './resolve-model';
 import {
   classifyToolRetrySafety,
@@ -654,17 +654,6 @@ function getOwnedRecoveryMessage(
     .where('chats.userId', '=', userId)
     .executeTakeFirst();
 }
-
-/** What a planned image records when the turn ended before it was generated. */
-export const IMAGE_ABANDONED_ERROR = 'The turn was interrupted before this image was generated.';
-/**
- * The renderable counterpart of {@link IMAGE_ABANDONED_ERROR}.
- *
- * `IMAGE_ABANDONED_ERROR` also travels as the tool result a model reads, so it
- * stays in English; this code is what a UI switches on to show the user's own
- * language instead.
- */
-export const IMAGE_ABANDONED_ERROR_CODE: ImageGenerationErrorCode = 'image_generation_interrupted';
 
 export function reconcileInterruptedMessageParts(parts: MessagePart[]): void {
   const resultIds = new Set(

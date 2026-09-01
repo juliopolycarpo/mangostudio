@@ -39,6 +39,7 @@ import {
 } from '../../../services/tools/builtin/generate-image';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
 import type { PersistedGeneratedImageInput } from '../infrastructure/conversation-persistence';
+import { IMAGE_ABANDONED_ERROR, IMAGE_ABANDONED_ERROR_CODE } from './image-interruption';
 import type { ToolExecutionProgressItem } from './standard-tool-execution';
 import type { StreamEvent } from './stream-text-turn-types';
 import {
@@ -48,7 +49,6 @@ import {
   ToolPolicyError,
 } from './tool-execution-lifecycle';
 import { errorToToolMessage, parseToolArgs, stringifyToolResult } from './tool-result-utils';
-import { IMAGE_ABANDONED_ERROR, IMAGE_ABANDONED_ERROR_CODE } from './turn-recovery';
 
 /** Accumulators a completed tool execution writes into for the turn. */
 interface ToolResultSink {
@@ -302,15 +302,19 @@ export async function* executeImageGenerationCall(
         if (part) {
           part.status = 'error';
           part.error = outcome.error;
+          part.errorCode = outcome.errorCode;
           part.modelName = outcome.modelName;
           part.generationTime = outcome.generationTime;
         }
+        // The part and the event both carry the code, or a live card and its
+        // reloaded self disagree about which reason they render.
         yield {
           type: 'image_generation_failed',
           imageId: outcome.imageId,
           toolCallId: callId,
           prompt: outcome.prompt,
           error: outcome.error,
+          errorCode: outcome.errorCode,
           modelName: outcome.modelName,
           generationTime: outcome.generationTime,
         };
@@ -410,6 +414,7 @@ function* abandonUnreachedImages(
       imageId,
       prompt: part.prompt,
       error: IMAGE_ABANDONED_ERROR,
+      errorCode: IMAGE_ABANDONED_ERROR_CODE,
       createdAt: Date.now(),
     });
     yield {

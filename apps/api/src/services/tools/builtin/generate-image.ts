@@ -3,6 +3,11 @@
  * Creates one or more generated images during an agentic text turn.
  */
 
+import type { ImageGenerationErrorCode } from '@mangostudio/shared/generation';
+import {
+  IMAGE_ABANDONED_ERROR,
+  IMAGE_ABANDONED_ERROR_CODE,
+} from '../../../modules/generation/application/image-interruption';
 import { resolveModel } from '../../../modules/generation/application/resolve-model';
 import { generateId } from '../../../utils/id';
 import { warmProviderForRequest } from '../../providers/core/provider-readiness';
@@ -60,6 +65,8 @@ interface GenerateImageToolFailedOutcome {
   imageId: string;
   prompt: string;
   error: string;
+  /** Set only for a closed reason a UI can localize; see `image-interruption`. */
+  errorCode?: ImageGenerationErrorCode;
   modelName?: string;
   generationTime?: string;
   createdAt: number;
@@ -187,11 +194,22 @@ export async function* generateImagesForToolPlan(
         createdAt: Date.now(),
       };
     } catch (error) {
+      // Now that the signal reaches the provider, this catch also runs for a
+      // user Stop, and the SDK's own words are not product copy: OpenAI throws
+      // `APIUserAbortError` ('Request was aborted.'), fetch throws 'The
+      // operation was aborted.' — neither is localizable, and both would sit
+      // next to the interrupted copy the unreached images of the *same* Stop
+      // get from `abandonUnreachedImages`. The signal, not the error's shape,
+      // is what names the cause: `error.name === 'AbortError'` misses
+      // `APIUserAbortError`, and a provider that swallows the signal and
+      // throws something else is still a turn the user stopped.
+      const interrupted = context.signal?.aborted === true;
       yield {
         type: 'failed',
         imageId,
         prompt: plan.prompt,
-        error: errorToMessage(error),
+        error: interrupted ? IMAGE_ABANDONED_ERROR : errorToMessage(error),
+        ...(interrupted ? { errorCode: IMAGE_ABANDONED_ERROR_CODE } : {}),
         modelName,
         generationTime: formatDurationSince(startedAt),
         createdAt: Date.now(),

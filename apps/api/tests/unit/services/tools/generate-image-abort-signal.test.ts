@@ -1,6 +1,10 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { getDb } from '../../../../src/db/database';
 import {
+  IMAGE_ABANDONED_ERROR,
+  IMAGE_ABANDONED_ERROR_CODE,
+} from '../../../../src/modules/generation/application/image-interruption';
+import {
   getProvider,
   registerProvider,
 } from '../../../../src/services/providers/core/provider-registry';
@@ -162,6 +166,17 @@ describe('generateImagesForToolPlan — abort signal threading', () => {
     // Only the in-flight image was attempted — the between-images check still
     // stops the loop before the second, unreached image is ever started.
     expect(fake.callCount).toBe(1);
-    expect(outcomes).toEqual([expect.objectContaining({ type: 'failed' })]);
+    // The image that was in flight and the one never reached are the same
+    // gesture to the user, so they must carry the same reason. Without the
+    // signal check this is whatever the SDK threw ('The image request was
+    // aborted.' here, 'Request was aborted.' from OpenAI) with no `errorCode`,
+    // which `GeneratedImagePart` then renders verbatim and untranslated.
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        type: 'failed',
+        error: IMAGE_ABANDONED_ERROR,
+        errorCode: IMAGE_ABANDONED_ERROR_CODE,
+      }),
+    ]);
   }, 5000);
 });
