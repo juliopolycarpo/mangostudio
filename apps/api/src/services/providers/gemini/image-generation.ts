@@ -5,6 +5,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getConfig } from '../../../lib/config';
+import { throwIfAborted } from '../../../modules/environments/domain/cancellation';
 import {
   normalizeGeneratedImageMimeType,
   saveGeneratedImage,
@@ -166,6 +167,14 @@ export async function generateGeminiImage(
   } else if (modelName === 'gemini-2.5-flash-image') {
     config.imageConfig = { aspectRatio: '1:1' };
   }
+
+  // `config.abortSignal` only covers an abort that lands *after* dispatch: the
+  // SDK wires it with `addEventListener('abort')` onto a fresh controller and
+  // never reads `signal.aborted`, so a Stop during key resolution or the
+  // reference-image read above would be dropped and the request would run to
+  // completion. Every await between the caller's check and here is covered by
+  // checking once, at the last possible moment.
+  throwIfAborted(signal, 'Image generation was aborted.');
 
   const response = await ai.models.generateContent({
     model: modelName,
