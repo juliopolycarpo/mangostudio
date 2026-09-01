@@ -26,28 +26,28 @@
     "test:coverage:integration": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun test --coverage --coverage-dir=../../.mango/artifacts/coverage/api-integration --timeout 15000 --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/api-integration.xml $MANGOSTUDIO_BUN_TEST_ARGS tests/integration"
   },
   "dependencies": {
-    "@ai-sdk/deepseek": "^3.0.24",
-    "@anthropic-ai/sdk": "^0.115.0",
-    "@better-auth/api-key": "1.6.26",
+    "@ai-sdk/deepseek": "^3.0.36",
+    "@anthropic-ai/sdk": "^0.122.0",
+    "@better-auth/api-key": "1.7.2",
     "@elysia/cors": "2.0.0-beta.1",
     "@elysia/openapi": "2.0.0-beta.1",
     "@elysia/static": "2.0.0-beta.2",
     "@google/genai": "^1.52.0",
     "@mangostudio/runtime": "workspace:*",
     "@mangostudio/shared": "workspace:*",
-    "ai": "^7.0.55",
-    "better-auth": "^1.6.26",
+    "ai": "^7.0.84",
+    "better-auth": "^1.7.2",
     "elysia": "2.0.0-beta.4",
     "exact-mirror": "1.2.4",
-    "file-type": "^22.0.1",
-    "kysely": "^0.29.4",
+    "file-type": "^22.0.2",
+    "kysely": "^0.29.5",
     "kysely-bun-sqlite": "^0.4.0",
     "openai": "^6.48.0",
-    "smol-toml": "^1.7.0",
-    "typebox": "1.3.13"
+    "smol-toml": "^1.8.0",
+    "typebox": "1.3.20"
   },
   "devDependencies": {
-    "@faker-js/faker": "^10.5.0",
+    "@faker-js/faker": "^10.6.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/bun": "^1.4.0",
     "typescript": "7.0.2"
