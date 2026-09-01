@@ -624,14 +624,23 @@ function computeTurnLocalCharCount(
  * `finalizeSuccessfulTurn` never calls it, so a throw swallowed into an
  * `isError` tool result — which lets `generateText` return normally — would
  * otherwise settle a successful turn with the card stuck pulsing forever.
+ * Yields `image_generation_failed` for each such image so a client still
+ * reading the stream settles the card too, not just a later reload.
  *
- * // Usage: finalizeDanglingToolExecutions(session.allParts);
+ * // Usage: yield* finalizeDanglingToolExecutions(session.allParts);
  */
-export function finalizeDanglingToolExecutions(parts: MessagePart[]): void {
+export function* finalizeDanglingToolExecutions(parts: MessagePart[]): Generator<StreamEvent> {
   for (const part of parts) {
     if (part.type === 'generated_image' && part.status === 'generating') {
       part.status = 'error';
       part.error = IMAGE_ABANDONED_ERROR;
+      yield {
+        type: 'image_generation_failed',
+        imageId: part.imageId,
+        toolCallId: part.toolCallId,
+        prompt: part.prompt,
+        error: IMAGE_ABANDONED_ERROR,
+      };
       continue;
     }
     if (part.type !== 'tool_call' || !part.execution) continue;

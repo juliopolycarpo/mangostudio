@@ -25,10 +25,11 @@ describe('finalizeDanglingToolExecutions', () => {
       },
     ];
 
-    finalizeDanglingToolExecutions(parts);
+    const events = [...finalizeDanglingToolExecutions(parts)];
 
     const call = parts.find((part) => part.type === 'tool_call');
     expect(call).toMatchObject({ execution: { status: 'cancelled', reasonCode: 'turn_aborted' } });
+    expect(events).toEqual([]);
   });
 
   it('seals a generated_image part still generating when the turn finalized successfully', () => {
@@ -54,7 +55,7 @@ describe('finalizeDanglingToolExecutions', () => {
       },
     ];
 
-    finalizeDanglingToolExecutions(parts);
+    const events = [...finalizeDanglingToolExecutions(parts)];
 
     const pending = parts.find(
       (part) => part.type === 'generated_image' && part.imageId === 'img-1'
@@ -65,5 +66,16 @@ describe('finalizeDanglingToolExecutions', () => {
     expect(pending).toMatchObject({ status: 'error', error: expect.any(String) });
     // A part that already landed keeps its result: this seals, it does not undo.
     expect(landed).toMatchObject({ status: 'completed', imageUrl: '/images/img-2.png' });
+    // The open tab is still reading this stream: without this event it never
+    // hears the seal and the card keeps pulsing until reload.
+    expect(events).toEqual([
+      {
+        type: 'image_generation_failed',
+        imageId: 'img-1',
+        toolCallId: 'image-1',
+        prompt: 'Paint mangoes',
+        error: expect.any(String),
+      },
+    ]);
   });
 });

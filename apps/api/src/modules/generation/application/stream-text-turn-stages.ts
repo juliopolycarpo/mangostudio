@@ -976,7 +976,7 @@ export async function* finalizeSuccessfulTurn(
     }
   }
 
-  finalizeDanglingToolExecutions(session.allParts);
+  yield* finalizeDanglingToolExecutions(session.allParts);
   await session.checkpointWriter.prepareFinal('completed');
   sealUnresolvedToolCalls(session.allParts);
   const finalParts = mergeMessageParts(session.allParts);
