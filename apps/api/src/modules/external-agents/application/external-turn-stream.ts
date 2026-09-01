@@ -30,6 +30,7 @@ import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getOwnedChat, type OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import { findActiveTurnByChat } from '../../generation/application/active-turn-registry';
+import { KEEPALIVE_INTERVAL_MS } from '../../generation/application/sse-keepalive';
 import { getRepoRoot } from '../../git/application/git-status-service';
 import { requiresExternalDisclosure } from './external-disclosure-gate';
 import {
@@ -44,9 +45,6 @@ import {
 import { requiresWorkspaceTrust } from './external-workspace-trust';
 
 const logger = createDiagnosticLogger('external-turn-stream');
-
-/** Matches the internal streaming route; one interval for one chat experience. */
-const KEEPALIVE_INTERVAL_MS = 15_000;
 
 const KEEPALIVE_BYTES = new TextEncoder().encode(': keepalive\n\n');
 
