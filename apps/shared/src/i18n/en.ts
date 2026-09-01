@@ -151,8 +151,9 @@ export const messages: Messages = {
       generatingImage: 'Generating image...',
       statusGenerating: 'Generating',
       statusThinking: 'Thinking',
-      statusGenerated: 'Generated',
-      statusReplied: 'Replied',
+      statusResponding: 'Responding',
+      statusWorking: 'Working',
+      statusAwaitingUser: 'Waiting for you',
       modelFallback: 'AI model',
       modelStatus: '{status} with: {model}',
       download: 'Download',
@@ -3481,7 +3482,6 @@ export const messages: Messages = {
       usageCacheRead: 'cache read',
       usageCacheWrite: 'cache write',
       usageTotal: 'total',
-      working: 'Working...',
       incomplete: 'Cut off.',
       terminal: {
         completed: 'Finished.',
@@ -3546,10 +3546,9 @@ export const messages: Messages = {
   },
 
   thinking: {
-    labelContinued: 'Continued thinking',
     streaming: 'Thinking...',
-    streamingContinued: 'Thinking again...',
     thought: 'Thought',
+    withheld: 'Thought, reasoning not shared',
     toggle: 'View reasoning',
     enable: 'Thinking',
     enabled: 'Thinking enabled',
@@ -3647,6 +3646,7 @@ export const messages: Messages = {
     referenceImageUploadFailed: 'Failed to upload reference image. Please try again.',
     textGenerationFailed: 'Failed to get a response. Please try again.',
     imageGenerationFailed: 'Failed to generate image. Please try again.',
+    imageGenerationInterrupted: 'The turn was interrupted before this image was generated.',
   },
 
   models: {

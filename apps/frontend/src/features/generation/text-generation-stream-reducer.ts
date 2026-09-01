@@ -36,7 +36,6 @@ export interface TextGenerationStreamState {
   readonly currentAiMessageId: string;
   readonly receivedServerUserMessageId: boolean;
   readonly receivedServerAiMessageId: boolean;
-  readonly activeThinkingIndex: number | null;
   /**
    * Where in `parts` the reasoning phase an external turn opened sits, until
    * `external_reasoning_ended` closes it.
@@ -48,6 +47,14 @@ export interface TextGenerationStreamState {
   readonly openExternalThinkingIndex: number | null;
   readonly userMessageUpdate: TextGenerationStreamMessageUpdate | null;
   readonly aiMessageUpdate: TextGenerationStreamMessageUpdate | null;
+  /**
+   * Whether some chunk has already taken the assistant row off `isGenerating`.
+   *
+   * Not every stream ends with one: a cancelled turn is closed by
+   * `finalizeInterruptedTurn`, which yields no `done`. The caller reads this to
+   * decide whether the row still needs a terminal patch once the stream returns.
+   */
+  readonly sealed: boolean;
   /** Cumulative thread usage from the vendor — separate from per-turn `usage` on the turn part. */
   readonly threadUsage: ExternalThreadUsage | null;
 }
@@ -84,12 +91,59 @@ export function createTextGenerationStreamState({
     currentAiMessageId: aiMessageId,
     receivedServerUserMessageId: false,
     receivedServerAiMessageId: false,
-    activeThinkingIndex: null,
     openExternalThinkingIndex: null,
     userMessageUpdate: null,
     aiMessageUpdate: null,
     threadUsage: null,
+    sealed: false,
   };
+}
+
+/**
+ * Settles every `generated_image` part still at `generating` onto `error`.
+ *
+ * A card only moves off `generating` when its `image_generation_completed` or
+ * `image_generation_failed` event arrives, so any stream that ends before those
+ * are read — a torn-down reader, a dropped socket, a provider that threw —
+ * leaves it pulsing with nothing left to settle it. Returns `parts` unchanged
+ * when none is pending, so a caller can tell "nothing to write" from "wrote the
+ * same array".
+ *
+ * Usage: `const parts = settleUnfinishedImageParts(state.parts, t.errors.imageGenerationInterrupted)`
+ */
+export function settleUnfinishedImageParts(parts: MessagePart[], error: string): MessagePart[] {
+  if (!parts.some(isUnfinishedImagePart)) return parts;
+  return parts.map((part) =>
+    isUnfinishedImagePart(part) ? { ...part, status: 'error' as const, error } : part
+  );
+}
+
+function isUnfinishedImagePart(part: MessagePart): part is GeneratedImagePart {
+  return part.type === 'generated_image' && part.status === 'generating';
+}
+
+/**
+ * Marks a still-active vendor turn record terminal when the reader ends before
+ * the vendor's own terminal chunk does.
+ *
+ * The turn record is the second piece of evidence `isRunning` consults — it
+ * survives `isGenerating: false`, so without this a killed or dropped external
+ * stream keeps the row on `working` and its actions hidden forever. The reason
+ * is provisional by the same contract as the rest of the local seal: the next
+ * transcript read replaces the part with the server's own record. Returns the
+ * same state when no active turn record exists, mirroring
+ * `settleUnfinishedImageParts`'s same-array contract.
+ *
+ * @example
+ * streamState = settleUnfinishedExternalTurn(streamState, 'cancelled-by-user');
+ */
+export function settleUnfinishedExternalTurn(
+  state: TextGenerationStreamState,
+  reason: ExternalTurnTerminalReason
+): TextGenerationStreamState {
+  const turn = state.parts.find((part) => part.type === 'external_turn');
+  if (turn?.status !== 'active') return state;
+  return reduceExternalTurnCompleted(state, reason);
 }
 
 /** Reduces one streamed chunk into the next optimistic text generation state.
@@ -219,28 +273,39 @@ function reduceStreamError(state: TextGenerationStreamState, errorText: string) 
   );
 }
 
+/**
+ * Explicitly opens a new reasoning segment, unconditionally.
+ *
+ * Unlike a delta, which only opens a segment when the trailing part isn't
+ * already one, `thinking_start` always appends a fresh empty `thinking` part
+ * — even back-to-back with another one — because it is the provider's own
+ * word that a new phase began, not an inference from adjacency.
+ */
 function reduceThinkingStart(state: TextGenerationStreamState) {
   const parts = [...state.parts, { type: 'thinking', text: '' } satisfies MessagePart];
-  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: parts.length - 1 }, { parts });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
+/**
+ * Same rule `reduceTextDelta` and `reduceExternalReasoning` apply: a run ends
+ * the moment a part of another kind is appended. Reading `parts` structurally
+ * rather than tracking which index is "active" is what keeps this agreeing
+ * with `mergeMessageParts`'s adjacency rule on the persisted side — a
+ * `continuation_transition` (or any other part) spliced in between two
+ * reasoning phases ends the first one, even on a runtime old enough, or a
+ * server bookkeeping bug stale enough, to never send a second `thinking_start`.
+ */
 function reduceThinkingDelta(state: TextGenerationStreamState, text: string) {
-  const initializedState = state.activeThinkingIndex === null ? reduceThinkingStart(state) : state;
-  const thinkingIndex = initializedState.activeThinkingIndex;
-  if (thinkingIndex === null) return initializedState;
-  const currentPart = initializedState.parts[thinkingIndex];
-  const currentText = currentPart?.type === 'thinking' ? currentPart.text : '';
-  const parts = replacePartAt(initializedState.parts, thinkingIndex, {
-    type: 'thinking',
-    text: `${currentText}${text}`,
-  });
-  return withAiMessageUpdate({ ...initializedState, parts }, { parts });
+  const parts = appendTrailingText(state.parts, 'thinking', text);
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceTextDelta(state: TextGenerationStreamState, textDelta: string) {
+  // `state.text` still accumulates every delta for the legacy `msg.text` patch;
+  // the parts array gets the delta alone, appended to the trailing text part.
   const text = `${state.text}${textDelta}`;
-  const parts = upsertTextPart(state.parts, text);
-  return withAiMessageUpdate({ ...state, text, parts, activeThinkingIndex: null }, { text, parts });
+  const parts = appendTrailingText(state.parts, 'text', textDelta);
+  return withAiMessageUpdate({ ...state, text, parts }, { text, parts });
 }
 
 function reduceToolCallStarted(state: TextGenerationStreamState, callId: string, name: string) {
@@ -248,7 +313,7 @@ function reduceToolCallStarted(state: TextGenerationStreamState, callId: string,
     ...state.parts,
     { type: 'tool_call', toolCallId: callId, name, args: {} } satisfies MessagePart,
   ];
-  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceToolCallCompleted(
@@ -443,7 +508,7 @@ function reduceMcpElicitation(
   const parts = exists
     ? updateElicitationStatus(state.parts, chunk.elicitationId, chunk.status)
     : [...state.parts, elicitationPart];
-  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceMcpElicitationStatus(
@@ -503,7 +568,7 @@ function reduceImageGenerationStarted(
     status: 'generating',
     prompt: chunk.prompt,
   });
-  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceImageGenerationCompleted(
@@ -534,6 +599,7 @@ function reduceImageGenerationFailed(
     status: 'error',
     prompt: chunk.prompt,
     error: chunk.error,
+    errorCode: chunk.errorCode,
     modelName: chunk.modelName,
     generationTime: chunk.generationTime,
   });
@@ -580,7 +646,7 @@ function reduceDone(
   generationTime: string | undefined
 ) {
   return withAiMessageUpdate(
-    { ...state, activeThinkingIndex: null },
+    state,
     {
       isGenerating: false,
       text: state.text,
@@ -598,14 +664,11 @@ function reduceDone(
  *
  * The hub builds the durable transcript from the same neutral events these
  * chunks were projected from, so every function below has an exact counterpart
- * in `ExternalTurnTranscript` and has to agree with it — including the parts
- * that look like details, such as appending a delta to the *trailing* part
- * rather than to the first `text` part found. `upsertTextPart` moves the text
- * block to the end, which is right for a MangoStudio turn whose prose is one
- * block, and wrong for a vendor that interleaves prose with its own activity.
+ * in `ExternalTurnTranscript` and has to agree with it.
  *
  * `apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts`
- * drives both paths from one event sequence and compares the results.
+ * drives both paths from one event sequence and compares the results, and
+ * `internal-turn-live-vs-reload.test.ts` does the same for the internal one.
  */
 function reduceExternalSessionStarted(
   state: TextGenerationStreamState,
@@ -630,17 +693,17 @@ function reduceExternalSessionStarted(
       persistedBytes: 0,
     } satisfies MessagePart,
   ];
-  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceExternalText(state: TextGenerationStreamState, textDelta: string) {
   const text = `${state.text}${textDelta}`;
-  const parts = appendExternalText(state.parts, 'text', textDelta);
-  return withAiMessageUpdate({ ...state, text, parts, activeThinkingIndex: null }, { text, parts });
+  const parts = appendTrailingText(state.parts, 'text', textDelta);
+  return withAiMessageUpdate({ ...state, text, parts }, { text, parts });
 }
 
 function reduceExternalReasoning(state: TextGenerationStreamState, textDelta: string) {
-  const parts = appendExternalText(state.parts, 'thinking', textDelta);
+  const parts = appendTrailingText(state.parts, 'thinking', textDelta);
   return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
@@ -651,12 +714,12 @@ function reduceExternalReasoning(state: TextGenerationStreamState, textDelta: st
  * vendor produced in between and never closed in word — what a runtime too old
  * to send `external_reasoning_ended` always produces. Closing it first discards
  * it when it is empty, instead of stranding a blank block mid-transcript.
- * `appendExternalText` then coalesces onto a trailing `thinking` part, so a
+ * `appendTrailingText` then coalesces onto a trailing `thinking` part, so a
  * phase that already received text is not opened a second time.
  */
 function reduceExternalReasoningStarted(state: TextGenerationStreamState) {
   const closed = closeThinkingAt(state.parts, state.openExternalThinkingIndex);
-  const parts = appendExternalText(closed.parts, 'thinking', '');
+  const parts = appendTrailingText(closed.parts, 'thinking', '');
   return withAiMessageUpdate(
     { ...state, parts, openExternalThinkingIndex: parts.length - 1 },
     { parts }
@@ -694,7 +757,7 @@ function reduceExternalActivityStarted(
       ...(chunk.truncated ? { truncated: true } : {}),
     } satisfies MessagePart,
   ];
-  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceExternalActivityUpdated(
@@ -747,7 +810,7 @@ function reduceExternalApprovalRequest(
       ...(chunk.truncated ? { truncated: true } : {}),
     } satisfies MessagePart,
   ];
-  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceExternalApprovalStatus(
@@ -835,7 +898,7 @@ function reduceExternalSteer(
           createdAt: 0,
         };
   const parts = [...state.parts, steerPart satisfies MessagePart];
-  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceExternalError(state: TextGenerationStreamState, error: ExternalAgentError) {
@@ -935,10 +998,13 @@ function updateExternalActivity(
  * Appends to the trailing part when it is already of this kind.
  *
  * A stream of deltas becomes one block, and interleaved activity still splits
- * the prose where the vendor split it — which is what the persisted transcript
- * records, so it is what a live render has to produce.
+ * the prose where the producer split it — which is what the persisted
+ * transcript records, so it is what a live render has to produce. True of a
+ * vendor CLI and of MangoStudio's own harness alike: prose written before a
+ * tool call belongs before it, and the previous rule — remove the text part,
+ * re-append it with the whole accumulated text — moved it after.
  */
-function appendExternalText(
+function appendTrailingText(
   parts: MessagePart[],
   kind: 'text' | 'thinking',
   text: string
@@ -974,19 +1040,16 @@ function withAiMessageUpdate(
     ...state,
     currentAiMessageId: nextMessageId,
     receivedServerAiMessageId,
+    // Read off the patch rather than set by each terminal reducer: this is the
+    // one funnel every assistant-row update goes through, so a future chunk
+    // that ends a turn cannot forget to say so.
+    sealed: state.sealed || patch.isGenerating === false,
     aiMessageUpdate: { targetMessageId: state.currentAiMessageId, patch },
   };
 }
 
 function replacePartAt(parts: MessagePart[], index: number, nextPart: MessagePart): MessagePart[] {
   return parts.map((part, partIndex) => (partIndex === index ? nextPart : part));
-}
-
-function upsertTextPart(parts: MessagePart[], text: string): MessagePart[] {
-  const textIndex = parts.findIndex((part) => part.type === 'text');
-  if (textIndex === -1) return [...parts, { type: 'text', text }];
-  const nextParts = [...parts.slice(0, textIndex), ...parts.slice(textIndex + 1)];
-  return [...nextParts, { type: 'text', text }];
 }
 
 function parseToolArguments(argumentsText: string): Record<string, unknown> {

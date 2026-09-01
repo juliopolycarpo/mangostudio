@@ -67,6 +67,27 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(screen.getByText('The answer is 42.')).toBeInTheDocument();
   });
 
+  it('puts the assistant prose in a balloon off the rail, not on it', async () => {
+    const parts: MessagePart[] = [
+      { type: 'thinking', text: 'weighing it up' },
+      { type: 'tool_call', toolCallId: 'c1', name: 'Bash', args: {} },
+      { type: 'tool_result', toolCallId: 'c1', content: '{}' },
+      { type: 'text', text: 'Created /tmp/probe.txt.' },
+    ];
+    const msg = makeMessage({ parts });
+
+    const { container } = render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
+
+    // The prose item cuts the rail (`--bubble`) instead of hanging off it as
+    // one more step (`--block`), and it draws the same balloon a user gets.
+    const bubbleItems = container.querySelectorAll('.chat-timeline-item--bubble');
+    expect(bubbleItems).toHaveLength(1);
+    expect(bubbleItems[0]?.querySelector('.rounded-2xl.bg-surface-container-low')).not.toBeNull();
+    expect(screen.getByText('Created /tmp/probe.txt.')).toBeInTheDocument();
+  });
+
   it('renders multiple thinking blocks for multiple thinking parts', async () => {
     const parts: MessagePart[] = [
       { type: 'thinking', text: 'initial thinking' },
@@ -88,14 +109,16 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(thoughtRows).toHaveLength(2);
   });
 
-  it('normalizes token-level interleaving into one thinking block and one text block', async () => {
+  it('collapses a run of deltas but leaves an alternating turn alternating', async () => {
     const parts: MessagePart[] = [
       { type: 'thinking', text: 'The ' },
-      { type: 'text', text: 'Let ' },
       { type: 'thinking', text: 'user ' },
-      { type: 'text', text: 'me ' },
       { type: 'thinking', text: 'wants me' },
+      { type: 'text', text: 'Let ' },
+      { type: 'text', text: 'me ' },
       { type: 'text', text: 'first explore' },
+      { type: 'thinking', text: 'Second look.' },
+      { type: 'text', text: 'Then answer.' },
     ];
     const msg = makeMessage({ parts });
 
@@ -103,13 +126,15 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     await flushAsyncRender();
 
-    const thinkingButtons = container.querySelectorAll('button');
-    const thoughtRows = Array.from(thinkingButtons).filter((btn) =>
+    // Each run of same-kind deltas becomes one block; the two reasoning phases
+    // stay two, in the places the model produced them.
+    const thoughtRows = Array.from(container.querySelectorAll('button')).filter((btn) =>
       btn.textContent?.includes('Thought')
     );
 
-    expect(thoughtRows).toHaveLength(1);
+    expect(thoughtRows).toHaveLength(2);
     expect(screen.getByText('Let me first explore')).toBeInTheDocument();
+    expect(screen.getByText('Then answer.')).toBeInTheDocument();
   });
 
   it('settles a thought as soon as the turn streams past it', async () => {
@@ -132,6 +157,9 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(container.querySelector('.markdown-content--streaming')).toHaveTextContent(
       'Here is the answer.'
     );
+    // The trailing prose is what the turn is streaming into, so the working row
+    // stays suppressed even though the turn is running.
+    expect(screen.queryByText('Working')).toBeNull();
   });
 
   it('renders tool call block with pending state when no matching result', async () => {
@@ -150,6 +178,9 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
       btn.textContent?.includes('calculator')
     );
     expect(toolButtons.length).toBeGreaterThan(0);
+    // The turn is streaming and the call has not answered, so the gap under it
+    // now carries the working row an internal turn never used to get.
+    expect(screen.getByText('Working')).toBeInTheDocument();
   });
 
   it('skips tool_result parts (rendered inline with tool_call)', async () => {
@@ -205,6 +236,72 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(screen.getByText('No response')).toBeInTheDocument();
   });
 
+  it('does not show No response for a settled vendor turn with only activities', async () => {
+    // A Codex/Claude turn that only ran commands never writes `tool_call` —
+    // it writes `external_activity`. The old `text`-or-`tool_call` heuristic
+    // missed this and drew the activity timeline plus a false "No response".
+    const parts: MessagePart[] = [
+      {
+        type: 'external_activity',
+        targetId: 'codex',
+        callId: 'call-1',
+        name: 'shell',
+        kind: 'command',
+        title: 'bun run build',
+        status: 'completed',
+      },
+    ];
+    const msg = makeMessage({ parts });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
+
+    expect(screen.getByText('bun run build')).toBeInTheDocument();
+    expect(screen.queryByText('No response')).not.toBeInTheDocument();
+  });
+
+  it('does not show No response for a settled turn that only asked for approval', async () => {
+    // `external_approval`/`external_steer` have no `tool_call` sibling the way
+    // `question`/`todo` do, so an inclusion list of "content" kinds misses them
+    // the same way it missed activities. An expired/decided approval is a
+    // settled turn (deriveTurnStatus reads `external_turn.status` for that),
+    // and the card still renders under a false "No response".
+    const parts: MessagePart[] = [
+      {
+        type: 'external_turn',
+        version: 1,
+        targetId: 'codex',
+        sessionId: 'session-1',
+        status: 'terminal',
+        terminalReason: 'completed',
+        startedAt: 0,
+        updatedAt: 0,
+        lastSequence: 1,
+        eventCount: 1,
+        persistedBytes: 10,
+      },
+      {
+        type: 'external_approval',
+        targetId: 'codex',
+        requestId: 'req-1',
+        kind: 'command',
+        title: 'Run `rm -rf build`',
+        options: [{ id: 'approve', rawLabel: 'Approve', isDestructive: false }],
+        expiresAtMs: 600_000,
+        decisionSource: 'expired',
+      },
+    ];
+    const msg = makeMessage({ parts });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
+
+    expect(screen.getByText('Run `rm -rf build`')).toBeInTheDocument();
+    expect(screen.queryByText('No response')).not.toBeInTheDocument();
+  });
+
   it('uses a neutral fallback label when assistant model name is missing', async () => {
     const msg = makeMessage({
       parts: undefined,
@@ -253,7 +350,10 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     await flushAsyncRender();
 
-    expect(screen.getByText('Generated with: gpt-image-2')).toBeInTheDocument();
+    // The separator names the producer and nothing else: a stored status verb
+    // goes stale the moment a turn is reloaded, so the turn's phase is derived
+    // and only stated while it is still true.
+    expect(screen.getByText('gpt-image-2')).toBeInTheDocument();
     expect(screen.getByAltText('Generated')).toHaveAttribute('src', '/images/generated-123.png');
     expect(screen.getByText(/Thought for/)).toBeInTheDocument();
     expect(screen.getByText('1K')).toBeInTheDocument();
@@ -462,8 +562,12 @@ describe('ChatFeed — generated_image part rendering', () => {
     expect(screen.getByText('Subagent trace')).toBeInTheDocument();
     expect(screen.getByText('I used Explore.')).toBeInTheDocument();
 
+    // The disclosure state has to reach assistive technology, not just the chevron.
+    expect(screen.getByRole('button', { expanded: false })).toBeInTheDocument();
+
     fireEvent.click(screen.getByText('Explore'));
 
+    expect(screen.getByRole('button', { expanded: true })).toBeInTheDocument();
     expect(screen.getByText('Messages')).toBeInTheDocument();
     expect(screen.getByText('Tool calls')).toBeInTheDocument();
     expect(screen.getByText('read_file')).toBeInTheDocument();
@@ -515,5 +619,52 @@ describe('ChatFeed — generated_image part rendering', () => {
     expect(screen.getByText('Attempt 2')).toBeInTheDocument();
     expect(screen.getByText('Delegation completed')).toBeInTheDocument();
     expect(screen.queryByText(/call=delegate-1/)).not.toBeInTheDocument();
+  });
+});
+
+// A MangoStudio turn carries no `external_turn` record to consult, so until the
+// derived status ORed `isStreaming` into liveness it was the one provider that
+// never got this cue. These are the rendered counterparts of the pure-function
+// cases in `tests/unit/features/chat/turn-status.test.ts`: they prove something
+// actually draws the row, not just that the derivation asked for it.
+describe('ChatFeed — an internal turn that is still working', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('says so before the first token, where the skeleton used to be', async () => {
+    const msg = makeMessage({ parts: [], isGenerating: true });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
+
+    expect(screen.getByText('Working')).toBeInTheDocument();
+  });
+
+  it('says so in the gap under a tool call that has not answered yet', async () => {
+    const parts: MessagePart[] = [
+      { type: 'tool_call', toolCallId: 'c9', name: 'calculator', args: {} },
+    ];
+    const msg = makeMessage({ parts, isGenerating: true });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
+
+    expect(screen.getByText('Working')).toBeInTheDocument();
+  });
+
+  // The prose already carries its own caret. A row under it saying the same
+  // thing would be redundant exactly where it matters least.
+  it('stays quiet under text that is actively streaming', async () => {
+    const parts: MessagePart[] = [{ type: 'text', text: 'Here is the ans' }];
+    const msg = makeMessage({ parts, isGenerating: true });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    await flushAsyncRender();
+
+    expect(screen.queryByText('Working')).toBeNull();
   });
 });

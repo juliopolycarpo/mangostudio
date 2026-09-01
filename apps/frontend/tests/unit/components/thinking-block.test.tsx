@@ -98,6 +98,21 @@ describe('ThinkingBlock', () => {
     expect(screen.queryByText('Race thought')).not.toBeInTheDocument();
   });
 
+  // `reasoning_started` opens an empty thinking part on purpose, and
+  // `display: "omitted"` is the API default — so a phase whose content was
+  // never sent is the common case, not the edge one. A disclosure over an
+  // empty panel is an affordance that opens onto nothing.
+  it('renders a withheld phase as a row with nothing to open', async () => {
+    const { container } = render(
+      <ThinkingBlock messageId="msg-withheld" text="" isStreaming={false} />
+    );
+    await flushAsyncRender();
+
+    expect(container.querySelector('[aria-expanded]')).toBeNull();
+    expect(container.querySelector('.app-scrollbar')).toBeNull();
+    expect(screen.getByText(/reasoning not shared/i)).toBeInTheDocument();
+  });
+
   it('handles scroll events', async () => {
     render(<ThinkingBlock messageId="msg-4" text="Scroll thought" isStreaming={true} />);
     await flushAsyncRender();

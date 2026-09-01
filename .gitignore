@@ -91,6 +91,7 @@ config.toml
 !.cursor/rules/
 .cursor/rules/*
 !.cursor/rules/cursor-cloud.mdc
+.playwright-cli/
 
 # ─── Local scratch space ─── #
 .local/

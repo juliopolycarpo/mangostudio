@@ -16,6 +16,7 @@ import {
   ExternalTurnTerminalReasonSchema,
   ExternalUsageSchema,
 } from '../external-agents/schemas';
+import { ImageGenerationErrorCodeSchema } from '../generation/schemas';
 import {
   McpElicitationFieldSchema,
   McpElicitationStatusSchema,
@@ -211,6 +212,7 @@ export const SSEImageGenerationFailedEventSchema = Type.Object({
   toolCallId: Type.String(),
   prompt: Type.String(),
   error: Type.String(),
+  errorCode: Type.Optional(ImageGenerationErrorCodeSchema),
   modelName: Type.Optional(Type.String()),
   generationTime: Type.Optional(Type.String()),
   done: Type.Literal(false),

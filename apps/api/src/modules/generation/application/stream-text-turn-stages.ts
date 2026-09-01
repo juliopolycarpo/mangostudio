@@ -6,6 +6,7 @@ import type {
 } from '@mangostudio/shared';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
+import { mergeMessageParts } from '@mangostudio/shared/generation';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { getErrorCode } from '../../../lib/error-code';
@@ -56,7 +57,6 @@ import {
   executeImageGenerationCall,
   finalizeDanglingToolExecutions,
   handleTurnCompleted,
-  mergeMessageParts,
   synchronizeToolProgressForCheckpoint,
   upsertToolCallPart,
   upsertToolResultPart,
@@ -426,6 +426,15 @@ export async function* emitAgentStreamEvent(
 
   switch (event.type) {
     case 'reasoning_delta':
+      // A delta with no text is not a withheld reasoning phase, and this path
+      // has no way to say it is one: `thinking_start` is synthesized from the
+      // first delta rather than announced by the provider, unlike an external
+      // turn's `reasoning_started`. Opening a segment for it stored an empty
+      // `thinking` part that rendered as "reasoning not shared", claiming the
+      // model withheld reasoning it never produced. The legacy arm below has
+      // always guarded its text this way; two adapters already drop these at
+      // the source, and the two that do not pass the vendor's value verbatim.
+      if (!event.text) break;
       if (!loop.inThinkingSegment) {
         loop.inThinkingSegment = true;
         yield { type: 'thinking_start' };
@@ -535,6 +544,14 @@ export async function* emitAgentStreamEvent(
 
     case 'continuation_degraded':
       loop.degradedThisTurn = true;
+      // A transition part is about to sit between whatever reasoning ran
+      // before it and whatever runs after, the same way a tool call would —
+      // see every other case here. Left stale, the next `reasoning_delta`
+      // skips `thinking_start`, and a client that relies on it to open a new
+      // segment (rather than reopening one structurally, like this reducer's
+      // frontend counterpart) welds the resumed reasoning onto the phase the
+      // transition just ended.
+      loop.inThinkingSegment = false;
       yield* emitContinuationDegradation(session, {
         from: event.from,
         to: event.to,
@@ -959,7 +976,7 @@ export async function* finalizeSuccessfulTurn(
     }
   }
 
-  finalizeDanglingToolExecutions(session.allParts);
+  yield* finalizeDanglingToolExecutions(session.allParts);
   await session.checkpointWriter.prepareFinal('completed');
   sealUnresolvedToolCalls(session.allParts);
   const finalParts = mergeMessageParts(session.allParts);

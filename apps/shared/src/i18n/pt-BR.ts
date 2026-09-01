@@ -144,8 +144,9 @@ export const messages = {
       generatingImage: 'Gerando imagem...',
       statusGenerating: 'Gerando',
       statusThinking: 'Pensando',
-      statusGenerated: 'Gerado',
-      statusReplied: 'Respondido',
+      statusResponding: 'Respondendo',
+      statusWorking: 'Trabalhando',
+      statusAwaitingUser: 'Aguardando você',
       modelFallback: 'Modelo de IA',
       modelStatus: '{status} com: {model}',
       download: 'Baixar',
@@ -3471,7 +3472,6 @@ export const messages = {
       usageCacheRead: 'cache lido',
       usageCacheWrite: 'cache escrito',
       usageTotal: 'total',
-      working: 'Trabalhando...',
       incomplete: 'Interrompido.',
       terminal: {
         completed: 'Concluído.',
@@ -3535,10 +3535,9 @@ export const messages = {
   },
 
   thinking: {
-    labelContinued: 'Continuação do raciocínio',
     streaming: 'Pensando...',
-    streamingContinued: 'Pensando novamente...',
     thought: 'Pensou',
+    withheld: 'Pensou, raciocínio não compartilhado',
     toggle: 'Ver raciocínio',
     enable: 'Raciocinar',
     enabled: 'Raciocínio ativo',
@@ -3636,6 +3635,7 @@ export const messages = {
     referenceImageUploadFailed: 'Falha ao enviar a imagem de referência. Tente novamente.',
     textGenerationFailed: 'Falha ao obter uma resposta. Tente novamente.',
     imageGenerationFailed: 'Falha ao gerar imagem. Tente novamente.',
+    imageGenerationInterrupted: 'O turno foi interrompido antes desta imagem ser gerada.',
   },
 
   models: {

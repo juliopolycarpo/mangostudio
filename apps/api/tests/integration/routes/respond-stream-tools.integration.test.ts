@@ -2,11 +2,13 @@ import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { cancelActiveTurn } from '../../../src/modules/generation/application/active-turn-registry';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import { isShellAvailable } from '../../../src/services/tools/builtin/_shell-exec';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { SseRecorder } from '../../support/harness/sse-recorder';
 import {
   buildRespondStreamRequest,
   createTestStreamDb,
@@ -31,6 +33,14 @@ beforeAll(async () => {
 
 let restoreAuth: (() => void) | null = null;
 const tempDirs: string[] = [];
+
+async function waitFor(predicate: () => boolean, label: string): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error(`Timed out waiting for ${label}`);
+}
 
 afterEach(async () => {
   restoreAuth?.();
@@ -158,6 +168,15 @@ describe('POST /respond/stream — tools', () => {
     const imageParts = parts.filter((part) => part.type === 'generated_image');
     expect(imageParts).toHaveLength(2);
     expect(toolCallIndex).toBeGreaterThanOrEqual(0);
+    // The provider announced this call through `tool_call_completed` before the
+    // image tool ran, so the two writers must land on one row: a second one
+    // renders as a duplicate step sharing the first's React key, and only the
+    // later row is settled when the tool returns.
+    const imageToolCalls = parts.filter(
+      (part) => part.type === 'tool_call' && part.toolCallId === 'image-call-1'
+    );
+    expect(imageToolCalls).toHaveLength(1);
+    expect(imageToolCalls[0]).toMatchObject({ execution: { status: 'succeeded' } });
     expect(parts.indexOf(imageParts[0])).toBeGreaterThan(toolCallIndex);
     expect(parts.indexOf(imageParts[1])).toBeGreaterThan(parts.indexOf(imageParts[0]));
     expect(imageParts[0]).toMatchObject({
@@ -193,6 +212,99 @@ describe('POST /respond/stream — tools', () => {
       modelName: 'test-image-model',
       metadataJson: JSON.stringify({ quality: '1K' }),
     });
+  });
+
+  it('streams the abandoned-image failure event to a tab that only asked to cancel, not disconnect', async () => {
+    // Regression test for the SSE route conflating the two: `cancelActiveTurn`
+    // aborts the same signal a client disconnect would, but the connection
+    // this stream owns is still open and its controller still writable, so
+    // events the cancelled tool call still yields — like the
+    // `image_generation_failed` this asserts on — must still reach it.
+    const generateImageCalls: Array<Record<string, unknown>> = [];
+    let resolveFirstImage: ((result: { imageUrl: string }) => void) | undefined;
+    const generateImage = (request: Record<string, unknown>) => {
+      generateImageCalls.push({ ...request });
+      if (generateImageCalls.length === 1) {
+        return new Promise<{ imageUrl: string }>((resolve) => {
+          resolveFirstImage = resolve;
+        });
+      }
+      return Promise.resolve({ imageUrl: `/images/generated-${generateImageCalls.length}.png` });
+    };
+
+    await mockVerifiedChatOwnership();
+
+    await mock.module('../../../src/services/tools', () => ({
+      getAllTools: realGetAllTools,
+      getAllToolDefinitions: realGetAllToolDefinitions,
+      executeTool: realExecuteTool,
+      getTool: realGetTool,
+      getSafeEffectiveToolSettings: realGetSafeEffectiveToolSettings,
+    }));
+
+    await mockProviderRegistry(
+      async function* streamImageToolLifecycle() {
+        await Promise.resolve();
+        yield { type: 'tool_call_started', callId: 'image-call-1', name: 'generate_image' };
+        yield {
+          type: 'tool_call_completed',
+          callId: 'image-call-1',
+          name: 'generate_image',
+          arguments: JSON.stringify({
+            prompt: 'Paint mangoes',
+            count: 2,
+            model: 'test-image-model',
+          }),
+        };
+        yield { type: 'turn_completed', providerState: null };
+      },
+      { generateImage }
+    );
+
+    const dbMock = createTestStreamDb({ userId: TEST_USER.id });
+    await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      buildRespondStreamRequest({ chatId: 'test-chat', prompt: 'Make images', model: 'test-model' })
+    );
+    expect(response.status).toBe(200);
+
+    const recorder = new SseRecorder(response);
+    const assistantEvent = await recorder.readUntil(
+      (event) => event.type === 'assistant_message_id'
+    );
+    const assistantMessageId = String(assistantEvent.messageId);
+
+    await waitFor(
+      () => generateImageCalls.length >= 1,
+      'the first image request to reach the provider'
+    );
+
+    // What the Stop button does: `handleStop` POSTs `/recovery/cancel` and then
+    // keeps reading, because the events that settle the cards this turn will
+    // never reach are yielded after that call has already returned. The
+    // recorder reading on is the browser, not a convenience — a Stop that tore
+    // the reader down here would be testing a client that no longer exists.
+    const cancelled = cancelActiveTurn(
+      assistantMessageId,
+      TEST_USER.id,
+      'test-chat',
+      'user_cancelled'
+    );
+    expect(cancelled).toBe(true);
+
+    resolveFirstImage?.({ imageUrl: '/images/generated-1.png' });
+
+    const events = await recorder.finish();
+
+    expect(events.filter((event) => event.type === 'image_generation_completed')).toHaveLength(1);
+    const failed = events.filter((event) => event.type === 'image_generation_failed');
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toMatchObject({ toolCallId: 'image-call-1' });
+    expect(generateImageCalls).toHaveLength(1);
   });
 
   it('omits disabled tools from provider requests', async () => {

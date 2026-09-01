@@ -4,6 +4,7 @@ import type { StreamChunk } from '@mangostudio/shared/streaming';
 import {
   createTextGenerationStreamState,
   reduceTextGenerationStreamChunk,
+  settleUnfinishedImageParts,
 } from '../../../../src/features/generation/text-generation-stream-reducer';
 
 const REDUCER_OPTIONS = { pendingSubagentName: 'Pending subagent' };
@@ -38,7 +39,6 @@ describe('text generation stream reducer', () => {
       { type: 'thinking', text: 'after tool' },
     ]);
     expect(state.text).toBe('answer');
-    expect(state.activeThinkingIndex).toBeNull();
   });
 
   it('updates tool call parts and tolerates malformed argument payloads', () => {
@@ -196,6 +196,34 @@ describe('text generation stream reducer', () => {
         error: 'provider failed',
         modelName: 'flux',
         generationTime: '2.1s',
+      },
+    ]);
+  });
+
+  // `errorCode` is what lets `GeneratedImagePart` localize an interrupted
+  // abandon instead of showing the model-facing English text verbatim.
+  it('carries errorCode from an image_generation_failed chunk onto the part', () => {
+    const state = reduceChunks([
+      {
+        type: 'image_generation_failed',
+        imageId: 'image-1',
+        toolCallId: 'tool-1',
+        prompt: 'cat portrait',
+        error: 'The turn was interrupted before this image was generated.',
+        errorCode: 'image_generation_interrupted',
+        done: false,
+      },
+    ]);
+
+    expect(getPartsByType(state.parts, 'generated_image')).toEqual([
+      {
+        type: 'generated_image',
+        imageId: 'image-1',
+        toolCallId: 'tool-1',
+        status: 'error',
+        prompt: 'cat portrait',
+        error: 'The turn was interrupted before this image was generated.',
+        errorCode: 'image_generation_interrupted',
       },
     ]);
   });
@@ -529,5 +557,93 @@ describe('text generation stream reducer', () => {
         ],
       },
     });
+  });
+});
+
+describe('settleUnfinishedImageParts', () => {
+  const pendingImage: MessagePart = {
+    type: 'generated_image',
+    imageId: 'img-1',
+    toolCallId: 'image-call-1',
+    status: 'generating',
+    prompt: 'Paint mangoes',
+  };
+
+  it('moves every pending card onto error and leaves settled ones alone', () => {
+    const settledImage: MessagePart = {
+      type: 'generated_image',
+      imageId: 'img-0',
+      toolCallId: 'image-call-1',
+      status: 'completed',
+      prompt: 'Paint mangoes',
+      imageUrl: '/images/generated-1.png',
+    };
+    const parts: MessagePart[] = [settledImage, pendingImage, { type: 'text', text: 'here goes' }];
+
+    expect(settleUnfinishedImageParts(parts, 'stopped')).toEqual([
+      settledImage,
+      { ...pendingImage, status: 'error', error: 'stopped' },
+      { type: 'text', text: 'here goes' },
+    ]);
+  });
+
+  // Identity, not equality: the caller reads it to decide whether the update it
+  // is about to send needs a `parts` key at all.
+  it('hands back the same array when nothing is pending', () => {
+    const parts: MessagePart[] = [{ type: 'text', text: 'no pictures here' }];
+
+    expect(settleUnfinishedImageParts(parts, 'stopped')).toBe(parts);
+  });
+});
+
+describe('stream state sealing', () => {
+  it('is unsealed while the turn is still producing', () => {
+    const state = reduceChunks([
+      { type: 'assistant_message_id', messageId: 'server-ai', done: false },
+      { type: 'text', text: 'partial answer', done: false },
+    ]);
+
+    expect(state.sealed).toBe(false);
+  });
+
+  it('seals on done', () => {
+    const state = reduceChunks([
+      { type: 'text', text: 'answer', done: false },
+      { type: 'done', done: true, generationTime: '0.5s' },
+    ]);
+
+    expect(state.sealed).toBe(true);
+  });
+
+  // Read off the patch, so a terminal chunk that is not `done` seals too.
+  it('seals on a terminal error chunk', () => {
+    const state = reduceChunks([{ type: 'error', error: 'provider exploded', done: true }]);
+
+    expect(state.sealed).toBe(true);
+  });
+
+  // The Stop path: every one of these leaves the row generating, which is why
+  // the caller has to seal it once the stream returns.
+  it('stays unsealed through a cancelled image turn', () => {
+    const state = reduceChunks([
+      { type: 'assistant_message_id', messageId: 'server-ai', done: false },
+      {
+        type: 'image_generation_started',
+        imageId: 'img-1',
+        toolCallId: 'image-call-1',
+        prompt: 'Paint mangoes',
+        done: false,
+      },
+      {
+        type: 'image_generation_failed',
+        imageId: 'img-1',
+        toolCallId: 'image-call-1',
+        prompt: 'Paint mangoes',
+        error: 'interrupted',
+        done: false,
+      },
+    ]);
+
+    expect(state.sealed).toBe(false);
   });
 });

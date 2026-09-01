@@ -3,8 +3,10 @@
  * Verifies that multiple thinking blocks are built correctly during SSE streaming.
  */
 
-import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+import { beforeEach, describe, expect, it, jest, mock, spyOn } from 'bun:test';
 import type { MessagePart } from '@mangostudio/shared';
+import { en } from '@mangostudio/shared/i18n';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
@@ -43,6 +45,46 @@ mock.module('../../../src/features/chat/queries', () => ({
 
 mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
   invalidateGitState: mockInvalidateGitState,
+}));
+
+/**
+ * Stands in for the realtime socket: records the latest handler per
+ * `(topic, concern)` and lets a test deliver a signal the way the server's
+ * activity publish would.
+ */
+class FakeRealtimeInvalidations {
+  private readonly handlers = new Map<string, (signal: { type: string }) => void | Promise<void>>();
+
+  register(
+    topic: string | null,
+    concern: string,
+    onSignal: (signal: { type: string }) => void | Promise<void>
+  ): void {
+    if (topic === null) return;
+    this.handlers.set(`${topic}\0${concern}`, onSignal);
+  }
+
+  async emit(topic: string): Promise<void> {
+    for (const [key, handler] of this.handlers) {
+      if (key.startsWith(`${topic}\0`)) await handler({ type: 'invalidate' });
+    }
+  }
+
+  reset(): void {
+    this.handlers.clear();
+  }
+}
+
+const fakeRealtime = new FakeRealtimeInvalidations();
+
+mock.module('../../../src/lib/realtime/use-realtime-invalidation', () => ({
+  useRealtimeInvalidation: (
+    topic: string | null,
+    concern: string,
+    onSignal: (signal: { type: string }) => void | Promise<void>
+  ) => {
+    fakeRealtime.register(topic, concern, onSignal);
+  },
 }));
 
 // Static imports are evaluated before any statement above runs, so the hook
@@ -888,6 +930,57 @@ describe('useTextGeneration — failure surfaced as timeline item', () => {
     );
   });
 
+  // A dropped socket rejects out of the reader as a network error, not an
+  // abort, so it lands here rather than in the abort branch. The card it leaves
+  // behind at `generating` is the same one, and nothing downstream settles it.
+  it('settles a still-generating image card when the stream throws', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({
+          type: 'image_generation_started',
+          imageId: 'img-1',
+          toolCallId: 'image-call-1',
+          prompt: 'Paint mangoes',
+          done: false,
+        });
+        return Promise.reject(new Error('network boom'));
+      }
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('draw');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    const calls = props.updateOptimisticMessage.mock.calls as Array<
+      [string, string, Partial<{ parts: MessagePart[]; isGenerating: boolean }>]
+    >;
+    const finalCall = [...calls].reverse().find(([, , update]) => update.isGenerating === false);
+    if (!finalCall) throw new Error('expected a terminal update');
+
+    expect(finalCall[2].parts).toContainEqual({
+      type: 'generated_image',
+      imageId: 'img-1',
+      toolCallId: 'image-call-1',
+      status: 'error',
+      prompt: 'Paint mangoes',
+      error: en.errors.imageGenerationInterrupted,
+    });
+    // The error part still lands: settling the card explains the picture, not
+    // the turn.
+    expect(finalCall[2].parts).toContainEqual({
+      type: 'error',
+      text: en.errors.textGenerationFailed,
+    });
+  });
+
   it('uses the localized fallback when the stream throws a non-Error value', async () => {
     const props = makeProps();
     mockStream.mockImplementation(() => Promise.reject('offline'));
@@ -1092,6 +1185,49 @@ describe('useTextGeneration — stream metadata and abort lifecycle', () => {
       { isGenerating: false }
     );
   });
+
+  // The abort paths that are left — a cancel POST that never landed, a socket
+  // that dropped — end the stream before the events that settle an image card
+  // are read. Nothing else will move it off `generating`.
+  it('settles a still-generating image card when the reader is torn down', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeAbortableStreamFn([
+        {
+          type: 'image_generation_started',
+          imageId: 'img-1',
+          toolCallId: 'image-call-1',
+          prompt: 'Paint mangoes',
+          done: false,
+        },
+      ])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      const responsePromise = result.current.handleRespond('draw');
+      result.current.handleStop();
+      await responsePromise;
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+    expect(props.updateOptimisticMessage).toHaveBeenCalledWith(
+      'chat-1',
+      expect.stringContaining('optimistic-ai'),
+      {
+        isGenerating: false,
+        parts: [
+          expect.objectContaining({
+            type: 'generated_image',
+            imageId: 'img-1',
+            status: 'error',
+            error: en.errors.imageGenerationInterrupted,
+          }),
+        ],
+      }
+    );
+  });
 });
 
 describe('useTextGeneration — interrupted turn actions', () => {
@@ -1151,6 +1287,223 @@ describe('useTextGeneration — interrupted turn actions', () => {
     });
   });
 
+  // `/recovery/cancel` returns as soon as the turn is told to stop, and the
+  // cancelled turn keeps yielding after that — the `image_generation_failed`
+  // events for the images it never reached are what settle those cards. A stop
+  // that tore the reader down dropped them and left the cards pulsing.
+  it('keeps reading after a stop so the cancelled turn can settle its own cards', async () => {
+    const props = makeProps();
+    const cancelReturned = createDeferred<void>();
+    const serverError = 'The turn was interrupted before this image was generated.';
+    let abortedWhenSettled = true;
+
+    mockCancelInterruptedTurn.mockResolvedValue(undefined);
+    mockStream.mockImplementation(
+      async (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void,
+        signal?: AbortSignal
+      ) => {
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai', done: false });
+        onChunk({
+          type: 'image_generation_started',
+          imageId: 'img-1',
+          toolCallId: 'image-call-1',
+          prompt: 'Paint mangoes',
+          done: false,
+        });
+
+        await new Promise<void>((resolve, reject) => {
+          if (signal?.aborted) {
+            reject(createAbortError());
+            return;
+          }
+          signal?.addEventListener('abort', () => reject(createAbortError()), { once: true });
+          void cancelReturned.promise.then(resolve);
+        });
+
+        abortedWhenSettled = signal?.aborted ?? false;
+        onChunk({
+          type: 'image_generation_failed',
+          imageId: 'img-1',
+          toolCallId: 'image-call-1',
+          prompt: 'Paint mangoes',
+          error: serverError,
+          done: false,
+        });
+      }
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+    let responded!: Promise<void>;
+
+    await act(async () => {
+      responded = result.current.handleRespond('draw');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      result.current.handleStop();
+      await Promise.resolve();
+    });
+
+    expect(mockCancelInterruptedTurn).toHaveBeenCalledWith('chat-1', 'server-ai');
+
+    await act(async () => {
+      cancelReturned.resolve();
+      await responded;
+    });
+
+    expect(abortedWhenSettled).toBe(false);
+    expect(props.updateOptimisticMessage).toHaveBeenCalledWith(
+      'chat-1',
+      'server-ai',
+      expect.objectContaining({
+        parts: [
+          expect.objectContaining({
+            type: 'generated_image',
+            imageId: 'img-1',
+            status: 'error',
+            error: serverError,
+          }),
+        ],
+      })
+    );
+
+    // A cancelled turn is closed by `finalizeInterruptedTurn`, which yields no
+    // `done`, so nothing in the stream takes the row off `isGenerating` and
+    // nothing throws either. Without a terminal patch here the row reads as
+    // `working` forever: no copy, no revert, and a working row under cards the
+    // stream already settled.
+    const calls = props.updateOptimisticMessage.mock.calls as Array<
+      [string, string, Partial<{ isGenerating: boolean }>]
+    >;
+    expect(calls.some(([, , update]) => update.isGenerating === false)).toBe(true);
+  });
+
+  // The first press waits for the server. A turn the server cannot end
+  // promptly — an image already in flight with the provider — would otherwise
+  // leave the user with no way out but a reload.
+  it('tears the reader down on a second stop press', async () => {
+    const props = makeProps();
+    let observedSignal: AbortSignal | undefined;
+
+    mockCancelInterruptedTurn.mockResolvedValue(undefined);
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void,
+        signal?: AbortSignal
+      ) => {
+        observedSignal = signal;
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai', done: false });
+        // The server that never closes: only an abort ends this.
+        return new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(createAbortError()), { once: true });
+        });
+      }
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+    let responded!: Promise<void>;
+
+    await act(async () => {
+      responded = result.current.handleRespond('draw');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      result.current.handleStop();
+      await Promise.resolve();
+    });
+    expect(observedSignal?.aborted).toBe(false);
+
+    await act(async () => {
+      result.current.handleStop();
+      await responded;
+    });
+
+    expect(observedSignal?.aborted).toBe(true);
+    expect(mockCancelInterruptedTurn).toHaveBeenCalledTimes(1);
+  });
+
+  // The cancel POST settles whenever the network lets it. By then the ref may
+  // hold the controller of a turn the user has since sent, so the fallback has
+  // to abort the stream this cancel belonged to, not whichever is current.
+  it('does not abort a later turn when the cancel fails after this one ended', async () => {
+    const props = makeProps();
+    let failCancel!: () => void;
+    mockCancelInterruptedTurn.mockImplementation(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          failCancel = () => reject(new Error('cancel timed out'));
+        })
+    );
+
+    const signals: (AbortSignal | undefined)[] = [];
+    const finishSecondTurn = createDeferred<void>();
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void,
+        signal?: AbortSignal
+      ) => {
+        signals.push(signal);
+        const turnIndex = signals.length;
+        onChunk({
+          type: 'assistant_message_id',
+          messageId: `server-ai-${turnIndex}`,
+          done: false,
+        });
+        return new Promise<void>((resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(createAbortError()), { once: true });
+          if (turnIndex === 2) void finishSecondTurn.promise.then(resolve);
+        });
+      }
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    let firstTurn!: Promise<void>;
+    await act(async () => {
+      firstTurn = result.current.handleRespond('draw');
+      await Promise.resolve();
+    });
+
+    // First press hands the stop to the server; second is the hard kill that
+    // ends this turn while the cancel POST is still in flight.
+    await act(async () => {
+      result.current.handleStop();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      result.current.handleStop();
+      await firstTurn;
+    });
+
+    let secondTurn!: Promise<void>;
+    await act(async () => {
+      secondTurn = result.current.handleRespond('again');
+      await Promise.resolve();
+    });
+    expect(signals).toHaveLength(2);
+
+    // The first turn's cancel fails now, long after that turn ended.
+    await act(async () => {
+      failCancel();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]?.aborted).toBe(false);
+
+    await act(async () => {
+      finishSecondTurn.resolve();
+      await secondTurn;
+    });
+  });
+
   it('dismisses the interrupted checkpoint for the current chat', async () => {
     const props = makeProps();
     mockDismissInterruptedTurn.mockResolvedValue(undefined);
@@ -1161,5 +1514,373 @@ describe('useTextGeneration — interrupted turn actions', () => {
     });
 
     expect(mockDismissInterruptedTurn).toHaveBeenCalledWith('chat-1', 'interrupted-ai');
+  });
+});
+
+describe('useTextGeneration — transcript reconciliation with the persisted turn', () => {
+  const ACTIVITY_TOPIC = 'activity';
+
+  beforeEach(() => {
+    mockStream.mockReset();
+    mockCancelInterruptedTurn.mockReset();
+    fakeRealtime.reset();
+  });
+
+  /** Renders the hook plus a probe for the QueryClient the wrapper installed. */
+  function renderWithQueryClient(props: TextGenerationProps) {
+    return renderHook(() => ({
+      generation: useTextGeneration(props),
+      queryClient: useQueryClient(),
+    }));
+  }
+
+  function messagesInvalidations(spy: ReturnType<typeof spyOn>) {
+    return spy.mock.calls.filter(([filters]: [{ queryKey?: unknown } | undefined]) => {
+      const queryKey = filters?.queryKey;
+      return Array.isArray(queryKey) && queryKey[0] === 'messages';
+    });
+  }
+
+  // The checkpoint's resume affordance travels only in the persisted parts —
+  // no stream event carries it — and the server has always persisted before it
+  // closes the stream. A stopped turn that skipped this re-read left the
+  // banner behind a reload.
+  it('re-reads the transcript when the stream closes cleanly without done', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([
+        { type: 'user_message_id', messageId: 'server-user', done: false },
+        { type: 'assistant_message_id', messageId: 'server-ai', done: false },
+        { type: 'text', text: 'partial', done: false },
+      ])
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    await act(async () => {
+      await result.current.generation.handleRespond('stop me');
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toContainEqual([
+      { queryKey: ['messages', 'chat-1'] },
+    ]);
+  });
+
+  it('does not re-read after a turn that ended in done with known ids', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([
+        { type: 'user_message_id', messageId: 'server-user', done: false },
+        { type: 'assistant_message_id', messageId: 'server-ai', done: false },
+        { type: 'done', done: true, messageId: 'server-ai', generationTime: '0.5s' },
+      ])
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    await act(async () => {
+      await result.current.generation.handleRespond('ping');
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+  });
+
+  // A dropped socket leaves the server mid-unwind: it learns the reader is gone
+  // at its next write, which can be a whole tool call away. An immediate
+  // re-read would replace the terminal error row with a persisted row still at
+  // `isGenerating`. The activity publish every finalizer sends is what says the
+  // persisted row is now the truth.
+  it('reconciles a thrown stream on the activity signal, not immediately', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({ type: 'user_message_id', messageId: 'server-user', done: false });
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai', done: false });
+        return Promise.reject(new Error('network error'));
+      }
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    await act(async () => {
+      await result.current.generation.handleRespond('draw');
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toContainEqual([
+      { queryKey: ['messages', 'chat-1'] },
+    ]);
+  });
+
+  // The server can persist and publish before the client notices its own read
+  // has died — the gate discards that signal because the controller ref is
+  // still installed. If nothing remembers it, the read's own `finally` arms a
+  // reconcile that waits for a second signal which, absent an unrelated turn
+  // or a reconnect, never comes.
+  it('redeems a signal that arrived mid-read once the stream throws', async () => {
+    const props = makeProps();
+    let rejectStream!: (error: Error) => void;
+    const streamGate = new Promise<void>((_resolve, reject) => {
+      rejectStream = reject;
+    });
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({ type: 'user_message_id', messageId: 'server-user', done: false });
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai', done: false });
+        return streamGate;
+      }
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    let turn!: Promise<void>;
+    await act(async () => {
+      turn = result.current.generation.handleRespond('draw');
+      await Promise.resolve();
+    });
+
+    // Mid-read: the finalize signal arrives while the controller ref is still
+    // installed, so the gate defers it instead of reconciling right away.
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+
+    // The read dies without ever hearing a completion event. No further
+    // signal fires — the deferred one from mid-read must be redeemed here.
+    await act(async () => {
+      rejectStream(new Error('network error'));
+      await turn;
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toContainEqual([
+      { queryKey: ['messages', 'chat-1'] },
+    ]);
+  });
+
+  // The activity topic is user-scoped: a reconnect ack or a turn finishing in
+  // another chat lands on the same handler. If any signal consumed the pending
+  // reconcile, one that fires while the server is still unwinding would clear
+  // it, refetch a row still at `isGenerating`, and pin the transcript on
+  // "working" with no later signal left to heal it.
+  it('keeps the reconcile armed while the re-read still shows the row generating', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({ type: 'user_message_id', messageId: 'server-user', done: false });
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai', done: false });
+        return Promise.reject(new Error('network error'));
+      }
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    await act(async () => {
+      await result.current.generation.handleRespond('draw');
+    });
+
+    // The server is still mid-unwind: its persisted row still says generating.
+    result.current.queryClient.setQueryData(['messages', 'chat-1'], {
+      pages: [{ messages: [{ id: 'server-ai', isGenerating: true }], nextCursor: null }],
+      pageParams: [null],
+    });
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(1);
+
+    // The finalize lands; the next signal must still find the reconcile armed.
+    result.current.queryClient.setQueryData(['messages', 'chat-1'], {
+      pages: [{ messages: [{ id: 'server-ai', isGenerating: false }], nextCursor: null }],
+      pageParams: [null],
+    });
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(2);
+
+    // Settled: a later signal has nothing left to reconcile.
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(2);
+  });
+
+  // `invalidateQueries` writes whatever the server currently has before the
+  // settled check runs. If the server is mid-unwind that write is a row still
+  // at `isGenerating: true`, landing straight over a terminal optimistic row
+  // the client already painted (the error state a dropped socket produces).
+  // The reconcile must restore that terminal snapshot rather than leave the
+  // mid-unwind write on screen.
+  it('restores the terminal optimistic row when a mid-unwind refetch is not settled', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({ type: 'user_message_id', messageId: 'server-user', done: false });
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai', done: false });
+        return Promise.reject(new Error('network error'));
+      }
+    );
+
+    type MessagesQueryData = {
+      pages: Array<{ messages: Array<{ id: string; isGenerating?: boolean; error?: string }> }>;
+      pageParams: Array<string | null>;
+    };
+
+    const { result } = renderWithQueryClient(props);
+    const queryKey = ['messages', 'chat-1'];
+    const terminalSnapshot: MessagesQueryData = {
+      pages: [{ messages: [{ id: 'server-ai', isGenerating: false, error: 'network error' }] }],
+      pageParams: [null],
+    };
+
+    await act(async () => {
+      await result.current.generation.handleRespond('draw');
+    });
+
+    // The client already settled the row locally; the server is still
+    // mid-unwind and would answer the refetch with `isGenerating: true`.
+    result.current.queryClient.setQueryData<MessagesQueryData>(queryKey, terminalSnapshot);
+    spyOn(result.current.queryClient, 'invalidateQueries').mockImplementation(
+      (filters?: { queryKey?: unknown }) => {
+        if (Array.isArray(filters?.queryKey) && filters.queryKey[0] === 'messages') {
+          result.current.queryClient.setQueryData<MessagesQueryData>(queryKey, {
+            pages: [{ messages: [{ id: 'server-ai', isGenerating: true }] }],
+            pageParams: [null],
+          });
+        }
+        return Promise.resolve();
+      }
+    );
+
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+
+    expect(result.current.queryClient.getQueryData<MessagesQueryData>(queryKey)).toEqual(
+      terminalSnapshot
+    );
+  });
+
+  // A vendor turn record outlives `isGenerating` — it is the second piece of
+  // evidence `isRunning` consults — so a reader torn down before the vendor's
+  // terminal chunk must seal it locally or the row reads as working forever.
+  it('seals a still-active external turn record when the stream throws', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai', done: false });
+        onChunk({
+          type: 'external_session_started',
+          sessionId: 'session-1',
+          targetId: 'codex',
+          resumed: false,
+          done: false,
+        });
+        return Promise.reject(new Error('network error'));
+      }
+    );
+
+    const { result } = renderWithQueryClient(props);
+
+    await act(async () => {
+      await result.current.generation.handleRespond('review this');
+    });
+
+    const calls = props.updateOptimisticMessage.mock.calls as Array<
+      [string, string, Partial<{ parts: MessagePart[]; isGenerating: boolean }>]
+    >;
+    const finalCall = [...calls].reverse().find(([, , update]) => update.isGenerating === false);
+    if (!finalCall) throw new Error('expected a terminal update');
+    const turnRecord = (finalCall[2].parts ?? []).find((part) => part.type === 'external_turn');
+    expect(turnRecord).toMatchObject({
+      type: 'external_turn',
+      status: 'terminal',
+      terminalReason: 'runtime-disconnected',
+    });
+  });
+
+  // The gate must defer, not drop: a signal that lands while the next turn is
+  // still streaming would otherwise be the last one, and the reconcile the
+  // thrown turn armed would wait forever.
+  it('holds a pending reconcile through a live stream and settles it at turn end', async () => {
+    const props = makeProps();
+    mockStream.mockImplementationOnce(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({ type: 'user_message_id', messageId: 'server-user-1', done: false });
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai-1', done: false });
+        return Promise.reject(new Error('network error'));
+      }
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    await act(async () => {
+      await result.current.generation.handleRespond('draw');
+    });
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+
+    const secondTurnGate = createDeferred<void>();
+    mockStream.mockImplementationOnce(
+      async (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({ type: 'user_message_id', messageId: 'server-user-2', done: false });
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai-2', done: false });
+        await secondTurnGate.promise;
+        onChunk({ type: 'done', done: true, messageId: 'server-ai-2', generationTime: '0.5s' });
+      }
+    );
+
+    let secondTurn!: Promise<void>;
+    await act(async () => {
+      secondTurn = result.current.generation.handleRespond('again');
+      await Promise.resolve();
+    });
+
+    // Mid-stream: the signal must not clobber the optimistic state being built.
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+
+    await act(async () => {
+      secondTurnGate.resolve();
+      await secondTurn;
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toContainEqual([
+      { queryKey: ['messages', 'chat-1'] },
+    ]);
   });
 });

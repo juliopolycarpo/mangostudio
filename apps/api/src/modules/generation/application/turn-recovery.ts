@@ -1,5 +1,6 @@
 import type { MessagePart } from '@mangostudio/shared';
 import type { AgentId } from '@mangostudio/shared/agents';
+import type { ImageGenerationErrorCode } from '@mangostudio/shared/generation';
 import {
   applyToolExecutionTransition,
   createToolExecutionSnapshot,
@@ -654,6 +655,17 @@ function getOwnedRecoveryMessage(
     .executeTakeFirst();
 }
 
+/** What a planned image records when the turn ended before it was generated. */
+export const IMAGE_ABANDONED_ERROR = 'The turn was interrupted before this image was generated.';
+/**
+ * The renderable counterpart of {@link IMAGE_ABANDONED_ERROR}.
+ *
+ * `IMAGE_ABANDONED_ERROR` also travels as the tool result a model reads, so it
+ * stays in English; this code is what a UI switches on to show the user's own
+ * language instead.
+ */
+export const IMAGE_ABANDONED_ERROR_CODE: ImageGenerationErrorCode = 'image_generation_interrupted';
+
 export function reconcileInterruptedMessageParts(parts: MessagePart[]): void {
   const resultIds = new Set(
     parts.filter((part) => part.type === 'tool_result').map((part) => part.toolCallId)
@@ -662,6 +674,17 @@ export function reconcileInterruptedMessageParts(parts: MessagePart[]): void {
     if (part.type === 'mcp_elicitation' && part.status === 'pending') {
       part.status = 'cancelled';
       part.reason = 'turn_aborted';
+      continue;
+    }
+    // Only the in-process return path through `abandonUnreachedImages` seals
+    // these; a crash, a throw mid-batch, or a stale-turn reconcile on reload
+    // all leave the cards pulsing for the life of the message. Every caller of
+    // this function is finalizing a turn, so a still-generating image here is
+    // one that will never arrive.
+    if (part.type === 'generated_image' && part.status === 'generating') {
+      part.status = 'error';
+      part.error = IMAGE_ABANDONED_ERROR;
+      part.errorCode = IMAGE_ABANDONED_ERROR_CODE;
       continue;
     }
     if (part.type !== 'tool_call' || resultIds.has(part.toolCallId)) continue;

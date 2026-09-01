@@ -11,7 +11,9 @@ import type {
   MessagePart,
 } from '@mangostudio/shared/types';
 import { fireEvent, screen } from '@testing-library/react';
+import { deriveTurnStatus } from '../../../src/features/chat/lib/turn-status';
 import { render, waitFor } from '../../support/harness/render';
+import { ToolIdentitiesProbe } from '../../support/mocks/tool-identities';
 
 const answerExternalApproval =
   jest.fn<(chatId: string, body: { requestId: string; optionId: string }) => Promise<unknown>>();
@@ -74,7 +76,18 @@ function approvalPart(overrides: Partial<ExternalApprovalPart> = {}): ExternalAp
 
 function renderParts(parts: MessagePart[], chatId: string | null = 'chat-1') {
   return render(
-    <MessageParts parts={parts} messageId="msg-1" isStreaming={false} chatId={chatId} />
+    <ToolIdentitiesProbe>
+      {(toolIdentities) => (
+        <MessageParts
+          parts={parts}
+          messageId="msg-1"
+          isStreaming={false}
+          status={deriveTurnStatus(parts, false)}
+          chatId={chatId}
+          toolIdentities={toolIdentities}
+        />
+      )}
+    </ToolIdentitiesProbe>
   );
 }
 
@@ -106,10 +119,13 @@ describe('external activity row', () => {
     expect(screen.getByText('commandExecution').className).toContain('text-error');
   });
 
-  // A row with nothing to open must not advertise a disclosure it cannot honour.
-  it('drops the disclosure for an activity with no detail', () => {
-    renderParts([turnPart(), activityPart({ detail: undefined })]);
-    expect(screen.getByRole('button')).not.toHaveAttribute('aria-expanded');
+  // A row with nothing to open must not advertise a disclosure it cannot
+  // honour — nor cost a tab stop for it. A turn that ran twenty commands would
+  // otherwise put twenty dead stops between the user and the next real control.
+  it('renders an activity with no detail as an inert row, not a tab stop', () => {
+    const { container } = renderParts([turnPart(), activityPart({ detail: undefined })]);
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.querySelector('[aria-expanded]')).toBeNull();
   });
 
   it("shows the vendor's own tool name verbatim", () => {
@@ -233,37 +249,47 @@ describe('external turn summary', () => {
 describe('external turn: still working', () => {
   it('shows a working row while the turn is active and has produced nothing yet', () => {
     renderParts([turnPart({ status: 'active' })]);
-    expect(screen.getByText('Working...')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
   });
 
   it('shows a working row in the gap between two tool calls', () => {
     renderParts([turnPart({ status: 'active' }), activityPart({ status: 'completed' })]);
-    expect(screen.getByText('Working...')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
   });
 
   // A call still running already renders as running. A second row under it
   // reads as a *second* thing happening, which is one more than there is.
   it('does not duplicate the cue under a call that is still running', () => {
     renderParts([turnPart({ status: 'active' }), activityPart({ status: 'running' })]);
-    expect(screen.queryByText('Working...')).toBeNull();
+    expect(screen.queryByText('Working')).toBeNull();
   });
 
   it('stays quiet once the turn is terminal', () => {
     renderParts([turnPart({ status: 'terminal', terminalReason: 'completed' })]);
-    expect(screen.queryByText('Working...')).toBeNull();
+    expect(screen.queryByText('Working')).toBeNull();
   });
 
   // The trailing text already shows its own caret while it streams — a second
   // cue saying the same thing would be redundant right where it matters least.
   it('does not duplicate the cue over text that is actively streaming', () => {
+    const parts: MessagePart[] = [
+      turnPart({ status: 'active' }),
+      { type: 'text', text: 'partial' },
+    ];
     render(
-      <MessageParts
-        parts={[turnPart({ status: 'active' }), { type: 'text', text: 'partial' }]}
-        messageId="msg-1"
-        isStreaming
-      />
+      <ToolIdentitiesProbe>
+        {(toolIdentities) => (
+          <MessageParts
+            parts={parts}
+            messageId="msg-1"
+            isStreaming
+            status={deriveTurnStatus(parts, true)}
+            toolIdentities={toolIdentities}
+          />
+        )}
+      </ToolIdentitiesProbe>
     );
-    expect(screen.queryByText('Working...')).toBeNull();
+    expect(screen.queryByText('Working')).toBeNull();
   });
 });
 

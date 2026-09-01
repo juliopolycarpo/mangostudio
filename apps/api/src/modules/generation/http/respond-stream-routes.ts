@@ -37,6 +37,7 @@ import {
   type ResolvedRunnerAgent,
   resolveRunnerAgentProfile,
 } from '../application/resolve-runner-agent';
+import { KEEPALIVE_INTERVAL_MS } from '../application/sse-keepalive';
 import { type StreamEvent, streamTextTurn } from '../application/stream-text-turn';
 import {
   assertTextTurnHasContent,
@@ -51,8 +52,6 @@ import {
   TurnRecoveryValidationError,
 } from '../application/turn-recovery';
 import { modelUnavailableResponse } from './model-unavailable-response';
-
-const KEEPALIVE_INTERVAL_MS = 15_000;
 
 function sseEvent(data: object): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
@@ -170,6 +169,7 @@ function toSsePayload(event: StreamEvent): object {
         toolCallId: event.toolCallId,
         prompt: event.prompt,
         error: event.error,
+        errorCode: event.errorCode,
         modelName: event.modelName,
         generationTime: event.generationTime,
         done: false,
@@ -463,6 +463,15 @@ export const respondStreamRoutes = (app: Elysia) =>
           }
         }
 
+        // `abortController.signal.aborted` also goes true for an in-place Stop
+        // (`cancelActiveTurn` aborts the same signal from a separate request),
+        // which leaves this connection open and its controller writable. Only
+        // the ReadableStream's own `cancel()` means the browser is gone and
+        // `controller.enqueue` would throw, so trailing events a cancelled
+        // turn still yields — like `image_generation_failed` for the images it
+        // never reached — must gate on this instead of the abort signal.
+        let clientDisconnected = false;
+
         const stream = new ReadableStream({
           async start(controller) {
             const heartbeat = setInterval(() => {
@@ -503,7 +512,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                 },
                 db
               )) {
-                if (!abortController.signal.aborted) {
+                if (!clientDisconnected) {
                   controller.enqueue(sseEvent(toSsePayload(event)));
                 }
               }
@@ -530,6 +539,7 @@ export const respondStreamRoutes = (app: Elysia) =>
             }
           },
           cancel() {
+            clientDisconnected = true;
             abortController.abort('client_disconnect');
           },
         });

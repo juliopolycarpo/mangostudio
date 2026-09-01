@@ -48,6 +48,7 @@ import {
   ToolPolicyError,
 } from './tool-execution-lifecycle';
 import { errorToToolMessage, parseToolArgs, stringifyToolResult } from './tool-result-utils';
+import { IMAGE_ABANDONED_ERROR, IMAGE_ABANDONED_ERROR_CODE } from './turn-recovery';
 
 /** Accumulators a completed tool execution writes into for the turn. */
 interface ToolResultSink {
@@ -203,6 +204,8 @@ export async function* executeImageGenerationCall(
   let result: unknown;
   let isError = false;
   let thrown: { error: unknown } | undefined;
+  /** Images the generator never reached — see `abandonUnreachedImages`. */
+  let abandonedCount = 0;
 
   // This path yields stream events directly instead of routing through the
   // async queue, so lifecycle transitions buffer here and drain between stages.
@@ -212,14 +215,18 @@ export async function* executeImageGenerationCall(
   );
   lifecycle.emitQueued();
 
-  const toolCallPart: Extract<MessagePart, { type: 'tool_call' }> = {
+  // Upsert, not push: a provider that announced this call through
+  // `tool_call_completed` already put a row for it in `allParts`, and pushing a
+  // second one gave the turn two rows per image call — rendered as duplicate
+  // steps under one React key, the first of them never settling because only
+  // this one is updated when the tool returns.
+  const toolCallPart = upsertToolCallPart(ctx.allParts, {
     type: 'tool_call',
     toolCallId: callId,
     name,
     args,
     execution: lifecycle.current,
-  };
-  ctx.allParts.push(toolCallPart);
+  });
   yield* drainLifecycleEvents(lifecycleEvents);
   await ctx.checkpoint?.();
 
@@ -311,9 +318,19 @@ export async function* executeImageGenerationCall(
       }
     }
 
+    abandonedCount = yield* abandonUnreachedImages(imagePartsById, outcomes, callId);
+    await ctx.checkpoint?.();
+
     const imageResult = summarizeGenerateImageToolResult(outcomes);
     result = imageResult;
-    isError = imageResult.images.length === 0 && (imageResult.errors?.length ?? 0) > 0;
+    // A call cut short is a failed call even when some pictures landed: the
+    // checkpoint files a `tool_result` without `isError` under succeeded calls,
+    // so a partial abort would tell the resume prompt this call worked and drop
+    // it off the retry list. The payload still carries `images` and `errors`,
+    // so the model sees exactly how far the batch got.
+    isError =
+      abandonedCount > 0 ||
+      (imageResult.images.length === 0 && (imageResult.errors?.length ?? 0) > 0);
   } catch (error) {
     result = { error: errorToToolMessage(error) };
     isError = true;
@@ -323,8 +340,17 @@ export async function* executeImageGenerationCall(
   if (thrown) {
     const failure = classifyToolExecutionFailure(thrown.error, ctx.signal);
     lifecycle.transition(failure.status, failure.reasonCode);
+  } else if (isError) {
+    // Two failures reach here without an exception. `generateImagesForToolPlan`
+    // stops yielding rather than throwing, so the turn signal — not a caught
+    // error — is what names the cause, and a call cut short is cancelled even
+    // when the images it did reach came back: producing two of three pictures
+    // is not the same as being asked for two. With nothing aborted this
+    // classifies exactly as the plain `execution_error` it replaces.
+    const failure = classifyToolExecutionFailure(undefined, ctx.signal);
+    lifecycle.transition(failure.status, failure.reasonCode);
   } else {
-    lifecycle.transition(isError ? 'failed' : 'succeeded', isError ? 'execution_error' : undefined);
+    lifecycle.transition('succeeded');
   }
   toolCallPart.execution = lifecycle.current;
   yield* drainLifecycleEvents(lifecycleEvents);
@@ -337,24 +363,103 @@ export async function* executeImageGenerationCall(
   ctx.nextToolResults.push({ callId, name, result: resultStr, isError });
 }
 
+/**
+ * Records a failed outcome for every planned image the generator never reached,
+ * and streams the failure so the tab that started the call stops showing it as
+ * generating.
+ *
+ * `generateImagesForToolPlan` stops at its abort check by returning rather than
+ * throwing, and says nothing about the images it had left. Without this an
+ * interrupted call summarizes to `count: 0` with no errors — which reads as a
+ * call that succeeded and chose to produce nothing, and settles the lifecycle
+ * as `succeeded` — while every unreached part stays at `generating` for the
+ * life of the message, spinning on each reload. The browser's parts array is
+ * separate from the API's, and only a completion/failure event moves a card
+ * off `generating` there, so pushing to `outcomes` without also yielding
+ * leaves the open tab spinning even though the API and a reload both agree
+ * the image failed.
+ *
+ * A stop keeps the tab open for this to reach; a crash or a throw mid-batch
+ * skips this function entirely, so the durable seal for a part left at
+ * `generating` still lives in `reconcileInterruptedMessageParts` for that
+ * case. What this adds on top of the tool result is the live signal: the
+ * outcomes it pushes are how the model learns the batch was cut short, and
+ * the events it yields are how the open tab learns the same thing without a
+ * reload.
+ *
+ * Returns how many images were abandoned, which is what tells the caller the
+ * call was cut short rather than finished.
+ *
+ * // Usage: const abandoned = yield* abandonUnreachedImages(imagePartsById, outcomes, callId);
+ */
+function* abandonUnreachedImages(
+  imagePartsById: ReadonlyMap<string, GeneratedImagePart>,
+  outcomes: GenerateImageToolOutcome[],
+  toolCallId: string
+): Generator<StreamEvent, number> {
+  const reached = new Set(outcomes.map((outcome) => outcome.imageId));
+  let abandoned = 0;
+
+  for (const [imageId, part] of imagePartsById) {
+    if (reached.has(imageId)) continue;
+    part.status = 'error';
+    part.error = IMAGE_ABANDONED_ERROR;
+    part.errorCode = IMAGE_ABANDONED_ERROR_CODE;
+    outcomes.push({
+      type: 'failed',
+      imageId,
+      prompt: part.prompt,
+      error: IMAGE_ABANDONED_ERROR,
+      createdAt: Date.now(),
+    });
+    yield {
+      type: 'image_generation_failed',
+      imageId,
+      toolCallId,
+      prompt: part.prompt,
+      error: IMAGE_ABANDONED_ERROR,
+      errorCode: IMAGE_ABANDONED_ERROR_CODE,
+    };
+    abandoned += 1;
+  }
+
+  return abandoned;
+}
+
+/**
+ * Writes a tool call into the turn's parts, merging onto the row that already
+ * carries this `toolCallId` instead of adding a second one.
+ *
+ * Returns the part now held in the array, which is not always `next`: merging
+ * builds a new object, and a caller that goes on to mutate the call — settling
+ * its execution once the tool returns — has to hold the stored one or its
+ * writes land on an orphan.
+ *
+ * // Usage: const stored = upsertToolCallPart(parts, { type: 'tool_call', ... });
+ */
 export function upsertToolCallPart(
   parts: MessagePart[],
   next: Extract<MessagePart, { type: 'tool_call' }>
-): void {
+): Extract<MessagePart, { type: 'tool_call' }> {
   const index = parts.findIndex(
     (part) => part.type === 'tool_call' && part.toolCallId === next.toolCallId
   );
-  if (index === -1) {
+  const current = index === -1 ? undefined : parts[index];
+  // The narrowing arm is unreachable — `findIndex` already matched on the type
+  // — but it must still append rather than hand back an unstored part: the
+  // whole point of the return value is that a caller can mutate what is in the
+  // array, and returning `next` without storing it silently breaks that.
+  if (current?.type !== 'tool_call') {
     parts.push(next);
-    return;
+    return next;
   }
-  const current = parts[index];
-  if (current?.type !== 'tool_call') return;
-  parts[index] = {
+  const merged: Extract<MessagePart, { type: 'tool_call' }> = {
     ...current,
     ...next,
     args: Object.keys(next.args).length > 0 ? next.args : current.args,
   };
+  parts[index] = merged;
+  return merged;
 }
 
 export function upsertToolResultPart(
@@ -512,15 +617,36 @@ function computeTurnLocalCharCount(
 }
 
 /**
- * Force a terminal state onto any tool_call part still carrying a live
- * lifecycle snapshot, so a partial/exhausted/errored turn never persists a
- * call as queued/running/awaiting_user. Runs immediately before the assistant
- * message is written.
+ * Force a terminal state onto any part still carrying a live snapshot, so a
+ * partial/exhausted/errored/*successful* turn never persists a tool_call as
+ * queued/running/awaiting_user, or a generated_image as `generating`. Runs
+ * immediately before the assistant message is written.
  *
- * // Usage: finalizeDanglingToolExecutions(session.allParts);
+ * The image clause covers what `reconcileInterruptedMessageParts` cannot:
+ * `finalizeSuccessfulTurn` never calls it, so a throw swallowed into an
+ * `isError` tool result — which lets `generateText` return normally — would
+ * otherwise settle a successful turn with the card stuck pulsing forever.
+ * Yields `image_generation_failed` for each such image so a client still
+ * reading the stream settles the card too, not just a later reload.
+ *
+ * // Usage: yield* finalizeDanglingToolExecutions(session.allParts);
  */
-export function finalizeDanglingToolExecutions(parts: MessagePart[]): void {
+export function* finalizeDanglingToolExecutions(parts: MessagePart[]): Generator<StreamEvent> {
   for (const part of parts) {
+    if (part.type === 'generated_image' && part.status === 'generating') {
+      part.status = 'error';
+      part.error = IMAGE_ABANDONED_ERROR;
+      part.errorCode = IMAGE_ABANDONED_ERROR_CODE;
+      yield {
+        type: 'image_generation_failed',
+        imageId: part.imageId,
+        toolCallId: part.toolCallId,
+        prompt: part.prompt,
+        error: IMAGE_ABANDONED_ERROR,
+        errorCode: IMAGE_ABANDONED_ERROR_CODE,
+      };
+      continue;
+    }
     if (part.type !== 'tool_call' || !part.execution) continue;
     if (isTerminalToolExecutionStatus(part.execution.status)) continue;
     part.execution = applyToolExecutionTransition(part.execution, {
@@ -529,45 +655,4 @@ export function finalizeDanglingToolExecutions(parts: MessagePart[]): void {
       reasonCode: 'turn_aborted',
     });
   }
-}
-
-/**
- * Coalesce consecutive thinking/text parts into single runs so the persisted
- * message stores one part per contiguous segment instead of per delta.
- *
- * // Usage: const parts = mergeMessageParts(allParts);
- */
-export function mergeMessageParts(allParts: MessagePart[]): MessagePart[] {
-  const finalParts: MessagePart[] = [];
-  let thinkingRun = '';
-  let textRun = '';
-
-  const flushThinking = () => {
-    if (thinkingRun) {
-      finalParts.push({ type: 'thinking', text: thinkingRun });
-      thinkingRun = '';
-    }
-  };
-  const flushText = () => {
-    if (textRun) {
-      finalParts.push({ type: 'text', text: textRun });
-      textRun = '';
-    }
-  };
-
-  for (const part of allParts) {
-    if (part.type === 'thinking') {
-      thinkingRun += part.text;
-    } else if (part.type === 'text') {
-      textRun += part.text;
-    } else {
-      flushThinking();
-      flushText();
-      finalParts.push(part);
-    }
-  }
-  flushThinking();
-  flushText();
-
-  return finalParts;
 }

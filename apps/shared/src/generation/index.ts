@@ -1,4 +1,5 @@
 export type { GeneratedMessage, GenerateImageResponse, GenerateTextResponse } from './contracts';
+export { mergeMessageParts } from './merge-message-parts';
 export {
   type ExternalTurnRequest,
   ExternalTurnRequestSchema,
@@ -15,6 +16,8 @@ export {
   GenerateImageBodySchema,
   type GenerateTextBody,
   GenerateTextBodySchema,
+  type ImageGenerationErrorCode,
+  ImageGenerationErrorCodeSchema,
   type ModelUnavailableAction,
   ModelUnavailableActionSchema,
   type ModelUnavailableDetails,

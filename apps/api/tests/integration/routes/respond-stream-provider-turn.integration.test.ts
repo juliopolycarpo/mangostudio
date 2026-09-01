@@ -329,6 +329,46 @@ describe('POST /respond/stream — agent-turn provider', () => {
     expect(parts.some((part) => part.type === 'system_event')).toBe(false);
   });
 
+  /**
+   * An empty reasoning delta is not an announced-but-withheld reasoning phase.
+   * The internal path has no `reasoning_started` — `thinking_start` is
+   * synthesized from the first delta — so an empty one means nothing at all.
+   * Persisting it made the renderer label the turn "reasoning not shared",
+   * asserting the model withheld reasoning it never produced.
+   */
+  it('does not persist a thinking part for an empty reasoning delta', async () => {
+    const insertedMessages: Array<Record<string, unknown>> = [];
+
+    await mockAgentTurnProvider(async function* stream() {
+      await Promise.resolve();
+      yield { type: 'reasoning_delta', text: '' };
+      yield { type: 'assistant_text_delta', text: 'Done.' };
+      yield { type: 'turn_completed' };
+    }, insertedMessages);
+    await mock.module('../../../src/db/database', mockStreamDb(insertedMessages));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      buildRespondStreamRequest({
+        chatId: 'stream-agent-chat',
+        prompt: 'Say something.',
+        model: 'gpt-5.2',
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const sseEvents = parseSseEvents(await response.text());
+    // Nothing announces a phase that produced no text, live or on reload.
+    expect(sseEvents.some((event) => event.type === 'thinking_start')).toBe(false);
+
+    const aiMessage = insertedMessages.find((message) => message.role === 'ai');
+    const parts = parsePersistedParts(aiMessage?.parts);
+    expect(parts.some((part) => part.type === 'thinking')).toBe(false);
+    expect(parts).toContainEqual({ type: 'text', text: 'Done.' });
+  });
+
   it('surfaces provider turn_error as a persisted error response', async () => {
     const insertedMessages: Array<Record<string, unknown>> = [];
 

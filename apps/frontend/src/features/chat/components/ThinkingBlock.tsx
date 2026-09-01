@@ -39,6 +39,33 @@ function formatThinkingDuration(durationMs: number): string {
   return `${Math.max(1, Math.round(durationMs / 1000))}s`;
 }
 
+interface ThinkingLabels {
+  streaming: string;
+  withheld: string;
+  thought: string;
+  /** `chat.feed.thoughtFor`, holding the `{time}` placeholder. */
+  thoughtFor: string;
+}
+
+/**
+ * The one sentence the row prints: which phase this is, and what it cost.
+ *
+ * A settled phase with no text is named before its duration is: the reader's
+ * question about a withheld thought is what happened to it, not how long it
+ * took. A phase still streaming is named as such even before its first delta.
+ *
+ * Usage: thinkingLabel({ isStreaming: false, hasText: true, durationMs: 2000 }, labels)
+ */
+function thinkingLabel(
+  state: { isStreaming: boolean; hasText: boolean; durationMs?: number },
+  labels: ThinkingLabels
+): string {
+  if (state.isStreaming) return labels.streaming;
+  if (!state.hasText) return labels.withheld;
+  if (state.durationMs === undefined) return labels.thought;
+  return formatMessage(labels.thoughtFor, { time: formatThinkingDuration(state.durationMs) });
+}
+
 interface ThinkingBlockProps {
   messageId: string;
   text: string;
@@ -76,6 +103,14 @@ export function ThinkingBlock({ messageId, text, isStreaming, incomplete }: Thin
   const uiStateRef = useRef(initialUiStateRef.current);
   const previousStreamingRef = useRef(isStreaming);
 
+  // `reasoning_started` opens the part before any delta arrives, and
+  // `display: "omitted"` is the API default on current models — so a phase
+  // whose content was never sent is the ordinary case, and the empty part is
+  // the whole of what the reader ever sees of it. It gets a row, because the
+  // phase happened; it gets no disclosure, because there is nothing behind it.
+  const hasText = text.length > 0;
+  const isExpanded = expanded && hasText;
+
   const updateUiState = useCallback(
     (partial: Partial<ThinkingUiState>) => {
       uiStateRef.current = { ...uiStateRef.current, ...partial };
@@ -110,7 +145,7 @@ export function ThinkingBlock({ messageId, text, isStreaming, incomplete }: Thin
   }, [isStreaming, updateUiState]);
 
   useLayoutEffect(() => {
-    if (!expanded || !scrollRef.current) return;
+    if (!isExpanded || !scrollRef.current) return;
     const element = scrollRef.current;
     const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
     if (isStreaming && uiStateRef.current.shouldAutoFollow) {
@@ -119,7 +154,7 @@ export function ThinkingBlock({ messageId, text, isStreaming, incomplete }: Thin
       return;
     }
     element.scrollTop = Math.min(uiStateRef.current.scrollTop, maxScrollTop);
-  }, [expanded, isStreaming, text, updateUiState]);
+  }, [isExpanded, isStreaming, text, updateUiState]);
 
   const handleToggle = () => {
     const nextExpanded = !expanded;
@@ -138,17 +173,21 @@ export function ThinkingBlock({ messageId, text, isStreaming, incomplete }: Thin
   // `chat.feed.thoughtFor` is the same sentence an image turn already prints
   // for its own elapsed time; a second key holding the same string would only
   // give the two translations a way to drift apart.
-  const label = isStreaming
-    ? t.thinking.streaming
-    : durationMs === undefined
-      ? t.thinking.thought
-      : formatMessage(t.chat.feed.thoughtFor, { time: formatThinkingDuration(durationMs) });
+  const label = thinkingLabel(
+    { isStreaming, hasText, durationMs },
+    {
+      streaming: t.thinking.streaming,
+      withheld: t.thinking.withheld,
+      thought: t.thinking.thought,
+      thoughtFor: t.chat.feed.thoughtFor,
+    }
+  );
 
   return (
     <TimelineItem tone={isStreaming ? 'active' : 'muted'}>
       {/* No glyph: a thought is the one step with no outcome to report, and the
           empty status column is what sets it apart from the calls around it. */}
-      <TimelineRow expanded={expanded} onToggle={handleToggle}>
+      <TimelineRow expanded={isExpanded} onToggle={handleToggle} disclosable={hasText}>
         <span
           className={`truncate ${isStreaming ? 'animate-pulse text-on-surface-variant' : 'text-on-surface-variant/55'}`}
         >
@@ -160,22 +199,24 @@ export function ThinkingBlock({ messageId, text, isStreaming, incomplete }: Thin
           </span>
         ) : null}
       </TimelineRow>
-      <TimelineDisclosure open={expanded}>
-        <div
-          ref={scrollRef}
-          onScroll={handleScroll}
-          className="app-scrollbar max-h-48 overflow-y-auto p-3.5 sm:max-h-72 md:max-h-96"
-        >
-          <div className="markdown-content--thinking text-xs leading-relaxed text-on-surface-variant/60">
-            <MarkdownContent
-              content={text}
-              isStreaming={isStreaming}
-              copyCodeLabel={t.chat.copyCode}
-              codeCopiedLabel={t.chat.codeCopied}
-            />
+      {hasText ? (
+        <TimelineDisclosure open={isExpanded}>
+          <div
+            ref={scrollRef}
+            onScroll={handleScroll}
+            className="app-scrollbar max-h-48 overflow-y-auto p-3.5 sm:max-h-72 md:max-h-96"
+          >
+            <div className="markdown-content--thinking text-xs leading-relaxed text-on-surface-variant/60">
+              <MarkdownContent
+                content={text}
+                isStreaming={isStreaming}
+                copyCodeLabel={t.chat.copyCode}
+                codeCopiedLabel={t.chat.codeCopied}
+              />
+            </div>
           </div>
-        </div>
-      </TimelineDisclosure>
+        </TimelineDisclosure>
+      ) : null}
     </TimelineItem>
   );
 }

@@ -70,7 +70,15 @@ describe('normalizeMessageParts', () => {
     ]);
   });
 
-  it('merges interleaved thinking and text into one block each, preserving order', () => {
+  /**
+   * A run ends where a part of another kind begins. Holding a pending run open
+   * across the other kind reordered the turn: prose written before a second
+   * reasoning phase was welded to prose written after it, and the merged
+   * thinking part landed above both. Nothing the model actually did was
+   * alternating for effect — a turn that thinks, answers and thinks again is
+   * the ordinary shape of a tool loop, and the reader has to see it in order.
+   */
+  it('does not merge across a part of the other kind', () => {
     const parts: MessagePart[] = [
       { type: 'thinking', text: 'The ' },
       { type: 'text', text: 'Let ' },
@@ -80,10 +88,71 @@ describe('normalizeMessageParts', () => {
       { type: 'text', text: 'go' },
     ];
 
+    expect(normalizeMessageParts(parts)).toEqual(parts);
+  });
+
+  it('merges a run only while it stays adjacent', () => {
+    const parts: MessagePart[] = [
+      { type: 'thinking', text: 'The ' },
+      { type: 'thinking', text: 'user ' },
+      { type: 'thinking', text: 'wants' },
+      { type: 'text', text: 'Let ' },
+      { type: 'text', text: 'me go' },
+    ];
+
     expect(normalizeMessageParts(parts)).toEqual([
       { type: 'thinking', text: 'The user wants' },
       { type: 'text', text: 'Let me go' },
     ]);
+  });
+
+  /**
+   * The reported bug, as a fixture: a second reasoning phase streamed into the
+   * part at index 0 while the renderer decides liveness positionally, so the
+   * live thought was never the last part and rendered collapsed for the rest
+   * of the turn.
+   */
+  it('leaves a second reasoning phase last, where the live part belongs', () => {
+    const parts: MessagePart[] = [
+      { type: 'thinking', text: '' },
+      { type: 'text', text: 'a' },
+      { type: 'thinking', text: 'b' },
+    ];
+
+    const normalized = normalizeMessageParts(parts);
+
+    expect(normalized).toEqual(parts);
+    expect(normalized.at(-1)).toEqual({ type: 'thinking', text: 'b' });
+  });
+
+  /**
+   * A reloaded transcript is normalized again on every render, so the rule has
+   * to be a no-op on its own output or a stored turn would drift as it is read.
+   */
+  it('is idempotent over an already-merged row', () => {
+    const stored: MessagePart[] = [
+      { type: 'thinking', text: 'plan' },
+      { type: 'tool_call', toolCallId: 'c1', name: 'search', args: {} },
+      { type: 'text', text: 'answer' },
+    ];
+
+    expect(normalizeMessageParts(normalizeMessageParts(stored))).toEqual(
+      normalizeMessageParts(stored)
+    );
+    expect(normalizeMessageParts(stored)).toEqual(stored);
+  });
+
+  /**
+   * Unlike `thinking`, no event opens an empty text phase, so an empty text
+   * part is noise rather than a signal.
+   */
+  it('drops an empty text part but keeps an empty reasoning phase', () => {
+    const parts: MessagePart[] = [
+      { type: 'text', text: '' },
+      { type: 'thinking', text: '' },
+    ];
+
+    expect(normalizeMessageParts(parts)).toEqual([{ type: 'thinking', text: '' }]);
   });
 
   it('flushes pending runs before a non-text part to keep ordering', () => {
