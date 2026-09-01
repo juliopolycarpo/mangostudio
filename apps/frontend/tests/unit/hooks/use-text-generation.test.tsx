@@ -1623,6 +1623,56 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
     ]);
   });
 
+  // The server can persist and publish before the client notices its own read
+  // has died — the gate discards that signal because the controller ref is
+  // still installed. If nothing remembers it, the read's own `finally` arms a
+  // reconcile that waits for a second signal which, absent an unrelated turn
+  // or a reconnect, never comes.
+  it('redeems a signal that arrived mid-read once the stream throws', async () => {
+    const props = makeProps();
+    let rejectStream!: (error: Error) => void;
+    const streamGate = new Promise<void>((_resolve, reject) => {
+      rejectStream = reject;
+    });
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({ type: 'user_message_id', messageId: 'server-user', done: false });
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai', done: false });
+        return streamGate;
+      }
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    let turn!: Promise<void>;
+    await act(async () => {
+      turn = result.current.generation.handleRespond('draw');
+      await Promise.resolve();
+    });
+
+    // Mid-read: the finalize signal arrives while the controller ref is still
+    // installed, so the gate defers it instead of reconciling right away.
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+
+    // The read dies without ever hearing a completion event. No further
+    // signal fires — the deferred one from mid-read must be redeemed here.
+    await act(async () => {
+      rejectStream(new Error('network error'));
+      await turn;
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toContainEqual([
+      { queryKey: ['messages', 'chat-1'] },
+    ]);
+  });
+
   // The activity topic is user-scoped: a reconnect ack or a turn finishing in
   // another chat lands on the same handler. If any signal consumed the pending
   // reconcile, one that fires while the server is still unwinding would clear

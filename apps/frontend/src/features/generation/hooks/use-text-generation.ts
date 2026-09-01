@@ -357,9 +357,23 @@ export function useTextGeneration({
    * the re-read shows the row settled, because the activity topic is
    * user-scoped: a reconnect ack or a turn in another chat also lands here,
    * and treating any signal as the finalize would end the wait early and pin
-   * the mid-unwind row.
+   * the mid-unwind row. A signal that arrives while the wait is gated off
+   * (see `signalDuringReadRef`) is not lost either — it is redeemed the
+   * moment the gate opens.
    */
   const pendingTranscriptReconciles = useRef<Set<string>>(new Set());
+  /**
+   * Set when an activity signal arrives while a stream is still being read.
+   *
+   * The gate below skips reconciling mid-turn, but the server may have
+   * finished and published exactly then — a persisted turn whose final SSE
+   * frame or connection close never reaches this tab. If that was the only
+   * finalize this turn was ever going to get, the chat it just armed above
+   * would wait on a signal that has already happened and will not repeat.
+   * Read once and cleared unconditionally in the turn's `finally`, so it
+   * never leaks into a later turn's decision.
+   */
+  const signalDuringReadRef = useRef(false);
   const [pendingContextAction, setPendingContextAction] = useState<'compact' | 'new-chat' | null>(
     null
   );
@@ -421,9 +435,13 @@ export function useTextGeneration({
   // socket was down is not lost. That makes this the signal that can end the
   // wait armed above. Gated off while a stream is being read: mid-turn the
   // optimistic state is fresher than the database, and the turn's own end
-  // paths decide what reconciliation it needs.
+  // paths decide what reconciliation it needs. A signal that lands during
+  // that gate is deferred, not dropped — the read's own `finally` redeems it.
   useRealtimeInvalidation(ACTIVITY_TOPIC, 'transcript-reconcile', async () => {
-    if (stream.abortControllerRef.current) return;
+    if (stream.abortControllerRef.current) {
+      signalDuringReadRef.current = true;
+      return;
+    }
     await reconcilePendingTranscripts();
   });
 
@@ -768,8 +786,15 @@ export function useTextGeneration({
         // Reconciles an earlier turn armed must not wait forever on a signal
         // that may never come — retry them here. The one this turn just armed
         // is excluded: its server may still be mid-unwind, which is the whole
-        // reason it went into the set instead of the branch below.
-        void reconcilePendingTranscripts((chatId) => !(streamThrew && chatId === activeChatId));
+        // reason it went into the set instead of the branch below. Unless a
+        // signal already landed mid-read (see `signalDuringReadRef`) — that may
+        // have been this chat's only finalize, so it is worth an immediate
+        // look instead of waiting on a signal that will not repeat.
+        const missedSignalDuringRead = signalDuringReadRef.current;
+        signalDuringReadRef.current = false;
+        void reconcilePendingTranscripts(
+          (chatId) => missedSignalDuringRead || !(streamThrew && chatId === activeChatId)
+        );
         // A clean close is the server's word that the turn was finalized: the
         // route closes the stream only after the generator — finalizers
         // included — has returned. So a clean close without `done` (a stopped
