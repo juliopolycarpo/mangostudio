@@ -174,6 +174,7 @@ export async function* generateImagesForToolPlan(
         prompt: plan.prompt,
         imageSize: plan.quality,
         modelName,
+        signal: context.signal,
       });
 
       yield {
@@ -236,7 +237,10 @@ async function execute(
   });
   const outcomes: GenerateImageToolOutcome[] = [];
 
-  for await (const outcome of generateImagesForToolPlan(plan, { userId: context.userId })) {
+  for await (const outcome of generateImagesForToolPlan(plan, {
+    userId: context.userId,
+    signal: context.signal,
+  })) {
     outcomes.push(outcome);
   }
 

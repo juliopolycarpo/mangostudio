@@ -85,6 +85,8 @@ export async function saveGeminiGeneratedImageFromResponse(
  * @param referenceImageUrl - Optional local URL to a reference image (e.g., /uploads/...).
  * @param imageSize - Image quality/size setting (512px, 1K, 2K, 4K).
  * @param modelName - Gemini model to use.
+ * @param client - Prepared Gemini client; created from a resolved key when absent.
+ * @param signal - Optional signal to abort a request already in flight.
  * @returns The saved image URL path (e.g., /images/generated-xxx.png).
  */
 export async function generateGeminiImage(
@@ -94,7 +96,8 @@ export async function generateGeminiImage(
   referenceImageUrl?: string,
   imageSize = '1K',
   modelName?: string,
-  client?: ReturnType<typeof createGeminiClient>
+  client?: ReturnType<typeof createGeminiClient>,
+  signal?: AbortSignal
 ): Promise<string> {
   if (!modelName) {
     throw new Error('No Gemini image model was provided.');
@@ -142,6 +145,10 @@ export async function generateGeminiImage(
   }
 
   const config: Record<string, unknown> = {};
+
+  if (signal) {
+    config.abortSignal = signal;
+  }
 
   if (systemPrompt?.trim()) {
     config.systemInstruction = systemPrompt;

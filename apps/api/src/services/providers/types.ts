@@ -216,6 +216,8 @@ export interface ImageGenerationRequest {
   referenceImageUrl?: string;
   imageSize?: string;
   modelName: string;
+  /** Optional signal to abort a request already in flight with the provider. */
+  signal?: AbortSignal;
 }
 
 /** Output from image generation. */

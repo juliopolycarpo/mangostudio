@@ -44,7 +44,7 @@ export async function generateOpenAIImage(
         response_format: 'url',
       };
 
-  const response = await client.images.generate(params);
+  const response = await client.images.generate(params, { signal: req.signal });
 
   const data = response.data?.[0];
 
@@ -58,7 +58,7 @@ export async function generateOpenAIImage(
     };
   }
   if (data?.url) {
-    const imageResponse = await fetch(data.url);
+    const imageResponse = await fetch(data.url, { signal: req.signal });
     if (!imageResponse.ok) {
       throw new Error('Failed to download generated image from OpenAI CDN.');
     }
