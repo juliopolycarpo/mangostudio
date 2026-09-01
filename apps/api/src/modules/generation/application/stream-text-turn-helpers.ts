@@ -615,15 +615,25 @@ function computeTurnLocalCharCount(
 }
 
 /**
- * Force a terminal state onto any tool_call part still carrying a live
- * lifecycle snapshot, so a partial/exhausted/errored turn never persists a
- * call as queued/running/awaiting_user. Runs immediately before the assistant
- * message is written.
+ * Force a terminal state onto any part still carrying a live snapshot, so a
+ * partial/exhausted/errored/*successful* turn never persists a tool_call as
+ * queued/running/awaiting_user, or a generated_image as `generating`. Runs
+ * immediately before the assistant message is written.
+ *
+ * The image clause covers what `reconcileInterruptedMessageParts` cannot:
+ * `finalizeSuccessfulTurn` never calls it, so a throw swallowed into an
+ * `isError` tool result — which lets `generateText` return normally — would
+ * otherwise settle a successful turn with the card stuck pulsing forever.
  *
  * // Usage: finalizeDanglingToolExecutions(session.allParts);
  */
 export function finalizeDanglingToolExecutions(parts: MessagePart[]): void {
   for (const part of parts) {
+    if (part.type === 'generated_image' && part.status === 'generating') {
+      part.status = 'error';
+      part.error = IMAGE_ABANDONED_ERROR;
+      continue;
+    }
     if (part.type !== 'tool_call' || !part.execution) continue;
     if (isTerminalToolExecutionStatus(part.execution.status)) continue;
     part.execution = applyToolExecutionTransition(part.execution, {
