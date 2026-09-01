@@ -1330,6 +1330,52 @@ describe('useTextGeneration — interrupted turn actions', () => {
     );
   });
 
+  // The first press waits for the server. A turn the server cannot end
+  // promptly — an image already in flight with the provider — would otherwise
+  // leave the user with no way out but a reload.
+  it('tears the reader down on a second stop press', async () => {
+    const props = makeProps();
+    let observedSignal: AbortSignal | undefined;
+
+    mockCancelInterruptedTurn.mockResolvedValue(undefined);
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void,
+        signal?: AbortSignal
+      ) => {
+        observedSignal = signal;
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai', done: false });
+        // The server that never closes: only an abort ends this.
+        return new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(createAbortError()), { once: true });
+        });
+      }
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+    let responded!: Promise<void>;
+
+    await act(async () => {
+      responded = result.current.handleRespond('draw');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      result.current.handleStop();
+      await Promise.resolve();
+    });
+    expect(observedSignal?.aborted).toBe(false);
+
+    await act(async () => {
+      result.current.handleStop();
+      await responded;
+    });
+
+    expect(observedSignal?.aborted).toBe(true);
+    expect(mockCancelInterruptedTurn).toHaveBeenCalledTimes(1);
+  });
+
   it('dismisses the interrupted checkpoint for the current chat', async () => {
     const props = makeProps();
     mockDismissInterruptedTurn.mockResolvedValue(undefined);

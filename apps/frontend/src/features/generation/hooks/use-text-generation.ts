@@ -335,6 +335,8 @@ export function useTextGeneration({
   const activeTurnRef = useRef<{ readonly chatId: string; readonly messageId: string } | null>(
     null
   );
+  /** The turn a stop has already been handed to the server for — see `handleStop`. */
+  const stopRequestedRef = useRef<string | null>(null);
   const [pendingContextAction, setPendingContextAction] = useState<'compact' | 'new-chat' | null>(
     null
   );
@@ -632,6 +634,7 @@ export function useTextGeneration({
         if (recovery || review) throw error;
       } finally {
         activeTurnRef.current = null;
+        stopRequestedRef.current = null;
         stream.setAbortController(null);
         stream.setIsGenerating(false);
         // Realtime normally refreshes mounted Git panels; keep this as the
@@ -711,6 +714,18 @@ export function useTextGeneration({
       stream.handleStop();
       return;
     }
+
+    // A second press on the same turn is the hard kill. The first hands the
+    // stop to the server and waits for it to close the stream, which is what
+    // lets the cancelled turn settle its own cards — but the server cannot
+    // always end one promptly. An image already in flight with the provider
+    // outlives the cancel, because `generateImage` is never given the signal,
+    // and without this the user's only way out of that wait is a reload.
+    if (stopRequestedRef.current === activeTurn.messageId) {
+      stream.handleStop();
+      return;
+    }
+    stopRequestedRef.current = activeTurn.messageId;
 
     // Cancel, then keep reading. `/recovery/cancel` returns as soon as the turn
     // is told to stop, and a cancelled turn is not finished talking: the
