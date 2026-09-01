@@ -568,3 +568,55 @@ describe('settleUnfinishedImageParts', () => {
     expect(settleUnfinishedImageParts(parts, 'stopped')).toBe(parts);
   });
 });
+
+describe('stream state sealing', () => {
+  it('is unsealed while the turn is still producing', () => {
+    const state = reduceChunks([
+      { type: 'assistant_message_id', messageId: 'server-ai', done: false },
+      { type: 'text', text: 'partial answer', done: false },
+    ]);
+
+    expect(state.sealed).toBe(false);
+  });
+
+  it('seals on done', () => {
+    const state = reduceChunks([
+      { type: 'text', text: 'answer', done: false },
+      { type: 'done', done: true, generationTime: '0.5s' },
+    ]);
+
+    expect(state.sealed).toBe(true);
+  });
+
+  // Read off the patch, so a terminal chunk that is not `done` seals too.
+  it('seals on a terminal error chunk', () => {
+    const state = reduceChunks([{ type: 'error', error: 'provider exploded', done: true }]);
+
+    expect(state.sealed).toBe(true);
+  });
+
+  // The Stop path: every one of these leaves the row generating, which is why
+  // the caller has to seal it once the stream returns.
+  it('stays unsealed through a cancelled image turn', () => {
+    const state = reduceChunks([
+      { type: 'assistant_message_id', messageId: 'server-ai', done: false },
+      {
+        type: 'image_generation_started',
+        imageId: 'img-1',
+        toolCallId: 'image-call-1',
+        prompt: 'Paint mangoes',
+        done: false,
+      },
+      {
+        type: 'image_generation_failed',
+        imageId: 'img-1',
+        toolCallId: 'image-call-1',
+        prompt: 'Paint mangoes',
+        error: 'interrupted',
+        done: false,
+      },
+    ]);
+
+    expect(state.sealed).toBe(false);
+  });
+});

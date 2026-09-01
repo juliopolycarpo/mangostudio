@@ -1328,6 +1328,16 @@ describe('useTextGeneration — interrupted turn actions', () => {
         ],
       })
     );
+
+    // A cancelled turn is closed by `finalizeInterruptedTurn`, which yields no
+    // `done`, so nothing in the stream takes the row off `isGenerating` and
+    // nothing throws either. Without a terminal patch here the row reads as
+    // `working` forever: no copy, no revert, and a working row under cards the
+    // stream already settled.
+    const calls = props.updateOptimisticMessage.mock.calls as Array<
+      [string, string, Partial<{ isGenerating: boolean }>]
+    >;
+    expect(calls.some(([, , update]) => update.isGenerating === false)).toBe(true);
   });
 
   // The first press waits for the server. A turn the server cannot end

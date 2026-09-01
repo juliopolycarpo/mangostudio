@@ -48,6 +48,14 @@ export interface TextGenerationStreamState {
   readonly openExternalThinkingIndex: number | null;
   readonly userMessageUpdate: TextGenerationStreamMessageUpdate | null;
   readonly aiMessageUpdate: TextGenerationStreamMessageUpdate | null;
+  /**
+   * Whether some chunk has already taken the assistant row off `isGenerating`.
+   *
+   * Not every stream ends with one: a cancelled turn is closed by
+   * `finalizeInterruptedTurn`, which yields no `done`. The caller reads this to
+   * decide whether the row still needs a terminal patch once the stream returns.
+   */
+  readonly sealed: boolean;
   /** Cumulative thread usage from the vendor — separate from per-turn `usage` on the turn part. */
   readonly threadUsage: ExternalThreadUsage | null;
 }
@@ -89,6 +97,7 @@ export function createTextGenerationStreamState({
     userMessageUpdate: null,
     aiMessageUpdate: null,
     threadUsage: null,
+    sealed: false,
   };
 }
 
@@ -999,6 +1008,10 @@ function withAiMessageUpdate(
     ...state,
     currentAiMessageId: nextMessageId,
     receivedServerAiMessageId,
+    // Read off the patch rather than set by each terminal reducer: this is the
+    // one funnel every assistant-row update goes through, so a future chunk
+    // that ends a turn cannot forget to say so.
+    sealed: state.sealed || patch.isGenerating === false,
     aiMessageUpdate: { targetMessageId: state.currentAiMessageId, patch },
   };
 }

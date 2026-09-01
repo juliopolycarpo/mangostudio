@@ -594,6 +594,23 @@ export function useTextGeneration({
                 controller.signal
               );
         });
+
+        // A stream can close cleanly without ever having sealed the row.
+        // `finalizeInterruptedTurn` ends a cancelled turn without yielding
+        // `done` — and since Stop keeps reading, that is now its ordinary path —
+        // so nothing throws and neither branch below runs. Left alone the row
+        // keeps `isGenerating: true`, which `deriveTurnStatus` reads as
+        // `working`: copy and revert stay hidden and a working row draws under
+        // cards the stream already settled.
+        if (!streamState.sealed) {
+          updateOptimisticMessage(activeChatId, streamState.currentAiMessageId, {
+            isGenerating: false,
+            parts: settleUnfinishedImageParts(
+              streamState.parts,
+              t.errors.imageGenerationInterrupted
+            ),
+          });
+        }
       } catch (error: unknown) {
         // Every end that reaches this catch is one a card at `generating` never
         // hears about — an abort, a dropped socket, a provider that threw. The
