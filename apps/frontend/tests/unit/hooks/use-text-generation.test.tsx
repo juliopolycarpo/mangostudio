@@ -1623,6 +1623,99 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
     ]);
   });
 
+  // The activity topic is user-scoped: a reconnect ack or a turn finishing in
+  // another chat lands on the same handler. If any signal consumed the pending
+  // reconcile, one that fires while the server is still unwinding would clear
+  // it, refetch a row still at `isGenerating`, and pin the transcript on
+  // "working" with no later signal left to heal it.
+  it('keeps the reconcile armed while the re-read still shows the row generating', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({ type: 'user_message_id', messageId: 'server-user', done: false });
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai', done: false });
+        return Promise.reject(new Error('network error'));
+      }
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    await act(async () => {
+      await result.current.generation.handleRespond('draw');
+    });
+
+    // The server is still mid-unwind: its persisted row still says generating.
+    result.current.queryClient.setQueryData(['messages', 'chat-1'], {
+      pages: [{ messages: [{ id: 'server-ai', isGenerating: true }], nextCursor: null }],
+      pageParams: [null],
+    });
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(1);
+
+    // The finalize lands; the next signal must still find the reconcile armed.
+    result.current.queryClient.setQueryData(['messages', 'chat-1'], {
+      pages: [{ messages: [{ id: 'server-ai', isGenerating: false }], nextCursor: null }],
+      pageParams: [null],
+    });
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(2);
+
+    // Settled: a later signal has nothing left to reconcile.
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(2);
+  });
+
+  // A vendor turn record outlives `isGenerating` — it is the second piece of
+  // evidence `isRunning` consults — so a reader torn down before the vendor's
+  // terminal chunk must seal it locally or the row reads as working forever.
+  it('seals a still-active external turn record when the stream throws', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai', done: false });
+        onChunk({
+          type: 'external_session_started',
+          sessionId: 'session-1',
+          targetId: 'codex',
+          resumed: false,
+          done: false,
+        });
+        return Promise.reject(new Error('network error'));
+      }
+    );
+
+    const { result } = renderWithQueryClient(props);
+
+    await act(async () => {
+      await result.current.generation.handleRespond('review this');
+    });
+
+    const calls = props.updateOptimisticMessage.mock.calls as Array<
+      [string, string, Partial<{ parts: MessagePart[]; isGenerating: boolean }>]
+    >;
+    const finalCall = [...calls].reverse().find(([, , update]) => update.isGenerating === false);
+    if (!finalCall) throw new Error('expected a terminal update');
+    const turnRecord = (finalCall[2].parts ?? []).find((part) => part.type === 'external_turn');
+    expect(turnRecord).toMatchObject({
+      type: 'external_turn',
+      status: 'terminal',
+      terminalReason: 'runtime-disconnected',
+    });
+  });
+
   // The gate must defer, not drop: a signal that lands while the next turn is
   // still streaming would otherwise be the last one, and the reconcile the
   // thrown turn armed would wait forever.

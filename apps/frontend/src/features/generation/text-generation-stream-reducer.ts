@@ -124,6 +124,30 @@ function isUnfinishedImagePart(part: MessagePart): part is GeneratedImagePart {
   return part.type === 'generated_image' && part.status === 'generating';
 }
 
+/**
+ * Marks a still-active vendor turn record terminal when the reader ends before
+ * the vendor's own terminal chunk does.
+ *
+ * The turn record is the second piece of evidence `isRunning` consults — it
+ * survives `isGenerating: false`, so without this a killed or dropped external
+ * stream keeps the row on `working` and its actions hidden forever. The reason
+ * is provisional by the same contract as the rest of the local seal: the next
+ * transcript read replaces the part with the server's own record. Returns the
+ * same state when no active turn record exists, mirroring
+ * `settleUnfinishedImageParts`'s same-array contract.
+ *
+ * @example
+ * streamState = settleUnfinishedExternalTurn(streamState, 'cancelled-by-user');
+ */
+export function settleUnfinishedExternalTurn(
+  state: TextGenerationStreamState,
+  reason: ExternalTurnTerminalReason
+): TextGenerationStreamState {
+  const turn = state.parts.find((part) => part.type === 'external_turn');
+  if (turn?.status !== 'active') return state;
+  return reduceExternalTurnCompleted(state, reason);
+}
+
 /** Reduces one streamed chunk into the next optimistic text generation state.
  * Usage: `state = reduceTextGenerationStreamChunk(state, chunk, { pendingSubagentName })`
  */

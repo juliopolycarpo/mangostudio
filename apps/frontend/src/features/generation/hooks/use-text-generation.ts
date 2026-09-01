@@ -45,6 +45,7 @@ import type { useOptimisticMessages } from '@/features/generation/hooks/use-opti
 import {
   createTextGenerationStreamState,
   reduceTextGenerationStreamChunk,
+  settleUnfinishedExternalTurn,
   settleUnfinishedImageParts,
   type TextGenerationStreamMessageUpdate,
 } from '@/features/generation/text-generation-stream-reducer';
@@ -340,7 +341,7 @@ export function useTextGeneration({
   /** The turn a stop has already been handed to the server for — see `handleStop`. */
   const stopRequestedRef = useRef<string | null>(null);
   /**
-   * The chat whose transcript still owes a re-read of the server's truth.
+   * Chats whose transcripts still owe a re-read of the server's truth.
    *
    * Armed when a stream ends by throwing — a dropped socket, a hard kill — and
    * the server may still be unwinding the turn: it only learns the reader is
@@ -348,9 +349,13 @@ export function useTextGeneration({
    * the persisted row still says `isGenerating`. Refetching right then would
    * replace the terminal error row with one that reads as working forever.
    * Instead the refetch waits for the signal below, or for the next turn's
-   * `finally`, whichever comes first.
+   * `finally`, whichever comes first — and an entry leaves the set only once
+   * the re-read shows the row settled, because the activity topic is
+   * user-scoped: a reconnect ack or a turn in another chat also lands here,
+   * and treating any signal as the finalize would end the wait early and pin
+   * the mid-unwind row.
    */
-  const transcriptReconcileRef = useRef<string | null>(null);
+  const pendingTranscriptReconciles = useRef<Set<string>>(new Set());
   const [pendingContextAction, setPendingContextAction] = useState<'compact' | 'new-chat' | null>(
     null
   );
@@ -367,19 +372,44 @@ export function useTextGeneration({
     details: ModelUnavailableDetails;
   } | null>(null);
 
+  /**
+   * Re-reads each pending transcript and retires only the ones the server
+   * shows settled.
+   *
+   * A chat with a row still at `isGenerating` stays pending: the signal that
+   * triggered this read was not the finalize, and the next one gets another
+   * chance. An evicted query is retired — with nothing cached there is nothing
+   * stale, and the next mount fetches fresh anyway.
+   *
+   * @example
+   * await reconcilePendingTranscripts((chatId) => chatId !== justArmedChatId);
+   */
+  const reconcilePendingTranscripts = useCallback(
+    async (include: (chatId: string) => boolean = () => true) => {
+      for (const chatId of [...pendingTranscriptReconciles.current].filter(include)) {
+        await queryClient.invalidateQueries({ queryKey: messageKeys.list(chatId) });
+        const data = queryClient.getQueryData<{
+          pages: Array<{ messages: Array<{ isGenerating?: boolean }> }>;
+        }>(messageKeys.list(chatId));
+        const settled =
+          data === undefined ||
+          !data.pages.some((page) => page.messages.some((message) => message.isGenerating));
+        if (settled) pendingTranscriptReconciles.current.delete(chatId);
+      }
+    },
+    [queryClient]
+  );
+
   // Every turn finalizer — success, interrupt, error, exhausted — publishes on
   // the activity topic once the row is persisted, and the subscription's
   // `subscribed` ack fires on reconnect, so a finalize published while the
-  // socket was down is not lost. That makes this the one signal that can end
-  // the wait armed above. Gated off while a stream is being read: mid-turn the
+  // socket was down is not lost. That makes this the signal that can end the
+  // wait armed above. Gated off while a stream is being read: mid-turn the
   // optimistic state is fresher than the database, and the turn's own end
   // paths decide what reconciliation it needs.
   useRealtimeInvalidation(ACTIVITY_TOPIC, 'transcript-reconcile', async () => {
     if (stream.abortControllerRef.current) return;
-    const pendingChatId = transcriptReconcileRef.current;
-    if (!pendingChatId) return;
-    transcriptReconcileRef.current = null;
-    await queryClient.invalidateQueries({ queryKey: messageKeys.list(pendingChatId) });
+    await reconcilePendingTranscripts();
   });
 
   const syncContextInfo = useCallback(
@@ -639,6 +669,13 @@ export function useTextGeneration({
         // `working`: copy and revert stay hidden and a working row draws under
         // cards the stream already settled.
         if (!streamState.sealed) {
+          // A vendor turn record outlives `isGenerating`: it is the second
+          // piece of evidence `isRunning` reads, so it has to be sealed here
+          // too or the row stays `working` until the re-read below lands.
+          streamState = settleUnfinishedExternalTurn(
+            streamState,
+            stopRequestedRef.current ? 'cancelled-by-user' : 'runtime-disconnected'
+          );
           updateOptimisticMessage(activeChatId, streamState.currentAiMessageId, {
             isGenerating: false,
             parts: settleUnfinishedImageParts(
@@ -649,21 +686,29 @@ export function useTextGeneration({
         }
       } catch (error: unknown) {
         streamThrew = true;
+        const isAbort = error instanceof Error && error.name === 'AbortError';
         // Every end that reaches this catch is one a card at `generating` never
         // hears about — an abort, a dropped socket, a provider that threw. The
         // events that would settle it are in a stream nobody is reading any
-        // more, so this is the last place to do it. Returns the same array when
+        // more, so this is the last place to do it. The same goes for a vendor
+        // turn record still at `active`: no re-read is coming soon on this
+        // path, so an unsealed record would keep the row on `working` and its
+        // actions hidden. Both settles return the same value untouched when
         // nothing is pending, which is what keeps `parts` out of the update on
         // an ordinary stop.
+        const partsBeforeSettle = streamState.parts;
+        streamState = settleUnfinishedExternalTurn(
+          streamState,
+          isAbort ? 'cancelled-by-user' : 'runtime-disconnected'
+        );
         const settledParts = settleUnfinishedImageParts(
           streamState.parts,
           t.errors.imageGenerationInterrupted
         );
-        const isAbort = error instanceof Error && error.name === 'AbortError';
         if (isAbort) {
           updateOptimisticMessage(activeChatId, streamState.currentAiMessageId, {
             isGenerating: false,
-            ...(settledParts === streamState.parts ? {} : { parts: settledParts }),
+            ...(settledParts === partsBeforeSettle ? {} : { parts: settledParts }),
           });
         } else {
           console.error('[respond]', error);
@@ -702,32 +747,28 @@ export function useTextGeneration({
         // the user's message. The server's timestamp is the one that counts, so
         // this re-reads rather than bumping the cached row by hand.
         void queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
-        // A reconcile an earlier turn armed must not wait forever on a signal
-        // that may never come — consume it here, before this turn decides its
-        // own. By now that turn has long since finalized, so the read is safe.
-        const reconcileEarlier = transcriptReconcileRef.current;
-        transcriptReconcileRef.current = null;
-        if (reconcileEarlier && reconcileEarlier !== activeChatId) {
-          void queryClient.invalidateQueries({ queryKey: messageKeys.list(reconcileEarlier) });
-        }
         if (streamThrew) {
-          transcriptReconcileRef.current = activeChatId;
+          pendingTranscriptReconciles.current.add(activeChatId);
         }
+        // Reconciles an earlier turn armed must not wait forever on a signal
+        // that may never come — retry them here. The one this turn just armed
+        // is excluded: its server may still be mid-unwind, which is the whole
+        // reason it went into the set instead of the branch below.
+        void reconcilePendingTranscripts((chatId) => !(streamThrew && chatId === activeChatId));
         // A clean close is the server's word that the turn was finalized: the
         // route closes the stream only after the generator — finalizers
         // included — has returned. So a clean close without `done` (a stopped
         // turn, a terminal error chunk) re-reads now, which is what puts the
         // persisted checkpoint's resume affordance on screen without a reload.
-        // A thrown end gets no immediate re-read (see `transcriptReconcileRef`)
-        // unless the server ids never arrived, where the optimistic rows are
+        // A thrown end gets no immediate re-read (see the pending set) unless
+        // the server ids never arrived, where the optimistic rows are
         // provisional and the persisted user message is worth having even
         // mid-unwind.
         if (
           recovery ||
           !streamState.receivedServerUserMessageId ||
           !streamState.receivedServerAiMessageId ||
-          (!streamThrew && !sawDoneChunk) ||
-          reconcileEarlier === activeChatId
+          (!streamThrew && !sawDoneChunk)
         ) {
           void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId) });
         }
@@ -754,6 +795,7 @@ export function useTextGeneration({
       onChatCreated,
       stream,
       pendingSubagentName,
+      reconcilePendingTranscripts,
     ]
   );
 
