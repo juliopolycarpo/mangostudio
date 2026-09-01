@@ -593,17 +593,18 @@ export function useTextGeneration({
               );
         });
       } catch (error: unknown) {
+        // Every end that reaches this catch is one a card at `generating` never
+        // hears about — an abort, a dropped socket, a provider that threw. The
+        // events that would settle it are in a stream nobody is reading any
+        // more, so this is the last place to do it. Returns the same array when
+        // nothing is pending, which is what keeps `parts` out of the update on
+        // an ordinary stop.
+        const settledParts = settleUnfinishedImageParts(
+          streamState.parts,
+          t.errors.imageGenerationInterrupted
+        );
         const isAbort = error instanceof Error && error.name === 'AbortError';
         if (isAbort) {
-          // An abort is the one end a card at `generating` never hears about:
-          // the events that settle it are still in a stream nobody is reading.
-          // `settleUnfinishedImageParts` returns the same array when there is
-          // nothing pending, which is what keeps `parts` out of the update on
-          // the ordinary stop.
-          const settledParts = settleUnfinishedImageParts(
-            streamState.parts,
-            t.errors.imageGenerationInterrupted
-          );
           updateOptimisticMessage(activeChatId, streamState.currentAiMessageId, {
             isGenerating: false,
             ...(settledParts === streamState.parts ? {} : { parts: settledParts }),
@@ -615,10 +616,10 @@ export function useTextGeneration({
           const deprecated = deprecatedProviderRefusal(error);
           if (deprecated) setModelUnavailable({ chatId: activeChatId, details: deprecated });
           const errorText = resolveApiErrorMessage(error, t.errors.textGenerationFailed);
-          const alreadyHasError = streamState.parts.some((part) => part.type === 'error');
+          const alreadyHasError = settledParts.some((part) => part.type === 'error');
           const nextParts: MessagePart[] = alreadyHasError
-            ? streamState.parts
-            : [...streamState.parts, { type: 'error', text: errorText }];
+            ? settledParts
+            : [...settledParts, { type: 'error', text: errorText }];
           updateOptimisticMessage(activeChatId, streamState.currentAiMessageId, {
             isGenerating: false,
             text: streamState.text || errorText,

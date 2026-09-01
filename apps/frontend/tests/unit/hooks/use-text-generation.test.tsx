@@ -889,6 +889,57 @@ describe('useTextGeneration — failure surfaced as timeline item', () => {
     );
   });
 
+  // A dropped socket rejects out of the reader as a network error, not an
+  // abort, so it lands here rather than in the abort branch. The card it leaves
+  // behind at `generating` is the same one, and nothing downstream settles it.
+  it('settles a still-generating image card when the stream throws', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({
+          type: 'image_generation_started',
+          imageId: 'img-1',
+          toolCallId: 'image-call-1',
+          prompt: 'Paint mangoes',
+          done: false,
+        });
+        return Promise.reject(new Error('network boom'));
+      }
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('draw');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    const calls = props.updateOptimisticMessage.mock.calls as Array<
+      [string, string, Partial<{ parts: MessagePart[]; isGenerating: boolean }>]
+    >;
+    const finalCall = [...calls].reverse().find(([, , update]) => update.isGenerating === false);
+    if (!finalCall) throw new Error('expected a terminal update');
+
+    expect(finalCall[2].parts).toContainEqual({
+      type: 'generated_image',
+      imageId: 'img-1',
+      toolCallId: 'image-call-1',
+      status: 'error',
+      prompt: 'Paint mangoes',
+      error: en.errors.imageGenerationInterrupted,
+    });
+    // The error part still lands: settling the card explains the picture, not
+    // the turn.
+    expect(finalCall[2].parts).toContainEqual({
+      type: 'error',
+      text: en.errors.textGenerationFailed,
+    });
+  });
+
   it('uses the localized fallback when the stream throws a non-Error value', async () => {
     const props = makeProps();
     mockStream.mockImplementation(() => Promise.reject('offline'));

@@ -96,10 +96,11 @@ export function createTextGenerationStreamState({
  * Settles every `generated_image` part still at `generating` onto `error`.
  *
  * A card only moves off `generating` when its `image_generation_completed` or
- * `image_generation_failed` event arrives, so a stream that ends before those
- * are read — a torn-down reader, a dropped socket — leaves it pulsing with
- * nothing left to settle it. Returns `parts` unchanged when none is pending, so
- * a caller can tell "nothing to write" from "wrote the same array".
+ * `image_generation_failed` event arrives, so any stream that ends before those
+ * are read — a torn-down reader, a dropped socket, a provider that threw —
+ * leaves it pulsing with nothing left to settle it. Returns `parts` unchanged
+ * when none is pending, so a caller can tell "nothing to write" from "wrote the
+ * same array".
  *
  * Usage: `const parts = settleUnfinishedImageParts(state.parts, t.errors.imageGenerationInterrupted)`
  */
