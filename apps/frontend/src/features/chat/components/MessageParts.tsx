@@ -78,10 +78,12 @@ export function MessageParts({
             case 'thinking': {
               const blockId = `${messageId}-thinking-${idx}`;
               // A thought is over the moment anything follows it: the reducer
-              // clears its active index on every other kind of chunk, which is
-              // why `livePartIndex` can be purely positional. Asking instead
-              // whether a *later thinking part* exists left the finished
-              // thought pulsing, expanded and uncounted for the rest of the turn.
+              // only ever extends the *trailing* part of a stream, so once a
+              // part of another kind is appended this one can never grow
+              // again — which is why `livePartIndex` can be purely
+              // positional. Asking instead whether a *later thinking part*
+              // exists left the finished thought pulsing, expanded and
+              // uncounted for the rest of the turn.
               return (
                 <ThinkingBlock
                   key={blockId}

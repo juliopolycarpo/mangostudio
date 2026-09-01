@@ -36,7 +36,6 @@ export interface TextGenerationStreamState {
   readonly currentAiMessageId: string;
   readonly receivedServerUserMessageId: boolean;
   readonly receivedServerAiMessageId: boolean;
-  readonly activeThinkingIndex: number | null;
   /**
    * Where in `parts` the reasoning phase an external turn opened sits, until
    * `external_reasoning_ended` closes it.
@@ -92,7 +91,6 @@ export function createTextGenerationStreamState({
     currentAiMessageId: aiMessageId,
     receivedServerUserMessageId: false,
     receivedServerAiMessageId: false,
-    activeThinkingIndex: null,
     openExternalThinkingIndex: null,
     userMessageUpdate: null,
     aiMessageUpdate: null,
@@ -275,22 +273,31 @@ function reduceStreamError(state: TextGenerationStreamState, errorText: string) 
   );
 }
 
+/**
+ * Explicitly opens a new reasoning segment, unconditionally.
+ *
+ * Unlike a delta, which only opens a segment when the trailing part isn't
+ * already one, `thinking_start` always appends a fresh empty `thinking` part
+ * — even back-to-back with another one — because it is the provider's own
+ * word that a new phase began, not an inference from adjacency.
+ */
 function reduceThinkingStart(state: TextGenerationStreamState) {
   const parts = [...state.parts, { type: 'thinking', text: '' } satisfies MessagePart];
-  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: parts.length - 1 }, { parts });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
+/**
+ * Same rule `reduceTextDelta` and `reduceExternalReasoning` apply: a run ends
+ * the moment a part of another kind is appended. Reading `parts` structurally
+ * rather than tracking which index is "active" is what keeps this agreeing
+ * with `mergeMessageParts`'s adjacency rule on the persisted side — a
+ * `continuation_transition` (or any other part) spliced in between two
+ * reasoning phases ends the first one, even on a runtime old enough, or a
+ * server bookkeeping bug stale enough, to never send a second `thinking_start`.
+ */
 function reduceThinkingDelta(state: TextGenerationStreamState, text: string) {
-  const initializedState = state.activeThinkingIndex === null ? reduceThinkingStart(state) : state;
-  const thinkingIndex = initializedState.activeThinkingIndex;
-  if (thinkingIndex === null) return initializedState;
-  const currentPart = initializedState.parts[thinkingIndex];
-  const currentText = currentPart?.type === 'thinking' ? currentPart.text : '';
-  const parts = replacePartAt(initializedState.parts, thinkingIndex, {
-    type: 'thinking',
-    text: `${currentText}${text}`,
-  });
-  return withAiMessageUpdate({ ...initializedState, parts }, { parts });
+  const parts = appendTrailingText(state.parts, 'thinking', text);
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceTextDelta(state: TextGenerationStreamState, textDelta: string) {
@@ -298,7 +305,7 @@ function reduceTextDelta(state: TextGenerationStreamState, textDelta: string) {
   // the parts array gets the delta alone, appended to the trailing text part.
   const text = `${state.text}${textDelta}`;
   const parts = appendTrailingText(state.parts, 'text', textDelta);
-  return withAiMessageUpdate({ ...state, text, parts, activeThinkingIndex: null }, { text, parts });
+  return withAiMessageUpdate({ ...state, text, parts }, { text, parts });
 }
 
 function reduceToolCallStarted(state: TextGenerationStreamState, callId: string, name: string) {
@@ -306,7 +313,7 @@ function reduceToolCallStarted(state: TextGenerationStreamState, callId: string,
     ...state.parts,
     { type: 'tool_call', toolCallId: callId, name, args: {} } satisfies MessagePart,
   ];
-  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceToolCallCompleted(
@@ -501,7 +508,7 @@ function reduceMcpElicitation(
   const parts = exists
     ? updateElicitationStatus(state.parts, chunk.elicitationId, chunk.status)
     : [...state.parts, elicitationPart];
-  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceMcpElicitationStatus(
@@ -561,7 +568,7 @@ function reduceImageGenerationStarted(
     status: 'generating',
     prompt: chunk.prompt,
   });
-  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceImageGenerationCompleted(
@@ -638,7 +645,7 @@ function reduceDone(
   generationTime: string | undefined
 ) {
   return withAiMessageUpdate(
-    { ...state, activeThinkingIndex: null },
+    state,
     {
       isGenerating: false,
       text: state.text,
@@ -685,13 +692,13 @@ function reduceExternalSessionStarted(
       persistedBytes: 0,
     } satisfies MessagePart,
   ];
-  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceExternalText(state: TextGenerationStreamState, textDelta: string) {
   const text = `${state.text}${textDelta}`;
   const parts = appendTrailingText(state.parts, 'text', textDelta);
-  return withAiMessageUpdate({ ...state, text, parts, activeThinkingIndex: null }, { text, parts });
+  return withAiMessageUpdate({ ...state, text, parts }, { text, parts });
 }
 
 function reduceExternalReasoning(state: TextGenerationStreamState, textDelta: string) {
@@ -749,7 +756,7 @@ function reduceExternalActivityStarted(
       ...(chunk.truncated ? { truncated: true } : {}),
     } satisfies MessagePart,
   ];
-  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceExternalActivityUpdated(
@@ -802,7 +809,7 @@ function reduceExternalApprovalRequest(
       ...(chunk.truncated ? { truncated: true } : {}),
     } satisfies MessagePart,
   ];
-  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceExternalApprovalStatus(
@@ -890,7 +897,7 @@ function reduceExternalSteer(
           createdAt: 0,
         };
   const parts = [...state.parts, steerPart satisfies MessagePart];
-  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceExternalError(state: TextGenerationStreamState, error: ExternalAgentError) {

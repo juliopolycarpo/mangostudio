@@ -39,7 +39,6 @@ describe('text generation stream reducer', () => {
       { type: 'thinking', text: 'after tool' },
     ]);
     expect(state.text).toBe('answer');
-    expect(state.activeThinkingIndex).toBeNull();
   });
 
   it('updates tool call parts and tolerates malformed argument payloads', () => {

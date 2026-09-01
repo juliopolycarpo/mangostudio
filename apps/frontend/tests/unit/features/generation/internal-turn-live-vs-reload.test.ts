@@ -109,4 +109,52 @@ describe('internal turn: live stream vs reloaded transcript', () => {
     expect(live).toEqual([{ type: 'text', text: 'Hello there' }]);
     expect(persisted).toEqual(live);
   });
+
+  /**
+   * A `continuation_transition` mid-reasoning (a provider degrading to replay
+   * mid-turn, e.g. on `cursor_expired`) ends the reasoning run the same way a
+   * tool call does. Deliberately omits the `thinking_start` a fresh segment
+   * would normally open after the transition: old runtimes not aware of the
+   * boundary — and the API itself, if `loop.inThinkingSegment` is left stale —
+   * never send one, so the reducer has to reopen the segment on its own from
+   * the first delta that follows, exactly as it already does for a provider
+   * that never sends `thinking_start` at all.
+   */
+  it('ends a reasoning run at a continuation transition, even with no thinking_start after it', () => {
+    const live = liveParts([
+      { type: 'thinking_start', done: false },
+      { type: 'thinking', text: 'Checking the cursor.', done: false },
+      {
+        type: 'continuation_transition',
+        provider: 'gemini',
+        modelName: 'gemini-2.5-pro',
+        fromProvider: 'gemini',
+        fromMode: 'interactions',
+        toMode: 'replay',
+        reasonCode: 'cursor_expired',
+        detail: 'interactions → replay',
+        done: false,
+      },
+      { type: 'thinking', text: 'Retrying from scratch.', done: false },
+    ]);
+
+    const persisted = mergeMessageParts([
+      { type: 'thinking', text: 'Checking the cursor.' },
+      {
+        type: 'continuation_transition',
+        provider: 'gemini',
+        modelName: 'gemini-2.5-pro',
+        fromProvider: 'gemini',
+        fromMode: 'interactions',
+        toMode: 'replay',
+        reasonCode: 'cursor_expired',
+        detail: 'interactions → replay',
+        recovered: false,
+      },
+      { type: 'thinking', text: 'Retrying from scratch.' },
+    ]);
+
+    expect(live).toEqual(persisted);
+    expect(live.filter((part) => part.type === 'thinking')).toHaveLength(2);
+  });
 });
