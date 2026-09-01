@@ -544,6 +544,14 @@ export async function* emitAgentStreamEvent(
 
     case 'continuation_degraded':
       loop.degradedThisTurn = true;
+      // A transition part is about to sit between whatever reasoning ran
+      // before it and whatever runs after, the same way a tool call would —
+      // see every other case here. Left stale, the next `reasoning_delta`
+      // skips `thinking_start`, and a client that relies on it to open a new
+      // segment (rather than reopening one structurally, like this reducer's
+      // frontend counterpart) welds the resumed reasoning onto the phase the
+      // transition just ended.
+      loop.inThinkingSegment = false;
       yield* emitContinuationDegradation(session, {
         from: event.from,
         to: event.to,
