@@ -15,6 +15,14 @@ import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
 const TEST_USER = 'test-user-openai';
 const NO_TOML = join(import.meta.dir, '.mangostudio-test-nonexistent-config.toml');
 
+// Snapshotted at module evaluation, before any `mock.module` below runs: an
+// ESM import is a live binding, so restoring `db/database` with `() => ({
+// getDb })` reads whatever `getDb` currently resolves to — including a fake
+// this file already installed — and the "restore" makes the fake permanent
+// for the rest of the (unisolated) `bun test tests/unit` process. A plain
+// variable captures the real function by value instead.
+const REAL_GET_DB = getDb;
+
 /**
  * Creates an in-memory metadata harness for test isolation.
  * Mirrors the pattern from gemini-secret.test.ts.
@@ -430,7 +438,7 @@ describe('validateOpenAIAuthContext', () => {
 describe('openai-provider listModels filtering', () => {
   afterEach(async () => {
     mock.restore();
-    await mock.module('../../../../src/db/database', () => ({ getDb }));
+    await mock.module('../../../../src/db/database', () => ({ getDb: REAL_GET_DB }));
   });
 
   it('filters out embedding/tts/whisper/moderation model ids', () => {
