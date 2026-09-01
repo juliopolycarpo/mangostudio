@@ -5,6 +5,7 @@
 
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { MessagePart } from '@mangostudio/shared';
+import { en } from '@mangostudio/shared/i18n';
 import {
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
@@ -1092,6 +1093,49 @@ describe('useTextGeneration — stream metadata and abort lifecycle', () => {
       { isGenerating: false }
     );
   });
+
+  // The abort paths that are left — a cancel POST that never landed, a socket
+  // that dropped — end the stream before the events that settle an image card
+  // are read. Nothing else will move it off `generating`.
+  it('settles a still-generating image card when the reader is torn down', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeAbortableStreamFn([
+        {
+          type: 'image_generation_started',
+          imageId: 'img-1',
+          toolCallId: 'image-call-1',
+          prompt: 'Paint mangoes',
+          done: false,
+        },
+      ])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      const responsePromise = result.current.handleRespond('draw');
+      result.current.handleStop();
+      await responsePromise;
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+    expect(props.updateOptimisticMessage).toHaveBeenCalledWith(
+      'chat-1',
+      expect.stringContaining('optimistic-ai'),
+      {
+        isGenerating: false,
+        parts: [
+          expect.objectContaining({
+            type: 'generated_image',
+            imageId: 'img-1',
+            status: 'error',
+            error: en.errors.imageGenerationInterrupted,
+          }),
+        ],
+      }
+    );
+  });
 });
 
 describe('useTextGeneration — interrupted turn actions', () => {
@@ -1149,6 +1193,90 @@ describe('useTextGeneration — interrupted turn actions', () => {
         result.current.handleResumeInterruptedTurn('interrupted-ai', [])
       ).rejects.toThrow('Resume rejected');
     });
+  });
+
+  // `/recovery/cancel` returns as soon as the turn is told to stop, and the
+  // cancelled turn keeps yielding after that — the `image_generation_failed`
+  // events for the images it never reached are what settle those cards. A stop
+  // that tore the reader down dropped them and left the cards pulsing.
+  it('keeps reading after a stop so the cancelled turn can settle its own cards', async () => {
+    const props = makeProps();
+    const cancelReturned = createDeferred<void>();
+    const serverError = 'The turn was interrupted before this image was generated.';
+    let abortedWhenSettled = true;
+
+    mockCancelInterruptedTurn.mockResolvedValue(undefined);
+    mockStream.mockImplementation(
+      async (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void,
+        signal?: AbortSignal
+      ) => {
+        onChunk({ type: 'assistant_message_id', messageId: 'server-ai', done: false });
+        onChunk({
+          type: 'image_generation_started',
+          imageId: 'img-1',
+          toolCallId: 'image-call-1',
+          prompt: 'Paint mangoes',
+          done: false,
+        });
+
+        await new Promise<void>((resolve, reject) => {
+          if (signal?.aborted) {
+            reject(createAbortError());
+            return;
+          }
+          signal?.addEventListener('abort', () => reject(createAbortError()), { once: true });
+          void cancelReturned.promise.then(resolve);
+        });
+
+        abortedWhenSettled = signal?.aborted ?? false;
+        onChunk({
+          type: 'image_generation_failed',
+          imageId: 'img-1',
+          toolCallId: 'image-call-1',
+          prompt: 'Paint mangoes',
+          error: serverError,
+          done: false,
+        });
+      }
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+    let responded!: Promise<void>;
+
+    await act(async () => {
+      responded = result.current.handleRespond('draw');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      result.current.handleStop();
+      await Promise.resolve();
+    });
+
+    expect(mockCancelInterruptedTurn).toHaveBeenCalledWith('chat-1', 'server-ai');
+
+    await act(async () => {
+      cancelReturned.resolve();
+      await responded;
+    });
+
+    expect(abortedWhenSettled).toBe(false);
+    expect(props.updateOptimisticMessage).toHaveBeenCalledWith(
+      'chat-1',
+      'server-ai',
+      expect.objectContaining({
+        parts: [
+          expect.objectContaining({
+            type: 'generated_image',
+            imageId: 'img-1',
+            status: 'error',
+            error: serverError,
+          }),
+        ],
+      })
+    );
   });
 
   it('dismisses the interrupted checkpoint for the current chat', async () => {

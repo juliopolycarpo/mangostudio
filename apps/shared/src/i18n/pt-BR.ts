@@ -3635,6 +3635,7 @@ export const messages = {
     referenceImageUploadFailed: 'Falha ao enviar a imagem de referência. Tente novamente.',
     textGenerationFailed: 'Falha ao obter uma resposta. Tente novamente.',
     imageGenerationFailed: 'Falha ao gerar imagem. Tente novamente.',
+    imageGenerationInterrupted: 'O turno foi interrompido antes desta imagem ser gerada.',
   },
 
   models: {

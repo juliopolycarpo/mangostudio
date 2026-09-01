@@ -44,6 +44,7 @@ import type { useOptimisticMessages } from '@/features/generation/hooks/use-opti
 import {
   createTextGenerationStreamState,
   reduceTextGenerationStreamChunk,
+  settleUnfinishedImageParts,
   type TextGenerationStreamMessageUpdate,
 } from '@/features/generation/text-generation-stream-reducer';
 import { invalidateGitState } from '@/features/workspace/hooks/use-git-state';
@@ -594,8 +595,18 @@ export function useTextGeneration({
       } catch (error: unknown) {
         const isAbort = error instanceof Error && error.name === 'AbortError';
         if (isAbort) {
+          // An abort is the one end a card at `generating` never hears about:
+          // the events that settle it are still in a stream nobody is reading.
+          // `settleUnfinishedImageParts` returns the same array when there is
+          // nothing pending, which is what keeps `parts` out of the update on
+          // the ordinary stop.
+          const settledParts = settleUnfinishedImageParts(
+            streamState.parts,
+            t.errors.imageGenerationInterrupted
+          );
           updateOptimisticMessage(activeChatId, streamState.currentAiMessageId, {
             isGenerating: false,
+            ...(settledParts === streamState.parts ? {} : { parts: settledParts }),
           });
         } else {
           console.error('[respond]', error);
@@ -700,13 +711,19 @@ export function useTextGeneration({
       return;
     }
 
-    void cancelInterruptedTurn(activeTurn.chatId, activeTurn.messageId)
-      .catch((error: unknown) => {
-        console.warn('[turn-recovery] Failed to persist turn cancellation', error);
-      })
-      .finally(() => {
-        stream.handleStop();
-      });
+    // Cancel, then keep reading. `/recovery/cancel` returns as soon as the turn
+    // is told to stop, and a cancelled turn is not finished talking: the
+    // `image_generation_failed` events for the images it never reached are what
+    // move those cards off `generating`, and they are yielded after the cancel
+    // call has already resolved. Aborting the fetch here dropped exactly those,
+    // leaving the open tab pulsing until a reload. The server closes the stream
+    // once the cancelled turn unwinds, and this request ends with it.
+    void cancelInterruptedTurn(activeTurn.chatId, activeTurn.messageId).catch((error: unknown) => {
+      console.warn('[turn-recovery] Failed to persist turn cancellation', error);
+      // Nothing told the turn to stop, so nothing is going to close this
+      // stream. Tearing the reader down is the only stop left.
+      stream.handleStop();
+    });
   }, [stream]);
 
   const handleResumeInterruptedTurn = useCallback(

@@ -92,6 +92,28 @@ export function createTextGenerationStreamState({
   };
 }
 
+/**
+ * Settles every `generated_image` part still at `generating` onto `error`.
+ *
+ * A card only moves off `generating` when its `image_generation_completed` or
+ * `image_generation_failed` event arrives, so a stream that ends before those
+ * are read — a torn-down reader, a dropped socket — leaves it pulsing with
+ * nothing left to settle it. Returns `parts` unchanged when none is pending, so
+ * a caller can tell "nothing to write" from "wrote the same array".
+ *
+ * Usage: `const parts = settleUnfinishedImageParts(state.parts, t.errors.imageGenerationInterrupted)`
+ */
+export function settleUnfinishedImageParts(parts: MessagePart[], error: string): MessagePart[] {
+  if (!parts.some(isUnfinishedImagePart)) return parts;
+  return parts.map((part) =>
+    isUnfinishedImagePart(part) ? { ...part, status: 'error' as const, error } : part
+  );
+}
+
+function isUnfinishedImagePart(part: MessagePart): part is GeneratedImagePart {
+  return part.type === 'generated_image' && part.status === 'generating';
+}
+
 /** Reduces one streamed chunk into the next optimistic text generation state.
  * Usage: `state = reduceTextGenerationStreamChunk(state, chunk, { pendingSubagentName })`
  */

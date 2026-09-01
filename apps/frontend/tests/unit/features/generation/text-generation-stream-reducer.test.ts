@@ -4,6 +4,7 @@ import type { StreamChunk } from '@mangostudio/shared/streaming';
 import {
   createTextGenerationStreamState,
   reduceTextGenerationStreamChunk,
+  settleUnfinishedImageParts,
 } from '../../../../src/features/generation/text-generation-stream-reducer';
 
 const REDUCER_OPTIONS = { pendingSubagentName: 'Pending subagent' };
@@ -529,5 +530,41 @@ describe('text generation stream reducer', () => {
         ],
       },
     });
+  });
+});
+
+describe('settleUnfinishedImageParts', () => {
+  const pendingImage: MessagePart = {
+    type: 'generated_image',
+    imageId: 'img-1',
+    toolCallId: 'image-call-1',
+    status: 'generating',
+    prompt: 'Paint mangoes',
+  };
+
+  it('moves every pending card onto error and leaves settled ones alone', () => {
+    const settledImage: MessagePart = {
+      type: 'generated_image',
+      imageId: 'img-0',
+      toolCallId: 'image-call-1',
+      status: 'completed',
+      prompt: 'Paint mangoes',
+      imageUrl: '/images/generated-1.png',
+    };
+    const parts: MessagePart[] = [settledImage, pendingImage, { type: 'text', text: 'here goes' }];
+
+    expect(settleUnfinishedImageParts(parts, 'stopped')).toEqual([
+      settledImage,
+      { ...pendingImage, status: 'error', error: 'stopped' },
+      { type: 'text', text: 'here goes' },
+    ]);
+  });
+
+  // Identity, not equality: the caller reads it to decide whether the update it
+  // is about to send needs a `parts` key at all.
+  it('hands back the same array when nothing is pending', () => {
+    const parts: MessagePart[] = [{ type: 'text', text: 'no pictures here' }];
+
+    expect(settleUnfinishedImageParts(parts, 'stopped')).toBe(parts);
   });
 });

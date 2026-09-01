@@ -283,8 +283,11 @@ describe('POST /respond/stream — tools', () => {
       'the first image request to reach the provider'
     );
 
-    // Same effect as the Stop button: aborts the in-memory turn without the
-    // browser closing this connection.
+    // What the Stop button does: `handleStop` POSTs `/recovery/cancel` and then
+    // keeps reading, because the events that settle the cards this turn will
+    // never reach are yielded after that call has already returned. The
+    // recorder reading on is the browser, not a convenience — a Stop that tore
+    // the reader down here would be testing a client that no longer exists.
     const cancelled = cancelActiveTurn(
       assistantMessageId,
       TEST_USER.id,
