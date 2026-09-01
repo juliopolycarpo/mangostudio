@@ -8,7 +8,7 @@ import type {
 } from '@mangostudio/shared';
 import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import type { ContextSettings } from '@mangostudio/shared/chat';
-import type { ToolIntent } from '@mangostudio/shared/generation';
+import type { ImageGenerationErrorCode, ToolIntent } from '@mangostudio/shared/generation';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 import type {
@@ -69,6 +69,7 @@ export type StreamEvent =
       toolCallId: string;
       prompt: string;
       error: string;
+      errorCode?: ImageGenerationErrorCode;
       modelName?: string;
       generationTime?: string;
     }

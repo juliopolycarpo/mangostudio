@@ -200,6 +200,34 @@ describe('text generation stream reducer', () => {
     ]);
   });
 
+  // `errorCode` is what lets `GeneratedImagePart` localize an interrupted
+  // abandon instead of showing the model-facing English text verbatim.
+  it('carries errorCode from an image_generation_failed chunk onto the part', () => {
+    const state = reduceChunks([
+      {
+        type: 'image_generation_failed',
+        imageId: 'image-1',
+        toolCallId: 'tool-1',
+        prompt: 'cat portrait',
+        error: 'The turn was interrupted before this image was generated.',
+        errorCode: 'image_generation_interrupted',
+        done: false,
+      },
+    ]);
+
+    expect(getPartsByType(state.parts, 'generated_image')).toEqual([
+      {
+        type: 'generated_image',
+        imageId: 'image-1',
+        toolCallId: 'tool-1',
+        status: 'error',
+        prompt: 'cat portrait',
+        error: 'The turn was interrupted before this image was generated.',
+        errorCode: 'image_generation_interrupted',
+      },
+    ]);
+  });
+
   it('merges subagent system and lifecycle events into the trace part', () => {
     const state = reduceChunks([
       {

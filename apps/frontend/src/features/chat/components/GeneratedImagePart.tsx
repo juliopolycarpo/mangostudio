@@ -130,14 +130,21 @@ export function GeneratedImagePart({ part }: Props) {
   }
 
   if (part.status === 'error') {
+    // `errorCode` names a closed, renderable reason; `error` alone is the
+    // model-facing text and stays in English, so only the coded case can be
+    // localized here.
+    const errorDetail =
+      part.errorCode === 'image_generation_interrupted'
+        ? t.errors.imageGenerationInterrupted
+        : part.error;
     return (
       <div className="bg-error/10 border border-error/20 p-4 rounded-xl flex items-start gap-3 max-w-md">
         <AlertCircle size={16} className="text-error shrink-0 mt-0.5" />
         <div className="flex flex-col gap-1 min-w-0">
           <span className="text-error text-xs font-bold">{t.chat.feed.imageGenerationFailed}</span>
-          {part.error && (
+          {errorDetail && (
             <span className="text-error/70 text-[11px] font-body leading-relaxed">
-              {part.error}
+              {errorDetail}
             </span>
           )}
           {(modelLabel || generationTimeLabel) && (

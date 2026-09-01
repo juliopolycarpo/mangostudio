@@ -1,5 +1,6 @@
 import type { MessagePart } from '@mangostudio/shared';
 import type { AgentId } from '@mangostudio/shared/agents';
+import type { ImageGenerationErrorCode } from '@mangostudio/shared/generation';
 import {
   applyToolExecutionTransition,
   createToolExecutionSnapshot,
@@ -656,6 +657,14 @@ function getOwnedRecoveryMessage(
 
 /** What a planned image records when the turn ended before it was generated. */
 export const IMAGE_ABANDONED_ERROR = 'The turn was interrupted before this image was generated.';
+/**
+ * The renderable counterpart of {@link IMAGE_ABANDONED_ERROR}.
+ *
+ * `IMAGE_ABANDONED_ERROR` also travels as the tool result a model reads, so it
+ * stays in English; this code is what a UI switches on to show the user's own
+ * language instead.
+ */
+export const IMAGE_ABANDONED_ERROR_CODE: ImageGenerationErrorCode = 'image_generation_interrupted';
 
 export function reconcileInterruptedMessageParts(parts: MessagePart[]): void {
   const resultIds = new Set(
@@ -675,6 +684,7 @@ export function reconcileInterruptedMessageParts(parts: MessagePart[]): void {
     if (part.type === 'generated_image' && part.status === 'generating') {
       part.status = 'error';
       part.error = IMAGE_ABANDONED_ERROR;
+      part.errorCode = IMAGE_ABANDONED_ERROR_CODE;
       continue;
     }
     if (part.type !== 'tool_call' || resultIds.has(part.toolCallId)) continue;

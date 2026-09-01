@@ -103,6 +103,19 @@ export const RespondStreamBodySchema = Type.Object({
 export type RespondStreamBody = Static<typeof RespondStreamBodySchema>;
 
 /**
+ * Why a `generated_image` part settled into `error` without ever reaching the
+ * provider.
+ *
+ * A closed code rather than the persisted `error` string, because that string
+ * also travels as the tool result a model reads — it stays in English on
+ * purpose — while the code is what a renderer switches on to show the user's
+ * own language instead of replaying it verbatim.
+ */
+export const ImageGenerationErrorCodeSchema = Type.Literal('image_generation_interrupted');
+
+export type ImageGenerationErrorCode = Static<typeof ImageGenerationErrorCodeSchema>;
+
+/**
  * Why a turn could not resolve a model.
  *
  * A closed vocabulary rather than the server's sentence, because the two arms

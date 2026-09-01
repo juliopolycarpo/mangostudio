@@ -8,6 +8,7 @@ import type {
   ExternalTurnTerminalReason,
   ExternalUsage,
 } from '../external-agents/schemas';
+import type { ImageGenerationErrorCode } from '../generation/schemas';
 import type { McpElicitationPart } from '../mcp/schemas';
 import type { QuestionSpec } from '../questions/schemas';
 import type { TodoItem } from '../todos/schemas';
@@ -61,6 +62,8 @@ export interface GeneratedImagePart {
   prompt: string;
   imageUrl?: string;
   error?: string;
+  /** Set only when `error` is a code a renderer should localize, not the model-facing text as-is. */
+  errorCode?: ImageGenerationErrorCode;
   modelName?: string;
   generationTime?: string;
 }

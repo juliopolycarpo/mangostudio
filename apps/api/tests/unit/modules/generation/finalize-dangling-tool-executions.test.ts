@@ -63,11 +63,16 @@ describe('finalizeDanglingToolExecutions', () => {
     const landed = parts.find(
       (part) => part.type === 'generated_image' && part.imageId === 'img-2'
     );
-    expect(pending).toMatchObject({ status: 'error', error: expect.any(String) });
+    expect(pending).toMatchObject({
+      status: 'error',
+      error: expect.any(String),
+      errorCode: 'image_generation_interrupted',
+    });
     // A part that already landed keeps its result: this seals, it does not undo.
     expect(landed).toMatchObject({ status: 'completed', imageUrl: '/images/img-2.png' });
     // The open tab is still reading this stream: without this event it never
-    // hears the seal and the card keeps pulsing until reload.
+    // hears the seal and the card keeps pulsing until reload. `errorCode`
+    // travels alongside the English text so a renderer can localize it.
     expect(events).toEqual([
       {
         type: 'image_generation_failed',
@@ -75,6 +80,7 @@ describe('finalizeDanglingToolExecutions', () => {
         toolCallId: 'image-1',
         prompt: 'Paint mangoes',
         error: expect.any(String),
+        errorCode: 'image_generation_interrupted',
       },
     ]);
   });

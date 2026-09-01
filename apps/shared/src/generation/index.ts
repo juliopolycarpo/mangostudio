@@ -16,6 +16,8 @@ export {
   GenerateImageBodySchema,
   type GenerateTextBody,
   GenerateTextBodySchema,
+  type ImageGenerationErrorCode,
+  ImageGenerationErrorCodeSchema,
   type ModelUnavailableAction,
   ModelUnavailableActionSchema,
   type ModelUnavailableDetails,

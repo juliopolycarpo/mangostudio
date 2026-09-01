@@ -48,7 +48,7 @@ import {
   ToolPolicyError,
 } from './tool-execution-lifecycle';
 import { errorToToolMessage, parseToolArgs, stringifyToolResult } from './tool-result-utils';
-import { IMAGE_ABANDONED_ERROR } from './turn-recovery';
+import { IMAGE_ABANDONED_ERROR, IMAGE_ABANDONED_ERROR_CODE } from './turn-recovery';
 
 /** Accumulators a completed tool execution writes into for the turn. */
 interface ToolResultSink {
@@ -404,6 +404,7 @@ function* abandonUnreachedImages(
     if (reached.has(imageId)) continue;
     part.status = 'error';
     part.error = IMAGE_ABANDONED_ERROR;
+    part.errorCode = IMAGE_ABANDONED_ERROR_CODE;
     outcomes.push({
       type: 'failed',
       imageId,
@@ -417,6 +418,7 @@ function* abandonUnreachedImages(
       toolCallId,
       prompt: part.prompt,
       error: IMAGE_ABANDONED_ERROR,
+      errorCode: IMAGE_ABANDONED_ERROR_CODE,
     };
     abandoned += 1;
   }
@@ -634,12 +636,14 @@ export function* finalizeDanglingToolExecutions(parts: MessagePart[]): Generator
     if (part.type === 'generated_image' && part.status === 'generating') {
       part.status = 'error';
       part.error = IMAGE_ABANDONED_ERROR;
+      part.errorCode = IMAGE_ABANDONED_ERROR_CODE;
       yield {
         type: 'image_generation_failed',
         imageId: part.imageId,
         toolCallId: part.toolCallId,
         prompt: part.prompt,
         error: IMAGE_ABANDONED_ERROR,
+        errorCode: IMAGE_ABANDONED_ERROR_CODE,
       };
       continue;
     }

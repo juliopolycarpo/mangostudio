@@ -169,6 +169,7 @@ function toSsePayload(event: StreamEvent): object {
         toolCallId: event.toolCallId,
         prompt: event.prompt,
         error: event.error,
+        errorCode: event.errorCode,
         modelName: event.modelName,
         generationTime: event.generationTime,
         done: false,

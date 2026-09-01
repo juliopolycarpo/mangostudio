@@ -145,5 +145,10 @@ describe('executeImageGenerationCall — abandoned images', () => {
 
     const failed = events.filter((event) => event.type === 'image_generation_failed');
     expect(failed).toHaveLength(2);
+    // `errorCode` is what lets the open tab localize the card instead of
+    // showing the model-facing English text verbatim.
+    for (const event of failed) {
+      expect(event).toMatchObject({ errorCode: 'image_generation_interrupted' });
+    }
   });
 });

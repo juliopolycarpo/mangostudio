@@ -599,6 +599,7 @@ function reduceImageGenerationFailed(
     status: 'error',
     prompt: chunk.prompt,
     error: chunk.error,
+    errorCode: chunk.errorCode,
     modelName: chunk.modelName,
     generationTime: chunk.generationTime,
   });

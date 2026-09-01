@@ -388,7 +388,11 @@ describe('interrupted turn recovery', () => {
     const landed = parts.find(
       (part) => part.type === 'generated_image' && part.imageId === 'img-2'
     );
-    expect(pending).toMatchObject({ status: 'error', error: expect.any(String) });
+    expect(pending).toMatchObject({
+      status: 'error',
+      error: expect.any(String),
+      errorCode: 'image_generation_interrupted',
+    });
     // An image that did land keeps its result: reconcile seals, it does not undo.
     expect(landed).toMatchObject({ status: 'completed', imageUrl: '/images/img-2.png' });
   });
