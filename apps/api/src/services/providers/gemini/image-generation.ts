@@ -5,6 +5,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getConfig } from '../../../lib/config';
+import { throwIfAborted } from '../../../modules/environments/domain/cancellation';
 import {
   normalizeGeneratedImageMimeType,
   saveGeneratedImage,
@@ -85,6 +86,8 @@ export async function saveGeminiGeneratedImageFromResponse(
  * @param referenceImageUrl - Optional local URL to a reference image (e.g., /uploads/...).
  * @param imageSize - Image quality/size setting (512px, 1K, 2K, 4K).
  * @param modelName - Gemini model to use.
+ * @param client - Prepared Gemini client; created from a resolved key when absent.
+ * @param signal - Optional signal to abort a request already in flight.
  * @returns The saved image URL path (e.g., /images/generated-xxx.png).
  */
 export async function generateGeminiImage(
@@ -94,7 +97,8 @@ export async function generateGeminiImage(
   referenceImageUrl?: string,
   imageSize = '1K',
   modelName?: string,
-  client?: ReturnType<typeof createGeminiClient>
+  client?: ReturnType<typeof createGeminiClient>,
+  signal?: AbortSignal
 ): Promise<string> {
   if (!modelName) {
     throw new Error('No Gemini image model was provided.');
@@ -143,6 +147,10 @@ export async function generateGeminiImage(
 
   const config: Record<string, unknown> = {};
 
+  if (signal) {
+    config.abortSignal = signal;
+  }
+
   if (systemPrompt?.trim()) {
     config.systemInstruction = systemPrompt;
   }
@@ -159,6 +167,14 @@ export async function generateGeminiImage(
   } else if (modelName === 'gemini-2.5-flash-image') {
     config.imageConfig = { aspectRatio: '1:1' };
   }
+
+  // `config.abortSignal` only covers an abort that lands *after* dispatch: the
+  // SDK wires it with `addEventListener('abort')` onto a fresh controller and
+  // never reads `signal.aborted`, so a Stop during key resolution or the
+  // reference-image read above would be dropped and the request would run to
+  // completion. Every await between the caller's check and here is covered by
+  // checking once, at the last possible moment.
+  throwIfAborted(signal, 'Image generation was aborted.');
 
   const response = await ai.models.generateContent({
     model: modelName,

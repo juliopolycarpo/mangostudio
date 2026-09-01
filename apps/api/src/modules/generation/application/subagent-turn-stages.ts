@@ -683,6 +683,11 @@ async function executeSubagentTools(input: {
               workdir: input.workdir,
               workdirPolicy: input.workdirPolicy,
               parameters: {},
+              // Same signal the MCP branch above already forwards. Without it a
+              // builtin a subagent runs — `generate_image` among them — keeps its
+              // provider request in flight after the delegating turn is stopped,
+              // which is the hard kill this signal exists to replace.
+              signal: input.signal,
             },
             getSafeEffectiveToolSettings(tool, input.settingsByToolName.get(call.name))
           );

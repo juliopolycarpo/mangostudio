@@ -110,7 +110,8 @@ const geminiProvider: AIProvider = {
       req.referenceImageUrl,
       req.imageSize ?? '1K',
       req.modelName,
-      client
+      client,
+      req.signal
     );
     return { imageUrl };
   },
