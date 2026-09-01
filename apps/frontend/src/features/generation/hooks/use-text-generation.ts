@@ -744,6 +744,13 @@ export function useTextGeneration({
     }
     stopRequestedRef.current = activeTurn.messageId;
 
+    // Captured, not read again in the handler below. That call settles whenever
+    // the network lets it, by which time the ref may hold the controller of a
+    // turn the user has since sent — `runTurn`'s `finally` clears it and the
+    // next send installs its own. Aborting this one is a no-op if the stream it
+    // belongs to has already ended, which is exactly the intent.
+    const cancelledStream = stream.abortControllerRef.current;
+
     // Cancel, then keep reading. `/recovery/cancel` returns as soon as the turn
     // is told to stop, and a cancelled turn is not finished talking: the
     // `image_generation_failed` events for the images it never reached are what
@@ -755,7 +762,7 @@ export function useTextGeneration({
       console.warn('[turn-recovery] Failed to persist turn cancellation', error);
       // Nothing told the turn to stop, so nothing is going to close this
       // stream. Tearing the reader down is the only stop left.
-      stream.handleStop();
+      cancelledStream?.abort();
     });
   }, [stream]);
 

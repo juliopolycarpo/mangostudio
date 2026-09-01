@@ -1386,6 +1386,83 @@ describe('useTextGeneration — interrupted turn actions', () => {
     expect(mockCancelInterruptedTurn).toHaveBeenCalledTimes(1);
   });
 
+  // The cancel POST settles whenever the network lets it. By then the ref may
+  // hold the controller of a turn the user has since sent, so the fallback has
+  // to abort the stream this cancel belonged to, not whichever is current.
+  it('does not abort a later turn when the cancel fails after this one ended', async () => {
+    const props = makeProps();
+    let failCancel!: () => void;
+    mockCancelInterruptedTurn.mockImplementation(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          failCancel = () => reject(new Error('cancel timed out'));
+        })
+    );
+
+    const signals: (AbortSignal | undefined)[] = [];
+    const finishSecondTurn = createDeferred<void>();
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void,
+        signal?: AbortSignal
+      ) => {
+        signals.push(signal);
+        const turnIndex = signals.length;
+        onChunk({
+          type: 'assistant_message_id',
+          messageId: `server-ai-${turnIndex}`,
+          done: false,
+        });
+        return new Promise<void>((resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(createAbortError()), { once: true });
+          if (turnIndex === 2) void finishSecondTurn.promise.then(resolve);
+        });
+      }
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    let firstTurn!: Promise<void>;
+    await act(async () => {
+      firstTurn = result.current.handleRespond('draw');
+      await Promise.resolve();
+    });
+
+    // First press hands the stop to the server; second is the hard kill that
+    // ends this turn while the cancel POST is still in flight.
+    await act(async () => {
+      result.current.handleStop();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      result.current.handleStop();
+      await firstTurn;
+    });
+
+    let secondTurn!: Promise<void>;
+    await act(async () => {
+      secondTurn = result.current.handleRespond('again');
+      await Promise.resolve();
+    });
+    expect(signals).toHaveLength(2);
+
+    // The first turn's cancel fails now, long after that turn ended.
+    await act(async () => {
+      failCancel();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]?.aborted).toBe(false);
+
+    await act(async () => {
+      finishSecondTurn.resolve();
+      await secondTurn;
+    });
+  });
+
   it('dismisses the interrupted checkpoint for the current chat', async () => {
     const props = makeProps();
     mockDismissInterruptedTurn.mockResolvedValue(undefined);
