@@ -214,8 +214,10 @@ export function createRuntimeServiceManager(
       const slotState = await readRuntimeSlotState(slot, deps.env);
       const currentDir = runtimeSlotCurrentDir(slot, options());
       const configMode = inferConfiguredMode(slotState.config);
-      const status = await manager.status();
-      const body = await manager.readUnit();
+      // Two reads of the same unit file: `status()` reads it to decide
+      // `installed`, and the mode lives in the body it does not hand back. They
+      // do not depend on each other, so they go out together.
+      const [status, body] = await Promise.all([manager.status(), manager.readUnit()]);
       const mode = body ? (modeFromUnitBody(body) ?? configMode) : configMode;
       if (!status.installed || status.error) {
         return { ...status, mode };
