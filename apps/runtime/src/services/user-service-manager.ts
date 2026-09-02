@@ -9,7 +9,7 @@
  * PowerShell.
  */
 
-import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import type { UserServicePlatform, UserServiceStatus } from '@mangostudio/shared/runtime-home';
@@ -505,7 +505,13 @@ export function defaultUserServiceExecDeps(
     hasSystemd: () => Promise.resolve(Bun.which('systemctl', { PATH: env.PATH }) !== null),
     // A unit carries the environment it runs with; nobody else on the machine
     // needs to read it.
-    writeFile: (path, contents) => writeFile(path, contents, { encoding: 'utf8', mode: 0o600 }),
+    writeFile: async (path, contents) => {
+      await writeFile(path, contents, { encoding: 'utf8', mode: 0o600 });
+      // `mode` is honoured only when the file is created, so a reinstall over a
+      // unit an older build left at 0644 would keep it — and that unit carries
+      // this hub's configuration.
+      await chmod(path, 0o600);
+    },
     readFile: (path) => readFile(path, 'utf8'),
     unlink: (path) => unlink(path),
     mkdir: (path) => mkdir(path, { recursive: true }).then(() => undefined),

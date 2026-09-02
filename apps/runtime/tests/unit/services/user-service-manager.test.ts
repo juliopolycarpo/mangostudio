@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { userInfo } from 'node:os';
+import { chmod, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir, userInfo } from 'node:os';
+import { join } from 'node:path';
 import { UserServiceStatusSchema } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
 import { RuntimeServiceManagementError } from '../../../src/errors';
@@ -618,6 +620,28 @@ describe('defaultUserServiceExecDeps', () => {
   it('reads systemd off PATH without spawning anything', async () => {
     expect(await defaultUserServiceExecDeps({ PATH: '/nonexistent' }).hasSystemd()).toBe(false);
   });
+
+  // The unit carries this hub's configuration. `writeFile`'s `mode` is honoured
+  // only when the file is created, so a reinstall over a unit an older build
+  // left world-readable kept it that way. Windows has no mode to assert on; the
+  // supervisor there is a Scheduled Task, not a file.
+  it.skipIf(process.platform === 'win32')(
+    'tightens an existing unit file to 0600 rather than leaving its old mode',
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'mango-unit-'));
+      try {
+        const path = join(dir, 'example.service');
+        await writeFile(path, 'old', { mode: 0o644 });
+        await chmod(path, 0o644);
+
+        await defaultUserServiceExecDeps().writeFile(path, 'new');
+
+        expect((await stat(path)).mode & 0o777).toBe(0o600);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
+  );
 });
 
 describe('createUserServiceManager elsewhere', () => {
