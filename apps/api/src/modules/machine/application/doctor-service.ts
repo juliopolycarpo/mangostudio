@@ -124,13 +124,10 @@ export interface DoctorCollectOptions extends Omit<DoctorArgs, 'json'> {
   userId?: string;
 }
 
-export const DEFAULT_DOCTOR_COLLECT_OPTIONS: DoctorCollectOptions = {
-  all: DEFAULT_DOCTOR_ARGS.all,
-  chatgptRefresh: DEFAULT_DOCTOR_ARGS.chatgptRefresh,
-  probe: DEFAULT_DOCTOR_ARGS.probe,
-  envOnly: DEFAULT_DOCTOR_ARGS.envOnly,
-  libraryOnly: DEFAULT_DOCTOR_ARGS.libraryOnly,
-};
+// Derived rather than hand-copied: a sixth doctor flag added to `args.ts`
+// otherwise reaches the CLI and silently misses the API's defaults.
+const { json: _json, ...DOCTOR_ARG_DEFAULTS } = DEFAULT_DOCTOR_ARGS;
+export const DEFAULT_DOCTOR_COLLECT_OPTIONS: DoctorCollectOptions = DOCTOR_ARG_DEFAULTS;
 
 interface InstanceProbe {
   state: ServerState | null;
@@ -287,9 +284,7 @@ function realFsProbe(): FsProbe {
   };
 }
 
-export function resolveDoctorCollectDeps(
-  deps: Partial<DoctorCollectDeps>
-): Required<DoctorCollectDeps> {
+function resolveDoctorCollectDeps(deps: Partial<DoctorCollectDeps>): Required<DoctorCollectDeps> {
   return {
     loadConfig: deps.loadConfig ?? (() => loadConfig()),
     fs: deps.fs ?? realFsProbe(),
