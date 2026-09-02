@@ -80,6 +80,7 @@ export function TerminalView({
       term.write(bytes, () => ackAccountingRef.current?.add(bytes.byteLength));
     },
     onExit: (exit) => {
+      exitRenderedRef.current = true;
       const term = termRef.current;
       if (term) {
         writeDimLine(
@@ -107,16 +108,17 @@ export function TerminalView({
     onStatusChangeRef.current?.(socket.status);
   }, [socket.status]);
 
-  // GONE (close code 4410) has no server-sent exit frame to render as a dim
-  // line the way a normal process exit does — the session itself is gone, so
-  // this is the one status the view has to narrate on its own.
+  // GONE (close code 4410) follows a process exit, whose `exit` frame already
+  // drew its own line, but it also arrives alone when the session was closed
+  // elsewhere or died with its runtime. Only that second case needs narrating.
   useEffect(() => {
-    if (socket.status !== 'gone') return;
+    if (socket.status !== 'gone' || exitRenderedRef.current) return;
     const term = termRef.current;
     if (term) writeDimLine(term, tRef.current.terminal.disconnected);
   }, [socket.status]);
 
   const ackAccountingRef = useRef<ReturnType<typeof createAckAccounting> | null>(null);
+  const exitRenderedRef = useRef(false);
 
   // Mounts one `Terminal` for this component's lifetime, reading `config` and
   // `resolvedTheme` once: `sessionId` changing remounts this component from

@@ -119,4 +119,72 @@ describe('TerminalView', () => {
     // Reconnecting opens a second socket instead of retrying the first.
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
+
+  it('narrates a process exit once, even though GONE follows the exit frame', () => {
+    const writes: string[] = [];
+    const writeln = spyOn(Terminal.prototype, 'writeln').mockImplementation(function (
+      this: Terminal,
+      data: string | Uint8Array
+    ) {
+      writes.push(String(data));
+    });
+    try {
+      render(
+        <TerminalView
+          sessionId="session-1"
+          createSocket={(url) => new FakeWebSocket(url) as unknown as WebSocket}
+          resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
+        />
+      );
+      const socket = FakeWebSocket.instances[0];
+      act(() => socket?.open());
+      const exitFrame = encodeTerminalServerMessage({
+        type: 'exit',
+        exit: { exitCode: 0, signal: null },
+      });
+      act(() =>
+        socket?.onmessage?.({
+          data: exitFrame.buffer.slice(
+            exitFrame.byteOffset,
+            exitFrame.byteOffset + exitFrame.byteLength
+          ),
+        } as MessageEvent)
+      );
+      // The server closes with GONE right after the exit frame; that close
+      // must not add a second "disconnected" line under the exit line.
+      act(() => socket?.drop(TERMINAL_SOCKET_CLOSE_CODES.GONE));
+
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toContain('Process exited with code 0.');
+    } finally {
+      writeln.mockRestore();
+    }
+  });
+
+  it('narrates GONE on its own when no exit frame preceded it', () => {
+    const writes: string[] = [];
+    const writeln = spyOn(Terminal.prototype, 'writeln').mockImplementation(function (
+      this: Terminal,
+      data: string | Uint8Array
+    ) {
+      writes.push(String(data));
+    });
+    try {
+      render(
+        <TerminalView
+          sessionId="session-1"
+          createSocket={(url) => new FakeWebSocket(url) as unknown as WebSocket}
+          resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
+        />
+      );
+      const socket = FakeWebSocket.instances[0];
+      act(() => socket?.open());
+      act(() => socket?.drop(TERMINAL_SOCKET_CLOSE_CODES.GONE));
+
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toContain('Disconnected from the terminal.');
+    } finally {
+      writeln.mockRestore();
+    }
+  });
 });
