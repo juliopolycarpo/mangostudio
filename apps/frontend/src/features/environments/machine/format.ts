@@ -23,6 +23,21 @@ export function hubHealthLabel(t: Messages, health: HubHealth): string {
   return t.environments.machine.hub.health[health];
 }
 
+/**
+ * How each health reads at a glance, in one place so the card and the overview
+ * rollup cannot disagree. `unprobed` is not a failure — a hub bound to one LAN
+ * address simply cannot be measured from here — so it is neutral, not red.
+ */
+export const HUB_HEALTH_TONE: Record<HubHealth, { readonly badge: string; readonly text: string }> =
+  {
+    ok: { badge: 'bg-primary/10 text-primary', text: 'text-primary' },
+    unreachable: { badge: 'bg-error/10 text-error', text: 'text-error' },
+    unprobed: {
+      badge: 'bg-on-surface-variant/10 text-on-surface-variant',
+      text: 'text-on-surface-variant',
+    },
+  };
+
 export function supervisorLabel(t: Messages, platform: UserServicePlatform): string {
   return t.environments.machine.service.supervisor[platform];
 }

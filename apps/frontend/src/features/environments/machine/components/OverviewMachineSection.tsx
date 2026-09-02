@@ -8,7 +8,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { EnvironmentPageState } from '../../components/EnvironmentPageState';
 import { OverviewSection } from '../../components/OverviewSection';
 import { CardSectionLabel, TOOL_CARD_SURFACE } from '../../components/ToolCard';
-import { hubHealthLabel, launchModeLabel } from '../format';
+import { HUB_HEALTH_TONE, hubHealthLabel, launchModeLabel } from '../format';
 import { useMachineStatus } from '../queries';
 
 export function OverviewMachineSection() {
@@ -55,7 +55,7 @@ export function OverviewMachineSection() {
             </li>
             <li className="space-y-0.5">
               <p
-                className={`font-headline text-lg font-bold ${data.hub.health === 'ok' ? 'text-primary' : 'text-error'}`}
+                className={`font-headline text-lg font-bold ${data.hub.health ? HUB_HEALTH_TONE[data.hub.health].text : 'text-on-surface-variant'}`}
               >
                 {data.hub.health ? hubHealthLabel(t, data.hub.health) : '—'}
               </p>

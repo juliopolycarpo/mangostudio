@@ -3,11 +3,11 @@
  * long it has been up, and the restart control.
  */
 
-import type { HubHealth, MachineStatus } from '@mangostudio/shared/machine';
+import type { MachineStatus } from '@mangostudio/shared/machine';
 import { useI18n } from '@/hooks/use-i18n';
 import { CardSectionLabel, TOOL_CARD_SURFACE } from '../../components/ToolCard';
 import { formatDuration } from '../../format';
-import { hubHealthLabel, launchModeLabel } from '../format';
+import { HUB_HEALTH_TONE, hubHealthLabel, launchModeLabel } from '../format';
 import { MachineActionButton } from './MachineActionButton';
 
 interface HubProcessCardProps {
@@ -25,12 +25,6 @@ function Row({ label, value }: { readonly label: string; readonly value: string 
   );
 }
 
-const HEALTH_TONE: Record<HubHealth, string> = {
-  ok: 'bg-primary/10 text-primary',
-  unreachable: 'bg-error/10 text-error',
-  unprobed: 'bg-on-surface-variant/10 text-on-surface-variant',
-};
-
 export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCardProps) {
   const { t } = useI18n();
   const m = t.environments.machine;
@@ -47,9 +41,7 @@ export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCa
         </div>
         {hub.health && (
           <span
-            // `unprobed` is not a failure — nothing could be measured — so it
-            // reads as neutral rather than as a server that stopped answering.
-            className={`rounded-full px-2 py-0.5 text-xs font-bold ${HEALTH_TONE[hub.health]}`}
+            className={`rounded-full px-2 py-0.5 text-xs font-bold ${HUB_HEALTH_TONE[hub.health].badge}`}
             data-testid="machine-hub-health"
           >
             {hubHealthLabel(t, hub.health)}
