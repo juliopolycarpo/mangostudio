@@ -12,6 +12,7 @@ export {
   RuntimeConsentDeniedError,
   RuntimeRemoteError,
   RuntimeServiceError,
+  RuntimeServiceManagementError,
   RuntimeToolArgumentError,
 } from './errors';
 export {
@@ -274,6 +275,18 @@ export {
   hashFileAtPath,
   RuntimeSnapshotConflictError,
 } from './services/snapshot';
+export {
+  createUserServiceManager,
+  decodePowerShellArgv,
+  defaultUserServiceExecDeps,
+  execPathFromUnitBody,
+  USER_SERVICE_NO_SESSION_BUS_ERROR,
+  type UserServiceDefinition,
+  type UserServiceExecDeps,
+  type UserServiceExecResult,
+  type UserServiceIdentity,
+  type UserServiceManager,
+} from './services/user-service-manager';
 export {
   browseWorkspace,
   MAX_WORKSPACE_DIRECTORY_ENTRIES,

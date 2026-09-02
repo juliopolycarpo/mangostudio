@@ -63,6 +63,9 @@ function serviceDeps(options: {
       if (argv[0] === 'loginctl') {
         return Promise.resolve({ exitCode: 0, stdout: 'Linger=yes', stderr: '' });
       }
+      if (argv[0] === 'powershell.exe') {
+        return Promise.resolve({ exitCode: 0, stdout: '{"installed":false}\r\n', stderr: '' });
+      }
       return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
     },
     platform: options.platform ?? 'linux',
@@ -420,22 +423,34 @@ describe('runtime health', () => {
     expect(await diagnoseRuntimeServiceHealth(report)).toEqual([]);
   });
 
-  // Every branch here is a machine where `service install` refuses, so naming
-  // it as the fix would send the reader in a circle.
-  it.each([
-    ['win32' as const, /Scheduled Task/],
-    ['freebsd' as const, /supervise this runtime yourself/],
-  ])('points %s at the manual path instead of a command that refuses', async (platform, detail) => {
+  // A machine where `service install` refuses must not be told to run it —
+  // that would send the reader in a circle.
+  it('points an unsupported platform at the manual path instead of a command that refuses', async () => {
     const env = await isolatedEnv();
     await writeRuntimeSlotConfig('remote', { hubUrl: 'wss://hub.test/api/runtime' }, env);
     const findings = await diagnoseRuntimeServiceHealth(
       { slot: 'remote' } as RuntimeHealthReport,
       env,
-      serviceDeps({ platform, env })
+      serviceDeps({ platform: 'freebsd', env })
     );
     expect(findings).toHaveLength(1);
-    expect(findings[0]?.detail).toMatch(detail);
+    expect(findings[0]?.detail).toMatch(/supervise this runtime yourself/);
     expect(findings[0]?.fix).toBeUndefined();
+  });
+
+  // Windows installs a Scheduled Task now, so a missing one gets the same fix
+  // every other platform gets.
+  it('names service install as the fix on win32 when no task is registered', async () => {
+    const env = await isolatedEnv();
+    await writeRuntimeSlotConfig('remote', { hubUrl: 'wss://hub.test/api/runtime' }, env);
+    const findings = await diagnoseRuntimeServiceHealth(
+      { slot: 'remote' } as RuntimeHealthReport,
+      env,
+      serviceDeps({ platform: 'win32', env })
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.detail).toContain('no user-level service');
+    expect(findings[0]?.fix).toBe('mangostudio-runtime service install --mode connect');
   });
 
   it('says it could not read the service without a session bus, not that none exists', async () => {

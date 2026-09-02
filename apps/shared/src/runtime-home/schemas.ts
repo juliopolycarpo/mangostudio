@@ -298,31 +298,35 @@ export const RuntimeServiceModeSchema = Type.Union([
 ]);
 export type RuntimeServiceMode = Static<typeof RuntimeServiceModeSchema>;
 
+/** Which per-user supervisor a service unit lives under. */
+export const UserServicePlatformSchema = Type.Union([
+  Type.Literal('linux'),
+  Type.Literal('darwin'),
+  Type.Literal('win32'),
+  Type.Literal('unsupported'),
+]);
+export type UserServicePlatform = Static<typeof UserServicePlatformSchema>;
+
 /**
- * `mangostudio-runtime service status --json` — stable shape for environment cards.
+ * One user-level service unit, whichever binary it supervises. The hub and the
+ * runtime both report through this shape, so a card and a terminal describe a
+ * unit with the same words.
  */
-export const RuntimeServiceStatusSchema = Type.Object({
+export const UserServiceStatusSchema = Type.Object({
   schemaVersion: Type.Literal(1),
-  platform: Type.Union([
-    Type.Literal('linux'),
-    Type.Literal('darwin'),
-    Type.Literal('win32'),
-    Type.Literal('unsupported'),
-  ]),
-  mode: Type.Union([RuntimeServiceModeSchema, Type.Null()]),
+  platform: UserServicePlatformSchema,
+  /**
+   * The unit's name under its supervisor: systemd unit basename, launchd
+   * label, or Scheduled Task name.
+   */
+  unitName: Type.String({ minLength: 1, maxLength: 256 }),
   installed: Type.Boolean(),
   enabled: Type.Boolean(),
   running: Type.Boolean(),
   /** Linux only: whether loginctl linger is on for this user. */
   linger: Type.Optional(Type.Boolean()),
-  /** Whether the unit's ExecStart points at the slot `current` symlink. */
-  execUsesCurrent: Type.Optional(Type.Boolean()),
-  /**
-   * Whether a binary is actually reachable through `current`. A unit can point
-   * at the right path and still never start, which is the one failure the
-   * manager's own states describe only as "not running".
-   */
-  currentBinaryPresent: Type.Optional(Type.Boolean()),
+  /** The program the unit starts, as read back from the installed unit. */
+  execPath: Type.Optional(Type.String({ maxLength: 4_096 })),
   /** Manager-specific detail (unit path, label, raw states). */
   manager: Type.Optional(
     Type.Object({
@@ -334,6 +338,22 @@ export const RuntimeServiceStatusSchema = Type.Object({
   ),
   /** Set when status could not be fully determined. */
   error: Type.Optional(Type.String({ maxLength: 1_024 })),
+});
+export type UserServiceStatus = Static<typeof UserServiceStatusSchema>;
+
+/**
+ * `mangostudio-runtime service status --json` — stable shape for environment cards.
+ */
+export const RuntimeServiceStatusSchema = Type.Interface([UserServiceStatusSchema], {
+  mode: Type.Union([RuntimeServiceModeSchema, Type.Null()]),
+  /** Whether the unit's ExecStart points at the slot `current` symlink. */
+  execUsesCurrent: Type.Optional(Type.Boolean()),
+  /**
+   * Whether a binary is actually reachable through `current`. A unit can point
+   * at the right path and still never start, which is the one failure the
+   * manager's own states describe only as "not running".
+   */
+  currentBinaryPresent: Type.Optional(Type.Boolean()),
 });
 export type RuntimeServiceStatus = Static<typeof RuntimeServiceStatusSchema>;
 

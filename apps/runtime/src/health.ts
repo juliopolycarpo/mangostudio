@@ -303,16 +303,6 @@ export async function diagnoseRuntimeServiceHealth(
   // Where `service install` refuses, doctor must not name it as the fix — the
   // one command it could suggest is the one command guaranteed to fail. Each of
   // these reports what is true here and points at the manual alternative.
-  if (status.platform === 'win32') {
-    return [
-      {
-        severity: 'warn',
-        title: 'Service',
-        detail: `Windows has no service install — keep this runtime running with a Scheduled Task (${RUNTIME_SERVICE_DOCS_URL})`,
-      },
-    ];
-  }
-
   if (status.platform === 'unsupported') {
     return [
       {
@@ -333,6 +323,19 @@ export async function diagnoseRuntimeServiceHealth(
         title: 'Service',
         detail: 'cannot read the user service without a session bus',
         fix: 'XDG_RUNTIME_DIR=/run/user/$(id -u) mangostudio-runtime doctor',
+      },
+    ];
+  }
+
+  // The supervisor answered with an error rather than a state. Calling that
+  // "not installed" and prescribing an install would be the same lie as the
+  // session-bus case, with a different cause.
+  if (status.error) {
+    return [
+      {
+        severity: 'warn',
+        title: 'Service',
+        detail: `could not read the user service: ${status.error}`,
       },
     ];
   }

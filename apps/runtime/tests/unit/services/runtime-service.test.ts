@@ -22,6 +22,7 @@ import {
   resolveInstallMode,
   systemdUnitPath,
 } from '../../../src/services/runtime-service';
+import { decodePowerShellArgv } from '../../../src/services/user-service-manager';
 
 const CURRENT = '/home/test/.mango/runtime/remote/current/mangostudio-runtime';
 
@@ -319,7 +320,7 @@ describe('runtime service refusals', () => {
     }
   });
 
-  it('refuses win32 install', async () => {
+  it('registers a per-user Scheduled Task on win32 instead of refusing', async () => {
     const mangoHome = await mkdtemp(join(tmpdir(), 'mango-svc-'));
     const env = { MANGO_HOME: mangoHome };
     try {
@@ -330,9 +331,14 @@ describe('runtime service refusals', () => {
       );
       await writePairingToken('remote', 'token', env);
       const deps = makeDeps({ platform: 'win32', env });
-      await expect(createRuntimeServiceManager(deps).install('connect')).rejects.toMatchObject({
-        kind: 'runtime_service_unsupported',
-      });
+      await createRuntimeServiceManager(deps).install('connect');
+      expect(deps.files.size).toBe(0);
+      expect(deps.argv).toHaveLength(1);
+      expect(deps.argv[0]?.[0]).toBe('powershell.exe');
+      const script = decodePowerShellArgv(deps.argv[0] ?? []) ?? '';
+      expect(script).toContain("Register-ScheduledTask -TaskName 'MangoStudio runtime'");
+      expect(script).toContain('-RunLevel Limited');
+      expect(script).toContain('New-ScheduledTaskTrigger -AtLogOn');
     } finally {
       await rm(mangoHome, { recursive: true, force: true });
     }
