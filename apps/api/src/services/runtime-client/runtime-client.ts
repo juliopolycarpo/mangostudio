@@ -23,6 +23,7 @@ import {
   PartialReadError,
   PathAccessError,
   RUNTIME_EXTERNAL_AGENT_TOPIC,
+  RUNTIME_TERMINAL_OUTPUT_TOPIC,
   type RuntimeApplyPatchParams,
   type RuntimeApplyPatchResult,
   type RuntimeBeforeSnapshot,
@@ -151,16 +152,6 @@ import { ToolExecutionTimedOutError } from '../tools/execution-timeout';
 import { createTargetPaths, type TargetPaths } from './target-paths';
 
 const logger = createDiagnosticLogger('runtime-client');
-
-/**
- * Mirrors `RUNTIME_TERMINAL_OUTPUT_TOPIC` from `apps/runtime/src/methods.ts`
- * ('terminal.output'). The `@mangostudio/runtime` package barrel re-exports
- * every method's *types* (`export type * from './methods'`) but not this
- * value, unlike `RUNTIME_EXTERNAL_AGENT_TOPIC` and the other topic constants
- * a few lines above — inlined here rather than reaching into `apps/runtime`
- * to add the missing export.
- */
-const RUNTIME_TERMINAL_OUTPUT_TOPIC = 'terminal.output' as const;
 
 interface RuntimeFsClient {
   readFile(

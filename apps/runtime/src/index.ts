@@ -31,6 +31,7 @@ export {
   RUNTIME_MCP_ELICITATION_TOPIC,
   RUNTIME_MCP_SESSION_TOPIC,
   RUNTIME_READ_FILE_VIEWS,
+  RUNTIME_TERMINAL_OUTPUT_TOPIC,
 } from './methods';
 export {
   createRuntimeMethodHandlers,
