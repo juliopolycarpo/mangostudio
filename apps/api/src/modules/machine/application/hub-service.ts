@@ -51,6 +51,13 @@ const SERVICE_ENV_ALLOWLIST: readonly string[] = [
   // install a unit that starts on defaults, and watch their chats disappear
   // behind a fresh database.
   ...RUNTIME_CONFIG_ENV_KEYS.filter((key) => !SERVICE_ENV_SECRETS.has(key)),
+  // Read straight from `process.env` rather than through `ENV_KEY_MAP`, and
+  // carried for the same reason `DETACH_ENV_ALLOWLIST` carries them: a unit
+  // that dropped them would report version `dev` next to a checkout that
+  // reports otherwise (a doctor build-identity failure), and would turn
+  // diagnostic logging off the moment the hub handed over.
+  'VERSION',
+  'MANGOSTUDIO_DIAGNOSTIC_LOGS',
   'PATH',
   'MANGO_HOME',
   'TZ',
