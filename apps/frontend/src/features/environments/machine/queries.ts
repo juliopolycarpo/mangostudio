@@ -13,7 +13,7 @@ import type {
 } from '@mangostudio/shared/machine';
 import { MACHINE_LOG_TAIL_DEFAULT } from '@mangostudio/shared/machine';
 import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   changeMachineService,
   fetchMachineDoctor,
@@ -84,14 +84,31 @@ export function useMachineStatus(options: { readonly windowMs?: number } = {}) {
     if (!awaiting) return;
     if (query.data !== undefined && pid !== awaiting.pid) setAwaiting(null);
   }, [awaiting, pid, query.data]);
+  // Read inside the timeout below, which would otherwise close over the query
+  // state as it was when the window opened.
+  const lastSuccessAt = useRef(0);
+  lastSuccessAt.current = query.dataUpdatedAt;
+
   // A server that never comes back changes nothing the effect above watches,
   // so the window closes on a clock, not on data.
   useEffect(() => {
     if (!awaiting) return;
     const remaining = Math.max(0, windowMs - (Date.now() - awaiting.since));
-    const timer = setTimeout(() => setAwaiting(null), remaining);
+    const timer = setTimeout(() => {
+      setAwaiting(null);
+      // A failed refetch leaves the last successful document in the cache,
+      // which is right while the server is bouncing. If nothing answered for
+      // the whole window, that document predates the action and describes a
+      // process that is gone — the page would draw it as running with its
+      // service installed, which is exactly what an uninstall just undid.
+      // Dropping it puts the page in its connection-error state; the poll
+      // continues, so a server that does come back repopulates it.
+      if (lastSuccessAt.current <= awaiting.since) {
+        queryClient.removeQueries({ queryKey: machineKeys.status() });
+      }
+    }, remaining);
     return () => clearTimeout(timer);
-  }, [awaiting, windowMs]);
+  }, [awaiting, windowMs, queryClient]);
 
   const expectChange = useCallback(() => {
     setAwaiting({
