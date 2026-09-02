@@ -160,6 +160,22 @@ describe('machine routes', () => {
     expect(service.clientIps).toEqual(['203.0.113.5']);
   });
 
+  it('reads the hop the proxy appended, not the one the caller claimed', async () => {
+    const service = new FakeMachineService();
+    await mount(service, true).handle(
+      new Request('http://localhost/machine/status', {
+        // What nginx forwards when a remote caller sends "X-Forwarded-For:
+        // 127.0.0.1" and the config uses $proxy_add_x_forwarded_for, which
+        // appends rather than overwrites. Caddy's reverse_proxy appends too.
+        headers: { 'x-forwarded-for': '127.0.0.1, 203.0.113.5' },
+      })
+    );
+
+    // Taking the first hop would hand this machine's restart button to anyone
+    // who can set a header on a same-origin request.
+    expect(service.clientIps).toEqual(['203.0.113.5']);
+  });
+
   it('refuses without a session', async () => {
     const app = createApiTestApp(createMachineRoutes(new FakeMachineService()));
     const response = await app.handle(new Request('http://localhost/machine/status'));

@@ -278,6 +278,25 @@ describe('environment install routes', () => {
     expect(fake.getLastContext()?.clientIp).toBe('203.0.113.5');
   });
 
+  it('reads the hop the proxy appended, not the one the caller claimed', async () => {
+    const fake = createFakeService();
+    const { app, restore } = createAuthenticatedApiTestApp(
+      TEST_USER,
+      createInstallRoutes(fake.service, () => true)
+    );
+    restoreAuth = restore;
+
+    await app.handle(
+      new Request('http://localhost/environments/install/recipes', {
+        // nginx's $proxy_add_x_forwarded_for appends its peer to whatever the
+        // caller sent, so a remote caller claiming loopback arrives like this.
+        headers: { 'x-forwarded-for': '127.0.0.1, 203.0.113.5' },
+      })
+    );
+
+    expect(fake.getLastContext()?.clientIp).toBe('203.0.113.5');
+  });
+
   it('accepts a matching profileId and rejects a mismatched one', async () => {
     const fake = createFakeService();
     const { app, restore } = createAuthenticatedApiTestApp(

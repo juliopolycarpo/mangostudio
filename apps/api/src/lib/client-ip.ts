@@ -1,18 +1,22 @@
 /**
- * Who the hub thinks it is talking to. Two questions share one answer here: the
- * rate limiter's "which counter does this request belong to", and the
- * local-surface guard's "is this browser at this machine's keyboard".
+ * Who the hub thinks it is talking to. Two questions start from the same
+ * headers and end in different places: the rate limiter's "which counter does
+ * this request belong to", and the local-surface guard's "is this browser at
+ * this machine's keyboard".
  *
- * Both hang on the same trade-off. The socket peer address cannot be forged by
- * a caller, but behind a reverse proxy it is always the proxy — so a deployment
- * that terminates TLS in nginx hands every request the same loopback peer.
- * Proxy headers name the real client, but any caller can write them.
- * `trustProxy` is the operator saying which of the two shapes this deployment
- * is, and it is the only thing that decides between them.
+ * The socket peer cannot be forged, but behind a reverse proxy it is always the
+ * proxy — a deployment that terminates TLS in nginx hands every request the
+ * same loopback peer. `trustProxy` is the operator saying a proxy is there, and
+ * it is the only thing that lets a header outrank the peer.
  *
- * For the guard that matters in the strict direction, not the loose one: with a
- * trusted proxy in front, the forwarded client is what stops a remote session
- * from passing a loopback check that is supposed to mean "at this keyboard".
+ * Which header, and which hop, is where the two part company. `X-Forwarded-For`
+ * is a list, and only its **last** entry is written by the proxy: nginx's
+ * `$proxy_add_x_forwarded_for` and Caddy's `reverse_proxy` both *append* the
+ * address they saw to whatever the caller sent. The first entry is therefore
+ * the caller's own claim. The limiter wants that first entry anyway — it is the
+ * origin client, which is what a counter should be keyed on. The guard must not
+ * touch it: a remote browser that sends `X-Forwarded-For: 127.0.0.1` would
+ * otherwise be handed this machine's restart button.
  */
 
 /** Upper bound on a plausible IP token (IPv6 + zone id ≈ 50 chars); reject longer. */
@@ -65,4 +69,31 @@ export function extractClientIp(
   const proxyIp =
     sanitizeClientIp(headers.get('cf-connecting-ip')) ?? sanitizeClientIp(headers.get('x-real-ip'));
   return proxyIp ?? sanitizeClientIp(ip) ?? 'unknown';
+}
+
+/**
+ * The address the local-surface guard judges — the one deciding whether a
+ * caller may install a runtime, restart this hub, or read its raw log.
+ *
+ * Behind a trusted proxy that is the **last** `X-Forwarded-For` hop, because
+ * that is the one the proxy appended and no caller can write. The other
+ * candidates are all forgeable in one of the two documented deployments: a
+ * client-sent `CF-Connecting-IP` passes through nginx untouched, a client-sent
+ * `X-Real-IP` passes through Caddy, and the first `X-Forwarded-For` hop is
+ * whatever the caller put there.
+ *
+ * Without a trusted proxy the socket peer stands, exactly as before — a header
+ * cannot promote a remote caller then either.
+ *
+ * // Usage: resolveGuardClientIp(headers, server?.requestIP(request)?.address, trustProxy)
+ */
+export function resolveGuardClientIp(
+  headers: Headers,
+  peerIp: string | undefined,
+  trustProxy: boolean
+): string {
+  if (!trustProxy) return sanitizeClientIp(peerIp) ?? 'unknown';
+
+  const appended = sanitizeClientIp(headers.get('x-forwarded-for')?.split(',').at(-1));
+  return appended ?? sanitizeClientIp(peerIp) ?? 'unknown';
 }

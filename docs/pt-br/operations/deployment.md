@@ -195,10 +195,20 @@ está no teclado desta máquina, e o peer do socket não responde isso atrás de
 proxy — todo chamador chega de loopback. Com `TRUST_PROXY=true` quem responde é o
 cliente encaminhado, então uma sessão remota autenticada é corretamente recusada.
 
-> **Só habilite isso atrás de um proxy que sobrescreve esses headers** (a config
-> nginx acima usa `$proxy_add_x_forwarded_for`). Com exposição direta à internet,
-> um header confiável permite que qualquer cliente forje seu IP e burle o rate
-> limiting.
+Os dois leem hops diferentes do `X-Forwarded-For`, porque as perguntas são
+diferentes. O header é uma lista, e um proxy *acrescenta* o endereço que viu em
+vez de substituir a lista — tanto o `$proxy_add_x_forwarded_for` acima quanto o
+`reverse_proxy` do Caddy fazem isso. O limiter usa o **primeiro** hop, o cliente
+de origem, que é a chave certa para um contador. O guard usa o **último**, o que
+o seu proxy escreveu, porque toda entrada anterior é o que o chamador mandou —
+um browser remoto pode pôr `X-Forwarded-For: 127.0.0.1` numa requisição de mesma
+origem, e o guard não pode ler isso como o seu teclado.
+
+> **Só habilite isso atrás de um proxy que de fato define esses headers.** Com
+> exposição direta à internet, ou atrás de algo que repassa o `X-Forwarded-For`
+> do chamador sem acrescentar nada, um header confiável permite que qualquer
+> cliente forje seu IP — burlando o rate limiting e passando pelo guard de
+> superfície local.
 
 ## Serviço systemd
 
