@@ -79,7 +79,7 @@ describe('settings app settings routes', () => {
               // and this round-trip assertion would fail for a reason it is not
               // testing.
               visiblePanelIds: ['todos'],
-              panelOrder: ['todos', 'git', 'github'],
+              panelOrder: ['todos', 'git', 'github', 'terminal'],
               width: 420,
             },
           },
@@ -116,7 +116,7 @@ describe('settings app settings routes', () => {
       workspaceSettings: {
         sidePanel: {
           visiblePanelIds: ['todos'],
-          panelOrder: ['todos', 'git', 'github'],
+          panelOrder: ['todos', 'git', 'github', 'terminal'],
           width: 420,
         },
       },
