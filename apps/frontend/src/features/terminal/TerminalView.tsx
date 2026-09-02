@@ -81,6 +81,15 @@ export function TerminalView({
       // The server replays scrollback on every attach; without this a
       // reconnect would show it appended after whatever was on screen.
       termRef.current?.reset();
+      // The mount-time fits ran while this socket was still `connecting`, and
+      // a frame sent then is dropped rather than queued. This is the first
+      // moment the PTY can be told the size the renderer is actually using —
+      // `ResizeObserver` fires on container changes, not on socket open, so
+      // nothing else retries and the shell would keep wrapping at the 80x24
+      // it was opened with.
+      const term = termRef.current;
+      const fitAddon = fitAddonRef.current;
+      if (term && fitAddon) fitAndResize(term, fitAddon, socketRef.current);
     },
     onData: (bytes) => {
       const term = termRef.current;

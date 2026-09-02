@@ -9,11 +9,13 @@
 
 import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import {
+  decodeTerminalClientMessage,
   encodeTerminalServerMessage,
   TERMINAL_SOCKET_CLOSE_CODES,
 } from '@mangostudio/shared/terminal';
 import { act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { TerminalView } from '../../../../src/features/terminal/TerminalView';
 import { render, screen } from '../../../support/harness/render';
@@ -118,6 +120,36 @@ describe('TerminalView', () => {
 
     // Reconnecting opens a second socket instead of retrying the first.
     expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it('sends the fitted size when the socket opens, not while it is still connecting', () => {
+    const propose = spyOn(FitAddon.prototype, 'proposeDimensions').mockReturnValue({
+      cols: 120,
+      rows: 40,
+    });
+    try {
+      render(
+        <TerminalView
+          sessionId="session-1"
+          createSocket={(url) => new FakeWebSocket(url) as unknown as WebSocket}
+          resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
+        />
+      );
+      const socket = FakeWebSocket.instances[0];
+
+      // The mount-time fit and the `document.fonts.ready` one both run while
+      // the socket is `connecting`, and a frame sent then is dropped.
+      expect(socket?.sent ?? []).toHaveLength(0);
+
+      act(() => socket?.open());
+
+      // Nothing else retries: `ResizeObserver` fires on container changes, so
+      // without this the PTY keeps the 80x24 it was opened with.
+      const frames = (socket?.sent ?? []).map((bytes) => decodeTerminalClientMessage(bytes));
+      expect(frames).toContainEqual({ type: 'resize', cols: 120, rows: 40 });
+    } finally {
+      propose.mockRestore();
+    }
   });
 
   it('narrates a process exit once, even though GONE follows the exit frame', () => {
