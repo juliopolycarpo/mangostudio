@@ -104,6 +104,24 @@ export const MachineHostSlotSchema = Type.Object({
 });
 export type MachineHostSlot = Static<typeof MachineHostSlotSchema>;
 
+/** Why the page will not perform an action; each has a sentence in i18n. */
+export const MachineActionReasonSchema = Type.Union([
+  /** The local-surface guard refused; `actions.guard.reasons` says which check. */
+  Type.Literal('guard'),
+  /** The server was started in a terminal, which owns its lifecycle. */
+  Type.Literal('foreground'),
+  /** A Scheduled Task cannot restart itself from inside its own process tree. */
+  Type.Literal('windows-service'),
+  Type.Literal('already-installed'),
+  Type.Literal('not-installed'),
+  Type.Literal('unsupported-platform'),
+  /** The supervisor could not be asked; `service.error` has the detail. */
+  Type.Literal('service-unreadable'),
+  /** The auth secret lives only in this process's environment; a unit could not find it. */
+  Type.Literal('secret-not-persisted'),
+]);
+export type MachineActionReason = Static<typeof MachineActionReasonSchema>;
+
 /**
  * One mutating action the page may offer. `command` is what to type instead
  * when `available` is false, and `reason` says why the page will not do it.
@@ -111,7 +129,7 @@ export type MachineHostSlot = Static<typeof MachineHostSlotSchema>;
 export const MachineActionSchema = Type.Object({
   available: Type.Boolean(),
   command: Type.String({ minLength: 1, maxLength: 512 }),
-  reason: Type.Optional(Type.String({ maxLength: 1_024 })),
+  reason: Type.Optional(MachineActionReasonSchema),
 });
 export type MachineAction = Static<typeof MachineActionSchema>;
 

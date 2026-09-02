@@ -6,6 +6,7 @@ import {
   decodePowerShellArgv,
   execPathFromUnitBody,
   parseScheduledTaskJson,
+  programFromTaskAction,
   renderLaunchdPlistFile,
   renderScheduledTaskInstallScript,
   renderScheduledTaskRunnerScript,
@@ -146,7 +147,7 @@ describe('Scheduled Task scripts', () => {
     expect(runner).toContain("$env:EXAMPLE_LOG = '/home/test/logs/it''s.log'");
     expect(runner).toContain("Set-Location 'C:\\Users\\me'");
     expect(runner).toContain(
-      "& 'C:\\Users\\me\\bin\\example.cmd' 'serve' *>> 'C:\\Users\\me\\logs\\example.log'"
+      "& 'C:\\Users\\me\\bin\\example.cmd' 'serve' 2>&1 | Out-File -Append -Encoding utf8 -FilePath 'C:\\Users\\me\\logs\\example.log'"
     );
   });
 
@@ -162,8 +163,24 @@ describe('Scheduled Task scripts', () => {
       state: 'absent',
       enabled: false,
       execute: null,
+      arguments: null,
     });
     expect(parseScheduledTaskJson('not json')).toBeNull();
+  });
+});
+
+describe('programFromTaskAction', () => {
+  it('reads the wrapped program back out of the encoded runner', () => {
+    const script = renderScheduledTaskInstallScript('Example Unit', {
+      description: 'x',
+      argv: ["C:\\Program Files\\it's\\example.exe", 'serve'],
+      logFile: 'C:\\logs\\x.log',
+    });
+    const args = script.match(/-Argument '([^']+)'/)?.[1] ?? '';
+    expect(programFromTaskAction('powershell.exe', args)).toBe(
+      "C:\\Program Files\\it's\\example.exe"
+    );
+    expect(programFromTaskAction('C:\\other.exe', null)).toBe('C:\\other.exe');
   });
 });
 

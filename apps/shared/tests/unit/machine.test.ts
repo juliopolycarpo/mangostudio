@@ -57,7 +57,7 @@ const STATUS: MachineStatus = {
     installService: {
       available: false,
       command: 'mangostudio service install',
-      reason: 'installed',
+      reason: 'already-installed',
     },
     uninstallService: { available: true, command: 'mangostudio service uninstall' },
   },

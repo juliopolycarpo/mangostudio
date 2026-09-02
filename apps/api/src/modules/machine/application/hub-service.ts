@@ -3,7 +3,7 @@
  * it. The CLI `service` command and the machine API both come through here.
  */
 
-import { realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -12,6 +12,9 @@ import {
   type UserServiceExecDeps,
   type UserServiceManager,
 } from '@mangostudio/runtime';
+import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
+import { parse as parseToml } from 'smol-toml';
+import { getConfig, getConfigEnvFilePath, type MangoConfig } from '../../../lib/config';
 import { getLogsDir } from '../../../lib/mango-paths';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
 import {
@@ -122,6 +125,27 @@ function realPathOrSelf(path: string): string {
     return realpathSync(path);
   } catch {
     return path;
+  }
+}
+
+/**
+ * Whether the auth secret is stored in `~/.mango/.env` or `config.toml`, where
+ * a unit started without this shell's environment can load it. `serve` in a
+ * terminal generates and stores one on first run; a secret exported only in
+ * the shell would leave the unit refusing to start.
+ * // Usage: isAuthSecretPersisted()
+ */
+export function isAuthSecretPersisted(config: MangoConfig = getConfig()): boolean {
+  const envFile = parseRuntimeEnvFile(getConfigEnvFilePath(config.configFilePath));
+  if (envFile.BETTER_AUTH_SECRET?.trim()) return true;
+  const tomlPath = config.configFilePath;
+  if (!tomlPath || !existsSync(tomlPath)) return false;
+  try {
+    const parsed = parseToml(readFileSync(tomlPath, 'utf8')) as Record<string, unknown>;
+    const auth = parsed.auth as Record<string, unknown> | undefined;
+    return typeof auth?.secret === 'string' && auth.secret.trim().length > 0;
+  } catch {
+    return false;
   }
 }
 

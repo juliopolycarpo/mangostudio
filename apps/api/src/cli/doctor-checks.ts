@@ -6,6 +6,7 @@
 
 import { dirname, join } from 'node:path';
 import { type FsProbe, nearestExistingWritable } from '@mangostudio/shared/library/host';
+import type { MachineCheck, MachineCheckStatus } from '@mangostudio/shared/machine';
 import { deniedCapabilities, RUNTIME_CONFIG_FILE_NAME } from '@mangostudio/shared/runtime-home';
 import {
   BUILD_INFO_FILENAME,
@@ -26,13 +27,9 @@ import type { SshClientProbe } from './ssh-client-probe';
 
 export type { FsProbe } from '@mangostudio/shared/library/host';
 
-export type CheckStatus = 'ok' | 'warn' | 'fail';
-
-export interface CheckResult {
-  label: string;
-  status: CheckStatus;
-  detail: string;
-}
+/** One doctor row is the shared machine check, so the API serves what the CLI prints. */
+export type CheckStatus = MachineCheckStatus;
+export type CheckResult = MachineCheck;
 
 export interface BuildIdentityInput {
   serverBuild: BuildInfo | null;

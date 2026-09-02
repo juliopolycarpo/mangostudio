@@ -35,6 +35,7 @@ import { getDevFrontendDir } from './dev-frontend-dir';
 import { EMBEDDED_FRONTEND_DIR, getEmbeddedFrontend } from './embedded-frontend';
 import { registerFrontend } from './frontend-static';
 import { runMigrations } from './migrations';
+import { registerShutdownHandler, requestShutdown } from './shutdown-request';
 import {
   type StaleTurnReconcileSweep,
   startStaleTurnReconcileSweep,
@@ -144,19 +145,6 @@ async function persistState(port: number, host: string, frontendDir: string): Pr
   await writeState(state);
 }
 
-let shutdownRequested = false;
-
-/**
- * Stop serving and exit, the same way a SIGTERM would. For a restart the caller
- * has already arranged a successor; this is the half that lets go of the port
- * and the state file so the successor can take them.
- */
-export function requestShutdown(): void {
-  if (shutdownRequested) return;
-  shutdownRequested = true;
-  void gracefulStop().finally(() => process.exit(0));
-}
-
 function logRunning(host: string, port: number, devFrontend: boolean): void {
   const shown = displayHost(host);
   console.warn(`[api] MangoStudio API running on http://${shown}:${port}`);
@@ -184,14 +172,11 @@ async function gracefulStop(): Promise<void> {
 }
 
 function registerShutdown(): void {
-  // Guard against a second signal (e.g. SIGINT + a `stop` SIGTERM) re-running
-  // gracefulStop and closing the database twice.
-  let shuttingDown = false;
+  // `requestShutdown` runs the stop once, so a second signal (e.g. SIGINT + a
+  // `stop` SIGTERM) cannot re-run gracefulStop and close the database twice.
+  // A restart requested over the API ends the process the same way.
+  registerShutdownHandler(gracefulStop);
   const shutdown = (signal: 'SIGINT' | 'SIGTERM'): void => {
-    if (shuttingDown) {
-      return;
-    }
-    shuttingDown = true;
     if (signal === 'SIGINT') {
       console.warn('\n[api] Shutting down...');
     }

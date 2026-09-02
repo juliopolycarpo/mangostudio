@@ -11,7 +11,8 @@ const FOLLOW_INTERVAL_MS = 500;
 
 /** The last `count` lines of `content`, without a trailing empty line. */
 export function tailLines(content: string, count: number): { lines: string[]; truncated: boolean } {
-  const all = content.split(/\r?\n/);
+  // Windows PowerShell writes a byte-order mark first; it is not a log line.
+  const all = content.replace(/^\uFEFF/, '').split(/\r?\n/);
   if (all.at(-1) === '') all.pop();
   const lines = all.slice(-count);
   return { lines, truncated: all.length > lines.length };

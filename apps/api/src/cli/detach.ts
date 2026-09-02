@@ -182,8 +182,19 @@ export function buildDetachedEnv(
   return env;
 }
 
-/** Re-exec this binary (or `bun <entry>` in dev) with the hidden __serve command. */
-function realSpawn(port: number, host: string, logFile: string, options: DetachOptions): number {
+/**
+ * Re-exec this binary (or `bun <entry>` in dev) with the hidden __serve
+ * command and return its pid, without waiting for it to come up. `restart`
+ * from inside the server uses this directly: the child waits for this
+ * process to exit, so this process cannot also wait for the child.
+ * // Usage: spawnServeChild(3001, 'localhost', logFile, { waitForPid: process.pid })
+ */
+export function spawnServeChild(
+  port: number,
+  host: string,
+  logFile: string,
+  options: DetachOptions
+): number {
   const logFd = openSync(logFile, 'a');
   try {
     const proc = Bun.spawn({
@@ -217,7 +228,7 @@ function resolveDeps(deps: Partial<DetachDeps>): DetachDeps {
     controller: deps.controller ?? createProcessController(),
     now: deps.now ?? Date.now,
     sleep: deps.sleep ?? sleep,
-    spawn: deps.spawn ?? realSpawn,
+    spawn: deps.spawn ?? spawnServeChild,
     readState: deps.readState ?? readState,
     probeHealth: deps.probeHealth ?? probeHealth,
   };

@@ -226,7 +226,11 @@ export function renderScheduledTaskRunnerScript(definition: UserServiceDefinitio
     ...(definition.workingDirectory
       ? [`Set-Location ${psQuote(definition.workingDirectory)}`]
       : []),
-    definition.logFile ? `${invocation} *>> ${psQuote(definition.logFile)}` : invocation,
+    // Windows PowerShell's own redirection writes UTF-16; `logs` and the page
+    // read the file as UTF-8, so the pipeline sets the encoding explicitly.
+    definition.logFile
+      ? `${invocation} 2>&1 | Out-File -Append -Encoding utf8 -FilePath ${psQuote(definition.logFile)}`
+      : invocation,
   ].join('\n');
 }
 
@@ -571,11 +575,12 @@ export function createUserServiceManager(
       if (!task) {
         return base('win32', identity.taskName, { error: 'Get-ScheduledTask printed no JSON' });
       }
+      const execPath = task.execute ? programFromTaskAction(task.execute, task.arguments) : null;
       return base('win32', identity.taskName, {
         installed: task.installed,
         enabled: task.installed && task.enabled,
         running: task.installed && task.state === 'Running',
-        ...(task.execute ? { execPath: task.execute } : {}),
+        ...(execPath ? { execPath } : {}),
         manager: {
           label: identity.taskName,
           activeState: task.installed ? task.state : 'absent',
@@ -667,6 +672,19 @@ interface ScheduledTaskJson {
   readonly state: string;
   readonly enabled: boolean;
   readonly execute: string | null;
+  readonly arguments: string | null;
+}
+
+/**
+ * The program behind the task's hidden PowerShell wrapper, read back out of
+ * the encoded runner script; the wrapper itself when the task is not ours.
+ */
+export function programFromTaskAction(execute: string, args: string | null): string {
+  const encoded = args?.match(/-EncodedCommand\s+(\S+)/)?.[1];
+  if (!encoded) return execute;
+  const script = Buffer.from(encoded, 'base64').toString('utf16le');
+  const program = script.match(/^& '((?:[^']|'')*)'/m)?.[1];
+  return program ? program.replaceAll("''", "'") : execute;
 }
 
 /** Windows PowerShell 5.1 serialises the state enum as a number; PowerShell 7 as a name. */
@@ -692,8 +710,9 @@ export function parseScheduledTaskJson(stdout: string): ScheduledTaskJson | null
   }
   if (!parsed || typeof parsed !== 'object') return null;
   const record = parsed as Record<string, unknown>;
-  if (record.installed !== true)
-    return { installed: false, state: 'absent', enabled: false, execute: null };
+  if (record.installed !== true) {
+    return { installed: false, state: 'absent', enabled: false, execute: null, arguments: null };
+  }
   const state =
     typeof record.state === 'number'
       ? (SCHEDULED_TASK_STATES[record.state] ?? 'Unknown')
@@ -703,6 +722,7 @@ export function parseScheduledTaskJson(stdout: string): ScheduledTaskJson | null
     state,
     enabled: record.enabled !== false,
     execute: typeof record.execute === 'string' && record.execute ? record.execute : null,
+    arguments: typeof record.arguments === 'string' && record.arguments ? record.arguments : null,
   };
 }
 

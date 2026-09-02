@@ -9,6 +9,7 @@ describe('tailLines', () => {
     expect(tailLines('a\nb\nc\n', 2)).toEqual({ lines: ['b', 'c'], truncated: true });
     expect(tailLines('a\r\nb', 5)).toEqual({ lines: ['a', 'b'], truncated: false });
     expect(tailLines('', 5)).toEqual({ lines: [], truncated: false });
+    expect(tailLines('\uFEFFfirst\r\n', 5)).toEqual({ lines: ['first'], truncated: false });
   });
 });
 
