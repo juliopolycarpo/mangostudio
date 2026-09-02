@@ -1,4 +1,11 @@
-import type { TerminalExit, TerminalNotice } from '@mangostudio/shared/terminal';
+import {
+  TERMINAL_COLS_MAX,
+  TERMINAL_COLS_MIN,
+  TERMINAL_ROWS_MAX,
+  TERMINAL_ROWS_MIN,
+  type TerminalExit,
+  type TerminalNotice,
+} from '@mangostudio/shared/terminal';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
@@ -11,6 +18,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
 import { formatMessage } from '@/lib/i18n-format';
 import { createAckAccounting } from './ack-accounting';
+import { clampTerminalSize } from './terminal-fit';
 import { buildTerminalTheme, fontSizePx } from './terminal-theme';
 import { type TerminalSocketStatus, useTerminalSocket } from './use-terminal-socket';
 
@@ -264,9 +272,13 @@ async function loadWebglAddon(term: Terminal): Promise<void> {
 
 /**
  * Fits the terminal to its container, then sends the result over the wire —
- * but only when it clears the wire's minimum size. A collapsed panel or a
- * hidden tab proposes dimensions below `TERMINAL_COLS_MIN`/`ROWS_MIN`, which
- * the server schema rejects outright.
+ * but only when it clears the wire's minimum size, and clamped to the wire's
+ * maximum. A collapsed panel or a hidden tab proposes dimensions below
+ * `TERMINAL_COLS_MIN`/`ROWS_MIN`, which the server schema rejects outright;
+ * an ultrawide pop-out or a small font routinely proposes past
+ * `TERMINAL_COLS_MAX`, which the schema also rejects, closing the socket.
+ * `term.resize` (not `fitAddon.fit()`, which would resize to the unclamped
+ * proposal) keeps the PTY size the renderer actually shows.
  */
 function fitAndResize(
   term: Terminal,
@@ -274,7 +286,14 @@ function fitAndResize(
   socket: ReturnType<typeof useTerminalSocket>
 ): void {
   const proposed = fitAddon.proposeDimensions();
-  if (!proposed || proposed.cols < 2 || proposed.rows < 1) return;
-  fitAddon.fit();
+  if (!proposed) return;
+  const size = clampTerminalSize(proposed, {
+    colsMin: TERMINAL_COLS_MIN,
+    colsMax: TERMINAL_COLS_MAX,
+    rowsMin: TERMINAL_ROWS_MIN,
+    rowsMax: TERMINAL_ROWS_MAX,
+  });
+  if (!size) return;
+  term.resize(size.cols, size.rows);
   socket.resize(term.cols, term.rows);
 }
