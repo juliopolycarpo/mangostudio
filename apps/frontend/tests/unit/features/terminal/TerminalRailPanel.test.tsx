@@ -103,6 +103,36 @@ describe('TerminalRailPanel', () => {
     expect(await screen.findByText('Terminals are turned off on this hub.')).toBeVisible();
   });
 
+  it('keeps the open sessions reachable at the per-user cap, refusing only a new one', async () => {
+    fetchScenario.respondWithJson(
+      'GET',
+      `/api/terminals/availability?environmentId=${ENVIRONMENT_ID}`,
+      {
+        body: {
+          environmentId: ENVIRONMENT_ID,
+          available: false,
+          reason: 'limit',
+          shells: [],
+          openSessions: 1,
+          maxSessions: 1,
+        },
+      }
+    );
+    fetchScenario.respondWithJson(
+      'GET',
+      `/api/terminals?environmentId=${ENVIRONMENT_ID}&chatId=${CHAT_ID}`,
+      { body: { sessions: [session()] } }
+    );
+
+    render(<TerminalRailPanel chatId={CHAT_ID} environmentId={ENVIRONMENT_ID} />);
+
+    // The sessions filling the cap are the only place to close one; hiding the
+    // strip behind the unavailable line leaves no way out of it.
+    expect(await screen.findByTestId('terminal-tab-term-1')).toHaveTextContent('Terminal 1');
+    expect(await screen.findByTestId('terminal-view-stub')).toHaveTextContent('term-1');
+    expect(screen.getByRole('button', { name: 'New terminal' })).toBeDisabled();
+  });
+
   it('offers a new-session button when available but empty', async () => {
     mockAvailable();
     fetchScenario.respondWithJson(

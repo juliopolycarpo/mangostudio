@@ -47,11 +47,16 @@ export function TerminalIndexPage() {
     });
   }
 
+  // Availability answers whether another session may be *opened*. At the
+  // per-user cap the sessions that fill it are still live and still the only
+  // place to close one, so it refuses this button rather than the list.
+  const unavailable = availabilityQuery.isSuccess && !availabilityQuery.data.available;
+  const unavailableReason = availabilityQuery.data?.reason ?? 'unavailable';
+
   function openNewSession(): void {
+    if (unavailable) return;
     openMutation.mutate({ environmentId }, { onSuccess: (session) => setActiveId(session.id) });
   }
-
-  const unavailable = availabilityQuery.isSuccess && !availabilityQuery.data.available;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4 sm:p-6 md:p-8">
@@ -71,62 +76,62 @@ export function TerminalIndexPage() {
       </div>
 
       {unavailable ? (
-        <div className="flex flex-col items-center justify-center gap-1 py-12 text-center">
+        <div className="flex flex-col items-center justify-center gap-1 py-6 text-center">
           <p className="text-sm font-medium text-on-surface">{t.terminal.unavailableTitle}</p>
           <p className="text-sm text-on-surface-variant">
-            {unavailableMessage(t, availabilityQuery.data?.reason ?? 'unavailable')}
+            {unavailableMessage(t, unavailableReason)}
           </p>
         </div>
+      ) : null}
+
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-on-surface-variant">
+          {t.terminal.page.sessions}
+        </h2>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={openNewSession}
+          disabled={unavailable}
+          title={unavailable ? unavailableMessage(t, unavailableReason) : undefined}
+          loading={openMutation.isPending}
+        >
+          {t.terminal.newSession}
+        </Button>
+      </div>
+
+      {sessionsQuery.isSuccess && sessions.length === 0 ? (
+        <p className="text-sm text-on-surface-variant">{t.terminal.page.noSessions}</p>
       ) : (
-        <>
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-on-surface-variant">
-              {t.terminal.page.sessions}
-            </h2>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={openNewSession}
-              loading={openMutation.isPending}
+        <ul className="divide-y divide-outline-variant/10 rounded-2xl border border-outline-variant/15">
+          {sessions.map((session) => (
+            <li
+              key={session.id}
+              className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm"
             >
-              {t.terminal.newSession}
-            </Button>
-          </div>
-
-          {sessionsQuery.isSuccess && sessions.length === 0 ? (
-            <p className="text-sm text-on-surface-variant">{t.terminal.page.noSessions}</p>
-          ) : (
-            <ul className="divide-y divide-outline-variant/10 rounded-2xl border border-outline-variant/15">
-              {sessions.map((session) => (
-                <li
-                  key={session.id}
-                  className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm"
-                >
-                  <span className="truncate text-on-surface">{session.title}</span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setActiveId(session.id)}
-                    aria-pressed={session.id === activeId}
-                  >
-                    {t.terminal.page.openHere}
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {activeId ? (
-            <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-outline-variant/15">
-              <Suspense fallback={null}>
-                <TerminalView key={activeId} sessionId={activeId} />
-              </Suspense>
-            </div>
-          ) : null}
-        </>
+              <span className="truncate text-on-surface">{session.title}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setActiveId(session.id)}
+                aria-pressed={session.id === activeId}
+              >
+                {t.terminal.page.openHere}
+              </Button>
+            </li>
+          ))}
+        </ul>
       )}
+
+      {activeId ? (
+        <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-outline-variant/15">
+          <Suspense fallback={null}>
+            <TerminalView key={activeId} sessionId={activeId} />
+          </Suspense>
+        </div>
+      ) : null}
     </div>
   );
 }

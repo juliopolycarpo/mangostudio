@@ -59,6 +59,12 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
   const renameMutation = useRenameTerminalMutation();
   const closeMutation = useCloseTerminalMutation();
 
+  // Availability answers whether another session may be *opened*, not whether
+  // the open ones are still usable: at the per-user cap they are exactly what
+  // fills it. So it gates the new-session button, not the tab strip.
+  const unavailable = availabilityQuery.isSuccess && !availabilityQuery.data.available;
+  const unavailableReason = availabilityQuery.data?.reason ?? 'unavailable';
+
   useEffect(() => {
     if (activeId !== null && sessions.some((session) => session.id === activeId)) return;
     setActiveId(sessions[0]?.id ?? null);
@@ -69,12 +75,12 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
   // resubscribe the effect below — on every render.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above.
   const openSession = useCallback(() => {
-    if (!environmentId) return;
+    if (!environmentId || unavailable) return;
     openMutation.mutate(
       { environmentId, chatId },
       { onSuccess: (session) => setActiveId(session.id) }
     );
-  }, [environmentId, chatId]);
+  }, [environmentId, chatId, unavailable]);
 
   // The command palette's "New terminal session" row: fires whether or not
   // this panel happened to be mounted yet.
@@ -96,12 +102,13 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
     return queryClient.invalidateQueries({ queryKey: terminalKeys.all });
   }
 
-  if (!environmentId || (availabilityQuery.isSuccess && !availabilityQuery.data.available)) {
-    const reason = availabilityQuery.data?.reason ?? 'unavailable';
+  if (!environmentId || (unavailable && sessions.length === 0)) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
         <p className="text-sm font-medium text-on-surface">{t.terminal.unavailableTitle}</p>
-        <p className="text-sm text-on-surface-variant">{unavailableMessage(t, reason)}</p>
+        <p className="text-sm text-on-surface-variant">
+          {unavailableMessage(t, unavailableReason)}
+        </p>
       </div>
     );
   }
@@ -133,6 +140,8 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
         onSelect={setActiveId}
         onNew={openSession}
         newSessionPending={openMutation.isPending}
+        newSessionDisabled={unavailable}
+        newSessionHint={unavailableMessage(t, unavailableReason)}
         onRequestClose={setClosingId}
         onRename={(id, title) => renameMutation.mutate({ id, body: { title } })}
         onPopOut={popOut}

@@ -118,6 +118,51 @@ describe('/terminal route', () => {
       ).toBeVisible()
     );
   });
+
+  it('still lists the sessions that fill the per-user cap, refusing only a new one', async () => {
+    fetchScenario.respondWithJson('GET', '/api/environments', {
+      body: [{ id: 'local', name: 'Local', enabled: true, status: { state: 'connected' } }],
+    });
+    fetchScenario.respondWithJson('GET', '/api/terminals/availability?environmentId=local', {
+      body: {
+        environmentId: 'local',
+        available: false,
+        reason: 'limit',
+        shells: [],
+        openSessions: 1,
+        maxSessions: 1,
+      },
+    });
+    fetchScenario.respondWithJson('GET', '/api/terminals?environmentId=local', {
+      body: {
+        sessions: [
+          {
+            id: 'term-1',
+            environmentId: 'local',
+            chatId: null,
+            title: 'Terminal 1',
+            shell: 'bash',
+            cwd: null,
+            cols: 80,
+            rows: 24,
+            status: 'running',
+            attached: false,
+            createdAt: 1,
+            lastActivityAt: 1,
+          },
+        ],
+      },
+    });
+
+    render(<TerminalIndexPage />);
+
+    // The cap is made of live sessions. Hiding the list behind the refusal
+    // leaves the pop-out page with nothing to open and nothing to close.
+    expect(await screen.findByText('Terminal 1')).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'New terminal' })).toBeDisabled()
+    );
+  });
 });
 
 describe('/terminal/$sessionId route', () => {

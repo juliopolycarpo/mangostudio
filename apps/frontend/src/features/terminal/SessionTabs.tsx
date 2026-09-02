@@ -10,6 +10,10 @@ export interface SessionTabsProps {
   readonly onSelect: (id: string) => void;
   readonly onNew: () => void;
   readonly newSessionPending?: boolean;
+  /** Refuses a new session while the open ones stay reachable — the per-user cap. */
+  readonly newSessionDisabled?: boolean;
+  /** Why, when disabled. Shown as the button's tooltip. */
+  readonly newSessionHint?: string;
   readonly onRequestClose: (id: string) => void;
   readonly onRename: (id: string, title: string) => void;
   readonly onPopOut: (id: string) => void;
@@ -31,6 +35,8 @@ export function SessionTabs({
   onSelect,
   onNew,
   newSessionPending = false,
+  newSessionDisabled = false,
+  newSessionHint,
   onRequestClose,
   onRename,
   onPopOut,
@@ -143,9 +149,9 @@ export function SessionTabs({
         variant="ghost"
         size="icon"
         onClick={onNew}
-        disabled={newSessionPending}
+        disabled={newSessionPending || newSessionDisabled}
         aria-label={t.terminal.newSession}
-        title={t.terminal.newSession}
+        title={newSessionDisabled && newSessionHint ? newSessionHint : t.terminal.newSession}
         className="size-7 shrink-0"
       >
         <Plus size={15} />
