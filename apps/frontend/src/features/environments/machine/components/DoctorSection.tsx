@@ -54,9 +54,13 @@ export function DoctorSection() {
         />
       ) : (
         <ul className="space-y-2">
-          {sortChecks(doctor.data?.checks ?? []).map((check) => (
+          {/* Position keys the rows: two checks can share a label and a detail
+              (a second MCP server with the same name and the same finding), and
+              a duplicate key drops one of them. The list is fully replaced on
+              every fetch, so there is no identity to preserve across renders. */}
+          {sortChecks(doctor.data?.checks ?? []).map((check, index) => (
             <li
-              key={`${check.label}:${check.detail}`}
+              key={`${index}:${check.label}`}
               className="flex items-start gap-2 text-sm"
               data-check-status={check.status}
             >
