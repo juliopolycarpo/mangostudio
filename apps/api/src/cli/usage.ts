@@ -26,6 +26,7 @@ Commands:
                       Actions: install, uninstall, status, start, stop,
                       restart. Uses a systemd user unit, a launchd agent,
                       or a Windows Scheduled Task.
+                      --json prints the status document (status only).
   logs [-f] [-n <count>]
                       Print the last lines of the server log; -f follows.
   open                Open the running server in the default browser.
