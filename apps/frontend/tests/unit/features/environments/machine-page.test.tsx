@@ -197,6 +197,32 @@ describe('MachinePage', () => {
     );
   });
 
+  it("words a refused action in the reader's locale too", async () => {
+    localStorage.setItem(LOCALE_STORAGE_KEY, 'pt-BR');
+    mountScenario();
+    // The status said restart was available; by the time the POST lands the
+    // hub is in a terminal, so the refusal arrives with the response.
+    scenario.respondWithJson('POST', '/api/machine/restart', {
+      status: 409,
+      body: {
+        error: 'The server was started in a terminal, which owns its lifecycle.',
+        code: 'UNSUPPORTED',
+        details: { reason: 'foreground', command: 'mangostudio restart' },
+      },
+    });
+    render(<MachinePage />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByTestId('machine-restart'));
+    const dialog = screen.getByRole('dialog', { name: 'Reiniciar o MangoStudio?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Continuar' }));
+
+    // The API's own sentence for this is English; the code is what travels.
+    await waitFor(() =>
+      expect(document.body.textContent).toContain('O servidor foi iniciado em um terminal')
+    );
+  });
+
   it('confirms a restart, posts it, and announces the hand-over', async () => {
     mountScenario();
     scenario.respondWithJson('POST', '/api/machine/restart', {

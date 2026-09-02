@@ -26,7 +26,6 @@ interface MachineActionRefusal {
   readonly reasons: readonly InstallGuardReason[];
   readonly reason: MachineActionReason | null;
   readonly command: string | null;
-  readonly message: string;
 }
 
 export type MachineActionResult =
@@ -56,7 +55,6 @@ function toRefusal(error: EdenErrorLike): MachineActionRefusal | null {
     reasons: reasons ? (reasons.split(',') as InstallGuardReason[]) : [],
     reason: detailString(body.details, 'reason') as MachineActionReason | null,
     command: detailString(body.details, 'command'),
-    message: typeof body.error === 'string' ? body.error : '',
   };
 }
 

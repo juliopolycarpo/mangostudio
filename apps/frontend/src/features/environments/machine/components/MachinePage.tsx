@@ -17,6 +17,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { EnvironmentPageState } from '../../components/EnvironmentPageState';
 import type { MachineActionResult } from '../api';
+import { refusalMessage } from '../format';
 import {
   useChangeMachineServiceMutation,
   useMachineStatus,
@@ -51,7 +52,9 @@ export function MachinePage() {
       status.expectChange();
       return;
     }
-    toast(result.message || m.actions.refused, 'error');
+    // The reason is a code; the sentence is the dictionaries'. The API's own
+    // wording of it is English whatever the reader's locale.
+    toast(refusalMessage(t, result), 'error');
   };
   const fail = () => toast(m.actions.failed, 'error');
 

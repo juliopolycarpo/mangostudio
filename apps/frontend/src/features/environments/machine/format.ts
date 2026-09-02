@@ -44,6 +44,28 @@ function actionReasonLabel(t: Messages, reason: MachineActionReason): string {
 }
 
 /**
+ * Why the API refused an action it had advertised as available — the status the
+ * page was showing went stale between the render and the POST, so the reason
+ * arrives with the response rather than in `actions`. Same sentences as
+ * {@link actionRefusalLines}, joined for a toast.
+ * // Usage: refusalMessage(t, { reason: 'foreground', reasons: [] })
+ */
+export function refusalMessage(
+  t: Messages,
+  refusal: {
+    readonly reason: MachineActionReason | null;
+    readonly reasons: readonly InstallGuardReason[];
+  }
+): string {
+  if (refusal.reason && refusal.reason !== 'guard') return actionReasonLabel(t, refusal.reason);
+  const lines = refusal.reasons.map((reason) => machineGuardReasonLabel(t, reason));
+  if (lines.length > 0) return lines.join(' ');
+  return refusal.reason
+    ? actionReasonLabel(t, refusal.reason)
+    : t.environments.machine.actions.refused;
+}
+
+/**
  * Every sentence that explains why one action is unavailable, in the order the
  * user should read them: the guard's checks first, then the action's own.
  */
