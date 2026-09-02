@@ -606,13 +606,17 @@ export function createUserServiceManager(
       }
       const body = await readUnit();
       const installed = body !== null;
-      const enabled = installed
-        ? (await run(['systemctl', '--user', 'is-enabled', identity.unitName])).exitCode === 0
-        : false;
-      const active = installed
-        ? await run(['systemctl', '--user', 'is-active', identity.unitName])
-        : { exitCode: 1, stdout: 'inactive', stderr: '' };
-      const linger = await readLingerEnabled(deps);
+      // Three independent processes. `status()` is polled every 2s through an
+      // action window, so they are spawned together rather than in turn — the
+      // same reason `hasSystemd` is memoised.
+      const [enabledResult, active, linger] = await Promise.all([
+        installed ? run(['systemctl', '--user', 'is-enabled', identity.unitName]) : null,
+        installed
+          ? run(['systemctl', '--user', 'is-active', identity.unitName])
+          : { exitCode: 1, stdout: 'inactive', stderr: '' },
+        readLingerEnabled(deps),
+      ]);
+      const enabled = enabledResult?.exitCode === 0;
       return base('linux', identity.unitName, {
         installed,
         enabled,
