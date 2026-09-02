@@ -117,7 +117,10 @@ auth secret and connector credentials included, loads from `~/.mango/.env` at
 startup exactly as it does for `serve -d` (see
 [How background mode works](#how-background-mode-works)). Because the unit has
 no terminal to ask at, `install` runs the interactive auth-secret setup first,
-while there still is one.
+while there still is one — and refuses outright when the secret is exported in
+the calling shell and stored nowhere else. That case satisfies the setup (the
+secret is valid) but leaves the unit unable to load it, so the supervisor would
+report a successful install and the hub it starts would refuse to serve.
 
 The configuration carried is the one the process building the unit is running
 on. Installing from the "This machine" page or from a `restart` therefore

@@ -5,6 +5,7 @@
 
 import type { UserServiceManager } from '@mangostudio/runtime';
 import type { UserServiceStatus } from '@mangostudio/shared/runtime-home';
+import { getConfig, getConfigEnvFilePath } from '../../lib/config';
 import { ensureRuntimeDirs } from '../../lib/mango-paths';
 import { isStateLive, readState, removeState, type ServerState } from '../../lib/server-state';
 import {
@@ -12,6 +13,7 @@ import {
   createHubServiceManager,
   currentHubExecutable,
   hubServiceLogPath,
+  isAuthSecretPersisted,
 } from '../../modules/machine/application/hub-service';
 import type { HubExecutable } from '../../modules/machine/domain/hub-executable';
 import { hubServiceUnitName } from '../../modules/machine/domain/hub-service-identity';
@@ -31,6 +33,9 @@ export interface ServiceDeps {
   removeState: typeof removeState;
   log: (msg: string) => void;
   ensureAuthSecret: typeof ensureServeAuthSecret;
+  /** Whether the auth secret lives where a unit can load it, not just in this shell. */
+  secretPersisted: () => boolean;
+  envFilePath: () => string;
   assertServeConfig: () => void;
   ensureDirs: () => Promise<void>;
   executable: () => HubExecutable;
@@ -84,6 +89,16 @@ async function install(args: ServiceArgs, unit: string, d: Required<ServiceDeps>
   // The unit runs without a terminal, so anything that would prompt has to
   // happen now, while there is one.
   await d.ensureAuthSecret({ log: d.log });
+  // A secret that is merely *valid* satisfies the setup above without being
+  // written anywhere. Exported in this shell alone it is invisible to the unit,
+  // which deliberately carries no secrets — the supervisor would report a
+  // successful install and the hub it starts would refuse to serve, after this
+  // command had already stood the working one down.
+  if (!d.secretPersisted()) {
+    throw new CliError(
+      `BETTER_AUTH_SECRET is set in this shell only, and a service unit cannot read it. Put it in ${d.envFilePath()} or set auth.secret in config.toml, then install again.`
+    );
+  }
   d.assertServeConfig();
   await d.ensureDirs();
 
@@ -181,6 +196,8 @@ function resolveDeps(deps: Partial<ServiceDeps>): Required<ServiceDeps> {
     removeState: deps.removeState ?? removeState,
     log: deps.log ?? writeLine,
     ensureAuthSecret: deps.ensureAuthSecret ?? ensureServeAuthSecret,
+    secretPersisted: deps.secretPersisted ?? (() => isAuthSecretPersisted()),
+    envFilePath: deps.envFilePath ?? (() => getConfigEnvFilePath(getConfig().configFilePath)),
     assertServeConfig: deps.assertServeConfig ?? assertServeConfig,
     ensureDirs: deps.ensureDirs ?? ensureRuntimeDirs,
     executable: deps.executable ?? (() => currentHubExecutable()),

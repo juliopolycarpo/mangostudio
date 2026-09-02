@@ -35,6 +35,9 @@ function baseDeps(overrides: Partial<Omit<ServiceDeps, 'manager'>> = {}): Partia
     removeState: noop,
     log: (msg) => lines.push(msg),
     ensureAuthSecret: () => Promise.resolve(),
+    // The default for every other case: a secret a unit can actually load.
+    secretPersisted: () => true,
+    envFilePath: () => '/home/test/.mango/.env',
     assertServeConfig: () => undefined,
     ensureDirs: noop,
     executable: () => ({
@@ -95,6 +98,25 @@ describe('runService install', () => {
     };
     await runService({ action: 'install', json: false }, d);
     expect(order).toEqual(['secret', 'install']);
+  });
+
+  it('refuses to install while the auth secret lives only in this shell', async () => {
+    const controller = new FakeProcessController([42]);
+    const d = baseDeps({
+      controller,
+      readState: () => Promise.resolve(STATE),
+      secretPersisted: () => false,
+    });
+
+    // `ensureAuthSecret` is satisfied by a secret that is merely valid, and the
+    // unit carries no secrets — so the supervisor would report success and the
+    // hub it starts would refuse to serve, after the working one was stopped.
+    await expect(runService({ action: 'install', json: false }, d)).rejects.toThrow(
+      /set in this shell only/
+    );
+
+    expect(d.manager.calls).toEqual([]);
+    expect(controller.terminated).toEqual([]);
   });
 
   it('installs the unit before stopping an instance started by hand', async () => {
