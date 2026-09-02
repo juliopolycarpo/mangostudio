@@ -103,6 +103,20 @@ describe('terminalSessionService.open', () => {
     ).resolves.toBeDefined();
   });
 
+  test('an exited session still listed does not hold a seat against the cap', async () => {
+    const { service } = createHarness({ config: { maxSessionsPerUser: 1 } });
+    const first = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+
+    // The shell ended but the tab is still open, so the record stays listed
+    // as exited until the user closes it. That record is not a running shell.
+    service.recordExit(first.id, { exitCode: 0, signal: null });
+
+    await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).resolves.toMatchObject({
+      status: 'running',
+    });
+    expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(1);
+  });
+
   test('defaults cwd to the chat workdir when the caller supplies none', async () => {
     const { service, client } = createHarness({
       resolveChat: () => Promise.resolve({ ok: true, chatId: 'chat-1', workdir: '/repo' }),

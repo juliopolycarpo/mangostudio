@@ -151,10 +151,11 @@ export function createTerminalSessionService(
   const sessions = new Map<string, TerminalSessionEntry>();
   const clientsWithCloseHandler = new WeakSet<TerminalRuntimeClient>();
 
+  /** Sessions with a live shell. An exited one still listed is not a seat the cap protects. */
   function countRunning(userId: string): number {
     let count = 0;
     for (const entry of sessions.values()) {
-      if (entry.ownerUserId === userId) count += 1;
+      if (entry.ownerUserId === userId && entry.session.status === 'running') count += 1;
     }
     return count;
   }
