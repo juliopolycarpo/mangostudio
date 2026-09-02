@@ -350,8 +350,13 @@ describe('terminalSessionService viewer handoff', () => {
     service.attachViewer(session.id, first);
     service.attachViewer(session.id, second);
 
-    service.detachViewer(session.id, first);
+    // The caller reads this answer to decide whether to send `terminal.detach`
+    // to the runtime: a stale viewer must get "no", or its late close would
+    // silence the stream the current viewer is reading.
+    expect(service.detachViewer(session.id, first)).toBe(false);
 
     expect(service.getForAttach(USER_ID, session.id)?.session.attached).toBe(true);
+    expect(service.detachViewer(session.id, second)).toBe(true);
+    expect(service.getForAttach(USER_ID, session.id)?.session.attached).toBe(false);
   });
 });

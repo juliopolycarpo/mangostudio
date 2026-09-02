@@ -304,9 +304,15 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
         const state = socket.terminalSocket;
         state.socketClosed = true;
         teardown(state);
-        if (state.viewer) service.detachViewer(state.sessionId, state.viewer);
+        // Only the viewer that still holds the session detaches it on the
+        // runtime. A socket closed with REPLACED reaches here after its
+        // successor attached; sending `terminal.detach` then would silence
+        // the new viewer's stream.
+        const wasCurrent = state.viewer
+          ? service.detachViewer(state.sessionId, state.viewer)
+          : false;
         const client = state.client;
-        if (client && state.sessionId) {
+        if (wasCurrent && client && state.sessionId) {
           void client.terminal.detach({ sessionId: state.sessionId }).catch(() => undefined);
         }
       },

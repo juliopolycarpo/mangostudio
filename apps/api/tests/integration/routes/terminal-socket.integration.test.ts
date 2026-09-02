@@ -261,9 +261,21 @@ describe('terminal socket relay', () => {
     const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
     const first = await openViewer(service, user.id, session.id);
     const second = await openViewer(service, user.id, session.id);
-    void second;
 
     expect((await first.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.REPLACED);
+
+    // The replaced socket's close handler runs after the successor attached.
+    // It must not send `terminal.detach`: that would stop the runtime's stream
+    // while the second viewer is still reading it.
+    await Bun.sleep(50);
+    expect(runtime.calls.detach).toHaveLength(0);
+    expect(second.socket.readyState).toBe(WebSocket.OPEN);
+    runtime.emitOutput(session.id, {
+      kind: 'data',
+      data: Buffer.from('still here').toString('base64'),
+    });
+    const live = await second.nextMessage((message) => message.type === 'data');
+    expect(live.type === 'data' && Buffer.from(live.data).toString()).toBe('still here');
   });
 });
 

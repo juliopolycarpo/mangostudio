@@ -94,8 +94,13 @@ export interface TerminalSessionService {
     sessionId: string,
     viewer: TerminalSessionViewer
   ): { readonly replaced: TerminalSessionViewer | null };
-  /** No-ops when `viewer` is no longer the current one (already replaced). */
-  detachViewer(sessionId: string, viewer: TerminalSessionViewer): void;
+  /**
+   * Releases the session's viewer slot. Returns false, and changes nothing,
+   * when `viewer` is no longer the current one: a replaced socket closing late
+   * must not detach the runtime session out from under the viewer that took
+   * it over.
+   */
+  detachViewer(sessionId: string, viewer: TerminalSessionViewer): boolean;
   touchActivity(sessionId: string): void;
   /** Records a `terminal.output` exit frame, or an `attach` reply that arrived already exited. */
   recordExit(sessionId: string, exit: { exitCode: number | null; signal: string | null }): void;
@@ -348,10 +353,11 @@ export function createTerminalSessionService(
 
     detachViewer(sessionId, viewer) {
       const entry = sessions.get(sessionId);
-      if (!entry || entry.viewer !== viewer) return;
+      if (!entry || entry.viewer !== viewer) return false;
       entry.viewer = null;
       entry.session.attached = false;
       entry.session.lastActivityAt = d.now();
+      return true;
     },
 
     touchActivity(sessionId) {
