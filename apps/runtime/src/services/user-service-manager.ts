@@ -10,7 +10,7 @@
  */
 
 import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import type { UserServicePlatform, UserServiceStatus } from '@mangostudio/shared/runtime-home';
 import { RuntimeServiceManagementError } from '../errors';
@@ -410,6 +410,25 @@ function unescapeXml(value: string): string {
     .replaceAll('&amp;', '&');
 }
 
+/**
+ * Who `loginctl` is asked about. `USER` and `LOGNAME` are login-shell variables:
+ * a hub started with `serve -d` or by a unit carries neither, and falling back
+ * to a placeholder made `enable-linger` fail silently — the page reported an
+ * installed service that would die at the next logout. The account this process
+ * actually runs as is the answer; the environment is only the fallback for a
+ * platform where `userInfo` cannot say.
+ * // Usage: currentUserName(process.env) // → "juliopolycarpo"
+ */
+export function currentUserName(env: NodeJS.ProcessEnv = process.env): string {
+  try {
+    const name = userInfo().username.trim();
+    if (name) return name;
+  } catch {
+    // No passwd entry for this uid (a scratch container); fall through.
+  }
+  return env.USER ?? env.LOGNAME ?? env.USERNAME ?? 'user';
+}
+
 export function defaultUserServiceExecDeps(
   env: NodeJS.ProcessEnv = process.env
 ): UserServiceExecDeps {
@@ -434,7 +453,7 @@ export function defaultUserServiceExecDeps(
     env,
     home: homedir(),
     uid: typeof process.getuid === 'function' ? process.getuid() : 0,
-    user: env.USER ?? env.LOGNAME ?? env.USERNAME ?? 'user',
+    user: currentUserName(env),
     hasSystemd: async () => {
       const result = await Bun.spawn(['which', 'systemctl'], {
         stdout: 'ignore',

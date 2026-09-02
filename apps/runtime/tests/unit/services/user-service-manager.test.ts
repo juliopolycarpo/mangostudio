@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
+import { userInfo } from 'node:os';
 import { UserServiceStatusSchema } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
 import {
   createUserServiceManager,
+  currentUserName,
   decodePowerShellArgv,
   execPathFromUnitBody,
   parseScheduledTaskJson,
@@ -487,6 +489,20 @@ describe('createUserServiceManager on win32', () => {
     expect(script.indexOf('Stop-ScheduledTask')).toBeLessThan(script.indexOf('Start-Sleep'));
     expect(script.indexOf('Start-Sleep')).toBeLessThan(script.indexOf('Start-ScheduledTask'));
     expect(script).toContain("-eq 'Running'");
+  });
+});
+
+describe('currentUserName', () => {
+  // `loginctl enable-linger <user>` decides whether the unit survives logout.
+  // A detached hub carries none of the login-shell variables, so reading them
+  // alone named a user that does not exist and linger was never enabled — while
+  // the page reported the service installed.
+  it('names the account this process runs as, not a login-shell variable', () => {
+    expect(currentUserName({})).toBe(userInfo().username);
+  });
+
+  it('falls back to the environment only when there is no passwd entry to read', () => {
+    expect(currentUserName({ USER: 'shell-user' })).toBe(userInfo().username);
   });
 });
 
