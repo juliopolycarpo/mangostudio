@@ -135,9 +135,18 @@ export interface FollowDeps {
   stopped: Promise<void>;
 }
 
+/** Whether an error is the file being gone, rather than unreadable. */
+function isMissingFile(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT';
+}
+
 /**
  * Print bytes appended to `path` from `offset` on, until `stopped` resolves.
- * A file that shrinks (rotated or truncated) is read again from the start.
+ * A file that shrinks (rotated or truncated) is read again from the start, and
+ * one that disappears between two passes is waited for rather than fatal:
+ * `logs -f` is a watch, and `stat` on a renamed file throws. Anything else —
+ * a permission the follower has lost, an I/O error — still ends the follow,
+ * because a watch that cannot read and cannot say so is a silent spin.
  */
 export async function followFile(
   path: string,
@@ -151,13 +160,21 @@ export async function followFile(
     running = false;
   });
   while (running) {
-    const size = await deps.size(path);
-    if (size < position) position = 0;
-    if (size > position) {
-      // Bounded by the size just measured, so `position` names exactly what was
-      // written and the next pass does not repeat whatever landed meanwhile.
-      write(await deps.readFrom(path, position, size));
-      position = size;
+    try {
+      const size = await deps.size(path);
+      if (size < position) position = 0;
+      if (size > position) {
+        // Bounded by the size just measured, so `position` names exactly what
+        // was written and the next pass does not repeat whatever landed
+        // meanwhile.
+        write(await deps.readFrom(path, position, size));
+        position = size;
+      }
+    } catch (error) {
+      // Gone for now — a rotation, or a `service.log` the supervisor recreated.
+      // Keep the position and look again; a file that comes back smaller is
+      // caught by the shrink check above.
+      if (!isMissingFile(error)) throw error;
     }
     await deps.sleep(FOLLOW_INTERVAL_MS);
   }

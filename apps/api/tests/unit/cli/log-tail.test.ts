@@ -3,6 +3,8 @@ import { mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  type FollowDeps,
+  followFile,
   LOG_LINE_MAX_CHARS,
   LOG_TAIL_BYTES_PER_LINE,
   type LogTailSource,
@@ -125,6 +127,72 @@ describe('readLogTail', () => {
 
   it('is null for a file that is not there, without reading it', async () => {
     expect(await readLogTail('/logs/gone.log', 10, new MissingLogFile())).toBeNull();
+  });
+});
+
+function errorWithCode(message: string, code: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(message), { code });
+}
+
+/**
+ * A log file the follower watches across a rotation: `sizes` is what each pass
+ * measures, and a null entry is the window in which the file is not there. The
+ * follow stops once the script runs out.
+ */
+class ScriptedLogFile implements FollowDeps {
+  readonly chunks: string[] = [];
+  readonly stopped: Promise<void>;
+  private pass = 0;
+  private stop: () => void = () => undefined;
+
+  constructor(
+    private readonly sizes: readonly (number | null)[],
+    private readonly failure: NodeJS.ErrnoException = errorWithCode('ENOENT', 'ENOENT'),
+    private readonly content = 'a\nb\nc\nd\n'
+  ) {
+    this.stopped = new Promise((resolve) => {
+      this.stop = resolve;
+    });
+  }
+
+  size(_path: string): Promise<number> {
+    const size = this.sizes[this.pass];
+    return size === null || size === undefined
+      ? Promise.reject(this.failure)
+      : Promise.resolve(size);
+  }
+
+  readFrom(_path: string, offset: number, end?: number): Promise<string> {
+    return Promise.resolve(this.content.slice(offset, end));
+  }
+
+  sleep(_ms: number): Promise<void> {
+    this.pass += 1;
+    if (this.pass >= this.sizes.length) this.stop();
+    return Promise.resolve();
+  }
+}
+
+describe('followFile', () => {
+  // `logs -f` is a watch, not a read. `stat` on a log the supervisor rotated
+  // away throws, and letting that out ended the follower on an ENOENT stack
+  // trace instead of picking the file up when it came back.
+  it('keeps following a log that disappears between two passes', async () => {
+    const file = new ScriptedLogFile([4, null, 8]);
+
+    await followFile('/logs/service.log', 0, (chunk) => file.chunks.push(chunk), file);
+
+    expect(file.chunks).toEqual(['a\nb\n', 'c\nd\n']);
+  });
+
+  // The other half of the same decision: a follower that cannot read the file
+  // and cannot say so would spin at the poll interval forever.
+  it('ends the follow for a failure that is not the file being gone', async () => {
+    const file = new ScriptedLogFile([4, null], errorWithCode('EACCES', 'EACCES'));
+
+    await expect(
+      followFile('/logs/service.log', 0, (chunk) => file.chunks.push(chunk), file)
+    ).rejects.toMatchObject({ code: 'EACCES' });
   });
 });
 
