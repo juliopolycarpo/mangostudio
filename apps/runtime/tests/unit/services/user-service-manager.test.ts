@@ -189,6 +189,17 @@ describe('Scheduled Task scripts', () => {
     expect(runner.endsWith('\nexit $LASTEXITCODE')).toBe(true);
   });
 
+  // `$LASTEXITCODE` is unset when the program never ran — a missing executable
+  // after an upgrade — and `exit $null` is `exit 0`, which is the same lie the
+  // line above exists to stop.
+  it('fails the run when the program never started, rather than exiting null', () => {
+    const runner = renderScheduledTaskRunnerScript(DEFINITION);
+    expect(runner).toContain('if ($null -eq $LASTEXITCODE) { exit 1 }');
+    expect(runner.indexOf('$null -eq $LASTEXITCODE')).toBeLessThan(
+      runner.lastIndexOf('exit $LASTEXITCODE')
+    );
+  });
+
   it('refuses a command Task Scheduler would silently cut', () => {
     // Everything the task runs is base64 in one argument, and an argument over
     // the limit comes back cut — which decodes to a truncated script, so the

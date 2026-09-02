@@ -256,6 +256,11 @@ export function renderScheduledTaskRunnerScript(definition: UserServiceDefinitio
     // would read every crash as a clean run and never spend the RestartCount
     // above, leaving the hub down until the next logon. `$LASTEXITCODE` is the
     // native invocation's, and survives the pipeline.
+    //
+    // It is unset when the program never ran at all — a missing or unreadable
+    // executable after an upgrade — and `exit $null` is `exit 0`, which is the
+    // same lie by a different route. Name that as a failure so the task retries.
+    'if ($null -eq $LASTEXITCODE) { exit 1 }',
     'exit $LASTEXITCODE',
   ].join('\n');
 }
