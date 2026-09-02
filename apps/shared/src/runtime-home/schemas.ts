@@ -312,6 +312,13 @@ export type UserServicePlatform = Static<typeof UserServicePlatformSchema>;
  * runtime both report through this shape, so a card and a terminal describe a
  * unit with the same words.
  */
+/** Reasons this project refuses to read a unit's status; each has i18n. */
+export const UserServiceErrorCodeSchema = Type.Union([
+  Type.Literal('no-systemd'),
+  Type.Literal('no-session-bus'),
+]);
+export type UserServiceErrorCode = Static<typeof UserServiceErrorCodeSchema>;
+
 export const UserServiceStatusSchema = Type.Object({
   schemaVersion: Type.Literal(1),
   platform: UserServicePlatformSchema,
@@ -338,6 +345,13 @@ export const UserServiceStatusSchema = Type.Object({
   ),
   /** Set when status could not be fully determined. */
   error: Type.Optional(Type.String({ maxLength: 1_024 })),
+  /**
+   * The reason behind `error`, when it is one this project raises rather than
+   * something the supervisor printed. A reader with dictionaries words these;
+   * `error` stays as the diagnostic line beneath. Anything a supervisor says
+   * for itself has no code and is shown as it came.
+   */
+  errorCode: Type.Optional(UserServiceErrorCodeSchema),
 });
 export type UserServiceStatus = Static<typeof UserServiceStatusSchema>;
 

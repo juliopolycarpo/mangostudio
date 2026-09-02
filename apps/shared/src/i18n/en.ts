@@ -2577,6 +2577,11 @@ export const messages: Messages = {
         lingerOn: 'Keeps running',
         lingerOff: 'Stops at logout',
         runs: 'Runs',
+        errors: {
+          'no-systemd': 'This machine has no systemd, so there is no per-user service to manage.',
+          'no-session-bus':
+            'The user session bus is not reachable from here, so systemd could not be asked. Open a desktop session on this machine, or enable linger for this user.',
+        },
       },
       install: {
         title: 'Install',

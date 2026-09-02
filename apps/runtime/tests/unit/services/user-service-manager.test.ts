@@ -328,6 +328,24 @@ describe('createUserServiceManager on linux', () => {
   });
 });
 
+describe('createUserServiceManager status errors', () => {
+  it('codes the refusals this project raises, and only those', async () => {
+    const noSystemd = new FakeServiceHost({ hasSystemd: false });
+    const noBus = new FakeServiceHost({
+      busSocket: false,
+      env: { XDG_RUNTIME_DIR: '', DBUS_SESSION_BUS_ADDRESS: '' },
+    });
+
+    const first = await createUserServiceManager(IDENTITY, noSystemd.deps()).status();
+    const second = await createUserServiceManager(IDENTITY, noBus.deps()).status();
+
+    // The page words these; the message stays as the diagnostic line, and a
+    // supervisor's own stderr gets no code because no dictionary can hold it.
+    expect(first).toMatchObject({ errorCode: 'no-systemd', error: 'systemd is not available' });
+    expect(second).toMatchObject({ errorCode: 'no-session-bus', error: 'no session bus' });
+  });
+});
+
 describe('createUserServiceManager on darwin', () => {
   it('bootstraps the agent and kickstarts it', async () => {
     const host = new FakeServiceHost({ platform: 'darwin' });

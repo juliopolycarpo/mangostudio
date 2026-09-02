@@ -554,10 +554,16 @@ export function createUserServiceManager(
     },
     async status(): Promise<UserServiceStatus> {
       if (!(await deps.hasSystemd())) {
-        return base('unsupported', identity.unitName, { error: USER_SERVICE_NO_SYSTEMD_ERROR });
+        return base('unsupported', identity.unitName, {
+          error: USER_SERVICE_NO_SYSTEMD_ERROR,
+          errorCode: 'no-systemd',
+        });
       }
       if ((await sessionBus()) === null) {
-        return base('linux', identity.unitName, { error: USER_SERVICE_NO_SESSION_BUS_ERROR });
+        return base('linux', identity.unitName, {
+          error: USER_SERVICE_NO_SESSION_BUS_ERROR,
+          errorCode: 'no-session-bus',
+        });
       }
       const body = await readUnit();
       const installed = body !== null;

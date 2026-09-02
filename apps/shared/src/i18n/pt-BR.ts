@@ -2577,6 +2577,12 @@ export const messages = {
         lingerOn: 'Continua em execução',
         lingerOff: 'Para no logout',
         runs: 'Executa',
+        errors: {
+          'no-systemd':
+            'Esta máquina não tem systemd, então não há serviço de usuário para gerenciar.',
+          'no-session-bus':
+            'O barramento da sessão do usuário não é alcançável daqui, então o systemd não pôde ser consultado. Abra uma sessão gráfica nesta máquina, ou habilite linger para este usuário.',
+        },
       },
       install: {
         title: 'Instalação',

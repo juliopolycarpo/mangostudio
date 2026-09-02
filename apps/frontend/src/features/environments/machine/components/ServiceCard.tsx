@@ -52,9 +52,19 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
       <p className="text-sm text-on-surface-variant">{m.service.description}</p>
 
       {service.error ? (
-        <p className="text-sm text-error" data-testid="machine-service-error">
-          {service.error}
-        </p>
+        <div className="space-y-1" data-testid="machine-service-error">
+          {/* Coded reasons are ours and have a sentence in every locale; the
+              raw line is whatever the supervisor printed, which no dictionary
+              can hold, so it stays as the diagnostic beneath. */}
+          {service.errorCode ? (
+            <>
+              <p className="text-sm text-error">{m.service.errors[service.errorCode]}</p>
+              <p className="font-mono text-xs text-on-surface-variant/70">{service.error}</p>
+            </>
+          ) : (
+            <p className="text-sm text-error">{service.error}</p>
+          )}
+        </div>
       ) : (
         service.installed && (
           <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
