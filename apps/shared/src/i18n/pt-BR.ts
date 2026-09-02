@@ -2680,6 +2680,8 @@ export const messages = {
             'O segredo de autenticação existe só no ambiente deste processo, então um serviço não conseguiria iniciar com ele. Execute o comando abaixo uma vez em um terminal; ele guarda o segredo primeiro.',
           'install-failed':
             'O gerenciador de serviço não conseguiu instalar a unidade aqui. Execute o comando abaixo em um terminal.',
+          'uninstall-failed':
+            'O gerenciador de serviço não conseguiu remover a unidade aqui. Execute o comando abaixo em um terminal.',
         },
       },
     },

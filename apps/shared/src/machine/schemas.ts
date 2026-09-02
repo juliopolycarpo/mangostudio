@@ -142,6 +142,8 @@ export const MachineActionReasonSchema = Type.Union([
   Type.Literal('secret-not-persisted'),
   /** The service manager refused the install; the runtime error is not sent over the wire. */
   Type.Literal('install-failed'),
+  /** The service manager refused to remove the unit; same, from the other verb. */
+  Type.Literal('uninstall-failed'),
 ]);
 export type MachineActionReason = Static<typeof MachineActionReasonSchema>;
 

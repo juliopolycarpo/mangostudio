@@ -2677,6 +2677,8 @@ export const messages: Messages = {
             'The auth secret lives only in this process\u2019s environment, so a service could not start with it. Run the command below once in a terminal; it stores the secret first.',
           'install-failed':
             'The service manager could not install the unit here. Run the command below in a terminal instead.',
+          'uninstall-failed':
+            'The service manager could not remove the unit here. Run the command below in a terminal instead.',
         },
       },
     },

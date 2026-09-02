@@ -305,10 +305,40 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
           ...(state?.service && { unit: state.service }),
         };
       }
-      await d.manager.uninstall();
+      await throughSupervisor(
+        () => d.manager.uninstall(),
+        'uninstall-failed',
+        UNINSTALL_SERVICE_COMMAND
+      );
       return { accepted: true, outcome: 'service-removed' };
     },
   };
+
+  /**
+   * Run one supervisor verb, turning its own refusal into a coded reason. The
+   * manager's message names a missing session bus, an unwritable unit file or a
+   * command over Task Scheduler's limit — diagnostic detail for the log, not
+   * wire content: `MachineActionUnavailableError` carries a reason the
+   * dictionaries can word, same as every other refusal this route answers, and
+   * a bare `RuntimeServiceManagementError` would reach the page as a 500.
+   */
+  async function throughSupervisor(
+    work: () => Promise<void>,
+    reason: 'install-failed' | 'uninstall-failed',
+    command: string
+  ): Promise<void> {
+    try {
+      await work();
+    } catch (error) {
+      if (!(error instanceof RuntimeServiceManagementError)) throw error;
+      logger.error('supervisor_refused', {
+        reason,
+        kind: error.kind,
+        error: error.message,
+      });
+      throw new MachineActionUnavailableError(reason, command);
+    }
+  }
 
   async function install(
     state: ServerState | null,
@@ -328,19 +358,11 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       platform: environment.platform,
       ...(explicitTarget ? { target: explicitTarget } : {}),
     });
-    try {
-      await d.manager.install(definition);
-    } catch (error) {
-      // The supervisor's own reason (a command over Task Scheduler's argument
-      // limit, an unwritable unit file, ...) is diagnostic detail for the log,
-      // not wire content: `MachineActionUnavailableError` carries a reason the
-      // dictionaries can word, same as every other refusal this route answers.
-      if (error instanceof RuntimeServiceManagementError) {
-        logger.error('install_refused', { kind: error.kind, error: error.message });
-        throw new MachineActionUnavailableError('install-failed', INSTALL_SERVICE_COMMAND);
-      }
-      throw error;
-    }
+    await throughSupervisor(
+      () => d.manager.install(definition),
+      'install-failed',
+      INSTALL_SERVICE_COMMAND
+    );
 
     if (input.launch === 'service' || state === null) {
       return { accepted: true, outcome: 'service-installed', unit: unitName };

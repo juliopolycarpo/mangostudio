@@ -308,6 +308,23 @@ describe('machineService.service', () => {
     });
   });
 
+  // The sibling of the install case above: the supervisor refuses each verb on
+  // its own, and a raw RuntimeServiceManagementError past `mapMachineError` is
+  // a 500 with the supervisor's English in it.
+  it('turns a supervisor uninstall refusal into a 409-shaped reason, not a raw throw', async () => {
+    const { service, manager } = makeService();
+    manager.setStatus(installedAndRunning());
+    manager.uninstallFailWith = new RuntimeServiceManagementError(
+      'runtime_service_no_session_bus',
+      'No D-Bus session bus for systemd user services.'
+    );
+    await expect(service.service('uninstall', LOCAL)).rejects.toMatchObject({
+      name: 'MachineActionUnavailableError',
+      reason: 'uninstall-failed',
+      command: 'mangostudio service uninstall',
+    });
+  });
+
   it('removes the unit now for a detached hub, after responding for a service-managed one', async () => {
     const { service, manager, recorder } = makeService();
     manager.setStatus({ ...installedAndRunning(), running: false });

@@ -12,6 +12,8 @@ export class FakeServiceManager implements UserServiceManager {
   failWith: Error | null = null;
   /** Fails only the install call, leaving `status()` scripted as usual. */
   installFailWith: Error | null = null;
+  /** The same seam for `uninstall`: a supervisor refuses each verb separately. */
+  uninstallFailWith: Error | null = null;
 
   constructor(private statusValue: UserServiceStatus = notInstalled()) {}
 
@@ -28,6 +30,7 @@ export class FakeServiceManager implements UserServiceManager {
 
   uninstall(): Promise<void> {
     this.calls.push('uninstall');
+    if (this.uninstallFailWith) return Promise.reject(this.uninstallFailWith);
     return this.settle();
   }
 
