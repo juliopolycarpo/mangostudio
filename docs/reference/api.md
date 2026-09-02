@@ -222,7 +222,10 @@ alive, what doctor says, and the two actions that change either.
 
 `doctor` takes `?sections=environments,library` — core checks always run, and
 these two spawn probes, so a caller opts into them. An unknown section is `422`
-`VALIDATION`. `logs` takes `?tail=` between 1 and 2000, defaulting to 200. It
+`VALIDATION`. Its rows are scoped to the signed-in account: MCP servers,
+connectors and skill toggles belong to a user, not to the machine, so one
+account's page never names another's. `mangostudio doctor` is unscoped — it runs
+at the machine's own keyboard and reports on the whole install. `logs` takes `?tail=` between 1 and 2000, defaulting to 200. It
 reads a bounded suffix of the file rather than the whole of it, so a log whose
 lines are unusually long can answer with fewer lines than were asked for;
 `truncated` says whether the file holds more.

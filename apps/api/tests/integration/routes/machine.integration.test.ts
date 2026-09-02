@@ -67,6 +67,7 @@ const STATUS: MachineStatus = {
 class FakeMachineService implements MachineService {
   readonly clientIps: Array<string | undefined> = [];
   readonly doctorSections: string[][] = [];
+  readonly doctorUsers: Array<string | undefined> = [];
   readonly tails: number[] = [];
   readonly actions: string[] = [];
   refuseWith: Error | null = null;
@@ -76,8 +77,9 @@ class FakeMachineService implements MachineService {
     return Promise.resolve(STATUS);
   }
 
-  doctor(sections: readonly string[]): Promise<MachineDoctorReport> {
+  doctor(sections: readonly string[], userId?: string): Promise<MachineDoctorReport> {
     this.doctorSections.push([...sections]);
+    this.doctorUsers.push(userId);
     return Promise.resolve({
       checks: [{ label: 'Config', status: 'ok', detail: 'fine' }],
       warnings: 0,
@@ -189,6 +191,9 @@ describe('machine routes', () => {
     expect(ok.status).toBe(200);
     expect(Value.Check(MachineDoctorReportSchema, await ok.json())).toBe(true);
     expect(service.doctorSections).toEqual([['library']]);
+    // The rows name MCP servers and connectors, which belong to an account:
+    // without this the page would show every account's on a shared hub.
+    expect(service.doctorUsers).toEqual([TEST_USER.id]);
 
     const bad = await app.handle(new Request('http://localhost/machine/doctor?sections=chatgpt'));
     expect(bad.status).toBe(422);

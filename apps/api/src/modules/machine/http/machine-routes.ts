@@ -88,7 +88,7 @@ export function createMachineRoutes(
         query: t.Object({ sections: t.Optional(t.String({ maxLength: 256 })) }),
         response: { 200: MachineDoctorReportSchema, 422: ApiErrorResponseSchema },
       },
-      async ({ query, set }) => {
+      async ({ query, set, user }) => {
         const sections = parseDoctorSections(query.sections);
         if (sections === null) {
           set.status = 422;
@@ -97,7 +97,9 @@ export function createMachineRoutes(
             code: ERROR_CODES.VALIDATION,
           };
         }
-        return await service.doctor(sections);
+        // Scoped to the signed-in account: the rows name MCP servers and
+        // connectors, which are per-user rather than per-machine.
+        return await service.doctor(sections, user?.id);
       }
     )
     .get(

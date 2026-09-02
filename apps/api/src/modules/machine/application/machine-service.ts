@@ -106,7 +106,10 @@ export interface MachineServiceDeps {
   readonly probeHealth: typeof probeHealth;
   readonly probeRuntimeBinary: () => Promise<RuntimeBinaryProbe>;
   readonly probeRuntimeSlots: () => Promise<RuntimeSlotProbe[]>;
-  readonly collectDoctor: (sections: readonly MachineDoctorSection[]) => Promise<MachineCheck[]>;
+  readonly collectDoctor: (
+    sections: readonly MachineDoctorSection[],
+    userId?: string
+  ) => Promise<MachineCheck[]>;
   readonly readLogTail: (path: string, count: number) => Promise<LogTail | null>;
   readonly latestLogFile: () => Promise<string | null>;
   readonly evaluateGuard: (clientIp: string | undefined) => InstallGuard;
@@ -126,7 +129,7 @@ export interface MachineServiceDeps {
 
 export interface MachineService {
   status(context: MachineRequestContext): Promise<MachineStatus>;
-  doctor(sections: readonly MachineDoctorSection[]): Promise<MachineDoctorReport>;
+  doctor(sections: readonly MachineDoctorSection[], userId?: string): Promise<MachineDoctorReport>;
   logs(tail: number, context: MachineRequestContext): Promise<MachineLogTail>;
   restart(context: MachineRequestContext): Promise<MachineActionResponse>;
   service(
@@ -205,8 +208,10 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       };
     },
 
-    async doctor(sections) {
-      const checks = await d.collectDoctor(sections);
+    async doctor(sections, userId) {
+      // Scoped to the caller: the rows name MCP servers and connectors, which
+      // belong to an account rather than to the machine.
+      const checks = await d.collectDoctor(sections, userId);
       return {
         checks,
         warnings: checks.filter((check) => check.status === 'warn').length,
@@ -344,7 +349,12 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
     probeRuntimeSlots: deps.probeRuntimeSlots ?? (() => probeRuntimeSlots()),
     collectDoctor:
       deps.collectDoctor ??
-      ((sections) => collectDoctorChecks({ ...DEFAULT_DOCTOR_COLLECT_OPTIONS, sections })),
+      ((sections, userId) =>
+        collectDoctorChecks({
+          ...DEFAULT_DOCTOR_COLLECT_OPTIONS,
+          sections,
+          ...(userId === undefined ? {} : { userId }),
+        })),
     readLogTail: deps.readLogTail ?? readLogTail,
     latestLogFile: deps.latestLogFile ?? (() => latestHubLogFile(environment().logsDir)),
     evaluateGuard:

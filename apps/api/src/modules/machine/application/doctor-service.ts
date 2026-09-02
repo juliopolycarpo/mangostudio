@@ -87,8 +87,8 @@ export interface DoctorCollectDeps {
   probeRuntimeBinary: () => Promise<RuntimeBinaryProbe>;
   probeRuntimeSlots: () => Promise<RuntimeSlotProbe[]>;
   probeSshClient: () => Promise<SshClientProbe>;
-  listChatGptConnectors: (config: MangoConfig) => SecretMetadataRow[];
-  listCursorConnectors: (config: MangoConfig) => SecretMetadataRow[];
+  listChatGptConnectors: (config: MangoConfig, userId?: string) => SecretMetadataRow[];
+  listCursorConnectors: (config: MangoConfig, userId?: string) => SecretMetadataRow[];
   collectChatGptChecks: (
     config: MangoConfig,
     connectors: readonly SecretMetadataRow[],
@@ -98,8 +98,8 @@ export interface DoctorCollectDeps {
   getCheckoutBuildInfo: () => BuildInfo;
   readFrontendBuildInfo: (frontendDir: string) => BuildInfo | null;
   getEmbeddedFrontend: () => EmbeddedFrontendFiles | null;
-  collectSkillsChecks: (config: MangoConfig) => CheckResult[];
-  listMcpServers: (config: MangoConfig) => McpServerSelect[];
+  collectSkillsChecks: (config: MangoConfig, userId?: string) => CheckResult[];
+  listMcpServers: (config: MangoConfig, userId?: string) => McpServerSelect[];
   collectMcpChecks: (
     rows: readonly McpServerSelect[],
     options: { probe: boolean; serverRunning: boolean }
@@ -115,6 +115,13 @@ export interface DoctorCollectDeps {
  */
 export interface DoctorCollectOptions extends Omit<DoctorArgs, 'json'> {
   sections?: readonly MachineDoctorSection[];
+  /**
+   * Whose per-account rows to read. The API sets it to the signed-in user, so
+   * one account's page never names another's MCP servers or connectors. The CLI
+   * leaves it out: it runs on the machine's own keyboard and reports on the
+   * whole install.
+   */
+  userId?: string;
 }
 
 export const DEFAULT_DOCTOR_COLLECT_OPTIONS: DoctorCollectOptions = {
@@ -191,7 +198,7 @@ async function collectResults(
     // refuses every turn, so what matters is whether anyone still has a key
     // sitting there, which is also the evidence the removal cycle needs before
     // the connector and its secret can go.
-    if (d.isCursorConfigured(config) || d.listCursorConnectors(config).length > 0) {
+    if (d.isCursorConfigured(config) || d.listCursorConnectors(config, options.userId).length > 0) {
       results.push(
         warn(
           'Cursor connector',
@@ -200,16 +207,16 @@ async function collectResults(
       );
     }
 
-    const chatgptConnectors = d.listChatGptConnectors(config);
+    const chatgptConnectors = d.listChatGptConnectors(config, options.userId);
     if (chatgptConnectors.length > 0 || options.all) {
       results.push(
         ...(await d.collectChatGptChecks(config, chatgptConnectors, options.chatgptRefresh))
       );
     }
 
-    results.push(...d.collectSkillsChecks(config));
+    results.push(...d.collectSkillsChecks(config, options.userId));
 
-    const mcpServers = d.listMcpServers(config);
+    const mcpServers = d.listMcpServers(config, options.userId);
     if (mcpServers.length > 0 || options.all) {
       results.push(
         ...(await d.collectMcpChecks(mcpServers, {
@@ -331,18 +338,33 @@ export function isCursorConnectorConfigured(config: MangoConfig): boolean {
  * doctor never creates or migrates the database; a missing file or table
  * (fresh install) simply means no connectors.
  */
-function listChatGptConnectorRows(config: MangoConfig): SecretMetadataRow[] {
-  return readDbRows<SecretMetadataRow>(
-    config,
-    "SELECT * FROM secret_metadata WHERE provider = 'chatgpt'"
-  );
+function listChatGptConnectorRows(config: MangoConfig, userId?: string): SecretMetadataRow[] {
+  return listConnectorRows(config, 'chatgpt', userId);
 }
 
-function listCursorConnectorRows(config: MangoConfig): SecretMetadataRow[] {
-  return readDbRows<SecretMetadataRow>(
-    config,
-    "SELECT * FROM secret_metadata WHERE provider = 'cursor'"
-  );
+function listCursorConnectorRows(config: MangoConfig, userId?: string): SecretMetadataRow[] {
+  return listConnectorRows(config, 'cursor', userId);
+}
+
+/**
+ * Connector rows for one provider. `secret_metadata.userId` is nullable — a row
+ * with no owner came from the environment or `config.toml` and belongs to the
+ * install rather than to an account, so a scoped read keeps those.
+ */
+function listConnectorRows(
+  config: MangoConfig,
+  provider: string,
+  userId?: string
+): SecretMetadataRow[] {
+  return userId === undefined
+    ? readDbRows<SecretMetadataRow>(config, 'SELECT * FROM secret_metadata WHERE provider = ?', [
+        provider,
+      ])
+    : readDbRows<SecretMetadataRow>(
+        config,
+        'SELECT * FROM secret_metadata WHERE provider = ? AND (userId = ? OR userId IS NULL)',
+        [provider, userId]
+      );
 }
 
 function mergeConnectorSecretEnv(config: MangoConfig): Record<string, string | undefined> {
@@ -363,12 +385,12 @@ function mergeConnectorSecretEnv(config: MangoConfig): Record<string, string | u
  * the checklist. All reads are offline: SQLite is opened read-only and the
  * filesystem scan never mutates.
  */
-function collectSkillsDoctorSection(config: MangoConfig): CheckResult[] {
+function collectSkillsDoctorSection(config: MangoConfig, userId?: string): CheckResult[] {
   return collectSkillsDoctorChecks({
     configDir: config.skills.dir,
     configOrigin: resolveSkillsConfigOrigin(config),
-    sourceToggles: readSkillSourceToggles(config),
-    disabledKeys: readDisabledSkillKeys(config),
+    sourceToggles: readSkillSourceToggles(config, userId),
+    disabledKeys: readDisabledSkillKeys(config, userId),
   });
 }
 
@@ -396,23 +418,38 @@ function resolveSkillsConfigOrigin(config: MangoConfig): SkillsConfigOrigin {
 }
 
 /**
- * Skill keys switched off in per-skill settings, across all users (doctor is a
- * local single-user tool). A key disabled for any user counts as disabled.
+ * Skill keys switched off in per-skill settings. Without a `userId` these span
+ * every account and a key disabled for any of them counts as disabled, which is
+ * what the local CLI wants; with one they are that account's answer.
  */
-function readDisabledSkillKeys(config: MangoConfig): Set<string> {
-  const rows = readDbRows<{ skillKey: string }>(
-    config,
-    'SELECT skillKey FROM user_skill_settings WHERE enabled = 0'
-  );
+function readDisabledSkillKeys(config: MangoConfig, userId?: string): Set<string> {
+  const rows =
+    userId === undefined
+      ? readDbRows<{ skillKey: string }>(
+          config,
+          'SELECT skillKey FROM user_skill_settings WHERE enabled = 0'
+        )
+      : readDbRows<{ skillKey: string }>(
+          config,
+          'SELECT skillKey FROM user_skill_settings WHERE enabled = 0 AND userId = ?',
+          [userId]
+        );
   return new Set(rows.map((row) => row.skillKey));
 }
 
-/** Third-party source toggles; a source enabled for any user is treated as on. */
-function readSkillSourceToggles(config: MangoConfig): { agents: boolean; claude: boolean } {
-  const rows = readDbRows<{ settingsJson: string }>(
-    config,
-    'SELECT settingsJson FROM user_app_settings'
-  );
+/** Third-party source toggles, read the same way and with the same scoping. */
+function readSkillSourceToggles(
+  config: MangoConfig,
+  userId?: string
+): { agents: boolean; claude: boolean } {
+  const rows =
+    userId === undefined
+      ? readDbRows<{ settingsJson: string }>(config, 'SELECT settingsJson FROM user_app_settings')
+      : readDbRows<{ settingsJson: string }>(
+          config,
+          'SELECT settingsJson FROM user_app_settings WHERE userId = ?',
+          [userId]
+        );
   const toggles = { agents: false, claude: false };
   for (const row of rows) {
     const settings = parseSettingsJson(row.settingsJson);
@@ -462,9 +499,19 @@ function parseSettingsJson(raw: string): Record<string, unknown> {
   }
 }
 
-/** MCP server rows across all users, ordered like the settings list. */
-function listMcpServerRows(config: MangoConfig): McpServerSelect[] {
-  return readDbRows<McpServerSelect>(config, 'SELECT * FROM mcp_servers ORDER BY createdAt ASC');
+/**
+ * MCP server rows, ordered like the settings list. `userId` scopes them to one
+ * account; without it every row is returned, which is what the local CLI wants
+ * — see {@link DoctorCollectOptions.userId}.
+ */
+function listMcpServerRows(config: MangoConfig, userId?: string): McpServerSelect[] {
+  return userId === undefined
+    ? readDbRows<McpServerSelect>(config, 'SELECT * FROM mcp_servers ORDER BY createdAt ASC')
+    : readDbRows<McpServerSelect>(
+        config,
+        'SELECT * FROM mcp_servers WHERE userId = ? ORDER BY createdAt ASC',
+        [userId]
+      );
 }
 
 /**
@@ -472,14 +519,18 @@ function listMcpServerRows(config: MangoConfig): McpServerSelect[] {
  * (missing file, absent table on a fresh install). Doctor never creates or
  * migrates the database.
  */
-function readDbRows<T>(config: MangoConfig, query: string): T[] {
+function readDbRows<T>(
+  config: MangoConfig,
+  query: string,
+  parameters: readonly string[] = []
+): T[] {
   const dbPath = config.database.path;
   if (dbPath === ':memory:' || !existsSync(dbPath)) return [];
 
   let db: SQLiteDatabase | null = null;
   try {
     db = new SQLiteDatabase(dbPath, { readonly: true });
-    return db.query(query).all() as unknown as T[];
+    return db.query(query).all(...parameters) as unknown as T[];
   } catch {
     return [];
   } finally {
