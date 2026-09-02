@@ -144,9 +144,12 @@ describe('TerminalView', () => {
       act(() => socket?.open());
 
       // Nothing else retries: `ResizeObserver` fires on container changes, so
-      // without this the PTY keeps the 80x24 it was opened with.
+      // without this the PTY keeps the 80x24 it was opened with. One frame,
+      // not one per fit that was dropped on the way here.
       const frames = (socket?.sent ?? []).map((bytes) => decodeTerminalClientMessage(bytes));
-      expect(frames).toContainEqual({ type: 'resize', cols: 120, rows: 40 });
+      expect(frames.filter((frame) => frame.type === 'resize')).toEqual([
+        { type: 'resize', cols: 120, rows: 40 },
+      ]);
     } finally {
       propose.mockRestore();
     }
