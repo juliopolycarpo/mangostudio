@@ -222,3 +222,7 @@ Extend the channel in this order:
 6. Update this document and its Portuguese mirror.
 
 Filesystem watchers and entity synchronization do not belong in this channel.
+Neither does terminal I/O: interactive sessions ride their own route,
+`/api/terminal/:id`, with per-socket flow control, because the socket options
+this channel shares close a connection on backpressure rather than throttle it
+(see [terminal.md](../features/terminal.md)).
