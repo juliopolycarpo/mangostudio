@@ -158,7 +158,8 @@ o mantém vivo, o que o doctor diz e as duas ações que mudam qualquer um dos d
 `doctor` aceita `?sections=environments,library`; uma seção desconhecida é `422`
 `VALIDATION`. `logs` aceita `?tail=` entre 1 e 2000, com padrão 200.
 
-Os dois POSTs só respondem em loopback: de qualquer outro lugar são `403`
+Os dois POSTs e `GET /api/machine/logs` só respondem em loopback (o log é a saída bruta
+do processo, sem redação): de qualquer outro lugar são `403`
 `PERMISSION_DENIED` com `details.reasons`. Uma ação que não se aplica ao modo como
 o hub está rodando é `409` `UNSUPPORTED` com `details.reason` e `details.command`
 — a linha da CLI para rodar no lugar.

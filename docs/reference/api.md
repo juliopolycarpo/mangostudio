@@ -224,7 +224,8 @@ alive, what doctor says, and the two actions that change either.
 these two spawn probes, so a caller opts into them. An unknown section is `422`
 `VALIDATION`. `logs` takes `?tail=` between 1 and 2000, defaulting to 200.
 
-The two POSTs are loopback-only. A request from anywhere else is `403`
+The two POSTs and `GET /api/machine/logs` are loopback-only — the log is the process's
+raw output, unredacted. A request from anywhere else is `403`
 `PERMISSION_DENIED` with `details.reasons` naming which check failed — the same
 guard shape the environment installs use. An action that does not apply to how
 this hub is running is `409` `UNSUPPORTED` with `details.reason` and
