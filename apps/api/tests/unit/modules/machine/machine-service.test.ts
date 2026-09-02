@@ -123,6 +123,17 @@ describe('machineService.status', () => {
     expect(status.hub.running).toBe(true);
   });
 
+  it('says a LAN-bound hub is unprobed rather than unreachable', async () => {
+    // The loopback probe refuses a host that is neither loopback nor bind-all,
+    // so `false` there is "could not ask", not "did not answer".
+    const { service } = makeService(
+      { probeHealth: () => Promise.resolve(false), canProbeHealth: () => false },
+      { ...DETACHED, pid: 99, host: '192.168.1.20' }
+    );
+
+    expect((await service.status(LOCAL)).hub.health).toBe('unprobed');
+  });
+
   it('reports a version mismatch against the sibling runtime', async () => {
     const { service } = makeService({
       probeRuntimeBinary: () =>

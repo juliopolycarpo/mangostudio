@@ -2551,6 +2551,8 @@ export const messages = {
         health: {
           ok: 'Saudável',
           unreachable: 'Sem resposta',
+          /** Preso a um endereço de LAN, que a sonda de loopback não alcança. */
+          unprobed: 'Não dá para verificar daqui',
         },
       },
       service: {

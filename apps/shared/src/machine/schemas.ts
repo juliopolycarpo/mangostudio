@@ -19,7 +19,17 @@ export const HubLaunchModeSchema = Type.Union([
 ]);
 export type HubLaunchMode = Static<typeof HubLaunchModeSchema>;
 
-export const HubHealthSchema = Type.Union([Type.Literal('ok'), Type.Literal('unreachable')]);
+/**
+ * Whether the process answered `/api/health`. `unprobed` is not a failure: a
+ * hub bound to one explicit LAN address cannot be reached over loopback, and
+ * the probe will not fetch an arbitrary host named in a local state file, so
+ * there is nothing it can honestly say either way.
+ */
+export const HubHealthSchema = Type.Union([
+  Type.Literal('ok'),
+  Type.Literal('unreachable'),
+  Type.Literal('unprobed'),
+]);
 export type HubHealth = Static<typeof HubHealthSchema>;
 
 /**

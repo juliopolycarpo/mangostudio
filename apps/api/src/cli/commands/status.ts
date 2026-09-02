@@ -3,12 +3,13 @@
  * text or as the shared hub status document with `--json`.
  */
 
+import type { HubHealth } from '@mangostudio/shared/machine';
 import { formatBuildInfo, formatBuildSha } from '../../lib/build-info';
 import { isStateLive, readState, removeState, type ServerState } from '../../lib/server-state';
 import { describeHubProcess } from '../../modules/machine/domain/hub-process';
 import type { StatusArgs } from '../args';
 import { formatUptime } from '../format';
-import { probeHealth } from '../health';
+import { canProbeHealth, probeHealth } from '../health';
 import { writeLine } from '../output';
 import { createProcessController, type ProcessController } from '../process-control';
 
@@ -17,6 +18,7 @@ export interface StatusDeps {
   readState: typeof readState;
   removeState: typeof removeState;
   probeHealth: typeof probeHealth;
+  canProbeHealth: typeof canProbeHealth;
   log: (msg: string) => void;
   now: () => number;
 }
@@ -44,7 +46,14 @@ export async function runStatus(
     return;
   }
 
-  const health = (await d.probeHealth(state.host, state.port)) ? 'ok' : 'unreachable';
+  // A hub bound to one explicit LAN address cannot be reached over loopback and
+  // the probe will not fetch that address itself, so there is nothing it can
+  // honestly say — "unreachable" would call a healthy server broken.
+  const health: HubHealth = !d.canProbeHealth(state.host)
+    ? 'unprobed'
+    : (await d.probeHealth(state.host, state.port))
+      ? 'ok'
+      : 'unreachable';
   if (args.json) {
     d.log(
       JSON.stringify(describeHubProcess({ state, alive: true, now: d.now(), health }), null, 2)
@@ -54,11 +63,7 @@ export async function runStatus(
   printRunning(state, health, d);
 }
 
-function printRunning(
-  state: ServerState,
-  health: 'ok' | 'unreachable',
-  d: Required<StatusDeps>
-): void {
+function printRunning(state: ServerState, health: HubHealth, d: Required<StatusDeps>): void {
   const status = describeHubProcess({ state, alive: true, now: d.now(), health });
   d.log('MangoStudio is running.');
   d.log(`  PID:     ${state.pid}`);
@@ -79,6 +84,7 @@ function resolveDeps(deps: Partial<StatusDeps>): Required<StatusDeps> {
     readState: deps.readState ?? readState,
     removeState: deps.removeState ?? removeState,
     probeHealth: deps.probeHealth ?? probeHealth,
+    canProbeHealth: deps.canProbeHealth ?? canProbeHealth,
     log: deps.log ?? writeLine,
     now: deps.now ?? Date.now,
   };

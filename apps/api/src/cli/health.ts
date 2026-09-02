@@ -36,6 +36,18 @@ export async function probeHealth(
 }
 
 /**
+ * Whether {@link probeHealth} can say anything about this host. It is false for
+ * a bind to one explicit non-loopback address: the server is listening on that
+ * interface alone, so loopback would not answer, and the probe will not fetch
+ * the address itself. A caller must report that as unknown rather than as a
+ * server that failed to answer.
+ * // Usage: canProbeHealth('192.168.1.20') // → false
+ */
+export function canProbeHealth(host: string): boolean {
+  return resolveLocalTarget(host) !== null;
+}
+
+/**
  * Maps a server-state host to a safe loopback fetch target, or `null` when the
  * host is not local. Bind-all addresses (`0.0.0.0`, `::`) are not routable as
  * client targets, so they map to loopback.

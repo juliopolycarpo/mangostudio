@@ -2551,6 +2551,8 @@ export const messages: Messages = {
         health: {
           ok: 'Healthy',
           unreachable: 'Not answering',
+          /** Bound to one LAN address, which the loopback probe cannot reach. */
+          unprobed: 'Cannot be checked from here',
         },
       },
       service: {

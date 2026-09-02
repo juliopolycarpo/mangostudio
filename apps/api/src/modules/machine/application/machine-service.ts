@@ -8,6 +8,7 @@
 import type { UserServiceManager } from '@mangostudio/runtime';
 import type { InstallGuard } from '@mangostudio/shared/environments';
 import type {
+  HubHealth,
   MachineActionReason,
   MachineActionResponse,
   MachineCheck,
@@ -20,7 +21,7 @@ import type {
 import { MACHINE_LOG_TAIL_DEFAULT, MACHINE_LOG_TAIL_MAX } from '@mangostudio/shared/machine';
 import { resolveRuntimeSlotConfig, runtimeSlotDir } from '@mangostudio/shared/runtime-home';
 import { spawnServeChild } from '../../../cli/detach';
-import { probeHealth } from '../../../cli/health';
+import { canProbeHealth, probeHealth } from '../../../cli/health';
 import { type LogTail, latestHubLogFile, readLogTail } from '../../../cli/log-tail';
 import { createProcessController, type ProcessController } from '../../../cli/process-control';
 import { probeRuntimeBinary, type RuntimeBinaryProbe } from '../../../cli/runtime-binary-probe';
@@ -104,6 +105,7 @@ export interface MachineServiceDeps {
   readonly controller: ProcessController;
   readonly readState: typeof readState;
   readonly probeHealth: typeof probeHealth;
+  readonly canProbeHealth: typeof canProbeHealth;
   readonly probeRuntimeBinary: () => Promise<RuntimeBinaryProbe>;
   readonly probeRuntimeSlots: () => Promise<RuntimeSlotProbe[]>;
   readonly collectDoctor: (
@@ -166,12 +168,7 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
     async status(context) {
       const environment = d.environment();
       const state = await liveState();
-      const health =
-        state === null
-          ? undefined
-          : state.pid === environment.pid || (await d.probeHealth(state.host, state.port))
-            ? 'ok'
-            : 'unreachable';
+      const health = state === null ? undefined : await resolveHealth(state, environment, d);
       const input = await actionsInput(context.clientIp, state);
       const [binary, slots] = await Promise.all([d.probeRuntimeBinary(), d.probeRuntimeSlots()]);
       const host = slots.find((slot) => slot.slot === 'host');
@@ -318,6 +315,22 @@ function refuse(reason: MachineActionReason | null, guard: InstallGuard, command
   throw new MachineActionUnavailableError(reason, command);
 }
 
+/**
+ * Whether the recorded process is answering. This process is answering by
+ * definition — it is serving the request. Anything else is asked over loopback,
+ * and a hub bound to one explicit LAN address cannot be: saying `unreachable`
+ * there would call a healthy server broken.
+ */
+async function resolveHealth(
+  state: ServerState,
+  environment: MachineEnvironment,
+  d: MachineServiceDeps
+): Promise<HubHealth> {
+  if (state.pid === environment.pid) return 'ok';
+  if (!d.canProbeHealth(state.host)) return 'unprobed';
+  return (await d.probeHealth(state.host, state.port)) ? 'ok' : 'unreachable';
+}
+
 function realEnvironment(): MachineEnvironment {
   const config = getConfig();
   return {
@@ -345,6 +358,7 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
     controller: deps.controller ?? createProcessController(),
     readState: deps.readState ?? readState,
     probeHealth: deps.probeHealth ?? probeHealth,
+    canProbeHealth: deps.canProbeHealth ?? canProbeHealth,
     probeRuntimeBinary: deps.probeRuntimeBinary ?? (() => probeRuntimeBinary()),
     probeRuntimeSlots: deps.probeRuntimeSlots ?? (() => probeRuntimeSlots()),
     collectDoctor:

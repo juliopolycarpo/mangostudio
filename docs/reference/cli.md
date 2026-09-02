@@ -53,8 +53,14 @@ order, e.g. `mangostudio serve 127.0.0.1:3000 -d`.
 Host aliases: `lan`, `all`, `any`, and `public` bind `0.0.0.0`; `local` binds
 `127.0.0.1`.
 
-`status` probes `/api/health` and prints `ok` or `unreachable` beside the URL and
-the launch mode. `status --json` prints the `HubProcessStatus` document from
+`status` probes `/api/health` and prints `ok`, `unreachable` or `unprobed`
+beside the URL and the launch mode. The probe only ever fetches loopback — it
+will not issue a request to an arbitrary address named in a local state file —
+so a server bound to one explicit LAN address (`mangostudio serve
+192.168.1.20:3001`) reports `unprobed`: nothing could be measured, which is not
+the same as a server that failed to answer. A bind-all start (`lan:`, `0.0.0.0`)
+is probed over loopback as usual. `status --json` prints the `HubProcessStatus`
+document from
 [`apps/shared/src/machine/schemas.ts`](../../apps/shared/src/machine/schemas.ts) —
 the same shape `GET /api/machine/status` embeds, so a terminal and the
 "This machine" page cannot disagree.

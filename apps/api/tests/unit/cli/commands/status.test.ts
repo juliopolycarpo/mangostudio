@@ -104,6 +104,24 @@ describe('runStatus', () => {
     expect(lines.join('\n')).toContain('Health:  unreachable');
   });
 
+  it('does not call a LAN-bound instance unreachable when it cannot be probed', async () => {
+    const { lines, log } = capture();
+
+    await runStatus(TEXT, {
+      readState: () => Promise.resolve({ ...STATE, host: '192.168.1.20' }),
+      removeState: noop,
+      controller: new FakeProcessController([42]),
+      // The real probe refuses a host that is neither loopback nor bind-all
+      // rather than fetch an address named in a local state file, so a `false`
+      // here says nothing about the server.
+      probeHealth: () => Promise.resolve(false),
+      log,
+      now: () => 5000,
+    });
+
+    expect(lines.join('\n')).toContain('Health:  unprobed');
+  });
+
   it('prints the shared status document with --json', async () => {
     const { lines, log } = capture();
 
