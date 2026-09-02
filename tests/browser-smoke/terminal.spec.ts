@@ -1,11 +1,9 @@
 import { expect, test } from '@playwright/test';
 
 /**
- * This spec cannot run until the hub ships `/api/terminals*` and the
- * `/api/terminal/:id` socket route — both land in a parallel PR. It is
- * written and typechecked against the frontend contract now so it is ready
- * the day those routes exist; running it before then fails on the first
- * `waitForResponse` with no `/api/terminals/availability` ever answered.
+ * Opens the Terminal rail panel on a fresh chat, starts a session on the Local
+ * runtime and runs a command whose output the shell has to compute. WebGL may
+ * be unavailable headless; the DOM renderer must still draw the text.
  */
 test('typing in the terminal panel runs a real command', async ({ page }) => {
   // A cold shell spawn plus the socket round-trip costs more than the 30s
@@ -44,10 +42,12 @@ test('typing in the terminal panel runs a real command', async ({ page }) => {
 
   // Focuses the xterm surface before typing, the same as a click would.
   await terminal.click();
-  await page.keyboard.type('echo mango');
+  // The shell has to compute the marker: the typed command echoes back on the
+  // same screen, so asserting on a literal would pass before anything ran.
+  await page.keyboard.type('echo MANGO_$((20+3))');
   await page.keyboard.press('Enter');
 
-  await expect(terminal).toContainText('mango', { timeout: 15_000 });
+  await expect(terminal).toContainText('MANGO_23', { timeout: 15_000 });
 
   expect(consoleErrors).toEqual([]);
 });
