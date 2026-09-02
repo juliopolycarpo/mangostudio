@@ -277,6 +277,78 @@ describe('terminal socket relay', () => {
     const live = await second.nextMessage((message) => message.type === 'data');
     expect(live.type === 'data' && Buffer.from(live.data).toString()).toBe('still here');
   });
+
+  it('does not detach the runtime when a takeover replaces the viewer while attach() is still in flight', async () => {
+    const user = await insertTestUser();
+    let releaseAttach!: () => void;
+    const attachGate = new Promise<void>((resolve) => {
+      releaseAttach = resolve;
+    });
+    const runtime = new FakeTerminalRuntimeClient({ gateFirstAttach: () => attachGate });
+    const service = createTerminalSessionService({
+      getConfig: () => ({
+        enabled: true,
+        idleTimeoutMinutes: 30,
+        maxSessionsPerUser: 8,
+        scrollbackKib: 256,
+      }),
+      getRuntimeClient: () => Promise.resolve(runtime),
+      isIdentityAttested: () => true,
+    });
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+
+    // The first socket's terminal.attach() blocks on the gate, so a takeover
+    // races it: the second viewer replaces it before it ever finishes attaching.
+    const first = await openViewer(service, user.id, session.id);
+    const second = await openViewer(service, user.id, session.id);
+    expect((await first.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.REPLACED);
+
+    releaseAttach();
+    await Bun.sleep(50);
+
+    expect(runtime.calls.detach).toHaveLength(0);
+    expect(second.socket.readyState).toBe(WebSocket.OPEN);
+  });
+
+  it('drops a client message queued before a takeover instead of forwarding it after the viewer was replaced', async () => {
+    const user = await insertTestUser();
+    let releaseWrite!: () => void;
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    const runtime = new FakeTerminalRuntimeClient({ gateFirstWrite: () => writeGate });
+    const service = createTerminalSessionService({
+      getConfig: () => ({
+        enabled: true,
+        idleTimeoutMinutes: 30,
+        maxSessionsPerUser: 8,
+        scrollbackKib: 256,
+      }),
+      getRuntimeClient: () => Promise.resolve(runtime),
+      isIdentityAttested: () => true,
+    });
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const first = await openViewer(service, user.id, session.id);
+
+    // The first message's terminal.write() blocks on the gate, so the second
+    // message sits queued in the socket's messageChain, not yet started, when
+    // the takeover below closes this socket.
+    first.socket.send(
+      encodeTerminalClientMessage({ type: 'data', data: new TextEncoder().encode('a') })
+    );
+    first.socket.send(
+      encodeTerminalClientMessage({ type: 'data', data: new TextEncoder().encode('b') })
+    );
+
+    const second = await openViewer(service, user.id, session.id);
+    expect((await first.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.REPLACED);
+
+    releaseWrite();
+    await Bun.sleep(50);
+
+    expect(runtime.calls.write).toHaveLength(1);
+    expect(second.socket.readyState).toBe(WebSocket.OPEN);
+  });
 });
 
 /**

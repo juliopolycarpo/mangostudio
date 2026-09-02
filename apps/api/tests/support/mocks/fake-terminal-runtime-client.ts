@@ -45,6 +45,10 @@ export interface FakeTerminalRuntimeClientOptions {
   readonly manifest?: RuntimeCapabilityManifest;
   readonly openResult?: Partial<RuntimeTerminalOpenResult>;
   readonly attachResult?: Partial<RuntimeTerminalAttachResult>;
+  /** Awaited before the *first* `terminal.attach` call resolves; later calls are immediate. */
+  readonly gateFirstAttach?: () => Promise<unknown>;
+  /** Awaited before the *first* `terminal.write` call resolves; later calls are immediate. */
+  readonly gateFirstWrite?: () => Promise<unknown>;
 }
 
 export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
@@ -63,11 +67,15 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
   readonly #attachResult: Partial<RuntimeTerminalAttachResult>;
   readonly #outputListeners = new Map<string, Set<(event: RuntimeTerminalOutputEvent) => void>>();
   readonly #closeListeners = new Set<() => void>();
+  #gateFirstAttach: (() => Promise<unknown>) | undefined;
+  #gateFirstWrite: (() => Promise<unknown>) | undefined;
 
   constructor(options: FakeTerminalRuntimeClientOptions = {}) {
     this.manifest = options.manifest ?? FAKE_TERMINAL_MANIFEST;
     this.#openResult = options.openResult ?? {};
     this.#attachResult = options.attachResult ?? {};
+    this.#gateFirstAttach = options.gateFirstAttach;
+    this.#gateFirstWrite = options.gateFirstWrite;
   }
 
   readonly terminal: TerminalRuntimeTerminalClient = {
@@ -81,26 +89,32 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
         ...this.#openResult,
       });
     },
-    attach: (params) => {
+    attach: async (params) => {
       this.calls.attach.push(params);
-      return Promise.resolve({
+      const gate = this.#gateFirstAttach;
+      this.#gateFirstAttach = undefined;
+      if (gate) await gate();
+      return {
         sessionId: params.sessionId,
         scrollback: '',
-        status: 'running',
+        status: 'running' as const,
         exitCode: null,
         signal: null,
         cols: 80,
         rows: 24,
         ...this.#attachResult,
-      });
+      };
     },
     detach: (params) => {
       this.calls.detach.push(params);
       return Promise.resolve({ ok: true as const });
     },
-    write: (params) => {
+    write: async (params) => {
       this.calls.write.push(params);
-      return Promise.resolve({ ok: true as const });
+      const gate = this.#gateFirstWrite;
+      this.#gateFirstWrite = undefined;
+      if (gate) await gate();
+      return { ok: true as const };
     },
     resize: (params) => {
       this.calls.resize.push(params);

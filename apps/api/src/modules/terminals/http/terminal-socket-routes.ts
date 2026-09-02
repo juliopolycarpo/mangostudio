@@ -136,9 +136,14 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
     }
 
     if (state.socketClosed) {
-      // The browser hung up while attach() was in flight.
-      service.detachViewer(state.sessionId, viewer);
-      void client.terminal.detach({ sessionId: state.sessionId }).catch(() => undefined);
+      // The browser hung up, or a takeover replaced this viewer, while
+      // attach() was in flight. Only detach the runtime if this was still
+      // the current viewer: a takeover already moved that job onto the
+      // successor, and detaching here would stop its stream instead.
+      const wasCurrent = service.detachViewer(state.sessionId, viewer);
+      if (wasCurrent) {
+        void client.terminal.detach({ sessionId: state.sessionId }).catch(() => undefined);
+      }
       return;
     }
 
@@ -189,7 +194,11 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
   async function handleClientMessage(socket: TerminalSocket, bytes: Uint8Array): Promise<void> {
     const state = socket.terminalSocket;
     const client = state.client;
-    if (!client) return;
+    // A message already queued in `messageChain` when a takeover closes this
+    // socket must not reach the runtime after the fact: `state.client` is
+    // never cleared, so only `socketClosed` catches a dequeued handler that
+    // starts running after the close.
+    if (!client || state.socketClosed) return;
 
     let decoded: ReturnType<typeof decodeTerminalClientMessage>;
     try {
