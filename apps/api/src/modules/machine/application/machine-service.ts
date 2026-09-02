@@ -67,6 +67,7 @@ import {
   createHubServiceManager,
   currentHubExecutable,
   hubServiceLogPath,
+  hubServiceTargetFor,
   isAuthSecretPersisted,
 } from './hub-service';
 
@@ -315,10 +316,10 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
   ): Promise<MachineActionResponse> {
     const environment = d.environment();
     const unitName = hubServiceUnitName(environment.platform);
-    const explicitTarget =
-      state && (state.host !== environment.serverHost || state.port !== environment.serverPort)
-        ? { host: state.host, port: state.port }
-        : undefined;
+    const explicitTarget = hubServiceTargetFor(state, {
+      host: environment.serverHost,
+      port: environment.serverPort,
+    });
     const definition = buildHubServiceDefinition({
       executable: d.executable(),
       unitName,

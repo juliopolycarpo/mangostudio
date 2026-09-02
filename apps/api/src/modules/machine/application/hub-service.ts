@@ -117,6 +117,25 @@ export interface HubServiceDefinitionInput {
   readonly target?: HubServiceTarget;
 }
 
+/**
+ * The bind target a unit must carry, given the instance it is about to
+ * replace. None when that instance sits where `config.toml` already points, so
+ * a later edit there still moves the unit. Otherwise the predecessor's own
+ * address, because the hand-over stops it: `serve -d lan:4000` followed by an
+ * install would otherwise bind the defaults and take neither.
+ * // Usage: hubServiceTargetFor(predecessor, { host, port })
+ */
+export function hubServiceTargetFor(
+  predecessor: { readonly host: string; readonly port: number } | null,
+  configured: { readonly host: string; readonly port: number }
+): HubServiceTarget | undefined {
+  if (!predecessor) return undefined;
+  if (predecessor.host === configured.host && predecessor.port === configured.port) {
+    return undefined;
+  }
+  return { host: predecessor.host, port: predecessor.port };
+}
+
 /** Where the supervisor appends the hub's output. */
 export function hubServiceLogPath(): string {
   return join(getLogsDir(), 'service.log');
