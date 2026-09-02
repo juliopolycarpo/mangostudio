@@ -3,7 +3,7 @@
  * it. The CLI `service` command and the machine API both come through here.
  */
 
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -13,7 +13,6 @@ import {
   type UserServiceManager,
 } from '@mangostudio/runtime';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
-import { parse as parseToml } from 'smol-toml';
 import {
   getConfig,
   getConfigEnvFilePath,
@@ -22,6 +21,7 @@ import {
 } from '../../../lib/config';
 import { getLogsDir } from '../../../lib/mango-paths';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
+import { readTomlDocument } from '../../../lib/toml';
 import {
   type HubExecutable,
   type HubExecutableProbe,
@@ -197,12 +197,15 @@ export function isAuthSecretPersisted(config: MangoConfig = getConfig()): boolea
   const envFile = parseRuntimeEnvFile(getConfigEnvFilePath(config.configFilePath));
   if (envFile.BETTER_AUTH_SECRET?.trim()) return true;
   const tomlPath = config.configFilePath;
-  if (!tomlPath || !existsSync(tomlPath)) return false;
+  if (!tomlPath) return false;
   try {
-    const parsed = parseToml(readFileSync(tomlPath, 'utf8')) as Record<string, unknown>;
-    const auth = parsed.auth as Record<string, unknown> | undefined;
+    // A missing file reads as an empty document, so there is no exists-then-read
+    // window in which the throw would be mistaken for "no secret persisted" —
+    // the answer that makes `service install` refuse.
+    const auth = readTomlDocument(tomlPath).auth as Record<string, unknown> | undefined;
     return typeof auth?.secret === 'string' && auth.secret.trim().length > 0;
   } catch {
+    // Malformed TOML still throws out of the parser.
     return false;
   }
 }
