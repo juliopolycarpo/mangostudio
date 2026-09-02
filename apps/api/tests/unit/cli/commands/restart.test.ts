@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { type RestartDeps, runRestart } from '../../../../src/cli/commands/restart';
+import { confirmsHealthy } from '../../../../src/cli/health';
 import type { ServerState } from '../../../../src/lib/server-state';
 import { FakeProcessController } from '../../../support/mocks/fake-process-controller';
 import {
@@ -30,7 +31,7 @@ function baseDeps(overrides: Partial<RestartDeps> = {}) {
     readState: () => Promise.resolve(null),
     removeState: noop,
     spawnDetached: () => Promise.resolve({ pid: 43, port: 3001, logFile: '/x.log' }),
-    probeHealth: () => Promise.resolve(true),
+    confirmsHealthy: () => Promise.resolve(true),
     log: (msg) => lines.push(msg),
     now: () => now,
     sleep: (ms) => {
@@ -125,5 +126,30 @@ describe('runRestart', () => {
       readState: () => Promise.resolve(SERVICE),
     });
     await expect(runRestart(deps)).rejects.toThrow(/did not come back within 20s/);
+  });
+
+  it('accepts a LAN-bound successor the health probe cannot reach', async () => {
+    const LAN = { ...SERVICE, host: '192.168.1.20' };
+    const controller = new FakeProcessController([42, 77]);
+    let reads = 0;
+    const { deps, lines } = baseDeps({
+      controller,
+      readState: () => {
+        reads += 1;
+        if (reads < 3) return Promise.resolve(LAN);
+        controller.die(42);
+        return Promise.resolve({ ...LAN, pid: 77 });
+      },
+      // The real one, not a stub: `probeHealth` answers `false` for a host that
+      // is neither loopback nor bind-all — it refuses to fetch it rather than
+      // measuring anything — so gating on it burned the whole budget on a
+      // successor that was serving fine. `confirmsHealthy` is what knows the
+      // difference, and returns here without touching the network.
+      confirmsHealthy,
+    });
+
+    await runRestart(deps);
+
+    expect(lines.at(-1)).toContain('PID 77');
   });
 });

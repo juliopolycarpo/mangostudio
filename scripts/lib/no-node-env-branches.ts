@@ -23,7 +23,7 @@ export const NODE_ENV_READ_ALLOWLIST = [
   },
   {
     path: 'apps/api/src/cli/detach.ts',
-    line: 122,
+    line: 126,
     reason: 'passes through the variable to detached children; it is not a production branch',
   },
 ] as const;

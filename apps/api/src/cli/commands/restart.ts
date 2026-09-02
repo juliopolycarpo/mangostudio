@@ -10,7 +10,7 @@ import { createHubServiceManager } from '../../modules/machine/application/hub-s
 import { hubLaunchMode, hubUrl } from '../../modules/machine/domain/hub-process';
 import { spawnDetached } from '../detach';
 import { CliError } from '../errors';
-import { probeHealth } from '../health';
+import { confirmsHealthy } from '../health';
 import { writeLine } from '../output';
 import { createProcessController, type ProcessController, waitForExit } from '../process-control';
 import { withServiceErrors } from '../service-errors';
@@ -22,7 +22,7 @@ export interface RestartDeps {
   readState: typeof readState;
   removeState: typeof removeState;
   spawnDetached: typeof spawnDetached;
-  probeHealth: typeof probeHealth;
+  confirmsHealthy: typeof confirmsHealthy;
   log: (msg: string) => void;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
@@ -98,7 +98,13 @@ async function restartDetached(state: ServerState, d: Required<RestartDeps>): Pr
   d.log(`Logs: ${result.logFile}`);
 }
 
-/** Poll the state file until a different, healthy pid owns it. */
+/**
+ * Poll the state file until a different, healthy pid owns it. "Healthy" is the
+ * health endpoint where it can be reached; for a hub bound to one explicit LAN
+ * address it is a live pid owning the state file, since the probe only ever
+ * fetches loopback and would otherwise burn the whole budget on a successor
+ * that came back fine.
+ */
 async function waitForComeback(
   previousPid: number | null,
   d: Required<RestartDeps>
@@ -110,7 +116,7 @@ async function waitForComeback(
       state &&
       state.pid !== previousPid &&
       d.controller.isAlive(state.pid) &&
-      (await d.probeHealth(state.host, state.port))
+      (await d.confirmsHealthy(state.host, state.port))
     ) {
       return state;
     }
@@ -128,7 +134,7 @@ function resolveDeps(deps: Partial<RestartDeps>): Required<RestartDeps> {
     readState: deps.readState ?? readState,
     removeState: deps.removeState ?? removeState,
     spawnDetached: deps.spawnDetached ?? spawnDetached,
-    probeHealth: deps.probeHealth ?? probeHealth,
+    confirmsHealthy: deps.confirmsHealthy ?? confirmsHealthy,
     log: deps.log ?? writeLine,
     now: deps.now ?? Date.now,
     sleep: deps.sleep ?? sleep,

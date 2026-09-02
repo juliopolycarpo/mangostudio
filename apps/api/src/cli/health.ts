@@ -36,6 +36,23 @@ export async function probeHealth(
 }
 
 /**
+ * The health check as a gate on an instance a caller has already found alive in
+ * the state file. True when the endpoint answered — and true, without asking,
+ * for a host {@link canProbeHealth} refuses: there the state file is the only
+ * evidence available, it is written once the port is bound, and waiting for a
+ * probe that can never succeed would fail a server that is running.
+ * // Usage: if (await confirmsHealthy(state.host, state.port)) return state;
+ */
+export async function confirmsHealthy(
+  host: string,
+  port: number,
+  timeoutMs?: number
+): Promise<boolean> {
+  if (!canProbeHealth(host)) return true;
+  return await probeHealth(host, port, timeoutMs);
+}
+
+/**
  * Whether {@link probeHealth} can say anything about this host. It is false for
  * a bind to one explicit non-loopback address: the server is listening on that
  * interface alone, so loopback would not answer, and the probe will not fetch

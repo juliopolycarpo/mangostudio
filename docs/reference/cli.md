@@ -176,7 +176,11 @@ mangostudio service restart
 `mangostudio restart` brings the server back the way it was started:
 
 - **Started by the service** — the supervisor bounces the unit, and the CLI waits
-  up to 20 s for a different, healthy pid to own the state file.
+  up to 20 s for a different, healthy pid to own the state file. "Healthy" is
+  the `/api/health` answer where it can be reached; for a hub bound to one
+  explicit LAN address the probe only ever fetches loopback, so a live pid
+  owning the state file is the signal instead — the file is written once the
+  port is bound. `serve -d` waits the same way.
 - **Started with `serve -d`** — the instance is stopped, and once that is
   confirmed a successor is spawned that waits for the old pid
   (`MANGO_RESTART_WAIT_PID`) before binding the port.

@@ -11,7 +11,7 @@ import { ensureRuntimeDirs, getServerLogPath } from '../lib/mango-paths';
 import { isStandaloneExecutable } from '../lib/runtime-paths';
 import { readState } from '../lib/server-state';
 import { CliError } from './errors';
-import { probeHealth } from './health';
+import { confirmsHealthy } from './health';
 import { createProcessController, type ProcessController } from './process-control';
 import { RESTART_WAIT_PID_ENV, RESTART_WAIT_TIMEOUT_MS } from './restart-handshake';
 import { sleep } from './sleep';
@@ -37,7 +37,7 @@ export interface DetachDeps {
   /** Spawn the detached child writing to logFile and return its pid. */
   spawn: (port: number, host: string, logFile: string, options: DetachOptions) => number;
   readState: typeof readState;
-  probeHealth: typeof probeHealth;
+  confirmsHealthy: typeof confirmsHealthy;
 }
 
 const START_TIMEOUT_MS = 5000;
@@ -68,7 +68,11 @@ interface PendingChild {
   logFile: string;
 }
 
-/** Poll until the child is healthy, or fail fast if it dies or times out. */
+/**
+ * Poll until the child is healthy, or fail fast if it dies or times out. A bind
+ * to one explicit LAN address cannot be probed over loopback, so there the
+ * state file naming this pid is the readiness signal — see `confirmsHealthy`.
+ */
 async function confirmStarted(
   child: PendingChild,
   d: DetachDeps,
@@ -81,7 +85,7 @@ async function confirmStarted(
       throw new CliError(`Server failed to start. See logs: ${child.logFile}`);
     }
     const state = await d.readState();
-    if (state?.pid === child.pid && (await d.probeHealth(child.host, child.port))) {
+    if (state?.pid === child.pid && (await d.confirmsHealthy(child.host, child.port))) {
       return;
     }
     await d.sleep(POLL_INTERVAL_MS);
@@ -230,6 +234,6 @@ function resolveDeps(deps: Partial<DetachDeps>): DetachDeps {
     sleep: deps.sleep ?? sleep,
     spawn: deps.spawn ?? spawnServeChild,
     readState: deps.readState ?? readState,
-    probeHealth: deps.probeHealth ?? probeHealth,
+    confirmsHealthy: deps.confirmsHealthy ?? confirmsHealthy,
   };
 }
