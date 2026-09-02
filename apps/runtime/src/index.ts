@@ -277,9 +277,7 @@ export {
 } from './services/snapshot';
 export {
   createUserServiceManager,
-  decodePowerShellArgv,
   defaultUserServiceExecDeps,
-  execPathFromUnitBody,
   USER_SERVICE_NO_SESSION_BUS_ERROR,
   type UserServiceDefinition,
   type UserServiceExecDeps,

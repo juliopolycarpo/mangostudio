@@ -2,7 +2,10 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RuntimeServiceStatusSchema } from '@mangostudio/shared/runtime-home';
+import {
+  type RuntimeServiceMode,
+  RuntimeServiceStatusSchema,
+} from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
 import {
   readRuntimeSlotState,
@@ -12,33 +15,34 @@ import {
 } from '../../../src/runtime-home';
 import {
   assertServicePreconditions,
-  attemptEnableLinger,
   createRuntimeServiceManager,
   execStartUsesCurrent,
+  RUNTIME_SERVICE_IDENTITY,
   type RuntimeServiceExecDeps,
   type RuntimeServiceExecResult,
-  renderLaunchdPlist,
-  renderSystemdUnit,
   resolveInstallMode,
-  systemdUnitPath,
+  runtimeUnitDefinition,
 } from '../../../src/services/runtime-service';
-import { decodePowerShellArgv } from '../../../src/services/user-service-manager';
+import {
+  decodePowerShellArgv,
+  renderLaunchdPlistFile,
+  renderSystemdUnitFile,
+  systemdUserUnitPath,
+} from '../../../src/services/user-service-manager';
 
 const CURRENT = '/home/test/.mango/runtime/remote/current/mangostudio-runtime';
 
-/** Inner XML of the KeepAlive dict only (first match). */
-function keepAliveDictBody(plist: string): string {
-  const match = plist.match(/<key>KeepAlive<\/key>\s*<dict>([\s\S]*?)<\/dict>/);
-  if (!match) throw new Error('KeepAlive dict not found');
-  return match[1];
-}
-
-/** Job plist fragment after the KeepAlive dict closes. */
-function plistAfterKeepAlive(plist: string): string {
-  const parts = plist.split(/<key>KeepAlive<\/key>\s*<dict>[\s\S]*?<\/dict>/);
-  if (parts.length < 2) throw new Error('KeepAlive dict not found');
-  return parts[1];
-}
+// The runtime's slot policy over the shared renderers: what this workspace owns
+// is the mode and the binary, not the unit-file format.
+const renderSystemdUnit = (binaryPath: string, mode: RuntimeServiceMode): string =>
+  renderSystemdUnitFile(runtimeUnitDefinition(binaryPath, mode));
+const renderLaunchdPlist = (binaryPath: string, mode: RuntimeServiceMode): string =>
+  renderLaunchdPlistFile(
+    RUNTIME_SERVICE_IDENTITY.launchdLabel,
+    runtimeUnitDefinition(binaryPath, mode)
+  );
+const systemdUnitPath = (home: string): string =>
+  systemdUserUnitPath(home, RUNTIME_SERVICE_IDENTITY.unitName);
 
 function makeDeps(
   options: {
@@ -125,20 +129,6 @@ describe('runtime service templates', () => {
     expect(plist).toContain(`<string>${CURRENT}</string>`);
     expect(plist).toContain('<string>serve</string>');
     expect(plist).not.toMatch(/token|secret/i);
-  });
-
-  it('places ThrottleInterval at job top level, not inside KeepAlive', () => {
-    const plist = renderLaunchdPlist(CURRENT, 'connect');
-    const keepAlive = keepAliveDictBody(plist);
-    expect(keepAlive).toContain('<key>SuccessfulExit</key>');
-    expect(keepAlive).toContain('<false/>');
-    expect(keepAlive).not.toContain('ThrottleInterval');
-
-    const tail = plistAfterKeepAlive(plist);
-    expect(tail).toMatch(/<key>ThrottleInterval<\/key>\s*<integer>30<\/integer>/);
-    expect(plist.indexOf('<key>ThrottleInterval</key>')).toBeGreaterThan(
-      plist.indexOf('</dict>', plist.indexOf('<key>KeepAlive</key>'))
-    );
   });
 });
 
@@ -401,29 +391,6 @@ describe('runtime service refusals', () => {
       expect(bare.argv.some((row) => row.includes('enable'))).toBe(true);
     } finally {
       await rm(mangoHome, { recursive: true, force: true });
-    }
-  });
-});
-
-describe('runtime service linger', () => {
-  it('prints sudo line when loginctl needs root', async () => {
-    const stderr: string[] = [];
-    const original = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((chunk: string) => {
-      stderr.push(String(chunk));
-      return true;
-    }) as typeof process.stderr.write;
-    const deps = makeDeps({
-      onExec: (argv) =>
-        argv[0] === 'loginctl'
-          ? { exitCode: 1, stdout: '', stderr: 'Access denied' }
-          : { exitCode: 0, stdout: '', stderr: '' },
-    });
-    try {
-      await attemptEnableLinger(deps);
-      expect(stderr.join('')).toContain('sudo loginctl enable-linger test');
-    } finally {
-      process.stderr.write = original;
     }
   });
 });

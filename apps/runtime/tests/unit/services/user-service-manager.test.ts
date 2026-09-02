@@ -152,6 +152,18 @@ describe('renderLaunchdPlistFile', () => {
       /<key>KeepAlive<\/key>\s*<dict>\s*<key>SuccessfulExit<\/key>\s*<false\/>/
     );
   });
+
+  // `ThrottleInterval` is a job key. Inside the `KeepAlive` dict launchd reads
+  // it as a keep-alive condition instead, and the job respawns with no delay.
+  it('places ThrottleInterval at job top level, not inside KeepAlive', () => {
+    const plist = renderLaunchdPlistFile('com.example.unit', DEFINITION);
+    const keepAlive = plist.match(/<key>KeepAlive<\/key>\s*<dict>([\s\S]*?)<\/dict>/)?.[1];
+    expect(keepAlive).toContain('<key>SuccessfulExit</key>');
+    expect(keepAlive).not.toContain('ThrottleInterval');
+
+    const tail = plist.split(/<key>KeepAlive<\/key>\s*<dict>[\s\S]*?<\/dict>/)[1];
+    expect(tail).toMatch(/<key>ThrottleInterval<\/key>\s*<integer>30<\/integer>/);
+  });
 });
 
 describe('Scheduled Task scripts', () => {

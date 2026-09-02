@@ -43,7 +43,8 @@ const SYSTEMD_UNIT_BASENAME = 'mangostudio-runtime.service';
 const LAUNCHD_LABEL = 'com.mangostudio.runtime';
 const TASK_NAME = 'MangoStudio runtime';
 
-const RUNTIME_SERVICE_IDENTITY: UserServiceIdentity = {
+/** The runtime's unit under each supervisor. Exported for the unit tests. */
+export const RUNTIME_SERVICE_IDENTITY: UserServiceIdentity = {
   unitName: SYSTEMD_UNIT_BASENAME,
   launchdLabel: LAUNCHD_LABEL,
   taskName: TASK_NAME,
@@ -66,20 +67,9 @@ function homeOptions(env: NodeJS.ProcessEnv, platform: NodeJS.Platform) {
   return { mangoHome: loadRuntimeConfig(env).mangoHome, platform };
 }
 
-export function systemdUnitPath(home: string): string {
-  return systemdUserUnitPath(home, SYSTEMD_UNIT_BASENAME);
-}
-
-function runtimeUnitDefinition(binaryPath: string, mode: RuntimeServiceMode) {
+/** What the runtime's unit runs in each mode. // Usage: runtimeUnitDefinition(bin, 'connect') */
+export function runtimeUnitDefinition(binaryPath: string, mode: RuntimeServiceMode) {
   return { description: `MangoStudio runtime (${mode})`, argv: [binaryPath, mode] };
-}
-
-export function renderSystemdUnit(binaryPath: string, mode: RuntimeServiceMode): string {
-  return renderSystemdUnitFile(runtimeUnitDefinition(binaryPath, mode));
-}
-
-export function renderLaunchdPlist(binaryPath: string, mode: RuntimeServiceMode): string {
-  return renderLaunchdPlistFile(LAUNCHD_LABEL, runtimeUnitDefinition(binaryPath, mode));
 }
 
 /**
@@ -260,13 +250,6 @@ function inferConfiguredMode(config: RuntimeSlotState['config']): RuntimeService
   if (config.hubUrl && !config.serveListen) return 'connect';
   if (config.serveListen && !config.hubUrl) return 'serve';
   return null;
-}
-
-export async function attemptEnableLinger(deps: RuntimeServiceExecDeps): Promise<void> {
-  await attemptEnableLingerFor(
-    deps,
-    deps.warn ?? ((message) => process.stderr.write(`${RUNTIME_CLI_NAME}: ${message}\n`))
-  );
 }
 
 /** Whether doctor should inspect the user-level service for this health report. */

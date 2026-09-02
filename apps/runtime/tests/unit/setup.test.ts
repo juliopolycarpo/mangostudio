@@ -19,9 +19,10 @@ import {
 import { readRuntimeSlotConfig, writeRuntimeSlotConfig } from '../../src/runtime-home';
 import {
   type RuntimeServiceExecDeps,
-  renderSystemdUnit,
+  runtimeUnitDefinition,
   shouldCheckRuntimeService,
 } from '../../src/services/runtime-service';
+import { renderSystemdUnitFile } from '../../src/services/user-service-manager';
 import { parseAllowOverrides, type RuntimeSetupArgs, runRuntimeSetup } from '../../src/setup';
 
 const homes: string[] = [];
@@ -48,9 +49,11 @@ function serviceDeps(options: {
   readonly unitInstalled?: boolean;
 }): RuntimeServiceExecDeps {
   const bus = options.sessionBus ?? true;
-  const unitBody = renderSystemdUnit(
-    join(options.env.MANGO_HOME as string, 'runtime/remote/current/mangostudio-runtime'),
-    'connect'
+  const unitBody = renderSystemdUnitFile(
+    runtimeUnitDefinition(
+      join(options.env.MANGO_HOME as string, 'runtime/remote/current/mangostudio-runtime'),
+      'connect'
+    )
   );
   return {
     exec: (argv) => {
