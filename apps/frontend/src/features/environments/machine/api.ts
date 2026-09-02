@@ -37,25 +37,32 @@ interface EdenErrorLike {
   readonly value?: unknown;
 }
 
-function detailString(details: unknown, key: string): string | null {
-  if (!details || typeof details !== 'object') return null;
-  const value = (details as Record<string, unknown>)[key];
-  return typeof value === 'string' && value ? value : null;
-}
-
-/** Reads a refusal out of an Eden error; anything else stays a real failure. */
+/**
+ * Reads a refusal out of an Eden error; anything else stays a real failure.
+ *
+ * The body is read through `ApiError` rather than by hand: the client asks for
+ * `application/problem+json`, so a refusal arrives as a problem document, and
+ * `normalizeApiErrorBody` behind `ApiError` is the one place that reads both
+ * that and the legacy shape. Parsing `details` here again would be a second
+ * path that happens to work only while the two shapes agree on the key.
+ */
 function toRefusal(error: EdenErrorLike): MachineActionRefusal | null {
   if (error.status !== 403 && error.status !== 409) return null;
-  const value = error.value;
-  if (!value || typeof value !== 'object') return null;
-  const body = value as { error?: unknown; details?: unknown };
-  const reasons = detailString(body.details, 'reasons');
+  const { details } = new ApiError(error.value);
+  const reasons = details?.reasons;
   return {
     outcome: 'refused',
     reasons: reasons ? (reasons.split(',') as InstallGuardReason[]) : [],
-    reason: detailString(body.details, 'reason') as MachineActionReason | null,
-    command: detailString(body.details, 'command'),
+    reason: (details?.reason as MachineActionReason | undefined) || null,
+    command: details?.command || null,
   };
+}
+
+/** A guard refusal is a result the page renders; anything else is a failure. */
+function refusalOrThrow(error: EdenErrorLike): MachineActionRefusal {
+  const refusal = toRefusal(error);
+  if (refusal) return refusal;
+  throw new ApiError(error.value);
 }
 
 export async function fetchMachineStatus(): Promise<MachineStatus> {
@@ -81,21 +88,13 @@ export type MachineLogsResult =
 /** The tail, or the guard's refusal — the log is loopback-only like the actions. */
 export async function fetchMachineLogs(tail: number): Promise<MachineLogsResult> {
   const { data, error } = await client.api.machine.logs.get({ query: { tail } });
-  if (error) {
-    const refusal = toRefusal(error);
-    if (refusal) return refusal;
-    throw new ApiError(error.value);
-  }
+  if (error) return refusalOrThrow(error);
   return { outcome: 'tail', tail: data as MachineLogTail };
 }
 
 export async function restartMachine(): Promise<MachineActionResult> {
   const { data, error } = await client.api.machine.restart.post();
-  if (error) {
-    const refusal = toRefusal(error);
-    if (refusal) return refusal;
-    throw new ApiError(error.value);
-  }
+  if (error) return refusalOrThrow(error);
   return { outcome: 'accepted', response: data as MachineActionResponse };
 }
 
@@ -103,10 +102,6 @@ export async function changeMachineService(
   action: MachineServiceAction
 ): Promise<MachineActionResult> {
   const { data, error } = await client.api.machine.service.post({ action });
-  if (error) {
-    const refusal = toRefusal(error);
-    if (refusal) return refusal;
-    throw new ApiError(error.value);
-  }
+  if (error) return refusalOrThrow(error);
   return { outcome: 'accepted', response: data as MachineActionResponse };
 }
