@@ -1,0 +1,316 @@
+/**
+ * `/api/terminal/:id` — the browser-facing socket for one live terminal
+ * session.
+ *
+ * Authentication and Origin checking are the same as `/api/ws` (see
+ * `browser-socket-handshake.ts`); ownership, single-viewer takeover, and the
+ * runtime relay are this route's own. Flow control on the way out lives in
+ * `terminal-socket-relay.ts`, a pure module this route only wires up to a
+ * real socket.
+ */
+
+import {
+  chunkTerminalBytes,
+  decodeTerminalClientMessage,
+  encodeTerminalServerMessage,
+  TERMINAL_CHUNK_MAX_BYTES,
+  TERMINAL_SOCKET_CLOSE_CODES,
+} from '@mangostudio/shared/terminal';
+import { Elysia, t } from 'elysia';
+import { createDiagnosticLogger } from '../../../lib/logger';
+import {
+  type BrowserSocketRejection,
+  createBrowserSocketHandshake,
+} from '../../../plugins/browser-socket-handshake';
+import {
+  type TerminalSessionService,
+  type TerminalSessionViewer,
+  terminalSessionService,
+} from '../application/terminal-session-service';
+import {
+  createTerminalSocketRelay,
+  type TerminalSocketRelay,
+} from '../application/terminal-socket-relay';
+import type { TerminalRuntimeClient } from '../domain/terminal-runtime-client';
+
+const logger = createDiagnosticLogger('terminals-ws');
+
+/** Standard "internal error" WS close code; this route defines no code of its own for it. */
+const INTERNAL_ERROR_CLOSE_CODE = 1011;
+/** Standard "malformed frame" WS close code. */
+const PROTOCOL_ERROR_CLOSE_CODE = 1003;
+
+interface TerminalSocketState {
+  userId: string | null;
+  rejection: BrowserSocketRejection;
+  sessionId: string;
+  client: TerminalRuntimeClient | null;
+  relay: TerminalSocketRelay | null;
+  viewer: TerminalSessionViewer | null;
+  unsubscribeOutput: (() => void) | null;
+  socketClosed: boolean;
+  /** Serializes async message handlers so client writes cannot reorder. */
+  messageChain: Promise<void>;
+}
+
+interface TerminalSocket {
+  params: { id: string };
+  close(code?: number, reason?: string): unknown;
+  raw: {
+    send(message: Uint8Array, compress?: boolean): number;
+    getBufferedAmount(): number;
+    close(code?: number, reason?: string): void;
+  };
+  /**
+   * Elysia flattens derived values onto the socket context rather than
+   * nesting them under `data`, which now carries the route's own wiring.
+   */
+  terminalSocket: TerminalSocketState;
+}
+
+export interface TerminalSocketRouteDependencies {
+  readonly service?: TerminalSessionService;
+  readonly resolveUserId?: (headers: Headers) => Promise<string | null>;
+  readonly allowedOrigins?: readonly string[];
+}
+
+function toClientBytes(message: string | Buffer): Uint8Array | null {
+  // The client never sends a text frame; one arriving is a protocol error.
+  if (typeof message === 'string') return null;
+  return new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
+}
+
+export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDependencies = {}) {
+  const service = dependencies.service ?? terminalSessionService;
+  const resolveHandshake = createBrowserSocketHandshake({
+    resolveUserId: dependencies.resolveUserId,
+    allowedOrigins: dependencies.allowedOrigins,
+    onSessionResolutionError: (error) => {
+      logger.error('session_resolution_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    },
+  });
+
+  /** Attaches, replays scrollback, and wires the live relay for one socket. */
+  async function attach(socket: TerminalSocket, state: TerminalSocketState): Promise<void> {
+    const userId = state.userId as string;
+    const found = service.getForAttach(userId, state.sessionId);
+    if (!found) {
+      socket.close(TERMINAL_SOCKET_CLOSE_CODES.NOT_FOUND, 'Not found');
+      return;
+    }
+    const { client } = found;
+    state.client = client;
+
+    const relay = createTerminalSocketRelay({
+      send: (frame) => socket.raw.send(frame, false),
+      getBufferedAmount: () => socket.raw.getBufferedAmount(),
+      close: (code, reason) => socket.raw.close(code, reason),
+      buildOverflowNotice: (bytes) =>
+        encodeTerminalServerMessage({ type: 'notice', notice: { kind: 'queue_overflow', bytes } }),
+    });
+    state.relay = relay;
+
+    const viewer: TerminalSessionViewer = {
+      pushNotice: (notice) => relay.push(encodeTerminalServerMessage({ type: 'notice', notice })),
+      close: (code, reason) => socket.raw.close(code, reason),
+    };
+    state.viewer = viewer;
+    // A second upgrade for the same session takes over: the previous viewer is
+    // closed, on purpose, with the code that says a client must not reconnect.
+    const { replaced } = service.attachViewer(state.sessionId, viewer);
+    replaced?.close(TERMINAL_SOCKET_CLOSE_CODES.REPLACED, 'Replaced by a new viewer');
+
+    let attachResult: Awaited<ReturnType<TerminalRuntimeClient['terminal']['attach']>>;
+    try {
+      attachResult = await client.terminal.attach({ sessionId: state.sessionId });
+    } catch (error) {
+      logger.warn('attach_failed', {
+        sessionId: state.sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      service.detachViewer(state.sessionId, viewer);
+      socket.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session unavailable');
+      return;
+    }
+
+    if (state.socketClosed) {
+      // The browser hung up while attach() was in flight.
+      service.detachViewer(state.sessionId, viewer);
+      void client.terminal.detach({ sessionId: state.sessionId }).catch(() => undefined);
+      return;
+    }
+
+    const scrollback = Buffer.from(attachResult.scrollback, 'base64');
+    for (const chunk of chunkTerminalBytes(scrollback, TERMINAL_CHUNK_MAX_BYTES)) {
+      relay.push(encodeTerminalServerMessage({ type: 'data', data: chunk }));
+    }
+
+    if (attachResult.status === 'exited') {
+      const exit = { exitCode: attachResult.exitCode, signal: attachResult.signal };
+      service.recordExit(state.sessionId, exit);
+      relay.push(encodeTerminalServerMessage({ type: 'exit', exit }));
+      socket.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session exited');
+      return;
+    }
+
+    state.unsubscribeOutput = client.terminal.onOutput(state.sessionId, (event) => {
+      if (state.socketClosed) return;
+      switch (event.kind) {
+        case 'data':
+          relay.push(
+            encodeTerminalServerMessage({ type: 'data', data: Buffer.from(event.data, 'base64') })
+          );
+          return;
+        case 'dropped':
+          relay.push(
+            encodeTerminalServerMessage({
+              type: 'notice',
+              notice: { kind: 'dropped', bytes: event.bytes },
+            })
+          );
+          return;
+        case 'exit': {
+          const exit = { exitCode: event.exitCode, signal: event.signal };
+          service.recordExit(state.sessionId, exit);
+          relay.push(encodeTerminalServerMessage({ type: 'exit', exit }));
+          socket.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session exited');
+        }
+      }
+    });
+  }
+
+  function teardown(state: TerminalSocketState): void {
+    state.unsubscribeOutput?.();
+    state.unsubscribeOutput = null;
+  }
+
+  async function handleClientMessage(socket: TerminalSocket, bytes: Uint8Array): Promise<void> {
+    const state = socket.terminalSocket;
+    const client = state.client;
+    if (!client) return;
+
+    let decoded: ReturnType<typeof decodeTerminalClientMessage>;
+    try {
+      decoded = decodeTerminalClientMessage(bytes);
+    } catch (error) {
+      logger.warn('malformed_client_frame', {
+        sessionId: state.sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      socket.close(PROTOCOL_ERROR_CLOSE_CODE, 'Malformed frame');
+      return;
+    }
+
+    try {
+      switch (decoded.type) {
+        case 'data':
+          await client.terminal.write({
+            sessionId: state.sessionId,
+            data: Buffer.from(decoded.data).toString('base64'),
+          });
+          service.touchActivity(state.sessionId);
+          return;
+        case 'resize':
+          await client.terminal.resize({
+            sessionId: state.sessionId,
+            cols: decoded.cols,
+            rows: decoded.rows,
+          });
+          service.recordResize(state.sessionId, decoded.cols, decoded.rows);
+          return;
+        case 'ack':
+          await client.terminal.ack({ sessionId: state.sessionId, bytes: decoded.bytes });
+          return;
+        case 'ping':
+          state.relay?.push(encodeTerminalServerMessage({ type: 'pong' }));
+          return;
+      }
+    } catch (error) {
+      logger.warn('client_frame_failed', {
+        sessionId: state.sessionId,
+        type: decoded.type,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return new Elysia({ name: 'terminal-socket-routes' })
+    .derive(async ({ request }) => {
+      const { userId, rejection } = await resolveHandshake(request.headers);
+      return {
+        terminalSocket: {
+          userId,
+          rejection,
+          sessionId: '',
+          client: null,
+          relay: null,
+          viewer: null,
+          unsubscribeOutput: null,
+          socketClosed: false,
+          messageChain: Promise.resolve(),
+        } satisfies TerminalSocketState,
+      };
+    })
+    .ws('/terminal/:id', {
+      params: t.Object({ id: t.String({ minLength: 1 }) }),
+      open(rawSocket) {
+        const socket = rawSocket as unknown as TerminalSocket;
+        const state = socket.terminalSocket;
+        state.sessionId = socket.params.id;
+
+        if (state.rejection === 'forbidden') {
+          socket.close(TERMINAL_SOCKET_CLOSE_CODES.FORBIDDEN, 'Forbidden');
+          return;
+        }
+        if (state.rejection === 'internal') {
+          socket.close(INTERNAL_ERROR_CLOSE_CODE, 'Internal error');
+          return;
+        }
+        if (state.rejection === 'unauthorized' || !state.userId) {
+          socket.close(TERMINAL_SOCKET_CLOSE_CODES.UNAUTHORIZED, 'Unauthorized');
+          return;
+        }
+
+        void attach(socket, state);
+      },
+      message(rawSocket, rawMessage) {
+        const socket = rawSocket as unknown as TerminalSocket;
+        const state = socket.terminalSocket;
+        if (state.socketClosed) return;
+
+        const bytes = toClientBytes(rawMessage as string | Buffer);
+        if (!bytes) {
+          socket.close(PROTOCOL_ERROR_CLOSE_CODE, 'Malformed frame');
+          return;
+        }
+
+        // Serialized per socket: a write and the resize behind it must reach
+        // the runtime in the order the browser sent them.
+        const run = (): Promise<void> => handleClientMessage(socket, bytes);
+        const queued = state.messageChain.then(run, run);
+        state.messageChain = queued.then(
+          () => undefined,
+          () => undefined
+        );
+      },
+      drain(rawSocket) {
+        const socket = rawSocket as unknown as TerminalSocket;
+        socket.terminalSocket.relay?.drain();
+      },
+      close(rawSocket) {
+        const socket = rawSocket as unknown as TerminalSocket;
+        const state = socket.terminalSocket;
+        state.socketClosed = true;
+        teardown(state);
+        if (state.viewer) service.detachViewer(state.sessionId, state.viewer);
+        const client = state.client;
+        if (client && state.sessionId) {
+          void client.terminal.detach({ sessionId: state.sessionId }).catch(() => undefined);
+        }
+      },
+    });
+}
+
+export const terminalSocketRoutes = createTerminalSocketRoutes();

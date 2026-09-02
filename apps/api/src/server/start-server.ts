@@ -22,6 +22,7 @@ import { reconcileExternalTurns } from '../modules/external-agents/application/e
 import { isActiveTurn } from '../modules/generation/application/active-turn-registry';
 import { reconcileStaleTurns } from '../modules/generation/application/turn-recovery';
 import { HUB_SERVICE_UNIT_ENV } from '../modules/machine/domain/hub-service-identity';
+import { terminalSessionService } from '../modules/terminals/application/terminal-session-service';
 import { closeAllMcpClients } from '../services/mcp/connection-manager';
 import {
   flushObservabilitySnapshot,
@@ -53,6 +54,7 @@ export interface StartOptions {
 }
 
 let staleTurnReconcileSweep: StaleTurnReconcileSweep | null = null;
+let stopTerminalIdleReaper: (() => void) | null = null;
 
 /** Start the API server and return a handle. // Usage: await startServer({ writeStateFile: true }) */
 export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
@@ -93,6 +95,7 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
   staleTurnReconcileSweep = startStaleTurnReconcileSweep(() =>
     reconcileStaleTurns({ reasonCode: 'unknown', isActive: isActiveTurn }, getDb())
   );
+  stopTerminalIdleReaper = terminalSessionService.startIdleReaper();
 
   registerShutdown();
 
@@ -161,11 +164,17 @@ function logRunning(host: string, port: number, devFrontend: boolean): void {
 async function gracefulStop(): Promise<void> {
   await staleTurnReconcileSweep?.stop();
   staleTurnReconcileSweep = null;
+  stopTerminalIdleReaper?.();
+  stopTerminalIdleReaper = null;
   // Before the runtime connections close, so each session gets a real close
   // rather than a dropped socket, and no vendor process outlives the hub.
   await externalSessionManager.reapAll('hub-restarted');
   await flushObservabilitySnapshot();
   await closeAllMcpClients();
+  // Also before the runtime connections close, for the same reason: a live
+  // terminal session gets a real `terminal.close` instead of the connection
+  // simply dropping out from under it.
+  await terminalSessionService.closeAll();
   await closeAllRuntimeConnections();
   await removeState();
   await closeDb();

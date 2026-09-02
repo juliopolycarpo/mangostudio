@@ -107,6 +107,17 @@ import {
   type RuntimeSnapshotHashResult,
   type RuntimeSnapshotRevertParams,
   type RuntimeSnapshotRevertResult,
+  type RuntimeTerminalAckParams,
+  type RuntimeTerminalAttachParams,
+  type RuntimeTerminalAttachResult,
+  type RuntimeTerminalCloseParams,
+  type RuntimeTerminalDetachParams,
+  type RuntimeTerminalListResult,
+  type RuntimeTerminalOpenParams,
+  type RuntimeTerminalOpenResult,
+  type RuntimeTerminalOutputEvent,
+  type RuntimeTerminalResizeParams,
+  type RuntimeTerminalWriteParams,
   type RuntimeUpdateBeginParams,
   type RuntimeUpdateBeginResult,
   type RuntimeUpdateChunkParams,
@@ -140,6 +151,16 @@ import { ToolExecutionTimedOutError } from '../tools/execution-timeout';
 import { createTargetPaths, type TargetPaths } from './target-paths';
 
 const logger = createDiagnosticLogger('runtime-client');
+
+/**
+ * Mirrors `RUNTIME_TERMINAL_OUTPUT_TOPIC` from `apps/runtime/src/methods.ts`
+ * ('terminal.output'). The `@mangostudio/runtime` package barrel re-exports
+ * every method's *types* (`export type * from './methods'`) but not this
+ * value, unlike `RUNTIME_EXTERNAL_AGENT_TOPIC` and the other topic constants
+ * a few lines above — inlined here rather than reaching into `apps/runtime`
+ * to add the missing export.
+ */
+const RUNTIME_TERMINAL_OUTPUT_TOPIC = 'terminal.output' as const;
 
 interface RuntimeFsClient {
   readFile(
@@ -236,6 +257,49 @@ interface RuntimeWorkspaceClient {
     params: RuntimeWorkspaceResolveContainedParams,
     options?: RuntimeRequestOptions
   ): Promise<RuntimeWorkspaceResolveContainedResult>;
+}
+
+/**
+ * One interactive shell on the target machine, addressed by a hub-minted
+ * session id exactly like the external-agent client below.
+ */
+interface RuntimeTerminalClient {
+  open(
+    params: RuntimeTerminalOpenParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeTerminalOpenResult>;
+  attach(
+    params: RuntimeTerminalAttachParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeTerminalAttachResult>;
+  detach(
+    params: RuntimeTerminalDetachParams,
+    options?: RuntimeRequestOptions
+  ): Promise<{ readonly ok: true }>;
+  write(
+    params: RuntimeTerminalWriteParams,
+    options?: RuntimeRequestOptions
+  ): Promise<{ readonly ok: true }>;
+  resize(
+    params: RuntimeTerminalResizeParams,
+    options?: RuntimeRequestOptions
+  ): Promise<{ readonly ok: true }>;
+  ack(
+    params: RuntimeTerminalAckParams,
+    options?: RuntimeRequestOptions
+  ): Promise<{ readonly ok: true }>;
+  close(
+    params: RuntimeTerminalCloseParams,
+    options?: RuntimeRequestOptions
+  ): Promise<{ readonly ok: true }>;
+  list(options?: RuntimeRequestOptions): Promise<RuntimeTerminalListResult>;
+  /**
+   * Subscribes to one session's output frames, filtered by `streamId` the way
+   * `RuntimeExternalAgentsClient.onEvent` filters by `sessionId` — the runtime
+   * never emits on this topic before `terminal.attach`, so a listener added
+   * after that call sees every frame the session produces from then on.
+   */
+  onOutput(sessionId: string, listener: (event: RuntimeTerminalOutputEvent) => void): () => void;
 }
 
 /**
@@ -441,6 +505,7 @@ export class RuntimeClient {
   readonly library: RuntimeLibraryClient;
   readonly snapshot: RuntimeSnapshotClient;
   readonly workspace: RuntimeWorkspaceClient;
+  readonly terminal: RuntimeTerminalClient;
   private targetPaths?: TargetPaths;
   private unenforcedContainment = false;
   private pathPolicyEnforced = false;
@@ -559,6 +624,22 @@ export class RuntimeClient {
       validate: (params, options) => this.request('workspace.validate', params, options),
       resolveContained: (params, options) =>
         this.request('workspace.resolve-contained', params, options),
+    };
+    this.terminal = {
+      open: (params, options) => this.request('terminal.open', params, options),
+      attach: (params, options) => this.request('terminal.attach', params, options),
+      detach: (params, options) => this.request('terminal.detach', params, options),
+      write: (params, options) => this.request('terminal.write', params, options),
+      resize: (params, options) => this.request('terminal.resize', params, options),
+      ack: (params, options) => this.request('terminal.ack', params, options),
+      close: (params, options) => this.request('terminal.close', params, options),
+      list: (options) => this.request('terminal.list', {}, options),
+      onOutput: (sessionId, listener) =>
+        this.protocol.onEvent((frame) => {
+          if (frame.topic !== RUNTIME_TERMINAL_OUTPUT_TOPIC) return;
+          if (frame.streamId !== sessionId) return;
+          listener(frame.payload as RuntimeTerminalOutputEvent);
+        }),
     };
   }
 

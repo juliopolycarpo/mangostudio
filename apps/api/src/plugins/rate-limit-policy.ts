@@ -97,6 +97,12 @@ export const RATE_LIMIT_BUCKETS = {
    * single impatient user 429 everyone sharing their address.
    */
   probeForce: { name: 'probe-force', max: 60, windowMs: ONE_MINUTE_MS },
+  /**
+   * `/api/terminals` — opening, listing, renaming and closing live terminal
+   * sessions. Its own bucket so a chat panel driving several of these in a
+   * row does not compete with ordinary page-load traffic on `general`.
+   */
+  terminal: { name: 'terminal', max: 120, windowMs: ONE_MINUTE_MS },
 } as const satisfies Record<string, RateLimitBucket>;
 
 /** True when `path` equals `base` or sits directly under it (`base/...`). */
@@ -133,6 +139,11 @@ export function isProbeForcePath(path: string): boolean {
   // The pattern is anchored on a literal prefix, so a non-probe path fails on
   // its first characters — a hand-rolled segment pre-check buys nothing here.
   return PROBE_FORCE_PATH_RE.test(withoutTrailingSlash(path));
+}
+
+/** Matches `/terminals` and `/terminals/*`, with or without the `/api` prefix. */
+export function isTerminalPath(path: string): boolean {
+  return matchesSegment(path, '/terminals') || matchesSegment(path, '/api/terminals');
 }
 
 function isPostMethod(method: string | undefined): boolean {
@@ -185,5 +196,6 @@ export function classifyRateLimit(
   // would hand automation exactly that lever back.
   if (trimmedApiKeyHeader(headers)) return RATE_LIMIT_BUCKETS.apiKey;
   if (isProbeForcePath(path) && isPostMethod(method)) return RATE_LIMIT_BUCKETS.probeForce;
+  if (isTerminalPath(path)) return RATE_LIMIT_BUCKETS.terminal;
   return RATE_LIMIT_BUCKETS.general;
 }

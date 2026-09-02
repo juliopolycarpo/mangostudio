@@ -5,6 +5,7 @@ import {
   isAuthPath,
   isHealthPath,
   isProbeForcePath,
+  isTerminalPath,
   RATE_LIMIT_BUCKETS,
   resolveRateLimitClientId,
 } from '../../../src/plugins/rate-limit-policy';
@@ -115,6 +116,25 @@ describe('rate-limit policy classification', () => {
     expect(classifyRateLimit('/api/environments/runtimes/bun/probe', headers, 'POST')).toBe(
       RATE_LIMIT_BUCKETS.apiKey
     );
+  });
+
+  it('routes /terminals to its own bucket, with or without the /api prefix', () => {
+    expect(classifyRateLimit('/api/terminals')).toBe(RATE_LIMIT_BUCKETS.terminal);
+    expect(classifyRateLimit('/terminals')).toBe(RATE_LIMIT_BUCKETS.terminal);
+    expect(classifyRateLimit('/api/terminals/abc-123')).toBe(RATE_LIMIT_BUCKETS.terminal);
+  });
+
+  it('does not misclassify the singular socket path or look-alikes as /terminals', () => {
+    // `/api/terminal/:id` is the WebSocket route, not the CRUD one this bucket
+    // covers, and neither starts with the other's segment boundary.
+    expect(isTerminalPath('/api/terminal/abc-123')).toBe(false);
+    expect(isTerminalPath('/api/terminalsomething')).toBe(false);
+    expect(classifyRateLimit('/api/terminal/abc-123')).toBe(RATE_LIMIT_BUCKETS.general);
+  });
+
+  it('keeps key-authenticated terminal traffic on the api-key bucket', () => {
+    const headers = headersWithApiKey('mango_key_value');
+    expect(classifyRateLimit('/api/terminals', headers)).toBe(RATE_LIMIT_BUCKETS.apiKey);
   });
 
   it('does not misclassify neighboring environments routes as forced probes', () => {
