@@ -12,8 +12,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
+import { TERMINAL_SCROLLBACK_MAX_BYTES } from '@mangostudio/shared/terminal';
 import { parse as parseToml } from 'smol-toml';
 import { CliError } from '../cli/errors';
+
+/** `terminal.scrollback_kib` is threaded to the runtime as bytes; it cannot ask for more than the ring buffer holds. */
+const TERMINAL_SCROLLBACK_KIB_MAX = TERMINAL_SCROLLBACK_MAX_BYTES / 1024;
 
 /**
  * Absolute path to the monorepo root, derived from this file's location.
@@ -325,7 +329,7 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   MANGO_TERMINAL_SCROLLBACK_KIB: (cfg, v) => {
     const kib = Number(v);
-    if (Number.isSafeInteger(kib) && kib > 0) {
+    if (Number.isSafeInteger(kib) && kib > 0 && kib <= TERMINAL_SCROLLBACK_KIB_MAX) {
       cfg.terminal.scrollbackKib = kib;
     }
   },
@@ -710,7 +714,8 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
     if (
       typeof terminal.scrollback_kib === 'number' &&
       Number.isSafeInteger(terminal.scrollback_kib) &&
-      terminal.scrollback_kib > 0
+      terminal.scrollback_kib > 0 &&
+      terminal.scrollback_kib <= TERMINAL_SCROLLBACK_KIB_MAX
     ) {
       cfg.terminal.scrollbackKib = terminal.scrollback_kib;
     }

@@ -254,6 +254,7 @@ export function createTerminalSessionService(
         sessionId,
         cols,
         rows,
+        scrollbackBytes: config.scrollbackKib * 1024,
         ...(body.shell ? { shell: body.shell } : {}),
         ...(cwd ? { cwd } : {}),
         ...(chatId ? { env: { MANGOSTUDIO_CHAT_ID: chatId } } : {}),

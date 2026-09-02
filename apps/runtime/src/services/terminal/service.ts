@@ -120,6 +120,9 @@ export function createTerminalService(options: TerminalServiceOptions): Terminal
         cols: params.cols,
         rows: params.rows,
         pty: deps.pty,
+        ...(params.scrollbackBytes !== undefined
+          ? { scrollbackBytes: params.scrollbackBytes }
+          : {}),
         emit: (payload, end) => publish(params.sessionId, payload, end),
       });
       sessions.set(params.sessionId, session);

@@ -463,6 +463,17 @@ describe('config precedence', () => {
     expect(cfg.terminal.idleTimeoutMinutes).toBe(30);
   });
 
+  test('ignores a scrollback_kib above the runtime ring buffer ceiling', () => {
+    writeFileSync(TMP_TOML, '[terminal]\nscrollback_kib = 1024\n');
+    process.env.MANGO_TERMINAL_SCROLLBACK_KIB = '2048';
+
+    const cfg = loadConfig(TMP_TOML);
+
+    // Above TERMINAL_SCROLLBACK_MAX_BYTES / 1024 (256): the runtime clamps to
+    // it anyway, so accepting a bigger value here would silently no-op.
+    expect(cfg.terminal.scrollbackKib).toBe(256);
+  });
+
   test('loadConfigForTest applies terminal overrides', () => {
     const cfg = loadConfigForTest({
       terminal: {

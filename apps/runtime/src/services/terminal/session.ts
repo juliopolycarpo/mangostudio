@@ -61,6 +61,8 @@ export interface CreateTerminalSessionOptions {
   readonly cols: number;
   readonly rows: number;
   readonly pty: PtyPort;
+  /** Omitted: `TERMINAL_SCROLLBACK_MAX_BYTES`, which is also the hard ceiling this is clamped to. */
+  readonly scrollbackBytes?: number;
   /**
    * Publishes one output frame for this session. May throw — `port.send` on
    * a closed hub connection does — and every call site here treats a throw
@@ -72,7 +74,12 @@ export interface CreateTerminalSessionOptions {
 
 /** Spawns the PTY and returns the session that owns it. */
 export function createTerminalSession(options: CreateTerminalSessionOptions): TerminalSession {
-  const scrollback = new ByteRingBuffer(TERMINAL_SCROLLBACK_MAX_BYTES);
+  const scrollback = new ByteRingBuffer(
+    Math.min(
+      options.scrollbackBytes ?? TERMINAL_SCROLLBACK_MAX_BYTES,
+      TERMINAL_SCROLLBACK_MAX_BYTES
+    )
+  );
   const pending = new ByteRingBuffer(TERMINAL_PENDING_MAX_BYTES);
   let cols = options.cols;
   let rows = options.rows;

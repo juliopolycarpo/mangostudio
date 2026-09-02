@@ -798,6 +798,8 @@ export interface RuntimeTerminalOpenParams {
   /** Variables layered over the sanitized host env. Never secrets; the hub does not hold any to send. */
   readonly env?: Readonly<Record<string, string>>;
   readonly envPolicy?: RuntimeShellRunParams['envPolicy'];
+  /** Omitted: `TERMINAL_SCROLLBACK_MAX_BYTES`, which is also the hard ceiling this is clamped to. */
+  readonly scrollbackBytes?: number;
 }
 
 export interface RuntimeTerminalOpenResult {
@@ -818,7 +820,7 @@ export interface RuntimeTerminalAttachParams {
  */
 export interface RuntimeTerminalAttachResult {
   readonly sessionId: string;
-  /** Base64 of the last `TERMINAL_SCROLLBACK_MAX_BYTES` bytes of output. */
+  /** Base64 of the last `scrollbackBytes` (default, and hard ceiling: `TERMINAL_SCROLLBACK_MAX_BYTES`) bytes of output. */
   readonly scrollback: string;
   readonly status: RuntimeTerminalSessionStatus;
   readonly exitCode: number | null;

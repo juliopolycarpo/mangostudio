@@ -34,7 +34,10 @@ interface Harness {
 }
 
 function createHarness(
-  overrides: { emit?: (payload: RuntimeTerminalOutputEvent, end?: true) => void } = {}
+  overrides: {
+    emit?: (payload: RuntimeTerminalOutputEvent, end?: true) => void;
+    scrollbackBytes?: number;
+  } = {}
 ): Harness {
   const port = new FakePtyPort();
   const frames: RuntimeTerminalOutputEvent[] = [];
@@ -53,6 +56,9 @@ function createHarness(
     cols: 80,
     rows: 24,
     pty: port,
+    ...(overrides.scrollbackBytes !== undefined
+      ? { scrollbackBytes: overrides.scrollbackBytes }
+      : {}),
     emit,
   });
   return { session, port, frames };
@@ -85,6 +91,26 @@ describe('createTerminalSession', () => {
     const { session, port } = createHarness();
     const overflow = TERMINAL_SCROLLBACK_MAX_BYTES + 100;
     port.handles[0]?.emitData(bytesOf(overflow, 0x62));
+
+    const result = session.attach();
+
+    expect(Buffer.from(result.scrollback, 'base64').byteLength).toBe(TERMINAL_SCROLLBACK_MAX_BYTES);
+  });
+
+  it('honors a smaller scrollbackBytes instead of always using the hard ceiling', () => {
+    const { session, port } = createHarness({ scrollbackBytes: 64 });
+    port.handles[0]?.emitData(bytesOf(100, 0x63));
+
+    const result = session.attach();
+
+    expect(Buffer.from(result.scrollback, 'base64').byteLength).toBe(64);
+  });
+
+  it('clamps a scrollbackBytes above the hard ceiling instead of over-allocating', () => {
+    const { session, port } = createHarness({
+      scrollbackBytes: TERMINAL_SCROLLBACK_MAX_BYTES + 1000,
+    });
+    port.handles[0]?.emitData(bytesOf(TERMINAL_SCROLLBACK_MAX_BYTES + 100, 0x64));
 
     const result = session.attach();
 
