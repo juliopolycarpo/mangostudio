@@ -20,6 +20,13 @@ const STATE: ServerState = {
 
 const noop = (): Promise<void> => Promise.resolve();
 
+/** A controller whose SIGTERM actually ends the pid, so the hand-over completes. */
+function stoppableController(): FakeProcessController {
+  const controller = new FakeProcessController([42]);
+  controller.terminate = (pid) => controller.die(pid);
+  return controller;
+}
+
 function baseDeps(overrides: Partial<Omit<ServiceDeps, 'manager'>> = {}): Partial<ServiceDeps> & {
   lines: string[];
   manager: FakeServiceManager;
@@ -38,6 +45,7 @@ function baseDeps(overrides: Partial<Omit<ServiceDeps, 'manager'>> = {}): Partia
     // The default for every other case: a secret a unit can actually load.
     secretPersisted: () => true,
     envFilePath: () => '/home/test/.mango/.env',
+    configuredTarget: () => ({ host: '127.0.0.1', port: 3001 }),
     assertServeConfig: () => undefined,
     ensureDirs: noop,
     executable: () => ({
@@ -81,6 +89,28 @@ describe('runService install', () => {
     await expect(
       runService({ action: 'install', port: 70_000, json: false }, baseDeps())
     ).rejects.toBeInstanceOf(CliError);
+  });
+
+  // The hand-over stops the running instance, so a unit that took config's own
+  // defaults would move the server: `serve -d lan:4000` then `service install`
+  // would leave the hub on localhost:3001 with the LAN port gone.
+  it('carries the bind target of the instance it takes over from', async () => {
+    const d = baseDeps({
+      controller: stoppableController(),
+      readState: () => Promise.resolve({ ...STATE, host: '0.0.0.0', port: 4000 }),
+    });
+    await runService({ action: 'install', json: false }, d);
+    expect(d.manager.installed[0]?.env).toMatchObject({ API_HOST: '0.0.0.0', API_PORT: '4000' });
+  });
+
+  it('leaves config.toml deciding when the running instance is where it already says', async () => {
+    const d = baseDeps({
+      controller: stoppableController(),
+      readState: () => Promise.resolve(STATE),
+    });
+    await runService({ action: 'install', json: false }, d);
+    expect(d.manager.installed[0]?.env).not.toHaveProperty('API_HOST');
+    expect(d.manager.installed[0]?.env).not.toHaveProperty('API_PORT');
   });
 
   it('runs the auth-secret setup while there is still a terminal', async () => {

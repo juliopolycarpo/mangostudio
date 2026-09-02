@@ -12,6 +12,7 @@ import {
   buildHubServiceDefinition,
   createHubServiceManager,
   currentHubExecutable,
+  type HubServiceTarget,
   hubServiceLogPath,
   isAuthSecretPersisted,
 } from '../../modules/machine/application/hub-service';
@@ -36,6 +37,8 @@ export interface ServiceDeps {
   /** Whether the auth secret lives where a unit can load it, not just in this shell. */
   secretPersisted: () => boolean;
   envFilePath: () => string;
+  /** Where `config.toml` and this shell's environment would bind on their own. */
+  configuredTarget: () => { host: string; port: number };
   assertServeConfig: () => void;
   ensureDirs: () => Promise<void>;
   executable: () => HubExecutable;
@@ -104,13 +107,14 @@ async function install(args: ServiceArgs, unit: string, d: Required<ServiceDeps>
 
   const predecessor = await liveInstance(d);
   const executable = d.executable();
+  const target = resolveInstallTarget(args, predecessor, d);
   const definition = buildHubServiceDefinition({
     executable,
     unitName: unit,
     logFile: d.logFile(),
     env: d.env,
     platform: d.platform,
-    target: { host: args.host, port: args.port },
+    ...(target ? { target } : {}),
   });
 
   // Register before touching what is serving. Installing can fail for reasons
@@ -133,6 +137,33 @@ async function install(args: ServiceArgs, unit: string, d: Required<ServiceDeps>
   if (executable.note) {
     d.log(`  Note:    ${executable.note}`);
   }
+}
+
+/**
+ * What the unit binds to. An explicit flag wins. Otherwise the unit inherits
+ * `config.toml`, so a later edit there still moves it — except when the instance
+ * it is about to replace is listening somewhere else, which is what `serve -d
+ * lan:4000` leaves behind: the hand-over below stops that instance, and a unit
+ * on the default port would take neither its address nor its port with it.
+ * // Usage: resolveInstallTarget(args, predecessor, d)
+ */
+function resolveInstallTarget(
+  args: ServiceArgs,
+  predecessor: ServerState | null,
+  d: Required<ServiceDeps>
+): HubServiceTarget | undefined {
+  if (args.host !== undefined || args.port !== undefined) {
+    return {
+      ...(args.host === undefined ? {} : { host: args.host }),
+      ...(args.port === undefined ? {} : { port: args.port }),
+    };
+  }
+  if (!predecessor) return undefined;
+  const configured = d.configuredTarget();
+  if (predecessor.host === configured.host && predecessor.port === configured.port) {
+    return undefined;
+  }
+  return { host: predecessor.host, port: predecessor.port };
 }
 
 /** The instance still serving, or null. A stale state file is cleared. */
@@ -198,6 +229,9 @@ function resolveDeps(deps: Partial<ServiceDeps>): Required<ServiceDeps> {
     ensureAuthSecret: deps.ensureAuthSecret ?? ensureServeAuthSecret,
     secretPersisted: deps.secretPersisted ?? (() => isAuthSecretPersisted()),
     envFilePath: deps.envFilePath ?? (() => getConfigEnvFilePath(getConfig().configFilePath)),
+    configuredTarget:
+      deps.configuredTarget ??
+      (() => ({ host: getConfig().server.host, port: getConfig().server.port })),
     assertServeConfig: deps.assertServeConfig ?? assertServeConfig,
     ensureDirs: deps.ensureDirs ?? ensureRuntimeDirs,
     executable: deps.executable ?? (() => currentHubExecutable()),
