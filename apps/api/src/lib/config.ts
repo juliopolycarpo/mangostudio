@@ -139,6 +139,16 @@ export interface MangoConfig {
      */
     wslExecutable: string;
   };
+  terminal: {
+    /** Master switch for opening live terminal sessions on any environment. */
+    enabled: boolean;
+    /** A session with no attached viewer this long is closed by the idle reaper. */
+    idleTimeoutMinutes: number;
+    /** Running sessions one user may hold at once, across every environment. */
+    maxSessionsPerUser: number;
+    /** Bytes of output the runtime keeps per session for `terminal.attach` replay. */
+    scrollbackKib: number;
+  };
   /** The server's own origins plus every `server.allowedOrigins` entry. */
   corsOrigins: string[];
   /** Path to the config.toml that was loaded (for TOML-based services). */
@@ -172,6 +182,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   auth: { secret: '', url: '' },
   security: { trustProxy: false, allowDirectLoopback: true },
   environments: { ltsRefresh: false, installsEnabled: false, container: false, wslExecutable: '' },
+  terminal: { enabled: true, idleTimeoutMinutes: 30, maxSessionsPerUser: 8, scrollbackKib: 256 },
   chatgpt: {
     authBaseUrl: 'https://auth.openai.com',
     apiBaseUrl: 'https://chatgpt.com/backend-api/codex',
@@ -295,6 +306,27 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
     const bytes = Number(v);
     if (Number.isSafeInteger(bytes) && bytes > 0) {
       cfg.library.backupRetentionBytes = bytes;
+    }
+  },
+  MANGO_TERMINAL_ENABLED: (cfg, v) => {
+    cfg.terminal.enabled = parseBooleanFlag(v);
+  },
+  MANGO_TERMINAL_IDLE_TIMEOUT_MINUTES: (cfg, v) => {
+    const minutes = Number(v);
+    if (Number.isSafeInteger(minutes) && minutes > 0) {
+      cfg.terminal.idleTimeoutMinutes = minutes;
+    }
+  },
+  MANGO_TERMINAL_MAX_SESSIONS_PER_USER: (cfg, v) => {
+    const count = Number(v);
+    if (Number.isSafeInteger(count) && count > 0) {
+      cfg.terminal.maxSessionsPerUser = count;
+    }
+  },
+  MANGO_TERMINAL_SCROLLBACK_KIB: (cfg, v) => {
+    const kib = Number(v);
+    if (Number.isSafeInteger(kib) && kib > 0) {
+      cfg.terminal.scrollbackKib = kib;
     }
   },
 };
@@ -551,6 +583,7 @@ function cloneDefaults(): MangoConfig {
     auth: { ...DEFAULT_CONFIG.auth },
     security: { ...DEFAULT_CONFIG.security },
     environments: { ...DEFAULT_CONFIG.environments },
+    terminal: { ...DEFAULT_CONFIG.terminal },
     chatgpt: { ...DEFAULT_CONFIG.chatgpt },
     secretStore: { ...DEFAULT_CONFIG.secretStore },
     corsOrigins: [],
@@ -654,6 +687,32 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
     }
     if (typeof environments.installs_enabled === 'boolean') {
       cfg.environments.installsEnabled = environments.installs_enabled;
+    }
+  }
+
+  const terminal = parsed.terminal as Record<string, unknown> | undefined;
+  if (terminal) {
+    if (typeof terminal.enabled === 'boolean') cfg.terminal.enabled = terminal.enabled;
+    if (
+      typeof terminal.idle_timeout_minutes === 'number' &&
+      Number.isSafeInteger(terminal.idle_timeout_minutes) &&
+      terminal.idle_timeout_minutes > 0
+    ) {
+      cfg.terminal.idleTimeoutMinutes = terminal.idle_timeout_minutes;
+    }
+    if (
+      typeof terminal.max_sessions_per_user === 'number' &&
+      Number.isSafeInteger(terminal.max_sessions_per_user) &&
+      terminal.max_sessions_per_user > 0
+    ) {
+      cfg.terminal.maxSessionsPerUser = terminal.max_sessions_per_user;
+    }
+    if (
+      typeof terminal.scrollback_kib === 'number' &&
+      Number.isSafeInteger(terminal.scrollback_kib) &&
+      terminal.scrollback_kib > 0
+    ) {
+      cfg.terminal.scrollbackKib = terminal.scrollback_kib;
     }
   }
 
@@ -942,6 +1001,7 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (partial.auth) Object.assign(cfg.auth, partial.auth);
   if (partial.security) Object.assign(cfg.security, partial.security);
   if (partial.environments) Object.assign(cfg.environments, partial.environments);
+  if (partial.terminal) Object.assign(cfg.terminal, partial.terminal);
   if (partial.chatgpt) Object.assign(cfg.chatgpt, partial.chatgpt);
   if (partial.secretStore) Object.assign(cfg.secretStore, partial.secretStore);
   if (partial.corsOrigins) cfg.corsOrigins = partial.corsOrigins;

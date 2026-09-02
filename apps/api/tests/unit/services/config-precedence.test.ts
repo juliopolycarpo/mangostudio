@@ -45,6 +45,10 @@ const WATCHED_ENV_KEYS = [
   'MANGO_ENV_LTS_REFRESH',
   'MANGO_ENV_INSTALLS_ENABLED',
   'MANGO_CONTAINER',
+  'MANGO_TERMINAL_ENABLED',
+  'MANGO_TERMINAL_IDLE_TIMEOUT_MINUTES',
+  'MANGO_TERMINAL_MAX_SESSIONS_PER_USER',
+  'MANGO_TERMINAL_SCROLLBACK_KIB',
   'FRONTEND_PORT',
   'ALLOWED_ORIGINS',
 ];
@@ -402,6 +406,78 @@ describe('config precedence', () => {
     expect(cfg.uploads.dir).toBe(join(TEST_MANAGED_CONFIG_DIR, 'uploads'));
     expect(cfg.images.dir).toBe(join(TEST_MANAGED_CONFIG_DIR, 'images'));
     expect(cfg.toolImages.dir).toBe(join(TEST_MANAGED_CONFIG_DIR, 'tool-images'));
+  });
+
+  test('defaults [terminal] to enabled with the documented limits', () => {
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(cfg.terminal).toEqual({
+      enabled: true,
+      idleTimeoutMinutes: 30,
+      maxSessionsPerUser: 8,
+      scrollbackKib: 256,
+    });
+  });
+
+  test('loads [terminal] from config.toml', () => {
+    writeFileSync(
+      TMP_TOML,
+      '[terminal]\nenabled = false\nidle_timeout_minutes = 5\nmax_sessions_per_user = 2\nscrollback_kib = 64\n'
+    );
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.terminal).toEqual({
+      enabled: false,
+      idleTimeoutMinutes: 5,
+      maxSessionsPerUser: 2,
+      scrollbackKib: 64,
+    });
+  });
+
+  test('MANGO_TERMINAL env vars override config.toml', () => {
+    writeFileSync(TMP_TOML, '[terminal]\nenabled = false\nmax_sessions_per_user = 2\n');
+    process.env.MANGO_TERMINAL_ENABLED = 'true';
+    process.env.MANGO_TERMINAL_IDLE_TIMEOUT_MINUTES = '15';
+    process.env.MANGO_TERMINAL_MAX_SESSIONS_PER_USER = '4';
+    process.env.MANGO_TERMINAL_SCROLLBACK_KIB = '128';
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.terminal).toEqual({
+      enabled: true,
+      idleTimeoutMinutes: 15,
+      maxSessionsPerUser: 4,
+      scrollbackKib: 128,
+    });
+  });
+
+  test('ignores invalid terminal limit overrides', () => {
+    writeFileSync(TMP_TOML, '[terminal]\nmax_sessions_per_user = 6\n');
+    process.env.MANGO_TERMINAL_MAX_SESSIONS_PER_USER = '0';
+    process.env.MANGO_TERMINAL_IDLE_TIMEOUT_MINUTES = '-5';
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.terminal.maxSessionsPerUser).toBe(6);
+    expect(cfg.terminal.idleTimeoutMinutes).toBe(30);
+  });
+
+  test('loadConfigForTest applies terminal overrides', () => {
+    const cfg = loadConfigForTest({
+      terminal: {
+        enabled: false,
+        idleTimeoutMinutes: 30,
+        maxSessionsPerUser: 1,
+        scrollbackKib: 256,
+      },
+    });
+
+    expect(cfg.terminal.enabled).toBe(false);
+    expect(cfg.terminal.maxSessionsPerUser).toBe(1);
+    // Untouched fields keep their defaults rather than being wiped by the partial merge.
+    expect(cfg.terminal.idleTimeoutMinutes).toBe(30);
+    expect(cfg.terminal.scrollbackKib).toBe(256);
   });
 });
 
