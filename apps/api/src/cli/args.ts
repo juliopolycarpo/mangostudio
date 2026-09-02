@@ -30,6 +30,37 @@ export interface EnvArgs {
   json: boolean;
 }
 
+export interface StatusArgs {
+  /** Emit the shared hub status document instead of plain text. */
+  json: boolean;
+}
+
+export const HUB_SERVICE_ACTIONS = [
+  'install',
+  'uninstall',
+  'status',
+  'start',
+  'stop',
+  'restart',
+] as const;
+export type HubServiceAction = (typeof HUB_SERVICE_ACTIONS)[number];
+
+export interface ServiceArgs {
+  action: HubServiceAction;
+  /** `install` only: an explicit bind target baked into the unit. */
+  host?: string;
+  port?: number;
+  json: boolean;
+}
+
+export interface LogsArgs {
+  follow: boolean;
+  lines: number;
+}
+
+export const DEFAULT_LOG_LINES = 100;
+const MAX_LOG_LINES = 10_000;
+
 /** Default doctor flags for tests and internal callers. */
 export const DEFAULT_DOCTOR_ARGS: DoctorArgs = {
   all: false,
@@ -121,6 +152,89 @@ export function parseDoctorArgs(rest: string[]): DoctorArgs {
   }
 
   return { all, chatgptRefresh, probe, envOnly, libraryOnly, json };
+}
+
+/** Parse `status` args: optional --json. // Usage: parseStatusArgs(['--json']) */
+export function parseStatusArgs(rest: string[]): StatusArgs {
+  let json = false;
+  for (const arg of rest) {
+    if (arg === '--json') {
+      json = true;
+      continue;
+    }
+    throw new CliError(`Unknown option for status: ${arg}`);
+  }
+  return { json };
+}
+
+function isHubServiceAction(value: string): value is HubServiceAction {
+  return (HUB_SERVICE_ACTIONS as readonly string[]).includes(value);
+}
+
+/** Parse `service` args: an action, an install target, --json. // Usage: parseServiceArgs(['install', 'lan:3000']) */
+export function parseServiceArgs(rest: string[]): ServiceArgs {
+  const [action, ...options] = rest;
+  if (action === undefined) {
+    throw new CliError(
+      `Missing service action. Expected one of: ${HUB_SERVICE_ACTIONS.join(', ')}`
+    );
+  }
+  if (!isHubServiceAction(action)) {
+    throw new CliError(
+      `Unknown service action: ${action}. Expected one of: ${HUB_SERVICE_ACTIONS.join(', ')}`
+    );
+  }
+
+  let json = false;
+  let host: string | undefined;
+  let port: number | undefined;
+  for (const arg of options) {
+    if (arg === '--json') {
+      json = true;
+      continue;
+    }
+    if (arg.startsWith('-')) {
+      throw new CliError(`Unknown option for service: ${arg}`);
+    }
+    if (action !== 'install') {
+      throw new CliError(`Unexpected argument for service ${action}: ${arg}`);
+    }
+    if (host !== undefined || port !== undefined) {
+      throw new CliError(`Unexpected argument: ${arg}`);
+    }
+    ({ host, port } = parseServeTarget(arg));
+  }
+
+  return { action, host, port, json };
+}
+
+/** Parse `logs` args: -f/--follow and -n/--lines <count>. // Usage: parseLogsArgs(['-f', '-n', '50']) */
+export function parseLogsArgs(rest: string[]): LogsArgs {
+  let follow = false;
+  let lines = DEFAULT_LOG_LINES;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === '-f' || arg === '--follow') {
+      follow = true;
+      continue;
+    }
+    if (arg === '-n' || arg === '--lines') {
+      const value = rest[index + 1];
+      if (value === undefined || !/^\d+$/.test(value)) {
+        throw new CliError(`Expected a line count after ${arg}, got: ${value ?? '(nothing)'}`);
+      }
+      lines = Number(value);
+      if (lines < 1 || lines > MAX_LOG_LINES) {
+        throw new CliError(`Line count out of range (1-${MAX_LOG_LINES}): ${value}`);
+      }
+      index += 1;
+      continue;
+    }
+    throw new CliError(`Unknown option for logs: ${arg}`);
+  }
+
+  return { follow, lines };
 }
 
 /** Parse `env` args: optional subcommand and --json. */

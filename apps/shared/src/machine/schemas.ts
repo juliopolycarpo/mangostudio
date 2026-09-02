@@ -1,0 +1,173 @@
+/**
+ * The hub's own machine: what process is serving, how it was launched, whether
+ * a service keeps it alive, and what doctor says about the install. One shape
+ * feeds `mangostudio status --json` and `GET /api/machine/status`, so a
+ * terminal and the "This machine" page cannot disagree.
+ */
+
+import type { Static } from 'typebox';
+import Type from 'typebox';
+import { InstallGuardSchema } from '../environments/schemas';
+import { RuntimeConsentProfileSchema, UserServiceStatusSchema } from '../runtime-home/schemas';
+import { ReadonlyArraySchema } from '../schema-helpers';
+
+/** How the serving process came to exist, which decides how it can be restarted. */
+export const HubLaunchModeSchema = Type.Union([
+  Type.Literal('service'),
+  Type.Literal('detached'),
+  Type.Literal('foreground'),
+]);
+export type HubLaunchMode = Static<typeof HubLaunchModeSchema>;
+
+export const HubHealthSchema = Type.Union([Type.Literal('ok'), Type.Literal('unreachable')]);
+export type HubHealth = Static<typeof HubHealthSchema>;
+
+/**
+ * The single-instance state file, as a status. Every field after `running` is
+ * absent when nothing is serving, so a stale file never reads as a live hub.
+ */
+export const HubProcessStatusSchema = Type.Object({
+  running: Type.Boolean(),
+  pid: Type.Optional(Type.Integer({ minimum: 1 })),
+  port: Type.Optional(Type.Integer({ minimum: 1, maximum: 65_535 })),
+  host: Type.Optional(Type.String({ maxLength: 256 })),
+  /** The address a browser on this machine reaches it at. */
+  url: Type.Optional(Type.String({ maxLength: 512 })),
+  startedAt: Type.Optional(Type.Integer({ minimum: 0 })),
+  uptimeMs: Type.Optional(Type.Integer({ minimum: 0 })),
+  /** Empty for a foreground start, whose output goes to its terminal. */
+  logFile: Type.Optional(Type.String({ maxLength: 4_096 })),
+  version: Type.Optional(Type.String({ maxLength: 128 })),
+  buildSha: Type.Optional(Type.String({ maxLength: 64 })),
+  buildType: Type.Optional(Type.String({ maxLength: 32 })),
+  builtAt: Type.Optional(Type.String({ maxLength: 64 })),
+  health: Type.Optional(HubHealthSchema),
+  launch: Type.Optional(HubLaunchModeSchema),
+  /** The supervisor unit that started this process, when `launch` is `service`. */
+  serviceUnit: Type.Optional(Type.String({ maxLength: 256 })),
+});
+export type HubProcessStatus = Static<typeof HubProcessStatusSchema>;
+
+export const MachineCheckStatusSchema = Type.Union([
+  Type.Literal('ok'),
+  Type.Literal('warn'),
+  Type.Literal('fail'),
+]);
+export type MachineCheckStatus = Static<typeof MachineCheckStatusSchema>;
+
+/** One doctor row, exactly as the CLI prints it. */
+export const MachineCheckSchema = Type.Object({
+  label: Type.String({ minLength: 1, maxLength: 128 }),
+  status: MachineCheckStatusSchema,
+  detail: Type.String({ maxLength: 4_096 }),
+});
+export type MachineCheck = Static<typeof MachineCheckSchema>;
+
+export const MACHINE_DOCTOR_CHECK_LIMIT = 512;
+
+export const MachineDoctorReportSchema = Type.Object({
+  checks: ReadonlyArraySchema(MachineCheckSchema, { maxItems: MACHINE_DOCTOR_CHECK_LIMIT }),
+  warnings: Type.Integer({ minimum: 0 }),
+  failures: Type.Integer({ minimum: 0 }),
+});
+export type MachineDoctorReport = Static<typeof MachineDoctorReportSchema>;
+
+/**
+ * Optional doctor sections. Core checks always run; these spawn probes and
+ * already have pages of their own, so a caller opts into them.
+ */
+export const MachineDoctorSectionSchema = Type.Union([
+  Type.Literal('environments'),
+  Type.Literal('library'),
+]);
+export type MachineDoctorSection = Static<typeof MachineDoctorSectionSchema>;
+
+/** The sibling runtime binary the hub spawns for stdio environments. */
+export const MachineRuntimeBinarySchema = Type.Object({
+  /** Null in a source checkout, which runs the runtime through Bun instead. */
+  path: Type.Union([Type.String({ maxLength: 4_096 }), Type.Null()]),
+  present: Type.Boolean(),
+  version: Type.Union([Type.String({ maxLength: 128 }), Type.Null()]),
+  /** Whether it reports the hub's own version; null when it could not be asked. */
+  versionMatches: Type.Union([Type.Boolean(), Type.Null()]),
+  error: Type.Union([Type.String({ maxLength: 1_024 }), Type.Null()]),
+});
+export type MachineRuntimeBinary = Static<typeof MachineRuntimeBinarySchema>;
+
+/** What the `host` runtime slot on this machine has consented to. */
+export const MachineHostSlotSchema = Type.Object({
+  /** False when no slot directory exists, which means full consent by default. */
+  present: Type.Boolean(),
+  profile: RuntimeConsentProfileSchema,
+  directory: Type.String({ maxLength: 4_096 }),
+  error: Type.Union([Type.String({ maxLength: 1_024 }), Type.Null()]),
+});
+export type MachineHostSlot = Static<typeof MachineHostSlotSchema>;
+
+/**
+ * One mutating action the page may offer. `command` is what to type instead
+ * when `available` is false, and `reason` says why the page will not do it.
+ */
+export const MachineActionSchema = Type.Object({
+  available: Type.Boolean(),
+  command: Type.String({ minLength: 1, maxLength: 512 }),
+  reason: Type.Optional(Type.String({ maxLength: 1_024 })),
+});
+export type MachineAction = Static<typeof MachineActionSchema>;
+
+export const MachineActionsSchema = Type.Object({
+  /** The local-surface guard every mutating action shares. */
+  guard: InstallGuardSchema,
+  restart: MachineActionSchema,
+  installService: MachineActionSchema,
+  uninstallService: MachineActionSchema,
+});
+export type MachineActions = Static<typeof MachineActionsSchema>;
+
+export const MachineStatusSchema = Type.Object({
+  hub: HubProcessStatusSchema,
+  service: UserServiceStatusSchema,
+  runtimeBinary: MachineRuntimeBinarySchema,
+  hostSlot: MachineHostSlotSchema,
+  platform: Type.String({ minLength: 1, maxLength: 32 }),
+  standalone: Type.Boolean(),
+  container: Type.Boolean(),
+  homeDir: Type.String({ maxLength: 4_096 }),
+  logsDir: Type.String({ maxLength: 4_096 }),
+  configFile: Type.Union([Type.String({ maxLength: 4_096 }), Type.Null()]),
+  actions: MachineActionsSchema,
+});
+export type MachineStatus = Static<typeof MachineStatusSchema>;
+
+export const MACHINE_LOG_TAIL_DEFAULT = 200;
+export const MACHINE_LOG_TAIL_MAX = 2_000;
+
+export const MachineLogTailSchema = Type.Object({
+  /** Null when the serving process writes to a terminal, not a file. */
+  file: Type.Union([Type.String({ maxLength: 4_096 }), Type.Null()]),
+  lines: ReadonlyArraySchema(Type.String({ maxLength: 8_192 }), {
+    maxItems: MACHINE_LOG_TAIL_MAX,
+  }),
+  /** True when the file holds more lines than were returned. */
+  truncated: Type.Boolean(),
+});
+export type MachineLogTail = Static<typeof MachineLogTailSchema>;
+
+export const MachineServiceActionSchema = Type.Union([
+  Type.Literal('install'),
+  Type.Literal('uninstall'),
+]);
+export type MachineServiceAction = Static<typeof MachineServiceActionSchema>;
+
+export const MachineServiceBodySchema = Type.Object(
+  { action: MachineServiceActionSchema },
+  { additionalProperties: false }
+);
+export type MachineServiceBody = Static<typeof MachineServiceBodySchema>;
+
+/** A mutating action was accepted; `message` says what happens next. */
+export const MachineActionResponseSchema = Type.Object({
+  accepted: Type.Boolean(),
+  message: Type.String({ maxLength: 1_024 }),
+});
+export type MachineActionResponse = Static<typeof MachineActionResponseSchema>;

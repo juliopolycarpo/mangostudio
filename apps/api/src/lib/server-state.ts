@@ -20,6 +20,8 @@ export interface ServerState {
   version: string;
   buildInfo?: BuildInfo;
   frontendDir?: string;
+  /** The supervisor unit that started this process, when one did. */
+  service?: string;
 }
 
 /** Read and parse the state file; null when absent or corrupt. // Usage: await readState() */

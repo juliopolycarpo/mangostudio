@@ -119,3 +119,14 @@ describe('buildDetachedEnv', () => {
     }
   });
 });
+
+describe('buildDetachedEnv restart handshake', () => {
+  it('names the predecessor pid only when a restart asks for it', () => {
+    expect(buildDetachedEnv('localhost', 3001, '/x.log')).not.toHaveProperty(
+      'MANGO_RESTART_WAIT_PID'
+    );
+    expect(buildDetachedEnv('localhost', 3001, '/x.log', { waitForPid: 42 })).toMatchObject({
+      MANGO_RESTART_WAIT_PID: '42',
+    });
+  });
+});

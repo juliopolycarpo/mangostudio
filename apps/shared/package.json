@@ -60,7 +60,8 @@
     "./realtime": "./src/realtime/index.ts",
     "./tool-identity": "./src/tool-identity/index.ts",
     "./runtime-protocol": "./src/runtime-protocol/index.ts",
-    "./runtime-home": "./src/runtime-home/index.ts"
+    "./runtime-home": "./src/runtime-home/index.ts",
+    "./machine": "./src/machine/index.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",

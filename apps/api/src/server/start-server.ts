@@ -21,6 +21,7 @@ import { externalSessionManager } from '../modules/external-agents/application/e
 import { reconcileExternalTurns } from '../modules/external-agents/application/external-turn-recovery';
 import { isActiveTurn } from '../modules/generation/application/active-turn-registry';
 import { reconcileStaleTurns } from '../modules/generation/application/turn-recovery';
+import { HUB_SERVICE_UNIT_ENV } from '../modules/machine/domain/hub-service-identity';
 import { closeAllMcpClients } from '../services/mcp/connection-manager';
 import {
   flushObservabilitySnapshot,
@@ -136,8 +137,24 @@ async function persistState(port: number, host: string, frontendDir: string): Pr
     version: getVersion(),
     buildInfo: getBuildInfo(),
     frontendDir,
+    // Set by the unit a service manager installed, so `restart` knows to go
+    // through the supervisor instead of respawning by hand.
+    ...(process.env[HUB_SERVICE_UNIT_ENV] ? { service: process.env[HUB_SERVICE_UNIT_ENV] } : {}),
   };
   await writeState(state);
+}
+
+let shutdownRequested = false;
+
+/**
+ * Stop serving and exit, the same way a SIGTERM would. For a restart the caller
+ * has already arranged a successor; this is the half that lets go of the port
+ * and the state file so the successor can take them.
+ */
+export function requestShutdown(): void {
+  if (shutdownRequested) return;
+  shutdownRequested = true;
+  void gracefulStop().finally(() => process.exit(0));
 }
 
 function logRunning(host: string, port: number, devFrontend: boolean): void {
@@ -178,7 +195,7 @@ function registerShutdown(): void {
     if (signal === 'SIGINT') {
       console.warn('\n[api] Shutting down...');
     }
-    void gracefulStop().finally(() => process.exit(0));
+    requestShutdown();
   };
 
   process.on('SIGINT', () => shutdown('SIGINT'));
