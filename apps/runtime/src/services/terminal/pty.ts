@@ -41,7 +41,7 @@ export function supportsPty(): boolean {
   return typeof (Bun as { Terminal?: unknown }).Terminal === 'function';
 }
 
-/** The production port over `Bun.spawn({ terminal })`. */
+/** The production port over `Bun.spawn` with its `terminal` option. */
 export function createBunPtyPort(): PtyPort {
   return {
     spawn(input) {

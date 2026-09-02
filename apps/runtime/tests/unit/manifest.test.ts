@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { directoryHashDomainVersion } from '@mangostudio/shared/library';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { createLocalRuntimeManifest, parseGhVersion } from '../../src/manifest';
+import { supportsPty } from '../../src/services/terminal/pty';
 
 describe('createLocalRuntimeManifest', () => {
   it('derives a full profile from the full allow set', () => {
@@ -14,6 +15,9 @@ describe('createLocalRuntimeManifest', () => {
     expect(manifest.features.tools).toBe(true);
     expect(manifest.enforcesPathPolicy).toBe(true);
     expect(manifest.directoryHashDomain).toBe(directoryHashDomainVersion());
+    // A shell binary is what CI actually has, so this is asserted as agreement
+    // with `supportsPty()` rather than a hard-coded `true`.
+    expect(manifest.terminal).toBe(manifest.shells.length > 0 && supportsPty());
   });
 
   it('advertises readonly without shell or write', () => {
@@ -27,6 +31,9 @@ describe('createLocalRuntimeManifest', () => {
     expect(manifest.features.update).toBe(false);
     expect(manifest.features.probing).toBe(true);
     expect(manifest.features.library).toBe(true);
+    // No shell consent means no PTY either, regardless of what this machine
+    // could otherwise offer.
+    expect(manifest.terminal).toBe(false);
   });
 
   it('announces gh under the same consent as git', () => {
