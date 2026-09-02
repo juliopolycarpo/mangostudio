@@ -648,6 +648,18 @@ export function createUserServiceManager(
   };
 
   const darwinTarget = `gui/${deps.uid}/${identity.launchdLabel}`;
+  /**
+   * Load the job into the domain, then kick it. `bootstrap` is tolerated
+   * failing: the job is already in the domain whenever it was never stopped,
+   * and it treats that as an error. `force` bounces one that is running.
+   */
+  const darwinBounce = async (force: boolean): Promise<void> => {
+    await run(['launchctl', 'bootstrap', `gui/${deps.uid}`, unitPath as string]);
+    await requireCommand(
+      ['launchctl', 'kickstart', ...(force ? ['-k'] : []), darwinTarget],
+      'launchctl kickstart'
+    );
+  };
   const darwin = {
     async install(definition: UserServiceDefinition) {
       await deps.mkdir(join(deps.home, 'Library', 'LaunchAgents'));
@@ -691,12 +703,7 @@ export function createUserServiceManager(
     // after `ThrottleInterval` while the caller was told it had stopped. The
     // plist stays on disk either way, so the job still loads at the next login
     // — the same thing `systemctl --user stop` leaves behind.
-    async start() {
-      // Tolerated: the job is already in the domain whenever it was never
-      // stopped, and `bootstrap` treats that as an error.
-      await run(['launchctl', 'bootstrap', `gui/${deps.uid}`, unitPath as string]);
-      await requireCommand(['launchctl', 'kickstart', darwinTarget], 'launchctl kickstart');
-    },
+    start: () => darwinBounce(false),
     async stop() {
       const result = await run(['launchctl', 'bootout', darwinTarget]);
       if (result.exitCode === 0) return;
@@ -710,25 +717,26 @@ export function createUserServiceManager(
         `launchctl bootout failed (exit ${result.exitCode})${detail ? `: ${detail}` : ''}`
       );
     },
-    // Same sequence as `start`, with `-k` to bounce a job that is running.
+    // `restart` is `start` with `-k` to bounce a job that is already running.
     // `kickstart` alone would fail after a `stop`, which now leaves the job out
     // of the domain — and every other backend restarts a stopped unit into a
     // running one.
-    async restart() {
-      await run(['launchctl', 'bootstrap', `gui/${deps.uid}`, unitPath as string]);
-      await requireCommand(['launchctl', 'kickstart', '-k', darwinTarget], 'launchctl kickstart');
-    },
+    restart: () => darwinBounce(true),
   };
+
+  /** Run a PowerShell script, naming the cmdlet it stands for in any refusal. */
+  const runPowerShell = (script: string, label: string): Promise<void> =>
+    requireCommand(powershellArgv(script), label);
 
   const win32 = {
     install: (definition: UserServiceDefinition) =>
-      requireCommand(
-        powershellArgv(renderScheduledTaskInstallScript(identity.taskName, definition)),
+      runPowerShell(
+        renderScheduledTaskInstallScript(identity.taskName, definition),
         'Register-ScheduledTask'
       ),
     uninstall: () =>
-      requireCommand(
-        powershellArgv(renderScheduledTaskVerbScript('unregister', identity.taskName)),
+      runPowerShell(
+        renderScheduledTaskVerbScript('unregister', identity.taskName),
         'Unregister-ScheduledTask'
       ),
     async status(): Promise<UserServiceStatus> {
@@ -755,18 +763,15 @@ export function createUserServiceManager(
       });
     },
     start: () =>
-      requireCommand(
-        powershellArgv(renderScheduledTaskVerbScript('start', identity.taskName)),
+      runPowerShell(
+        renderScheduledTaskVerbScript('start', identity.taskName),
         'Start-ScheduledTask'
       ),
     stop: () =>
-      requireCommand(
-        powershellArgv(renderScheduledTaskVerbScript('stop', identity.taskName)),
-        'Stop-ScheduledTask'
-      ),
+      runPowerShell(renderScheduledTaskVerbScript('stop', identity.taskName), 'Stop-ScheduledTask'),
     restart: () =>
-      requireCommand(
-        powershellArgv(renderScheduledTaskRestartScript(identity.taskName)),
+      runPowerShell(
+        renderScheduledTaskRestartScript(identity.taskName),
         'Stop-ScheduledTask/Start-ScheduledTask'
       ),
   };
