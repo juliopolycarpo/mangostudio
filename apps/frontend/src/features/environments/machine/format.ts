@@ -59,10 +59,26 @@ function actionReasonLabel(t: Messages, reason: MachineActionReason): string {
 }
 
 /**
+ * The sentences behind one refusal: the action's own reason, or — when the
+ * reason is the guard — the guard's individual checks. Shared so a new reason
+ * kind is worded once; what each caller does with an empty result differs and
+ * stays with the caller.
+ */
+function refusalLines(
+  t: Messages,
+  reason: MachineActionReason | null,
+  guardReasons: readonly InstallGuardReason[]
+): string[] {
+  if (reason && reason !== 'guard') return [actionReasonLabel(t, reason)];
+  return guardReasons.map((entry) => machineGuardReasonLabel(t, entry));
+}
+
+/**
  * Why the API refused an action it had advertised as available — the status the
  * page was showing went stale between the render and the POST, so the reason
  * arrives with the response rather than in `actions`. Same sentences as
- * {@link actionRefusalLines}, joined for a toast.
+ * {@link actionRefusalLines}, joined for a toast — and a toast has to say
+ * something, so an empty result falls back rather than showing nothing.
  * // Usage: refusalMessage(t, { reason: 'foreground', reasons: [] })
  */
 export function refusalMessage(
@@ -72,8 +88,7 @@ export function refusalMessage(
     readonly reasons: readonly InstallGuardReason[];
   }
 ): string {
-  if (refusal.reason && refusal.reason !== 'guard') return actionReasonLabel(t, refusal.reason);
-  const lines = refusal.reasons.map((reason) => machineGuardReasonLabel(t, reason));
+  const lines = refusalLines(t, refusal.reason, refusal.reasons);
   if (lines.length > 0) return lines.join(' ');
   return refusal.reason
     ? actionReasonLabel(t, refusal.reason)
@@ -82,7 +97,8 @@ export function refusalMessage(
 
 /**
  * Every sentence that explains why one action is unavailable, in the order the
- * user should read them: the guard's checks first, then the action's own.
+ * user should read them: the guard's checks first, then the action's own. An
+ * available action has nothing to explain, so the list is empty.
  */
 export function actionRefusalLines(
   t: Messages,
@@ -91,8 +107,5 @@ export function actionRefusalLines(
 ): string[] {
   const entry = status.actions[action];
   if (entry.available || !entry.reason) return [];
-  if (entry.reason === 'guard') {
-    return status.actions.guard.reasons.map((reason) => machineGuardReasonLabel(t, reason));
-  }
-  return [actionReasonLabel(t, entry.reason)];
+  return refusalLines(t, entry.reason, status.actions.guard.reasons);
 }
