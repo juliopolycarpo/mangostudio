@@ -27,6 +27,7 @@ import {
   resolveRuntimeSlotConfig,
   runtimeSlotDir,
   USER_SERVICE_ERROR_MAX,
+  type UserServiceStatus,
 } from '@mangostudio/shared/runtime-home';
 import { spawnServeChild } from '../../../cli/detach';
 import { canProbeHealth, probeHealth, probeHubHealth } from '../../../cli/health';
@@ -162,24 +163,38 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
     return isStateLive(state, (pid) => d.controller.isAlive(pid)) ? state : null;
   };
 
-  const actionsInput = async (
+  /** Assemble the action inputs around a service status already in hand. */
+  const actionsInputFrom = (
     clientIp: string | undefined,
-    state: ServerState | null
-  ): Promise<MachineActionsInput> => ({
+    state: ServerState | null,
+    service: UserServiceStatus
+  ): MachineActionsInput => ({
     launch: state ? hubLaunchMode(state) : 'foreground',
     platform: d.environment().platform,
-    service: await d.manager.status(),
+    service,
     guard: d.evaluateGuard(clientIp),
     secretPersisted: d.secretPersisted(),
   });
 
+  const actionsInput = async (
+    clientIp: string | undefined,
+    state: ServerState | null
+  ): Promise<MachineActionsInput> => actionsInputFrom(clientIp, state, await d.manager.status());
+
   return {
     async status(context) {
       const environment = d.environment();
-      const state = await liveState();
+      // Only the health probe needs the state file; the supervisor query and the
+      // two runtime probes each spawn work of their own and depend on nothing
+      // but the request, so they are asked for together rather than in turn.
+      const [state, service, binary, slots] = await Promise.all([
+        liveState(),
+        d.manager.status(),
+        d.probeRuntimeBinary(),
+        d.probeRuntimeSlots(),
+      ]);
       const health = state === null ? undefined : await resolveHealth(state, environment, d);
-      const input = await actionsInput(context.clientIp, state);
-      const [binary, slots] = await Promise.all([d.probeRuntimeBinary(), d.probeRuntimeSlots()]);
+      const input = actionsInputFrom(context.clientIp, state, service);
       const host = slots.find((slot) => slot.slot === 'host');
       return {
         hub: describeHubProcess({ state, alive: state !== null, now: d.now(), health }),
