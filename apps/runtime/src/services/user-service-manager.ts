@@ -661,10 +661,14 @@ export function createUserServiceManager(
         `launchctl bootout failed (exit ${result.exitCode})${detail ? `: ${detail}` : ''}`
       );
     },
-    // `-k` signals the job and lets launchd start it again, which is a restart
-    // rather than a stop, so KeepAlive is working with it here.
-    restart: () =>
-      requireCommand(['launchctl', 'kickstart', '-k', darwinTarget], 'launchctl kickstart'),
+    // Same sequence as `start`, with `-k` to bounce a job that is running.
+    // `kickstart` alone would fail after a `stop`, which now leaves the job out
+    // of the domain — and every other backend restarts a stopped unit into a
+    // running one.
+    async restart() {
+      await run(['launchctl', 'bootstrap', `gui/${deps.uid}`, unitPath as string]);
+      await requireCommand(['launchctl', 'kickstart', '-k', darwinTarget], 'launchctl kickstart');
+    },
   };
 
   const win32 = {

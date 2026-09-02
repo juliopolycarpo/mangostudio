@@ -391,6 +391,25 @@ describe('createUserServiceManager on darwin', () => {
     });
   });
 
+  it('bootstraps before kickstarting on restart, so a stopped job comes back', async () => {
+    const host = new FakeServiceHost({ platform: 'darwin' });
+
+    await createUserServiceManager(IDENTITY, host.deps()).restart();
+
+    // `stop` boots the job out of the domain, so `kickstart` alone would fail
+    // with "Could not find service" while the CLI reported a restart. systemd
+    // and Task Scheduler both start a stopped unit on restart.
+    expect(host.argv).toEqual([
+      [
+        'launchctl',
+        'bootstrap',
+        'gui/1000',
+        '/home/test/Library/LaunchAgents/com.example.unit.plist',
+      ],
+      ['launchctl', 'kickstart', '-k', 'gui/1000/com.example.unit'],
+    ]);
+  });
+
   it('bootstraps before kickstarting, since a stopped job has left the domain', async () => {
     const host = new FakeServiceHost({ platform: 'darwin' });
 
