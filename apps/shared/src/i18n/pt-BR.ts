@@ -2524,6 +2524,138 @@ export const messages = {
       agents: 'Agentes',
       health: 'Diagnóstico',
       library: 'Biblioteca',
+      machine: 'Esta máquina',
+    },
+    machine: {
+      description:
+        'O processo do MangoStudio que serve esta página, o que o mantém em execução e o que o doctor diz sobre a instalação.',
+      refresh: 'Atualizar',
+      reconnecting: 'Aguardando o servidor voltar...',
+      hub: {
+        title: 'Hub',
+        running: 'Em execução',
+        notRunning: 'Parado',
+        url: 'Endereço',
+        pid: 'Processo',
+        launchLabel: 'Iniciado',
+        launch: {
+          service: 'pelo serviço',
+          detached: 'em segundo plano',
+          foreground: 'em um terminal',
+        },
+        uptime: 'Tempo ativo',
+        version: 'Versão',
+        logFile: 'Arquivo de log',
+        noLogFile: 'nenhum (escreve no terminal)',
+        healthLabel: 'Saúde',
+        health: {
+          ok: 'Saudável',
+          unreachable: 'Sem resposta',
+        },
+      },
+      service: {
+        title: 'Serviço',
+        description:
+          'Um serviço por usuário inicia o MangoStudio no login e o traz de volta após reiniciar, para que já esteja lá antes de você abrir o navegador.',
+        installed: 'Instalado',
+        notInstalled: 'Não instalado',
+        supervisor: {
+          linux: 'unidade de usuário do systemd',
+          darwin: 'agente do launchd',
+          win32: 'Tarefa Agendada',
+          unsupported: 'Sem supervisor nesta plataforma',
+        },
+        enabledLabel: 'No login',
+        enabled: 'Ativado',
+        disabled: 'Desativado',
+        runningLabel: 'Estado',
+        running: 'Em execução',
+        stopped: 'Parado',
+        lingerLabel: 'Após o logout',
+        lingerOn: 'Continua em execução',
+        lingerOff: 'Para no logout',
+        runs: 'Executa',
+      },
+      install: {
+        title: 'Instalação',
+        home: 'Diretório base',
+        logsDir: 'Logs',
+        configFile: 'Arquivo de configuração',
+        noConfigFile: 'nenhum (padrões)',
+        build: 'Build',
+        standalone: 'binário standalone',
+        sourceCheckout: 'checkout do código-fonte',
+        container: 'contêiner',
+      },
+      runtime: {
+        title: 'Binário do runtime',
+        source: 'Executa a partir do checkout do código-fonte via Bun',
+        missing: 'não encontrado ao lado do hub',
+        versionMismatch:
+          'O binário do runtime informa uma versão diferente da do hub. Ambientes stdio recusarão o pareamento até que as duas coincidam.',
+      },
+      hostSlot: {
+        title: 'Consentimento do host',
+        absent: 'sem arquivo de consentimento, então tudo é permitido',
+        profile: {
+          full: 'Acesso total',
+          readonly: 'Somente leitura',
+          none: 'Nada permitido',
+          custom: 'Personalizado',
+        },
+      },
+      doctor: {
+        title: 'Doctor',
+        summary: '{warnings} avisos, {failures} falhas',
+        clear: 'Todas as verificações passaram.',
+      },
+      logs: {
+        title: 'Log',
+        none: 'Sem arquivo de log: este servidor escreve no terminal em que foi iniciado.',
+        empty: 'O arquivo de log está vazio.',
+        truncated: 'Últimas {count} linhas de {file}',
+      },
+      actions: {
+        restart: 'Reiniciar',
+        installService: 'Instalar serviço',
+        uninstallService: 'Remover serviço',
+        confirm: 'Continuar',
+        cancel: 'Cancelar',
+        confirmRestartTitle: 'Reiniciar o MangoStudio?',
+        confirmRestartDescription:
+          'Todos os chats e conexões caem por alguns segundos enquanto o servidor volta. Equivale a executar:',
+        confirmInstallTitle: 'Instalar o serviço?',
+        confirmInstallDescription:
+          'O MangoStudio passará a iniciar no login. O servidor em execução entrega o lugar ao serviço, o que derruba as conexões por alguns segundos. Equivale a executar:',
+        confirmUninstallTitle: 'Remover o serviço?',
+        confirmUninstallDescription:
+          'O MangoStudio deixará de iniciar no login. Se o serviço for o que está em execução agora, ele para junto. Equivale a executar:',
+        runInstead: 'Execute isto em um terminal',
+        refused: 'O servidor recusou esta ação.',
+        failed: 'Não foi possível enviar a ação.',
+        guard: {
+          container:
+            'Este hub roda dentro de um contêiner; reinicie-o e gerencie o serviço a partir do host do contêiner.',
+          'server-not-loopback':
+            'O MangoStudio está acessível a partir de outras máquinas, então não se reinicia nem altera o serviço a partir de um navegador.',
+          'client-not-loopback': 'Esta página não foi aberta na máquina em que o hub roda.',
+        },
+        reasons: {
+          guard: 'Esta ação só está disponível em um navegador na máquina em que o hub roda.',
+          foreground:
+            'O servidor foi iniciado em um terminal, que é o dono dele. Pressione Ctrl-C lá e inicie de novo.',
+          'windows-service':
+            'Uma Tarefa Agendada não consegue se reiniciar de dentro do próprio processo. Use o comando abaixo.',
+          'already-installed': 'O serviço já está instalado.',
+          'not-installed': 'Não há serviço para remover.',
+          'unsupported-platform':
+            'Nenhum gerenciador de serviço por usuário é suportado nesta plataforma.',
+          'service-unreadable':
+            'Não foi possível consultar o gerenciador de serviço; veja o erro acima.',
+          'secret-not-persisted':
+            'O segredo de autenticação existe só no ambiente deste processo, então um serviço não conseguiria iniciar com ele. Execute o comando abaixo uma vez em um terminal; ele guarda o segredo primeiro.',
+        },
+      },
     },
     // Nomes próprios de produtos — iguais em todos os idiomas, mas centralizados
     // aqui para que a UI nunca use um id cru como `nvm` ou `mangostudio`.

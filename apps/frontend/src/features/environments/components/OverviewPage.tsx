@@ -14,6 +14,7 @@ import {
   useInstallRecipes,
   useRuntimeStatuses,
 } from '../hooks/use-runtime-status';
+import { OverviewMachineSection } from '../machine/components/OverviewMachineSection';
 import { EnvironmentEntitiesOverview } from './EnvironmentEntitiesOverview';
 import { EnvironmentPageState } from './EnvironmentPageState';
 import { OverviewAgentCard } from './OverviewAgentCard';
@@ -37,6 +38,8 @@ export function OverviewPage() {
         <OverviewHealthRollup />
         <OverviewLibrarySnapshot />
       </div>
+
+      <OverviewMachineSection />
     </div>
   );
 }

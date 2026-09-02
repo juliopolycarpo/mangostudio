@@ -111,9 +111,10 @@ describe('navigateCommands', () => {
     expect(paths).toContain('/gallery');
     expect(paths).toContain('/studio');
     expect(paths).toContain('/environments/health');
+    expect(paths).toContain('/environments/machine');
     expect(paths).toContain('/settings/external-agents');
-    // 4 surfaces + 5 environments tabs + 15 settings tabs.
-    expect(items).toHaveLength(24);
+    // 4 surfaces + 6 environments tabs + 15 settings tabs.
+    expect(items).toHaveLength(25);
   });
 
   it('qualifies a tab label with the surface it belongs to', () => {

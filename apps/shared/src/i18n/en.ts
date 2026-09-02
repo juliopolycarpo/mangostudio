@@ -2524,6 +2524,136 @@ export const messages: Messages = {
       agents: 'Agents',
       health: 'Health',
       library: 'Library',
+      machine: 'This machine',
+    },
+    machine: {
+      description:
+        'The MangoStudio process serving this page, what keeps it running, and what doctor says about the install.',
+      refresh: 'Refresh',
+      reconnecting: 'Waiting for the server to come back...',
+      hub: {
+        title: 'Hub',
+        running: 'Running',
+        notRunning: 'Not running',
+        url: 'Address',
+        pid: 'Process',
+        launchLabel: 'Started',
+        launch: {
+          service: 'by the service',
+          detached: 'in the background',
+          foreground: 'in a terminal',
+        },
+        uptime: 'Uptime',
+        version: 'Version',
+        logFile: 'Log file',
+        noLogFile: 'none (writes to its terminal)',
+        healthLabel: 'Health',
+        health: {
+          ok: 'Healthy',
+          unreachable: 'Not answering',
+        },
+      },
+      service: {
+        title: 'Service',
+        description:
+          'A per-user service starts MangoStudio at login and brings it back after a reboot, so it is there before you open the browser.',
+        installed: 'Installed',
+        notInstalled: 'Not installed',
+        supervisor: {
+          linux: 'systemd user unit',
+          darwin: 'launchd agent',
+          win32: 'Scheduled Task',
+          unsupported: 'No supervisor on this platform',
+        },
+        enabledLabel: 'At login',
+        enabled: 'Enabled',
+        disabled: 'Disabled',
+        runningLabel: 'State',
+        running: 'Running',
+        stopped: 'Stopped',
+        lingerLabel: 'After logout',
+        lingerOn: 'Keeps running',
+        lingerOff: 'Stops at logout',
+        runs: 'Runs',
+      },
+      install: {
+        title: 'Install',
+        home: 'Home directory',
+        logsDir: 'Logs',
+        configFile: 'Config file',
+        noConfigFile: 'none (defaults)',
+        build: 'Build',
+        standalone: 'standalone binary',
+        sourceCheckout: 'source checkout',
+        container: 'container',
+      },
+      runtime: {
+        title: 'Runtime binary',
+        source: 'Runs from the source checkout through Bun',
+        missing: 'not found beside the hub',
+        versionMismatch:
+          'The runtime binary reports a different version than the hub. Stdio environments will refuse to pair until both match.',
+      },
+      hostSlot: {
+        title: 'Host consent',
+        absent: 'no consent file, so everything is allowed',
+        profile: {
+          full: 'Full access',
+          readonly: 'Read only',
+          none: 'Nothing allowed',
+          custom: 'Custom',
+        },
+      },
+      doctor: {
+        title: 'Doctor',
+        summary: '{warnings} warnings, {failures} failures',
+        clear: 'Every check passed.',
+      },
+      logs: {
+        title: 'Log',
+        none: 'No log file: this server writes to the terminal it was started in.',
+        empty: 'The log file is empty.',
+        truncated: 'Last {count} lines of {file}',
+      },
+      actions: {
+        restart: 'Restart',
+        installService: 'Install service',
+        uninstallService: 'Remove service',
+        confirm: 'Continue',
+        cancel: 'Cancel',
+        confirmRestartTitle: 'Restart MangoStudio?',
+        confirmRestartDescription:
+          'Every chat and connection drops for a few seconds while the server comes back. This is the same as running:',
+        confirmInstallTitle: 'Install the service?',
+        confirmInstallDescription:
+          'MangoStudio will start at login from now on. The running server hands over to the service, which drops connections for a few seconds. This is the same as running:',
+        confirmUninstallTitle: 'Remove the service?',
+        confirmUninstallDescription:
+          'MangoStudio will no longer start at login. If the service is what is running now, it stops with it. This is the same as running:',
+        runInstead: 'Run this in a terminal instead',
+        refused: 'The server refused this action.',
+        failed: 'The action could not be sent.',
+        guard: {
+          container:
+            'This hub runs inside a container; restart it and manage its service from the container host.',
+          'server-not-loopback':
+            'MangoStudio is reachable from other machines, so it will not restart itself or change its service from a browser.',
+          'client-not-loopback': 'This page was not opened from the machine the hub runs on.',
+        },
+        reasons: {
+          guard: 'This action is only available from a browser on the machine the hub runs on.',
+          foreground:
+            'The server was started in a terminal, which owns it. Press Ctrl-C there and start it again.',
+          'windows-service':
+            'A Scheduled Task cannot restart itself from inside its own process. Use the command below.',
+          'already-installed': 'The service is already installed.',
+          'not-installed': 'There is no service to remove.',
+          'unsupported-platform': 'No per-user service manager is supported on this platform.',
+          'service-unreadable': 'The service manager could not be asked; see the error above.',
+          'secret-not-persisted':
+            'The auth secret lives only in this process\u2019s environment, so a service could not start with it. Run the command below once in a terminal; it stores the secret first.',
+        },
+      },
     },
     // Product names — identical in every locale, but centralized here so the UI
     // never renders a raw id such as `nvm` or `mangostudio`.
