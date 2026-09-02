@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { dismissWorkdirPicker } from './support/workdir-picker';
 
 /**
  * Opens the Terminal rail panel on a fresh chat, starts a session on the Local
@@ -17,22 +18,9 @@ test('typing in the terminal panel runs a real command', async ({ page }) => {
   // straight onto the authenticated shell.
   await page.goto('/');
 
-  // A chat on an account with no default working directory opens the folder
-  // picker by itself, and it is a modal: its header swallows every click
-  // underneath, including the one on "New Chat". Dismiss it wherever it shows
-  // up — this spec runs first in the suite, so it also meets the account's
-  // very first landing, where the app opens a chat and the picker on its own.
-  const workdirPicker = page.getByRole('dialog', { name: 'Working directory' });
-  const dismissWorkdirPicker = async (): Promise<void> => {
-    const opened = await workdirPicker.waitFor({ state: 'visible', timeout: 5_000 }).then(
-      () => true,
-      () => false
-    );
-    if (!opened) return;
-    await page.keyboard.press('Escape');
-    await expect(workdirPicker).toBeHidden({ timeout: 10_000 });
-  };
-  await dismissWorkdirPicker();
+  // This spec runs first in the suite, so it meets the account's very first
+  // landing, where the app opens a chat and its folder picker on its own.
+  await dismissWorkdirPicker(page);
 
   // The rail only exists on the chat surface; open a chat when the landing
   // did not already do so. Scoped to `main` because the sidebar carries a
@@ -40,7 +28,7 @@ test('typing in the terminal panel runs a real command', async ({ page }) => {
   const railButton = page.getByRole('button', { name: 'Show Terminal panel' });
   if (!(await railButton.isVisible())) {
     await page.getByRole('main').getByRole('button', { name: 'New Chat' }).click();
-    await dismissWorkdirPicker();
+    await dismissWorkdirPicker(page);
   }
   await expect(railButton).toBeVisible({ timeout: 15_000 });
   await railButton.click();
