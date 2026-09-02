@@ -218,10 +218,16 @@ export function isAuthSecretPersisted(config: MangoConfig = getConfig()): boolea
   const tomlPath = config.configFilePath;
   if (!tomlPath) return false;
   try {
-    // A missing file reads as an empty document, so there is no exists-then-read
-    // window in which the throw would be mistaken for "no secret persisted" —
-    // the answer that makes `service install` refuse.
-    const auth = readTomlDocument(tomlPath).auth as Record<string, unknown> | undefined;
+    // Resolve first: `config.toml` is one of the files users symlink into a
+    // dotfiles repo (#617), which `loadConfig` follows via `readFileSync` and
+    // `writeFileAtomic` writes through. `readTomlDocument` opens with
+    // `O_NOFOLLOW`, so reading the link itself raises `ELOOP` and this gate
+    // would refuse a hub that boots with the secret just fine. A missing file
+    // still reads as an empty document, so there is no exists-then-read window
+    // in which a throw is mistaken for "no secret persisted".
+    const auth = readTomlDocument(realPathOrSelf(tomlPath)).auth as
+      | Record<string, unknown>
+      | undefined;
     return typeof auth?.secret === 'string' && auth.secret.trim().length > 0;
   } catch {
     // Malformed TOML still throws out of the parser.

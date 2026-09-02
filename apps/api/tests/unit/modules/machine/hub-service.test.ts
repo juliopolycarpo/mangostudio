@@ -1,9 +1,16 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { loadConfigForTest, resetConfig } from '../../../../src/lib/config';
 import {
   buildHubServiceDefinition,
+  isAuthSecretPersisted,
   withoutUserinfo,
 } from '../../../../src/modules/machine/application/hub-service';
 import { hubServiceUnitName } from '../../../../src/modules/machine/domain/hub-service-identity';
+
+const isWindows = process.platform === 'win32';
 
 describe('buildHubServiceDefinition', () => {
   it('forwards configuration, never secrets, and marks the unit', () => {
@@ -121,6 +128,78 @@ describe('buildHubServiceDefinition on Windows', () => {
     });
     expect(definition.env).not.toHaveProperty('PATH');
     expect(definition.env).toMatchObject({ TZ: 'UTC' });
+  });
+});
+
+describe('isAuthSecretPersisted', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'mango-hub-secret-'));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    resetConfig();
+  });
+
+  /** A `~/.mango` holding only the config file this test wants to be read. */
+  function mangoHome(write: (mangoDir: string) => void): string {
+    const mangoDir = join(dir, 'mango');
+    mkdirSync(mangoDir, { recursive: true });
+    write(mangoDir);
+    return loadConfigForTest({ configFilePath: join(mangoDir, 'config.toml') }).configFilePath;
+  }
+
+  it('finds the secret in a plain config.toml', () => {
+    const configFilePath = mangoHome((mangoDir) => {
+      writeFileSync(join(mangoDir, 'config.toml'), '[auth]\nsecret = "hunter2-and-then-some"\n');
+    });
+
+    expect(isAuthSecretPersisted(loadConfigForTest({ configFilePath }))).toBe(true);
+  });
+
+  /**
+   * Regression coverage for a `config.toml` symlinked into a dotfiles repo, the
+   * arrangement `writeFileAtomic` exists to preserve (#617). The gate used to
+   * read it through `O_NOFOLLOW`, so the link raised `ELOOP` and `service
+   * install` refused with `secret-not-persisted` on a hub that boots fine.
+   */
+  it('finds the secret in a config.toml symlinked into a dotfiles repo', () => {
+    if (isWindows) return;
+    const target = join(dir, 'dotfiles', 'config.toml');
+    mkdirSync(join(dir, 'dotfiles'), { recursive: true });
+    writeFileSync(target, '[auth]\nsecret = "hunter2-and-then-some"\n');
+    // No `.env` beside the link: the env branch must not answer this for us.
+    const configFilePath = mangoHome((mangoDir) => {
+      symlinkSync(target, join(mangoDir, 'config.toml'));
+    });
+
+    expect(isAuthSecretPersisted(loadConfigForTest({ configFilePath }))).toBe(true);
+  });
+
+  it('reports no secret when neither file holds one', () => {
+    const configFilePath = mangoHome((mangoDir) => {
+      writeFileSync(join(mangoDir, 'config.toml'), '[server]\nport = 3000\n');
+    });
+
+    expect(isAuthSecretPersisted(loadConfigForTest({ configFilePath }))).toBe(false);
+  });
+
+  it('reports no secret for a malformed config.toml rather than throwing', () => {
+    const configFilePath = mangoHome((mangoDir) => {
+      writeFileSync(join(mangoDir, 'config.toml'), '[auth\nsecret =\n');
+    });
+
+    expect(isAuthSecretPersisted(loadConfigForTest({ configFilePath }))).toBe(false);
+  });
+
+  it('prefers the .env beside the link over reading config.toml at all', () => {
+    const configFilePath = mangoHome((mangoDir) => {
+      writeFileSync(join(mangoDir, '.env'), 'BETTER_AUTH_SECRET=hunter2-and-then-some\n');
+    });
+
+    expect(isAuthSecretPersisted(loadConfigForTest({ configFilePath }))).toBe(true);
   });
 });
 
