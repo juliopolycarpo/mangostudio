@@ -35,6 +35,39 @@ function LogBody({ tail }: { readonly tail: MachineLogTail }) {
   );
 }
 
+/**
+ * What the card shows below its header. Written as early returns rather than
+ * one chain: the first two arms are the rule "do not blank a section that
+ * already has content", and a sixth state would re-indent the whole thing.
+ */
+function LogContent({ logs }: { readonly logs: ReturnType<typeof useMachineLogs> }) {
+  const { t } = useI18n();
+  const m = t.environments.machine.logs;
+
+  if (logs.isPending && !logs.data)
+    return <EnvironmentPageState variant="loading" size="section" />;
+  if (logs.error && !logs.data) {
+    return (
+      <EnvironmentPageState variant="error" size="section" onRetry={() => void logs.refetch()} />
+    );
+  }
+  if (!logs.data) return null;
+  if (logs.data.outcome === 'refused') {
+    return (
+      <div className="space-y-1" data-testid="machine-logs-refused">
+        {logs.data.reasons.map((reason) => (
+          <p key={reason} className="text-sm text-on-surface-variant">
+            {machineGuardReasonLabel(t, reason)}
+          </p>
+        ))}
+        <p className="text-sm text-on-surface-variant/70">{m.readLocally}</p>
+      </div>
+    );
+  }
+  if (!logs.data.tail.file) return <p className="text-sm text-on-surface-variant/70">{m.none}</p>;
+  return <LogBody tail={logs.data.tail} />;
+}
+
 export function LogTail() {
   const { t } = useI18n();
   const m = t.environments.machine.logs;
@@ -55,24 +88,7 @@ export function LogTail() {
         </Button>
       </div>
 
-      {logs.isPending && !logs.data ? (
-        <EnvironmentPageState variant="loading" size="section" />
-      ) : logs.error && !logs.data ? (
-        <EnvironmentPageState variant="error" size="section" onRetry={() => void logs.refetch()} />
-      ) : !logs.data ? null : logs.data.outcome === 'refused' ? (
-        <div className="space-y-1" data-testid="machine-logs-refused">
-          {logs.data.reasons.map((reason) => (
-            <p key={reason} className="text-sm text-on-surface-variant">
-              {machineGuardReasonLabel(t, reason)}
-            </p>
-          ))}
-          <p className="text-sm text-on-surface-variant/70">{m.readLocally}</p>
-        </div>
-      ) : !logs.data.tail.file ? (
-        <p className="text-sm text-on-surface-variant/70">{m.none}</p>
-      ) : (
-        <LogBody tail={logs.data.tail} />
-      )}
+      <LogContent logs={logs} />
     </section>
   );
 }
