@@ -2024,6 +2024,7 @@ export const messages: Messages = {
     runtimeDisconnected: 'The runtime went away; this session ended.',
     closeConfirmTitle: 'Close this terminal?',
     closeConfirmDescription: 'The shell and anything it is running will be stopped.',
+    cancel: 'Cancel',
     unavailableTitle: 'Terminal is unavailable',
     unavailable: {
       disabled: 'Terminals are turned off on this hub.',

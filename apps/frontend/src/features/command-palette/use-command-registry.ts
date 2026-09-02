@@ -25,6 +25,7 @@ import {
   useExternalAgents,
 } from '@/features/external-agents/useExternalAgents';
 import { requestGithubCreatePr } from '@/features/github/lib/github-panel-request';
+import { requestNewTerminalSession } from '@/features/terminal/terminal-panel-request';
 import { isWorkspacePanelVisible } from '@/features/workspace/rail/panel-registry';
 import { requestRailPanel } from '@/features/workspace/rail/rail-panel-request';
 import { useI18n } from '@/hooks/use-i18n';
@@ -70,6 +71,10 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
   // mounted beside the rail and not by it.
   const githubPanelVisible = isWorkspacePanelVisible(
     'github',
+    app.settings.workspaceSettings.sidePanel
+  );
+  const terminalPanelVisible = isWorkspacePanelVisible(
+    'terminal',
     app.settings.workspaceSettings.sidePanel
   );
 
@@ -122,6 +127,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
       resolvedTheme,
       hasChat: currentChatId !== null,
       githubPanelVisible,
+      terminalPanelVisible,
       isGenerating,
       chatHasTurns,
       newChatShortcut: newChatShortcutHint(),
@@ -181,6 +187,17 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
         requestRailPanel('github');
         requestGithubCreatePr();
       },
+      onOpenTerminalPanel: async () => {
+        onRun();
+        await navigate({ to: '/' });
+        requestRailPanel('terminal');
+      },
+      onNewTerminalSession: async () => {
+        onRun();
+        await navigate({ to: '/' });
+        requestRailPanel('terminal');
+        requestNewTerminalSession();
+      },
     });
 
     const navigation = navigateCommands({
@@ -220,6 +237,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
     resolvedTheme,
     setConfig,
     t,
+    terminalPanelVisible,
   ]);
 
   return {

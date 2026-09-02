@@ -18,6 +18,7 @@ import { Route as AuthenticatedGalleryRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedHomeRouteImport } from './routes/_authenticated/home'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedStudioRouteImport } from './routes/_authenticated/studio'
+import { Route as AuthenticatedTerminalRouteImport } from './routes/_authenticated/terminal'
 import { Route as AuthenticatedEnvironmentsIndexRouteImport } from './routes/_authenticated/environments/index'
 import { Route as AuthenticatedEnvironmentsAgentsRouteImport } from './routes/_authenticated/environments/agents'
 import { Route as AuthenticatedEnvironmentsHealthRouteImport } from './routes/_authenticated/environments/health'
@@ -41,6 +42,7 @@ import { Route as AuthenticatedSettingsPromptsRouteImport } from './routes/_auth
 import { Route as AuthenticatedSettingsProvidersRouteImport } from './routes/_authenticated/settings/providers'
 import { Route as AuthenticatedSettingsSkillsRouteImport } from './routes/_authenticated/settings/skills'
 import { Route as AuthenticatedSettingsToolsRouteImport } from './routes/_authenticated/settings/tools'
+import { Route as AuthenticatedTerminalSessionIdRouteImport } from './routes/_authenticated/terminal_.$sessionId'
 import { Route as AuthenticatedEnvironmentsLibraryIndexRouteImport } from './routes/_authenticated/environments/library/index'
 import { Route as AuthenticatedEnvironmentsLibraryResourceKeyRouteImport } from './routes/_authenticated/environments/library/$resourceKey'
 import { Route as AuthenticatedEnvironmentsLibraryBackupsRouteImport } from './routes/_authenticated/environments/library/backups'
@@ -107,6 +109,13 @@ const AuthenticatedStudioRoute = AuthenticatedStudioRouteImport.update({
   getParentRoute: () => AuthenticatedRoute,
 } as any).lazy(() =>
   import('./routes/_authenticated/studio.lazy').then((d) => d.Route),
+)
+const AuthenticatedTerminalRoute = AuthenticatedTerminalRouteImport.update({
+  id: '/terminal',
+  path: '/terminal',
+  getParentRoute: () => AuthenticatedRoute,
+} as any).lazy(() =>
+  import('./routes/_authenticated/terminal.lazy').then((d) => d.Route),
 )
 const AuthenticatedEnvironmentsIndexRoute =
   AuthenticatedEnvironmentsIndexRouteImport.update({
@@ -314,6 +323,16 @@ const AuthenticatedSettingsToolsRoute =
   } as any).lazy(() =>
     import('./routes/_authenticated/settings/tools.lazy').then((d) => d.Route),
   )
+const AuthenticatedTerminalSessionIdRoute =
+  AuthenticatedTerminalSessionIdRouteImport.update({
+    id: '/terminal_/$sessionId',
+    path: '/terminal/$sessionId',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any).lazy(() =>
+    import('./routes/_authenticated/terminal_.$sessionId.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AuthenticatedEnvironmentsLibraryIndexRoute =
   AuthenticatedEnvironmentsLibraryIndexRouteImport.update({
     id: '/',
@@ -430,6 +449,7 @@ export interface FileRoutesByFullPath {
   '/home': typeof AuthenticatedHomeRoute
   '/settings': typeof AuthenticatedSettingsRouteWithChildren
   '/studio': typeof AuthenticatedStudioRoute
+  '/terminal': typeof AuthenticatedTerminalRoute
   '/environments/agents': typeof AuthenticatedEnvironmentsAgentsRoute
   '/environments/health': typeof AuthenticatedEnvironmentsHealthRoute
   '/environments/library': typeof AuthenticatedEnvironmentsLibraryRouteWithChildren
@@ -451,6 +471,7 @@ export interface FileRoutesByFullPath {
   '/settings/providers': typeof AuthenticatedSettingsProvidersRouteWithChildren
   '/settings/skills': typeof AuthenticatedSettingsSkillsRoute
   '/settings/tools': typeof AuthenticatedSettingsToolsRoute
+  '/terminal/$sessionId': typeof AuthenticatedTerminalSessionIdRoute
   '/environments/': typeof AuthenticatedEnvironmentsIndexRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
   '/environments/library/$resourceKey': typeof AuthenticatedEnvironmentsLibraryResourceKeyRoute
@@ -471,6 +492,7 @@ export interface FileRoutesByTo {
   '/gallery': typeof AuthenticatedGalleryRoute
   '/home': typeof AuthenticatedHomeRoute
   '/studio': typeof AuthenticatedStudioRoute
+  '/terminal': typeof AuthenticatedTerminalRoute
   '/': typeof AuthenticatedIndexRoute
   '/environments/agents': typeof AuthenticatedEnvironmentsAgentsRoute
   '/environments/health': typeof AuthenticatedEnvironmentsHealthRoute
@@ -491,6 +513,7 @@ export interface FileRoutesByTo {
   '/settings/prompts': typeof AuthenticatedSettingsPromptsRoute
   '/settings/skills': typeof AuthenticatedSettingsSkillsRoute
   '/settings/tools': typeof AuthenticatedSettingsToolsRoute
+  '/terminal/$sessionId': typeof AuthenticatedTerminalSessionIdRoute
   '/environments': typeof AuthenticatedEnvironmentsIndexRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
   '/environments/library/$resourceKey': typeof AuthenticatedEnvironmentsLibraryResourceKeyRoute
@@ -515,6 +538,7 @@ export interface FileRoutesById {
   '/_authenticated/home': typeof AuthenticatedHomeRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRouteWithChildren
   '/_authenticated/studio': typeof AuthenticatedStudioRoute
+  '/_authenticated/terminal': typeof AuthenticatedTerminalRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/environments/agents': typeof AuthenticatedEnvironmentsAgentsRoute
   '/_authenticated/environments/health': typeof AuthenticatedEnvironmentsHealthRoute
@@ -537,6 +561,7 @@ export interface FileRoutesById {
   '/_authenticated/settings/providers': typeof AuthenticatedSettingsProvidersRouteWithChildren
   '/_authenticated/settings/skills': typeof AuthenticatedSettingsSkillsRoute
   '/_authenticated/settings/tools': typeof AuthenticatedSettingsToolsRoute
+  '/_authenticated/terminal_/$sessionId': typeof AuthenticatedTerminalSessionIdRoute
   '/_authenticated/environments/': typeof AuthenticatedEnvironmentsIndexRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
   '/_authenticated/environments/library/$resourceKey': typeof AuthenticatedEnvironmentsLibraryResourceKeyRoute
@@ -562,6 +587,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/settings'
     | '/studio'
+    | '/terminal'
     | '/environments/agents'
     | '/environments/health'
     | '/environments/library'
@@ -583,6 +609,7 @@ export interface FileRouteTypes {
     | '/settings/providers'
     | '/settings/skills'
     | '/settings/tools'
+    | '/terminal/$sessionId'
     | '/environments/'
     | '/settings/'
     | '/environments/library/$resourceKey'
@@ -603,6 +630,7 @@ export interface FileRouteTypes {
     | '/gallery'
     | '/home'
     | '/studio'
+    | '/terminal'
     | '/'
     | '/environments/agents'
     | '/environments/health'
@@ -623,6 +651,7 @@ export interface FileRouteTypes {
     | '/settings/prompts'
     | '/settings/skills'
     | '/settings/tools'
+    | '/terminal/$sessionId'
     | '/environments'
     | '/settings'
     | '/environments/library/$resourceKey'
@@ -646,6 +675,7 @@ export interface FileRouteTypes {
     | '/_authenticated/home'
     | '/_authenticated/settings'
     | '/_authenticated/studio'
+    | '/_authenticated/terminal'
     | '/_authenticated/'
     | '/_authenticated/environments/agents'
     | '/_authenticated/environments/health'
@@ -668,6 +698,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/providers'
     | '/_authenticated/settings/skills'
     | '/_authenticated/settings/tools'
+    | '/_authenticated/terminal_/$sessionId'
     | '/_authenticated/environments/'
     | '/_authenticated/settings/'
     | '/_authenticated/environments/library/$resourceKey'
@@ -752,6 +783,13 @@ declare module '@tanstack/react-router' {
       path: '/studio'
       fullPath: '/studio'
       preLoaderRoute: typeof AuthenticatedStudioRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/terminal': {
+      id: '/_authenticated/terminal'
+      path: '/terminal'
+      fullPath: '/terminal'
+      preLoaderRoute: typeof AuthenticatedTerminalRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/environments/': {
@@ -914,6 +952,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings/tools'
       preLoaderRoute: typeof AuthenticatedSettingsToolsRouteImport
       parentRoute: typeof AuthenticatedSettingsRoute
+    }
+    '/_authenticated/terminal_/$sessionId': {
+      id: '/_authenticated/terminal_/$sessionId'
+      path: '/terminal/$sessionId'
+      fullPath: '/terminal/$sessionId'
+      preLoaderRoute: typeof AuthenticatedTerminalSessionIdRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/environments/library/': {
       id: '/_authenticated/environments/library/'
@@ -1130,8 +1175,10 @@ interface AuthenticatedRouteChildren {
   AuthenticatedHomeRoute: typeof AuthenticatedHomeRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRouteWithChildren
   AuthenticatedStudioRoute: typeof AuthenticatedStudioRoute
+  AuthenticatedTerminalRoute: typeof AuthenticatedTerminalRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedLibrarySplatRoute: typeof AuthenticatedLibrarySplatRoute
+  AuthenticatedTerminalSessionIdRoute: typeof AuthenticatedTerminalSessionIdRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
@@ -1140,8 +1187,10 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedHomeRoute: AuthenticatedHomeRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRouteWithChildren,
   AuthenticatedStudioRoute: AuthenticatedStudioRoute,
+  AuthenticatedTerminalRoute: AuthenticatedTerminalRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedLibrarySplatRoute: AuthenticatedLibrarySplatRoute,
+  AuthenticatedTerminalSessionIdRoute: AuthenticatedTerminalSessionIdRoute,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(

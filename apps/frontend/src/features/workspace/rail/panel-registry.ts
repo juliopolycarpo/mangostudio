@@ -1,8 +1,15 @@
 import type { TodoList } from '@mangostudio/shared/todos';
 import type { WorkspacePanelId, WorkspacePanelSettings } from '@mangostudio/shared/workspaces';
-import { FolderGit2, GitPullRequest, ListTodo, type LucideIcon } from 'lucide-react';
+import {
+  FolderGit2,
+  GitPullRequest,
+  ListTodo,
+  type LucideIcon,
+  TerminalSquare,
+} from 'lucide-react';
 import type { ComponentType } from 'react';
 import { GithubPanel } from '@/features/github/components/GithubPanel';
+import { TerminalRailPanel } from '@/features/terminal/TerminalRailPanel';
 import { GitPanel } from '../GitPanel';
 import { TodoRailPanel } from './TodoRailPanel';
 
@@ -22,6 +29,8 @@ interface RailPanelContentProps {
    */
   readonly workdir: string | null;
   readonly todos: TodoList;
+  /** The machine the chat runs on. Null before the chat's environment is known. */
+  readonly environmentId: string | null;
 }
 
 export interface RailPanelDefinition {
@@ -55,6 +64,12 @@ export const WORKSPACE_PANEL_REGISTRY: readonly RailPanelDefinition[] = [
     icon: ListTodo,
     availability: ({ chatId, todoCount }) => Boolean(chatId) && todoCount > 0,
     component: TodoRailPanel,
+  },
+  {
+    id: 'terminal',
+    icon: TerminalSquare,
+    availability: ({ chatId }) => Boolean(chatId),
+    component: TerminalRailPanel,
   },
 ];
 

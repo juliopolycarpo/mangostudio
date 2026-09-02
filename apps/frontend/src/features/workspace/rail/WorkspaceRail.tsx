@@ -21,11 +21,19 @@ const COLLAPSED_RAIL_WIDTH = 48;
 interface WorkspaceRailProps {
   readonly chatId: string;
   readonly workdir: string | null;
+  /** The machine the chat runs on. Null (the default) before it is known. */
+  readonly environmentId?: string | null;
   readonly settings: WorkspacePanelSettings;
   readonly onWidthChange?: (width: number) => void;
 }
 
-export function WorkspaceRail({ chatId, workdir, settings, onWidthChange }: WorkspaceRailProps) {
+export function WorkspaceRail({
+  chatId,
+  workdir,
+  environmentId = null,
+  settings,
+  onWidthChange,
+}: WorkspaceRailProps) {
   const { t } = useI18n();
   const todosQuery = useChatTodos(chatId);
   const todos = todosQuery.data?.todos ?? [];
@@ -138,7 +146,12 @@ export function WorkspaceRail({ chatId, workdir, settings, onWidthChange }: Work
       }
       onClose={onClose}
     >
-      <ActivePanelContent chatId={chatId} workdir={workdir} todos={todos} />
+      <ActivePanelContent
+        chatId={chatId}
+        workdir={workdir}
+        todos={todos}
+        environmentId={environmentId}
+      />
     </RailPanel>
   );
 

@@ -2045,6 +2045,7 @@ export const messages = {
     runtimeDisconnected: 'O runtime se desconectou; esta sessão terminou.',
     closeConfirmTitle: 'Fechar este terminal?',
     closeConfirmDescription: 'O shell e tudo o que ele estiver executando serão interrompidos.',
+    cancel: 'Cancelar',
     unavailableTitle: 'Terminal indisponível',
     unavailable: {
       disabled: 'Os terminais estão desligados neste hub.',
