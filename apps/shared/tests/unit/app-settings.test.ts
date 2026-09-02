@@ -147,22 +147,22 @@ describe('normalizeWorkspaceSettings', () => {
       chatSidebarWidth: CHAT_SIDEBAR_WIDTH_MAX,
       sidePanel: {
         // The stored order is the ledger of panels these settings have heard
-        // of, and it names only `todos` — so `git` and `github` are both new
-        // here and both backfill into visibility as well as into the order.
-        visiblePanelIds: ['todos', 'git', 'github'],
-        panelOrder: ['todos', 'git', 'github'],
+        // of, and it names only `todos` — so `git`, `github` and `terminal`
+        // are all new here and all backfill into visibility as well as order.
+        visiblePanelIds: ['todos', 'git', 'github', 'terminal'],
+        panelOrder: ['todos', 'git', 'github', 'terminal'],
         width: WORKSPACE_PANEL_WIDTH_MAX,
       },
     });
   });
 
-  it('shows a newly shipped panel to users whose settings predate it', () => {
+  it('shows newly shipped panels to users whose settings predate them', () => {
     const legacy = normalizeWorkspaceSettings({
       sidePanel: { visiblePanelIds: ['git', 'todos'], panelOrder: ['git', 'todos'] },
     });
 
-    expect(legacy.sidePanel.visiblePanelIds).toEqual(['git', 'todos', 'github']);
-    expect(legacy.sidePanel.panelOrder).toEqual(['git', 'todos', 'github']);
+    expect(legacy.sidePanel.visiblePanelIds).toEqual(['git', 'todos', 'github', 'terminal']);
+    expect(legacy.sidePanel.panelOrder).toEqual(['git', 'todos', 'github', 'terminal']);
   });
 
   it('keeps respecting a panel the user hid in a build that knew about it', () => {
@@ -170,14 +170,16 @@ describe('normalizeWorkspaceSettings', () => {
       sidePanel: { visiblePanelIds: ['git'], panelOrder: ['git', 'github', 'todos'] },
     });
 
-    expect(hidden.sidePanel.visiblePanelIds).toEqual(['git']);
-    expect(hidden.sidePanel.panelOrder).toEqual(['git', 'github', 'todos']);
+    // `terminal` postdates this stored order, so it backfills into both
+    // arrays; `github` and `todos` were already known and stay hidden.
+    expect(hidden.sidePanel.visiblePanelIds).toEqual(['git', 'terminal']);
+    expect(hidden.sidePanel.panelOrder).toEqual(['git', 'github', 'todos', 'terminal']);
   });
 
   it('backfills everything when the stored order cannot act as a ledger', () => {
     const orderless = normalizeWorkspaceSettings({ sidePanel: { visiblePanelIds: ['todos'] } });
 
-    expect(orderless.sidePanel.visiblePanelIds).toEqual(['todos', 'git', 'github']);
+    expect(orderless.sidePanel.visiblePanelIds).toEqual(['todos', 'git', 'github', 'terminal']);
     expect(orderless.sidePanel.panelOrder).toEqual(DEFAULT_WORKSPACE_SETTINGS.sidePanel.panelOrder);
   });
 

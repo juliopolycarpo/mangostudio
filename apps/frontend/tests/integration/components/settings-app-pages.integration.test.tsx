@@ -333,8 +333,8 @@ describe('app settings pages integration', () => {
       workspaceSettings: {
         ...initialSettings.workspaceSettings,
         sidePanel: {
-          visiblePanelIds: ['github', 'todos'],
-          panelOrder: ['git', 'github', 'todos'],
+          visiblePanelIds: ['github', 'todos', 'terminal'],
+          panelOrder: ['git', 'github', 'todos', 'terminal'],
           width: 420,
         },
       },
@@ -345,7 +345,7 @@ describe('app settings pages integration', () => {
         ...visibilitySettings.workspaceSettings,
         sidePanel: {
           ...visibilitySettings.workspaceSettings.sidePanel,
-          panelOrder: ['git', 'todos', 'github'],
+          panelOrder: ['git', 'todos', 'github', 'terminal'],
         },
       },
     };

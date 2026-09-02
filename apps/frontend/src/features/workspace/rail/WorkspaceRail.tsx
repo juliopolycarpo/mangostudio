@@ -33,6 +33,7 @@ export function WorkspaceRail({ chatId, workdir, settings, onWidthChange }: Work
     git: t.git.title,
     github: t.github.title,
     todos: t.chat.todo.title,
+    terminal: t.terminal.title,
   };
   const availablePanels = useMemo(
     () => getAvailableWorkspacePanels({ chatId, workdir, todoCount: todos.length }, settings),
