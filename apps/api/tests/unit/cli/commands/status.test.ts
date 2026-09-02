@@ -163,5 +163,9 @@ describe('runStatus', () => {
     });
 
     expect(JSON.parse(lines.join(''))).toEqual({ running: false });
+    // One command, one format: the running answer above is pretty-printed, and
+    // anything diffing or line-parsing `status --json` would otherwise have to
+    // handle two shapes for one contract.
+    expect(lines.join('')).toBe(JSON.stringify({ running: false }, null, 2));
   });
 });

@@ -39,7 +39,11 @@ export async function runStatus(
       await d.removeState();
     }
     if (args.json) {
-      d.log(JSON.stringify(describeHubProcess({ state: null, alive: false, now: d.now() })));
+      // Same shape and same formatting as the running answer: a reader that
+      // pipes this into a diff or an editor should not have to handle two.
+      d.log(
+        JSON.stringify(describeHubProcess({ state: null, alive: false, now: d.now() }), null, 2)
+      );
       return;
     }
     d.log('MangoStudio is not running.');
