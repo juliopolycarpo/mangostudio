@@ -41,6 +41,10 @@ export function machineStatusQueryOptions() {
     queryKey: machineKeys.status(),
     queryFn: fetchMachineStatus,
     staleTime: STATUS_STALE_MS,
+    refetchInterval: STATUS_POLL_MS,
+    // Keep asking while the server is away; the error is the "reconnecting"
+    // state, not a reason to stop.
+    retry: false,
   });
 }
 
@@ -73,10 +77,8 @@ export function useMachineStatus(options: { readonly windowMs?: number } = {}) {
 
   const query = useQuery({
     ...machineStatusQueryOptions(),
-    refetchInterval: awaiting ? AFTER_ACTION_POLL_MS : STATUS_POLL_MS,
-    // Keep asking while the server is away; the error is the "reconnecting"
-    // state, not a reason to stop.
-    retry: false,
+    // Tighter than the shared interval only while an action is in flight.
+    ...(awaiting ? { refetchInterval: AFTER_ACTION_POLL_MS } : {}),
   });
 
   const pid = query.data?.hub.pid ?? null;

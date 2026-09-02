@@ -1,20 +1,23 @@
 /**
  * The overview's one-line answer about the hub itself: what is serving, how it
  * was started, and whether a service keeps it alive. Reads status only — the
- * doctor and log queries belong to the tab.
+ * doctor and log queries belong to the tab, and so does `useMachineStatus`:
+ * this section takes no action, so it has no "waiting for a different process"
+ * state to keep and no window timer to run.
  */
 
+import { useQuery } from '@tanstack/react-query';
 import { useI18n } from '@/hooks/use-i18n';
 import { EnvironmentPageState } from '../../components/EnvironmentPageState';
 import { OverviewSection } from '../../components/OverviewSection';
 import { CardSectionLabel, TOOL_CARD_SURFACE } from '../../components/ToolCard';
 import { HUB_HEALTH_TONE, hubHealthLabel, launchModeLabel } from '../format';
-import { useMachineStatus } from '../queries';
+import { machineStatusQueryOptions } from '../queries';
 
 export function OverviewMachineSection() {
   const { t } = useI18n();
   const e = t.environments;
-  const status = useMachineStatus();
+  const status = useQuery(machineStatusQueryOptions());
   const data = status.data;
 
   return (
