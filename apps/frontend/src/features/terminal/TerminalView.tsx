@@ -138,6 +138,11 @@ export function TerminalView({
       cursorBlink: true,
       scrollback: 10_000,
       allowProposedApi: true,
+      // Mirrors the visible rows into an accessibility tree. With the WebGL
+      // renderer the screen is one canvas and holds no text a screen reader,
+      // or a browser test, can read; this is what makes the output reachable
+      // by anything that is not a pair of eyes.
+      screenReaderMode: true,
     });
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
