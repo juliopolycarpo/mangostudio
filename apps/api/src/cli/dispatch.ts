@@ -1,6 +1,6 @@
 /**
  * CLI command router. Maps the first user argument to a command handler and
- * turns CliError into a clean stderr message + non-zero exit.
+ * turns an operator-facing error into a clean stderr message + non-zero exit.
  */
 
 import {
@@ -25,7 +25,7 @@ import { runService } from './commands/service';
 import { runStatus } from './commands/status';
 import { runStop } from './commands/stop';
 import { runVersion } from './commands/version';
-import { CliError } from './errors';
+import { isOperatorError } from './errors';
 import { writeError } from './output';
 import { printHelp, printUnknown } from './usage';
 
@@ -35,7 +35,7 @@ export async function dispatch(args: string[]): Promise<void> {
   try {
     await route(command, rest);
   } catch (error) {
-    if (error instanceof CliError) {
+    if (isOperatorError(error)) {
       writeError(error.message);
       process.exit(1);
       return;

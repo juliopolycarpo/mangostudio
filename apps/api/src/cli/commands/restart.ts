@@ -13,7 +13,6 @@ import { CliError } from '../errors';
 import { confirmsHealthy } from '../health';
 import { writeLine } from '../output';
 import { createProcessController, type ProcessController, waitForExit } from '../process-control';
-import { withServiceErrors } from '../service-errors';
 import { sleep } from '../sleep';
 
 export interface RestartDeps {
@@ -46,7 +45,7 @@ export async function runRestart(deps: Partial<RestartDeps> = {}): Promise<void>
 
   const mode = hubLaunchMode(state);
   if (mode === 'service') {
-    await withServiceErrors(() => d.manager.restart());
+    await d.manager.restart();
     d.log(`Restart requested through ${state.service}.`);
     const next = await waitForComeback(state.pid, d);
     d.log(`MangoStudio restarted (PID ${next.pid}, ${hubUrl(next.host, next.port)}).`);
@@ -62,13 +61,13 @@ export async function runRestart(deps: Partial<RestartDeps> = {}): Promise<void>
 }
 
 async function startInstalledService(d: Required<RestartDeps>): Promise<void> {
-  const status = await withServiceErrors(() => d.manager.status());
+  const status = await d.manager.status();
   if (!status.installed) {
     throw new CliError(
       'No running instance to restart. Start one with "mangostudio serve -d", or install the service with "mangostudio service install".'
     );
   }
-  await withServiceErrors(() => d.manager.start());
+  await d.manager.start();
   const next = await waitForComeback(null, d);
   d.log(
     `MangoStudio started through ${status.unitName} (PID ${next.pid}, ${hubUrl(next.host, next.port)}).`

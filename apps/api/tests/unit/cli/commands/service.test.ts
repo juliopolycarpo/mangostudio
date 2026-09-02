@@ -220,14 +220,16 @@ describe('runService install', () => {
     expect(d.lines.join('\n')).toContain('Note:    No launcher at');
   });
 
-  it('turns a manager refusal into a CLI error', async () => {
+  // The command lets the refusal through as it is; `dispatch` is the single
+  // place that turns an operator-facing error into a message and exit 1.
+  it('lets a manager refusal reach the CLI error boundary', async () => {
     const d = baseDeps();
     d.manager.failWith = new RuntimeServiceManagementError(
       'runtime_service_no_session_bus',
       'No D-Bus session bus for systemd user services.'
     );
     await expect(runService({ action: 'install', json: false }, d)).rejects.toMatchObject({
-      name: 'CliError',
+      name: 'RuntimeServiceManagementError',
       message: 'No D-Bus session bus for systemd user services.',
     });
   });

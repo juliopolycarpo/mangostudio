@@ -24,7 +24,6 @@ import { CliError } from '../errors';
 import { writeLine } from '../output';
 import { createProcessController, type ProcessController, waitForExit } from '../process-control';
 import { assertServeConfig } from '../serve-config-guard';
-import { withServiceErrors } from '../service-errors';
 import { sleep } from '../sleep';
 
 export interface ServiceDeps {
@@ -72,16 +71,16 @@ export async function runService(
     return;
   }
   if (action === 'uninstall') {
-    await withServiceErrors(() => d.manager.uninstall());
+    await d.manager.uninstall();
     d.log(`Removed the MangoStudio service (${unit}).`);
     return;
   }
   if (action === 'status') {
-    const status = await withServiceErrors(() => d.manager.status());
+    const status = await d.manager.status();
     printStatus(status, args.json, d);
     return;
   }
-  await withServiceErrors(() => d.manager[action]());
+  await d.manager[action]();
   d.log(VERB_MESSAGES[action](unit));
 }
 
@@ -121,12 +120,12 @@ async function install(args: ServiceArgs, unit: string, d: Required<ServiceDeps>
   // that have nothing to do with the running hub — no session bus, a launchctl
   // refusal, a task command over the Windows limit — and stopping it first
   // would leave the user with neither a server nor a service.
-  await withServiceErrors(() => d.manager.install(definition));
+  await d.manager.install(definition);
 
   // The unit has started, and its `serve` waits on whatever still holds the
   // state file rather than refusing, so the hand-over happens now.
   if (predecessor?.service) {
-    await withServiceErrors(() => d.manager.restart());
+    await d.manager.restart();
   } else if (predecessor) {
     await stopPredecessor(d, predecessor, unit);
   }
