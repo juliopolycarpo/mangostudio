@@ -166,6 +166,17 @@ async function collectResults(
     ? options.sections.includes('library')
     : !options.envOnly || options.libraryOnly;
 
+  // Four independent probes, two of which spawn a program (`--version` on the
+  // runtime binary, `ssh -V`). Inside the array literal below they would run
+  // one after another; the doctor is an HTTP endpoint now, not only a command
+  // that exits afterwards.
+  const [runtimeBinary, runtimeSlots, runtimeCache, sshClient] = await Promise.all([
+    d.probeRuntimeBinary(),
+    d.probeRuntimeSlots(),
+    probeRuntimeCache(),
+    d.probeSshClient(),
+  ]);
+
   const results: CheckResult[] = [
     checkDir('Home directory', getHomeMangoDir(), d.fs),
     checkDir('Logs directory', getLogsDir(), d.fs),
@@ -176,10 +187,10 @@ async function collectResults(
     checkAuthSecret(config),
     checkInstance(instance.state, instance.alive),
     checkRuntime(getVersion(), isStandaloneExecutable()),
-    checkRuntimeBinary(await d.probeRuntimeBinary(), getVersion()),
-    ...(await d.probeRuntimeSlots()).map(checkRuntimeSlot),
-    checkRuntimeCache(await probeRuntimeCache()),
-    checkSshClient(await d.probeSshClient()),
+    checkRuntimeBinary(runtimeBinary, getVersion()),
+    ...runtimeSlots.map(checkRuntimeSlot),
+    checkRuntimeCache(runtimeCache),
+    checkSshClient(sshClient),
     ...collectBuildIdentityChecks({
       serverBuild,
       checkoutBuild: d.getCheckoutBuildInfo(),
