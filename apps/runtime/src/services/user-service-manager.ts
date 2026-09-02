@@ -211,7 +211,11 @@ export function renderScheduledTaskInstallScript(
   // reported installed, and starts a hub with half its environment or none of
   // its program. Say so here instead.
   if (runnerArgument.length > SCHEDULED_TASK_ARGUMENT_MAX) {
-    throw new Error(
+    // The same refusal shape every other backend raises, so `withServiceErrors`
+    // prints it as one line and the machine route answers 409 — a bare `Error`
+    // reached the user as a stack trace and the page as a 500.
+    throw new RuntimeServiceManagementError(
+      'runtime_service_unsupported',
       `The Scheduled Task command for ${taskName} is ${runnerArgument.length} characters, over the ${SCHEDULED_TASK_ARGUMENT_MAX} Task Scheduler accepts. Move configuration out of the environment into config.toml so the unit does not have to carry it.`
     );
   }

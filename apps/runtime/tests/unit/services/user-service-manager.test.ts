@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { userInfo } from 'node:os';
 import { UserServiceStatusSchema } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
+import { RuntimeServiceManagementError } from '../../../src/errors';
 import {
   createUserServiceManager,
   currentUserName,
@@ -211,6 +212,12 @@ describe('Scheduled Task scripts', () => {
     expect(() =>
       renderScheduledTaskInstallScript('Example Unit', { ...DEFINITION, env: enormous })
     ).toThrow(/over the 8192 Task Scheduler accepts/);
+
+    // The refusal has to be the shape every backend raises, or the CLI prints a
+    // stack trace and the machine route answers 500 instead of 409.
+    expect(() =>
+      renderScheduledTaskInstallScript('Example Unit', { ...DEFINITION, env: enormous })
+    ).toThrow(RuntimeServiceManagementError);
   });
 
   it('reads the state name from both PowerShell 5.1 and 7 JSON', () => {
