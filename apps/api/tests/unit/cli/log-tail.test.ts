@@ -51,6 +51,21 @@ class RecordingLogFile implements LogTailSource {
   }
 }
 
+/** A log that gains a line between the size probe and the read, as a live one does. */
+class GrowingLogFile implements LogTailSource {
+  #content = 'a\nb\n';
+
+  size(_path: string): Promise<number | null> {
+    const size = Buffer.byteLength(this.#content);
+    this.#content += 'c\n';
+    return Promise.resolve(size);
+  }
+
+  readFrom(_path: string, offset: number, end?: number): Promise<string> {
+    return Promise.resolve(this.#content.slice(offset, end));
+  }
+}
+
 class MissingLogFile implements LogTailSource {
   size(_path: string): Promise<number | null> {
     return Promise.resolve(null);
@@ -77,6 +92,16 @@ describe('readLogTail', () => {
     expect(file.offsets[0]).toBe(size - 2 * LOG_TAIL_BYTES_PER_LINE);
     expect(tail?.truncated).toBe(true);
     expect(tail?.offset).toBe(size);
+  });
+
+  // `offset` is where `logs -f` resumes. A read that ran past the size it
+  // measured returns lines the offset does not account for, and the first
+  // follow tick prints every one of them a second time.
+  it('returns exactly what its offset accounts for on a log still being written', async () => {
+    const tail = await readLogTail('/logs/service.log', 10, new GrowingLogFile());
+
+    expect(tail?.lines).toEqual(['a', 'b']);
+    expect(tail?.offset).toBe(4);
   });
 
   it('reads a file smaller than the budget from the start', async () => {

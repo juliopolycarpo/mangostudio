@@ -43,8 +43,14 @@ export const LOG_TAIL_BYTES_PER_LINE = 4_096;
 export interface LogTailSource {
   /** Size in bytes, or null when there is no such file. */
   size: (path: string) => Promise<number | null>;
-  /** The file from `offset` on, decoded as UTF-8. */
-  readFrom: (path: string, offset: number) => Promise<string>;
+  /**
+   * The bytes in `[offset, end)`, decoded as UTF-8; to the end of the file when
+   * `end` is omitted. A log is appended to while it is being read, so the
+   * caller passes the size it measured: without an upper bound the read runs
+   * past it and the offset it reports back is behind what it already returned,
+   * which a follower then prints a second time.
+   */
+  readFrom: (path: string, offset: number, end?: number) => Promise<string>;
 }
 
 export interface LogTail {
@@ -68,7 +74,7 @@ export async function readLogTail(
   if (size === null) return null;
 
   const start = Math.max(0, size - count * LOG_TAIL_BYTES_PER_LINE);
-  const content = await source.readFrom(path, start);
+  const content = await source.readFrom(path, start, size);
   if (start === 0) return { ...tailLines(content, count), offset: size };
 
   // A byte offset lands mid-line, and that fragment is not a line anyone asked
@@ -89,7 +95,7 @@ export function realLogTailSource(): LogTailSource {
         return null;
       }
     },
-    readFrom: (path, offset) => Bun.file(path).slice(offset).text(),
+    readFrom: (path, offset, end) => Bun.file(path).slice(offset, end).text(),
   };
 }
 
@@ -123,7 +129,7 @@ export async function latestHubLogFile(logsDir: string): Promise<string | null> 
 
 export interface FollowDeps {
   size: (path: string) => Promise<number>;
-  readFrom: (path: string, offset: number) => Promise<string>;
+  readFrom: (path: string, offset: number, end?: number) => Promise<string>;
   sleep: (ms: number) => Promise<void>;
   /** Resolves when the follower should stop, e.g. on SIGINT. */
   stopped: Promise<void>;
@@ -148,7 +154,9 @@ export async function followFile(
     const size = await deps.size(path);
     if (size < position) position = 0;
     if (size > position) {
-      write(await deps.readFrom(path, position));
+      // Bounded by the size just measured, so `position` names exactly what was
+      // written and the next pass does not repeat whatever landed meanwhile.
+      write(await deps.readFrom(path, position, size));
       position = size;
     }
     await deps.sleep(FOLLOW_INTERVAL_MS);
