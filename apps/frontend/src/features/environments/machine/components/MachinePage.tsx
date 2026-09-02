@@ -103,12 +103,14 @@ export function MachinePage() {
     <div className="space-y-4">
       {header}
 
-      {(notice || status.awaitingChange) && (
+      {/* `awaitingChange` only ever follows a `setNotice` on the accepted path,
+          so the notice is the banner's condition; the window adds a suffix. */}
+      {notice && (
         <div
           className="rounded-2xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-on-surface"
           data-testid="machine-notice"
         >
-          {status.awaitingChange ? (notice ?? m.reconnecting) : notice}
+          {notice}
           {status.awaitingChange && status.error && (
             <span className="text-on-surface-variant/70"> {m.reconnecting}</span>
           )}
