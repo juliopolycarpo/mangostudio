@@ -917,7 +917,7 @@ export function parseScheduledTaskJson(stdout: string): ScheduledTaskJson | null
   };
 }
 
-export async function attemptEnableLinger(
+async function attemptEnableLinger(
   deps: UserServiceExecDeps,
   warn: (message: string) => void = (message) => process.stderr.write(`${message}\n`)
 ): Promise<void> {

@@ -23,12 +23,8 @@ import {
   readServeToken,
 } from '../runtime-home';
 import {
-  attemptEnableLinger as attemptEnableLingerFor,
   createUserServiceManager,
   defaultUserServiceExecDeps,
-  renderLaunchdPlistFile,
-  renderSystemdUnitFile,
-  systemdUserUnitPath,
   USER_SERVICE_NO_SESSION_BUS_ERROR,
   type UserServiceExecDeps,
   type UserServiceExecResult,
