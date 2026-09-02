@@ -15,9 +15,10 @@ import {
 } from '@mangostudio/shared/machine';
 import { Elysia, t } from 'elysia';
 import Value from 'typebox/value';
-import { type GuardIpPolicy, resolveGuardClientIp } from '../../../lib/client-ip';
+import type { GuardIpPolicy } from '../../../lib/client-ip';
 import { getConfig } from '../../../lib/config';
 import { requireAuth } from '../../../plugins/auth-middleware';
+import { guardClientIp } from '../../../plugins/guard-client-ip';
 import {
   MachineActionBlockedError,
   MachineActionUnavailableError,
@@ -64,23 +65,9 @@ export function createMachineRoutes(
 ) {
   return new Elysia()
     .use(requireAuth)
-    .derive(({ request, server }) => {
-      // The socket peer is not header-controlled, so it is the default. It is
-      // not enough on its own: behind the documented nginx and Caddy setups the
-      // peer is always the loopback proxy, and every remote browser would pass
-      // a check that is supposed to mean "at this machine's keyboard". Where
-      // the operator has trusted the proxy, the hop that proxy appended is the
-      // stricter answer; where they have not, a forged header changes nothing.
-      return {
-        machinePeerIp: resolveGuardClientIp(
-          request.headers,
-          server?.requestIP(request)?.address,
-          policy()
-        ),
-      };
-    })
-    .get('/machine/status', { response: { 200: MachineStatusSchema } }, ({ machinePeerIp }) =>
-      service.status({ clientIp: machinePeerIp })
+    .use(guardClientIp(policy))
+    .get('/machine/status', { response: { 200: MachineStatusSchema } }, ({ guardClientIp }) =>
+      service.status({ clientIp: guardClientIp })
     )
     .get(
       '/machine/doctor',
@@ -110,9 +97,9 @@ export function createMachineRoutes(
         }),
         response: { 200: MachineLogTailSchema, 403: ApiErrorResponseSchema },
       },
-      async ({ query, machinePeerIp, set }) => {
+      async ({ query, guardClientIp, set }) => {
         try {
-          return await service.logs(query.tail ?? 0, { clientIp: machinePeerIp });
+          return await service.logs(query.tail ?? 0, { clientIp: guardClientIp });
         } catch (error) {
           return mapMachineError(error, set);
         }
@@ -127,9 +114,9 @@ export function createMachineRoutes(
           409: ApiErrorResponseSchema,
         },
       },
-      async ({ machinePeerIp, set }) => {
+      async ({ guardClientIp, set }) => {
         try {
-          const response = await service.restart({ clientIp: machinePeerIp });
+          const response = await service.restart({ clientIp: guardClientIp });
           set.status = 202;
           return response;
         } catch (error) {
@@ -147,9 +134,9 @@ export function createMachineRoutes(
           409: ApiErrorResponseSchema,
         },
       },
-      async ({ body, machinePeerIp, set }) => {
+      async ({ body, guardClientIp, set }) => {
         try {
-          const response = await service.service(body.action, { clientIp: machinePeerIp });
+          const response = await service.service(body.action, { clientIp: guardClientIp });
           set.status = 202;
           return response;
         } catch (error) {

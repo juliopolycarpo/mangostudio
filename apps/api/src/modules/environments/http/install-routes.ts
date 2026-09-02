@@ -16,10 +16,11 @@ import {
 } from '@mangostudio/shared/errors';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 import { Elysia, t } from 'elysia';
-import { type GuardIpPolicy, resolveGuardClientIp } from '../../../lib/client-ip';
+import type { GuardIpPolicy } from '../../../lib/client-ip';
 import { getConfig } from '../../../lib/config';
 import { ProfileMismatchError } from '../../../lib/profile-context';
 import { requireAuth } from '../../../plugins/auth-middleware';
+import { guardClientIp } from '../../../plugins/guard-client-ip';
 import {
   InstallBlockedError,
   InstallConflictError,
@@ -108,32 +109,18 @@ export function createInstallRoutes(
 ) {
   return new Elysia()
     .use(requireAuth)
-    .derive(({ request, server }) => {
-      // The socket peer is not header-controlled, so it is the default. It is
-      // not enough on its own: behind the documented nginx and Caddy setups the
-      // peer is always the loopback proxy, and every remote browser would pass
-      // a check that is supposed to mean "at this machine's keyboard". Where
-      // the operator has trusted the proxy, the hop that proxy appended is the
-      // stricter answer; where they have not, a forged header changes nothing.
-      return {
-        installPeerIp: resolveGuardClientIp(
-          request.headers,
-          server?.requestIP(request)?.address,
-          policy()
-        ),
-      };
-    })
+    .use(guardClientIp(policy))
     .get(
       '/environments/install/recipes',
       {
         query: t.Object({ environmentId: t.Optional(EnvironmentIdSchema) }),
         response: { 200: t.Array(InstallRecipePreviewSchema) },
       },
-      ({ user, installPeerIp, request, query }) =>
+      ({ user, guardClientIp, request, query }) =>
         service.listRecipes({
           ...requestContext({
             userId: user?.id ?? '',
-            peerIp: installPeerIp,
+            peerIp: guardClientIp,
             request,
           }),
           ...(query.environmentId ? { environmentId: query.environmentId } : {}),
@@ -152,13 +139,13 @@ export function createInstallRoutes(
           502: ApiErrorResponseSchema,
         },
       },
-      async ({ body, user, installPeerIp, request, set }) => {
+      async ({ body, user, guardClientIp, request, set }) => {
         try {
           return await service.prepare(
             body,
             requestContext({
               userId: user?.id ?? '',
-              peerIp: installPeerIp,
+              peerIp: guardClientIp,
               request,
               includeSignal: true,
             })
@@ -180,13 +167,13 @@ export function createInstallRoutes(
           422: ApiErrorResponseSchema,
         },
       },
-      async ({ body, user, installPeerIp, request, set }) => {
+      async ({ body, user, guardClientIp, request, set }) => {
         try {
           return await service.start(
             body,
             requestContext({
               userId: user?.id ?? '',
-              peerIp: installPeerIp,
+              peerIp: guardClientIp,
               request,
               includeSignal: true,
             })
