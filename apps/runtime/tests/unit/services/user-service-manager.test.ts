@@ -43,6 +43,8 @@ class FakeServiceHost {
   readonly warnings: string[] = [];
   /** Everything the manager did, in order: commands and file removals. */
   readonly events: string[] = [];
+  /** How often the manager went looking for systemctl. */
+  hasSystemdCalls = 0;
 
   constructor(
     private readonly options: {
@@ -73,7 +75,10 @@ class FakeServiceHost {
       home: '/home/test',
       uid: 1000,
       user: 'test',
-      hasSystemd: () => Promise.resolve(this.options.hasSystemd ?? true),
+      hasSystemd: () => {
+        this.hasSystemdCalls += 1;
+        return Promise.resolve(this.options.hasSystemd ?? true);
+      },
       writeFile: (path, contents) => {
         this.files.set(path, contents);
         return Promise.resolve();
@@ -327,6 +332,20 @@ describe('createUserServiceManager on linux', () => {
       kind: 'runtime_service_no_session_bus',
       message: expect.stringContaining('example service <command>'),
     });
+  });
+
+  // The machine page polls status every two seconds during an action window,
+  // and whether this machine has systemctl cannot change while this process
+  // runs — so it is asked once, like the session bus already was.
+  it('looks for systemctl once per manager, however often it is asked', async () => {
+    const host = new FakeServiceHost();
+    const manager = createUserServiceManager(IDENTITY, host.deps());
+
+    await manager.status();
+    await manager.status();
+    await manager.start();
+
+    expect(host.hasSystemdCalls).toBe(1);
   });
 });
 

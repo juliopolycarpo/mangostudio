@@ -524,9 +524,18 @@ export function createUserServiceManager(
     return busEnv;
   };
 
+  // Also resolved once: `status()` is polled by the machine page, and probing
+  // for systemctl on every poll spawns a process to re-answer a question about
+  // the machine that cannot change while this one runs.
+  let systemdPresent: boolean | undefined;
+  const hasSystemd = async (): Promise<boolean> => {
+    if (systemdPresent === undefined) systemdPresent = await deps.hasSystemd();
+    return systemdPresent;
+  };
+
   const requireSystemd = async (): Promise<void> => {
     if ((await sessionBus()) === null) refuseNoSessionBus();
-    if (!(await deps.hasSystemd())) {
+    if (!(await hasSystemd())) {
       refuseUnsupported('systemd user services are not available on this machine.');
     }
   };
@@ -572,7 +581,7 @@ export function createUserServiceManager(
       await run(['systemctl', '--user', '--no-block', 'stop', identity.unitName]);
     },
     async status(): Promise<UserServiceStatus> {
-      if (!(await deps.hasSystemd())) {
+      if (!(await hasSystemd())) {
         return base('unsupported', identity.unitName, {
           error: USER_SERVICE_NO_SYSTEMD_ERROR,
           errorCode: 'no-systemd',
