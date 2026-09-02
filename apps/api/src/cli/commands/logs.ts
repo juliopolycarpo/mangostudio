@@ -12,16 +12,17 @@ import { CliError } from '../errors';
 import {
   type FollowDeps,
   followFile,
+  type LogTail,
   latestHubLogFile,
+  readLogTail,
   realFollowDeps,
-  tailLines,
 } from '../log-tail';
 import { writeLine } from '../output';
 
 export interface LogsDeps {
   readState: typeof readState;
   latestLogFile: () => Promise<string | null>;
-  readFile: (path: string) => Promise<string | null>;
+  readTail: (path: string, count: number) => Promise<LogTail | null>;
   log: (msg: string) => void;
   write: (chunk: string) => void;
   follow: FollowDeps;
@@ -38,30 +39,24 @@ export async function runLogs(args: LogsArgs, deps: Partial<LogsDeps> = {}): Pro
     );
   }
 
-  const content = await d.readFile(file);
-  if (content === null) {
+  const tail = await d.readTail(file, args.lines);
+  if (tail === null) {
     throw new CliError(`Log file not found: ${file}`);
   }
 
-  const { lines } = tailLines(content, args.lines);
-  if (lines.length > 0) d.log(lines.join('\n'));
+  if (tail.lines.length > 0) d.log(tail.lines.join('\n'));
   if (!args.follow) return;
 
-  await followFile(file, Buffer.byteLength(content), d.write, d.follow);
+  await followFile(file, tail.offset, d.write, d.follow);
 }
 
 function resolveDeps(deps: Partial<LogsDeps>): Required<LogsDeps> {
   return {
     readState: deps.readState ?? readState,
     latestLogFile: deps.latestLogFile ?? (() => latestHubLogFile(getLogsDir())),
-    readFile: deps.readFile ?? readFileOrNull,
+    readTail: deps.readTail ?? readLogTail,
     log: deps.log ?? writeLine,
     write: deps.write ?? ((chunk) => process.stdout.write(chunk)),
     follow: deps.follow ?? realFollowDeps(),
   };
-}
-
-async function readFileOrNull(path: string): Promise<string | null> {
-  const file = Bun.file(path);
-  return (await file.exists()) ? await file.text() : null;
 }

@@ -222,7 +222,10 @@ alive, what doctor says, and the two actions that change either.
 
 `doctor` takes `?sections=environments,library` — core checks always run, and
 these two spawn probes, so a caller opts into them. An unknown section is `422`
-`VALIDATION`. `logs` takes `?tail=` between 1 and 2000, defaulting to 200.
+`VALIDATION`. `logs` takes `?tail=` between 1 and 2000, defaulting to 200. It
+reads a bounded suffix of the file rather than the whole of it, so a log whose
+lines are unusually long can answer with fewer lines than were asked for;
+`truncated` says whether the file holds more.
 
 The two POSTs and `GET /api/machine/logs` are loopback-only — the log is the process's
 raw output, unredacted. A request from anywhere else is `403`

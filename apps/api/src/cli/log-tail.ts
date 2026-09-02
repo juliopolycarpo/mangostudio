@@ -27,6 +27,73 @@ export function tailLines(content: string, count: number): { lines: string[]; tr
 }
 
 /**
+ * Bytes read for each line asked for. `service.log` is append-only and nothing
+ * rotates it, so a hub that has supervised itself for months owns a file no
+ * caller should pull into memory whole just to see the end of it \u2014 and the
+ * machine page reads it on every visit.
+ *
+ * Four kilobytes is generous per line: the JSON logger writes a few hundred
+ * bytes and the wire contract caps one line at 8 KiB. A file whose lines run
+ * longer than this on average yields fewer lines than were asked for, and says
+ * so through `truncated` rather than silently looking complete.
+ */
+export const LOG_TAIL_BYTES_PER_LINE = 4_096;
+
+/** Byte-range access to a log file, so a tail can be read without the head. */
+export interface LogTailSource {
+  /** Size in bytes, or null when there is no such file. */
+  size: (path: string) => Promise<number | null>;
+  /** The file from `offset` on, decoded as UTF-8. */
+  readFrom: (path: string, offset: number) => Promise<string>;
+}
+
+export interface LogTail {
+  readonly lines: string[];
+  readonly truncated: boolean;
+  /** One byte past what was read \u2014 where `followFile` resumes. */
+  readonly offset: number;
+}
+
+/**
+ * The last `count` lines of a log file, reading a bounded suffix of it. Null
+ * when the file is not there.
+ * // Usage: await readLogTail('/home/j/.mango/logs/service.log', 200)
+ */
+export async function readLogTail(
+  path: string,
+  count: number,
+  source: LogTailSource = realLogTailSource()
+): Promise<LogTail | null> {
+  const size = await source.size(path);
+  if (size === null) return null;
+
+  const start = Math.max(0, size - count * LOG_TAIL_BYTES_PER_LINE);
+  const content = await source.readFrom(path, start);
+  if (start === 0) return { ...tailLines(content, count), offset: size };
+
+  // A byte offset lands mid-line, and that fragment is not a line anyone asked
+  // for. Dropping it also drops the replacement character the offset makes of a
+  // multi-byte character it split. A suffix with no newline at all is one
+  // enormous line, of which only a fragment was read: there is nothing to keep.
+  const newline = content.indexOf('\n');
+  const whole = newline === -1 ? '' : content.slice(newline + 1);
+  return { ...tailLines(whole, count), truncated: true, offset: size };
+}
+
+export function realLogTailSource(): LogTailSource {
+  return {
+    size: async (path) => {
+      try {
+        return (await stat(path)).size;
+      } catch {
+        return null;
+      }
+    },
+    readFrom: (path, offset) => Bun.file(path).slice(offset).text(),
+  };
+}
+
+/**
  * The most recently modified hub log in `logsDir`, or null. Both the detached
  * `server-*.log` files and the service's `service.log` qualify; installer logs
  * under `installs/` do not.
@@ -91,7 +158,7 @@ export async function followFile(
 export function realFollowDeps(): FollowDeps {
   return {
     size: async (path) => (await stat(path)).size,
-    readFrom: (path, offset) => Bun.file(path).slice(offset).text(),
+    readFrom: realLogTailSource().readFrom,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     stopped: new Promise((resolve) => {
       process.once('SIGINT', () => resolve());

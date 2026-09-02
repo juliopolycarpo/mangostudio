@@ -21,7 +21,7 @@ import { MACHINE_LOG_TAIL_DEFAULT, MACHINE_LOG_TAIL_MAX } from '@mangostudio/sha
 import { resolveRuntimeSlotConfig, runtimeSlotDir } from '@mangostudio/shared/runtime-home';
 import { spawnServeChild } from '../../../cli/detach';
 import { probeHealth } from '../../../cli/health';
-import { latestHubLogFile, tailLines } from '../../../cli/log-tail';
+import { type LogTail, latestHubLogFile, readLogTail } from '../../../cli/log-tail';
 import { createProcessController, type ProcessController } from '../../../cli/process-control';
 import { probeRuntimeBinary, type RuntimeBinaryProbe } from '../../../cli/runtime-binary-probe';
 import { probeRuntimeSlots, type RuntimeSlotProbe } from '../../../cli/runtime-slot-probe';
@@ -107,7 +107,7 @@ export interface MachineServiceDeps {
   readonly probeRuntimeBinary: () => Promise<RuntimeBinaryProbe>;
   readonly probeRuntimeSlots: () => Promise<RuntimeSlotProbe[]>;
   readonly collectDoctor: (sections: readonly MachineDoctorSection[]) => Promise<MachineCheck[]>;
-  readonly readLogFile: (path: string) => Promise<string | null>;
+  readonly readLogTail: (path: string, count: number) => Promise<LogTail | null>;
   readonly latestLogFile: () => Promise<string | null>;
   readonly evaluateGuard: (clientIp: string | undefined) => InstallGuard;
   readonly environment: () => MachineEnvironment;
@@ -223,9 +223,12 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       const state = await d.readState();
       const file = state?.logFile || (await d.latestLogFile());
       if (!file) return { file: null, lines: [], truncated: false };
-      const content = await d.readLogFile(file);
-      if (content === null) return { file, lines: [], truncated: false };
-      return { file, ...tailLines(content, count) };
+      // A bounded suffix, not the whole file: `service.log` is append-only and
+      // nothing rotates it, so a long-lived hub's log is not something a page
+      // visit should read into memory end to end.
+      const recent = await d.readLogTail(file, count);
+      if (recent === null) return { file, lines: [], truncated: false };
+      return { file, lines: recent.lines, truncated: recent.truncated };
     },
 
     async restart(context) {
@@ -334,11 +337,6 @@ function realEnvironment(): MachineEnvironment {
   };
 }
 
-async function readFileOrNull(path: string): Promise<string | null> {
-  const file = Bun.file(path);
-  return (await file.exists()) ? await file.text() : null;
-}
-
 function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
   const environment = deps.environment ?? realEnvironment;
   return {
@@ -351,7 +349,7 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
     collectDoctor:
       deps.collectDoctor ??
       ((sections) => collectDoctorChecks({ ...DEFAULT_DOCTOR_COLLECT_OPTIONS, sections })),
-    readLogFile: deps.readLogFile ?? readFileOrNull,
+    readLogTail: deps.readLogTail ?? readLogTail,
     latestLogFile: deps.latestLogFile ?? (() => latestHubLogFile(environment().logsDir)),
     evaluateGuard:
       deps.evaluateGuard ??

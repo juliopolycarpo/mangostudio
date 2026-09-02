@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { MachineStatusSchema } from '@mangostudio/shared/machine';
 import Value from 'typebox/value';
+import { tailLines } from '../../../../src/cli/log-tail';
 import type { ServerState } from '../../../../src/lib/server-state';
 import {
   createMachineService,
@@ -60,7 +61,7 @@ function makeService(
         { label: 'Database', status: 'warn', detail: 'slow' },
         { label: 'Frontend', status: 'fail', detail: 'gone' },
       ]),
-    readLogFile: () => Promise.resolve('a\nb\nc\n'),
+    readLogTail: (_path, count) => Promise.resolve({ ...tailLines('a\nb\nc\n', count), offset: 6 }),
     latestLogFile: () => Promise.resolve('/home/j/.mango/logs/service.log'),
     evaluateGuard: (clientIp) =>
       clientIp === '127.0.0.1'

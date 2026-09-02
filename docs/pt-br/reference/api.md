@@ -156,7 +156,10 @@ o mantém vivo, o que o doctor diz e as duas ações que mudam qualquer um dos d
 | `POST` | `/api/machine/service` | Sim  | `{ "action": "install" \| "uninstall" }` da unidade (`202`) |
 
 `doctor` aceita `?sections=environments,library`; uma seção desconhecida é `422`
-`VALIDATION`. `logs` aceita `?tail=` entre 1 e 2000, com padrão 200.
+`VALIDATION`. `logs` aceita `?tail=` entre 1 e 2000, com padrão 200. Ele lê um
+sufixo limitado do arquivo, não o arquivo inteiro, então um log com linhas
+excepcionalmente longas pode responder com menos linhas do que as pedidas;
+`truncated` diz se o arquivo tem mais.
 
 Os dois POSTs e `GET /api/machine/logs` só respondem em loopback (o log é a saída bruta
 do processo, sem redação): de qualquer outro lugar são `403`
