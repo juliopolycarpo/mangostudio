@@ -57,6 +57,13 @@ describe('machineActions', () => {
     expect(machineActions(input({ launch: 'service' })).restart.available).toBe(true);
   });
 
+  it('will not remove a Windows task from inside the task', () => {
+    const actions = machineActions(
+      input({ launch: 'service', platform: 'win32', service: { ...SERVICE, installed: true } })
+    );
+    expect(actions.uninstallService.reason).toBe('windows-service');
+  });
+
   it('flips install and uninstall on whether a unit exists', () => {
     const installed = machineActions(input({ service: { ...SERVICE, installed: true } }));
     expect(installed.installService.reason).toBe('already-installed');

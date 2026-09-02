@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { latestHubLogFile, tailLines } from '../../../src/cli/log-tail';
+import { LOG_LINE_MAX_CHARS, latestHubLogFile, tailLines } from '../../../src/cli/log-tail';
 
 describe('tailLines', () => {
   it('returns the last lines and says whether more exist', () => {
@@ -10,6 +10,14 @@ describe('tailLines', () => {
     expect(tailLines('a\r\nb', 5)).toEqual({ lines: ['a', 'b'], truncated: false });
     expect(tailLines('', 5)).toEqual({ lines: [], truncated: false });
     expect(tailLines('\uFEFFfirst\r\n', 5)).toEqual({ lines: ['first'], truncated: false });
+  });
+
+  it('cuts a line longer than the wire contract allows instead of failing the whole tail', () => {
+    const long = 'x'.repeat(LOG_LINE_MAX_CHARS + 500);
+    const { lines } = tailLines(`${long}\nshort\n`, 5);
+    expect(lines[0]?.length).toBe(LOG_LINE_MAX_CHARS);
+    expect(lines[0]?.endsWith('…')).toBe(true);
+    expect(lines[1]).toBe('short');
   });
 });
 

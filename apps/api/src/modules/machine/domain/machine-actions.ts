@@ -51,6 +51,9 @@ export function uninstallServiceReason(input: MachineActionsInput): MachineActio
   if (input.service.platform === 'unsupported') return 'unsupported-platform';
   if (input.service.error) return 'service-unreadable';
   if (!input.service.installed) return 'not-installed';
+  // Unregistering does not end the running instance, and stopping it from
+  // inside its own process tree ends the caller first.
+  if (input.launch === 'service' && input.platform === 'win32') return 'windows-service';
   return null;
 }
 

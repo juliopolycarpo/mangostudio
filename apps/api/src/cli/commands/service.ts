@@ -94,6 +94,7 @@ async function install(args: ServiceArgs, unit: string, d: Required<ServiceDeps>
     unitName: unit,
     logFile: d.logFile(),
     env: d.env,
+    platform: d.platform,
     target: { host: args.host, port: args.port },
   });
 

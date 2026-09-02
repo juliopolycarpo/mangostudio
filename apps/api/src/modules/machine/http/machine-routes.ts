@@ -91,9 +91,15 @@ export function createMachineRoutes(service: MachineService = machineService) {
         query: t.Object({
           tail: t.Optional(t.Numeric({ minimum: 1, maximum: MACHINE_LOG_TAIL_MAX })),
         }),
-        response: { 200: MachineLogTailSchema },
+        response: { 200: MachineLogTailSchema, 403: ApiErrorResponseSchema },
       },
-      ({ query }) => service.logs(query.tail ?? 0)
+      async ({ query, machinePeerIp, set }) => {
+        try {
+          return await service.logs(query.tail ?? 0, { clientIp: machinePeerIp });
+        } catch (error) {
+          return mapMachineError(error, set);
+        }
+      }
     )
     .post(
       '/machine/restart',

@@ -31,6 +31,7 @@ import {
   getRuntimeHomeMangoDir,
   getVersion,
 } from '../../../lib/config';
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { getLogsDir, getServerLogPath } from '../../../lib/mango-paths';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
 import { isStateLive, readState, type ServerState } from '../../../lib/server-state';
@@ -126,7 +127,7 @@ export interface MachineServiceDeps {
 export interface MachineService {
   status(context: MachineRequestContext): Promise<MachineStatus>;
   doctor(sections: readonly MachineDoctorSection[]): Promise<MachineDoctorReport>;
-  logs(tail: number): Promise<MachineLogTail>;
+  logs(tail: number, context: MachineRequestContext): Promise<MachineLogTail>;
   restart(context: MachineRequestContext): Promise<MachineActionResponse>;
   service(
     action: MachineServiceAction,
@@ -135,6 +136,7 @@ export interface MachineService {
 }
 
 const AFTER_RESPONSE_MS = 50;
+const logger = createDiagnosticLogger('machine');
 
 /** Build the service. // Usage: createMachineService().status({ clientIp }) */
 export function createMachineService(deps: Partial<MachineServiceDeps> = {}): MachineService {
@@ -212,7 +214,11 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       };
     },
 
-    async logs(tail) {
+    async logs(tail, context) {
+      // Raw stdout and stderr, unredacted: error dumps land here whole. The
+      // machine's own keyboard may read them; a signed-in remote session may not.
+      const guard = d.evaluateGuard(context.clientIp);
+      if (!guard.allowed) throw new MachineActionBlockedError(guard);
       const count = Math.min(Math.max(1, tail || MACHINE_LOG_TAIL_DEFAULT), MACHINE_LOG_TAIL_MAX);
       const state = await d.readState();
       const file = state?.logFile || (await d.latestLogFile());
@@ -236,6 +242,8 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
         };
       }
       d.schedule(() => {
+        // Only let go once a successor exists; a failed spawn followed by a
+        // shutdown would leave nothing serving.
         d.spawnSuccessor(state);
         d.shutdown();
       });
@@ -282,6 +290,7 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       unitName,
       logFile: d.serviceLogFile(),
       env: d.env,
+      platform: environment.platform,
       ...(explicitTarget ? { target: explicitTarget } : {}),
     });
     await d.manager.install(definition);
@@ -373,7 +382,13 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
         const timer = setTimeout(() => {
           void Promise.resolve()
             .then(work)
-            .catch(() => undefined);
+            .catch((error: unknown) => {
+              // The response already said "accepted"; the log is the only
+              // place left to say it was not.
+              logger.error('deferred_action_failed', {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
         }, AFTER_RESPONSE_MS);
         timer.unref?.();
       }),

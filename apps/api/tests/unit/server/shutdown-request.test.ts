@@ -29,6 +29,18 @@ describe('requestShutdown', () => {
     }
   });
 
+  it('exits once the budget runs out on a stop that never finishes', async () => {
+    const exitSpy = spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    registerShutdownHandler(() => new Promise<void>(() => undefined));
+    try {
+      requestShutdown(10);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    } finally {
+      exitSpy.mockRestore();
+    }
+  });
+
   it('exits even when nothing was registered', async () => {
     const exitSpy = spyOn(process, 'exit').mockImplementation(() => undefined as never);
     try {

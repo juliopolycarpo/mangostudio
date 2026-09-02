@@ -8,13 +8,21 @@ import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const FOLLOW_INTERVAL_MS = 500;
+/** The wire contract's per-line cap; a longer line is cut, never dropped. */
+export const LOG_LINE_MAX_CHARS = 8_192;
+const LOG_LINE_CUT_MARK = '…';
+
+function capLine(line: string): string {
+  if (line.length <= LOG_LINE_MAX_CHARS) return line;
+  return `${line.slice(0, LOG_LINE_MAX_CHARS - LOG_LINE_CUT_MARK.length)}${LOG_LINE_CUT_MARK}`;
+}
 
 /** The last `count` lines of `content`, without a trailing empty line. */
 export function tailLines(content: string, count: number): { lines: string[]; truncated: boolean } {
   // Windows PowerShell writes a byte-order mark first; it is not a log line.
   const all = content.replace(/^\uFEFF/, '').split(/\r?\n/);
   if (all.at(-1) === '') all.pop();
-  const lines = all.slice(-count);
+  const lines = all.slice(-count).map(capLine);
   return { lines, truncated: all.length > lines.length };
 }
 

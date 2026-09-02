@@ -49,6 +49,32 @@ const SERVICE_ENV_ALLOWLIST: readonly string[] = [
   'all_proxy',
 ];
 
+const PROXY_KEYS = new Set([
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'ALL_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'all_proxy',
+]);
+
+/**
+ * A proxy URL may carry `user:password@`; that is a secret, and the unit
+ * file is not where it goes. The host and port still reach the unit.
+ * // Usage: withoutUserinfo('http://alice:pw@proxy:3128') → 'http://proxy:3128/'
+ */
+export function withoutUserinfo(value: string): string {
+  try {
+    const url = new URL(value);
+    if (!url.username && !url.password) return value;
+    url.username = '';
+    url.password = '';
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
+
 export interface HubServiceTarget {
   readonly host?: string;
   readonly port?: number;
@@ -59,6 +85,7 @@ export interface HubServiceDefinitionInput {
   readonly unitName: string;
   readonly logFile: string;
   readonly env: NodeJS.ProcessEnv;
+  readonly platform: NodeJS.Platform;
   /** Explicit bind target; omitted so `config.toml` keeps deciding. */
   readonly target?: HubServiceTarget;
 }
@@ -72,8 +99,12 @@ export function hubServiceLogPath(): string {
 export function buildHubServiceDefinition(input: HubServiceDefinitionInput): UserServiceDefinition {
   const env: Record<string, string> = {};
   for (const key of SERVICE_ENV_ALLOWLIST) {
+    // A Scheduled Task inherits the user's PATH at logon, and inlining it
+    // there would count against the command-line limit twice over.
+    if (key === 'PATH' && input.platform === 'win32') continue;
     const value = input.env[key];
-    if (value !== undefined && value !== '') env[key] = value;
+    if (value === undefined || value === '') continue;
+    env[key] = PROXY_KEYS.has(key) ? withoutUserinfo(value) : value;
   }
   if (input.target?.host !== undefined) env.API_HOST = input.target.host;
   if (input.target?.port !== undefined) env.API_PORT = String(input.target.port);

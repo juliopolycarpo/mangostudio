@@ -8,6 +8,9 @@
 
 type ShutdownHandler = () => Promise<void>;
 
+/** Shorter than the successor's wait, so it never binds into a live predecessor. */
+const SHUTDOWN_BUDGET_MS = 12_000;
+
 let handler: ShutdownHandler | null = null;
 let requested = false;
 
@@ -22,11 +25,18 @@ export function registerShutdownHandler(next: ShutdownHandler): void {
  * twice and close the database twice.
  * // Usage: requestShutdown()
  */
-export function requestShutdown(): void {
+export function requestShutdown(budgetMs: number = SHUTDOWN_BUDGET_MS): void {
   if (requested) return;
   requested = true;
   const work = handler ? handler() : Promise.resolve();
-  void work.finally(() => process.exit(0));
+  // A stop that hangs (a stuck client close, a wedged database) must not
+  // keep the port forever: a restart's successor waits on this pid and then
+  // fails to bind. Past the budget the process exits anyway.
+  const budget = new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, budgetMs);
+    timer.unref?.();
+  });
+  void Promise.race([work, budget]).finally(() => process.exit(0));
 }
 
 /** Test seam: forget the handler and the in-flight flag. */

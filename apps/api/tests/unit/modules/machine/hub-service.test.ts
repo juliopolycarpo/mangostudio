@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { buildHubServiceDefinition } from '../../../../src/modules/machine/application/hub-service';
+import {
+  buildHubServiceDefinition,
+  withoutUserinfo,
+} from '../../../../src/modules/machine/application/hub-service';
 import { hubServiceUnitName } from '../../../../src/modules/machine/domain/hub-service-identity';
 
 describe('buildHubServiceDefinition', () => {
@@ -8,9 +11,10 @@ describe('buildHubServiceDefinition', () => {
       executable: { argv: ['/opt/mangostudio'], pointer: 'external' },
       unitName: 'mangostudio.service',
       logFile: '/home/j/.mango/logs/service.log',
+      platform: 'linux',
       env: {
         PATH: '/usr/bin',
-        HTTPS_PROXY: 'http://proxy:3128',
+        HTTPS_PROXY: 'http://alice:hunter2@proxy:3128',
         BETTER_AUTH_SECRET: 'secret',
         GEMINI_API_KEY_DEFAULT: 'secret',
         DATABASE_PATH: '/tmp/db',
@@ -20,7 +24,7 @@ describe('buildHubServiceDefinition', () => {
     expect(definition.argv).toEqual(['/opt/mangostudio', 'serve']);
     expect(definition.env).toEqual({
       PATH: '/usr/bin',
-      HTTPS_PROXY: 'http://proxy:3128',
+      HTTPS_PROXY: 'http://proxy:3128/',
       MANGO_LOG_FILE: '/home/j/.mango/logs/service.log',
       MANGOSTUDIO_SERVICE_UNIT: 'mangostudio.service',
     });
@@ -37,6 +41,7 @@ describe('buildHubServiceDefinition', () => {
       },
       unitName: 'com.mangostudio.hub',
       logFile: '/x.log',
+      platform: 'linux',
       env: {},
       target: { port: 3000 },
     });
@@ -44,6 +49,28 @@ describe('buildHubServiceDefinition', () => {
     expect(definition.workingDirectory).toBe('/repo');
     expect(definition.env).toMatchObject({ API_PORT: '3000' });
     expect(definition.env).not.toHaveProperty('API_HOST');
+  });
+});
+
+describe('buildHubServiceDefinition on Windows', () => {
+  it('leaves PATH to the logon session instead of inlining it into the task', () => {
+    const definition = buildHubServiceDefinition({
+      executable: { argv: ['C:\\x\\mangostudio.cmd'], pointer: 'current' },
+      unitName: 'MangoStudio Hub',
+      logFile: 'C:\\x\\service.log',
+      platform: 'win32',
+      env: { PATH: 'C:\\very\\long', TZ: 'UTC' },
+    });
+    expect(definition.env).not.toHaveProperty('PATH');
+    expect(definition.env).toMatchObject({ TZ: 'UTC' });
+  });
+});
+
+describe('withoutUserinfo', () => {
+  it('strips credentials and leaves everything else alone', () => {
+    expect(withoutUserinfo('http://alice:hunter2@proxy:3128')).toBe('http://proxy:3128/');
+    expect(withoutUserinfo('http://proxy:3128')).toBe('http://proxy:3128');
+    expect(withoutUserinfo('not a url')).toBe('not a url');
   });
 });
 

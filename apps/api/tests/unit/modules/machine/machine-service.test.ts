@@ -141,15 +141,24 @@ describe('machineService.doctor and logs', () => {
 
   it('tails the recorded log, falling back to the newest file', async () => {
     const { service } = makeService();
-    expect(await service.logs(2)).toEqual({
+    expect(await service.logs(2, LOCAL)).toEqual({
       file: '/home/j/.mango/logs/server-1.log',
       lines: ['b', 'c'],
       truncated: true,
     });
     const fallback = makeService({}, { ...DETACHED, logFile: '' });
-    expect((await fallback.service.logs(10)).file).toBe('/home/j/.mango/logs/service.log');
+    expect((await fallback.service.logs(10, LOCAL)).file).toBe('/home/j/.mango/logs/service.log');
     const none = makeService({ latestLogFile: () => Promise.resolve(null) }, null);
-    expect(await none.service.logs(10)).toEqual({ file: null, lines: [], truncated: false });
+    expect(await none.service.logs(10, LOCAL)).toEqual({ file: null, lines: [], truncated: false });
+  });
+});
+
+describe('machineService.logs guard', () => {
+  it('refuses the raw log to a browser that is not on this machine', async () => {
+    const { service } = makeService();
+    await expect(service.logs(10, { clientIp: '10.0.0.7' })).rejects.toBeInstanceOf(
+      MachineActionBlockedError
+    );
   });
 });
 

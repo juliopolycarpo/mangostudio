@@ -87,6 +87,7 @@ class FakeMachineService implements MachineService {
 
   logs(tail: number): Promise<MachineLogTail> {
     this.tails.push(tail);
+    if (this.refuseWith) return Promise.reject(this.refuseWith);
     return Promise.resolve({ file: '/x.log', lines: ['a'], truncated: false });
   }
 
@@ -156,6 +157,14 @@ describe('machine routes', () => {
 
     const tooMany = await app.handle(new Request('http://localhost/machine/logs?tail=999999'));
     expect(tooMany.status).toBe(422);
+
+    service.refuseWith = new MachineActionBlockedError({
+      allowed: false,
+      reasons: ['client-not-loopback'],
+    });
+    const refused = await app.handle(new Request('http://localhost/machine/logs?tail=50'));
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ code: 'PERMISSION_DENIED' });
   });
 
   it('accepts a restart and a service action', async () => {
