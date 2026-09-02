@@ -11,8 +11,9 @@ import { ensureRuntimeDirs, getServerLogPath } from '../lib/mango-paths';
 import { isStandaloneExecutable } from '../lib/runtime-paths';
 import { readState } from '../lib/server-state';
 import { CliError } from './errors';
-import { probeHealth } from './health';
+import { confirmsHealthy } from './health';
 import { createProcessController, type ProcessController } from './process-control';
+import { RESTART_WAIT_PID_ENV, RESTART_WAIT_TIMEOUT_MS } from './restart-handshake';
 import { sleep } from './sleep';
 
 export interface DetachResult {
@@ -21,14 +22,22 @@ export interface DetachResult {
   logFile: string;
 }
 
+export interface DetachOptions {
+  /**
+   * A pid the child waits on before it binds. Set by `restart`, whose child
+   * is spawned while the old server is still shutting down.
+   */
+  waitForPid?: number;
+}
+
 export interface DetachDeps {
   controller: ProcessController;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
   /** Spawn the detached child writing to logFile and return its pid. */
-  spawn: (port: number, host: string, logFile: string) => number;
+  spawn: (port: number, host: string, logFile: string, options: DetachOptions) => number;
   readState: typeof readState;
-  probeHealth: typeof probeHealth;
+  confirmsHealthy: typeof confirmsHealthy;
 }
 
 const START_TIMEOUT_MS = 5000;
@@ -38,15 +47,17 @@ const POLL_INTERVAL_MS = 100;
 export async function spawnDetached(
   port: number,
   host: string,
-  deps: Partial<DetachDeps> = {}
+  deps: Partial<DetachDeps> = {},
+  options: DetachOptions = {}
 ): Promise<DetachResult> {
   const d = resolveDeps(deps);
   await ensureRuntimeDirs();
 
   const logFile = getServerLogPath(d.now());
-  const childPid = d.spawn(port, host, logFile);
+  const childPid = d.spawn(port, host, logFile, options);
 
-  await confirmStarted({ pid: childPid, port, host, logFile }, d);
+  const budget = START_TIMEOUT_MS + (options.waitForPid ? RESTART_WAIT_TIMEOUT_MS : 0);
+  await confirmStarted({ pid: childPid, port, host, logFile }, d, budget);
   return { pid: childPid, port, logFile };
 }
 
@@ -57,23 +68,31 @@ interface PendingChild {
   logFile: string;
 }
 
-/** Poll until the child is healthy, or fail fast if it dies or times out. */
-async function confirmStarted(child: PendingChild, d: DetachDeps): Promise<void> {
-  const deadline = d.now() + START_TIMEOUT_MS;
+/**
+ * Poll until the child is healthy, or fail fast if it dies or times out. A bind
+ * to one explicit LAN address cannot be probed over loopback, so there the
+ * state file naming this pid is the readiness signal — see `confirmsHealthy`.
+ */
+async function confirmStarted(
+  child: PendingChild,
+  d: DetachDeps,
+  timeoutMs: number
+): Promise<void> {
+  const deadline = d.now() + timeoutMs;
 
   while (d.now() < deadline) {
     if (!d.controller.isAlive(child.pid)) {
       throw new CliError(`Server failed to start. See logs: ${child.logFile}`);
     }
     const state = await d.readState();
-    if (state?.pid === child.pid && (await d.probeHealth(child.host, child.port))) {
+    if (state?.pid === child.pid && (await d.confirmsHealthy(child.host, child.port))) {
       return;
     }
     await d.sleep(POLL_INTERVAL_MS);
   }
 
   throw new CliError(
-    `Server did not become healthy within ${START_TIMEOUT_MS / 1000}s. See logs: ${child.logFile}`
+    `Server did not become healthy within ${timeoutMs / 1000}s. See logs: ${child.logFile}`
   );
 }
 
@@ -144,7 +163,8 @@ const DETACH_ENV_ALLOWLIST = new Set<string>([
 export function buildDetachedEnv(
   host: string,
   port: number,
-  logFile: string
+  logFile: string,
+  options: DetachOptions = {}
 ): Record<string, string> {
   const env: Record<string, string> = {};
 
@@ -159,17 +179,31 @@ export function buildDetachedEnv(
   env.API_HOST = host;
   env.API_PORT = String(port);
   env.MANGO_LOG_FILE = logFile;
+  if (options.waitForPid !== undefined) {
+    env[RESTART_WAIT_PID_ENV] = String(options.waitForPid);
+  }
 
   return env;
 }
 
-/** Re-exec this binary (or `bun <entry>` in dev) with the hidden __serve command. */
-function realSpawn(port: number, host: string, logFile: string): number {
+/**
+ * Re-exec this binary (or `bun <entry>` in dev) with the hidden __serve
+ * command and return its pid, without waiting for it to come up. `restart`
+ * from inside the server uses this directly: the child waits for this
+ * process to exit, so this process cannot also wait for the child.
+ * // Usage: spawnServeChild(3001, 'localhost', logFile, { waitForPid: process.pid })
+ */
+export function spawnServeChild(
+  port: number,
+  host: string,
+  logFile: string,
+  options: DetachOptions
+): number {
   const logFd = openSync(logFile, 'a');
   try {
     const proc = Bun.spawn({
       cmd: buildServeCommand(host, port),
-      env: buildDetachedEnv(host, port, logFile),
+      env: buildDetachedEnv(host, port, logFile, options),
       detached: true,
       stdin: 'ignore',
       stdout: logFd,
@@ -198,8 +232,8 @@ function resolveDeps(deps: Partial<DetachDeps>): DetachDeps {
     controller: deps.controller ?? createProcessController(),
     now: deps.now ?? Date.now,
     sleep: deps.sleep ?? sleep,
-    spawn: deps.spawn ?? realSpawn,
+    spawn: deps.spawn ?? spawnServeChild,
     readState: deps.readState ?? readState,
-    probeHealth: deps.probeHealth ?? probeHealth,
+    confirmsHealthy: deps.confirmsHealthy ?? confirmsHealthy,
   };
 }

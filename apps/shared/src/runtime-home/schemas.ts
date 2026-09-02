@@ -298,31 +298,49 @@ export const RuntimeServiceModeSchema = Type.Union([
 ]);
 export type RuntimeServiceMode = Static<typeof RuntimeServiceModeSchema>;
 
+/** Which per-user supervisor a service unit lives under. */
+export const UserServicePlatformSchema = Type.Union([
+  Type.Literal('linux'),
+  Type.Literal('darwin'),
+  Type.Literal('win32'),
+  Type.Literal('unsupported'),
+]);
+export type UserServicePlatform = Static<typeof UserServicePlatformSchema>;
+
 /**
- * `mangostudio-runtime service status --json` — stable shape for environment cards.
+ * One user-level service unit, whichever binary it supervises. The hub and the
+ * runtime both report through this shape, so a card and a terminal describe a
+ * unit with the same words.
  */
-export const RuntimeServiceStatusSchema = Type.Object({
+/** Reasons this project refuses to read a unit's status; each has i18n. */
+export const UserServiceErrorCodeSchema = Type.Union([
+  Type.Literal('no-systemd'),
+  Type.Literal('no-session-bus'),
+]);
+export type UserServiceErrorCode = Static<typeof UserServiceErrorCodeSchema>;
+
+/**
+ * Cap on `error`. Exported because what fills it is a supervisor's stderr, which
+ * has no length of its own: a reader that serves this shape over a validated
+ * response has to cut it here or lose the whole document to a 500.
+ */
+export const USER_SERVICE_ERROR_MAX = 1_024;
+
+export const UserServiceStatusSchema = Type.Object({
   schemaVersion: Type.Literal(1),
-  platform: Type.Union([
-    Type.Literal('linux'),
-    Type.Literal('darwin'),
-    Type.Literal('win32'),
-    Type.Literal('unsupported'),
-  ]),
-  mode: Type.Union([RuntimeServiceModeSchema, Type.Null()]),
+  platform: UserServicePlatformSchema,
+  /**
+   * The unit's name under its supervisor: systemd unit basename, launchd
+   * label, or Scheduled Task name.
+   */
+  unitName: Type.String({ minLength: 1, maxLength: 256 }),
   installed: Type.Boolean(),
   enabled: Type.Boolean(),
   running: Type.Boolean(),
   /** Linux only: whether loginctl linger is on for this user. */
   linger: Type.Optional(Type.Boolean()),
-  /** Whether the unit's ExecStart points at the slot `current` symlink. */
-  execUsesCurrent: Type.Optional(Type.Boolean()),
-  /**
-   * Whether a binary is actually reachable through `current`. A unit can point
-   * at the right path and still never start, which is the one failure the
-   * manager's own states describe only as "not running".
-   */
-  currentBinaryPresent: Type.Optional(Type.Boolean()),
+  /** The program the unit starts, as read back from the installed unit. */
+  execPath: Type.Optional(Type.String({ maxLength: 4_096 })),
   /** Manager-specific detail (unit path, label, raw states). */
   manager: Type.Optional(
     Type.Object({
@@ -333,7 +351,30 @@ export const RuntimeServiceStatusSchema = Type.Object({
     })
   ),
   /** Set when status could not be fully determined. */
-  error: Type.Optional(Type.String({ maxLength: 1_024 })),
+  error: Type.Optional(Type.String({ maxLength: USER_SERVICE_ERROR_MAX })),
+  /**
+   * The reason behind `error`, when it is one this project raises rather than
+   * something the supervisor printed. A reader with dictionaries words these;
+   * `error` stays as the diagnostic line beneath. Anything a supervisor says
+   * for itself has no code and is shown as it came.
+   */
+  errorCode: Type.Optional(UserServiceErrorCodeSchema),
+});
+export type UserServiceStatus = Static<typeof UserServiceStatusSchema>;
+
+/**
+ * `mangostudio-runtime service status --json` — stable shape for environment cards.
+ */
+export const RuntimeServiceStatusSchema = Type.Interface([UserServiceStatusSchema], {
+  mode: Type.Union([RuntimeServiceModeSchema, Type.Null()]),
+  /** Whether the unit's ExecStart points at the slot `current` symlink. */
+  execUsesCurrent: Type.Optional(Type.Boolean()),
+  /**
+   * Whether a binary is actually reachable through `current`. A unit can point
+   * at the right path and still never start, which is the one failure the
+   * manager's own states describe only as "not running".
+   */
+  currentBinaryPresent: Type.Optional(Type.Boolean()),
 });
 export type RuntimeServiceStatus = Static<typeof RuntimeServiceStatusSchema>;
 

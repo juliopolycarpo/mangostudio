@@ -266,10 +266,14 @@ An interrupted or mismatched transfer removes the `.incoming` file and never cha
 Commit renames the verified file over the versioned binary and atomically swaps `current`.
 The old process keeps serving its old inode until restart. A hub-spawned slot runtime exits
 with a distinct update code and the hub reconnects it; a manually launched `connect` or
-`serve` runtime keeps running and the card asks its owner to restart it. A future service
-manager can supply that restart without changing the wire contract. Windows publication is
-deliberately refused until a Windows runtime slot exists and can implement rename-aside plus
-antivirus retry semantics safely.
+`serve` runtime keeps running and the card asks its owner to restart it. That restart no
+longer has to be a person: one user-level service manager
+(`apps/runtime/src/services/user-service-manager.ts`) now supervises both binaries — the
+runtime through `mangostudio-runtime service` and the hub through `mangostudio service` —
+across systemd user units, launchd agents and per-user Scheduled Tasks. A runtime that a
+unit owns exits with the update code on commit and the supervisor's restart-on-failure
+brings it back on the new bytes, without touching the wire contract. Windows publication is deliberately refused until a Windows
+runtime slot exists and can implement rename-aside plus antivirus retry semantics safely.
 
 ### Enforcement
 

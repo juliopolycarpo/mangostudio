@@ -347,9 +347,18 @@ Health carry an `environmentId` search param (absent means the hub's own), and t
 Health tab's compare mode puts two of them side by side.
 
 The umbrella covers everything about the user's tooling, so its tabs are
-Overview, Toolchains, Agents, Health, and Library — the last one nests the whole
-library surface above. "Toolchains" is an i18n label: the route is still
-`/environments/runtimes` and `RuntimeIdSchema` is unchanged.
+Overview, Toolchains, Agents, Health, Library, and This machine — Library nests
+the whole library surface above. "Toolchains" is an i18n label: the route is
+still `/environments/runtimes` and `RuntimeIdSchema` is unchanged.
+
+"This machine" is the odd one out: every other tab describes whichever machine
+the `environmentId` search param names, and this one only ever describes the hub's
+own host. It lives at `/environments/machine` with its feature directory at
+`apps/frontend/src/features/environments/machine/`, and it reads the machine
+routes (`GET /api/machine/status`, `doctor`, `logs`; `POST /api/machine/restart`,
+`service`) rather than the probing endpoints the other tabs use. Its restart and
+service buttons are loopback-only on the API side, so the page has to render the
+CLI command the response names whenever the hub refuses.
 
 ### Overview (the landing page)
 
@@ -885,16 +894,33 @@ target's style, from the manifest; see the Paths Across Hosts section of
 
 ## CLI And Server Lifecycle
 
-Covers `serve`, `status`, `stop`, `killserver`, and `doctor`.
+Covers `serve`, `status`, `stop`, `restart`, `killserver`, `service`, `logs`,
+`open`, and `doctor`.
 
 Open these first:
 
 - `apps/api/src/index.ts` (CLI entry)
 - `apps/api/src/cli/` (argument parsing, dispatch, commands, doctor checks)
+- `apps/api/src/cli/log-tail.ts` (tail, newest-log lookup, the `-f` follow loop)
+- `apps/api/src/cli/restart-handshake.ts` (`MANGO_RESTART_WAIT_PID`, the successor's wait)
 - `apps/api/src/server/start-server.ts`
-- `apps/api/src/lib/server-state.ts` (PID and port state)
+- `apps/api/src/server/shutdown-request.ts` (letting go of the port from inside a request)
+- `apps/api/src/lib/server-state.ts` (PID, port, and the supervisor unit that started it)
 - `apps/api/src/lib/mango-paths.ts`
 - Reference: `docs/reference/cli.md`
+
+The hub's own machine — process, service unit, doctor, log tail, and the two
+mutating actions — lives in one module, shared by the CLI and the API:
+
+- `apps/api/src/modules/machine/domain/` (`hub-process.ts` launch mode and status,
+  `hub-service-identity.ts` unit names per platform, `hub-executable.ts` what a unit
+  runs, `machine-actions.ts` availability rules, `machine-guard.ts` the loopback guard)
+- `apps/api/src/modules/machine/application/` (`hub-service.ts` unit definition and env
+  allowlist, `doctor-service.ts` the checks both surfaces render, `machine-service.ts`)
+- `apps/api/src/modules/machine/http/machine-routes.ts`
+- `apps/runtime/src/services/user-service-manager.ts` (the one supervisor abstraction —
+  systemd user units, launchd agents, per-user Scheduled Tasks — used by both binaries)
+- `apps/shared/src/machine/schemas.ts` (single source of truth for every shape)
 
 ## Changelog And Release
 

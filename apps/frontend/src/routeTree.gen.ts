@@ -22,6 +22,7 @@ import { Route as AuthenticatedEnvironmentsIndexRouteImport } from './routes/_au
 import { Route as AuthenticatedEnvironmentsAgentsRouteImport } from './routes/_authenticated/environments/agents'
 import { Route as AuthenticatedEnvironmentsHealthRouteImport } from './routes/_authenticated/environments/health'
 import { Route as AuthenticatedEnvironmentsLibraryRouteImport } from './routes/_authenticated/environments/library'
+import { Route as AuthenticatedEnvironmentsMachineRouteImport } from './routes/_authenticated/environments/machine'
 import { Route as AuthenticatedEnvironmentsRuntimesRouteImport } from './routes/_authenticated/environments/runtimes'
 import { Route as AuthenticatedLibrarySplatRouteImport } from './routes/_authenticated/library/$'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
@@ -144,6 +145,16 @@ const AuthenticatedEnvironmentsLibraryRoute =
     getParentRoute: () => AuthenticatedEnvironmentsRoute,
   } as any).lazy(() =>
     import('./routes/_authenticated/environments/library.lazy').then(
+      (d) => d.Route,
+    ),
+  )
+const AuthenticatedEnvironmentsMachineRoute =
+  AuthenticatedEnvironmentsMachineRouteImport.update({
+    id: '/machine',
+    path: '/machine',
+    getParentRoute: () => AuthenticatedEnvironmentsRoute,
+  } as any).lazy(() =>
+    import('./routes/_authenticated/environments/machine.lazy').then(
       (d) => d.Route,
     ),
   )
@@ -422,6 +433,7 @@ export interface FileRoutesByFullPath {
   '/environments/agents': typeof AuthenticatedEnvironmentsAgentsRoute
   '/environments/health': typeof AuthenticatedEnvironmentsHealthRoute
   '/environments/library': typeof AuthenticatedEnvironmentsLibraryRouteWithChildren
+  '/environments/machine': typeof AuthenticatedEnvironmentsMachineRoute
   '/environments/runtimes': typeof AuthenticatedEnvironmentsRuntimesRoute
   '/library/$': typeof AuthenticatedLibrarySplatRoute
   '/settings/agents': typeof AuthenticatedSettingsAgentsRoute
@@ -462,6 +474,7 @@ export interface FileRoutesByTo {
   '/': typeof AuthenticatedIndexRoute
   '/environments/agents': typeof AuthenticatedEnvironmentsAgentsRoute
   '/environments/health': typeof AuthenticatedEnvironmentsHealthRoute
+  '/environments/machine': typeof AuthenticatedEnvironmentsMachineRoute
   '/environments/runtimes': typeof AuthenticatedEnvironmentsRuntimesRoute
   '/library/$': typeof AuthenticatedLibrarySplatRoute
   '/settings/agents': typeof AuthenticatedSettingsAgentsRoute
@@ -506,6 +519,7 @@ export interface FileRoutesById {
   '/_authenticated/environments/agents': typeof AuthenticatedEnvironmentsAgentsRoute
   '/_authenticated/environments/health': typeof AuthenticatedEnvironmentsHealthRoute
   '/_authenticated/environments/library': typeof AuthenticatedEnvironmentsLibraryRouteWithChildren
+  '/_authenticated/environments/machine': typeof AuthenticatedEnvironmentsMachineRoute
   '/_authenticated/environments/runtimes': typeof AuthenticatedEnvironmentsRuntimesRoute
   '/_authenticated/library/$': typeof AuthenticatedLibrarySplatRoute
   '/_authenticated/settings/agents': typeof AuthenticatedSettingsAgentsRoute
@@ -551,6 +565,7 @@ export interface FileRouteTypes {
     | '/environments/agents'
     | '/environments/health'
     | '/environments/library'
+    | '/environments/machine'
     | '/environments/runtimes'
     | '/library/$'
     | '/settings/agents'
@@ -591,6 +606,7 @@ export interface FileRouteTypes {
     | '/'
     | '/environments/agents'
     | '/environments/health'
+    | '/environments/machine'
     | '/environments/runtimes'
     | '/library/$'
     | '/settings/agents'
@@ -634,6 +650,7 @@ export interface FileRouteTypes {
     | '/_authenticated/environments/agents'
     | '/_authenticated/environments/health'
     | '/_authenticated/environments/library'
+    | '/_authenticated/environments/machine'
     | '/_authenticated/environments/runtimes'
     | '/_authenticated/library/$'
     | '/_authenticated/settings/agents'
@@ -763,6 +780,13 @@ declare module '@tanstack/react-router' {
       path: '/library'
       fullPath: '/environments/library'
       preLoaderRoute: typeof AuthenticatedEnvironmentsLibraryRouteImport
+      parentRoute: typeof AuthenticatedEnvironmentsRoute
+    }
+    '/_authenticated/environments/machine': {
+      id: '/_authenticated/environments/machine'
+      path: '/machine'
+      fullPath: '/environments/machine'
+      preLoaderRoute: typeof AuthenticatedEnvironmentsMachineRouteImport
       parentRoute: typeof AuthenticatedEnvironmentsRoute
     }
     '/_authenticated/environments/runtimes': {
@@ -1014,6 +1038,7 @@ interface AuthenticatedEnvironmentsRouteChildren {
   AuthenticatedEnvironmentsAgentsRoute: typeof AuthenticatedEnvironmentsAgentsRoute
   AuthenticatedEnvironmentsHealthRoute: typeof AuthenticatedEnvironmentsHealthRoute
   AuthenticatedEnvironmentsLibraryRoute: typeof AuthenticatedEnvironmentsLibraryRouteWithChildren
+  AuthenticatedEnvironmentsMachineRoute: typeof AuthenticatedEnvironmentsMachineRoute
   AuthenticatedEnvironmentsRuntimesRoute: typeof AuthenticatedEnvironmentsRuntimesRoute
   AuthenticatedEnvironmentsIndexRoute: typeof AuthenticatedEnvironmentsIndexRoute
 }
@@ -1024,6 +1049,8 @@ const AuthenticatedEnvironmentsRouteChildren: AuthenticatedEnvironmentsRouteChil
     AuthenticatedEnvironmentsHealthRoute: AuthenticatedEnvironmentsHealthRoute,
     AuthenticatedEnvironmentsLibraryRoute:
       AuthenticatedEnvironmentsLibraryRouteWithChildren,
+    AuthenticatedEnvironmentsMachineRoute:
+      AuthenticatedEnvironmentsMachineRoute,
     AuthenticatedEnvironmentsRuntimesRoute:
       AuthenticatedEnvironmentsRuntimesRoute,
     AuthenticatedEnvironmentsIndexRoute: AuthenticatedEnvironmentsIndexRoute,

@@ -50,6 +50,7 @@ import { parseListenAddress, serveRuntime } from './serve';
 import { resolveExternalAgentIsolation } from './services/external-agents/isolation';
 import { createRuntimeServiceManager, resolveInstallMode } from './services/runtime-service';
 import { RUNTIME_UPDATE_EXIT_CODE } from './services/runtime-update';
+import { isUserServiceAction, type UserServiceAction } from './services/user-service-manager';
 import {
   isRuntimeSetupProfile,
   parseAllowOverrides,
@@ -100,7 +101,7 @@ export type RuntimeCliInvocation =
   | {
       readonly command: 'service';
       readonly args: {
-        readonly action: 'install' | 'uninstall' | 'status';
+        readonly action: UserServiceAction;
         readonly mode?: RuntimeServiceMode;
         readonly json: boolean;
       };
@@ -166,9 +167,12 @@ health / doctor options:
   --json       Machine-readable output.
 
 service options:
-  install      Write and enable a user-level unit (systemd or launchd).
+  install      Write and enable a user-level unit (systemd, launchd, or a
+               Windows Scheduled Task).
   uninstall    Disable and remove the unit.
   status       Report installed, enabled, and running.
+  start | stop | restart
+               Drive the installed unit through its supervisor.
   --mode connect|serve
                Which subcommand the unit runs (required when both are configured).
   --json       Machine-readable output (status only).
@@ -361,7 +365,7 @@ function parseReportArgs(
 
 function parseServiceArgs(args: readonly string[]): RuntimeCliInvocation {
   const [action, ...rest] = args;
-  if (action !== 'install' && action !== 'uninstall' && action !== 'status') {
+  if (!isUserServiceAction(action)) {
     return { command: 'unknown', argument: action ?? 'service' };
   }
   let mode: RuntimeServiceMode | undefined;
@@ -916,8 +920,14 @@ async function runDoctor(json: boolean, runtimeVersion: string): Promise<number>
   return worstSeverity(findings) === 'fail' ? 1 : 0;
 }
 
+const SERVICE_VERB_MESSAGES: Record<'start' | 'stop' | 'restart', string> = {
+  start: 'Started mangostudio-runtime service.',
+  stop: 'Stopped mangostudio-runtime service.',
+  restart: 'Restart of mangostudio-runtime service requested.',
+};
+
 async function runService(args: {
-  readonly action: 'install' | 'uninstall' | 'status';
+  readonly action: UserServiceAction;
   readonly mode?: RuntimeServiceMode;
   readonly json: boolean;
 }): Promise<number> {
@@ -935,6 +945,11 @@ async function runService(args: {
     if (args.action === 'uninstall') {
       await manager.uninstall();
       if (!args.json) process.stdout.write('Removed mangostudio-runtime service.\n');
+      return 0;
+    }
+    if (args.action === 'start' || args.action === 'stop' || args.action === 'restart') {
+      await manager[args.action]();
+      if (!args.json) process.stdout.write(`${SERVICE_VERB_MESSAGES[args.action]}\n`);
       return 0;
     }
     const status = await manager.status();

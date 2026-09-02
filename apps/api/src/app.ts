@@ -32,6 +32,7 @@ import { libraryRoutes } from './modules/library/http/library-routes';
 import { propagationRoutes } from './modules/library/http/propagation-routes';
 import { removalRoutes } from './modules/library/http/removal-routes';
 import { librarySettingsRoutes } from './modules/library/http/settings-routes';
+import { machineRoutes } from './modules/machine/http/machine-routes';
 import { mcpServerRoutes } from './modules/mcp-servers/http/mcp-server-routes';
 import { messageRoutes } from './modules/messages/http/message-routes';
 import {
@@ -97,6 +98,7 @@ const api = new Elysia({ prefix: '/api' })
   .use(chatRoutes)
   .use(activityRoutes)
   .use(environmentRoutes)
+  .use(machineRoutes)
   .use(externalAgentRoutes)
   .use(externalAgentTurnRoutes)
   .use(externalSessionRoutes)

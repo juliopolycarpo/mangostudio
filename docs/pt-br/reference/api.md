@@ -142,6 +142,46 @@ SSE com `Content-Type: text/event-stream`. Veja [../architecture/streaming.md](.
 | `GET`  | `/api/settings/rules`         | Sim  | Listar arquivos de regra         |
 | `GET`  | `/api/settings/rules/preview` | Sim  | Pré-visualizar conteúdo da regra |
 
+## Endpoints De Machine
+
+A máquina do próprio hub: qual processo está servindo, se uma unidade de serviço
+o mantém vivo, o que o doctor diz e as duas ações que mudam qualquer um dos dois.
+
+| Método | Path                   | Auth | Finalidade                                                  |
+| ------ | ---------------------- | ---- | ----------------------------------------------------------- |
+| `GET`  | `/api/machine/status`  | Sim  | Processo do hub, unidade, runtime irmão, slot host e ações  |
+| `GET`  | `/api/machine/doctor`  | Sim  | Linhas do doctor com contagem de avisos e falhas            |
+| `GET`  | `/api/machine/logs`    | Sim  | Fim do arquivo de log da instância em execução              |
+| `POST` | `/api/machine/restart` | Sim  | Reinicia o servidor do jeito que ele foi iniciado (`202`)   |
+| `POST` | `/api/machine/service` | Sim  | `{ "action": "install" \| "uninstall" }` da unidade (`202`) |
+
+`doctor` aceita `?sections=environments,library`; uma seção desconhecida é `422`
+`VALIDATION`. Suas linhas são limitadas à conta autenticada: servidores MCP,
+conectores e toggles de skills pertencem a um usuário, não à máquina, então a
+página de uma conta nunca cita as de outra. O `mangostudio doctor` não tem esse
+limite — ele roda no teclado da própria máquina e relata a instalação inteira.
+`logs` aceita `?tail=` entre 1 e 2000, com padrão 200. Ele lê um
+sufixo limitado do arquivo, não o arquivo inteiro, então um log com linhas
+excepcionalmente longas pode responder com menos linhas do que as pedidas;
+`truncated` diz se o arquivo tem mais.
+
+Os dois POSTs e `GET /api/machine/logs` só respondem em loopback (o log é a saída bruta
+do processo, sem redação): de qualquer outro lugar são `403`
+`PERMISSION_DENIED` com `details.reasons`. "Loopback" é o peer do socket, a menos
+que `trustProxy` esteja ligado: atrás de um reverse proxy o peer é o proxy para
+todo chamador, então lá o guard lê o cliente encaminhado. Veja
+[Confiar nos headers de proxy](../operations/deployment.md#confiar-nos-headers-de-proxy).
+Uma ação que não se aplica ao modo como
+o hub está rodando é `409` `UNSUPPORTED` com `details.reason` e `details.command`
+— a linha da CLI para rodar no lugar.
+
+O corpo do `202` é `{ accepted, outcome, unit? }`. `outcome` é um código —
+`restarting-service`, `restarting-detached`, `service-installed-handover`,
+`service-installed`, `service-removing` ou `service-removed` — e `unit` nomeia a
+unidade do supervisor quando o desfecho fala de uma. Sem prosa: o hub não conhece
+o idioma do navegador que pediu, então a página escreve cada código a partir dos
+dicionários de i18n.
+
 ## Endpoints De Upload
 
 | Método | Path          | Auth | Finalidade                |

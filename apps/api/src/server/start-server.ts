@@ -21,6 +21,7 @@ import { externalSessionManager } from '../modules/external-agents/application/e
 import { reconcileExternalTurns } from '../modules/external-agents/application/external-turn-recovery';
 import { isActiveTurn } from '../modules/generation/application/active-turn-registry';
 import { reconcileStaleTurns } from '../modules/generation/application/turn-recovery';
+import { HUB_SERVICE_UNIT_ENV } from '../modules/machine/domain/hub-service-identity';
 import { closeAllMcpClients } from '../services/mcp/connection-manager';
 import {
   flushObservabilitySnapshot,
@@ -34,6 +35,7 @@ import { getDevFrontendDir } from './dev-frontend-dir';
 import { EMBEDDED_FRONTEND_DIR, getEmbeddedFrontend } from './embedded-frontend';
 import { registerFrontend } from './frontend-static';
 import { runMigrations } from './migrations';
+import { registerShutdownHandler, requestShutdown } from './shutdown-request';
 import {
   type StaleTurnReconcileSweep,
   startStaleTurnReconcileSweep,
@@ -136,6 +138,9 @@ async function persistState(port: number, host: string, frontendDir: string): Pr
     version: getVersion(),
     buildInfo: getBuildInfo(),
     frontendDir,
+    // Set by the unit a service manager installed, so `restart` knows to go
+    // through the supervisor instead of respawning by hand.
+    ...(process.env[HUB_SERVICE_UNIT_ENV] ? { service: process.env[HUB_SERVICE_UNIT_ENV] } : {}),
   };
   await writeState(state);
 }
@@ -167,18 +172,15 @@ async function gracefulStop(): Promise<void> {
 }
 
 function registerShutdown(): void {
-  // Guard against a second signal (e.g. SIGINT + a `stop` SIGTERM) re-running
-  // gracefulStop and closing the database twice.
-  let shuttingDown = false;
+  // `requestShutdown` runs the stop once, so a second signal (e.g. SIGINT + a
+  // `stop` SIGTERM) cannot re-run gracefulStop and close the database twice.
+  // A restart requested over the API ends the process the same way.
+  registerShutdownHandler(gracefulStop);
   const shutdown = (signal: 'SIGINT' | 'SIGTERM'): void => {
-    if (shuttingDown) {
-      return;
-    }
-    shuttingDown = true;
     if (signal === 'SIGINT') {
       console.warn('\n[api] Shutting down...');
     }
-    void gracefulStop().finally(() => process.exit(0));
+    requestShutdown();
   };
 
   process.on('SIGINT', () => shutdown('SIGINT'));

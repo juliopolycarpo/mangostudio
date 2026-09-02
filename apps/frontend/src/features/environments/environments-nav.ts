@@ -24,6 +24,7 @@ export function environmentNavEntries(
     { to: '/environments/runtimes', label: labels.runtimes },
     { to: '/environments/agents', label: labels.agents },
     { to: '/environments/health', label: labels.health },
+    { to: '/environments/machine', label: labels.machine },
     { to: '/environments/library', label: labels.library },
   ];
 }

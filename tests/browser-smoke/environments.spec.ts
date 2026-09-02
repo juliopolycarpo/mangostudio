@@ -47,6 +47,13 @@ test('environments surface renders its runtime cards', async ({ page }) => {
   await expect(page).toHaveURL(/\/environments\/agents/);
   await expect(page.getByTestId('agent-cli-card').first()).toBeVisible({ timeout: 15_000 });
 
+  // The hub's own page: the serving process and its service unit render from
+  // the status document, whatever state the machine running the suite is in.
+  await tabs.getByRole('link', { name: 'This machine' }).click();
+  await expect(page).toHaveURL(/\/environments\/machine$/);
+  await expect(page.getByTestId('machine-hub-card')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('machine-service-card')).toBeVisible();
+
   // The library is a section of this umbrella, so its tab has to reach it from
   // here and the relabelled first tab has to lead back.
   await tabs.getByRole('link', { name: 'Library' }).click();

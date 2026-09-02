@@ -11,7 +11,7 @@ import { ROOT_DIR } from './config';
 export const NODE_ENV_READ_ALLOWLIST = [
   {
     path: 'apps/api/src/lib/config.ts',
-    line: 777,
+    line: 796,
     reason:
       'selects the isolated test config path; moving this seam risks clobbering a real user file',
   },
@@ -23,7 +23,7 @@ export const NODE_ENV_READ_ALLOWLIST = [
   },
   {
     path: 'apps/api/src/cli/detach.ts',
-    line: 107,
+    line: 126,
     reason: 'passes through the variable to detached children; it is not a production branch',
   },
 ] as const;

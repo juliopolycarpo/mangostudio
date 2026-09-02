@@ -32,7 +32,8 @@ Início rápido com o instalador shell:
 
 ```bash
 curl -fsSL https://mangostudio.dev/install.sh | bash
-mangostudio serve # inicia em http://localhost:3001
+mangostudio serve           # inicia em http://localhost:3001
+mangostudio service install # ou entrega ao gerenciador de serviços do usuário
 ```
 
 No Windows, execute o instalador PowerShell hospedado:
@@ -50,7 +51,10 @@ arquivo verificado por checksum na primeira execução.
 ```bash
 mangostudio serve [host|port|host:port] # foreground (padrão localhost:3001)
 mangostudio serve lan:3001 -d           # background (logs em ~/.mango/logs/)
+mangostudio service install # mantém rodando após logout e reboot
 mangostudio status         # mostra a instância em execução
+mangostudio restart        # reinicia do jeito que foi iniciado
+mangostudio logs -f        # acompanha o log do servidor
 mangostudio stop           # encerramento gracioso
 mangostudio doctor         # diagnóstico de ambiente
 ```

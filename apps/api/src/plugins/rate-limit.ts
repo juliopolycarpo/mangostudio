@@ -15,11 +15,16 @@
 
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import type { Elysia } from 'elysia';
+import { extractClientIp } from '../lib/client-ip';
 import { resolveRateLimitClientId } from './rate-limit-policy';
 import { type RateLimitEntry, RateLimitStore } from './rate-limit-store';
 import type { RateLimitBucket } from './rate-limit-types';
 
 export type { RateLimitBucket } from './rate-limit-types';
+
+// Re-exported so the limiter stays the obvious place to look for it; the
+// resolution itself is shared with the local-surface guard. See lib/client-ip.
+export { extractClientIp };
 
 interface RateLimitConfig {
   /** Max requests for the default bucket when `classify` is not provided. */
@@ -76,52 +81,6 @@ const defaultConfig: RateLimitConfig = {
 /** Resolve the request path, preferring Elysia's parsed `path`. */
 export function resolvePath(path: string | undefined, url: string): string {
   return path ?? new URL(url).pathname;
-}
-
-/** Upper bound on a plausible IP token (IPv6 + zone id ≈ 50 chars); reject longer. */
-const MAX_CLIENT_IP_LENGTH = 64;
-
-/**
- * Trimmed IP candidate, or null when it is empty or implausibly long. Bounds the
- * store-key size so a hostile forwarded header cannot push megabyte-long keys
- * into memory. // Usage: sanitizeClientIp(' 1.2.3.4 ') // → "1.2.3.4"
- */
-function sanitizeClientIp(value: string | undefined | null): string | null {
-  if (!value) return null;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.length > MAX_CLIENT_IP_LENGTH) return null;
-  return trimmed;
-}
-
-/**
- * Extract the client IP, honoring proxy headers only when explicitly trusted.
- * `ip` is the peer socket address (the unspoofable default); proxy headers
- * override it only when `trustProxy` is set. Every source is run through
- * `sanitizeClientIp`, so a blank leading X-Forwarded-For hop (e.g. ",9.9.9.9")
- * or an oversized value falls through to the next source instead of yielding an
- * empty/huge key that would bypass or bloat the limiter.
- *
- * Takes `headers` and `ip` as discrete arguments rather than the request or the
- * whole Elysia context on purpose. Elysia statically analyzes hook source to
- * decide what to materialize: handing a hook the full context (or the bare
- * `request`) makes it treat the body as "maybe used" and eagerly parse it,
- * which consumes the stream before the Better Auth passthrough can read it
- * (`ERR_BODY_ALREADY_USED`) — and also drops the `set` mutations made later in
- * the request. Referencing only the `headers` sub-object sidesteps both.
- */
-export function extractClientIp(
-  headers: Headers,
-  ip: string | undefined,
-  trustProxy: boolean
-): string {
-  if (!trustProxy) return sanitizeClientIp(ip) ?? 'unknown';
-
-  const forwarded = sanitizeClientIp(headers.get('x-forwarded-for')?.split(',')[0]);
-  if (forwarded) return forwarded;
-
-  const proxyIp =
-    sanitizeClientIp(headers.get('cf-connecting-ip')) ?? sanitizeClientIp(headers.get('x-real-ip'));
-  return proxyIp ?? sanitizeClientIp(ip) ?? 'unknown';
 }
 
 /**

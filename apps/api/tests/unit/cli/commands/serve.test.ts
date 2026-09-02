@@ -135,3 +135,50 @@ describe('runServe (detached)', () => {
     expect(spawned).toBe(false);
   });
 });
+
+describe('runServe under a service unit', () => {
+  it('waits for the instance it replaces instead of refusing', async () => {
+    const controller = new FakeProcessController([42]);
+    const waited: number[] = [];
+    const spawned: number[] = [];
+
+    await runServe(
+      { host: undefined, port: 3000, detached: true },
+      {
+        readState: () => Promise.resolve(STATE),
+        removeState: noop,
+        controller,
+        serviceUnit: 'mangostudio.service',
+        waitForPredecessor: (pid) => {
+          waited.push(pid);
+          controller.die(pid);
+          return Promise.resolve(true);
+        },
+        spawnDetached: (port) => {
+          spawned.push(port);
+          return Promise.resolve({ pid: 1, port, logFile: '/l.log' });
+        },
+        log: () => undefined,
+      }
+    );
+
+    expect(waited).toEqual([42]);
+    expect(spawned).toEqual([3000]);
+  });
+
+  it('still refuses when the predecessor never lets go', async () => {
+    const refuse = runServe(
+      { host: undefined, port: 3000, detached: true },
+      {
+        readState: () => Promise.resolve(STATE),
+        removeState: noop,
+        controller: new FakeProcessController([42]),
+        serviceUnit: 'mangostudio.service',
+        waitForPredecessor: () => Promise.resolve(false),
+        spawnDetached: () => Promise.resolve({ pid: 1, port: 3000, logFile: '/l.log' }),
+        log: () => undefined,
+      }
+    );
+    await expect(refuse).rejects.toThrow(/already running/i);
+  });
+});

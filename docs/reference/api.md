@@ -207,6 +207,52 @@ but never more than it has keys. A setting that is simply not configured produce
 no field at all, which is why the marker exists: "no such setting" and "hidden on
 purpose" are different answers.
 
+## Machine Endpoints
+
+The hub's own host: what process is serving, whether a service unit keeps it
+alive, what doctor says, and the two actions that change either.
+
+| Method | Path                   | Auth | Purpose                                                        |
+| ------ | ---------------------- | ---- | -------------------------------------------------------------- |
+| `GET`  | `/api/machine/status`  | Yes  | Hub process, service unit, sibling runtime, host slot, actions |
+| `GET`  | `/api/machine/doctor`  | Yes  | Doctor rows with warning and failure counts                    |
+| `GET`  | `/api/machine/logs`    | Yes  | Tail of the log file the running instance writes               |
+| `POST` | `/api/machine/restart` | Yes  | Restart the server the way it was started (`202`)              |
+| `POST` | `/api/machine/service` | Yes  | `{ "action": "install" \| "uninstall" }` the service (`202`)   |
+
+`doctor` takes `?sections=environments,library` — core checks always run, and
+these two spawn probes, so a caller opts into them. An unknown section is `422`
+`VALIDATION`. Its rows are scoped to the signed-in account: MCP servers,
+connectors and skill toggles belong to a user, not to the machine, so one
+account's page never names another's. `mangostudio doctor` is unscoped — it runs
+at the machine's own keyboard and reports on the whole install. `logs` takes `?tail=` between 1 and 2000, defaulting to 200. It
+reads a bounded suffix of the file rather than the whole of it, so a log whose
+lines are unusually long can answer with fewer lines than were asked for;
+`truncated` says whether the file holds more.
+
+The two POSTs and `GET /api/machine/logs` are loopback-only — the log is the process's
+raw output, unredacted. A request from anywhere else is `403`
+`PERMISSION_DENIED` with `details.reasons` naming which check failed — the same
+guard shape the environment installs use. "Loopback" means the socket peer,
+unless `trustProxy` is on: behind a reverse proxy the peer is the proxy for every
+caller, so the forwarded client is what the guard reads there. See
+[Trusting proxy headers](../operations/deployment.md#trusting-proxy-headers). An action that does not apply to how
+this hub is running is `409` `UNSUPPORTED` with `details.reason` and
+`details.command`: a foreground server, a Windows task asked to restart itself, a
+unit that is already installed or not installed at all, a platform with no
+user-level supervisor, a supervisor that could not be read, or an auth secret that
+lives only in this process's environment where a unit could not find it. Both
+answer `202` on success; when the work would stop the process serving the request
+it runs after the response has left. `details.command` is the CLI line to run
+instead, which is what the "This machine" page shows when it is refused.
+
+The `202` body is `{ accepted, outcome, unit? }`. `outcome` is a code —
+`restarting-service`, `restarting-detached`, `service-installed-handover`,
+`service-installed`, `service-removing` or `service-removed` — and `unit` names
+the supervisor unit when the outcome is about one. No prose: the hub does not
+know the locale of the browser that asked, so the page words each code from the
+i18n dictionaries.
+
 ## Upload Endpoints
 
 | Method | Path          | Auth | Purpose                |

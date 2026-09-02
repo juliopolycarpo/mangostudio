@@ -2524,6 +2524,166 @@ export const messages = {
       agents: 'Agentes',
       health: 'Diagnóstico',
       library: 'Biblioteca',
+      machine: 'Esta máquina',
+    },
+    machine: {
+      description:
+        'O processo do MangoStudio que serve esta página, o que o mantém em execução e o que o doctor diz sobre a instalação.',
+      refresh: 'Atualizar',
+      reconnecting: 'Aguardando o servidor voltar...',
+      hub: {
+        title: 'Hub',
+        running: 'Em execução',
+        notRunning: 'Parado',
+        url: 'Endereço',
+        pid: 'Processo',
+        launchLabel: 'Iniciado',
+        launch: {
+          service: 'pelo serviço',
+          detached: 'em segundo plano',
+          foreground: 'em um terminal',
+        },
+        uptime: 'Tempo ativo',
+        version: 'Versão',
+        logFile: 'Arquivo de log',
+        noLogFile: 'nenhum (escreve no terminal)',
+        healthLabel: 'Saúde',
+        health: {
+          ok: 'Saudável',
+          unreachable: 'Sem resposta',
+          /** Preso a um endereço de LAN, que a sonda de loopback não alcança. */
+          unprobed: 'Não dá para verificar daqui',
+        },
+      },
+      service: {
+        title: 'Serviço',
+        description:
+          'Um serviço por usuário inicia o MangoStudio no login e o traz de volta após reiniciar, para que já esteja lá antes de você abrir o navegador.',
+        installed: 'Instalado',
+        notInstalled: 'Não instalado',
+        supervisor: {
+          linux: 'unidade de usuário do systemd',
+          darwin: 'agente do launchd',
+          win32: 'Tarefa Agendada',
+          unsupported: 'Sem supervisor nesta plataforma',
+        },
+        enabledLabel: 'No login',
+        enabled: 'Ativado',
+        disabled: 'Desativado',
+        runningLabel: 'Estado',
+        running: 'Em execução',
+        stopped: 'Parado',
+        lingerLabel: 'Após o logout',
+        lingerOn: 'Continua em execução',
+        lingerOff: 'Para no logout',
+        runs: 'Executa',
+        errors: {
+          'no-systemd':
+            'Esta máquina não tem systemd, então não há serviço de usuário para gerenciar.',
+          'no-session-bus':
+            'O barramento da sessão do usuário não é alcançável daqui, então o systemd não pôde ser consultado. Abra uma sessão gráfica nesta máquina, ou habilite linger para este usuário.',
+        },
+      },
+      install: {
+        title: 'Instalação',
+        home: 'Diretório base',
+        logsDir: 'Logs',
+        configFile: 'Arquivo de configuração',
+        noConfigFile: 'nenhum (padrões)',
+        build: 'Build',
+        standalone: 'binário standalone',
+        sourceCheckout: 'checkout do código-fonte',
+        container: 'contêiner',
+      },
+      runtime: {
+        title: 'Binário do runtime',
+        source: 'Executa a partir do checkout do código-fonte via Bun',
+        missing: 'não encontrado ao lado do hub',
+        versionMismatch:
+          'O binário do runtime informa uma versão diferente da do hub. Ambientes stdio recusarão o pareamento até que as duas coincidam.',
+      },
+      hostSlot: {
+        title: 'Consentimento do host',
+        absent: 'sem arquivo de consentimento, então tudo é permitido',
+        profile: {
+          full: 'Acesso total',
+          readonly: 'Somente leitura',
+          none: 'Nada permitido',
+          custom: 'Personalizado',
+        },
+      },
+      doctor: {
+        title: 'Doctor',
+        summary: '{warnings} avisos, {failures} falhas',
+        clear: 'Todas as verificações passaram.',
+      },
+      logs: {
+        title: 'Log',
+        none: 'Sem arquivo de log: este servidor escreve no terminal em que foi iniciado.',
+        readLocally:
+          'Abra esta página na máquina em que o hub roda, ou execute "mangostudio logs" lá.',
+        empty: 'O arquivo de log está vazio.',
+        truncated: 'Últimas {count} linhas de {file}',
+      },
+      actions: {
+        restart: 'Reiniciar',
+        installService: 'Instalar serviço',
+        uninstallService: 'Remover serviço',
+        confirm: 'Continuar',
+        cancel: 'Cancelar',
+        confirmRestartTitle: 'Reiniciar o MangoStudio?',
+        confirmRestartDescription:
+          'Todos os chats e conexões caem por alguns segundos enquanto o servidor volta. Equivale a executar:',
+        confirmInstallTitle: 'Instalar o serviço?',
+        confirmInstallDescription:
+          'O MangoStudio passará a iniciar no login. O servidor em execução entrega o lugar ao serviço, o que derruba as conexões por alguns segundos. Equivale a executar:',
+        confirmUninstallTitle: 'Remover o serviço?',
+        confirmUninstallDescription:
+          'O MangoStudio deixará de iniciar no login. Se o serviço for o que está em execução agora, ele para junto. Equivale a executar:',
+        runInstead: 'Execute isto em um terminal',
+        refused: 'O servidor recusou esta ação.',
+        failed: 'Não foi possível enviar a ação.',
+        accepted: {
+          'restarting-service':
+            'Reinício solicitado através de {unit}. A página reconecta quando o servidor voltar.',
+          'restarting-detached':
+            'Reiniciando em segundo plano. A página reconecta quando o servidor voltar.',
+          'service-installed-handover':
+            '{unit} instalado. Entregando o lugar a ele agora; a página reconecta quando estiver no ar.',
+          'service-installed': '{unit} instalado.',
+          'service-removing':
+            'Removendo {unit}. Este servidor para junto; inicie-o de novo com "mangostudio serve -d".',
+          'service-removed': 'O serviço foi removido. Este servidor continua rodando.',
+          /** Fica no lugar de `{unit}` quando a resposta não nomeia uma unidade. */
+          unnamedUnit: 'o serviço',
+        },
+        guard: {
+          container:
+            'Este hub roda dentro de um contêiner; reinicie-o e gerencie o serviço a partir do host do contêiner.',
+          'server-not-loopback':
+            'O MangoStudio está acessível a partir de outras máquinas, então não se reinicia nem altera o serviço a partir de um navegador.',
+          'client-not-loopback': 'Esta página não foi aberta na máquina em que o hub roda.',
+        },
+        reasons: {
+          guard: 'Esta ação só está disponível em um navegador na máquina em que o hub roda.',
+          foreground:
+            'O servidor foi iniciado em um terminal, que é o dono dele. Pressione Ctrl-C lá e inicie de novo.',
+          'windows-service':
+            'Uma Tarefa Agendada não consegue se parar nem se reiniciar de dentro do próprio processo. Use o comando abaixo.',
+          'already-installed': 'O serviço já está instalado.',
+          'not-installed': 'Não há serviço para remover.',
+          'unsupported-platform':
+            'Nenhum gerenciador de serviço por usuário é suportado nesta plataforma.',
+          'service-unreadable':
+            'Não foi possível consultar o gerenciador de serviço; veja o erro acima.',
+          'secret-not-persisted':
+            'O segredo de autenticação existe só no ambiente deste processo, então um serviço não conseguiria iniciar com ele. Execute o comando abaixo uma vez em um terminal; ele guarda o segredo primeiro.',
+          'install-failed':
+            'O gerenciador de serviço não conseguiu instalar a unidade aqui. Execute o comando abaixo em um terminal.',
+          'uninstall-failed':
+            'O gerenciador de serviço não conseguiu remover a unidade aqui. Execute o comando abaixo em um terminal.',
+        },
+      },
     },
     // Nomes próprios de produtos — iguais em todos os idiomas, mas centralizados
     // aqui para que a UI nunca use um id cru como `nvm` ou `mangostudio`.
@@ -3215,6 +3375,8 @@ export const messages = {
           'As instalações ficam desativadas enquanto o MangoStudio pode ser acessado por outras máquinas.',
         'client-not-loopback':
           'Esta requisição não veio desta máquina, então ela não pode instalar nada aqui.',
+        'client-unverified':
+          'O MangoStudio confia em um reverse proxy, e esta requisição não trouxe endereço encaminhado, então não foi possível estabelecer de onde ela veio. Essa recusa é o que security.allowDirectLoopback = false pede; o proxy à frente deste hub precisa definir X-Forwarded-For.',
         disabled: 'As instalações estão desativadas na configuração deste servidor.',
         'environment-not-trusted':
           'Este ambiente não foi autorizado a instalar. Ative essa opção para a máquina em questão, no cartão dela em Ambientes.',

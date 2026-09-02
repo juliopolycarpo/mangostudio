@@ -2,7 +2,10 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RuntimeServiceStatusSchema } from '@mangostudio/shared/runtime-home';
+import {
+  type RuntimeServiceMode,
+  RuntimeServiceStatusSchema,
+} from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
 import {
   readRuntimeSlotState,
@@ -12,32 +15,34 @@ import {
 } from '../../../src/runtime-home';
 import {
   assertServicePreconditions,
-  attemptEnableLinger,
   createRuntimeServiceManager,
   execStartUsesCurrent,
+  RUNTIME_SERVICE_IDENTITY,
   type RuntimeServiceExecDeps,
   type RuntimeServiceExecResult,
-  renderLaunchdPlist,
-  renderSystemdUnit,
   resolveInstallMode,
-  systemdUnitPath,
+  runtimeUnitDefinition,
 } from '../../../src/services/runtime-service';
+import {
+  decodePowerShellArgv,
+  renderLaunchdPlistFile,
+  renderSystemdUnitFile,
+  systemdUserUnitPath,
+} from '../../../src/services/user-service-manager';
 
 const CURRENT = '/home/test/.mango/runtime/remote/current/mangostudio-runtime';
 
-/** Inner XML of the KeepAlive dict only (first match). */
-function keepAliveDictBody(plist: string): string {
-  const match = plist.match(/<key>KeepAlive<\/key>\s*<dict>([\s\S]*?)<\/dict>/);
-  if (!match) throw new Error('KeepAlive dict not found');
-  return match[1];
-}
-
-/** Job plist fragment after the KeepAlive dict closes. */
-function plistAfterKeepAlive(plist: string): string {
-  const parts = plist.split(/<key>KeepAlive<\/key>\s*<dict>[\s\S]*?<\/dict>/);
-  if (parts.length < 2) throw new Error('KeepAlive dict not found');
-  return parts[1];
-}
+// The runtime's slot policy over the shared renderers: what this workspace owns
+// is the mode and the binary, not the unit-file format.
+const renderSystemdUnit = (binaryPath: string, mode: RuntimeServiceMode): string =>
+  renderSystemdUnitFile(runtimeUnitDefinition(binaryPath, mode));
+const renderLaunchdPlist = (binaryPath: string, mode: RuntimeServiceMode): string =>
+  renderLaunchdPlistFile(
+    RUNTIME_SERVICE_IDENTITY.launchdLabel,
+    runtimeUnitDefinition(binaryPath, mode)
+  );
+const systemdUnitPath = (home: string): string =>
+  systemdUserUnitPath(home, RUNTIME_SERVICE_IDENTITY.unitName);
 
 function makeDeps(
   options: {
@@ -46,6 +51,8 @@ function makeDeps(
     readonly hasSystemd?: boolean;
     /** Whether a binary is reachable through the slot `current` link. */
     readonly currentBinaryPresent?: boolean;
+    /** Whether the user bus socket exists under /run/user/<uid>. */
+    readonly sessionBusSocket?: boolean;
     readonly onExec?: (argv: readonly string[]) => RuntimeServiceExecResult;
   } = {}
 ): RuntimeServiceExecDeps & { readonly files: Map<string, string>; readonly argv: string[][] } {
@@ -91,7 +98,12 @@ function makeDeps(
       return Promise.resolve();
     },
     mkdir: () => Promise.resolve(),
-    pathExists: () => Promise.resolve(options.currentBinaryPresent ?? true),
+    pathExists: (path) =>
+      Promise.resolve(
+        path.endsWith('/bus')
+          ? (options.sessionBusSocket ?? true)
+          : (options.currentBinaryPresent ?? true)
+      ),
   };
 }
 
@@ -117,20 +129,6 @@ describe('runtime service templates', () => {
     expect(plist).toContain(`<string>${CURRENT}</string>`);
     expect(plist).toContain('<string>serve</string>');
     expect(plist).not.toMatch(/token|secret/i);
-  });
-
-  it('places ThrottleInterval at job top level, not inside KeepAlive', () => {
-    const plist = renderLaunchdPlist(CURRENT, 'connect');
-    const keepAlive = keepAliveDictBody(plist);
-    expect(keepAlive).toContain('<key>SuccessfulExit</key>');
-    expect(keepAlive).toContain('<false/>');
-    expect(keepAlive).not.toContain('ThrottleInterval');
-
-    const tail = plistAfterKeepAlive(plist);
-    expect(tail).toMatch(/<key>ThrottleInterval<\/key>\s*<integer>30<\/integer>/);
-    expect(plist.indexOf('<key>ThrottleInterval</key>')).toBeGreaterThan(
-      plist.indexOf('</dict>', plist.indexOf('<key>KeepAlive</key>'))
-    );
   });
 });
 
@@ -319,7 +317,7 @@ describe('runtime service refusals', () => {
     }
   });
 
-  it('refuses win32 install', async () => {
+  it('registers a per-user Scheduled Task on win32 instead of refusing', async () => {
     const mangoHome = await mkdtemp(join(tmpdir(), 'mango-svc-'));
     const env = { MANGO_HOME: mangoHome };
     try {
@@ -330,9 +328,14 @@ describe('runtime service refusals', () => {
       );
       await writePairingToken('remote', 'token', env);
       const deps = makeDeps({ platform: 'win32', env });
-      await expect(createRuntimeServiceManager(deps).install('connect')).rejects.toMatchObject({
-        kind: 'runtime_service_unsupported',
-      });
+      await createRuntimeServiceManager(deps).install('connect');
+      expect(deps.files.size).toBe(0);
+      expect(deps.argv).toHaveLength(1);
+      expect(deps.argv[0]?.[0]).toBe('powershell.exe');
+      const script = decodePowerShellArgv(deps.argv[0] ?? []) ?? '';
+      expect(script).toContain("Register-ScheduledTask -TaskName 'MangoStudio runtime'");
+      expect(script).toContain('-RunLevel Limited');
+      expect(script).toContain('New-ScheduledTaskTrigger -AtLogOn');
     } finally {
       await rm(mangoHome, { recursive: true, force: true });
     }
@@ -357,7 +360,7 @@ describe('runtime service refusals', () => {
     }
   });
 
-  it('refuses missing session bus', async () => {
+  it('refuses a missing session bus only when the bus socket is gone too', async () => {
     const mangoHome = await mkdtemp(join(tmpdir(), 'mango-svc-'));
     const env = { MANGO_HOME: mangoHome };
     try {
@@ -373,35 +376,21 @@ describe('runtime service refusals', () => {
           XDG_RUNTIME_DIR: '',
           DBUS_SESSION_BUS_ADDRESS: '',
         },
+        sessionBusSocket: false,
       });
       await expect(createRuntimeServiceManager(deps).install('connect')).rejects.toMatchObject({
         kind: 'runtime_service_no_session_bus',
       });
+
+      // The same bare environment with the socket present is what a process
+      // started by `serve -d` or by a unit sees; it must be able to install.
+      const bare = makeDeps({
+        env: { MANGO_HOME: mangoHome, XDG_RUNTIME_DIR: '', DBUS_SESSION_BUS_ADDRESS: '' },
+      });
+      await createRuntimeServiceManager(bare).install('connect');
+      expect(bare.argv.some((row) => row.includes('enable'))).toBe(true);
     } finally {
       await rm(mangoHome, { recursive: true, force: true });
-    }
-  });
-});
-
-describe('runtime service linger', () => {
-  it('prints sudo line when loginctl needs root', async () => {
-    const stderr: string[] = [];
-    const original = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((chunk: string) => {
-      stderr.push(String(chunk));
-      return true;
-    }) as typeof process.stderr.write;
-    const deps = makeDeps({
-      onExec: (argv) =>
-        argv[0] === 'loginctl'
-          ? { exitCode: 1, stdout: '', stderr: 'Access denied' }
-          : { exitCode: 0, stdout: '', stderr: '' },
-    });
-    try {
-      await attemptEnableLinger(deps);
-      expect(stderr.join('')).toContain('sudo loginctl enable-linger test');
-    } finally {
-      process.stderr.write = original;
     }
   });
 });

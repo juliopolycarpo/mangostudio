@@ -1,19 +1,31 @@
 /**
  * CLI command router. Maps the first user argument to a command handler and
- * turns CliError into a clean stderr message + non-zero exit.
+ * turns an operator-facing error into a clean stderr message + non-zero exit.
  */
 
-import { parseDoctorArgs, parseEnvArgs, parseLibraryArgs, parseServeArgs } from './args';
+import {
+  parseDoctorArgs,
+  parseEnvArgs,
+  parseLibraryArgs,
+  parseLogsArgs,
+  parseServeArgs,
+  parseServiceArgs,
+  parseStatusArgs,
+} from './args';
 import { runDoctor } from './commands/doctor';
 import { runEnv } from './commands/env';
 import { runKillServer } from './commands/killserver';
 import { runLibrary } from './commands/library';
+import { runLogs } from './commands/logs';
+import { runOpen } from './commands/open';
+import { runRestart } from './commands/restart';
 import { runServe } from './commands/serve';
 import { runServeInternal } from './commands/serve-internal';
+import { runService } from './commands/service';
 import { runStatus } from './commands/status';
 import { runStop } from './commands/stop';
 import { runVersion } from './commands/version';
-import { CliError } from './errors';
+import { isOperatorError } from './errors';
 import { writeError } from './output';
 import { printHelp, printUnknown } from './usage';
 
@@ -23,7 +35,7 @@ export async function dispatch(args: string[]): Promise<void> {
   try {
     await route(command, rest);
   } catch (error) {
-    if (error instanceof CliError) {
+    if (isOperatorError(error)) {
       writeError(error.message);
       process.exit(1);
       return;
@@ -48,13 +60,25 @@ async function route(command: string | undefined, rest: string[]): Promise<void>
       await runServeInternal(parseServeArgs(rest));
       return;
     case 'status':
-      await runStatus();
+      await runStatus(parseStatusArgs(rest));
       return;
     case 'stop':
       await runStop();
       return;
+    case 'restart':
+      await runRestart();
+      return;
     case 'killserver':
       await runKillServer();
+      return;
+    case 'service':
+      await runService(parseServiceArgs(rest));
+      return;
+    case 'logs':
+      await runLogs(parseLogsArgs(rest));
+      return;
+    case 'open':
+      await runOpen();
       return;
     case 'doctor':
       await runDoctor(parseDoctorArgs(rest));

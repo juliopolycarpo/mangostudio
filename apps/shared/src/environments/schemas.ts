@@ -743,6 +743,14 @@ export const InstallGuardReasonSchema = Type.Union([
   Type.Literal('container'),
   Type.Literal('server-not-loopback'),
   Type.Literal('client-not-loopback'),
+  /**
+   * The caller's address was never established: a trusted proxy appended no
+   * `X-Forwarded-For` hop and `security.allowDirectLoopback` is off. Distinct
+   * from `client-not-loopback`, which says the address *was* read and is
+   * somewhere else — a refusal that names the wrong cause sends the operator
+   * looking for the wrong fix.
+   */
+  Type.Literal('client-unverified'),
   Type.Literal('disabled'),
   /**
    * The environment has not been trusted with installs. Distinct from

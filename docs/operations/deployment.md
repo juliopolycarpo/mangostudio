@@ -246,9 +246,55 @@ under `[security]` in `config.toml` so the limiter resolves the real client IP
 from the `X-Forwarded-For` / `X-Real-IP` / `CF-Connecting-IP` headers the proxy
 sets.
 
-> **Only enable this behind a proxy that overwrites those headers** (the nginx
-> config above uses `$proxy_add_x_forwarded_for`). With direct internet exposure,
-> a trusted header lets any client spoof its IP and evade rate limiting.
+The same setting decides the local-surface guard that gates environment installs
+and the machine actions (`/api/machine/restart`, `/api/machine/service`,
+`/api/machine/logs`). That guard asks whether the browser is at this machine's
+keyboard, and the socket peer cannot answer it behind a proxy — every caller
+arrives from loopback. With `TRUST_PROXY=true` the forwarded client answers
+instead, so a remote signed-in session is correctly refused.
+
+The two read different hops of `X-Forwarded-For`, because they are asking
+different questions. The header is a list, and a proxy *appends* the address it
+saw rather than replacing the list — both `$proxy_add_x_forwarded_for` above and
+Caddy's `reverse_proxy` do. The limiter takes the **first** hop, the origin
+client, which is what a counter should be keyed on. The guard takes the **last**
+hop, the one your proxy wrote, because every earlier entry is whatever the
+caller sent — a remote browser can put `X-Forwarded-For: 127.0.0.1` on a
+same-origin request, and the guard must not read that as your keyboard.
+
+> **Only enable this behind a proxy that actually sets those headers.** With
+> direct internet exposure, or behind something that forwards a caller's
+> `X-Forwarded-For` verbatim without appending to it, a trusted header lets any
+> client spoof its IP — evading rate limiting, and passing the local-surface
+> guard.
+
+#### When the proxy sets no forwarded header
+
+A proxy that forwards without `X-Forwarded-For` — an nginx `location` block with
+no `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` — leaves the
+guard with only the socket peer to read, and that peer is the proxy, on
+loopback. Every remote browser then passes a check that means "at this machine's
+keyboard".
+
+`ALLOW_DIRECT_LOOPBACK` (env) or `allowDirectLoopback` under `[security]`
+decides what happens there. It defaults to `true`: an unforwarded request is
+judged by its socket peer, exactly as it was before `TRUST_PROXY` was set, so a
+browser that reaches the hub directly — bypassing the proxy on `localhost:3001`
+— keeps the machine page and its installs.
+
+```toml
+[security]
+trustProxy = true
+allowDirectLoopback = false
+```
+
+Set it to `false` when the proxy in front of this hub does not set
+`X-Forwarded-For` and you cannot change that. An unforwarded request is then
+refused as `client-unverified` rather than accepted as local — a distinct reason
+from `client-not-loopback`, so the page says the address could not be
+established instead of claiming the caller is somewhere else. Direct requests to
+the hub's own port are refused with it, and the CLI (`mangostudio restart`,
+`mangostudio service install`) remains the way in.
 
 ## Systemd Service
 

@@ -5,12 +5,14 @@
 
 import { displayHost, getConfig } from '../../lib/config';
 import { isStateLive, readState, removeState } from '../../lib/server-state';
+import { HUB_SERVICE_UNIT_ENV } from '../../modules/machine/domain/hub-service-identity';
 import { assertValidPort, type ServeArgs } from '../args';
 import { ensureServeAuthSecret } from '../auth-secret-setup';
 import { spawnDetached } from '../detach';
 import { CliError } from '../errors';
 import { writeLine } from '../output';
 import { createProcessController, type ProcessController } from '../process-control';
+import { waitForPredecessor } from '../restart-handshake';
 import { assertServeConfig } from '../serve-config-guard';
 
 export interface ServeDeps {
@@ -20,6 +22,9 @@ export interface ServeDeps {
   log: (msg: string) => void;
   spawnDetached: typeof spawnDetached;
   ensureAuthSecret: typeof ensureServeAuthSecret;
+  /** The unit that started this process, when a supervisor did. */
+  serviceUnit: string | undefined;
+  waitForPredecessor: typeof waitForPredecessor;
 }
 
 /** Start the server foreground, or in the background when detached. // Usage: await runServe({ detached: true }) */
@@ -36,20 +41,31 @@ export async function runServe(args: ServeArgs, deps: Partial<ServeDeps> = {}): 
   await startForeground(args, deps);
 }
 
-/** Refuse to start when a live instance already holds the state file. */
+/**
+ * Refuse to start when a live instance already holds the state file. Under a
+ * service unit the live instance is usually the one this unit is replacing —
+ * `service install` from the page hands over after answering — so the unit
+ * waits for it to let go rather than failing and being restarted on a loop.
+ */
 async function ensureNotRunning(deps: Partial<ServeDeps>): Promise<void> {
   const controller = deps.controller ?? createProcessController();
   const read = deps.readState ?? readState;
   const remove = deps.removeState ?? removeState;
+  const serviceUnit = deps.serviceUnit ?? process.env[HUB_SERVICE_UNIT_ENV];
+  const wait = deps.waitForPredecessor ?? waitForPredecessor;
 
   const state = await read();
   if (!state) {
     return;
   }
   if (isStateLive(state, (pid) => controller.isAlive(pid))) {
-    throw new CliError(
-      `Another instance is already running (PID ${state.pid}, port ${state.port}).`
-    );
+    if (!serviceUnit || !(await wait(state.pid))) {
+      throw new CliError(
+        `Another instance is already running (PID ${state.pid}, port ${state.port}).`
+      );
+    }
+    // The predecessor removed its own state file on the way out.
+    return;
   }
   // Stale file from a crashed server — clear it and continue.
   await remove();

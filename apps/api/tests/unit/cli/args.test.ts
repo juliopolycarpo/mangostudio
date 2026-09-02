@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'bun:test';
-import { assertValidPort, parseDoctorArgs, parseServeArgs } from '../../../src/cli/args';
+import {
+  assertValidPort,
+  DEFAULT_LOG_LINES,
+  parseDoctorArgs,
+  parseLogsArgs,
+  parseServeArgs,
+  parseServiceArgs,
+  parseStatusArgs,
+} from '../../../src/cli/args';
 import { CliError } from '../../../src/cli/errors';
 
 describe('parseServeArgs', () => {
@@ -194,5 +202,67 @@ describe('assertValidPort', () => {
   it('rejects ports outside the range', () => {
     expect(() => assertValidPort(0)).toThrow(CliError);
     expect(() => assertValidPort(65_536)).toThrow(CliError);
+  });
+});
+
+describe('parseStatusArgs', () => {
+  it('accepts --json and nothing else', () => {
+    expect(parseStatusArgs([])).toEqual({ json: false });
+    expect(parseStatusArgs(['--json'])).toEqual({ json: true });
+    expect(() => parseStatusArgs(['--verbose'])).toThrow(CliError);
+  });
+});
+
+describe('parseServiceArgs', () => {
+  it('requires a known action', () => {
+    expect(() => parseServiceArgs([])).toThrow(/Missing service action/);
+    expect(() => parseServiceArgs(['enable'])).toThrow(/Unknown service action: enable/);
+  });
+
+  it('parses each action with an optional --json', () => {
+    expect(parseServiceArgs(['status', '--json'])).toEqual({
+      action: 'status',
+      host: undefined,
+      port: undefined,
+      json: true,
+    });
+    expect(parseServiceArgs(['restart'])).toEqual({
+      action: 'restart',
+      host: undefined,
+      port: undefined,
+      json: false,
+    });
+  });
+
+  it('accepts a bind target for install only', () => {
+    expect(parseServiceArgs(['install', 'lan:3000'])).toEqual({
+      action: 'install',
+      host: '0.0.0.0',
+      port: 3000,
+      json: false,
+    });
+    expect(() => parseServiceArgs(['install', '3000', '3001'])).toThrow(/Unexpected argument/);
+    expect(() => parseServiceArgs(['stop', '3000'])).toThrow(
+      /Unexpected argument for service stop/
+    );
+    expect(() => parseServiceArgs(['install', '--now'])).toThrow(/Unknown option for service/);
+  });
+});
+
+describe('parseLogsArgs', () => {
+  it('defaults to a bounded tail without following', () => {
+    expect(parseLogsArgs([])).toEqual({ follow: false, lines: DEFAULT_LOG_LINES });
+  });
+
+  it('parses follow and a line count', () => {
+    expect(parseLogsArgs(['-f', '-n', '50'])).toEqual({ follow: true, lines: 50 });
+    expect(parseLogsArgs(['--lines', '5', '--follow'])).toEqual({ follow: true, lines: 5 });
+  });
+
+  it('rejects a missing, non-numeric, or out-of-range count', () => {
+    expect(() => parseLogsArgs(['-n'])).toThrow(/Expected a line count/);
+    expect(() => parseLogsArgs(['-n', 'ten'])).toThrow(/Expected a line count/);
+    expect(() => parseLogsArgs(['-n', '0'])).toThrow(/out of range/);
+    expect(() => parseLogsArgs(['--tail'])).toThrow(/Unknown option for logs/);
   });
 });

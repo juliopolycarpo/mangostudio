@@ -25,17 +25,28 @@ pré-compilado e sidecar do frontend. Veja a
 
 ## Comandos
 
-| Comando                            | Descrição                                                            |
-| ---------------------------------- | -------------------------------------------------------------------- |
-| `mangostudio`                      | Imprime ajuda e a lista de comandos.                                 |
-| `serve [host\|port\|host:port]`    | Inicia o servidor em foreground (padrão `localhost:3001`).           |
-| `serve [host\|port\|host:port] -d` | Inicia o servidor em background (detached) e retorna.                |
-| `status`                           | Mostra se um servidor está rodando e seus detalhes.                  |
-| `stop`                             | Encerra graciosamente o servidor em execução (SIGTERM).              |
-| `killserver`                       | Força encerramento do servidor (SIGKILL).                            |
-| `doctor`                           | Executa diagnósticos de ambiente e configuração.                     |
-| `doctor --all`                     | Inclui checagens do conector ChatGPT mesmo sem conector configurado. |
-| `version`, `--version`, `-v`       | Imprime a versão embutida do MangoStudio.                            |
+| Comando                                           | Descrição                                                            |
+| ------------------------------------------------- | -------------------------------------------------------------------- |
+| `mangostudio`                                     | Imprime ajuda e a lista de comandos.                                 |
+| `serve [host\|port\|host:port]`                   | Inicia o servidor em foreground (padrão `localhost:3001`).           |
+| `serve [host\|port\|host:port] -d`                | Inicia o servidor em background (detached) e retorna.                |
+| `status`                                          | Mostra se um servidor está rodando, sua URL, modo de início e saúde. |
+| `status --json`                                   | Emite o documento de status do hub em vez de texto simples.          |
+| `stop`                                            | Encerra graciosamente o servidor em execução (SIGTERM).              |
+| `restart`                                         | Reinicia o servidor do mesmo jeito que ele foi iniciado.             |
+| `killserver`                                      | Força encerramento do servidor (SIGKILL).                            |
+| `service <ação> [host\|port\|host:port] [--json]` | Mantém o servidor rodando após logout e reboot.                      |
+| `logs [-f] [-n <count>]`                          | Imprime o fim do log do servidor; `-f` acompanha.                    |
+| `open`                                            | Abre o servidor em execução no navegador padrão.                     |
+| `doctor`                                          | Executa diagnósticos de ambiente e configuração.                     |
+| `doctor --all`                                    | Inclui checagens do conector ChatGPT mesmo sem conector configurado. |
+| `version`, `--version`, `-v`                      | Imprime a versão embutida do MangoStudio.                            |
+
+Ações de `service`: `install`, `uninstall`, `status`, `start`, `stop`,
+`restart`. `install` grava uma unidade de usuário — unidade systemd
+`mangostudio.service` no Linux, agente launchd `com.mangostudio.hub` no macOS,
+Tarefa Agendada `MangoStudio Hub` no Windows — que roda `serve` e registra a
+saída em `~/.mango/logs/service.log`.
 
 ## Exemplos
 
@@ -44,11 +55,16 @@ mangostudio serve              # foreground em localhost:3001
 mangostudio serve 3000         # foreground em localhost:3000
 mangostudio serve 127.0.0.1 -d # background em 127.0.0.1:3001
 mangostudio serve lan:3000 -d  # background em 0.0.0.0:3000
+mangostudio service install    # inicia agora e a cada login
+mangostudio restart            # reinicia do jeito que foi iniciado
+mangostudio logs -f            # acompanha o log do servidor
 mangostudio --version
 mangostudio status
 mangostudio stop
 ```
 
-Para detalhes de modo background, instância única, arquivos de runtime, códigos
+Para detalhes de `service` (o que a unidade roda, a lista de variáveis de
+ambiente permitidas, a passagem de bastão na instalação, linger no Linux),
+`restart`, `logs`, modo background, instância única, arquivos de runtime, códigos
 de saída, a seção **Doctor** e configuração, consulte a
 [versão completa em inglês](../../reference/cli.md).

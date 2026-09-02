@@ -188,10 +188,55 @@ caem em um único contador de rate limit. Defina `TRUST_PROXY=true` (env) ou
 IP real do cliente a partir dos headers `X-Forwarded-For` / `X-Real-IP` /
 `CF-Connecting-IP` que o proxy define.
 
-> **Só habilite isso atrás de um proxy que sobrescreve esses headers** (a config
-> nginx acima usa `$proxy_add_x_forwarded_for`). Com exposição direta à internet,
-> um header confiável permite que qualquer cliente forje seu IP e burle o rate
-> limiting.
+A mesma configuração decide o guard de superfície local que protege as
+instalações de ambiente e as ações de máquina (`/api/machine/restart`,
+`/api/machine/service`, `/api/machine/logs`). Esse guard pergunta se o browser
+está no teclado desta máquina, e o peer do socket não responde isso atrás de um
+proxy — todo chamador chega de loopback. Com `TRUST_PROXY=true` quem responde é o
+cliente encaminhado, então uma sessão remota autenticada é corretamente recusada.
+
+Os dois leem hops diferentes do `X-Forwarded-For`, porque as perguntas são
+diferentes. O header é uma lista, e um proxy *acrescenta* o endereço que viu em
+vez de substituir a lista — tanto o `$proxy_add_x_forwarded_for` acima quanto o
+`reverse_proxy` do Caddy fazem isso. O limiter usa o **primeiro** hop, o cliente
+de origem, que é a chave certa para um contador. O guard usa o **último**, o que
+o seu proxy escreveu, porque toda entrada anterior é o que o chamador mandou —
+um browser remoto pode pôr `X-Forwarded-For: 127.0.0.1` numa requisição de mesma
+origem, e o guard não pode ler isso como o seu teclado.
+
+> **Só habilite isso atrás de um proxy que de fato define esses headers.** Com
+> exposição direta à internet, ou atrás de algo que repassa o `X-Forwarded-For`
+> do chamador sem acrescentar nada, um header confiável permite que qualquer
+> cliente forje seu IP — burlando o rate limiting e passando pelo guard de
+> superfície local.
+
+#### Quando o proxy não define header encaminhado
+
+Um proxy que repassa sem `X-Forwarded-For` — um bloco `location` do nginx sem
+`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` — deixa o guard
+apenas com o peer do socket para ler, e esse peer é o próprio proxy, em loopback.
+Aí todo browser remoto passa por uma verificação que significa "no teclado desta
+máquina".
+
+`ALLOW_DIRECT_LOOPBACK` (env) ou `allowDirectLoopback` em `[security]` decide o
+que acontece nesse caso. O padrão é `true`: uma requisição sem encaminhamento é
+julgada pelo peer do socket, exatamente como antes de `TRUST_PROXY` ser ligado,
+então um browser que fala direto com o hub — passando por cima do proxy em
+`localhost:3001` — mantém a página da máquina e suas instalações.
+
+```toml
+[security]
+trustProxy = true
+allowDirectLoopback = false
+```
+
+Defina `false` quando o proxy à frente deste hub não define `X-Forwarded-For` e
+você não pode mudar isso. Uma requisição sem encaminhamento passa a ser recusada
+como `client-unverified` em vez de aceita como local — um motivo distinto de
+`client-not-loopback`, então a página diz que o endereço não pôde ser
+estabelecido em vez de afirmar que o chamador está em outro lugar. Requisições
+diretas à porta do hub são recusadas junto, e a CLI (`mangostudio restart`,
+`mangostudio service install`) continua sendo o caminho.
 
 ## Serviço systemd
 

@@ -27,7 +27,7 @@ function baseDeps(overrides: Partial<DetachDeps> = {}): Partial<DetachDeps> {
     },
     spawn: () => CHILD_PID,
     readState: () => Promise.resolve(makeState()),
-    probeHealth: () => Promise.resolve(true),
+    confirmsHealthy: () => Promise.resolve(true),
     ...overrides,
   };
 }
@@ -59,7 +59,7 @@ describe('spawnDetached', () => {
   });
 
   it('fails when the child never becomes healthy', async () => {
-    const deps = baseDeps({ probeHealth: () => Promise.resolve(false) });
+    const deps = baseDeps({ confirmsHealthy: () => Promise.resolve(false) });
 
     await expect(spawnDetached(3001, 'localhost', deps)).rejects.toThrow(/did not become healthy/i);
   });
