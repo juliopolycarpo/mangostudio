@@ -5,7 +5,7 @@
  * service is testable without a supervisor, a state file, or a running server.
  */
 
-import type { UserServiceManager } from '@mangostudio/runtime';
+import { RuntimeServiceManagementError, type UserServiceManager } from '@mangostudio/runtime';
 import type { InstallGuard } from '@mangostudio/shared/environments';
 import type {
   HubHealth,
@@ -312,7 +312,19 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       platform: environment.platform,
       ...(explicitTarget ? { target: explicitTarget } : {}),
     });
-    await d.manager.install(definition);
+    try {
+      await d.manager.install(definition);
+    } catch (error) {
+      // The supervisor's own reason (a command over Task Scheduler's argument
+      // limit, an unwritable unit file, ...) is diagnostic detail for the log,
+      // not wire content: `MachineActionUnavailableError` carries a reason the
+      // dictionaries can word, same as every other refusal this route answers.
+      if (error instanceof RuntimeServiceManagementError) {
+        logger.error('install_refused', { kind: error.kind, error: error.message });
+        throw new MachineActionUnavailableError('install-failed', INSTALL_SERVICE_COMMAND);
+      }
+      throw error;
+    }
 
     if (input.launch === 'service' || state === null) {
       return { accepted: true, outcome: 'service-installed', unit: unitName };

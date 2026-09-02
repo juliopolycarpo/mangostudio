@@ -140,6 +140,8 @@ export const MachineActionReasonSchema = Type.Union([
   Type.Literal('service-unreadable'),
   /** The auth secret lives only in this process's environment; a unit could not find it. */
   Type.Literal('secret-not-persisted'),
+  /** The service manager refused the install; the runtime error is not sent over the wire. */
+  Type.Literal('install-failed'),
 ]);
 export type MachineActionReason = Static<typeof MachineActionReasonSchema>;
 

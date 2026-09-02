@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { RuntimeServiceManagementError } from '@mangostudio/runtime';
 import {
   MACHINE_CHECK_DETAIL_MAX,
   MACHINE_CHECK_LABEL_MAX,
@@ -292,6 +293,19 @@ describe('machineService.service', () => {
     await expect(unsaved.service.service('install', LOCAL)).rejects.toBeInstanceOf(
       MachineActionUnavailableError
     );
+  });
+
+  it('turns a supervisor install refusal into a 409-shaped reason, not a raw throw', async () => {
+    const { service, manager } = makeService();
+    manager.installFailWith = new RuntimeServiceManagementError(
+      'runtime_service_unsupported',
+      'The Scheduled Task command for mangostudio.service is 9000 characters, over the 8192 Task Scheduler accepts.'
+    );
+    await expect(service.service('install', LOCAL)).rejects.toMatchObject({
+      name: 'MachineActionUnavailableError',
+      reason: 'install-failed',
+      command: 'mangostudio service install',
+    });
   });
 
   it('removes the unit now for a detached hub, after responding for a service-managed one', async () => {

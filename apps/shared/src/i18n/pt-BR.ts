@@ -2678,6 +2678,8 @@ export const messages = {
             'Não foi possível consultar o gerenciador de serviço; veja o erro acima.',
           'secret-not-persisted':
             'O segredo de autenticação existe só no ambiente deste processo, então um serviço não conseguiria iniciar com ele. Execute o comando abaixo uma vez em um terminal; ele guarda o segredo primeiro.',
+          'install-failed':
+            'O gerenciador de serviço não conseguiu instalar a unidade aqui. Execute o comando abaixo em um terminal.',
         },
       },
     },

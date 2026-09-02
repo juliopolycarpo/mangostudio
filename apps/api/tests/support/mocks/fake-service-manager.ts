@@ -10,6 +10,8 @@ export class FakeServiceManager implements UserServiceManager {
   readonly installed: UserServiceDefinition[] = [];
   readonly unitPath: string | null = '/home/test/.config/systemd/user/mangostudio.service';
   failWith: Error | null = null;
+  /** Fails only the install call, leaving `status()` scripted as usual. */
+  installFailWith: Error | null = null;
 
   constructor(private statusValue: UserServiceStatus = notInstalled()) {}
 
@@ -20,6 +22,7 @@ export class FakeServiceManager implements UserServiceManager {
   install(definition: UserServiceDefinition): Promise<void> {
     this.calls.push('install');
     this.installed.push(definition);
+    if (this.installFailWith) return Promise.reject(this.installFailWith);
     return this.settle();
   }
 
