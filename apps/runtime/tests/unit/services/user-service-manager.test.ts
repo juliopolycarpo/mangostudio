@@ -7,6 +7,7 @@ import {
   createUserServiceManager,
   currentUserName,
   decodePowerShellArgv,
+  defaultUserServiceExecDeps,
   execPathFromUnitBody,
   parseScheduledTaskJson,
   programFromTaskAction,
@@ -568,6 +569,23 @@ describe('currentUserName', () => {
 
   it('falls back to the environment only when there is no passwd entry to read', () => {
     expect(currentUserName({ USER: 'shell-user' })).toBe(userInfo().username);
+  });
+});
+
+describe('defaultUserServiceExecDeps', () => {
+  // `Bun.spawn` throws for a program that is not on PATH. Every caller in the
+  // manager reads an exit code, so letting that out turned one absent
+  // `loginctl` or `which` — a container image without them — into a rejected
+  // `status()`, which is a 500 on the machine page and a stack trace out of
+  // `service status`.
+  it('answers a missing program with an exit code instead of throwing', async () => {
+    const result = await defaultUserServiceExecDeps().exec(['mangostudio-no-such-program-xyz']);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('mangostudio-no-such-program-xyz');
+  });
+
+  it('reads systemd off PATH without spawning anything', async () => {
+    expect(await defaultUserServiceExecDeps({ PATH: '/nonexistent' }).hasSystemd()).toBe(false);
   });
 });
 

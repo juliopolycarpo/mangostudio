@@ -463,14 +463,29 @@ export function defaultUserServiceExecDeps(
 ): UserServiceExecDeps {
   return {
     exec: async (argv, options) => {
-      const child = Bun.spawn([...argv], {
-        env: { ...env, ...options?.env },
-        stdin: 'ignore',
-        stdout: 'pipe',
-        stderr: 'pipe',
-        timeout: 30_000,
-        ...HIDDEN_WINDOW,
-      });
+      // A supervisor command that is not on PATH is an ordinary failure with a
+      // message, not an exception. `Bun.spawn` throws for a missing program,
+      // and every caller here reads an exit code: letting the throw out turns
+      // one absent `loginctl` into a rejected `status()`, which is a 500 on
+      // `GET /api/machine/status` and a stack trace out of `service status`.
+      let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
+      try {
+        child = Bun.spawn([...argv], {
+          env: { ...env, ...options?.env },
+          stdin: 'ignore',
+          stdout: 'pipe',
+          stderr: 'pipe',
+          timeout: 30_000,
+          ...HIDDEN_WINDOW,
+        });
+      } catch (error) {
+        // 127 is the shell's own "command not found", which is what this is.
+        return {
+          exitCode: 127,
+          stdout: '',
+          stderr: error instanceof Error ? error.message : String(error),
+        };
+      }
       const [stdout, stderr, exitCode] = await Promise.all([
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
@@ -483,14 +498,11 @@ export function defaultUserServiceExecDeps(
     home: homedir(),
     uid: typeof process.getuid === 'function' ? process.getuid() : 0,
     user: currentUserName(env),
-    hasSystemd: async () => {
-      const result = await Bun.spawn(['which', 'systemctl'], {
-        stdout: 'ignore',
-        stderr: 'ignore',
-        ...HIDDEN_WINDOW,
-      }).exited;
-      return result === 0;
-    },
+    // A PATH lookup rather than a spawned `which`: the answer is the same, it
+    // costs no process, and `which` is itself absent from enough container
+    // images that spawning it threw ENOENT on the machines this most needed to
+    // answer for.
+    hasSystemd: () => Promise.resolve(Bun.which('systemctl', { PATH: env.PATH }) !== null),
     // A unit carries the environment it runs with; nobody else on the machine
     // needs to read it.
     writeFile: (path, contents) => writeFile(path, contents, { encoding: 'utf8', mode: 0o600 }),
