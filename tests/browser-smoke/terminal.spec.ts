@@ -17,17 +17,31 @@ test('typing in the terminal panel runs a real command', async ({ page }) => {
   // straight onto the authenticated shell.
   await page.goto('/');
 
-  await page.getByRole('main').getByRole('button', { name: 'New Chat' }).click();
-
-  // A brand-new chat on an account with no default working directory opens
-  // the folder picker by itself; dismiss it the same way the GitHub panel
-  // spec does so it does not cover the rail.
+  // A chat on an account with no default working directory opens the folder
+  // picker by itself, and it is a modal: its header swallows every click
+  // underneath, including the one on "New Chat". Dismiss it wherever it shows
+  // up — this spec runs first in the suite, so it also meets the account's
+  // very first landing, where the app opens a chat and the picker on its own.
   const workdirPicker = page.getByRole('dialog', { name: 'Working directory' });
-  await expect(workdirPicker).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press('Escape');
-  await expect(workdirPicker).toBeHidden({ timeout: 10_000 });
+  const dismissWorkdirPicker = async (): Promise<void> => {
+    const opened = await workdirPicker.waitFor({ state: 'visible', timeout: 5_000 }).then(
+      () => true,
+      () => false
+    );
+    if (!opened) return;
+    await page.keyboard.press('Escape');
+    await expect(workdirPicker).toBeHidden({ timeout: 10_000 });
+  };
+  await dismissWorkdirPicker();
 
+  // The rail only exists on the chat surface; open a chat when the landing
+  // did not already do so. Scoped to `main` because the sidebar carries a
+  // second button with the same label.
   const railButton = page.getByRole('button', { name: 'Show Terminal panel' });
+  if (!(await railButton.isVisible())) {
+    await page.getByRole('main').getByRole('button', { name: 'New Chat' }).click();
+    await dismissWorkdirPicker();
+  }
   await expect(railButton).toBeVisible({ timeout: 15_000 });
   await railButton.click();
 

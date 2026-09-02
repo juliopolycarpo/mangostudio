@@ -17,7 +17,24 @@ export default defineConfig({
         ['html', { open: 'never', outputFolder: '.mango/artifacts/playwright/html-report' }],
       ]
     : 'list',
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
+  projects: [
+    // The terminal spec runs first, on its own. A Local terminal needs the
+    // single-user-host attestation, which the hub withdraws for the rest of its
+    // process once a second account connects — and `auth-flow.spec.ts` signs
+    // one up. Filename order is not a guarantee with more than one worker;
+    // a project dependency is.
+    {
+      name: 'terminal',
+      use: { browserName: 'chromium' },
+      testMatch: /terminal\.spec\.ts$/,
+    },
+    {
+      name: 'chromium',
+      use: { browserName: 'chromium' },
+      testIgnore: /terminal\.spec\.ts$/,
+      dependencies: ['terminal'],
+    },
+  ],
   use: {
     // One origin: the API builds and serves the frontend, so there is no
     // separate dev server and nothing on :5173 any more.
