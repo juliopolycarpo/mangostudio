@@ -171,6 +171,13 @@ Uma ação que não se aplica ao modo como
 o hub está rodando é `409` `UNSUPPORTED` com `details.reason` e `details.command`
 — a linha da CLI para rodar no lugar.
 
+O corpo do `202` é `{ accepted, outcome, unit? }`. `outcome` é um código —
+`restarting-service`, `restarting-detached`, `service-installed-handover`,
+`service-installed`, `service-removing` ou `service-removed` — e `unit` nomeia a
+unidade do supervisor quando o desfecho fala de uma. Sem prosa: o hub não conhece
+o idioma do navegador que pediu, então a página escreve cada código a partir dos
+dicionários de i18n.
+
 ## Endpoints De Upload
 
 | Método | Path          | Auth | Finalidade                |

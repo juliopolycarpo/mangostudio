@@ -178,7 +178,7 @@ describe('machineService.restart', () => {
     const { service, manager, recorder } = makeService({}, SERVICE);
     manager.setStatus(installedAndRunning());
     const response = await service.restart(LOCAL);
-    expect(response.message).toContain('mangostudio.service');
+    expect(response).toMatchObject({ outcome: 'restarting-service', unit: 'mangostudio.service' });
     await recorder.flush();
     expect(manager.calls).toContain('restart');
     expect(recorder.shutdowns).toBe(0);
@@ -236,14 +236,14 @@ describe('machineService.service', () => {
     const { service, manager, recorder } = makeService();
     manager.setStatus({ ...installedAndRunning(), running: false });
     const response = await service.service('uninstall', LOCAL);
-    expect(response.message).toContain('keeps running');
+    expect(response.outcome).toBe('service-removed');
     expect(manager.calls).toContain('uninstall');
     expect(recorder.scheduled).toHaveLength(0);
 
     const managed = makeService({}, SERVICE);
     managed.manager.setStatus(installedAndRunning());
     const deferred = await managed.service.service('uninstall', LOCAL);
-    expect(deferred.message).toContain('stops with it');
+    expect(deferred.outcome).toBe('service-removing');
     expect(managed.manager.calls).not.toContain('uninstall');
     await managed.recorder.flush();
     expect(managed.manager.calls).toContain('uninstall');

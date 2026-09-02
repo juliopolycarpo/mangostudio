@@ -2635,6 +2635,20 @@ export const messages = {
         runInstead: 'Execute isto em um terminal',
         refused: 'O servidor recusou esta ação.',
         failed: 'Não foi possível enviar a ação.',
+        accepted: {
+          'restarting-service':
+            'Reinício solicitado através de {unit}. A página reconecta quando o servidor voltar.',
+          'restarting-detached':
+            'Reiniciando em segundo plano. A página reconecta quando o servidor voltar.',
+          'service-installed-handover':
+            '{unit} instalado. Entregando o lugar a ele agora; a página reconecta quando estiver no ar.',
+          'service-installed': '{unit} instalado.',
+          'service-removing':
+            'Removendo {unit}. Este servidor para junto; inicie-o de novo com "mangostudio serve -d".',
+          'service-removed': 'O serviço foi removido. Este servidor continua rodando.',
+          /** Fica no lugar de `{unit}` quando a resposta não nomeia uma unidade. */
+          unnamedUnit: 'o serviço',
+        },
         guard: {
           container:
             'Este hub roda dentro de um contêiner; reinicie-o e gerencie o serviço a partir do host do contêiner.',

@@ -243,6 +243,13 @@ answer `202` on success; when the work would stop the process serving the reques
 it runs after the response has left. `details.command` is the CLI line to run
 instead, which is what the "This machine" page shows when it is refused.
 
+The `202` body is `{ accepted, outcome, unit? }`. `outcome` is a code —
+`restarting-service`, `restarting-detached`, `service-installed-handover`,
+`service-installed`, `service-removing` or `service-removed` — and `unit` names
+the supervisor unit when the outcome is about one. No prose: the hub does not
+know the locale of the browser that asked, so the page words each code from the
+i18n dictionaries.
+
 ## Upload Endpoints
 
 | Method | Path          | Auth | Purpose                |

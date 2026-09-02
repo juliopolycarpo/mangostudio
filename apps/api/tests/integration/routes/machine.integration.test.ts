@@ -94,13 +94,17 @@ class FakeMachineService implements MachineService {
   restart() {
     this.actions.push('restart');
     if (this.refuseWith) return Promise.reject(this.refuseWith);
-    return Promise.resolve({ accepted: true, message: 'restarting' });
+    return Promise.resolve({ accepted: true, outcome: 'restarting-detached' as const });
   }
 
   service(action: 'install' | 'uninstall') {
     this.actions.push(action);
     if (this.refuseWith) return Promise.reject(this.refuseWith);
-    return Promise.resolve({ accepted: true, message: action });
+    return Promise.resolve(
+      action === 'install'
+        ? { accepted: true, outcome: 'service-installed' as const, unit: 'mangostudio.service' }
+        : { accepted: true, outcome: 'service-removed' as const }
+    );
   }
 }
 
@@ -202,7 +206,7 @@ describe('machine routes', () => {
       new Request('http://localhost/machine/restart', { method: 'POST' })
     );
     expect(restart.status).toBe(202);
-    expect(await restart.json()).toEqual({ accepted: true, message: 'restarting' });
+    expect(await restart.json()).toEqual({ accepted: true, outcome: 'restarting-detached' });
 
     const install = await app.handle(
       new Request('http://localhost/machine/service', {
@@ -212,6 +216,13 @@ describe('machine routes', () => {
       })
     );
     expect(install.status).toBe(202);
+    // A code and the unit it names, not a sentence: the hub does not know the
+    // locale of the browser that asked.
+    expect(await install.json()).toEqual({
+      accepted: true,
+      outcome: 'service-installed',
+      unit: 'mangostudio.service',
+    });
     expect(service.actions).toEqual(['restart', 'install']);
 
     const bogus = await app.handle(

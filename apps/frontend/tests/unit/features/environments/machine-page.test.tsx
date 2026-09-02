@@ -94,8 +94,13 @@ function mountScenario(status: MachineStatus = STATUS) {
     .install();
 }
 
+const LOCALE_STORAGE_KEY = 'mangostudio:locale';
+
 afterEach(() => {
   scenario.restore();
+  // Every other test in this file reads English; a leaked locale would make
+  // them fail somewhere far from the test that set it.
+  localStorage.removeItem(LOCALE_STORAGE_KEY);
 });
 
 describe('MachinePage', () => {
@@ -169,11 +174,34 @@ describe('MachinePage', () => {
     expect(refused.textContent).toContain('mangostudio logs');
   });
 
+  it("words an accepted action in the reader's locale, not the hub's", async () => {
+    // The API answers with a code; the sentence is the page's to choose. A
+    // response rendered verbatim would be English here.
+    localStorage.setItem(LOCALE_STORAGE_KEY, 'pt-BR');
+    mountScenario();
+    scenario.respondWithJson('POST', '/api/machine/service', {
+      status: 202,
+      body: { accepted: true, outcome: 'service-installed-handover', unit: 'mangostudio.service' },
+    });
+    render(<MachinePage />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByTestId('machine-service-install'));
+    const dialog = screen.getByRole('dialog', { name: 'Instalar o serviço?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Continuar' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('machine-notice').textContent).toContain(
+        'mangostudio.service instalado. Entregando o lugar a ele agora'
+      )
+    );
+  });
+
   it('confirms a restart, posts it, and announces the hand-over', async () => {
     mountScenario();
     scenario.respondWithJson('POST', '/api/machine/restart', {
       status: 202,
-      body: { accepted: true, message: 'Restarting in the background.' },
+      body: { accepted: true, outcome: 'restarting-detached' },
     });
     render(<MachinePage />);
     const user = userEvent.setup();

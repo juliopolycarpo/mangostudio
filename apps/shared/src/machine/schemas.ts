@@ -183,9 +183,32 @@ export const MachineServiceBodySchema = Type.Object(
 );
 export type MachineServiceBody = Static<typeof MachineServiceBodySchema>;
 
-/** A mutating action was accepted; `message` says what happens next. */
+/**
+ * What an accepted action set in motion. A code rather than a sentence: the
+ * hub does not know the locale of the browser that asked, and the page has the
+ * dictionaries. Each one has a sentence in i18n.
+ */
+export const MachineActionOutcomeSchema = Type.Union([
+  /** The supervisor was asked to bounce the unit that runs this hub. */
+  Type.Literal('restarting-service'),
+  /** A successor was spawned and this process stands down behind it. */
+  Type.Literal('restarting-detached'),
+  /** The unit is installed and this process is handing the port over to it. */
+  Type.Literal('service-installed-handover'),
+  /** The unit is installed; what is serving did not have to change. */
+  Type.Literal('service-installed'),
+  /** The unit is being removed, and this process stops along with it. */
+  Type.Literal('service-removing'),
+  /** The unit is gone and this process keeps serving. */
+  Type.Literal('service-removed'),
+]);
+export type MachineActionOutcome = Static<typeof MachineActionOutcomeSchema>;
+
+/** A mutating action was accepted; `outcome` says what happens next. */
 export const MachineActionResponseSchema = Type.Object({
   accepted: Type.Boolean(),
-  message: Type.String({ maxLength: 1_024 }),
+  outcome: MachineActionOutcomeSchema,
+  /** The unit the outcome is about, when it names one. */
+  unit: Type.Optional(Type.String({ maxLength: 256 })),
 });
 export type MachineActionResponse = Static<typeof MachineActionResponseSchema>;

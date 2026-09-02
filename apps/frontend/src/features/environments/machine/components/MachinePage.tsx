@@ -8,12 +8,13 @@
  * still the one answering.
  */
 
-import type { MachineServiceAction } from '@mangostudio/shared/machine';
+import type { MachineActionResponse, MachineServiceAction } from '@mangostudio/shared/machine';
 import { RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatMessage } from '@/lib/i18n-format';
 import { EnvironmentPageState } from '../../components/EnvironmentPageState';
 import type { MachineActionResult } from '../api';
 import {
@@ -36,9 +37,17 @@ export function MachinePage() {
   const service = useChangeMachineServiceMutation();
   const [notice, setNotice] = useState<string | null>(null);
 
+  /** The accepted action worded here, since the hub does not know this locale. */
+  const acceptedNotice = (response: MachineActionResponse): string => {
+    const accepted = m.actions.accepted;
+    return formatMessage(accepted[response.outcome], {
+      unit: response.unit ?? accepted.unnamedUnit,
+    });
+  };
+
   const settle = (result: MachineActionResult) => {
     if (result.outcome === 'accepted') {
-      setNotice(result.response.message);
+      setNotice(acceptedNotice(result.response));
       status.expectChange();
       return;
     }

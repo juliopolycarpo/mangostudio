@@ -241,7 +241,8 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
         d.schedule(() => d.manager.restart());
         return {
           accepted: true,
-          message: `Restart requested through ${state.service}. The page reconnects when the server is back.`,
+          outcome: 'restarting-service',
+          ...(state.service && { unit: state.service }),
         };
       }
       d.schedule(() => {
@@ -250,10 +251,7 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
         d.spawnSuccessor(state);
         d.shutdown();
       });
-      return {
-        accepted: true,
-        message: 'Restarting in the background. The page reconnects when the server is back.',
-      };
+      return { accepted: true, outcome: 'restarting-detached' };
     },
 
     async service(action, context) {
@@ -270,11 +268,12 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
         d.schedule(() => d.manager.uninstall());
         return {
           accepted: true,
-          message: `Removing ${state?.service ?? 'the service'}. This server stops with it; start it again with "mangostudio serve -d".`,
+          outcome: 'service-removing',
+          ...(state?.service && { unit: state.service }),
         };
       }
       await d.manager.uninstall();
-      return { accepted: true, message: 'The service was removed. This server keeps running.' };
+      return { accepted: true, outcome: 'service-removed' };
     },
   };
 
@@ -299,15 +298,12 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
     await d.manager.install(definition);
 
     if (input.launch === 'service' || state === null) {
-      return { accepted: true, message: `Installed ${unitName}.` };
+      return { accepted: true, outcome: 'service-installed', unit: unitName };
     }
     // The unit is starting and waiting for this process to let go; nothing
     // happens until this response has left.
     d.schedule(() => d.shutdown());
-    return {
-      accepted: true,
-      message: `Installed ${unitName}. Handing over to it now; the page reconnects when it is up.`,
-    };
+    return { accepted: true, outcome: 'service-installed-handover', unit: unitName };
   }
 }
 
