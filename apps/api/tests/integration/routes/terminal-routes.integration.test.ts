@@ -112,16 +112,8 @@ describe('terminal HTTP routes with a fake runtime', () => {
       }),
       getRuntimeClient: () => Promise.resolve(client),
       isIdentityAttested: () => true,
-      resolveChat: async (chatId, userId) => {
-        const chat = await getDb()
-          .selectFrom('chats')
-          .select(['id', 'userId', 'workdir'])
-          .where('id', '=', chatId)
-          .executeTakeFirst();
-        if (!chat) return { ok: false, reason: 'not-found' };
-        if (chat.userId !== userId) return { ok: false, reason: 'forbidden' };
-        return { ok: true, chatId: chat.id, workdir: chat.workdir };
-      },
+      // resolveChat is left at its default: it queries `getDb()` directly,
+      // which is the same connected test database this file uses.
       now: Date.now,
       randomId: () => crypto.randomUUID(),
     });
@@ -152,7 +144,7 @@ describe('terminal HTTP routes with a fake runtime', () => {
     });
   });
 
-  it('refuses a chat that belongs to another user', async () => {
+  it('refuses a chat that belongs to another user with the same response as a missing one', async () => {
     const owner = await insertTestUser();
     const stranger = await insertTestUser();
     const chat = await insertTestChat(owner.id);
@@ -162,9 +154,9 @@ describe('terminal HTTP routes with a fake runtime', () => {
       jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID, chatId: chat.id })
     );
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(404);
     const body = (await response.json()) as { code: string };
-    expect(body.code).toBe(ERROR_CODES.OWNERSHIP);
+    expect(body.code).toBe(ERROR_CODES.NOT_FOUND);
   });
 
   it('lists, renames, and closes a session, each scoped to its owner', async () => {

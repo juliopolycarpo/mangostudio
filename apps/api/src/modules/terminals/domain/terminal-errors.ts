@@ -44,13 +44,6 @@ export class TerminalChatNotFoundError extends Error {
   }
 }
 
-export class TerminalChatForbiddenError extends Error {
-  constructor(readonly chatId: string) {
-    super(`Chat "${chatId}" belongs to another user.`);
-    this.name = 'TerminalChatForbiddenError';
-  }
-}
-
 export class TerminalSessionNotFoundError extends Error {
   constructor(readonly sessionId: string) {
     super(`Terminal session "${sessionId}" was not found.`);

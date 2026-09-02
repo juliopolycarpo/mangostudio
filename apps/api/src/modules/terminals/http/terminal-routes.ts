@@ -19,7 +19,6 @@ import {
   terminalSessionService,
 } from '../application/terminal-session-service';
 import {
-  TerminalChatForbiddenError,
   TerminalChatNotFoundError,
   TerminalDisabledError,
   TerminalLimitError,
@@ -57,10 +56,6 @@ function mapTerminalError(error: unknown, set: { status?: number | string }): Ap
   if (error instanceof TerminalChatNotFoundError) {
     set.status = 404;
     return { error: error.message, code: ERROR_CODES.NOT_FOUND };
-  }
-  if (error instanceof TerminalChatForbiddenError) {
-    set.status = 403;
-    return { error: error.message, code: ERROR_CODES.OWNERSHIP };
   }
   if (error instanceof TerminalSessionNotFoundError) {
     set.status = 404;

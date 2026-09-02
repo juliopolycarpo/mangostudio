@@ -26,9 +26,8 @@ import {
   getRuntimeClient as getRuntimeClientDefault,
   getRuntimeConnectionManager,
 } from '../../../services/runtime-client/runtime-connection-manager';
-import { getById } from '../../chats/infrastructure/chat-repository';
+import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
 import {
-  TerminalChatForbiddenError,
   TerminalChatNotFoundError,
   TerminalDisabledError,
   TerminalLimitError,
@@ -40,10 +39,17 @@ import type { TerminalRuntimeClient } from '../domain/terminal-runtime-client';
 
 const logger = createDiagnosticLogger('terminals');
 
-/** Resolved once a `chatId` is given; `workdir` may still be null. */
+/**
+ * Resolved once a `chatId` is given; `workdir` may still be null.
+ *
+ * `ok: false` never distinguishes a missing chat from one owned by another
+ * user — that distinction is exactly the oracle an ownership check exists to
+ * deny. See `TerminalSessionService.getForAttach`'s doc comment for the same
+ * invariant elsewhere in this module.
+ */
 export type TerminalChatResolution =
   | { readonly ok: true; readonly chatId: string; readonly workdir: string | null }
-  | { readonly ok: false; readonly reason: 'not-found' | 'forbidden' };
+  | { readonly ok: false };
 
 export interface TerminalConfig {
   readonly enabled: boolean;
@@ -124,10 +130,9 @@ interface TerminalSessionEntry {
 const DEFAULT_IDLE_REAPER_INTERVAL_MS = 60_000;
 
 async function defaultResolveChat(chatId: string, userId: string): Promise<TerminalChatResolution> {
-  const chat = await getById(chatId, getDb());
-  if (!chat) return { ok: false, reason: 'not-found' };
-  if (chat.userId !== userId) return { ok: false, reason: 'forbidden' };
-  return { ok: true, chatId: chat.id, workdir: chat.workdir };
+  const chat = await getOwnedChat(chatId, userId, getDb());
+  if (!chat) return { ok: false };
+  return { ok: true, chatId, workdir: chat.workdir };
 }
 
 function defaultDeps(): TerminalSessionServiceDeps {
@@ -233,11 +238,7 @@ export function createTerminalSessionService(
       let chatId: string | null = null;
       if (body.chatId) {
         const resolved = await d.resolveChat(body.chatId, userId);
-        if (!resolved.ok) {
-          throw resolved.reason === 'not-found'
-            ? new TerminalChatNotFoundError(body.chatId)
-            : new TerminalChatForbiddenError(body.chatId);
-        }
+        if (!resolved.ok) throw new TerminalChatNotFoundError(body.chatId);
         chatId = resolved.chatId;
         cwd ??= resolved.workdir;
       }

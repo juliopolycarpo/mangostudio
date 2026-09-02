@@ -8,7 +8,6 @@ import {
   type TerminalSessionViewer,
 } from '../../../../src/modules/terminals/application/terminal-session-service';
 import {
-  TerminalChatForbiddenError,
   TerminalChatNotFoundError,
   TerminalDisabledError,
   TerminalLimitError,
@@ -147,7 +146,7 @@ describe('terminalSessionService.open', () => {
 
   test('rejects an unknown chat as not found', async () => {
     const { service } = createHarness({
-      resolveChat: () => Promise.resolve({ ok: false, reason: 'not-found' }),
+      resolveChat: () => Promise.resolve({ ok: false }),
     });
 
     await expect(
@@ -155,14 +154,15 @@ describe('terminalSessionService.open', () => {
     ).rejects.toBeInstanceOf(TerminalChatNotFoundError);
   });
 
-  test("rejects another user's chat as forbidden", async () => {
+  test("rejects another user's chat with the same error as a missing one", async () => {
     const { service } = createHarness({
-      resolveChat: () => Promise.resolve({ ok: false, reason: 'forbidden' }),
+      // resolveChat never distinguishes missing from foreign; see its type's doc comment.
+      resolveChat: () => Promise.resolve({ ok: false }),
     });
 
     await expect(
       service.open(USER_ID, { environmentId: ENVIRONMENT_ID, chatId: 'someone-elses' })
-    ).rejects.toBeInstanceOf(TerminalChatForbiddenError);
+    ).rejects.toBeInstanceOf(TerminalChatNotFoundError);
   });
 
   test('reports a runtime with no terminal support as unavailable', async () => {
