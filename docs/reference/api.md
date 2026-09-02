@@ -207,6 +207,35 @@ but never more than it has keys. A setting that is simply not configured produce
 no field at all, which is why the marker exists: "no such setting" and "hidden on
 purpose" are different answers.
 
+## Machine Endpoints
+
+The hub's own host: what process is serving, whether a service unit keeps it
+alive, what doctor says, and the two actions that change either.
+
+| Method | Path                   | Auth | Purpose                                                        |
+| ------ | ---------------------- | ---- | -------------------------------------------------------------- |
+| `GET`  | `/api/machine/status`  | Yes  | Hub process, service unit, sibling runtime, host slot, actions |
+| `GET`  | `/api/machine/doctor`  | Yes  | Doctor rows with warning and failure counts                    |
+| `GET`  | `/api/machine/logs`    | Yes  | Tail of the log file the running instance writes               |
+| `POST` | `/api/machine/restart` | Yes  | Restart the server the way it was started (`202`)              |
+| `POST` | `/api/machine/service` | Yes  | `{ "action": "install" \| "uninstall" }` the service (`202`)   |
+
+`doctor` takes `?sections=environments,library` — core checks always run, and
+these two spawn probes, so a caller opts into them. An unknown section is `422`
+`VALIDATION`. `logs` takes `?tail=` between 1 and 2000, defaulting to 200.
+
+The two POSTs are loopback-only. A request from anywhere else is `403`
+`PERMISSION_DENIED` with `details.reasons` naming which check failed — the same
+guard shape the environment installs use. An action that does not apply to how
+this hub is running is `409` `UNSUPPORTED` with `details.reason` and
+`details.command`: a foreground server, a Windows task asked to restart itself, a
+unit that is already installed or not installed at all, a platform with no
+user-level supervisor, a supervisor that could not be read, or an auth secret that
+lives only in this process's environment where a unit could not find it. Both
+answer `202` on success; when the work would stop the process serving the request
+it runs after the response has left. `details.command` is the CLI line to run
+instead, which is what the "This machine" page shows when it is refused.
+
 ## Upload Endpoints
 
 | Method | Path          | Auth | Purpose                |

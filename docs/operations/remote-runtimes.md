@@ -108,18 +108,22 @@ mangostudio-runtime service install --mode connect
 mangostudio-runtime service install --mode serve
 mangostudio-runtime service uninstall
 mangostudio-runtime service status [--json]
+mangostudio-runtime service start
+mangostudio-runtime service stop
+mangostudio-runtime service restart
 ```
 
 `install` writes a **user** unit (no root for the unit itself):
 
-| OS    | Unit location                                          |
-| ----- | ------------------------------------------------------ |
-| Linux | `~/.config/systemd/user/mangostudio-runtime.service`   |
-| macOS | `~/Library/LaunchAgents/com.mangostudio.runtime.plist` |
+| OS      | Unit location                                                 |
+| ------- | ------------------------------------------------------------- |
+| Linux   | `~/.config/systemd/user/mangostudio-runtime.service`          |
+| macOS   | `~/Library/LaunchAgents/com.mangostudio.runtime.plist`        |
+| Windows | Scheduled Task `MangoStudio runtime` (Task Scheduler owns it) |
 
-`ExecStart` points at `~/.mango/runtime/remote/current/mangostudio-runtime` with
-only the subcommand (`connect` or `serve`) — no hub URL, listen address, or
-tokens on the command line. Configure those first:
+The unit runs `~/.mango/runtime/remote/current/mangostudio-runtime` with only the
+subcommand (`connect` or `serve`) — no hub URL, listen address, or tokens on the
+command line. Configure those first:
 
 - **connect** — run `connect` once so `hubUrl` and a pairing token are stored.
 - **serve** — run `serve --listen <host:port>` once so `serveListen` and a serve
@@ -195,24 +199,42 @@ launchctl bootout gui/$UID/com.mangostudio.runtime   # uninstall
 
 `KeepAlive` restarts the job after crashes with a throttle interval.
 
-### Windows
+### Windows: Scheduled Task
 
-`service install` on Windows exits with an unsupported error and points here.
-Use a per-user **Scheduled Task** (no admin), following the VS Code CLI
-pattern:
+`service install` handles Windows too. It registers a per-user **Scheduled Task**
+named `MangoStudio runtime` through PowerShell — no admin, and the same
+preconditions as Linux and macOS: setup answered, the chosen mode configured, and
+a binary published at `current`.
 
 ```powershell
-$bin = "$env:USERPROFILE\.mango\runtime\remote\current\mangostudio-runtime.exe"
-$action = New-ScheduledTaskAction -Execute $bin -Argument "connect"
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-Register-ScheduledTask -TaskName "MangoStudio runtime" -Action $action -Trigger $trigger -RunLevel Limited
+mangostudio-runtime service install --mode connect
+mangostudio-runtime service status --json
 ```
 
-Caveats:
+What the CLI registers:
 
-- Password changes can invalidate stored task credentials until you sign in again.
-- Point `-Execute` at `current` so upgrades keep working.
-- Prefer `connect` or `serve` only after the slot is configured, same as Linux.
+- **Trigger** `-AtLogOn` for the current user. There is no Windows analogue of
+  linger: the task starts when you sign in and runs in that session, so a machine
+  nobody has logged into is not serving.
+- **Principal** `-LogonType Interactive -RunLevel Limited` — the task borrows the
+  interactive session's token, so no password is stored and none has to be
+  re-entered after a password change.
+- **Settings** no execution time limit (the default three days would stop the
+  runtime on the fourth), `-MultipleInstances IgnoreNew`, `-StartWhenAvailable`,
+  the battery flags, and `-RestartCount 3 -RestartInterval 1 minute`.
+- **Action** a hidden `powershell.exe` wrapper that invokes the binary. The
+  wrapper is where a unit's environment, working directory and log redirection
+  would be set; the runtime's unit asks for none of the three, so it is a bare
+  invocation.
+
+Task Scheduler captures no output of its own, and the runtime's task does not
+redirect any, so there is no Windows equivalent of
+`journalctl --user -u mangostudio-runtime.service`. Use `mangostudio-runtime health`
+and the environment card on the hub to tell whether it is connected.
+
+`service status` reads the task back with `Get-ScheduledTask` and reports the same
+`installed` / `enabled` / `running` triple as the other platforms; `running` means
+the task state is `Running`. `uninstall` stops and unregisters it.
 
 ## Doctor
 
@@ -227,11 +249,15 @@ reachable through it.
 
 Where `service install` cannot help, doctor does not name it as the fix:
 
-- **Windows** — one warning pointing at the Scheduled Task snippet above.
-- **No systemd** — one warning saying so, with no command to run.
+- **No user-level supervisor** — Linux without systemd, or a platform with no
+  backend at all: one warning saying to supervise the runtime yourself, with no
+  command to run. Windows is not in this bucket any more; doctor names
+  `service install` there exactly as it does on Linux and macOS.
 - **No session bus** — systemctl can be asked nothing, so doctor says it could
   not read the service and gives you the `XDG_RUNTIME_DIR` prefix rather than
   reporting a running unit as missing.
+- **Any other supervisor error** — doctor reports what the supervisor said
+  instead of calling an unreadable unit "not installed".
 
 ## See also
 

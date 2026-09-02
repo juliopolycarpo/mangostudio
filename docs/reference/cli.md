@@ -22,31 +22,148 @@ copy-paste commands, or:
 
 ## Commands
 
-| Command                            | Description                                                                    |
-| ---------------------------------- | ------------------------------------------------------------------------------ |
-| `mangostudio`                      | Print help and the command list.                                               |
-| `serve [host\|port\|host:port]`    | Start the server in the foreground (default `localhost:3001`).                 |
-| `serve [host\|port\|host:port] -d` | Start the server in the background (detached) and return.                      |
-| `status`                           | Show whether a server is running and its details.                              |
-| `stop`                             | Gracefully stop the running server (SIGTERM).                                  |
-| `killserver`                       | Force-kill the running server (SIGKILL).                                       |
-| `doctor`                           | Run environment and configuration diagnostics.                                 |
-| `doctor --all`                     | Include ChatGPT connector checks even without a configured connector.          |
-| `doctor --chatgpt-refresh`         | Perform a live ChatGPT token refresh probe (rotates the stored refresh token). |
-| `doctor --probe`                   | Actively connect to each enabled MCP server (spawns children / hits URLs).     |
-| `doctor --env` / `--library`       | Limit extra sections to environments and/or library (core checks always run).  |
-| `doctor --json`                    | Emit structured JSON (checks, warning/failure counts).                         |
-| `env [runtimes\|agents] [--json]`  | Report runtimes, version managers, and agent CLIs (read-only).                 |
-| `library [locations] [--json]`     | Library coverage matrix and location health (read-only).                       |
-| `library --kind <kind>`            | Filter resources by kind (`skill`, `subagent`, etc.).                          |
-| `library --divergent`              | List only resources whose copies disagree across locations.                    |
-| `version`, `--version`, `-v`       | Print the embedded MangoStudio version.                                        |
+| Command                                             | Description                                                                    |
+| --------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `mangostudio`                                       | Print help and the command list.                                               |
+| `serve [host\|port\|host:port]`                     | Start the server in the foreground (default `localhost:3001`).                 |
+| `serve [host\|port\|host:port] -d`                  | Start the server in the background (detached) and return.                      |
+| `status`                                            | Show whether a server is running, its URL, launch mode, and health.            |
+| `status --json`                                     | Emit the shared hub status document instead of plain text.                     |
+| `stop`                                              | Gracefully stop the running server (SIGTERM).                                  |
+| `restart`                                           | Restart the running server the way it was started.                             |
+| `killserver`                                        | Force-kill the running server (SIGKILL).                                       |
+| `service <action> [host\|port\|host:port] [--json]` | Keep the server running across logout and reboot.                              |
+| `logs [-f] [-n <count>]`                            | Print the tail of the server log; `-f` follows it.                             |
+| `open`                                              | Open the running server in the default browser.                                |
+| `doctor`                                            | Run environment and configuration diagnostics.                                 |
+| `doctor --all`                                      | Include ChatGPT connector checks even without a configured connector.          |
+| `doctor --chatgpt-refresh`                          | Perform a live ChatGPT token refresh probe (rotates the stored refresh token). |
+| `doctor --probe`                                    | Actively connect to each enabled MCP server (spawns children / hits URLs).     |
+| `doctor --env` / `--library`                        | Limit extra sections to environments and/or library (core checks always run).  |
+| `doctor --json`                                     | Emit structured JSON (checks, warning/failure counts).                         |
+| `env [runtimes\|agents] [--json]`                   | Report runtimes, version managers, and agent CLIs (read-only).                 |
+| `library [locations] [--json]`                      | Library coverage matrix and location health (read-only).                       |
+| `library --kind <kind>`                             | Filter resources by kind (`skill`, `subagent`, etc.).                          |
+| `library --divergent`                               | List only resources whose copies disagree across locations.                    |
+| `version`, `--version`, `-v`                        | Print the embedded MangoStudio version.                                        |
 
 `-d` / `--detach` and the positional host/port target may be combined in any
 order, e.g. `mangostudio serve 127.0.0.1:3000 -d`.
 
 Host aliases: `lan`, `all`, `any`, and `public` bind `0.0.0.0`; `local` binds
 `127.0.0.1`.
+
+`status` probes `/api/health` and prints `ok` or `unreachable` beside the URL and
+the launch mode. `status --json` prints the `HubProcessStatus` document from
+[`apps/shared/src/machine/schemas.ts`](../../apps/shared/src/machine/schemas.ts) —
+the same shape `GET /api/machine/status` embeds, so a terminal and the
+"This machine" page cannot disagree.
+
+### service
+
+`mangostudio service install` hands the server to the platform's per-user
+supervisor, so it comes back after logout and reboot without a terminal open.
+No root is needed for the unit itself.
+
+| Action         | Description                                                                  |
+| -------------- | ---------------------------------------------------------------------------- |
+| `install`      | Write, enable and start the unit. Takes an optional `host\|port\|host:port`. |
+| `uninstall`    | Disable and remove the unit.                                                 |
+| `status`       | Report unit name, installed, enabled, running, linger, and what it runs.     |
+| `start`/`stop` | Drive the installed unit through its supervisor.                             |
+| `restart`      | Ask the supervisor to bounce the unit.                                       |
+| `--json`       | Machine-readable output (`status` only).                                     |
+
+| OS      | Unit                                                                    |
+| ------- | ----------------------------------------------------------------------- |
+| Linux   | systemd user unit `~/.config/systemd/user/mangostudio.service`          |
+| macOS   | launchd agent `~/Library/LaunchAgents/com.mangostudio.hub.plist`        |
+| Windows | Scheduled Task `MangoStudio Hub` (Task Scheduler owns it; no unit file) |
+
+The unit runs `serve` through whichever program survives an upgrade:
+
+- **Installer layout** — the launcher the installer maintains,
+  `~/.mango/dist/current/mangostudio` (`%LOCALAPPDATA%\mangostudio\bin\mangostudio.cmd`
+  on Windows), so a new version is picked up without touching the unit.
+- **Package manager** — the resolved executable, whose path the package manager
+  keeps stable on its own.
+- **Source checkout** — the workspace entry through Bun, with the directory
+  `install` was run from as the unit's working directory.
+- **Installer layout with no launcher yet** — this version's own directory. The
+  install prints a note saying so; run `mangostudio service install` again after
+  an upgrade.
+
+The supervisor appends stdout and stderr to `~/.mango/logs/service.log`. On
+Windows the task runs a hidden PowerShell wrapper that does that redirection
+itself, because Task Scheduler captures nothing.
+
+A unit file is written mode `0600`, but nothing secret goes in it regardless.
+The environment is a positive list — `PATH` (except on Windows, where the task
+inherits the logon session's), `MANGO_HOME`, `TZ`, `LANG`, `LC_ALL`,
+`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, and the proxy variables
+with any `user:password@` stripped — plus `MANGO_LOG_FILE` and
+`MANGOSTUDIO_SERVICE_UNIT`, and `API_HOST`/`API_PORT` when `install` was given a
+target. Everything else, the
+auth secret and connector credentials included, loads from `~/.mango/.env` at
+startup exactly as it does for `serve -d` (see
+[How background mode works](#how-background-mode-works)). Because the unit has
+no terminal to ask at, `install` runs the interactive auth-secret setup first,
+while there still is one.
+
+`install` also settles the port before writing the unit. An instance you started
+by hand is stopped first — a unit that starts while another process holds the
+state file refuses to serve, and the supervisor would then restart it forever —
+and one the service already runs is restarted afterwards so it picks up the new
+unit. When the hand-started instance will not stop within 10 s, `install` says so
+and asks for `mangostudio killserver` before trying again.
+
+Restart policy follows each supervisor: `Restart=on-failure` with `RestartSec=5`
+on systemd, `KeepAlive` on a non-zero exit with a 30-second throttle on launchd,
+and `RestartCount 3` at one-minute intervals with no execution time limit for the
+Scheduled Task.
+
+On Linux a user unit stops at logout unless **linger** is enabled. `install`
+attempts `loginctl enable-linger` and, when that needs root, prints the exact
+line to run:
+
+```bash
+sudo loginctl enable-linger $USER
+```
+
+`systemctl --user` and `loginctl` need `XDG_RUNTIME_DIR` and
+`DBUS_SESSION_BUS_ADDRESS`; a non-interactive `ssh host command` often carries
+neither, and `service` refuses with a distinct error naming the prefix to use.
+
+```bash
+mangostudio service install          # start now and again after every login
+mangostudio service install lan:3000 # bake a bind target into the unit
+mangostudio service status --json
+mangostudio service restart
+```
+
+### restart
+
+`mangostudio restart` brings the server back the way it was started:
+
+- **Started by the service** — the supervisor bounces the unit, and the CLI waits
+  up to 20 s for a different, healthy pid to own the state file.
+- **Started with `serve -d`** — the instance is stopped, and once that is
+  confirmed a successor is spawned that waits for the old pid
+  (`MANGO_RESTART_WAIT_PID`) before binding the port.
+- **Started in the foreground** — refused. The terminal owns that process; the
+  message names its PID.
+- **Nothing running** — the installed unit is started. With no unit installed,
+  the error names `mangostudio serve -d` and `mangostudio service install`.
+
+### logs
+
+`mangostudio logs` prints the tail of the log file recorded in
+`~/.mango/run/server.json`. When nothing is recorded — after a crash, say — the
+newest `server-*.log` or `service.log` under `~/.mango/logs` stands in, so the
+last run is still readable. The default is the last 100 lines; `-n` takes up to
+10 000. `-f` follows the file, polling twice a second, and re-reads from the
+start when it is rotated or truncated. A foreground `serve` writes to its
+terminal, so there is nothing to tail.
 
 ## `mangostudio-runtime`
 
@@ -150,19 +267,28 @@ installed into the slot first — `install` refuses rather than write a unit tha
 cannot start. See
 [`docs/operations/remote-runtimes.md`](../operations/remote-runtimes.md) for
 that prerequisite, linger, SSH session-bus workarounds, macOS launchd verbs, and
-the Windows Scheduled Task snippet.
+what the Windows Scheduled Task looks like.
 
 | Subcommand / flag       | Description                                                                                 |
 | ----------------------- | ------------------------------------------------------------------------------------------- |
-| `install`               | Write and enable the unit (`systemd` user or `launchd` LaunchAgent).                        |
+| `install`               | Write and enable the unit (systemd user unit, launchd agent, or Scheduled Task).            |
 | `uninstall`             | Disable and remove the unit.                                                                |
 | `status`                | Report installed, enabled, running, linger (Linux), and whether `ExecStart` uses `current`. |
+| `start` / `stop`        | Drive the installed unit through its supervisor.                                            |
+| `restart`               | Bounce the installed unit.                                                                  |
 | `--mode connect\|serve` | Required when both modes are configured; otherwise inferred.                                |
 | `--json`                | Machine-readable output (`status` only).                                                    |
+
+| OS      | Unit                                                   |
+| ------- | ------------------------------------------------------ |
+| Linux   | `~/.config/systemd/user/mangostudio-runtime.service`   |
+| macOS   | `~/Library/LaunchAgents/com.mangostudio.runtime.plist` |
+| Windows | Scheduled Task `MangoStudio runtime` (no unit file)    |
 
 ```bash
 mangostudio-runtime service install --mode connect
 mangostudio-runtime service status --json
+mangostudio-runtime service restart
 ```
 
 ## Examples
@@ -172,6 +298,10 @@ mangostudio serve              # foreground on localhost:3001
 mangostudio serve 3000         # foreground on localhost:3000
 mangostudio serve 127.0.0.1 -d # background on 127.0.0.1:3001
 mangostudio serve lan:3000 -d  # background on 0.0.0.0:3000
+mangostudio service install    # start now and after every login
+mangostudio restart            # bring it back the way it was started
+mangostudio logs -f            # follow the server log
+mangostudio open               # open the bound address in a browser
 mangostudio --version
 mangostudio status
 mangostudio stop
@@ -202,7 +332,7 @@ advanced debugging use `MANGO_CHATGPT_AUTH_BASE_URL` and `MANGO_CHATGPT_BASE_URL
 
 Only one server may run at a time. On startup the server writes a state file at
 `~/.mango/run/server.json`
-(`{ pid, port, host, startedAt, logFile, version, buildInfo, frontendDir }`)
+(`{ pid, port, host, startedAt, logFile, version, buildInfo, frontendDir, service }`)
 once the port is bound, and removes it on graceful shutdown. A second
 `serve` / `serve -d` reads that file and refuses to start if the recorded
 process is still alive. A state file whose process has died is treated as stale
@@ -210,14 +340,21 @@ and cleaned up automatically.
 
 ## Runtime files
 
-| Path                         | Contents                                           |
-| ---------------------------- | -------------------------------------------------- |
-| `~/.mango/run/server.json`   | Single-instance state file for the running server. |
-| `~/.mango/logs/server-*.log` | Output of background (`-d`) server runs.           |
+| Path                         | Contents                                                |
+| ---------------------------- | ------------------------------------------------------- |
+| `~/.mango/run/server.json`   | Single-instance state file for the running server.      |
+| `~/.mango/logs/server-*.log` | Output of background (`-d`) server runs.                |
+| `~/.mango/logs/service.log`  | Output the service unit's supervisor appends, all runs. |
 
 These live under `~/.mango` in both development and standalone modes so
 `status`/`stop` resolve the same instance regardless of how it was launched.
 Foreground `serve` logs to the terminal instead of a file.
+
+The state file's optional `service` field carries the name of the supervisor unit
+that started the process — `mangostudio.service`, `com.mangostudio.hub`, or
+`MangoStudio Hub`. It is what `status`, `restart` and the machine API read to tell
+a service-launched instance from a `serve -d` one, and it is absent for both
+`serve` modes.
 
 ## Doctor
 

@@ -142,6 +142,27 @@ SSE com `Content-Type: text/event-stream`. Veja [../architecture/streaming.md](.
 | `GET`  | `/api/settings/rules`         | Sim  | Listar arquivos de regra         |
 | `GET`  | `/api/settings/rules/preview` | Sim  | Pré-visualizar conteúdo da regra |
 
+## Endpoints De Machine
+
+A máquina do próprio hub: qual processo está servindo, se uma unidade de serviço
+o mantém vivo, o que o doctor diz e as duas ações que mudam qualquer um dos dois.
+
+| Método | Path                   | Auth | Finalidade                                                  |
+| ------ | ---------------------- | ---- | ----------------------------------------------------------- |
+| `GET`  | `/api/machine/status`  | Sim  | Processo do hub, unidade, runtime irmão, slot host e ações  |
+| `GET`  | `/api/machine/doctor`  | Sim  | Linhas do doctor com contagem de avisos e falhas            |
+| `GET`  | `/api/machine/logs`    | Sim  | Fim do arquivo de log da instância em execução              |
+| `POST` | `/api/machine/restart` | Sim  | Reinicia o servidor do jeito que ele foi iniciado (`202`)   |
+| `POST` | `/api/machine/service` | Sim  | `{ "action": "install" \| "uninstall" }` da unidade (`202`) |
+
+`doctor` aceita `?sections=environments,library`; uma seção desconhecida é `422`
+`VALIDATION`. `logs` aceita `?tail=` entre 1 e 2000, com padrão 200.
+
+Os dois POSTs só respondem em loopback: de qualquer outro lugar são `403`
+`PERMISSION_DENIED` com `details.reasons`. Uma ação que não se aplica ao modo como
+o hub está rodando é `409` `UNSUPPORTED` com `details.reason` e `details.command`
+— a linha da CLI para rodar no lugar.
+
 ## Endpoints De Upload
 
 | Método | Path          | Auth | Finalidade                |

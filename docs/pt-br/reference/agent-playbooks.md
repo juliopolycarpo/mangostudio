@@ -269,16 +269,32 @@ Abra estes arquivos primeiro:
 
 ## CLI E Ciclo De Vida Do Servidor
 
-Cobre `serve`, `status`, `stop`, `killserver` e `doctor`.
+Cobre `serve`, `status`, `stop`, `restart`, `killserver`, `service`, `logs`,
+`open` e `doctor`.
 
 Abra estes arquivos primeiro:
 
 - `apps/api/src/index.ts` (entrada da CLI)
 - `apps/api/src/cli/` (parsing de argumentos, dispatch, comandos, checagens do doctor)
+- `apps/api/src/cli/log-tail.ts` (tail, log mais recente e o loop de `-f`)
+- `apps/api/src/cli/restart-handshake.ts` (`MANGO_RESTART_WAIT_PID`)
 - `apps/api/src/server/start-server.ts`
-- `apps/api/src/lib/server-state.ts` (estado de PID e porta)
+- `apps/api/src/server/shutdown-request.ts` (soltar a porta a partir de um request)
+- `apps/api/src/lib/server-state.ts` (PID, porta e a unidade que iniciou o processo)
 - `apps/api/src/lib/mango-paths.ts`
 - Referência: `cli.md`
+
+A máquina do próprio hub — processo, unidade de serviço, doctor, tail de log e as
+duas ações mutantes — vive em um módulo só, compartilhado pela CLI e pela API:
+
+- `apps/api/src/modules/machine/domain/` (nomes de unidade por plataforma, o que a
+  unidade roda, regras de disponibilidade, guarda de loopback)
+- `apps/api/src/modules/machine/application/` (definição da unidade e allowlist de
+  ambiente, checagens do doctor, o serviço)
+- `apps/api/src/modules/machine/http/machine-routes.ts`
+- `apps/runtime/src/services/user-service-manager.ts` (a abstração de supervisor
+  usada pelos dois binários: systemd, launchd e Tarefa Agendada)
+- `apps/shared/src/machine/schemas.ts` (fonte única de verdade dos formatos)
 
 ## Changelog E Release
 

@@ -37,7 +37,8 @@ Quick start with the shell installer:
 
 ```bash
 curl -fsSL https://mangostudio.dev/install.sh | bash
-mangostudio serve # start on http://localhost:3001
+mangostudio serve           # start on http://localhost:3001
+mangostudio service install # or hand it to your user's service manager
 ```
 
 On Windows, run the hosted PowerShell installer:
@@ -55,7 +56,10 @@ checksum-verified archive on first run.
 ```bash
 mangostudio serve [host|port|host:port] # foreground (default localhost:3001)
 mangostudio serve lan:3001 -d           # background (logs to ~/.mango/logs/)
+mangostudio service install # keep it running across logout and reboot
 mangostudio status         # show the running instance
+mangostudio restart        # restart it the way it was started
+mangostudio logs -f        # follow the server log
 mangostudio stop           # graceful shutdown
 mangostudio doctor         # environment diagnostics
 ```
