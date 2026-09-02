@@ -2,6 +2,7 @@
  * Health probe for a running MangoStudio server via GET /api/health.
  */
 
+import type { HubHealth } from '@mangostudio/shared/machine';
 import { formatHostForUrl, isLoopback } from '../lib/ip-address';
 
 const DEFAULT_TIMEOUT_MS = 1000;
@@ -50,6 +51,29 @@ export async function confirmsHealthy(
 ): Promise<boolean> {
   if (!canProbeHealth(host)) return true;
   return await probeHealth(host, port, timeoutMs);
+}
+
+/** The two probes {@link probeHubHealth} reads, so a caller can inject them. */
+export interface HubHealthProbes {
+  readonly probeHealth: (host: string, port: number) => Promise<boolean>;
+  readonly canProbeHealth: (host: string) => boolean;
+}
+
+/**
+ * The health check as a *report* on an instance, for callers that describe a hub
+ * rather than wait for one. The counterpart to {@link confirmsHealthy}: where a
+ * waiter treats an unprobable host as healthy so it stops waiting, a reporter
+ * says `unprobed`, because calling it `unreachable` would draw a healthy server
+ * as broken.
+ * // Usage: await probeHubHealth(state.host, state.port) // → 'ok'
+ */
+export async function probeHubHealth(
+  host: string,
+  port: number,
+  probes: HubHealthProbes = { probeHealth, canProbeHealth }
+): Promise<HubHealth> {
+  if (!probes.canProbeHealth(host)) return 'unprobed';
+  return (await probes.probeHealth(host, port)) ? 'ok' : 'unreachable';
 }
 
 /**

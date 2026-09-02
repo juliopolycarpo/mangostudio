@@ -9,7 +9,7 @@ import { isStateLive, readState, removeState, type ServerState } from '../../lib
 import { describeHubProcess } from '../../modules/machine/domain/hub-process';
 import type { StatusArgs } from '../args';
 import { formatUptime } from '../format';
-import { canProbeHealth, probeHealth } from '../health';
+import { canProbeHealth, probeHealth, probeHubHealth } from '../health';
 import { writeLine } from '../output';
 import { createProcessController, type ProcessController } from '../process-control';
 
@@ -46,14 +46,7 @@ export async function runStatus(
     return;
   }
 
-  // A hub bound to one explicit LAN address cannot be reached over loopback and
-  // the probe will not fetch that address itself, so there is nothing it can
-  // honestly say — "unreachable" would call a healthy server broken.
-  const health: HubHealth = !d.canProbeHealth(state.host)
-    ? 'unprobed'
-    : (await d.probeHealth(state.host, state.port))
-      ? 'ok'
-      : 'unreachable';
+  const health = await probeHubHealth(state.host, state.port, d);
   if (args.json) {
     d.log(
       JSON.stringify(describeHubProcess({ state, alive: true, now: d.now(), health }), null, 2)

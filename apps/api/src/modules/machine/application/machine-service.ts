@@ -29,7 +29,7 @@ import {
   USER_SERVICE_ERROR_MAX,
 } from '@mangostudio/shared/runtime-home';
 import { spawnServeChild } from '../../../cli/detach';
-import { canProbeHealth, probeHealth } from '../../../cli/health';
+import { canProbeHealth, probeHealth, probeHubHealth } from '../../../cli/health';
 import { type LogTail, latestHubLogFile, readLogTail } from '../../../cli/log-tail';
 import { createProcessController, type ProcessController } from '../../../cli/process-control';
 import { probeRuntimeBinary, type RuntimeBinaryProbe } from '../../../cli/runtime-binary-probe';
@@ -344,9 +344,8 @@ function refuse(reason: MachineActionReason | null, guard: InstallGuard, command
 
 /**
  * Whether the recorded process is answering. This process is answering by
- * definition — it is serving the request. Anything else is asked over loopback,
- * and a hub bound to one explicit LAN address cannot be: saying `unreachable`
- * there would call a healthy server broken.
+ * definition — it is serving the request; anything else goes through the shared
+ * probe rule.
  */
 async function resolveHealth(
   state: ServerState,
@@ -354,8 +353,7 @@ async function resolveHealth(
   d: MachineServiceDeps
 ): Promise<HubHealth> {
   if (state.pid === environment.pid) return 'ok';
-  if (!d.canProbeHealth(state.host)) return 'unprobed';
-  return (await d.probeHealth(state.host, state.port)) ? 'ok' : 'unreachable';
+  return await probeHubHealth(state.host, state.port, d);
 }
 
 function realEnvironment(): MachineEnvironment {
