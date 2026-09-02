@@ -325,7 +325,11 @@ describe('terminal socket over a real Local runtime', () => {
     `opens, attaches, and relays real PTY output for printf hi (skip reason if skipped: ${localTerminalSupport.reason})`,
     async () => {
       const user = await insertTestUser();
-      const service = createTerminalSessionService();
+      // The attestation is answered by the process-wide connection manager,
+      // and earlier files in the same run connect other users to the Local
+      // runtime, which is exactly what un-proves single-user-host. The gate is
+      // covered by the unit tests; this case proves the PTY relay.
+      const service = createTerminalSessionService({ isIdentityAttested: () => true });
       const session = await service.open(user.id, {
         environmentId: 'local',
         shell: 'bash',
