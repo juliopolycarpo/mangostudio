@@ -31,7 +31,12 @@ import {
 } from '@mangostudio/shared/runtime-home';
 import { spawnServeChild } from '../../../cli/detach';
 import { canProbeHealth, probeHealth, probeHubHealth } from '../../../cli/health';
-import { type LogTail, latestHubLogFile, readLogTail } from '../../../cli/log-tail';
+import {
+  type LogTail,
+  latestHubLogFile,
+  readLogTail,
+  resolveHubLogFile,
+} from '../../../cli/log-tail';
 import { createProcessController, type ProcessController } from '../../../cli/process-control';
 import { probeRuntimeBinary, type RuntimeBinaryProbe } from '../../../cli/runtime-binary-probe';
 import { probeRuntimeSlots, type RuntimeSlotProbe } from '../../../cli/runtime-slot-probe';
@@ -253,8 +258,7 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       const guard = d.evaluateGuard(context.clientIp);
       if (!guard.allowed) throw new MachineActionBlockedError(guard);
       const count = Math.min(Math.max(1, tail || MACHINE_LOG_TAIL_DEFAULT), MACHINE_LOG_TAIL_MAX);
-      const state = await d.readState();
-      const file = state?.logFile || (await d.latestLogFile());
+      const file = await resolveHubLogFile(() => d.readState(), d.latestLogFile);
       if (!file) return { file: null, lines: [], truncated: false };
       // A bounded suffix, not the whole file: `service.log` is append-only and
       // nothing rotates it, so a long-lived hub's log is not something a page

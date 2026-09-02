@@ -127,6 +127,22 @@ export async function latestHubLogFile(logsDir: string): Promise<string | null> 
   return newest?.path ?? null;
 }
 
+/**
+ * Which log file to read: the one the running instance recorded, else the
+ * newest under the logs directory, so the last crash is still readable after
+ * the state file is gone. Null when neither names one — a foreground `serve`
+ * writes to its terminal and has no file at all.
+ * // Usage: await resolveHubLogFile(readState, () => latestHubLogFile(getLogsDir()))
+ */
+export async function resolveHubLogFile(
+  readState: () => Promise<{ readonly logFile?: string } | null>,
+  latestLogFile: () => Promise<string | null>
+): Promise<string | null> {
+  const state = await readState();
+  // Falsy, not nullish: a foreground start records an empty `logFile`.
+  return state?.logFile || (await latestLogFile());
+}
+
 export interface FollowDeps {
   size: (path: string) => Promise<number>;
   readFrom: (path: string, offset: number, end?: number) => Promise<string>;

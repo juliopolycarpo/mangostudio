@@ -10,6 +10,7 @@ import {
   type LogTailSource,
   latestHubLogFile,
   readLogTail,
+  resolveHubLogFile,
   tailLines,
 } from '../../../src/cli/log-tail';
 
@@ -127,6 +128,31 @@ describe('readLogTail', () => {
 
   it('is null for a file that is not there, without reading it', async () => {
     expect(await readLogTail('/logs/gone.log', 10, new MissingLogFile())).toBeNull();
+  });
+});
+
+describe('resolveHubLogFile', () => {
+  it('prefers the running instance’s file and falls back to the newest one', async () => {
+    expect(
+      await resolveHubLogFile(
+        () => Promise.resolve({ logFile: '/logs/server-1.log' }),
+        () => Promise.resolve('/logs/service.log')
+      )
+    ).toBe('/logs/server-1.log');
+    // A foreground start records an empty `logFile`; the newest on disk is the
+    // last crash, which is what both readers want to show.
+    expect(
+      await resolveHubLogFile(
+        () => Promise.resolve({ logFile: '' }),
+        () => Promise.resolve('/logs/service.log')
+      )
+    ).toBe('/logs/service.log');
+    expect(
+      await resolveHubLogFile(
+        () => Promise.resolve(null),
+        () => Promise.resolve(null)
+      )
+    ).toBeNull();
   });
 });
 

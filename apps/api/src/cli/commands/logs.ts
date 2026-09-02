@@ -16,6 +16,7 @@ import {
   latestHubLogFile,
   readLogTail,
   realFollowDeps,
+  resolveHubLogFile,
 } from '../log-tail';
 import { writeLine } from '../output';
 
@@ -31,8 +32,7 @@ export interface LogsDeps {
 /** Print the last lines of the hub log, optionally following it. // Usage: await runLogs({ follow: false, lines: 100 }) */
 export async function runLogs(args: LogsArgs, deps: Partial<LogsDeps> = {}): Promise<void> {
   const d = resolveDeps(deps);
-  const state = await d.readState();
-  const file = state?.logFile || (await d.latestLogFile());
+  const file = await resolveHubLogFile(d.readState, d.latestLogFile);
   if (!file) {
     throw new CliError(
       'No log file to show. A foreground "mangostudio serve" writes to its terminal; "serve -d" and the service write under ~/.mango/logs.'
