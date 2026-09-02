@@ -251,6 +251,12 @@ export function renderScheduledTaskRunnerScript(definition: UserServiceDefinitio
     definition.logFile
       ? `${invocation} 2>&1 | Out-File -Append -Encoding utf8 -FilePath ${psQuote(definition.logFile)}`
       : invocation,
+    // The pipeline's own status is `Out-File`'s, which succeeds whatever the
+    // program did, and a PowerShell that ends normally exits 0. Task Scheduler
+    // would read every crash as a clean run and never spend the RestartCount
+    // above, leaving the hub down until the next logon. `$LASTEXITCODE` is the
+    // native invocation's, and survives the pipeline.
+    'exit $LASTEXITCODE',
   ].join('\n');
 }
 
@@ -630,8 +636,33 @@ export function createUserServiceManager(
         },
       });
     },
-    start: () => requireCommand(['launchctl', 'kickstart', darwinTarget], 'launchctl kickstart'),
-    stop: () => requireCommand(['launchctl', 'kill', 'TERM', darwinTarget], 'launchctl kill'),
+    // A stopped job is one that has left the domain, not one that was signalled:
+    // the plist sets `KeepAlive.SuccessfulExit` false, and a process ended by a
+    // signal did not exit successfully, so launchd brought it straight back
+    // after `ThrottleInterval` while the caller was told it had stopped. The
+    // plist stays on disk either way, so the job still loads at the next login
+    // — the same thing `systemctl --user stop` leaves behind.
+    async start() {
+      // Tolerated: the job is already in the domain whenever it was never
+      // stopped, and `bootstrap` treats that as an error.
+      await run(['launchctl', 'bootstrap', `gui/${deps.uid}`, unitPath as string]);
+      await requireCommand(['launchctl', 'kickstart', darwinTarget], 'launchctl kickstart');
+    },
+    async stop() {
+      const result = await run(['launchctl', 'bootout', darwinTarget]);
+      if (result.exitCode === 0) return;
+      // `bootout` also fails when there is nothing to boot out, which is the
+      // state `stop` was asked to reach. Only a job still in the domain is one
+      // this failed to stop.
+      if ((await run(['launchctl', 'print', darwinTarget])).exitCode !== 0) return;
+      const detail = result.stderr.trim() || result.stdout.trim();
+      throw new RuntimeServiceManagementError(
+        'runtime_service_unsupported',
+        `launchctl bootout failed (exit ${result.exitCode})${detail ? `: ${detail}` : ''}`
+      );
+    },
+    // `-k` signals the job and lets launchd start it again, which is a restart
+    // rather than a stop, so KeepAlive is working with it here.
     restart: () =>
       requireCommand(['launchctl', 'kickstart', '-k', darwinTarget], 'launchctl kickstart'),
   };

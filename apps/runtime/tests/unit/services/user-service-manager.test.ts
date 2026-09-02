@@ -173,6 +173,15 @@ describe('Scheduled Task scripts', () => {
     );
   });
 
+  it('exits with the wrapped program status so a crash is not read as a clean run', () => {
+    const runner = renderScheduledTaskRunnerScript(DEFINITION);
+
+    // The pipeline's status is `Out-File`'s, and a PowerShell that ends
+    // normally exits 0 — so without this Task Scheduler records every crash as
+    // a success and never spends its RestartCount.
+    expect(runner.endsWith('\nexit $LASTEXITCODE')).toBe(true);
+  });
+
   it('refuses a command Task Scheduler would silently cut', () => {
     // Everything the task runs is base64 in one argument, and an argument over
     // the limit comes back cut — which decodes to a truncated script, so the
@@ -342,10 +351,60 @@ describe('createUserServiceManager on darwin', () => {
     ]);
   });
 
-  it('stops with a TERM so KeepAlive does not bring it straight back', async () => {
+  it('boots the agent out to stop it, since a signalled job is one KeepAlive revives', async () => {
     const host = new FakeServiceHost({ platform: 'darwin' });
+
     await createUserServiceManager(IDENTITY, host.deps()).stop();
-    expect(host.argv).toEqual([['launchctl', 'kill', 'TERM', 'gui/1000/com.example.unit']]);
+
+    // The plist sets KeepAlive.SuccessfulExit false, so `launchctl kill TERM`
+    // is an unsuccessful exit and launchd starts the job again after the
+    // throttle interval — with the caller told it had stopped.
+    expect(host.argv).toEqual([['launchctl', 'bootout', 'gui/1000/com.example.unit']]);
+  });
+
+  it('treats a job that was not loaded as already stopped', async () => {
+    const host = new FakeServiceHost({
+      platform: 'darwin',
+      // `bootout` fails when there is nothing to boot out, and `print` fails
+      // for the same reason — which is the state `stop` was asked to reach.
+      onExec: () => ({ exitCode: 3, stdout: '', stderr: 'No such process' }),
+    });
+
+    await createUserServiceManager(IDENTITY, host.deps()).stop();
+
+    expect(host.argv.map((argv) => argv[1])).toEqual(['bootout', 'print']);
+  });
+
+  it('reports a stop that left the job loaded', async () => {
+    const host = new FakeServiceHost({
+      platform: 'darwin',
+      onExec: (argv) =>
+        argv[1] === 'bootout'
+          ? { exitCode: 1, stdout: '', stderr: 'Operation not permitted' }
+          : undefined,
+    });
+
+    await expect(createUserServiceManager(IDENTITY, host.deps()).stop()).rejects.toMatchObject({
+      message: expect.stringContaining(
+        'launchctl bootout failed (exit 1): Operation not permitted'
+      ),
+    });
+  });
+
+  it('bootstraps before kickstarting, since a stopped job has left the domain', async () => {
+    const host = new FakeServiceHost({ platform: 'darwin' });
+
+    await createUserServiceManager(IDENTITY, host.deps()).start();
+
+    expect(host.argv).toEqual([
+      [
+        'launchctl',
+        'bootstrap',
+        'gui/1000',
+        '/home/test/Library/LaunchAgents/com.example.unit.plist',
+      ],
+      ['launchctl', 'kickstart', 'gui/1000/com.example.unit'],
+    ]);
   });
 });
 

@@ -120,17 +120,31 @@ typed into a fresh shell carries that shell's environment, so an env-only settin
 exported somewhere else is not picked up. Put settings that must survive either
 route in `config.toml` or `~/.mango/.env`.
 
-`install` also settles the port before writing the unit. An instance you started
-by hand is stopped first — a unit that starts while another process holds the
-state file refuses to serve, and the supervisor would then restart it forever —
-and one the service already runs is restarted afterwards so it picks up the new
-unit. When the hand-started instance will not stop within 10 s, `install` says so
-and asks for `mangostudio killserver` before trying again.
+`install` registers the unit before it touches what is serving. Installing can
+fail for reasons that have nothing to do with the running hub — no session bus,
+a `launchctl` refusal, a Scheduled Task command over the length limit — and
+stopping first would leave you with neither a server nor a service. Once the
+unit is up, the hand-over happens: an instance you started by hand is stopped
+(the unit's own `serve` waits for whoever holds the state file rather than
+refusing, so it takes the port as soon as that pid is gone), and one the service
+already runs is restarted so it picks up the new unit. When the hand-started
+instance will not stop within 10 s, `install` says the unit is installed and
+asks for `mangostudio killserver`; the service takes over once that pid ends.
 
 Restart policy follows each supervisor: `Restart=on-failure` with `RestartSec=5`
 on systemd, `KeepAlive` on a non-zero exit with a 30-second throttle on launchd,
 and `RestartCount 3` at one-minute intervals with no execution time limit for the
-Scheduled Task.
+Scheduled Task. On Windows the task's PowerShell wrapper ends with
+`exit $LASTEXITCODE`, because the pipeline that writes the log file would
+otherwise report its own success and Task Scheduler would read every crash as a
+clean run.
+
+`service stop` means "not running until you start it again", and on macOS that
+is `launchctl bootout` rather than a signal: `KeepAlive` on a non-zero exit
+counts a signalled process as one to revive, so a `kill` would be undone after
+the throttle interval. The plist stays in `~/Library/LaunchAgents`, so the job
+still loads at the next login — the same thing `systemctl --user stop` leaves
+behind. `service start` bootstraps it back into the domain.
 
 On Linux a user unit stops at logout unless **linger** is enabled. `install`
 attempts `loginctl enable-linger` and, when that needs root, prints the exact
