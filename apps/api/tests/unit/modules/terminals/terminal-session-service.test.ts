@@ -373,4 +373,25 @@ describe('terminalSessionService viewer handoff', () => {
     expect(service.detachViewer(session.id, second)).toBe(true);
     expect(service.getForAttach(USER_ID, session.id)?.session.attached).toBe(false);
   });
+
+  test('a replaced viewer stops being the current one before it is detached', async () => {
+    const { service } = createHarness();
+    const session = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    const first = new RecordingViewer();
+    const second = new RecordingViewer();
+    service.attachViewer(session.id, first);
+
+    expect(service.isCurrentViewer(session.id, first)).toBe(true);
+
+    // The socket route asks this across an await, where a replaced socket's
+    // `close` handler may not have run yet: the handoff itself is what has to
+    // answer, so nothing speaks for a session it no longer holds.
+    service.attachViewer(session.id, second);
+    expect(service.isCurrentViewer(session.id, first)).toBe(false);
+    expect(service.isCurrentViewer(session.id, second)).toBe(true);
+
+    service.detachViewer(session.id, second);
+    expect(service.isCurrentViewer(session.id, second)).toBe(false);
+    expect(service.isCurrentViewer('no-such-session', second)).toBe(false);
+  });
 });

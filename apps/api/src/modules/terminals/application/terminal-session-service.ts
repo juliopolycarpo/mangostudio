@@ -101,6 +101,13 @@ export interface TerminalSessionService {
     viewer: TerminalSessionViewer
   ): { readonly replaced: TerminalSessionViewer | null };
   /**
+   * Whether `viewer` still holds the session. The socket route reads this
+   * across an await to decide whether it may still speak for the session: a
+   * takeover registers synchronously, so this answers before the replaced
+   * socket's `close` handler has fired.
+   */
+  isCurrentViewer(sessionId: string, viewer: TerminalSessionViewer): boolean;
+  /**
    * Releases the session's viewer slot. Returns false, and changes nothing,
    * when `viewer` is no longer the current one: a replaced socket closing late
    * must not detach the runtime session out from under the viewer that took
@@ -352,6 +359,10 @@ export function createTerminalSessionService(
       entry.session.attached = true;
       entry.session.lastActivityAt = d.now();
       return { replaced };
+    },
+
+    isCurrentViewer(sessionId, viewer) {
+      return sessions.get(sessionId)?.viewer === viewer;
     },
 
     detachViewer(sessionId, viewer) {

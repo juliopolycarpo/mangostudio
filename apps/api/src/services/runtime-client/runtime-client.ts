@@ -286,9 +286,13 @@ interface RuntimeTerminalClient {
   list(options?: RuntimeRequestOptions): Promise<RuntimeTerminalListResult>;
   /**
    * Subscribes to one session's output frames, filtered by `streamId` the way
-   * `RuntimeExternalAgentsClient.onEvent` filters by `sessionId` — the runtime
-   * never emits on this topic before `terminal.attach`, so a listener added
-   * after that call sees every frame the session produces from then on.
+   * `RuntimeExternalAgentsClient.onEvent` filters by `sessionId`.
+   *
+   * The topic has no buffer and frames are dispatched synchronously, while a
+   * response only settles its promise a microtask later — so a frame the port
+   * delivers in the same read as the `terminal.attach` response reaches an
+   * empty listener set and is dropped. Subscribe *before* sending the request,
+   * not after it resolves.
    */
   onOutput(sessionId: string, listener: (event: RuntimeTerminalOutputEvent) => void): () => void;
 }

@@ -65,6 +65,12 @@ switching tabs detaches; attaching again replays the scrollback. One viewer hold
 at a time: popping it out into a window takes it from the rail, which then offers to bring it
 back.
 
+A viewer attaches in three steps, and the order is the contract: `terminal.detach` to quiesce
+whatever the last one left running, then the output subscription, then `terminal.attach`.
+Only that order makes every frame either scrollback or newer than it — the topic has no
+buffer, so subscribing after the reply loses whatever shared its read, and subscribing before
+the quiescing detach replays bytes the scrollback already carries.
+
 A session ends when the user closes it, when it sits with no viewer for
 `idle_timeout_minutes`, when the runtime connection drops, or when the hub stops. The hub's
 registry is in memory; sessions do not survive a hub restart.

@@ -65,6 +65,12 @@ As sessões pertencem ao runtime e sobrevivem ao socket do navegador. Fechar o p
 de aba desanexa; anexar de novo reproduz o scrollback. Um visualizador segura uma sessão por vez:
 abri-la em uma janela a tira da barra lateral, que então oferece trazê-la de volta.
 
+Um visualizador anexa em três passos, e a ordem é o contrato: `terminal.detach` para silenciar
+o que o último deixou correndo, depois a inscrição na saída, depois `terminal.attach`. Só essa
+ordem faz cada frame ser ou scrollback ou mais novo que ele — o tópico não tem buffer, então
+inscrever-se depois da resposta perde o que veio na mesma leitura, e inscrever-se antes do
+detach de silenciamento reproduz bytes que o scrollback já carrega.
+
 Uma sessão termina quando o usuário a fecha, quando fica sem visualizador por
 `idle_timeout_minutes`, quando a conexão do runtime cai ou quando o hub para. O registro do hub
 fica em memória; sessões não sobrevivem a um reinício do hub.

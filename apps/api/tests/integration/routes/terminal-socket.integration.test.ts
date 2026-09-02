@@ -183,12 +183,8 @@ describe('terminal socket relay', () => {
     return client;
   }
 
-  it('replays scrollback, relays live output, and closes on exit', async () => {
-    const user = await insertTestUser();
-    const runtime = new FakeTerminalRuntimeClient({
-      attachResult: { scrollback: Buffer.from('welcome\n').toString('base64') },
-    });
-    const service = createTerminalSessionService({
+  function relayService(runtime: FakeTerminalRuntimeClient): TerminalSessionService {
+    return createTerminalSessionService({
       getConfig: () => ({
         enabled: true,
         idleTimeoutMinutes: 30,
@@ -198,6 +194,31 @@ describe('terminal socket relay', () => {
       getRuntimeClient: () => Promise.resolve(runtime),
       isIdentityAttested: () => true,
     });
+  }
+
+  /**
+   * Every socket quiesces the stream with `terminal.detach` before its own
+   * `terminal.attach`, so counting detaches says nothing. What must hold is
+   * that none follows the last attach: that one would stop the runtime's
+   * stream while the viewer that owns it is still reading.
+   */
+  function detachesAfterLastAttach(runtime: FakeTerminalRuntimeClient) {
+    const lastAttach = runtime.sequence.map((call) => call.method).lastIndexOf('attach');
+    return runtime.sequence.slice(lastAttach + 1).filter((call) => call.method === 'detach');
+  }
+
+  function dataText(messages: readonly TerminalServerMessage[]): string[] {
+    return messages.flatMap((message) =>
+      message.type === 'data' ? [Buffer.from(message.data).toString()] : []
+    );
+  }
+
+  it('replays scrollback, relays live output, and closes on exit', async () => {
+    const user = await insertTestUser();
+    const runtime = new FakeTerminalRuntimeClient({
+      attachResult: { scrollback: Buffer.from('welcome\n').toString('base64') },
+    });
+    const service = relayService(runtime);
     const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
     const viewer = await openViewer(service, user.id, session.id);
 
@@ -220,16 +241,7 @@ describe('terminal socket relay', () => {
   it('forwards a client write to terminal.write, base64-encoded', async () => {
     const user = await insertTestUser();
     const runtime = new FakeTerminalRuntimeClient();
-    const service = createTerminalSessionService({
-      getConfig: () => ({
-        enabled: true,
-        idleTimeoutMinutes: 30,
-        maxSessionsPerUser: 8,
-        scrollbackKib: 256,
-      }),
-      getRuntimeClient: () => Promise.resolve(runtime),
-      isIdentityAttested: () => true,
-    });
+    const service = relayService(runtime);
     const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
     const viewer = await openViewer(service, user.id, session.id);
     await viewer.nextMessage(() => true).catch(() => undefined); // let attach settle if it sent nothing
@@ -245,19 +257,110 @@ describe('terminal socket relay', () => {
     );
   });
 
+  it('relays output the runtime emitted in the same read as the attach response', async () => {
+    const user = await insertTestUser();
+    const runtime = new FakeTerminalRuntimeClient({
+      attachResult: { scrollback: Buffer.from('welcome\n').toString('base64') },
+      outputWithFirstAttachResponse: [
+        { kind: 'data', data: Buffer.from('raced\n').toString('base64') },
+      ],
+    });
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const viewer = await openViewer(service, user.id, session.id);
+
+    // The frame was dispatched before the route's `await` on the response
+    // resumed, so only a subscription taken out *before* the request catches
+    // it — and it still has to land behind the scrollback it continues.
+    const scrollback = await viewer.nextMessage((message) => message.type === 'data');
+    expect(dataText([scrollback])).toEqual(['welcome\n']);
+    const raced = await viewer.nextMessage((message) => message.type === 'data');
+    expect(dataText([raced])).toEqual(['raced\n']);
+  });
+
+  it('ends the turn when the session exits in the same read as the attach response', async () => {
+    const user = await insertTestUser();
+    const runtime = new FakeTerminalRuntimeClient({
+      outputWithFirstAttachResponse: [{ kind: 'exit', exitCode: 3, signal: null }],
+    });
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const viewer = await openViewer(service, user.id, session.id);
+
+    // Losing this frame leaves the viewer on a dead session: the attach reply
+    // said `running`, and no later frame ever says otherwise.
+    const exit = await viewer.nextMessage((message) => message.type === 'exit');
+    expect(exit).toMatchObject({ type: 'exit', exit: { exitCode: 3, signal: null } });
+    expect((await viewer.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.GONE);
+    expect(service.list(user.id)[0]).toMatchObject({ status: 'exited' });
+  });
+
+  it('does not replay output the runtime emitted before this socket attached', async () => {
+    const user = await insertTestUser();
+    let releaseDetach!: () => void;
+    const detachGate = new Promise<void>((resolve) => {
+      releaseDetach = resolve;
+    });
+    const runtime = new FakeTerminalRuntimeClient({
+      gateFirstDetach: () => detachGate,
+      attachResult: { scrollback: Buffer.from('older\n').toString('base64') },
+      outputWithFirstAttachResponse: [
+        { kind: 'data', data: Buffer.from('newer\n').toString('base64') },
+      ],
+    });
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const viewer = await openViewer(service, user.id, session.id);
+
+    // A predecessor's stream is still running while this socket's quiescing
+    // detach is in flight. These bytes reach the scrollback the attach then
+    // snapshots, so relaying them as live output too would double them.
+    await Bun.sleep(20);
+    runtime.emitOutput(session.id, {
+      kind: 'data',
+      data: Buffer.from('older\n').toString('base64'),
+    });
+    releaseDetach();
+
+    await viewer.nextMessage(
+      (message) => message.type === 'data' && Buffer.from(message.data).toString() === 'newer\n'
+    );
+    await Bun.sleep(20);
+    expect(dataText(viewer.messages)).toEqual(['older\n', 'newer\n']);
+  });
+
+  it('never attaches a socket a takeover replaced while its quiescing detach was in flight', async () => {
+    const user = await insertTestUser();
+    // Releasing on the successor's attach, rather than after a sleep, keeps
+    // the replaced socket's resume inside the takeover's own turn of the loop:
+    // it must abandon the attach it already had in flight, whenever its `close`
+    // handler happens to run. Attaching afterwards would re-snapshot the
+    // successor's scrollback and double everything in between.
+    const runtime: FakeTerminalRuntimeClient = new FakeTerminalRuntimeClient({
+      gateFirstDetach: () => runtime.waitForCall('attach'),
+    });
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+
+    const first = await openViewer(service, user.id, session.id);
+    const second = await openViewer(service, user.id, session.id);
+
+    await Bun.sleep(50);
+    expect((await first.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.REPLACED);
+    expect(runtime.calls.attach).toHaveLength(1);
+    expect(detachesAfterLastAttach(runtime)).toEqual([]);
+    runtime.emitOutput(session.id, {
+      kind: 'data',
+      data: Buffer.from('still here').toString('base64'),
+    });
+    const live = await second.nextMessage((message) => message.type === 'data');
+    expect(dataText([live])).toEqual(['still here']);
+  });
+
   it('closes the previous viewer with REPLACED when a second socket attaches', async () => {
     const user = await insertTestUser();
     const runtime = new FakeTerminalRuntimeClient();
-    const service = createTerminalSessionService({
-      getConfig: () => ({
-        enabled: true,
-        idleTimeoutMinutes: 30,
-        maxSessionsPerUser: 8,
-        scrollbackKib: 256,
-      }),
-      getRuntimeClient: () => Promise.resolve(runtime),
-      isIdentityAttested: () => true,
-    });
+    const service = relayService(runtime);
     const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
     const first = await openViewer(service, user.id, session.id);
     const second = await openViewer(service, user.id, session.id);
@@ -268,7 +371,7 @@ describe('terminal socket relay', () => {
     // It must not send `terminal.detach`: that would stop the runtime's stream
     // while the second viewer is still reading it.
     await Bun.sleep(50);
-    expect(runtime.calls.detach).toHaveLength(0);
+    expect(detachesAfterLastAttach(runtime)).toEqual([]);
     expect(second.socket.readyState).toBe(WebSocket.OPEN);
     runtime.emitOutput(session.id, {
       kind: 'data',
@@ -285,16 +388,7 @@ describe('terminal socket relay', () => {
       releaseAttach = resolve;
     });
     const runtime = new FakeTerminalRuntimeClient({ gateFirstAttach: () => attachGate });
-    const service = createTerminalSessionService({
-      getConfig: () => ({
-        enabled: true,
-        idleTimeoutMinutes: 30,
-        maxSessionsPerUser: 8,
-        scrollbackKib: 256,
-      }),
-      getRuntimeClient: () => Promise.resolve(runtime),
-      isIdentityAttested: () => true,
-    });
+    const service = relayService(runtime);
     const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
 
     // The first socket's terminal.attach() blocks on the gate, so a takeover
@@ -306,7 +400,7 @@ describe('terminal socket relay', () => {
     releaseAttach();
     await Bun.sleep(50);
 
-    expect(runtime.calls.detach).toHaveLength(0);
+    expect(detachesAfterLastAttach(runtime)).toEqual([]);
     expect(second.socket.readyState).toBe(WebSocket.OPEN);
   });
 
@@ -317,16 +411,7 @@ describe('terminal socket relay', () => {
       releaseWrite = resolve;
     });
     const runtime = new FakeTerminalRuntimeClient({ gateFirstWrite: () => writeGate });
-    const service = createTerminalSessionService({
-      getConfig: () => ({
-        enabled: true,
-        idleTimeoutMinutes: 30,
-        maxSessionsPerUser: 8,
-        scrollbackKib: 256,
-      }),
-      getRuntimeClient: () => Promise.resolve(runtime),
-      isIdentityAttested: () => true,
-    });
+    const service = relayService(runtime);
     const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
     const first = await openViewer(service, user.id, session.id);
 

@@ -9,6 +9,7 @@
  * real socket.
  */
 
+import type { RuntimeTerminalOutputEvent } from '@mangostudio/runtime';
 import {
   chunkTerminalBytes,
   decodeTerminalClientMessage,
@@ -92,7 +93,11 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
     },
   });
 
-  /** Attaches, replays scrollback, and wires the live relay for one socket. */
+  /**
+   * Quiesces the runtime stream, attaches, replays scrollback, and wires the
+   * live relay for one socket — in that order, because it is the order that
+   * makes every frame either scrollback or newer than it.
+   */
   async function attach(socket: TerminalSocket, state: TerminalSocketState): Promise<void> {
     const userId = state.userId as string;
     const found = service.getForAttach(userId, state.sessionId);
@@ -122,45 +127,38 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
     const { replaced } = service.attachViewer(state.sessionId, viewer);
     replaced?.close(TERMINAL_SOCKET_CLOSE_CODES.REPLACED, 'Replaced by a new viewer');
 
-    let attachResult: Awaited<ReturnType<TerminalRuntimeClient['terminal']['attach']>>;
+    // Quiesce the stream before attaching. A predecessor may still be attached
+    // on the runtime — a takeover, or a closed socket whose `terminal.detach`
+    // is still in flight — and its frames are already in the scrollback this
+    // attach is about to snapshot. Frames the port delivers in the same read as
+    // this response are dispatched before the continuation below resumes, so
+    // there is no way to tell them apart after the fact; having the runtime
+    // stop emitting first is what makes everything that arrives from here on
+    // unambiguously newer than the snapshot.
     try {
-      attachResult = await client.terminal.attach({ sessionId: state.sessionId });
-    } catch (error) {
-      logger.warn('attach_failed', {
-        sessionId: state.sessionId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      await client.terminal.detach({ sessionId: state.sessionId });
+    } catch {
+      // The session is gone on the runtime, or the connection is: the attach
+      // below fails with the same cause and closes the socket for it.
+    }
+
+    // A takeover during that round trip must stop this socket here: attaching
+    // after the successor did would re-snapshot its scrollback and hand it a
+    // duplicate of everything in between. Viewer identity is what answers that,
+    // rather than `socketClosed` alone — the handoff is recorded synchronously,
+    // so this holds however the runtime schedules the replaced socket's `close`.
+    if (state.socketClosed || !service.isCurrentViewer(state.sessionId, viewer)) {
       service.detachViewer(state.sessionId, viewer);
-      socket.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session unavailable');
       return;
     }
 
-    if (state.socketClosed) {
-      // The browser hung up, or a takeover replaced this viewer, while
-      // attach() was in flight. Only detach the runtime if this was still
-      // the current viewer: a takeover already moved that job onto the
-      // successor, and detaching here would stop its stream instead.
-      const wasCurrent = service.detachViewer(state.sessionId, viewer);
-      if (wasCurrent) {
-        void client.terminal.detach({ sessionId: state.sessionId }).catch(() => undefined);
-      }
-      return;
-    }
-
-    const scrollback = Buffer.from(attachResult.scrollback, 'base64');
-    for (const chunk of chunkTerminalBytes(scrollback, TERMINAL_CHUNK_MAX_BYTES)) {
-      relay.push(encodeTerminalServerMessage({ type: 'data', data: chunk }));
-    }
-
-    if (attachResult.status === 'exited') {
-      const exit = { exitCode: attachResult.exitCode, signal: attachResult.signal };
-      service.recordExit(state.sessionId, exit);
-      relay.push(encodeTerminalServerMessage({ type: 'exit', exit }));
-      socket.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session exited');
-      return;
-    }
-
-    state.unsubscribeOutput = client.terminal.onOutput(state.sessionId, (event) => {
+    // Subscribed before the request, because the runtime starts emitting the
+    // moment its `attach()` runs and the topic has no buffer of its own.
+    // Frames wait in `queued` until the scrollback has been replayed, so live
+    // output cannot overtake the replay it continues. Nothing is acknowledged
+    // while they wait, so the runtime's in-flight window bounds the queue.
+    let queued: RuntimeTerminalOutputEvent[] | null = [];
+    const handleOutput = (event: RuntimeTerminalOutputEvent): void => {
       if (state.socketClosed) return;
       switch (event.kind) {
         case 'data':
@@ -183,7 +181,61 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
           socket.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session exited');
         }
       }
+    };
+    state.unsubscribeOutput = client.terminal.onOutput(state.sessionId, (event) => {
+      if (queued) {
+        queued.push(event);
+        return;
+      }
+      handleOutput(event);
     });
+
+    let attachResult: Awaited<ReturnType<TerminalRuntimeClient['terminal']['attach']>>;
+    try {
+      attachResult = await client.terminal.attach({ sessionId: state.sessionId });
+    } catch (error) {
+      logger.warn('attach_failed', {
+        sessionId: state.sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      teardown(state);
+      service.detachViewer(state.sessionId, viewer);
+      socket.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session unavailable');
+      return;
+    }
+
+    if (state.socketClosed) {
+      // The browser hung up, or a takeover replaced this viewer, while
+      // attach() was in flight. Only detach the runtime if this was still
+      // the current viewer: a takeover already moved that job onto the
+      // successor, and detaching here would stop its stream instead.
+      teardown(state);
+      const wasCurrent = service.detachViewer(state.sessionId, viewer);
+      if (wasCurrent) {
+        void client.terminal.detach({ sessionId: state.sessionId }).catch(() => undefined);
+      }
+      return;
+    }
+
+    const scrollback = Buffer.from(attachResult.scrollback, 'base64');
+    for (const chunk of chunkTerminalBytes(scrollback, TERMINAL_CHUNK_MAX_BYTES)) {
+      relay.push(encodeTerminalServerMessage({ type: 'data', data: chunk }));
+    }
+
+    if (attachResult.status === 'exited') {
+      // Nothing can have been queued: the runtime emits only while attached,
+      // and this session had already ended before it was.
+      teardown(state);
+      const exit = { exitCode: attachResult.exitCode, signal: attachResult.signal };
+      service.recordExit(state.sessionId, exit);
+      relay.push(encodeTerminalServerMessage({ type: 'exit', exit }));
+      socket.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session exited');
+      return;
+    }
+
+    const replayed = queued;
+    queued = null;
+    for (const event of replayed) handleOutput(event);
   }
 
   function teardown(state: TerminalSocketState): void {
