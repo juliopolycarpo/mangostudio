@@ -86,8 +86,8 @@ export function useMachineStatus(options: { readonly windowMs?: number } = {}) {
   }, [awaiting, pid, query.data]);
   // Read inside the timeout below, which would otherwise close over the query
   // state as it was when the window opened.
-  const lastSuccessAt = useRef(0);
-  lastSuccessAt.current = query.dataUpdatedAt;
+  const freshness = useRef({ data: 0, error: 0 });
+  freshness.current = { data: query.dataUpdatedAt, error: query.errorUpdatedAt };
 
   // A server that never comes back changes nothing the effect above watches,
   // so the window closes on a clock, not on data.
@@ -96,14 +96,23 @@ export function useMachineStatus(options: { readonly windowMs?: number } = {}) {
     const remaining = Math.max(0, windowMs - (Date.now() - awaiting.since));
     const timer = setTimeout(() => {
       setAwaiting(null);
-      // A failed refetch leaves the last successful document in the cache,
-      // which is right while the server is bouncing. If nothing answered for
-      // the whole window, that document predates the action and describes a
-      // process that is gone — the page would draw it as running with its
-      // service installed, which is exactly what an uninstall just undid.
-      // Dropping it puts the page in its connection-error state; the poll
-      // continues, so a server that does come back repopulates it.
-      if (lastSuccessAt.current <= awaiting.since) {
+      // Reaching here at all means no successor ever answered — the effect
+      // above would have cleared `awaiting` if one had. What is left to ask is
+      // whether the old process is still there: a failed refetch keeps the
+      // last successful document in the cache, and that document would draw a
+      // running hub with its service installed, which is exactly what an
+      // uninstall just undid.
+      //
+      // The question is which of the two the *latest* fetch was, not whether
+      // anything succeeded during the window. The mutation invalidates this
+      // query the moment the action is accepted, and the server does not stand
+      // down for another 50 ms, so a success from the old pid inside the window
+      // is the normal case rather than a sign of life.
+      //
+      // A hub still answering on the same pid keeps its document; one that
+      // answered once and then went away does not. The poll carries on either
+      // way, so a server that comes back repopulates it.
+      if (freshness.current.error >= freshness.current.data) {
         queryClient.removeQueries({ queryKey: machineKeys.status() });
       }
     }, remaining);

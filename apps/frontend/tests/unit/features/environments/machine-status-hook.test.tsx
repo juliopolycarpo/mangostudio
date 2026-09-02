@@ -13,6 +13,33 @@ import { createFetchScenario } from '../../../support/mocks/create-fetch-scenari
 
 const scenario = createFetchScenario();
 
+/** A service-managed hub, which is the shape an uninstall takes away. */
+const STATUS = {
+  hub: { running: true, pid: 42, launch: 'detached' },
+  service: {
+    schemaVersion: 1,
+    platform: 'linux',
+    unitName: 'mangostudio.service',
+    installed: true,
+    enabled: true,
+    running: true,
+  },
+  runtimeBinary: { path: null, present: false, version: null, versionMatches: null, error: null },
+  hostSlot: { present: false, profile: 'full', directory: '/h', error: null },
+  platform: 'linux',
+  standalone: false,
+  container: false,
+  homeDir: '/h',
+  logsDir: '/h/logs',
+  configFile: null,
+  actions: {
+    guard: { allowed: true, reasons: [] },
+    restart: { available: true, command: 'mangostudio restart' },
+    installService: { available: false, command: 'x', reason: 'already-installed' },
+    uninstallService: { available: true, command: 'mangostudio service uninstall' },
+  },
+};
+
 afterEach(() => {
   scenario.restore();
 });
@@ -32,51 +59,64 @@ describe('useMachineStatus', () => {
   });
 
   it('drops the status it was showing when the server never comes back', async () => {
-    const status = {
-      hub: { running: true, pid: 42, launch: 'detached' },
-      service: {
-        schemaVersion: 1,
-        platform: 'linux',
-        unitName: 'mangostudio.service',
-        installed: true,
-        enabled: true,
-        running: true,
-      },
-      runtimeBinary: {
-        path: null,
-        present: false,
-        version: null,
-        versionMatches: null,
-        error: null,
-      },
-      hostSlot: { present: false, profile: 'full', directory: '/h', error: null },
-      platform: 'linux',
-      standalone: false,
-      container: false,
-      homeDir: '/h',
-      logsDir: '/h/logs',
-      configFile: null,
-      actions: {
-        guard: { allowed: true, reasons: [] },
-        restart: { available: true, command: 'mangostudio restart' },
-        installService: { available: false, command: 'x', reason: 'already-installed' },
-        uninstallService: { available: true, command: 'mangostudio service uninstall' },
-      },
-    };
-    scenario.respondWithJson('GET', '/api/machine/status', { body: status }).install();
+    scenario.respondWithJson('GET', '/api/machine/status', { body: STATUS }).install();
     const { result } = renderHook(() => useMachineStatus({ windowMs: 40 }));
     await waitFor(() => expect(result.current.data).toBeTruthy());
 
     // Removing the service from a service-managed hub stops the server for
-    // good. Every later poll fails, and a failed refetch leaves the last good
-    // document in the cache — so the page went on drawing a running hub with
-    // its service installed.
+    // good. A failed refetch leaves the last good document in the cache — so
+    // the page went on drawing a running hub with its service installed.
     scenario.respondWithJson('GET', '/api/machine/status', {
       status: 503,
       body: { error: 'gone' },
     });
     act(() => result.current.expectChange());
+    // The refetch the mutation's invalidation kicks off, which finds nothing.
+    await act(async () => {
+      await result.current.refetch();
+    });
 
     await waitFor(() => expect(result.current.data).toBeUndefined(), { timeout: 3_000 });
+  });
+
+  it('drops it even when the dying process answered once more first', async () => {
+    scenario.respondWithJson('GET', '/api/machine/status', { body: STATUS }).install();
+    const { result } = renderHook(() => useMachineStatus({ windowMs: 400 }));
+    await waitFor(() => expect(result.current.data).toBeTruthy());
+
+    act(() => result.current.expectChange());
+
+    // The mutation invalidates this query the moment the action is accepted,
+    // and the server does not stand down for another 50 ms — so this refetch
+    // succeeds, from the same pid that is about to go away. Deciding on "did
+    // anything answer during the window" would call that a sign of life and
+    // keep the document for good.
+    await act(async () => {
+      await result.current.refetch();
+    });
+    expect(result.current.data).toBeTruthy();
+
+    scenario.respondWithJson('GET', '/api/machine/status', {
+      status: 503,
+      body: { error: 'gone' },
+    });
+    await act(async () => {
+      await result.current.refetch();
+    });
+
+    await waitFor(() => expect(result.current.data).toBeUndefined(), { timeout: 3_000 });
+  });
+
+  it('keeps the document when the hub is still answering on the same pid', async () => {
+    scenario.respondWithJson('GET', '/api/machine/status', { body: STATUS }).install();
+    const { result } = renderHook(() => useMachineStatus({ windowMs: 40 }));
+    await waitFor(() => expect(result.current.data).toBeTruthy());
+
+    act(() => result.current.expectChange());
+    await waitFor(() => expect(result.current.awaitingChange).toBe(false), { timeout: 2_000 });
+
+    // Nothing failed, so nothing is stale — an action that changed no pid is
+    // not a reason to blank a page whose server is right there.
+    expect(result.current.data).toBeTruthy();
   });
 });
