@@ -85,15 +85,43 @@ export function extractClientIp(
  * Without a trusted proxy the socket peer stands, exactly as before — a header
  * cannot promote a remote caller then either.
  *
- * // Usage: resolveGuardClientIp(headers, server?.requestIP(request)?.address, trustProxy)
+ * With one, and with no hop appended, there is a choice the operator owns.
+ * A proxy configured without `X-Forwarded-For` leaves the peer as the only
+ * candidate, and behind a proxy that peer is the proxy, on loopback — taking it
+ * places every remote browser at this machine's keyboard.
+ * `security.allowDirectLoopback` decides: on (the default) the peer stands, so a
+ * browser talking to the hub directly keeps its machine page; off, the caller is
+ * `UNVERIFIED_CLIENT_IP` and the guard refuses in a way that names the setting
+ * rather than claiming the caller is somewhere else.
+ */
+export interface GuardIpPolicy {
+  /** `security.trustProxy` — whether a forwarded header may outrank the peer. */
+  readonly trustProxy: boolean;
+  /** `security.allowDirectLoopback` — whether an unforwarded peer still counts. */
+  readonly allowDirectLoopback: boolean;
+}
+
+/**
+ * The address a caller gets when a trusted proxy appended no hop and the direct
+ * fallback is off. Not a loopback address, so every guard refuses it; distinct
+ * from `'unknown'` so the refusal can say the address was never established
+ * rather than that it was established and found remote.
+ */
+export const UNVERIFIED_CLIENT_IP = 'unverified';
+
+/**
+ * Resolve the address the local-surface guard judges.
+ * // Usage: resolveGuardClientIp(headers, server?.requestIP(request)?.address, getConfig().security)
  */
 export function resolveGuardClientIp(
   headers: Headers,
   peerIp: string | undefined,
-  trustProxy: boolean
+  policy: GuardIpPolicy
 ): string {
-  if (!trustProxy) return sanitizeClientIp(peerIp) ?? 'unknown';
+  if (!policy.trustProxy) return sanitizeClientIp(peerIp) ?? 'unknown';
 
   const appended = sanitizeClientIp(headers.get('x-forwarded-for')?.split(',').at(-1));
-  return appended ?? sanitizeClientIp(peerIp) ?? 'unknown';
+  if (appended) return appended;
+  if (!policy.allowDirectLoopback) return UNVERIFIED_CLIENT_IP;
+  return sanitizeClientIp(peerIp) ?? 'unknown';
 }

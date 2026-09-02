@@ -107,6 +107,19 @@ export interface MangoConfig {
      * balancer, Docker behind a proxy); otherwise clients can spoof them.
      */
     trustProxy: boolean;
+    /**
+     * Whether a request that reaches this hub on loopback still counts as local
+     * when `trustProxy` is on and no `X-Forwarded-For` hop arrived.
+     *
+     * Only read behind a trusted proxy, and only when that proxy appended
+     * nothing. Left on, the socket peer answers as it always has — which keeps
+     * the machine page working for a browser that talks to the hub directly,
+     * bypassing the proxy. Turn it off when the proxy in front of this hub does
+     * not set `X-Forwarded-For`: there the loopback peer is the proxy itself,
+     * and every remote browser would otherwise pass a check that is supposed to
+     * mean "at this machine's keyboard".
+     */
+    allowDirectLoopback: boolean;
   };
   environments: {
     /** Opt in to refreshing Node release metadata from nodejs.org. */
@@ -157,7 +170,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   library: { backupDir: '', backupRetentionCount: 10, backupRetentionBytes: 512 * 1024 * 1024 },
   checkpoints: { dir: '' },
   auth: { secret: '', url: '' },
-  security: { trustProxy: false },
+  security: { trustProxy: false, allowDirectLoopback: true },
   environments: { ltsRefresh: false, installsEnabled: false, container: false, wslExecutable: '' },
   chatgpt: {
     authBaseUrl: 'https://auth.openai.com',
@@ -242,6 +255,9 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   TRUST_PROXY: (cfg, v) => {
     cfg.security.trustProxy = parseBooleanFlag(v);
+  },
+  ALLOW_DIRECT_LOOPBACK: (cfg, v) => {
+    cfg.security.allowDirectLoopback = parseBooleanFlag(v);
   },
   MANGO_ENV_LTS_REFRESH: (cfg, v) => {
     cfg.environments.ltsRefresh = parseBooleanFlag(v);
@@ -626,6 +642,9 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
   const security = parsed.security as Record<string, unknown> | undefined;
   if (security) {
     if (typeof security.trustProxy === 'boolean') cfg.security.trustProxy = security.trustProxy;
+    if (typeof security.allowDirectLoopback === 'boolean') {
+      cfg.security.allowDirectLoopback = security.allowDirectLoopback;
+    }
   }
 
   const environments = parsed.environments as Record<string, unknown> | undefined;

@@ -15,7 +15,7 @@ import {
 } from '@mangostudio/shared/machine';
 import { Elysia, t } from 'elysia';
 import Value from 'typebox/value';
-import { resolveGuardClientIp } from '../../../lib/client-ip';
+import { type GuardIpPolicy, resolveGuardClientIp } from '../../../lib/client-ip';
 import { getConfig } from '../../../lib/config';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
@@ -60,7 +60,7 @@ export function parseDoctorSections(raw: string | undefined): MachineDoctorSecti
 
 export function createMachineRoutes(
   service: MachineService = machineService,
-  trustProxy: () => boolean = () => getConfig().security.trustProxy
+  policy: () => GuardIpPolicy = () => getConfig().security
 ) {
   return new Elysia()
     .use(requireAuth)
@@ -75,7 +75,7 @@ export function createMachineRoutes(
         machinePeerIp: resolveGuardClientIp(
           request.headers,
           server?.requestIP(request)?.address,
-          trustProxy()
+          policy()
         ),
       };
     })

@@ -3363,6 +3363,8 @@ export const messages: Messages = {
           'Installs are disabled while MangoStudio is reachable from other machines.',
         'client-not-loopback':
           'This request did not come from this machine, so it cannot install anything here.',
+        'client-unverified':
+          'MangoStudio trusts a reverse proxy, and this request carried no forwarded address, so where it came from could not be established. That refusal is what security.allowDirectLoopback = false asks for; the proxy in front of this hub has to set X-Forwarded-For.',
         disabled: 'Installs are disabled in this server configuration.',
         'environment-not-trusted':
           'This environment has not been trusted with installs. Turn it on for that machine, on its card in Environments.',

@@ -244,7 +244,7 @@ describe('environment install routes', () => {
     const fake = createFakeService();
     const { app, restore } = createAuthenticatedApiTestApp(
       TEST_USER,
-      createInstallRoutes(fake.service, () => false)
+      createInstallRoutes(fake.service, () => ({ trustProxy: false, allowDirectLoopback: true }))
     );
     restoreAuth = restore;
 
@@ -263,7 +263,7 @@ describe('environment install routes', () => {
     const fake = createFakeService();
     const { app, restore } = createAuthenticatedApiTestApp(
       TEST_USER,
-      createInstallRoutes(fake.service, () => true)
+      createInstallRoutes(fake.service, () => ({ trustProxy: true, allowDirectLoopback: true }))
     );
     restoreAuth = restore;
 
@@ -282,7 +282,7 @@ describe('environment install routes', () => {
     const fake = createFakeService();
     const { app, restore } = createAuthenticatedApiTestApp(
       TEST_USER,
-      createInstallRoutes(fake.service, () => true)
+      createInstallRoutes(fake.service, () => ({ trustProxy: true, allowDirectLoopback: true }))
     );
     restoreAuth = restore;
 

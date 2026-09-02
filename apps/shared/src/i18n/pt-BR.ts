@@ -3371,6 +3371,8 @@ export const messages = {
           'As instalações ficam desativadas enquanto o MangoStudio pode ser acessado por outras máquinas.',
         'client-not-loopback':
           'Esta requisição não veio desta máquina, então ela não pode instalar nada aqui.',
+        'client-unverified':
+          'O MangoStudio confia em um reverse proxy, e esta requisição não trouxe endereço encaminhado, então não foi possível estabelecer de onde ela veio. Essa recusa é o que security.allowDirectLoopback = false pede; o proxy à frente deste hub precisa definir X-Forwarded-For.',
         disabled: 'As instalações estão desativadas na configuração deste servidor.',
         'environment-not-trusted':
           'Este ambiente não foi autorizado a instalar. Ative essa opção para a máquina em questão, no cartão dela em Ambientes.',

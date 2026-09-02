@@ -61,7 +61,7 @@ function makeConfig(): MangoConfig {
     skills: { dir: join(dir, 'skills') },
     checkpoints: { dir: join(dir, 'checkpoints') },
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
-    security: { trustProxy: false },
+    security: { trustProxy: false, allowDirectLoopback: true },
     library: { backupDir: '', backupRetentionCount: 5, backupRetentionBytes: 0 },
     environments: {
       ltsRefresh: false,

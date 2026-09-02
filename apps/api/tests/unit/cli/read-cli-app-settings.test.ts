@@ -28,7 +28,7 @@ function makeConfig(dbPath: string): MangoConfig {
     },
     checkpoints: { dir: '/data/checkpoints' },
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
-    security: { trustProxy: false },
+    security: { trustProxy: false, allowDirectLoopback: true },
     environments: {
       ltsRefresh: false,
       installsEnabled: false,

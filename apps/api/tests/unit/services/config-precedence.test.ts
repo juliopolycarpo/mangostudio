@@ -37,6 +37,7 @@ const WATCHED_ENV_KEYS = [
   'UPLOADS_DIR',
   'IMAGES_DIR',
   'TRUST_PROXY',
+  'ALLOW_DIRECT_LOOPBACK',
   'MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR',
   'MANGO_LIBRARY_BACKUP_DIR',
   'MANGO_LIBRARY_BACKUP_RETENTION_COUNT',
@@ -241,6 +242,32 @@ describe('config precedence', () => {
     const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
 
     expect(cfg.security.trustProxy).toBe(true);
+  });
+
+  // Defaults on: turning it off refuses a request a proxy forwarded without
+  // X-Forwarded-For, which is a hardening an operator opts into rather than one
+  // an upgrade hands them.
+  test('security.allowDirectLoopback defaults to true', () => {
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(cfg.security.allowDirectLoopback).toBe(true);
+  });
+
+  test('loads security.allowDirectLoopback from config.toml', () => {
+    writeFileSync(TMP_TOML, '[security]\ntrustProxy = true\nallowDirectLoopback = false\n');
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.security.allowDirectLoopback).toBe(false);
+  });
+
+  test('process.env ALLOW_DIRECT_LOOPBACK overrides config.toml', () => {
+    writeFileSync(TMP_TOML, '[security]\nallowDirectLoopback = false\n');
+    process.env.ALLOW_DIRECT_LOOPBACK = 'true';
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.security.allowDirectLoopback).toBe(true);
   });
 
   test('keeps live Node LTS refresh opt-in and lets env override TOML', () => {

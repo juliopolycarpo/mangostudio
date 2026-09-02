@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { InstallGuard } from '@mangostudio/shared/environments';
+import { UNVERIFIED_CLIENT_IP } from '../../../../src/lib/client-ip';
 import {
   evaluateInstallGuard,
   evaluateRemoteInstallGuard,
@@ -71,6 +72,16 @@ describe('install guards', () => {
     expect(evaluateInstallGuard({ ...ALLOWED_CONTEXT, clientIp: '192.168.1.4' })).toEqual({
       allowed: false,
       reasons: ['client-not-loopback'],
+    });
+  });
+
+  // `client-not-loopback` sends the operator looking for the browser; this one
+  // sends them to the proxy that never set X-Forwarded-For. Two fixes, so never
+  // one reason.
+  it('separates a caller it could not place from one it placed elsewhere', () => {
+    expect(evaluateInstallGuard({ ...ALLOWED_CONTEXT, clientIp: UNVERIFIED_CLIENT_IP })).toEqual({
+      allowed: false,
+      reasons: ['client-unverified'],
     });
   });
 

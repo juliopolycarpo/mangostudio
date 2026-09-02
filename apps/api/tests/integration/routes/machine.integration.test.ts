@@ -8,6 +8,7 @@ import {
   MachineStatusSchema,
 } from '@mangostudio/shared/machine';
 import Value from 'typebox/value';
+import type { GuardIpPolicy } from '../../../src/lib/client-ip';
 import {
   MachineActionBlockedError,
   MachineActionUnavailableError,
@@ -117,10 +118,14 @@ afterEach(() => {
   restoreAuth = null;
 });
 
-function mount(service: FakeMachineService, trustProxy = false) {
+function mount(service: FakeMachineService, policy: Partial<GuardIpPolicy> = {}) {
   const { app, restore } = createAuthenticatedApiTestApp(
     TEST_USER,
-    createMachineRoutes(service, () => trustProxy)
+    createMachineRoutes(service, () => ({
+      trustProxy: false,
+      allowDirectLoopback: true,
+      ...policy,
+    }))
   );
   restoreAuth = restore;
   return app;
@@ -150,7 +155,7 @@ describe('machine routes', () => {
 
   it('resolves the client through a trusted proxy so a remote session is not local', async () => {
     const service = new FakeMachineService();
-    await mount(service, true).handle(
+    await mount(service, { trustProxy: true }).handle(
       new Request('http://localhost/machine/status', {
         headers: { 'x-forwarded-for': '203.0.113.5' },
       })
@@ -164,7 +169,7 @@ describe('machine routes', () => {
 
   it('reads the hop the proxy appended, not the one the caller claimed', async () => {
     const service = new FakeMachineService();
-    await mount(service, true).handle(
+    await mount(service, { trustProxy: true }).handle(
       new Request('http://localhost/machine/status', {
         // What nginx forwards when a remote caller sends "X-Forwarded-For:
         // 127.0.0.1" and the config uses $proxy_add_x_forwarded_for, which
@@ -176,6 +181,32 @@ describe('machine routes', () => {
     // Taking the first hop would hand this machine's restart button to anyone
     // who can set a header on a same-origin request.
     expect(service.clientIps).toEqual(['203.0.113.5']);
+  });
+
+  // A proxy that forwards without X-Forwarded-For leaves the peer as the only
+  // candidate, and behind a proxy that peer is the proxy itself. The default
+  // keeps reading it, so nothing about an unforwarded request changes.
+  it('still judges an unforwarded request by its peer under the default', async () => {
+    const service = new FakeMachineService();
+    await mount(service, { trustProxy: true }).handle(
+      new Request('http://localhost/machine/status')
+    );
+
+    // `app.handle` has no socket, so there is no peer to fall back to here;
+    // what matters is that the policy did not refuse before looking.
+    expect(service.clientIps).toEqual(['unknown']);
+  });
+
+  // `allowDirectLoopback = false` is the operator saying their proxy sets no
+  // header, so an unforwarded request is unplaceable rather than local — and it
+  // is refused under its own name, not as a caller found somewhere else.
+  it('marks an unforwarded caller unverified when the fallback is off', async () => {
+    const service = new FakeMachineService();
+    await mount(service, { trustProxy: true, allowDirectLoopback: false }).handle(
+      new Request('http://localhost/machine/status')
+    );
+
+    expect(service.clientIps).toEqual(['unverified']);
   });
 
   it('refuses without a session', async () => {

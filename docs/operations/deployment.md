@@ -268,6 +268,34 @@ same-origin request, and the guard must not read that as your keyboard.
 > client spoof its IP — evading rate limiting, and passing the local-surface
 > guard.
 
+#### When the proxy sets no forwarded header
+
+A proxy that forwards without `X-Forwarded-For` — an nginx `location` block with
+no `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` — leaves the
+guard with only the socket peer to read, and that peer is the proxy, on
+loopback. Every remote browser then passes a check that means "at this machine's
+keyboard".
+
+`ALLOW_DIRECT_LOOPBACK` (env) or `allowDirectLoopback` under `[security]`
+decides what happens there. It defaults to `true`: an unforwarded request is
+judged by its socket peer, exactly as it was before `TRUST_PROXY` was set, so a
+browser that reaches the hub directly — bypassing the proxy on `localhost:3001`
+— keeps the machine page and its installs.
+
+```toml
+[security]
+trustProxy = true
+allowDirectLoopback = false
+```
+
+Set it to `false` when the proxy in front of this hub does not set
+`X-Forwarded-For` and you cannot change that. An unforwarded request is then
+refused as `client-unverified` rather than accepted as local — a distinct reason
+from `client-not-loopback`, so the page says the address could not be
+established instead of claiming the caller is somewhere else. Direct requests to
+the hub's own port are refused with it, and the CLI (`mangostudio restart`,
+`mangostudio service install`) remains the way in.
+
 ## Systemd Service
 
 ```ini

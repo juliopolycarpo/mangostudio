@@ -210,6 +210,34 @@ origem, e o guard não pode ler isso como o seu teclado.
 > cliente forje seu IP — burlando o rate limiting e passando pelo guard de
 > superfície local.
 
+#### Quando o proxy não define header encaminhado
+
+Um proxy que repassa sem `X-Forwarded-For` — um bloco `location` do nginx sem
+`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` — deixa o guard
+apenas com o peer do socket para ler, e esse peer é o próprio proxy, em loopback.
+Aí todo browser remoto passa por uma verificação que significa "no teclado desta
+máquina".
+
+`ALLOW_DIRECT_LOOPBACK` (env) ou `allowDirectLoopback` em `[security]` decide o
+que acontece nesse caso. O padrão é `true`: uma requisição sem encaminhamento é
+julgada pelo peer do socket, exatamente como antes de `TRUST_PROXY` ser ligado,
+então um browser que fala direto com o hub — passando por cima do proxy em
+`localhost:3001` — mantém a página da máquina e suas instalações.
+
+```toml
+[security]
+trustProxy = true
+allowDirectLoopback = false
+```
+
+Defina `false` quando o proxy à frente deste hub não define `X-Forwarded-For` e
+você não pode mudar isso. Uma requisição sem encaminhamento passa a ser recusada
+como `client-unverified` em vez de aceita como local — um motivo distinto de
+`client-not-loopback`, então a página diz que o endereço não pôde ser
+estabelecido em vez de afirmar que o chamador está em outro lugar. Requisições
+diretas à porta do hub são recusadas junto, e a CLI (`mangostudio restart`,
+`mangostudio service install`) continua sendo o caminho.
+
 ## Serviço systemd
 
 ```ini

@@ -16,7 +16,7 @@ import {
 } from '@mangostudio/shared/errors';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 import { Elysia, t } from 'elysia';
-import { resolveGuardClientIp } from '../../../lib/client-ip';
+import { type GuardIpPolicy, resolveGuardClientIp } from '../../../lib/client-ip';
 import { getConfig } from '../../../lib/config';
 import { ProfileMismatchError } from '../../../lib/profile-context';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -104,7 +104,7 @@ const KEEPALIVE_BYTES = new TextEncoder().encode(': keepalive\n\n');
 
 export function createInstallRoutes(
   service: InstallService = installService,
-  trustProxy: () => boolean = () => getConfig().security.trustProxy
+  policy: () => GuardIpPolicy = () => getConfig().security
 ) {
   return new Elysia()
     .use(requireAuth)
@@ -119,7 +119,7 @@ export function createInstallRoutes(
         installPeerIp: resolveGuardClientIp(
           request.headers,
           server?.requestIP(request)?.address,
-          trustProxy()
+          policy()
         ),
       };
     })

@@ -1,4 +1,5 @@
 import type { InstallGuard, InstallGuardReason } from '@mangostudio/shared/environments';
+import { UNVERIFIED_CLIENT_IP } from '../../../lib/client-ip';
 import { isLoopback } from '../../../lib/ip-address';
 
 /**
@@ -53,7 +54,10 @@ export function evaluateInstallGuard(context: InstallGuardContext): InstallGuard
   if (!context.standalone && !isLoopbackAddress(context.serverHost)) {
     reasons.push('server-not-loopback');
   }
-  if (!isLoopbackAddress(context.clientIp)) reasons.push('client-not-loopback');
+  // One check, two causes. "Could not be read" and "was read, and is elsewhere"
+  // send the operator to different places, so they are never the same reason.
+  if (context.clientIp === UNVERIFIED_CLIENT_IP) reasons.push('client-unverified');
+  else if (!isLoopbackAddress(context.clientIp)) reasons.push('client-not-loopback');
   if (!context.installsEnabled) reasons.push('disabled');
   if (context.runtimeShellAllowed === false) reasons.push('runtime-denied');
 
