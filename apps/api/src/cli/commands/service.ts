@@ -6,7 +6,7 @@
 import type { UserServiceManager } from '@mangostudio/runtime';
 import type { UserServiceStatus } from '@mangostudio/shared/runtime-home';
 import { ensureRuntimeDirs } from '../../lib/mango-paths';
-import { isStateLive, readState, removeState } from '../../lib/server-state';
+import { isStateLive, readState, removeState, type ServerState } from '../../lib/server-state';
 import {
   buildHubServiceDefinition,
   createHubServiceManager,
@@ -87,7 +87,7 @@ async function install(args: ServiceArgs, unit: string, d: Required<ServiceDeps>
   d.assertServeConfig();
   await d.ensureDirs();
 
-  const restartAfter = await yieldRunningInstance(d);
+  const predecessor = await liveInstance(d);
   const executable = d.executable();
   const definition = buildHubServiceDefinition({
     executable,
@@ -98,9 +98,18 @@ async function install(args: ServiceArgs, unit: string, d: Required<ServiceDeps>
     target: { host: args.host, port: args.port },
   });
 
+  // Register before touching what is serving. Installing can fail for reasons
+  // that have nothing to do with the running hub — no session bus, a launchctl
+  // refusal, a task command over the Windows limit — and stopping it first
+  // would leave the user with neither a server nor a service.
   await withServiceErrors(() => d.manager.install(definition));
-  if (restartAfter) {
+
+  // The unit has started, and its `serve` waits on whatever still holds the
+  // state file rather than refusing, so the hand-over happens now.
+  if (predecessor?.service) {
     await withServiceErrors(() => d.manager.restart());
+  } else if (predecessor) {
+    await stopPredecessor(d, predecessor, unit);
   }
 
   d.log(`Installed and started the MangoStudio service (${unit}).`);
@@ -111,21 +120,27 @@ async function install(args: ServiceArgs, unit: string, d: Required<ServiceDeps>
   }
 }
 
-/**
- * A unit that starts while another instance holds the state file refuses to
- * serve, and the supervisor then restarts it forever. So an instance started
- * by hand is stopped first, and one the service already runs is restarted
- * after the unit is rewritten.
- */
-async function yieldRunningInstance(d: Required<ServiceDeps>): Promise<boolean> {
+/** The instance still serving, or null. A stale state file is cleared. */
+async function liveInstance(d: Required<ServiceDeps>): Promise<ServerState | null> {
   const state = await d.readState();
-  if (!state) return false;
-  if (!isStateLive(state, (pid) => d.controller.isAlive(pid))) {
-    await d.removeState();
-    return false;
-  }
-  if (state.service) return true;
+  if (!state) return null;
+  if (isStateLive(state, (pid) => d.controller.isAlive(pid))) return state;
+  await d.removeState();
+  return null;
+}
 
+/**
+ * Hand the port from an instance started outside the service to the unit that
+ * has just been installed. A unit whose `serve` finds another instance holding
+ * the state file waits for it, so it takes over as soon as this pid is gone —
+ * and if it never goes, the unit is restarted on a loop, which is what the
+ * refusal below is about.
+ */
+async function stopPredecessor(
+  d: Required<ServiceDeps>,
+  state: ServerState,
+  unit: string
+): Promise<void> {
   d.log(
     `Stopping the instance started outside the service (PID ${state.pid}) so the service can take its place.`
   );
@@ -138,10 +153,9 @@ async function yieldRunningInstance(d: Required<ServiceDeps>): Promise<boolean> 
   });
   if (!stopped) {
     throw new CliError(
-      `The running instance (PID ${state.pid}) did not stop within 10s; run "mangostudio killserver" and install again.`
+      `The service (${unit}) is installed, but the instance started outside it (PID ${state.pid}) did not stop within 10s. Run "mangostudio killserver"; the service takes the port once that pid is gone.`
     );
   }
-  return false;
 }
 
 function printStatus(status: UserServiceStatus, json: boolean, d: Required<ServiceDeps>): void {

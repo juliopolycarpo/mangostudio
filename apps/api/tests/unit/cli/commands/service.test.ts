@@ -97,31 +97,54 @@ describe('runService install', () => {
     expect(order).toEqual(['secret', 'install']);
   });
 
-  it('stops an instance started by hand before the unit takes the port', async () => {
+  it('installs the unit before stopping an instance started by hand', async () => {
+    const order: string[] = [];
     const controller = new FakeProcessController([42]);
+    controller.terminate = (pid) => {
+      order.push('terminate');
+      controller.die(pid);
+    };
     const d = baseDeps({
       controller,
       readState: () => Promise.resolve(STATE),
-      sleep: () => {
-        controller.die(42);
-        return Promise.resolve();
-      },
     });
+    d.manager.install = (definition) => {
+      order.push('install');
+      d.manager.installed.push(definition);
+      return Promise.resolve();
+    };
+
     await runService({ action: 'install', json: false }, d);
-    expect(controller.terminated).toEqual([42]);
+
+    // The other way round leaves a user whose install fails with neither the
+    // server they had nor the service they asked for.
+    expect(order).toEqual(['install', 'terminate']);
     expect(d.lines[0]).toContain('Stopping the instance started outside the service (PID 42)');
-    expect(d.manager.calls).toEqual(['install']);
   });
 
-  it('refuses when the running instance will not stop, leaving no unit behind', async () => {
+  it('leaves the running instance alone when the unit cannot be installed', async () => {
+    const controller = new FakeProcessController([42]);
+    const d = baseDeps({ controller, readState: () => Promise.resolve(STATE) });
+    d.manager.install = () => Promise.reject(new Error('systemctl enable --now failed'));
+
+    await expect(runService({ action: 'install', json: false }, d)).rejects.toThrow(
+      /systemctl enable --now failed/
+    );
+
+    expect(controller.terminated).toEqual([]);
+    expect(controller.isAlive(42)).toBe(true);
+  });
+
+  it('says the unit is installed when the instance it replaces will not stop', async () => {
     const d = baseDeps({
       controller: new FakeProcessController([42]),
       readState: () => Promise.resolve(STATE),
     });
+
     await expect(runService({ action: 'install', json: false }, d)).rejects.toThrow(
-      /did not stop within 10s/
+      /is installed, but the instance started outside it \(PID 42\) did not stop within 10s/
     );
-    expect(d.manager.calls).toEqual([]);
+    expect(d.manager.calls).toEqual(['install']);
   });
 
   it('restarts a service that is already running so it reads the rewritten unit', async () => {
