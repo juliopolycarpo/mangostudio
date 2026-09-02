@@ -7,10 +7,14 @@
  * before anything (`TerminalRailPanel`, the routes) is built on top of it.
  */
 
-import { beforeEach, describe, expect, it } from 'bun:test';
-import { TERMINAL_SOCKET_CLOSE_CODES } from '@mangostudio/shared/terminal';
+import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import {
+  encodeTerminalServerMessage,
+  TERMINAL_SOCKET_CLOSE_CODES,
+} from '@mangostudio/shared/terminal';
 import { act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Terminal } from '@xterm/xterm';
 import { TerminalView } from '../../../../src/features/terminal/TerminalView';
 import { render, screen } from '../../../support/harness/render';
 
@@ -106,6 +110,9 @@ describe('TerminalView', () => {
 
     const takeOver = await screen.findByRole('button', { name: 'Bring it here' });
     expect(screen.getByText('This terminal is open in another window.')).toBeVisible();
+    // xterm's link-layer canvas is z-index 2; an overlay without its own
+    // z-index rendered visibly but never received the click in a real browser.
+    expect(screen.getByTestId('terminal-replaced-overlay').className).toContain('z-10');
 
     await user.click(takeOver);
 
