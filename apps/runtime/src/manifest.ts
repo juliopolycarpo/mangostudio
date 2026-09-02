@@ -12,6 +12,7 @@ import {
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { HIDDEN_WINDOW } from './services/process-window';
 import { isShellAvailable } from './services/shell';
+import { supportsPty } from './services/terminal/pty';
 
 /**
  * Announces what this runtime may execute under the recorded consent.
@@ -78,6 +79,10 @@ export function createLocalRuntimeManifest(
     ...(externalAgents.identityIsolation
       ? { identityIsolation: externalAgents.identityIsolation }
       : {}),
+    // Consent and ability together, like `git`: a machine whose owner refused
+    // `shell`, or that has no shell to run, or a Bun without a PTY, all answer
+    // false rather than advertising a panel that every open would refuse.
+    terminal: allow.shell && shells.length > 0 && supportsPty(),
     profile: profileForAllow(allow),
     // This build decodes `hello_ack.hub`. Frame envelopes are closed, so the
     // hub withholds that field until a runtime says it will not choke on it.

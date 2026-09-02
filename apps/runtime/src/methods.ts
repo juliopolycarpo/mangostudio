@@ -767,6 +767,110 @@ export interface RuntimeInstallCancelParams {
 }
 
 /**
+ * Topic carrying one terminal session's output up to the hub, keyed by
+ * session id. Never emitted before the hub has called `terminal.attach` on
+ * that session, so an older hub that cannot decode the payload never sees it.
+ */
+export const RUNTIME_TERMINAL_OUTPUT_TOPIC = 'terminal.output' as const;
+
+/**
+ * One frame on `terminal.output`. `data` is base64 because the event envelope
+ * is JSON; at most `TERMINAL_CHUNK_MAX_BYTES` raw bytes per frame. `dropped`
+ * is a marker for bytes discarded when the in-flight window and the pending
+ * buffer were both full. `exit` rides the frame that ends the stream.
+ */
+export type RuntimeTerminalOutputEvent =
+  | { readonly kind: 'data'; readonly data: string }
+  | { readonly kind: 'dropped'; readonly bytes: number }
+  | { readonly kind: 'exit'; readonly exitCode: number | null; readonly signal: string | null };
+
+export type RuntimeTerminalSessionStatus = 'running' | 'exited';
+
+export interface RuntimeTerminalOpenParams {
+  /** Hub-minted session id. It is the stream key, so it is part of the contract. */
+  readonly sessionId: string;
+  /** Omitted: the login shell when it is one this runtime offers, else the first available. */
+  readonly shell?: RuntimeShellKind;
+  /** Omitted: the runtime user's home. `~` expands like `shell.run`. */
+  readonly cwd?: string;
+  readonly cols: number;
+  readonly rows: number;
+  /** Variables layered over the sanitized host env. Never secrets; the hub does not hold any to send. */
+  readonly env?: Readonly<Record<string, string>>;
+  readonly envPolicy?: RuntimeShellRunParams['envPolicy'];
+}
+
+export interface RuntimeTerminalOpenResult {
+  readonly sessionId: string;
+  readonly shell: RuntimeShellKind;
+  readonly cwd: string;
+  readonly pid: number;
+}
+
+export interface RuntimeTerminalAttachParams {
+  readonly sessionId: string;
+}
+
+/**
+ * Attaching replays what the session kept and starts the live stream. The
+ * in-flight window is reset by the attach: whatever was unacknowledged for a
+ * previous viewer is owed nothing by this one.
+ */
+export interface RuntimeTerminalAttachResult {
+  readonly sessionId: string;
+  /** Base64 of the last `TERMINAL_SCROLLBACK_MAX_BYTES` bytes of output. */
+  readonly scrollback: string;
+  readonly status: RuntimeTerminalSessionStatus;
+  readonly exitCode: number | null;
+  readonly signal: string | null;
+  readonly cols: number;
+  readonly rows: number;
+}
+
+export interface RuntimeTerminalDetachParams {
+  readonly sessionId: string;
+}
+
+export interface RuntimeTerminalWriteParams {
+  readonly sessionId: string;
+  /** Base64 of the keystrokes; at most `TERMINAL_CLIENT_MESSAGE_MAX_BYTES` raw. */
+  readonly data: string;
+}
+
+export interface RuntimeTerminalResizeParams {
+  readonly sessionId: string;
+  readonly cols: number;
+  readonly rows: number;
+}
+
+export interface RuntimeTerminalAckParams {
+  readonly sessionId: string;
+  /** Raw output bytes the viewer has consumed since its last ack. */
+  readonly bytes: number;
+}
+
+export interface RuntimeTerminalCloseParams {
+  readonly sessionId: string;
+}
+
+export interface RuntimeTerminalSessionSummary {
+  readonly sessionId: string;
+  readonly shell: RuntimeShellKind;
+  readonly cwd: string;
+  readonly cols: number;
+  readonly rows: number;
+  readonly status: RuntimeTerminalSessionStatus;
+  readonly exitCode: number | null;
+  readonly signal: string | null;
+  readonly attached: boolean;
+  readonly pid: number;
+}
+
+export interface RuntimeTerminalListResult {
+  readonly sessions: readonly RuntimeTerminalSessionSummary[];
+}
+
+/**
  * Variables merged over this host's own environment for library path
  * resolution. The hub pins configured MangoStudio directories here for its own
  * machine and pins nothing for anyone else's.
@@ -1214,6 +1318,38 @@ export interface RuntimeMethodMap {
   'install.cancel': {
     readonly params: RuntimeInstallCancelParams;
     readonly result: { readonly ok: true };
+  };
+  'terminal.open': {
+    readonly params: RuntimeTerminalOpenParams;
+    readonly result: RuntimeTerminalOpenResult;
+  };
+  'terminal.attach': {
+    readonly params: RuntimeTerminalAttachParams;
+    readonly result: RuntimeTerminalAttachResult;
+  };
+  'terminal.detach': {
+    readonly params: RuntimeTerminalDetachParams;
+    readonly result: { readonly ok: true };
+  };
+  'terminal.write': {
+    readonly params: RuntimeTerminalWriteParams;
+    readonly result: { readonly ok: true };
+  };
+  'terminal.resize': {
+    readonly params: RuntimeTerminalResizeParams;
+    readonly result: { readonly ok: true };
+  };
+  'terminal.ack': {
+    readonly params: RuntimeTerminalAckParams;
+    readonly result: { readonly ok: true };
+  };
+  'terminal.close': {
+    readonly params: RuntimeTerminalCloseParams;
+    readonly result: { readonly ok: true };
+  };
+  'terminal.list': {
+    readonly params: Record<string, never>;
+    readonly result: RuntimeTerminalListResult;
   };
   'library.scan': {
     readonly params: RuntimeLibraryScanParams;

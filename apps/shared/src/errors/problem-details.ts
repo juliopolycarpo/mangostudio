@@ -90,6 +90,9 @@ const PROBLEM_TITLES: Record<ErrorCode, string> = {
   EXTERNAL_SESSION_HELD: 'Vendor session already held',
   EXTERNAL_REVIEW_REQUIRES_GIT: 'Review requires a Git repository',
   MODEL_PROVIDER_DEPRECATED: 'Model provider no longer offered',
+  TERMINAL_DISABLED: 'Terminals disabled',
+  TERMINAL_LIMIT: 'Terminal limit reached',
+  TERMINAL_NOT_ISOLATED: 'Terminal host not isolated',
   INTERNAL: 'Internal server error',
 };
 

@@ -102,6 +102,18 @@ export const RUNTIME_METHOD_CAPABILITIES: Readonly<
   // the shell capability wearing a different name, and it answers to it.
   'install.run': ['shell'],
   'install.cancel': ['shell'],
+  // An interactive shell is everything `shell.run` reaches and more, so it
+  // answers to the same capability rather than a new one: `allow.shell`
+  // already means "this hub may run what it likes here". Every leg names it,
+  // including the reads, because a `readonly` machine has nothing to attach to.
+  'terminal.open': ['shell'],
+  'terminal.attach': ['shell'],
+  'terminal.detach': ['shell'],
+  'terminal.write': ['shell'],
+  'terminal.resize': ['shell'],
+  'terminal.ack': ['shell'],
+  'terminal.close': ['shell'],
+  'terminal.list': ['shell'],
   'library.scan': ['library'],
   'library.read': ['library'],
   'library.read-tree': ['library'],

@@ -69,6 +69,18 @@ describe('capabilityManifestFromHealth', () => {
     expect('gh' in manifest).toBe(false);
   });
 
+  it('carries terminal across a refresh and leaves it absent when never reported', () => {
+    const full = { profile: 'full' as const, allow: RUNTIME_CONSENT_PRESETS.full };
+    expect(capabilityManifestFromHealth({ ...baseReport, ...full, terminal: true }).terminal).toBe(
+      true
+    );
+    expect(capabilityManifestFromHealth({ ...baseReport, ...full, terminal: false }).terminal).toBe(
+      false
+    );
+    const silent = capabilityManifestFromHealth({ ...baseReport, ...full });
+    expect('terminal' in silent).toBe(false);
+  });
+
   it('preserves runtime targets and an explicit isolation attestation across refreshes', () => {
     const report: RuntimeHealthReport = {
       ...baseReport,

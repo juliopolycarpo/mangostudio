@@ -2023,6 +2023,56 @@ export const messages = {
     },
   },
 
+  terminal: {
+    title: 'Terminal',
+    newSession: 'Novo terminal',
+    closeSession: 'Fechar terminal',
+    rename: 'Renomear terminal',
+    renameLabel: 'Nome do terminal',
+    popOut: 'Abrir em uma janela',
+    openInWindow: 'Este terminal está aberto em outra janela.',
+    takeOver: 'Trazer para cá',
+    tabs: 'Sessões de terminal',
+    sessionTitle: 'Terminal {index}',
+    empty: 'Nenhum terminal aberto para este chat.',
+    emptyHint: 'Abra um para executar comandos onde este ambiente roda.',
+    connecting: 'Conectando...',
+    reconnecting: 'Reconectando...',
+    disconnected: 'Desconectado do terminal.',
+    exited: 'Processo encerrado com código {code}.',
+    exitedBySignal: 'Processo encerrado por {signal}.',
+    dropped: '{bytes} bytes de saída foram descartados porque o visualizador não acompanhou.',
+    runtimeDisconnected: 'O runtime se desconectou; esta sessão terminou.',
+    closeConfirmTitle: 'Fechar este terminal?',
+    closeConfirmDescription: 'O shell e tudo o que ele estiver executando serão interrompidos.',
+    unavailableTitle: 'Terminal indisponível',
+    unavailable: {
+      disabled: 'Os terminais estão desligados neste hub.',
+      limit: 'Você já tem o número máximo de terminais abertos.',
+      notIsolated:
+        'O runtime Local compartilha a conta do hub com outros usuários, então os terminais ficam desligados nele.',
+      unavailable:
+        'Este ambiente não pode abrir um terminal. Ele precisa de um shell e da permissão de shell.',
+      disconnected: 'O ambiente não está conectado.',
+      noShell: 'A imagem do contêiner não tem um shell para executar.',
+    },
+    page: {
+      title: 'Terminal',
+      environment: 'Ambiente',
+      sessions: 'Sessões',
+      openHere: 'Abrir aqui',
+      noSessions: 'Nenhum terminal aberto para este ambiente.',
+      notFound: 'Este terminal não existe mais.',
+    },
+    commands: {
+      openPanel: 'Abrir painel do terminal',
+      newSession: 'Nova sessão de terminal',
+    },
+    shell: {
+      label: 'Shell',
+    },
+  },
+
   common: {
     loading: 'Carregando...',
     appName: 'Mango Studio',

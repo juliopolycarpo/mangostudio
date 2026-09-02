@@ -258,6 +258,11 @@ export function summarizeAuditArgs(
   pickString(out, source, 'kind');
   pickString(out, source, 'command', STRING_SUMMARY_LIMIT);
   pickString(out, source, 'logPath');
+  // `terminal.open`: which shell, how big. Keystrokes travel as `data`, which
+  // is deliberately not a key this function knows.
+  pickString(out, source, 'shell');
+  if (typeof source.cols === 'number') out.cols = source.cols;
+  if (typeof source.rows === 'number') out.rows = source.rows;
 
   if (typeof source.size === 'number') out.bytes = source.size;
   if (typeof source.byteLength === 'number') out.bytes = source.byteLength;

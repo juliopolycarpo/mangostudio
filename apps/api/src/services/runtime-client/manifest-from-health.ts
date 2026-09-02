@@ -52,6 +52,9 @@ export function capabilityManifestFromHealth(
     // writing `gh: report.gh ?? { available: false }` would tell the hub a peer
     // answered "no gh" when it never answered at all.
     ...(report.gh ? { gh: report.gh } : {}),
+    // Same rule as `gh`: absent stays absent, so "too old to say" is never
+    // rewritten as "said no".
+    ...(report.terminal === undefined ? {} : { terminal: report.terminal }),
     features: {
       tools,
       git: allow.git && report.git.available,
