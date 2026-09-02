@@ -47,6 +47,10 @@ class FakeServiceHost {
   readonly events: string[] = [];
   /** How often the manager went looking for systemctl. */
   hasSystemdCalls = 0;
+  /** Mutable so a test can make the bus socket appear mid-life, as a login does. */
+  busSocket: boolean;
+  /** How often the manager looked for the bus socket. */
+  busLookups = 0;
 
   constructor(
     private readonly options: {
@@ -56,7 +60,9 @@ class FakeServiceHost {
       readonly busSocket?: boolean;
       readonly onExec?: (argv: readonly string[]) => UserServiceExecResult | undefined;
     } = {}
-  ) {}
+  ) {
+    this.busSocket = options.busSocket ?? true;
+  }
 
   deps(): UserServiceExecDeps {
     return {
@@ -97,8 +103,11 @@ class FakeServiceHost {
         return Promise.resolve();
       },
       mkdir: () => Promise.resolve(),
-      pathExists: (path) =>
-        Promise.resolve(path.endsWith('/bus') ? (this.options.busSocket ?? true) : true),
+      pathExists: (path) => {
+        if (!path.endsWith('/bus')) return Promise.resolve(true);
+        this.busLookups += 1;
+        return Promise.resolve(this.busSocket);
+      },
       warn: (message) => {
         this.warnings.push(message);
       },
@@ -411,6 +420,28 @@ describe('createUserServiceManager status errors', () => {
     // supervisor's own stderr gets no code because no dictionary can hold it.
     expect(first).toMatchObject({ errorCode: 'no-systemd', error: 'systemd is not available' });
     expect(second).toMatchObject({ errorCode: 'no-session-bus', error: 'no session bus' });
+  });
+
+  // The hub builds one manager for the life of the process. `hasSystemd` asks
+  // about the machine and cannot change; the bus socket appears the moment
+  // somebody logs in, so a `serve -d` started over SSH would otherwise report
+  // `no-session-bus` and refuse `service install` forever after.
+  it('looks for the session bus again after it was missing, unlike systemd', async () => {
+    const host = new FakeServiceHost({
+      busSocket: false,
+      env: { XDG_RUNTIME_DIR: '', DBUS_SESSION_BUS_ADDRESS: '' },
+    });
+    const manager = createUserServiceManager(IDENTITY, host.deps());
+
+    expect(await manager.status()).toMatchObject({ errorCode: 'no-session-bus' });
+    host.busSocket = true;
+
+    const recovered = await manager.status();
+    expect(recovered.errorCode).toBeUndefined();
+    expect(recovered.error).toBeUndefined();
+    expect(host.busLookups).toBe(2);
+    // The machine question stays answered once.
+    expect(host.hasSystemdCalls).toBe(1);
   });
 });
 

@@ -558,10 +558,17 @@ export function createUserServiceManager(
     );
   };
 
-  // Resolved once per manager: every systemctl call carries the same env.
-  let busEnv: NodeJS.ProcessEnv | null | undefined;
+  // Resolved once per manager, but only once it resolves: every systemctl call
+  // carries the same env. A *missing* bus is not cached, unlike `hasSystemd`
+  // below — the socket appears the moment the user opens a session, and the
+  // hub's manager lives for the whole process. Caching the absence would leave
+  // a `serve -d` started over SSH reporting `no-session-bus` and refusing
+  // `service install` for the rest of its life, long after the desktop login
+  // that created the bus.
+  let busEnv: NodeJS.ProcessEnv | null = null;
   const sessionBus = async (): Promise<NodeJS.ProcessEnv | null> => {
-    if (busEnv === undefined) busEnv = await sessionBusEnv(deps);
+    if (busEnv) return busEnv;
+    busEnv = await sessionBusEnv(deps);
     return busEnv;
   };
 
