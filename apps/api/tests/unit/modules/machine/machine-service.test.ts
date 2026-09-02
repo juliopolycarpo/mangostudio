@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'bun:test';
-import { MachineStatusSchema } from '@mangostudio/shared/machine';
+import {
+  MACHINE_CHECK_DETAIL_MAX,
+  MACHINE_CHECK_LABEL_MAX,
+  MACHINE_DOCTOR_CHECK_LIMIT,
+  MACHINE_ERROR_MAX,
+  MachineDoctorReportSchema,
+  MachineStatusSchema,
+} from '@mangostudio/shared/machine';
+import { USER_SERVICE_ERROR_MAX } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
 import { tailLines } from '../../../../src/cli/log-tail';
 import type { ServerState } from '../../../../src/lib/server-state';
@@ -162,6 +170,49 @@ describe('machineService.doctor and logs', () => {
     expect((await fallback.service.logs(10, LOCAL)).file).toBe('/home/j/.mango/logs/service.log');
     const none = makeService({ latestLogFile: () => Promise.resolve(null) }, null);
     expect(await none.service.logs(10, LOCAL)).toEqual({ file: null, lines: [], truncated: false });
+  });
+});
+
+// Nothing that fills these fields has a length of its own: a supervisor's
+// stderr, a probe's error, a doctor detail, the number of MCP rows an account
+// owns. A response that overruns its own schema is answered as a 500, so the
+// page would lose the whole document over one long line.
+describe('machineService fits its own wire contract', () => {
+  it('cuts a doctor detail, a label and the row count to what the report schema holds', async () => {
+    const { service } = makeService({
+      collectDoctor: () =>
+        Promise.resolve(
+          Array.from({ length: MACHINE_DOCTOR_CHECK_LIMIT + 5 }, () => ({
+            label: 'L'.repeat(MACHINE_CHECK_LABEL_MAX + 10),
+            status: 'warn' as const,
+            detail: 'D'.repeat(MACHINE_CHECK_DETAIL_MAX + 10),
+          }))
+        ),
+    });
+    const report = await service.doctor([]);
+    expect(Value.Check(MachineDoctorReportSchema, report)).toBe(true);
+    expect(report.checks).toHaveLength(MACHINE_DOCTOR_CHECK_LIMIT);
+    expect(report.checks[0]?.detail).toHaveLength(MACHINE_CHECK_DETAIL_MAX);
+    expect(report.checks[0]?.label).toHaveLength(MACHINE_CHECK_LABEL_MAX);
+  });
+
+  it('cuts a supervisor error and a probe error to what the status schema holds', async () => {
+    const manager = new FakeServiceManager();
+    manager.setStatus({ error: 'E'.repeat(USER_SERVICE_ERROR_MAX + 10) });
+    const { service } = makeService({
+      manager,
+      probeRuntimeBinary: () =>
+        Promise.resolve({
+          path: '/opt/mangostudio-runtime',
+          present: true,
+          version: null,
+          error: 'X'.repeat(MACHINE_ERROR_MAX + 10),
+        }),
+    });
+    const status = await service.status(LOCAL);
+    expect(Value.Check(MachineStatusSchema, status)).toBe(true);
+    expect(status.service.error).toHaveLength(USER_SERVICE_ERROR_MAX);
+    expect(status.runtimeBinary.error).toHaveLength(MACHINE_ERROR_MAX);
   });
 });
 

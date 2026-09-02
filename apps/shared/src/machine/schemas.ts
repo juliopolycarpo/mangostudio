@@ -65,11 +65,22 @@ export const MachineCheckStatusSchema = Type.Union([
 ]);
 export type MachineCheckStatus = Static<typeof MachineCheckStatusSchema>;
 
+/**
+ * Caps on the strings this hub writes about itself. Exported because the writer
+ * has to know them: a doctor detail, a probe error and a supervisor's stderr are
+ * all unbounded at the source, and a response that overruns its own schema is
+ * answered as a 500 rather than as the document with one long line in it.
+ */
+export const MACHINE_CHECK_LABEL_MAX = 128;
+export const MACHINE_CHECK_DETAIL_MAX = 4_096;
+/** Cap on every `error` string in the status document. */
+export const MACHINE_ERROR_MAX = 1_024;
+
 /** One doctor row, exactly as the CLI prints it. */
 export const MachineCheckSchema = Type.Object({
-  label: Type.String({ minLength: 1, maxLength: 128 }),
+  label: Type.String({ minLength: 1, maxLength: MACHINE_CHECK_LABEL_MAX }),
   status: MachineCheckStatusSchema,
-  detail: Type.String({ maxLength: 4_096 }),
+  detail: Type.String({ maxLength: MACHINE_CHECK_DETAIL_MAX }),
 });
 export type MachineCheck = Static<typeof MachineCheckSchema>;
 
@@ -100,7 +111,7 @@ export const MachineRuntimeBinarySchema = Type.Object({
   version: Type.Union([Type.String({ maxLength: 128 }), Type.Null()]),
   /** Whether it reports the hub's own version; null when it could not be asked. */
   versionMatches: Type.Union([Type.Boolean(), Type.Null()]),
-  error: Type.Union([Type.String({ maxLength: 1_024 }), Type.Null()]),
+  error: Type.Union([Type.String({ maxLength: MACHINE_ERROR_MAX }), Type.Null()]),
 });
 export type MachineRuntimeBinary = Static<typeof MachineRuntimeBinarySchema>;
 
@@ -110,7 +121,7 @@ export const MachineHostSlotSchema = Type.Object({
   present: Type.Boolean(),
   profile: RuntimeConsentProfileSchema,
   directory: Type.String({ maxLength: 4_096 }),
-  error: Type.Union([Type.String({ maxLength: 1_024 }), Type.Null()]),
+  error: Type.Union([Type.String({ maxLength: MACHINE_ERROR_MAX }), Type.Null()]),
 });
 export type MachineHostSlot = Static<typeof MachineHostSlotSchema>;
 

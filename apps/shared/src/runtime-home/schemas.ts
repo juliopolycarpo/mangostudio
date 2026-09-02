@@ -319,6 +319,13 @@ export const UserServiceErrorCodeSchema = Type.Union([
 ]);
 export type UserServiceErrorCode = Static<typeof UserServiceErrorCodeSchema>;
 
+/**
+ * Cap on `error`. Exported because what fills it is a supervisor's stderr, which
+ * has no length of its own: a reader that serves this shape over a validated
+ * response has to cut it here or lose the whole document to a 500.
+ */
+export const USER_SERVICE_ERROR_MAX = 1_024;
+
 export const UserServiceStatusSchema = Type.Object({
   schemaVersion: Type.Literal(1),
   platform: UserServicePlatformSchema,
@@ -344,7 +351,7 @@ export const UserServiceStatusSchema = Type.Object({
     })
   ),
   /** Set when status could not be fully determined. */
-  error: Type.Optional(Type.String({ maxLength: 1_024 })),
+  error: Type.Optional(Type.String({ maxLength: USER_SERVICE_ERROR_MAX })),
   /**
    * The reason behind `error`, when it is one this project raises rather than
    * something the supervisor printed. A reader with dictionaries words these;

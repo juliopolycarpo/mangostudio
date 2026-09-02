@@ -18,8 +18,16 @@ import type {
   MachineServiceAction,
   MachineStatus,
 } from '@mangostudio/shared/machine';
-import { MACHINE_LOG_TAIL_DEFAULT, MACHINE_LOG_TAIL_MAX } from '@mangostudio/shared/machine';
-import { resolveRuntimeSlotConfig, runtimeSlotDir } from '@mangostudio/shared/runtime-home';
+import {
+  MACHINE_ERROR_MAX,
+  MACHINE_LOG_TAIL_DEFAULT,
+  MACHINE_LOG_TAIL_MAX,
+} from '@mangostudio/shared/machine';
+import {
+  resolveRuntimeSlotConfig,
+  runtimeSlotDir,
+  USER_SERVICE_ERROR_MAX,
+} from '@mangostudio/shared/runtime-home';
 import { spawnServeChild } from '../../../cli/detach';
 import { canProbeHealth, probeHealth } from '../../../cli/health';
 import { type LogTail, latestHubLogFile, readLogTail } from '../../../cli/log-tail';
@@ -51,6 +59,7 @@ import {
   uninstallServiceReason,
 } from '../domain/machine-actions';
 import { evaluateMachineActionGuard } from '../domain/machine-guard';
+import { fitDoctorChecks, fitToLimit } from '../domain/machine-limits';
 import { collectDoctorChecks, DEFAULT_DOCTOR_COLLECT_OPTIONS } from './doctor-service';
 import {
   buildHubServiceDefinition,
@@ -174,20 +183,26 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       const host = slots.find((slot) => slot.slot === 'host');
       return {
         hub: describeHubProcess({ state, alive: state !== null, now: d.now(), health }),
-        service: input.service,
+        // A supervisor's stderr is whatever it printed; the contract caps it.
+        service: {
+          ...input.service,
+          ...(input.service.error === undefined
+            ? {}
+            : { error: fitToLimit(input.service.error, USER_SERVICE_ERROR_MAX) }),
+        },
         runtimeBinary: {
           path: binary.path,
           present: binary.present,
           version: binary.version,
           versionMatches: binary.version === null ? null : binary.version === environment.version,
-          error: binary.error,
+          error: fitToLimit(binary.error, MACHINE_ERROR_MAX),
         },
         hostSlot: host
           ? {
               present: true,
               profile: host.config.profile,
               directory: host.directory,
-              error: host.error,
+              error: fitToLimit(host.error, MACHINE_ERROR_MAX),
             }
           : {
               present: false,
@@ -208,7 +223,7 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
     async doctor(sections, userId) {
       // Scoped to the caller: the rows name MCP servers and connectors, which
       // belong to an account rather than to the machine.
-      const checks = await d.collectDoctor(sections, userId);
+      const checks = fitDoctorChecks(await d.collectDoctor(sections, userId));
       return {
         checks,
         warnings: checks.filter((check) => check.status === 'warn').length,
