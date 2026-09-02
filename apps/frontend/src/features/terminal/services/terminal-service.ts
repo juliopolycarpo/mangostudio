@@ -2,14 +2,13 @@
  * Terminal HTTP: availability, the session list, and the open/rename/close
  * lifecycle.
  *
- * Raw `fetch`, not Eden Treaty: `@mangostudio/api`'s `App` type carries no
- * `/api/terminals*` routes yet (the hub side of this feature lands in a
- * parallel PR), so `client.api.terminals` is not a type Eden can produce.
- * `terminalFetch` replicates the three behaviours `lib/api-client.ts`'s
- * fetcher gives every Eden call — negotiated problem-json errors, credentialed
- * cookies, and a 401 sending the tab back to the login flow — so this module
- * fails the same way the rest of the app does, just without the generated
- * client. Once the hub routes exist, this can move to `client.api.terminals`.
+ * Raw `fetch`, not Eden Treaty: the module was written against the shared
+ * contract before the hub routes existed, and `terminalFetch` replicates the
+ * three behaviours `lib/api-client.ts`'s fetcher gives every Eden call —
+ * negotiated problem-json errors, credentialed cookies, and a 401 sending the
+ * tab back to the login flow — so this module fails the same way the rest of
+ * the app does. Moving it onto `client.api.terminals` is a follow-up, not a
+ * behaviour change.
  */
 
 import { PROBLEM_JSON_ACCEPT } from '@mangostudio/shared/errors';
