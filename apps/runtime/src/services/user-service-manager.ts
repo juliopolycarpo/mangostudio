@@ -187,6 +187,14 @@ ${optional.map((entry) => `${entry}\n`).join('')}  <key>RunAtLoad</key>
 }
 
 /**
+ * What Task Scheduler accepts in an action's argument string. The whole runner
+ * script lives in there base64-encoded, and the encoding is not free: UTF-16
+ * doubles the script and base64 adds a third again, so roughly 2.7 bytes of
+ * argument per character of script.
+ */
+const SCHEDULED_TASK_ARGUMENT_MAX = 8_192;
+
+/**
  * The PowerShell that registers the Scheduled Task. The task runs a hidden
  * PowerShell that sets the unit's environment, moves to its working directory
  * and appends the program's output to the log file, since Task Scheduler
@@ -198,6 +206,15 @@ export function renderScheduledTaskInstallScript(
 ): string {
   const runner = renderScheduledTaskRunnerScript(definition);
   const runnerArgument = `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ${encodePowerShell(runner)}`;
+  // Task Scheduler cuts an over-long argument rather than refusing it, and a
+  // cut base64 blob decodes to a truncated script — a task that registers, is
+  // reported installed, and starts a hub with half its environment or none of
+  // its program. Say so here instead.
+  if (runnerArgument.length > SCHEDULED_TASK_ARGUMENT_MAX) {
+    throw new Error(
+      `The Scheduled Task command for ${taskName} is ${runnerArgument.length} characters, over the ${SCHEDULED_TASK_ARGUMENT_MAX} Task Scheduler accepts. Move configuration out of the environment into config.toml so the unit does not have to carry it.`
+    );
+  }
   const action = [
     'New-ScheduledTaskAction',
     "-Execute 'powershell.exe'",

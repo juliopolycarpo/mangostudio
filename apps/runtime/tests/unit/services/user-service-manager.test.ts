@@ -173,6 +173,19 @@ describe('Scheduled Task scripts', () => {
     );
   });
 
+  it('refuses a command Task Scheduler would silently cut', () => {
+    // Everything the task runs is base64 in one argument, and an argument over
+    // the limit comes back cut — which decodes to a truncated script, so the
+    // task registers, reports installed, and runs a broken hub.
+    const enormous = Object.fromEntries(
+      Array.from({ length: 40 }, (_, i) => [`MANGO_KEY_${i}`, 'v'.repeat(200)])
+    );
+
+    expect(() =>
+      renderScheduledTaskInstallScript('Example Unit', { ...DEFINITION, env: enormous })
+    ).toThrow(/over the 8192 Task Scheduler accepts/);
+  });
+
   it('reads the state name from both PowerShell 5.1 and 7 JSON', () => {
     expect(parseScheduledTaskJson('{"installed":true,"state":4,"enabled":true}')?.state).toBe(
       'Running'

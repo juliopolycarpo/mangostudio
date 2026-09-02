@@ -14,7 +14,12 @@ import {
 } from '@mangostudio/runtime';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import { parse as parseToml } from 'smol-toml';
-import { getConfig, getConfigEnvFilePath, type MangoConfig } from '../../../lib/config';
+import {
+  getConfig,
+  getConfigEnvFilePath,
+  type MangoConfig,
+  RUNTIME_CONFIG_ENV_KEYS,
+} from '../../../lib/config';
 import { getLogsDir } from '../../../lib/mango-paths';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
 import {
@@ -25,12 +30,27 @@ import {
 import { HUB_SERVICE_IDENTITY, HUB_SERVICE_UNIT_ENV } from '../domain/hub-service-identity';
 
 /**
+ * Configuration this hub may hold in its environment that a unit must still not
+ * carry. A unit file is read back by anything that can read the file, and the
+ * auth secret does not belong in one — `service install` already refuses while
+ * it lives nowhere else (`secret-not-persisted`), which is the answer for it.
+ */
+const SERVICE_ENV_SECRETS = new Set(['BETTER_AUTH_SECRET']);
+
+/**
  * Environment the unit carries. A unit file is readable by every process of
  * this user, so this is a positive list of configuration only: connector
  * secrets and the auth secret load from `~/.mango/.env` at startup, exactly as
  * they do for a detached start.
  */
 const SERVICE_ENV_ALLOWLIST: readonly string[] = [
+  // Runtime configuration, sourced from config.ts so a new ENV_KEY_MAP key
+  // reaches a unit the way it already reaches a detached child (see
+  // `DETACH_ENV_ALLOWLIST`). Dropping these silently reconfigured the hub on
+  // handover: an operator who exports `DATABASE_PATH` and runs `serve` would
+  // install a unit that starts on defaults, and watch their chats disappear
+  // behind a fresh database.
+  ...RUNTIME_CONFIG_ENV_KEYS.filter((key) => !SERVICE_ENV_SECRETS.has(key)),
   'PATH',
   'MANGO_HOME',
   'TZ',

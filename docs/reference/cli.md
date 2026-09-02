@@ -98,7 +98,10 @@ Windows the task runs a hidden PowerShell wrapper that does that redirection
 itself, because Task Scheduler captures nothing.
 
 A unit file is written mode `0600`, but nothing secret goes in it regardless.
-The environment is a positive list — `PATH` (except on Windows, where the task
+The environment is a positive list — the runtime configuration variables (the
+same set a detached start forwards: `DATABASE_PATH`, `PUBLIC_URL`,
+`ALLOWED_ORIGINS`, the storage directories and the rest, but never
+`BETTER_AUTH_SECRET`), `PATH` (except on Windows, where the task
 inherits the logon session's), `MANGO_HOME`, `TZ`, `LANG`, `LC_ALL`,
 `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, and the proxy variables
 with any `user:password@` stripped — plus `MANGO_LOG_FILE` and
@@ -109,6 +112,13 @@ startup exactly as it does for `serve -d` (see
 [How background mode works](#how-background-mode-works)). Because the unit has
 no terminal to ask at, `install` runs the interactive auth-secret setup first,
 while there still is one.
+
+The configuration carried is the one the process building the unit is running
+on. Installing from the "This machine" page or from a `restart` therefore
+preserves what the running hub was configured with; `mangostudio service install`
+typed into a fresh shell carries that shell's environment, so an env-only setting
+exported somewhere else is not picked up. Put settings that must survive either
+route in `config.toml` or `~/.mango/.env`.
 
 `install` also settles the port before writing the unit. An instance you started
 by hand is stopped first — a unit that starts while another process holds the
