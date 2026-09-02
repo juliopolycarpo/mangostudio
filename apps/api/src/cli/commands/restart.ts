@@ -12,7 +12,12 @@ import { spawnDetached } from '../detach';
 import { CliError } from '../errors';
 import { confirmsHealthy } from '../health';
 import { writeLine } from '../output';
-import { createProcessController, type ProcessController, waitForExit } from '../process-control';
+import {
+  createProcessController,
+  type ProcessController,
+  STOP_POLL_INTERVAL_MS,
+  stopPidOrThrow,
+} from '../process-control';
 import { sleep } from '../sleep';
 
 export interface RestartDeps {
@@ -27,9 +32,7 @@ export interface RestartDeps {
   sleep: (ms: number) => Promise<void>;
 }
 
-const STOP_TIMEOUT_MS = 10_000;
 const COMEBACK_TIMEOUT_MS = 20_000;
-const POLL_INTERVAL_MS = 200;
 
 /** Restart the running server, or start the service when nothing runs. // Usage: await runRestart() */
 export async function runRestart(deps: Partial<RestartDeps> = {}): Promise<void> {
@@ -80,18 +83,11 @@ async function startInstalledService(d: Required<RestartDeps>): Promise<void> {
  * safety net rather than the mechanism.
  */
 async function restartDetached(state: ServerState, d: Required<RestartDeps>): Promise<void> {
-  d.controller.terminate(state.pid);
-  const stopped = await waitForExit(d.controller, state.pid, {
-    timeoutMs: STOP_TIMEOUT_MS,
-    intervalMs: POLL_INTERVAL_MS,
-    now: d.now,
-    sleep: d.sleep,
-  });
-  if (!stopped) {
-    throw new CliError(
-      `MangoStudio (PID ${state.pid}) did not stop within 10s; try "mangostudio killserver" and then "mangostudio serve -d".`
-    );
-  }
+  await stopPidOrThrow(
+    d,
+    state.pid,
+    `MangoStudio (PID ${state.pid}) did not stop within 10s; try "mangostudio killserver" and then "mangostudio serve -d".`
+  );
   const result = await d.spawnDetached(state.port, state.host, {}, { waitForPid: state.pid });
   d.log(`MangoStudio restarted (PID ${result.pid}, ${hubUrl(state.host, result.port)}).`);
   d.log(`Logs: ${result.logFile}`);
@@ -119,7 +115,7 @@ async function waitForComeback(
     ) {
       return state;
     }
-    await d.sleep(POLL_INTERVAL_MS);
+    await d.sleep(STOP_POLL_INTERVAL_MS);
   }
   throw new CliError(
     `The service did not come back within ${COMEBACK_TIMEOUT_MS / 1000}s. Check "mangostudio logs" and "mangostudio service status".`
