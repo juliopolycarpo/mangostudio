@@ -1,4 +1,3 @@
-import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { ERROR_CODES, type ErrorCode } from '@mangostudio/shared/errors';
 import {
   ACTIVITY_TOPIC,
@@ -16,10 +15,12 @@ import {
 } from '@mangostudio/shared/realtime';
 import { Elysia } from 'elysia';
 import Value from 'typebox/value';
-import { getAuth } from '../../../auth';
 import { getDb } from '../../../db/database';
-import { getConfig } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
+import {
+  type BrowserSocketRejection,
+  createBrowserSocketHandshake,
+} from '../../../plugins/browser-socket-handshake';
 import { getRealtimeBus, type RealtimeBus } from '../../../services/realtime/realtime-bus';
 import { assertChatOwnership, ChatNotFoundError } from '../../chats/domain/chat-ownership';
 
@@ -54,7 +55,7 @@ function isUserScopedTopic(topic: string): boolean {
   return USER_SCOPED_TOPICS.has(topic);
 }
 
-type RejectionReason = 'unauthorized' | 'forbidden' | 'internal' | null;
+type RejectionReason = BrowserSocketRejection;
 
 interface RealtimeSocketState {
   userId: string | null;
@@ -115,22 +116,6 @@ function sendAndClose(
   });
 }
 
-function configuredAllowedOrigins(): string[] {
-  const config = getConfig();
-  const origins = new Set(config.corsOrigins);
-  try {
-    origins.add(new URL(config.auth.url).origin);
-  } catch {
-    // Invalid auth URLs fail Better Auth initialization; keep route setup fail-soft.
-  }
-  return [...origins];
-}
-
-async function resolveCookieUserId(headers: Headers): Promise<string | null> {
-  const session = await getAuth().api.getSession({ headers });
-  return session?.user.id ?? null;
-}
-
 async function ownsChat(chatId: string, userId: string): Promise<boolean> {
   try {
     await assertChatOwnership(chatId, userId, getDb());
@@ -144,19 +129,16 @@ async function ownsChat(chatId: string, userId: string): Promise<boolean> {
 export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {}) {
   const bus = dependencies.bus ?? getRealtimeBus();
   const now = dependencies.now ?? Date.now;
-  const resolveUserId = dependencies.resolveUserId ?? resolveCookieUserId;
   const verifyChatOwnership = dependencies.ownsChat ?? ownsChat;
-  // Resolved per handshake, not captured here. `realtimeRoutes` at the bottom
-  // of this file is a module-scope instance, so a Set built at construction
-  // binds the gate to whatever config was live at first import — in a split
-  // deployment that is `getConfig()` before the config file was read, and under
-  // the shared-module-graph integration lane it is whichever test file imported
-  // `app` first. Mirrors the same per-request check the cors plugin uses in
-  // app.ts. An injected list stays static: a caller that passes one is pinning
-  // an explicit set, not asking for the configured one.
-  const injectedOrigins = dependencies.allowedOrigins ? new Set(dependencies.allowedOrigins) : null;
-  const isAllowedOrigin = (origin: string): boolean =>
-    injectedOrigins ? injectedOrigins.has(origin) : configuredAllowedOrigins().includes(origin);
+  const resolveHandshake = createBrowserSocketHandshake({
+    resolveUserId: dependencies.resolveUserId,
+    allowedOrigins: dependencies.allowedOrigins,
+    onSessionResolutionError: (error) => {
+      logger.error('session_resolution_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    },
+  });
   const connectionsByUser = new Map<string, Set<string>>();
 
   function cleanupConnection(state: RealtimeSocketState, socketId: string): void {
@@ -253,23 +235,7 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
 
   return new Elysia({ name: 'realtime-routes' })
     .derive(async ({ request }) => {
-      const origin = request.headers.get('origin');
-      let rejection: RejectionReason = origin && !isAllowedOrigin(origin) ? 'forbidden' : null;
-      let userId: string | null = null;
-
-      if (!rejection && request.headers.has(API_KEY_HEADER)) {
-        rejection = 'unauthorized';
-      } else if (!rejection) {
-        try {
-          userId = await resolveUserId(request.headers);
-          if (!userId) rejection = 'unauthorized';
-        } catch (error) {
-          logger.error('session_resolution_failed', {
-            error: error instanceof Error ? error.message : String(error),
-          });
-          rejection = 'internal';
-        }
-      }
+      const { userId, rejection } = await resolveHandshake(request.headers);
 
       return {
         realtimeSocket: {
