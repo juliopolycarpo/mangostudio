@@ -47,6 +47,8 @@ function makeDeps(
     readonly hasSystemd?: boolean;
     /** Whether a binary is reachable through the slot `current` link. */
     readonly currentBinaryPresent?: boolean;
+    /** Whether the user bus socket exists under /run/user/<uid>. */
+    readonly sessionBusSocket?: boolean;
     readonly onExec?: (argv: readonly string[]) => RuntimeServiceExecResult;
   } = {}
 ): RuntimeServiceExecDeps & { readonly files: Map<string, string>; readonly argv: string[][] } {
@@ -92,7 +94,12 @@ function makeDeps(
       return Promise.resolve();
     },
     mkdir: () => Promise.resolve(),
-    pathExists: () => Promise.resolve(options.currentBinaryPresent ?? true),
+    pathExists: (path) =>
+      Promise.resolve(
+        path.endsWith('/bus')
+          ? (options.sessionBusSocket ?? true)
+          : (options.currentBinaryPresent ?? true)
+      ),
   };
 }
 
@@ -363,7 +370,7 @@ describe('runtime service refusals', () => {
     }
   });
 
-  it('refuses missing session bus', async () => {
+  it('refuses a missing session bus only when the bus socket is gone too', async () => {
     const mangoHome = await mkdtemp(join(tmpdir(), 'mango-svc-'));
     const env = { MANGO_HOME: mangoHome };
     try {
@@ -379,10 +386,19 @@ describe('runtime service refusals', () => {
           XDG_RUNTIME_DIR: '',
           DBUS_SESSION_BUS_ADDRESS: '',
         },
+        sessionBusSocket: false,
       });
       await expect(createRuntimeServiceManager(deps).install('connect')).rejects.toMatchObject({
         kind: 'runtime_service_no_session_bus',
       });
+
+      // The same bare environment with the socket present is what a process
+      // started by `serve -d` or by a unit sees; it must be able to install.
+      const bare = makeDeps({
+        env: { MANGO_HOME: mangoHome, XDG_RUNTIME_DIR: '', DBUS_SESSION_BUS_ADDRESS: '' },
+      });
+      await createRuntimeServiceManager(bare).install('connect');
+      expect(bare.argv.some((row) => row.includes('enable'))).toBe(true);
     } finally {
       await rm(mangoHome, { recursive: true, force: true });
     }

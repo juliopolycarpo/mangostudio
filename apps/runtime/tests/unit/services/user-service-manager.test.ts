@@ -36,22 +36,28 @@ const DEFINITION: UserServiceDefinition = {
 /** In-memory seam: records argv, keeps written files, answers from `onExec`. */
 class FakeServiceHost {
   readonly argv: string[][] = [];
+  readonly envs: NodeJS.ProcessEnv[] = [];
   readonly files = new Map<string, string>();
   readonly warnings: string[] = [];
+  /** Everything the manager did, in order: commands and file removals. */
+  readonly events: string[] = [];
 
   constructor(
     private readonly options: {
       readonly platform?: NodeJS.Platform;
       readonly hasSystemd?: boolean;
       readonly env?: NodeJS.ProcessEnv;
+      readonly busSocket?: boolean;
       readonly onExec?: (argv: readonly string[]) => UserServiceExecResult | undefined;
     } = {}
   ) {}
 
   deps(): UserServiceExecDeps {
     return {
-      exec: (argv) => {
+      exec: (argv, options) => {
         this.argv.push([...argv]);
+        this.envs.push(options?.env ?? {});
+        this.events.push(argv.join(' '));
         return Promise.resolve(
           this.options.onExec?.(argv) ?? { exitCode: 0, stdout: '', stderr: '' }
         );
@@ -78,10 +84,12 @@ class FakeServiceHost {
       },
       unlink: (path) => {
         this.files.delete(path);
+        this.events.push(`unlink ${path}`);
         return Promise.resolve();
       },
       mkdir: () => Promise.resolve(),
-      pathExists: () => Promise.resolve(true),
+      pathExists: (path) =>
+        Promise.resolve(path.endsWith('/bus') ? (this.options.busSocket ?? true) : true),
       warn: (message) => {
         this.warnings.push(message);
       },
@@ -98,6 +106,20 @@ describe('renderSystemdUnitFile', () => {
     expect(unit).toContain('StandardOutput=append:/home/test/logs/example.log');
     expect(unit).toContain('StandardError=append:/home/test/logs/example.log');
     expect(unit).toContain('Restart=on-failure');
+  });
+
+  it('doubles specifiers and expansions, and refuses a value a unit line cannot hold', () => {
+    const unit = renderSystemdUnitFile({
+      description: 'x',
+      argv: ['/opt/100%/app', '$HOME'],
+      env: { RATE: '50%', LITERAL: '$notexpanded' },
+    });
+    expect(unit).toContain('ExecStart=/opt/100%%/app $$HOME');
+    expect(unit).toContain('Environment="RATE=50%%"');
+    expect(unit).toContain('Environment="LITERAL=$notexpanded"');
+    expect(() =>
+      renderSystemdUnitFile({ description: 'x', argv: ['/x'], env: { BAD: 'a\nb' } })
+    ).toThrow(/BAD contains a line break/);
   });
 
   it('leaves a plain argv unquoted', () => {
@@ -240,6 +262,18 @@ describe('createUserServiceManager on linux', () => {
     });
   });
 
+  it('removes the unit before stopping it, so a self-uninstall leaves no file behind', async () => {
+    const host = new FakeServiceHost();
+    host.files.set('/home/test/.config/systemd/user/example.service', 'x');
+    await createUserServiceManager(IDENTITY, host.deps()).uninstall();
+    expect(host.events).toEqual([
+      'systemctl --user disable example.service',
+      'unlink /home/test/.config/systemd/user/example.service',
+      'systemctl --user daemon-reload',
+      'systemctl --user --no-block stop example.service',
+    ]);
+  });
+
   it('restarts without blocking, so a service can bounce itself', async () => {
     const host = new FakeServiceHost();
     await createUserServiceManager(IDENTITY, host.deps()).restart();
@@ -248,9 +282,22 @@ describe('createUserServiceManager on linux', () => {
     ]);
   });
 
+  it('derives the session bus from the uid when the shell did not pass it', async () => {
+    const host = new FakeServiceHost({
+      env: { XDG_RUNTIME_DIR: '', DBUS_SESSION_BUS_ADDRESS: '' },
+    });
+    await createUserServiceManager(IDENTITY, host.deps()).start();
+    expect(host.argv).toEqual([['systemctl', '--user', 'start', 'example.service']]);
+    expect(host.envs[0]).toMatchObject({
+      XDG_RUNTIME_DIR: '/run/user/1000',
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+    });
+  });
+
   it('refuses without a session bus and names the workaround for this CLI', async () => {
     const host = new FakeServiceHost({
       env: { XDG_RUNTIME_DIR: '', DBUS_SESSION_BUS_ADDRESS: '' },
+      busSocket: false,
     });
     await expect(createUserServiceManager(IDENTITY, host.deps()).start()).rejects.toMatchObject({
       kind: 'runtime_service_no_session_bus',
@@ -269,6 +316,16 @@ describe('createUserServiceManager on darwin', () => {
       ['launchctl', 'bootout', 'gui/1000/com.example.unit'],
       ['launchctl', 'bootstrap', 'gui/1000', plistPath],
       ['launchctl', 'kickstart', '-k', 'gui/1000/com.example.unit'],
+    ]);
+  });
+
+  it('unlinks the plist before booting the agent out', async () => {
+    const host = new FakeServiceHost({ platform: 'darwin' });
+    host.files.set('/home/test/Library/LaunchAgents/com.example.unit.plist', 'x');
+    await createUserServiceManager(IDENTITY, host.deps()).uninstall();
+    expect(host.events).toEqual([
+      'unlink /home/test/Library/LaunchAgents/com.example.unit.plist',
+      'launchctl bootout gui/1000/com.example.unit',
     ]);
   });
 
@@ -304,11 +361,23 @@ describe('createUserServiceManager on win32', () => {
     );
   });
 
-  it('unregisters the task on uninstall', async () => {
+  it('stops the task before unregistering it, since unregistering leaves it running', async () => {
     const host = new FakeServiceHost({ platform: 'win32' });
     await createUserServiceManager(IDENTITY, host.deps()).uninstall();
     const script = decodePowerShellArgv(host.argv[0] ?? []) ?? '';
     expect(script).toContain("Unregister-ScheduledTask -TaskName 'Example Unit' -Confirm:$false");
+    expect(script.indexOf('Stop-ScheduledTask')).toBeLessThan(
+      script.indexOf('Unregister-ScheduledTask')
+    );
+  });
+
+  it('waits for the old instance to end before starting the task again', async () => {
+    const host = new FakeServiceHost({ platform: 'win32' });
+    await createUserServiceManager(IDENTITY, host.deps()).restart();
+    const script = decodePowerShellArgv(host.argv[0] ?? []) ?? '';
+    expect(script.indexOf('Stop-ScheduledTask')).toBeLessThan(script.indexOf('Start-Sleep'));
+    expect(script.indexOf('Start-Sleep')).toBeLessThan(script.indexOf('Start-ScheduledTask'));
+    expect(script).toContain("-eq 'Running'");
   });
 });
 

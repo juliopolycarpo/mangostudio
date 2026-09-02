@@ -102,16 +102,19 @@ function launchdAgentPlistPath(home: string, label: string): string {
 }
 
 export function renderSystemdUnitFile(definition: UserServiceDefinition): string {
-  const execStart = definition.argv.map((arg) => escapeSystemdArg(arg)).join(' ');
+  const execStart = definition.argv
+    .map((arg) => escapeSystemdArg(arg, { execStart: true }))
+    .join(' ');
   const service = [
     'Type=simple',
     `ExecStart=${execStart}`,
     ...(definition.workingDirectory
       ? [`WorkingDirectory=${escapeSystemdArg(definition.workingDirectory)}`]
       : []),
-    ...Object.entries(definition.env ?? {}).map(
-      ([key, value]) => `Environment=${escapeSystemdArg(`${key}=${value}`, true)}`
-    ),
+    ...Object.entries(definition.env ?? {}).map(([key, value]) => {
+      assertSingleLine(key, value);
+      return `Environment=${escapeSystemdArg(`${key}=${value}`, { force: true })}`;
+    }),
     ...(definition.logFile
       ? [
           `StandardOutput=append:${definition.logFile}`,
@@ -257,10 +260,30 @@ function renderScheduledTaskVerbScript(
   if (verb === 'stop') {
     return `$ErrorActionPreference = 'Stop'\nStop-ScheduledTask -TaskName ${name}`;
   }
+  // Stop first, unlike the other backends: unregistering leaves a running
+  // instance alive, and stopping a task that no longer exists fails. A task
+  // removing itself from inside is refused upstream, so the stop never ends
+  // the caller here.
   return [
     "$ErrorActionPreference = 'Stop'",
     `Stop-ScheduledTask -TaskName ${name} -ErrorAction SilentlyContinue`,
     `Unregister-ScheduledTask -TaskName ${name} -Confirm:$false`,
+  ].join('\n');
+}
+
+/**
+ * Stop, wait for the instance to actually end, then start. Task Scheduler's
+ * stop is asynchronous and the task ignores new instances while one is
+ * running, so a start issued too early would be dropped with exit 0.
+ */
+function renderScheduledTaskRestartScript(taskName: string): string {
+  const name = psQuote(taskName);
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    `Stop-ScheduledTask -TaskName ${name} -ErrorAction SilentlyContinue`,
+    '$deadline = (Get-Date).AddSeconds(15)',
+    `while (((Get-ScheduledTask -TaskName ${name}).State -eq 'Running') -and ((Get-Date) -lt $deadline)) { Start-Sleep -Milliseconds 250 }`,
+    `Start-ScheduledTask -TaskName ${name}`,
   ].join('\n');
 }
 
@@ -292,11 +315,32 @@ function psQuote(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-function escapeSystemdArg(value: string, force = false): string {
-  if (force || /[\s"\\]/.test(value)) {
-    return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+/**
+ * One argument for a systemd directive. `%` is a specifier and `$` an
+ * expansion in `ExecStart`, so both are doubled; `Environment=` values keep
+ * their `$` since systemd does not expand it there.
+ */
+function escapeSystemdArg(
+  value: string,
+  options: { force?: boolean; execStart?: boolean } = {}
+): string {
+  const specifiers = options.execStart
+    ? value.replaceAll('%', '%%').replaceAll('$', '$$$$')
+    : value.replaceAll('%', '%%');
+  if (options.force || /[\s"\\]/.test(specifiers)) {
+    return `"${specifiers.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
   }
-  return value;
+  return specifiers;
+}
+
+/** A unit file is line-oriented; a value with a line break cannot be represented. */
+function assertSingleLine(key: string, value: string): void {
+  if (/[\r\n]/.test(value)) {
+    throw new RuntimeServiceManagementError(
+      'runtime_service_unsupported',
+      `Environment value for ${key} contains a line break, which a unit file cannot carry.`
+    );
+  }
 }
 
 function plistStringArray(values: readonly string[]): string {
@@ -376,7 +420,9 @@ export function defaultUserServiceExecDeps(
       }).exited;
       return result === 0;
     },
-    writeFile: (path, contents) => writeFile(path, contents, 'utf8'),
+    // A unit carries the environment it runs with; nobody else on the machine
+    // needs to read it.
+    writeFile: (path, contents) => writeFile(path, contents, { encoding: 'utf8', mode: 0o600 }),
     readFile: (path) => readFile(path, 'utf8'),
     unlink: (path) => unlink(path),
     mkdir: (path) => mkdir(path, { recursive: true }).then(() => undefined),
@@ -388,10 +434,18 @@ export function defaultUserServiceExecDeps(
   };
 }
 
-function sessionBusAvailable(env: NodeJS.ProcessEnv): boolean {
-  const runtimeDir = env.XDG_RUNTIME_DIR?.trim();
-  const dbus = env.DBUS_SESSION_BUS_ADDRESS?.trim();
-  return Boolean(runtimeDir && runtimeDir.length > 0 && dbus && dbus.length > 0);
+/**
+ * The env systemctl needs to reach the user manager. A hub started with
+ * `serve -d` or by a unit does not carry the two variables a login shell
+ * has, so when they are missing they are derived from the uid — the same
+ * derivation the SSH bootstrap uses — and accepted only if the bus socket is
+ * actually there. Null means there is no session bus to talk to.
+ */
+async function sessionBusEnv(deps: UserServiceExecDeps): Promise<NodeJS.ProcessEnv | null> {
+  const runtimeDir = deps.env.XDG_RUNTIME_DIR?.trim() || `/run/user/${deps.uid}`;
+  const dbus = deps.env.DBUS_SESSION_BUS_ADDRESS?.trim() || `unix:path=${runtimeDir}/bus`;
+  if (!(await deps.pathExists(`${runtimeDir}/bus`))) return null;
+  return { ...deps.env, XDG_RUNTIME_DIR: runtimeDir, DBUS_SESSION_BUS_ADDRESS: dbus };
 }
 
 /** Creates the manager for one unit identity. // Usage: createUserServiceManager(identity).status() */
@@ -421,8 +475,15 @@ export function createUserServiceManager(
     );
   };
 
+  // Resolved once per manager: every systemctl call carries the same env.
+  let busEnv: NodeJS.ProcessEnv | null | undefined;
+  const sessionBus = async (): Promise<NodeJS.ProcessEnv | null> => {
+    if (busEnv === undefined) busEnv = await sessionBusEnv(deps);
+    return busEnv;
+  };
+
   const requireSystemd = async (): Promise<void> => {
-    if (!sessionBusAvailable(deps.env)) refuseNoSessionBus();
+    if ((await sessionBus()) === null) refuseNoSessionBus();
     if (!(await deps.hasSystemd())) {
       refuseUnsupported('systemd user services are not available on this machine.');
     }
@@ -457,17 +518,22 @@ export function createUserServiceManager(
       );
       await attemptEnableLinger(deps, warn);
     },
+    // The stop comes last on every platform: when the caller is the service
+    // itself, stopping ends the process, and whatever was queued after it
+    // never runs. Removing the file first means a unit that outlives this
+    // call still reads as gone.
     async uninstall() {
       await requireSystemd();
-      await run(['systemctl', '--user', 'disable', '--now', identity.unitName]);
+      await run(['systemctl', '--user', 'disable', identity.unitName]);
       await deps.unlink(unitPath as string).catch(() => undefined);
       await run(['systemctl', '--user', 'daemon-reload']);
+      await run(['systemctl', '--user', '--no-block', 'stop', identity.unitName]);
     },
     async status(): Promise<UserServiceStatus> {
       if (!(await deps.hasSystemd())) {
         return base('unsupported', identity.unitName, { error: USER_SERVICE_NO_SYSTEMD_ERROR });
       }
-      if (!sessionBusAvailable(deps.env)) {
+      if ((await sessionBus()) === null) {
         return base('linux', identity.unitName, { error: USER_SERVICE_NO_SESSION_BUS_ERROR });
       }
       const body = await readUnit();
@@ -525,8 +591,8 @@ export function createUserServiceManager(
       await requireCommand(['launchctl', 'kickstart', '-k', darwinTarget], 'launchctl kickstart');
     },
     async uninstall() {
-      await run(['launchctl', 'bootout', darwinTarget]);
       await deps.unlink(unitPath as string).catch(() => undefined);
+      await run(['launchctl', 'bootout', darwinTarget]);
     },
     async status(): Promise<UserServiceStatus> {
       const body = await readUnit();
@@ -597,13 +663,11 @@ export function createUserServiceManager(
         powershellArgv(renderScheduledTaskVerbScript('stop', identity.taskName)),
         'Stop-ScheduledTask'
       ),
-    async restart() {
-      await run(powershellArgv(renderScheduledTaskVerbScript('stop', identity.taskName)));
-      await requireCommand(
-        powershellArgv(renderScheduledTaskVerbScript('start', identity.taskName)),
-        'Start-ScheduledTask'
-      );
-    },
+    restart: () =>
+      requireCommand(
+        powershellArgv(renderScheduledTaskRestartScript(identity.taskName)),
+        'Stop-ScheduledTask/Start-ScheduledTask'
+      ),
   };
 
   const backend = () => {
@@ -620,7 +684,8 @@ export function createUserServiceManager(
   };
 
   async function run(argv: readonly string[]): Promise<UserServiceExecResult> {
-    return await deps.exec(argv, { env: deps.env });
+    const env = argv[0] === 'systemctl' ? ((await sessionBus()) ?? deps.env) : deps.env;
+    return await deps.exec(argv, { env });
   }
 
   async function requireCommand(argv: readonly string[], label: string): Promise<void> {

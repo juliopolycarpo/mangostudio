@@ -89,7 +89,8 @@ function serviceDeps(options: {
         : Promise.reject(new Error(`ENOENT ${path}`)),
     unlink: () => Promise.resolve(),
     mkdir: () => Promise.resolve(),
-    pathExists: () => Promise.resolve(options.currentBinaryPresent ?? true),
+    pathExists: (path) =>
+      Promise.resolve(path.endsWith('/bus') ? bus : (options.currentBinaryPresent ?? true)),
   };
 }
 
