@@ -334,6 +334,22 @@ describe('createUserServiceManager on linux', () => {
     });
   });
 
+  // A machine with no systemd has no session bus either, and the bus refusal
+  // hands out "export XDG_RUNTIME_DIR and try again" — advice that cannot work
+  // there. `status()` already asked in this order; the actions did not.
+  it('names the missing systemd before the missing bus', async () => {
+    const host = new FakeServiceHost({
+      hasSystemd: false,
+      busSocket: false,
+      env: { XDG_RUNTIME_DIR: '', DBUS_SESSION_BUS_ADDRESS: '' },
+    });
+
+    await expect(createUserServiceManager(IDENTITY, host.deps()).start()).rejects.toMatchObject({
+      kind: 'runtime_service_unsupported',
+      message: expect.stringContaining('systemd user services are not available'),
+    });
+  });
+
   // The machine page polls status every two seconds during an action window,
   // and whether this machine has systemctl cannot change while this process
   // runs — so it is asked once, like the session bus already was.

@@ -534,10 +534,12 @@ export function createUserServiceManager(
   };
 
   const requireSystemd = async (): Promise<void> => {
-    if ((await sessionBus()) === null) refuseNoSessionBus();
+    // Systemd first: on a machine that has none, "export XDG_RUNTIME_DIR and
+    // try again" is advice that cannot work, and it is what the bus check says.
     if (!(await hasSystemd())) {
       refuseUnsupported('systemd user services are not available on this machine.');
     }
+    if ((await sessionBus()) === null) refuseNoSessionBus();
   };
 
   const unitPath =
