@@ -3,6 +3,11 @@
  * the -d/--detach flag.
  */
 
+import {
+  isUserServiceAction,
+  USER_SERVICE_ACTIONS,
+  type UserServiceAction,
+} from '@mangostudio/runtime';
 import type { ResourceKind } from '@mangostudio/shared/library';
 import { CliError } from './errors';
 
@@ -35,15 +40,9 @@ export interface StatusArgs {
   json: boolean;
 }
 
-export const HUB_SERVICE_ACTIONS = [
-  'install',
-  'uninstall',
-  'status',
-  'start',
-  'stop',
-  'restart',
-] as const;
-export type HubServiceAction = (typeof HUB_SERVICE_ACTIONS)[number];
+// The manager's own verb list, so a verb added there is not rejected here.
+export const HUB_SERVICE_ACTIONS = USER_SERVICE_ACTIONS;
+export type HubServiceAction = UserServiceAction;
 
 export interface ServiceArgs {
   action: HubServiceAction;
@@ -167,10 +166,6 @@ export function parseStatusArgs(rest: string[]): StatusArgs {
   return { json };
 }
 
-function isHubServiceAction(value: string): value is HubServiceAction {
-  return (HUB_SERVICE_ACTIONS as readonly string[]).includes(value);
-}
-
 /** Parse `service` args: an action, an install target, --json. // Usage: parseServiceArgs(['install', 'lan:3000']) */
 export function parseServiceArgs(rest: string[]): ServiceArgs {
   const [action, ...options] = rest;
@@ -179,7 +174,7 @@ export function parseServiceArgs(rest: string[]): ServiceArgs {
       `Missing service action. Expected one of: ${HUB_SERVICE_ACTIONS.join(', ')}`
     );
   }
-  if (!isHubServiceAction(action)) {
+  if (!isUserServiceAction(action)) {
     throw new CliError(
       `Unknown service action: ${action}. Expected one of: ${HUB_SERVICE_ACTIONS.join(', ')}`
     );

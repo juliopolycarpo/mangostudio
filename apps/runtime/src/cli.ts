@@ -50,6 +50,7 @@ import { parseListenAddress, serveRuntime } from './serve';
 import { resolveExternalAgentIsolation } from './services/external-agents/isolation';
 import { createRuntimeServiceManager, resolveInstallMode } from './services/runtime-service';
 import { RUNTIME_UPDATE_EXIT_CODE } from './services/runtime-update';
+import { isUserServiceAction, type UserServiceAction } from './services/user-service-manager';
 import {
   isRuntimeSetupProfile,
   parseAllowOverrides,
@@ -100,7 +101,7 @@ export type RuntimeCliInvocation =
   | {
       readonly command: 'service';
       readonly args: {
-        readonly action: RuntimeServiceAction;
+        readonly action: UserServiceAction;
         readonly mode?: RuntimeServiceMode;
         readonly json: boolean;
       };
@@ -362,23 +363,9 @@ function parseReportArgs(
   return { command, args: { json } };
 }
 
-const RUNTIME_SERVICE_ACTIONS = [
-  'install',
-  'uninstall',
-  'status',
-  'start',
-  'stop',
-  'restart',
-] as const;
-type RuntimeServiceAction = (typeof RUNTIME_SERVICE_ACTIONS)[number];
-
-function isServiceAction(value: string | undefined): value is RuntimeServiceAction {
-  return (RUNTIME_SERVICE_ACTIONS as readonly string[]).includes(value ?? '');
-}
-
 function parseServiceArgs(args: readonly string[]): RuntimeCliInvocation {
   const [action, ...rest] = args;
-  if (!isServiceAction(action)) {
+  if (!isUserServiceAction(action)) {
     return { command: 'unknown', argument: action ?? 'service' };
   }
   let mode: RuntimeServiceMode | undefined;
@@ -940,7 +927,7 @@ const SERVICE_VERB_MESSAGES: Record<'start' | 'stop' | 'restart', string> = {
 };
 
 async function runService(args: {
-  readonly action: RuntimeServiceAction;
+  readonly action: UserServiceAction;
   readonly mode?: RuntimeServiceMode;
   readonly json: boolean;
 }): Promise<number> {

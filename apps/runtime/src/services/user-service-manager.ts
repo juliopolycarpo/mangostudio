@@ -93,6 +93,26 @@ export interface UserServiceManager {
   readonly unitPath: string | null;
 }
 
+/**
+ * The verbs a manager answers to, in the order a CLI should list them. Both
+ * the hub's `service` command and the runtime's parse against this, so adding
+ * a verb to {@link UserServiceManager} cannot leave either CLI rejecting it.
+ */
+export const USER_SERVICE_ACTIONS = [
+  'install',
+  'uninstall',
+  'status',
+  'start',
+  'stop',
+  'restart',
+] as const;
+export type UserServiceAction = (typeof USER_SERVICE_ACTIONS)[number];
+
+/** // Usage: isUserServiceAction('start') // → true */
+export function isUserServiceAction(value: string | undefined): value is UserServiceAction {
+  return (USER_SERVICE_ACTIONS as readonly string[]).includes(value ?? '');
+}
+
 export function systemdUserUnitPath(home: string, unitName: string): string {
   return join(home, '.config', 'systemd', 'user', unitName);
 }

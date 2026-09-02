@@ -278,7 +278,10 @@ export {
 export {
   createUserServiceManager,
   defaultUserServiceExecDeps,
+  isUserServiceAction,
+  USER_SERVICE_ACTIONS,
   USER_SERVICE_NO_SESSION_BUS_ERROR,
+  type UserServiceAction,
   type UserServiceDefinition,
   type UserServiceExecDeps,
   type UserServiceExecResult,
