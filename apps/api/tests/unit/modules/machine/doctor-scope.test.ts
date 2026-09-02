@@ -92,6 +92,12 @@ function recordingDeps() {
       isCursorConfigured: () => false,
       probeRuntimeBinary: () =>
         Promise.resolve({ path: null, present: false, version: null, error: null }),
+      // Faked rather than left to the real ones: those spawn `ssh -V` and walk
+      // the runtime slot directories, which is machine state this test says
+      // nothing about — and a spawn is the last thing a row-scoping test needs.
+      probeRuntimeSlots: () => Promise.resolve([]),
+      probeSshClient: () => Promise.resolve({ present: false, version: null, error: null }),
+      getEmbeddedFrontend: () => null,
       collectChatGptChecks: (_config: MangoConfig, connectors: ReadonlyArray<{ name: string }>) => {
         connectorNames.push(connectors.map((connector) => connector.name));
         return Promise.resolve([]);
