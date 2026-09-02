@@ -4,13 +4,36 @@
  * empty box.
  */
 
+import type { MachineLogTail } from '@mangostudio/shared/machine';
 import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { EnvironmentPageState } from '../../components/EnvironmentPageState';
 import { CardSectionLabel, TOOL_CARD_SURFACE } from '../../components/ToolCard';
+import { machineGuardReasonLabel } from '../format';
 import { useMachineLogs } from '../queries';
+
+function LogBody({ tail }: { readonly tail: MachineLogTail }) {
+  const { t } = useI18n();
+  const m = t.environments.machine.logs;
+  return (
+    <>
+      <p className="truncate font-mono text-xs text-on-surface-variant/70">
+        {tail.truncated
+          ? formatMessage(m.truncated, { count: String(tail.lines.length), file: tail.file ?? '' })
+          : tail.file}
+      </p>
+      {tail.lines.length === 0 ? (
+        <p className="text-sm text-on-surface-variant/70">{m.empty}</p>
+      ) : (
+        <pre className="max-h-80 overflow-auto rounded-xl bg-surface-container-lowest p-3 font-mono text-[11px] leading-relaxed text-on-surface">
+          {tail.lines.join('\n')}
+        </pre>
+      )}
+    </>
+  );
+}
 
 export function LogTail() {
   const { t } = useI18n();
@@ -36,26 +59,19 @@ export function LogTail() {
         <EnvironmentPageState variant="loading" size="section" />
       ) : logs.error && !logs.data ? (
         <EnvironmentPageState variant="error" size="section" onRetry={() => void logs.refetch()} />
-      ) : !logs.data?.file ? (
+      ) : !logs.data ? null : logs.data.outcome === 'refused' ? (
+        <div className="space-y-1" data-testid="machine-logs-refused">
+          {logs.data.reasons.map((reason) => (
+            <p key={reason} className="text-sm text-on-surface-variant">
+              {machineGuardReasonLabel(t, reason)}
+            </p>
+          ))}
+          <p className="text-sm text-on-surface-variant/70">{m.readLocally}</p>
+        </div>
+      ) : !logs.data.tail.file ? (
         <p className="text-sm text-on-surface-variant/70">{m.none}</p>
       ) : (
-        <>
-          <p className="truncate font-mono text-xs text-on-surface-variant/70">
-            {logs.data.truncated
-              ? formatMessage(m.truncated, {
-                  count: String(logs.data.lines.length),
-                  file: logs.data.file,
-                })
-              : logs.data.file}
-          </p>
-          {logs.data.lines.length === 0 ? (
-            <p className="text-sm text-on-surface-variant/70">{m.empty}</p>
-          ) : (
-            <pre className="max-h-80 overflow-auto rounded-xl bg-surface-container-lowest p-3 font-mono text-[11px] leading-relaxed text-on-surface">
-              {logs.data.lines.join('\n')}
-            </pre>
-          )}
-        </>
+        <LogBody tail={logs.data.tail} />
       )}
     </section>
   );

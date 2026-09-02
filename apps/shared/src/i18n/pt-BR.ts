@@ -2612,6 +2612,8 @@ export const messages = {
       logs: {
         title: 'Log',
         none: 'Sem arquivo de log: este servidor escreve no terminal em que foi iniciado.',
+        readLocally:
+          'Abra esta página na máquina em que o hub roda, ou execute "mangostudio logs" lá.',
         empty: 'O arquivo de log está vazio.',
         truncated: 'Últimas {count} linhas de {file}',
       },
@@ -2645,7 +2647,7 @@ export const messages = {
           foreground:
             'O servidor foi iniciado em um terminal, que é o dono dele. Pressione Ctrl-C lá e inicie de novo.',
           'windows-service':
-            'Uma Tarefa Agendada não consegue se reiniciar de dentro do próprio processo. Use o comando abaixo.',
+            'Uma Tarefa Agendada não consegue se parar nem se reiniciar de dentro do próprio processo. Use o comando abaixo.',
           'already-installed': 'O serviço já está instalado.',
           'not-installed': 'Não há serviço para remover.',
           'unsupported-platform':

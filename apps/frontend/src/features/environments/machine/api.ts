@@ -76,10 +76,19 @@ export async function fetchMachineDoctor(
   return data as MachineDoctorReport;
 }
 
-export async function fetchMachineLogs(tail: number): Promise<MachineLogTail> {
+export type MachineLogsResult =
+  | { readonly outcome: 'tail'; readonly tail: MachineLogTail }
+  | MachineActionRefusal;
+
+/** The tail, or the guard's refusal — the log is loopback-only like the actions. */
+export async function fetchMachineLogs(tail: number): Promise<MachineLogsResult> {
   const { data, error } = await client.api.machine.logs.get({ query: { tail } });
-  if (error) throw new ApiError(error.value);
-  return data as MachineLogTail;
+  if (error) {
+    const refusal = toRefusal(error);
+    if (refusal) return refusal;
+    throw new ApiError(error.value);
+  }
+  return { outcome: 'tail', tail: data as MachineLogTail };
 }
 
 export async function restartMachine(): Promise<MachineActionResult> {

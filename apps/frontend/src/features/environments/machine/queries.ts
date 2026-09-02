@@ -66,7 +66,8 @@ export function machineLogsQueryOptions(tail: number = MACHINE_LOG_TAIL_DEFAULT)
  * process is simply gone, for an uninstall that stops the server — and relaxes
  * again after a bounded window either way.
  */
-export function useMachineStatus() {
+export function useMachineStatus(options: { readonly windowMs?: number } = {}) {
+  const windowMs = options.windowMs ?? AFTER_ACTION_WINDOW_MS;
   const queryClient = useQueryClient();
   const [awaiting, setAwaiting] = useState<{ pid: number | null; since: number } | null>(null);
 
@@ -81,10 +82,16 @@ export function useMachineStatus() {
   const pid = query.data?.hub.pid ?? null;
   useEffect(() => {
     if (!awaiting) return;
-    const changed = query.data !== undefined && pid !== awaiting.pid;
-    const expired = Date.now() - awaiting.since > AFTER_ACTION_WINDOW_MS;
-    if (changed || expired) setAwaiting(null);
+    if (query.data !== undefined && pid !== awaiting.pid) setAwaiting(null);
   }, [awaiting, pid, query.data]);
+  // A server that never comes back changes nothing the effect above watches,
+  // so the window closes on a clock, not on data.
+  useEffect(() => {
+    if (!awaiting) return;
+    const remaining = Math.max(0, windowMs - (Date.now() - awaiting.since));
+    const timer = setTimeout(() => setAwaiting(null), remaining);
+    return () => clearTimeout(timer);
+  }, [awaiting, windowMs]);
 
   const expectChange = useCallback(() => {
     setAwaiting({

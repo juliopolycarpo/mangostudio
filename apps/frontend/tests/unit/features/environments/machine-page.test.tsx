@@ -150,6 +150,25 @@ describe('MachinePage', () => {
     expect(screen.queryByTestId('machine-restart')).toBeNull();
   });
 
+  it('explains a refused log tail instead of showing an error', async () => {
+    scenario
+      .respondWithJson('GET', '/api/machine/status', { body: STATUS })
+      .respondWithJson('GET', '/api/machine/doctor', { body: DOCTOR })
+      .respondWithJson('GET', '/api/machine/logs?tail=200', {
+        status: 403,
+        body: {
+          error: 'not local',
+          code: 'PERMISSION_DENIED',
+          details: { reasons: 'client-not-loopback' },
+        },
+      })
+      .install();
+    render(<MachinePage />);
+    const refused = await screen.findByTestId('machine-logs-refused');
+    expect(refused.textContent).toContain('was not opened from the machine the hub runs on');
+    expect(refused.textContent).toContain('mangostudio logs');
+  });
+
   it('confirms a restart, posts it, and announces the hand-over', async () => {
     mountScenario();
     scenario.respondWithJson('POST', '/api/machine/restart', {

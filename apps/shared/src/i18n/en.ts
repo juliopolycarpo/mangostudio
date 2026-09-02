@@ -2612,6 +2612,8 @@ export const messages: Messages = {
       logs: {
         title: 'Log',
         none: 'No log file: this server writes to the terminal it was started in.',
+        readLocally:
+          'Open this page from the machine the hub runs on, or run "mangostudio logs" there.',
         empty: 'The log file is empty.',
         truncated: 'Last {count} lines of {file}',
       },
@@ -2645,7 +2647,7 @@ export const messages: Messages = {
           foreground:
             'The server was started in a terminal, which owns it. Press Ctrl-C there and start it again.',
           'windows-service':
-            'A Scheduled Task cannot restart itself from inside its own process. Use the command below.',
+            'A Scheduled Task cannot stop or restart itself from inside its own process. Use the command below.',
           'already-installed': 'The service is already installed.',
           'not-installed': 'There is no service to remove.',
           'unsupported-platform': 'No per-user service manager is supported on this platform.',
