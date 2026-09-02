@@ -15,6 +15,8 @@ import {
 } from '@mangostudio/shared/machine';
 import { Elysia, t } from 'elysia';
 import Value from 'typebox/value';
+import { extractClientIp } from '../../../lib/client-ip';
+import { getConfig } from '../../../lib/config';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   MachineActionBlockedError,
@@ -56,13 +58,26 @@ export function parseDoctorSections(raw: string | undefined): MachineDoctorSecti
   return sections;
 }
 
-export function createMachineRoutes(service: MachineService = machineService) {
+export function createMachineRoutes(
+  service: MachineService = machineService,
+  trustProxy: () => boolean = () => getConfig().security.trustProxy
+) {
   return new Elysia()
     .use(requireAuth)
     .derive(({ request, server }) => {
-      // The socket peer is not header-controlled. Forwarded client headers
-      // must never make a remote request look local.
-      return { machinePeerIp: server?.requestIP(request)?.address };
+      // The socket peer is not header-controlled, so it is the default. It is
+      // not enough on its own: behind the documented nginx and Caddy setups the
+      // peer is always the loopback proxy, and every remote browser would pass
+      // a check that is supposed to mean "at this machine's keyboard". Where
+      // the operator has trusted the proxy, its forwarded client is the
+      // stricter answer; where they have not, a forged header changes nothing.
+      return {
+        machinePeerIp: extractClientIp(
+          request.headers,
+          server?.requestIP(request)?.address,
+          trustProxy()
+        ),
+      };
     })
     .get('/machine/status', { response: { 200: MachineStatusSchema } }, ({ machinePeerIp }) =>
       service.status({ clientIp: machinePeerIp })

@@ -160,7 +160,11 @@ o mantém vivo, o que o doctor diz e as duas ações que mudam qualquer um dos d
 
 Os dois POSTs e `GET /api/machine/logs` só respondem em loopback (o log é a saída bruta
 do processo, sem redação): de qualquer outro lugar são `403`
-`PERMISSION_DENIED` com `details.reasons`. Uma ação que não se aplica ao modo como
+`PERMISSION_DENIED` com `details.reasons`. "Loopback" é o peer do socket, a menos
+que `trustProxy` esteja ligado: atrás de um reverse proxy o peer é o proxy para
+todo chamador, então lá o guard lê o cliente encaminhado. Veja
+[Confiar nos headers de proxy](../operations/deployment.md#confiar-nos-headers-de-proxy).
+Uma ação que não se aplica ao modo como
 o hub está rodando é `409` `UNSUPPORTED` com `details.reason` e `details.command`
 — a linha da CLI para rodar no lugar.
 

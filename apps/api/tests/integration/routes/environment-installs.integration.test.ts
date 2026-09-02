@@ -240,11 +240,11 @@ describe('environment install routes', () => {
     expect(payload.recipe.guard.reasons).toEqual(['disabled']);
   });
 
-  it('uses only the socket peer for the local-surface decision', async () => {
+  it('ignores a forged forwarded client when no proxy is trusted', async () => {
     const fake = createFakeService();
     const { app, restore } = createAuthenticatedApiTestApp(
       TEST_USER,
-      createInstallRoutes(fake.service)
+      createInstallRoutes(fake.service, () => false)
     );
     restoreAuth = restore;
 
@@ -254,7 +254,28 @@ describe('environment install routes', () => {
       })
     );
 
-    expect(fake.getLastContext()?.clientIp).toBeUndefined();
+    // `app.handle` has no socket, so nothing names this caller — and a header
+    // claiming loopback must not be what fills that in.
+    expect(fake.getLastContext()?.clientIp).toBe('unknown');
+  });
+
+  it('resolves the client through a trusted proxy so a remote session is not local', async () => {
+    const fake = createFakeService();
+    const { app, restore } = createAuthenticatedApiTestApp(
+      TEST_USER,
+      createInstallRoutes(fake.service, () => true)
+    );
+    restoreAuth = restore;
+
+    await app.handle(
+      new Request('http://localhost/environments/install/recipes', {
+        headers: { 'x-forwarded-for': '203.0.113.5' },
+      })
+    );
+
+    // Behind nginx or Caddy the socket peer is the loopback proxy for every
+    // caller, so taking it alone would hand a remote browser the local surface.
+    expect(fake.getLastContext()?.clientIp).toBe('203.0.113.5');
   });
 
   it('accepts a matching profileId and rejects a mismatched one', async () => {

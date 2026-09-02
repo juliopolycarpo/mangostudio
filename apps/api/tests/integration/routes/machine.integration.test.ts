@@ -111,8 +111,11 @@ afterEach(() => {
   restoreAuth = null;
 });
 
-function mount(service: FakeMachineService) {
-  const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createMachineRoutes(service));
+function mount(service: FakeMachineService, trustProxy = false) {
+  const { app, restore } = createAuthenticatedApiTestApp(
+    TEST_USER,
+    createMachineRoutes(service, () => trustProxy)
+  );
   restoreAuth = restore;
   return app;
 }
@@ -125,7 +128,32 @@ describe('machine routes', () => {
     expect(Value.Check(MachineStatusSchema, await response.json())).toBe(true);
     // `app.handle` has no socket, so the peer is unknown — which is exactly
     // what the guard must treat as not local.
-    expect(service.clientIps).toEqual([undefined]);
+    expect(service.clientIps).toEqual(['unknown']);
+  });
+
+  it('ignores a forged forwarded client when no proxy is trusted', async () => {
+    const service = new FakeMachineService();
+    await mount(service).handle(
+      new Request('http://localhost/machine/status', {
+        headers: { 'x-forwarded-for': '127.0.0.1' },
+      })
+    );
+
+    expect(service.clientIps).toEqual(['unknown']);
+  });
+
+  it('resolves the client through a trusted proxy so a remote session is not local', async () => {
+    const service = new FakeMachineService();
+    await mount(service, true).handle(
+      new Request('http://localhost/machine/status', {
+        headers: { 'x-forwarded-for': '203.0.113.5' },
+      })
+    );
+
+    // Behind nginx or Caddy the socket peer is the loopback proxy for every
+    // caller. Taking it alone would let a remote browser read this machine's
+    // raw log and restart the hub.
+    expect(service.clientIps).toEqual(['203.0.113.5']);
   });
 
   it('refuses without a session', async () => {

@@ -188,6 +188,13 @@ caem em um único contador de rate limit. Defina `TRUST_PROXY=true` (env) ou
 IP real do cliente a partir dos headers `X-Forwarded-For` / `X-Real-IP` /
 `CF-Connecting-IP` que o proxy define.
 
+A mesma configuração decide o guard de superfície local que protege as
+instalações de ambiente e as ações de máquina (`/api/machine/restart`,
+`/api/machine/service`, `/api/machine/logs`). Esse guard pergunta se o browser
+está no teclado desta máquina, e o peer do socket não responde isso atrás de um
+proxy — todo chamador chega de loopback. Com `TRUST_PROXY=true` quem responde é o
+cliente encaminhado, então uma sessão remota autenticada é corretamente recusada.
+
 > **Só habilite isso atrás de um proxy que sobrescreve esses headers** (a config
 > nginx acima usa `$proxy_add_x_forwarded_for`). Com exposição direta à internet,
 > um header confiável permite que qualquer cliente forje seu IP e burle o rate

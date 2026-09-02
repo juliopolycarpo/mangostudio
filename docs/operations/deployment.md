@@ -246,6 +246,13 @@ under `[security]` in `config.toml` so the limiter resolves the real client IP
 from the `X-Forwarded-For` / `X-Real-IP` / `CF-Connecting-IP` headers the proxy
 sets.
 
+The same setting decides the local-surface guard that gates environment installs
+and the machine actions (`/api/machine/restart`, `/api/machine/service`,
+`/api/machine/logs`). That guard asks whether the browser is at this machine's
+keyboard, and the socket peer cannot answer it behind a proxy — every caller
+arrives from loopback. With `TRUST_PROXY=true` the forwarded client answers
+instead, so a remote signed-in session is correctly refused.
+
 > **Only enable this behind a proxy that overwrites those headers** (the nginx
 > config above uses `$proxy_add_x_forwarded_for`). With direct internet exposure,
 > a trusted header lets any client spoof its IP and evade rate limiting.

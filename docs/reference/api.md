@@ -227,7 +227,10 @@ these two spawn probes, so a caller opts into them. An unknown section is `422`
 The two POSTs and `GET /api/machine/logs` are loopback-only — the log is the process's
 raw output, unredacted. A request from anywhere else is `403`
 `PERMISSION_DENIED` with `details.reasons` naming which check failed — the same
-guard shape the environment installs use. An action that does not apply to how
+guard shape the environment installs use. "Loopback" means the socket peer,
+unless `trustProxy` is on: behind a reverse proxy the peer is the proxy for every
+caller, so the forwarded client is what the guard reads there. See
+[Trusting proxy headers](../operations/deployment.md#trusting-proxy-headers). An action that does not apply to how
 this hub is running is `409` `UNSUPPORTED` with `details.reason` and
 `details.command`: a foreground server, a Windows task asked to restart itself, a
 unit that is already installed or not installed at all, a platform with no

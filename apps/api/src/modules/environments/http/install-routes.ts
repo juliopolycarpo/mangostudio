@@ -16,6 +16,8 @@ import {
 } from '@mangostudio/shared/errors';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 import { Elysia, t } from 'elysia';
+import { extractClientIp } from '../../../lib/client-ip';
+import { getConfig } from '../../../lib/config';
 import { ProfileMismatchError } from '../../../lib/profile-context';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
@@ -100,13 +102,26 @@ function sseEvent(data: object): Uint8Array {
 
 const KEEPALIVE_BYTES = new TextEncoder().encode(': keepalive\n\n');
 
-export function createInstallRoutes(service: InstallService = installService) {
+export function createInstallRoutes(
+  service: InstallService = installService,
+  trustProxy: () => boolean = () => getConfig().security.trustProxy
+) {
   return new Elysia()
     .use(requireAuth)
     .derive(({ request, server }) => {
-      // The socket peer is not header-controlled. Forwarded client headers
-      // must never make a remote install request look local.
-      return { installPeerIp: server?.requestIP(request)?.address };
+      // The socket peer is not header-controlled, so it is the default. It is
+      // not enough on its own: behind the documented nginx and Caddy setups the
+      // peer is always the loopback proxy, and every remote browser would pass
+      // a check that is supposed to mean "at this machine's keyboard". Where
+      // the operator has trusted the proxy, its forwarded client is the
+      // stricter answer; where they have not, a forged header changes nothing.
+      return {
+        installPeerIp: extractClientIp(
+          request.headers,
+          server?.requestIP(request)?.address,
+          trustProxy()
+        ),
+      };
     })
     .get(
       '/environments/install/recipes',
