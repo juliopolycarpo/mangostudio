@@ -276,13 +276,26 @@ function noticeMessage(t: ReturnType<typeof useI18n>['t'], notice: TerminalNotic
   }
 }
 
+/**
+ * Answered once per page, and the probe context is released as soon as it has
+ * answered. A browser caps how many live WebGL contexts a document may hold
+ * (Chrome force-loses the *oldest* past ~16), so a probe left for the garbage
+ * collector on every mount — and the rail remounts this view on every tab
+ * switch — evicts the contexts the visible terminals are rendering with.
+ */
+let webglSupported: boolean | null = null;
+
 function canUseWebgl(): boolean {
+  if (webglSupported !== null) return webglSupported;
   try {
     const canvas = document.createElement('canvas');
-    return canvas.getContext('webgl2') !== null;
+    const context = canvas.getContext('webgl2');
+    context?.getExtension('WEBGL_lose_context')?.loseContext();
+    webglSupported = context !== null;
   } catch {
-    return false;
+    webglSupported = false;
   }
+  return webglSupported;
 }
 
 async function loadWebglAddon(term: Terminal): Promise<void> {
