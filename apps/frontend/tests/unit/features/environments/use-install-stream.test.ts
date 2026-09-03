@@ -155,6 +155,30 @@ describe('useInstallStream', () => {
     expect(result.current.lines).toHaveLength(0);
   });
 
+  it('delivers the exit to the callback from the latest render', async () => {
+    let release: (() => void) | undefined;
+    fetchMock.mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          release = () => resolve(streamingResponse([sse([EXIT_EVENT])]));
+        })
+    );
+    const stale = jest.fn();
+    const latest = jest.fn();
+
+    const { rerender } = renderHook(
+      ({ onExit }: { onExit: (event: InstallStreamEvent) => void }) =>
+        useInstallStream({ runId: 'run-6', onExit }),
+      { initialProps: { onExit: stale } }
+    );
+    rerender({ onExit: latest });
+    await waitFor(() => expect(release).toBeDefined());
+    act(() => release?.());
+
+    await waitFor(() => expect(latest).toHaveBeenCalledTimes(1));
+    expect(stale).not.toHaveBeenCalled();
+  });
+
   it('tears the response body down on unmount', async () => {
     const onCancel = jest.fn();
     let signal: AbortSignal | undefined;
