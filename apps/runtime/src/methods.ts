@@ -716,14 +716,13 @@ export interface RuntimeProbeAgentClisParams extends RuntimeProbeParams {
   readonly targetIds?: readonly LibraryTargetId[];
   readonly installable?: Readonly<Partial<Record<LibraryTargetId, boolean>>>;
   /**
-   * What the hub is, for the `mangostudio` target. `configHome` and
-   * `executablePath` are sent only when this host *is* the hub's machine;
-   * elsewhere the runtime answers with its own, which is the honest reading of
-   * "what MangoStudio looks like over there".
+   * What the hub is, for the `mangostudio` target. `executablePath` is sent
+   * only when this host *is* the hub's machine; elsewhere the runtime answers
+   * with its own. Config home reaches the runtime through `pathEnv` like every
+   * other configured MangoStudio path.
    */
   readonly self: {
     readonly version: string;
-    readonly configHome?: string;
     readonly executablePath?: string;
   };
 }

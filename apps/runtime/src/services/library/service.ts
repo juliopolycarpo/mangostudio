@@ -13,7 +13,7 @@ import type {
   ResourceKind,
 } from '@mangostudio/shared/library';
 import { describeLocation, LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import type { LibraryPathEnv, PathEnv } from '@mangostudio/shared/runtime-env';
 import {
   LIBRARY_BACKUP_MISSING_KIND,
   RuntimeServiceError,
@@ -65,7 +65,7 @@ export interface LibraryHostAdapters {
   readonly createPathEnv: (overrides?: {
     readonly env?: Readonly<Record<string, string>>;
     readonly workspaceRoot?: string;
-  }) => PathEnv;
+  }) => LibraryPathEnv;
   readonly cache: LibraryCache;
   readonly describeLocations: (env: PathEnv) => LibraryLocationStatus[];
   readonly readSettingsSources: (env: PathEnv) => RuntimeSettingsSourcesResult;
@@ -146,7 +146,7 @@ function pathEnvFrom(
       readonly workspaceRoot?: string;
     };
   }
-): PathEnv {
+): LibraryPathEnv {
   return adapters.createPathEnv({
     env: params.pathEnv?.env,
     workspaceRoot: params.pathEnv?.workspaceRoot,

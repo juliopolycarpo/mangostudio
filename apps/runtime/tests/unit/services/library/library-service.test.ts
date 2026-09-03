@@ -12,6 +12,7 @@ import {
   withLibraryLocations,
 } from '@mangostudio/shared/app-settings';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
+import { createPathEnv } from '@mangostudio/shared/runtime-env';
 import {
   createLibraryService,
   LibraryCache,
@@ -130,7 +131,7 @@ describe('library.read containment', () => {
 describe('library.read resolves its own root from the location', () => {
   const serviceWithHome = (homeDir: string) =>
     createLibraryService({
-      createPathEnv: () => ({ platform: process.platform, homeDir, env: {} }),
+      createPathEnv: () => createPathEnv({ platform: process.platform, homeDir, env: {} }),
       cache: new LibraryCache(),
       describeLocations: () => [],
       now: () => 0,
@@ -190,7 +191,7 @@ describe('library.scan caps', () => {
     // Pin PathEnv to the fixture home: mango-agents/mango-skills stay
     // force-enabled by the normalizer and must not scan the developer machine.
     const service = createLibraryService({
-      createPathEnv: () => ({ platform: process.platform, homeDir: root, env: {} }),
+      createPathEnv: () => createPathEnv({ platform: process.platform, homeDir: root, env: {} }),
       cache: new LibraryCache(),
       describeLocations: () => [],
       now: () => 0,

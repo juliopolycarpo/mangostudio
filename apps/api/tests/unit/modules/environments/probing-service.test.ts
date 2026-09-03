@@ -263,9 +263,18 @@ describe('what the hub sends down with a probe', () => {
 
     await service.listAgentCliStatuses(LOCAL);
 
-    expect(local.selfParams).toMatchObject({ version: '9.9.9' });
-    expect(local.selfParams).toHaveProperty('configHome');
-    expect(local.pathEnvParams).toHaveProperty('env');
+    expect(local.selfParams).toEqual({
+      version: '9.9.9',
+      executablePath: process.execPath,
+    });
+    expect(local.selfParams).not.toHaveProperty('configHome');
+    expect(local.pathEnvParams).toEqual({
+      env: expect.objectContaining({
+        SKILLS_DIR: expect.any(String),
+        AGENTS_DIR: expect.any(String),
+        MANGO_CONFIG_HOME: expect.any(String),
+      }),
+    });
   });
 
   it('sends no hub paths to a machine where they would name nothing', async () => {

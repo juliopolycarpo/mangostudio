@@ -400,12 +400,29 @@ describe('config precedence', () => {
     expect(cfg.library.backupDir).toBe(join(TEST_MANAGED_CONFIG_DIR, 'library-backups'));
   });
 
+  test('defaults agents and skills next to the managed test config file', () => {
+    const cfg = loadConfigForTest();
+
+    expect(cfg.skills.dir).toBe(join(TEST_MANAGED_CONFIG_DIR, 'skills'));
+    expect(cfg.agents.dir).toBe(join(TEST_MANAGED_CONFIG_DIR, 'agents'));
+  });
+
+  test('relocated config.toml defaults agents and skills beside the file', () => {
+    writeFileSync(TMP_TOML, '');
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.skills.dir).toBe(join(TMP_DIR, 'skills'));
+    expect(cfg.agents.dir).toBe(join(TMP_DIR, 'agents'));
+  });
+
   test('test-runtime config fallback isolates writable directories from ~/.mango', () => {
     const cfg = loadConfig();
 
     expect(cfg.uploads.dir).toBe(join(TEST_MANAGED_CONFIG_DIR, 'uploads'));
     expect(cfg.images.dir).toBe(join(TEST_MANAGED_CONFIG_DIR, 'images'));
     expect(cfg.toolImages.dir).toBe(join(TEST_MANAGED_CONFIG_DIR, 'tool-images'));
+    expect(cfg.skills.dir).toBe(join(TEST_MANAGED_CONFIG_DIR, 'skills'));
+    expect(cfg.agents.dir).toBe(join(TEST_MANAGED_CONFIG_DIR, 'agents'));
   });
 
   test('defaults [terminal] to enabled with the documented limits', () => {

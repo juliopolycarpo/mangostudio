@@ -9,7 +9,7 @@
  * dropped rather than carried across the gap.
  */
 
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import type {
   AgentCliStatus,
   RuntimeId,
@@ -28,7 +28,7 @@ import { getConfig, getHomeMangoDir, getVersion } from '../../../lib/config';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 import { LibraryFeatureUnavailableError } from '../../library/domain/library-feature-error';
-import { hubLibraryEnvFor } from '../../library/infrastructure/location-probe';
+import { hubLibraryPathEnvParams } from '../../library/infrastructure/location-probe';
 import { hasInstallRecipeForRuntime } from '../domain/install-recipes';
 import {
   loadNodeReleaseMetadata,
@@ -273,8 +273,8 @@ export function createEnvironmentProbingService(
 
   /** Spreadable: the hub's configured PATH, and nothing at all anywhere else. */
   const pathEnvFor = (environmentId: string) => {
-    const env = hubLibraryEnvFor(environmentId);
-    return env ? { pathEnv: { env } } : {};
+    const pathEnv = hubLibraryPathEnvParams(environmentId);
+    return pathEnv ? { pathEnv } : {};
   };
 
   /**
@@ -518,10 +518,7 @@ export function createEnvironmentProbingService(
               // Remote mangostudio is whatever that runtime handshaked as —
               // the hub's own release is the wrong answer for another machine.
               version: local ? getSelfVersion() : client.runtimeVersion,
-              ...(local && {
-                configHome: dirname(getConfig().configFilePath),
-                executablePath: process.execPath,
-              }),
+              ...(local && { executablePath: process.execPath }),
             },
             ...pathEnvFor(scope.environmentId),
           },

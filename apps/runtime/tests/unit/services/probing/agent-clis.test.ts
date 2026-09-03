@@ -15,6 +15,7 @@ import {
   parseCursorAgentVersion,
 } from '@mangostudio/shared/environments/detection';
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
+import { getLibraryLocation } from '@mangostudio/shared/library/host';
 import Value from 'typebox/value';
 import type { RuntimeProbeAgentClisParams } from '../../../../src/methods';
 import {
@@ -464,7 +465,6 @@ describe('agent CLI detection', () => {
     const status = await statusFor(service, 'mangostudio', {
       version: '9.9.9',
       executablePath: '/opt/mangostudio/mangostudio',
-      configHome,
     });
 
     expect(status).toMatchObject({
@@ -485,6 +485,45 @@ describe('agent CLI detection', () => {
       effective: true,
     });
     expect(Value.Check(AgentCliStatusSchema, status)).toBe(true);
+  });
+
+  it('resolves mangostudio config home from PathEnv like every mango-* location', async () => {
+    const configHome = '/tmp/relocated-mango';
+    const env = {
+      platform: 'linux',
+      homeDir: '/home/tester',
+      env: { PATH: '/bin', MANGO_CONFIG_HOME: configHome },
+    };
+    const service = createProbingService({
+      agentDefinitions: [MANGOSTUDIO_AGENT_CLI_DEFINITION],
+      createPathEnv: () => env,
+      authFs: new FakeAuthSignalFs(new Map(), new Set([configHome])),
+      describeLocations: (_targetId, pathEnv) =>
+        (['mango-skills', 'mango-agents', 'mango-instructions', 'mango-settings'] as const).map(
+          (id) => ({
+            id,
+            kind: getLibraryLocation(id)?.kind ?? 'skill',
+            scope: 'home' as const,
+            path: getLibraryLocation(id)?.resolvePath(pathEnv) ?? null,
+            access: 'read-write' as const,
+            exists: false,
+            readable: false,
+            writable: false,
+            targetIds: ['mangostudio' as const],
+          })
+        ),
+      now: () => 1,
+    });
+
+    const status = await statusFor(service, 'mangostudio', { version: '9.9.9' });
+
+    expect(status?.configHome).toBe(configHome);
+    expect(status?.locations.map((location) => location.path)).toEqual([
+      `${configHome}/skills`,
+      `${configHome}/agents`,
+      `${configHome}/AGENTS.md`,
+      `${configHome}/config.toml`,
+    ]);
   });
 
   it('refuses an agent CLI probe cancelled while a version subprocess is in flight', async () => {

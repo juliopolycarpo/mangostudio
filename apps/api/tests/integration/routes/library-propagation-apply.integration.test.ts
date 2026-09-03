@@ -158,9 +158,14 @@ function makeDirectories(...locationIds: LibraryLocationId[]): void {
 }
 
 function pathEnv() {
+  const mango = join(home, '.mango');
   return createLibraryPathEnv({
     homeDir: home,
-    env: { SKILLS_DIR: join(home, '.mango', 'skills') },
+    env: {
+      MANGO_CONFIG_HOME: mango,
+      SKILLS_DIR: join(mango, 'skills'),
+      AGENTS_DIR: join(mango, 'agents'),
+    },
   });
 }
 
@@ -1221,7 +1226,11 @@ describe('propagation apply — across machines', () => {
     const machineHome = homeOf(environmentId);
     return createLibraryPathEnv({
       homeDir: machineHome,
-      env: { SKILLS_DIR: join(machineHome, '.mango', 'skills') },
+      env: {
+        MANGO_CONFIG_HOME: join(machineHome, '.mango'),
+        SKILLS_DIR: join(machineHome, '.mango', 'skills'),
+        AGENTS_DIR: join(machineHome, '.mango', 'agents'),
+      },
     });
   }
 

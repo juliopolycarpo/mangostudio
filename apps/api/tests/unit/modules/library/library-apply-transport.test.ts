@@ -11,6 +11,7 @@ import {
   RuntimeServiceError,
 } from '@mangostudio/runtime';
 import type { PropagationApplyRequest, PropagationPreview } from '@mangostudio/shared/library';
+import { createPathEnv } from '@mangostudio/shared/runtime-env';
 import {
   applyLibraryPropagation,
   undoLibraryPropagation,
@@ -93,7 +94,7 @@ describe('library.apply payload bounds', () => {
         },
         {
           preview: () => Promise.resolve(agentsPreview(slugs)),
-          pathEnv: () => ({ platform: 'linux', homeDir: '/tmp/home', env: {} }),
+          pathEnv: () => createPathEnv({ platform: 'linux', homeDir: '/tmp/home', env: {} }),
           readSourceFile: (path) =>
             Promise.resolve(new Uint8Array(2 * 1024 * 1024).fill(path.charCodeAt(path.length - 1))),
           runtimeApply: () => {
@@ -176,7 +177,7 @@ describe('library.apply transport failures', () => {
               },
             ],
           } as unknown as PropagationPreview),
-        pathEnv: () => ({ platform: 'linux', homeDir: '/tmp', env: {} }),
+        pathEnv: () => createPathEnv({ platform: 'linux', homeDir: '/tmp', env: {} }),
         readSourceFile: () => {
           wrote = true;
           return Promise.resolve(new Uint8Array());
@@ -216,7 +217,7 @@ describe('library.apply transport failures', () => {
       // the kind the payload carries rather than on the message text.
       await expect(
         undoLibraryPropagation('2020-01-01T00-00-00.000Z-deadbeef', {
-          pathEnv: () => ({ platform: 'linux', homeDir: '/tmp', env: {} }),
+          pathEnv: () => createPathEnv({ platform: 'linux', homeDir: '/tmp', env: {} }),
           runtimeUndo: (params) => client.library.undo(params, { timeoutMs: 5_000 }),
         })
       ).rejects.toMatchObject({ status: 404 });
@@ -250,7 +251,7 @@ describe('library.apply transport failures', () => {
     try {
       await expect(
         undoLibraryPropagation('2020-01-01T00-00-00.000Z-deadbeef', {
-          pathEnv: () => ({ platform: 'linux', homeDir: '/tmp', env: {} }),
+          pathEnv: () => createPathEnv({ platform: 'linux', homeDir: '/tmp', env: {} }),
           runtimeUndo: (params) => client.library.undo(params, { timeoutMs: 5_000 }),
         })
       ).rejects.toMatchObject({ status: 404, message: 'that set is gone' });

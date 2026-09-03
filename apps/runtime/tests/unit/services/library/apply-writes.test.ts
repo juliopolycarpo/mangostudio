@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createPathEnv } from '@mangostudio/shared/runtime-env';
 import {
   createPropagationWriteEngineDeps,
   executePropagationWrites,
@@ -22,12 +23,16 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
+function hostEnv() {
+  return createPathEnv({ platform: 'linux', homeDir: home, env: {} });
+}
+
 describe('executePropagationWrites', () => {
   it('writes through an injected backupRoot and supports undo', async () => {
     const sourceDir = join(home, 'source');
     mkdirSync(sourceDir);
     writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nbody\n');
-    const env = { platform: 'linux' as const, homeDir: home, env: {} };
+    const env = hostEnv();
     const expected = await hashResourceAt(sourceDir, 'directory');
 
     const result = await executePropagationWrites({
@@ -69,7 +74,7 @@ describe('executePropagationWrites', () => {
     const sourceDir = join(home, 'source');
     mkdirSync(sourceDir);
     writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nbody\n');
-    const env = { platform: 'linux' as const, homeDir: home, env: {} };
+    const env = hostEnv();
     const expected = await hashResourceAt(sourceDir, 'directory');
 
     // What a runtime whose location resolution disagrees with the hub's looks
@@ -102,7 +107,7 @@ describe('executePropagationWrites', () => {
     mkdirSync(sourceDir);
     writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nbody\n');
     mkdirSync(join(home, '.agents', 'skills'), { recursive: true });
-    const env = { platform: 'linux' as const, homeDir: home, env: {} };
+    const env = hostEnv();
     const expected = await hashResourceAt(sourceDir, 'directory');
     const controller = new AbortController();
 
@@ -152,7 +157,7 @@ describe('executePropagationWrites', () => {
     const sourceDir = join(home, 'source');
     mkdirSync(sourceDir);
     writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nbody\n');
-    const env = { platform: 'linux' as const, homeDir: home, env: {} };
+    const env = hostEnv();
     const expected = await hashResourceAt(sourceDir, 'directory');
 
     const result = await executePropagationWrites({

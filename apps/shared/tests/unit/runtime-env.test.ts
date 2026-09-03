@@ -2,7 +2,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseRuntimeEnvContent, parseRuntimeEnvFile } from '../../src/runtime-env';
+import {
+  createPathEnv,
+  libraryPathEnvOverrides,
+  MANGO_CONFIG_HOME_ENV,
+  parseRuntimeEnvContent,
+  parseRuntimeEnvFile,
+  SKILLS_DIR_ENV,
+} from '../../src/runtime-env';
 
 let tmpDir: string;
 
@@ -46,6 +53,32 @@ describe('parseRuntimeEnvContent', () => {
       TOKEN: '"unterminated',
       DATABASE_URL: 'a=b=c',
     });
+  });
+});
+
+describe('createPathEnv', () => {
+  it('builds a host layout the writers can take without throwing', () => {
+    const env = createPathEnv({
+      platform: 'linux',
+      homeDir: '/home/tester',
+      env: { [SKILLS_DIR_ENV]: '/custom/skills' },
+    });
+
+    expect(env.homeDir).toBe('/home/tester');
+    expect(env.env[SKILLS_DIR_ENV]).toBe('/custom/skills');
+    expect(JSON.stringify(env)).not.toContain('LibraryPathEnv');
+  });
+});
+
+describe('libraryPathEnvOverrides', () => {
+  it('copies only the MangoStudio directory pins that are set', () => {
+    expect(
+      libraryPathEnvOverrides({
+        PATH: '/bin',
+        [SKILLS_DIR_ENV]: '/custom/skills',
+        [MANGO_CONFIG_HOME_ENV]: '  ',
+      })
+    ).toEqual({ [SKILLS_DIR_ENV]: '/custom/skills' });
   });
 });
 

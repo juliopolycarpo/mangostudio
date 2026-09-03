@@ -17,7 +17,7 @@ import type {
   RemovalRemoved,
 } from '@mangostudio/shared/library';
 import type { LocationDefinition } from '@mangostudio/shared/library/host';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import type { LibraryPathEnv, PathEnv } from '@mangostudio/shared/runtime-env';
 import {
   type BackupEntry,
   type BackupStoreDeps,
@@ -50,7 +50,7 @@ export interface ExecuteRemovalWritesParams {
   readonly backupRoot: string;
   readonly retentionCount?: number;
   readonly retentionBytes?: number;
-  readonly pathEnv: PathEnv;
+  readonly pathEnv: LibraryPathEnv;
   readonly backupId?: string;
   readonly operations: readonly PreparedRemovalOperation[];
   readonly lastCopyResourceKeys?: readonly string[];

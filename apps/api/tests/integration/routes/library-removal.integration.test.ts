@@ -68,9 +68,14 @@ function skillAt(locationId: LibraryLocationId, body: string): string {
 }
 
 function libraryPathEnv() {
+  const mango = join(home, '.mango');
   return createLibraryPathEnv({
     homeDir: home,
-    env: { SKILLS_DIR: join(home, '.mango', 'skills') },
+    env: {
+      MANGO_CONFIG_HOME: mango,
+      SKILLS_DIR: join(mango, 'skills'),
+      AGENTS_DIR: join(mango, 'agents'),
+    },
   });
 }
 

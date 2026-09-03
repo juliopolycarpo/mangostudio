@@ -331,4 +331,30 @@ describe('library location health', () => {
       describeLocation('mango-agents', { ...LINUX_ENV, env: { AGENTS_DIR: path } }, fs).path
     ).toBe(path);
   });
+
+  it('relocates every mango-* path when MANGO_CONFIG_HOME is set', () => {
+    const configHome = '/tmp/relocated-mango';
+    const env = { ...LINUX_ENV, env: { MANGO_CONFIG_HOME: configHome } };
+    const fs = new FakeLocationFs(new Set(), new Set(), new Set());
+
+    expect(getLibraryTarget('mangostudio')?.resolveConfigHome(env)).toBe(configHome);
+    expect(describeLocation('mango-skills', env, fs).path).toBe(`${configHome}/skills`);
+    expect(describeLocation('mango-agents', env, fs).path).toBe(`${configHome}/agents`);
+    expect(describeLocation('mango-instructions', env, fs).path).toBe(`${configHome}/AGENTS.md`);
+    expect(describeLocation('mango-settings', env, fs).path).toBe(`${configHome}/config.toml`);
+  });
+
+  it('keeps an explicit SKILLS_DIR ahead of a relocated config home', () => {
+    const skills = '/srv/mango-skills';
+    const env = {
+      ...LINUX_ENV,
+      env: { MANGO_CONFIG_HOME: '/tmp/relocated-mango', SKILLS_DIR: skills },
+    };
+    const fs = new FakeLocationFs(new Set(), new Set(), new Set());
+
+    expect(describeLocation('mango-skills', env, fs).path).toBe(skills);
+    expect(describeLocation('mango-instructions', env, fs).path).toBe(
+      '/tmp/relocated-mango/AGENTS.md'
+    );
+  });
 });

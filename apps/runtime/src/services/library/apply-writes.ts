@@ -18,7 +18,7 @@ import type {
   PropagationApply,
   PropagationFailure,
 } from '@mangostudio/shared/library';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import type { LibraryPathEnv } from '@mangostudio/shared/runtime-env';
 import {
   type BackupEntry,
   type BackupStoreDeps,
@@ -46,14 +46,14 @@ export interface PropagationWriteEngineDeps {
     readonly slug: string;
     readonly sourceDir?: string;
     readonly files?: readonly PreparedPropagationFile[];
-    readonly env: PathEnv;
+    readonly env: LibraryPathEnv;
     readonly backupId: string;
   }): Promise<ResourceWriteResult>;
   writeFile(input: {
     readonly locationId: LibraryLocationId;
     readonly slug: string;
     readonly contents: string | Uint8Array;
-    readonly env: PathEnv;
+    readonly env: LibraryPathEnv;
     readonly backupId: string;
   }): Promise<ResourceWriteResult>;
   hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
@@ -64,7 +64,7 @@ export interface ExecutePropagationWritesParams {
   readonly backupRoot: string;
   readonly retentionCount?: number;
   readonly retentionBytes?: number;
-  readonly pathEnv: PathEnv;
+  readonly pathEnv: LibraryPathEnv;
   readonly backupId?: string;
   readonly operations: readonly PreparedPropagationOperation[];
   /** Stamped into the manifest so a store can name the environment it serves. */
@@ -209,7 +209,7 @@ async function persistBackupManifest(
 
 async function executeOperation(
   operation: PreparedPropagationOperation,
-  env: PathEnv,
+  env: LibraryPathEnv,
   backupId: string,
   environmentId: string,
   deps: PropagationWriteEngineDeps
@@ -300,7 +300,7 @@ function backupEntryFrom(
 
 function performWrite(
   operation: PreparedPropagationOperation,
-  env: PathEnv,
+  env: LibraryPathEnv,
   backupId: string,
   deps: PropagationWriteEngineDeps
 ): Promise<ResourceWriteResult> {
@@ -368,7 +368,7 @@ async function rollback(
  * for the layouts that hold many resources, and the resource path itself only
  * for `single-file`, where the two coincide.
  */
-function assertPreviewedRoot(operation: PreparedPropagationOperation, env: PathEnv): void {
+function assertPreviewedRoot(operation: PreparedPropagationOperation, env: LibraryPathEnv): void {
   const location = requireWritableLocation(
     operation.locationId,
     operation.kind === 'directory' ? 'directory-of-dirs' : 'file'

@@ -13,7 +13,7 @@ import {
 import { cp, lstat, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import { createPathEnv } from '@mangostudio/shared/runtime-env';
 
 import { writeFileAtomic } from '../../../../src/lib/safe-file';
 import {
@@ -24,13 +24,13 @@ import {
 let tempDir: string;
 let sourceDir: string;
 let backupDir: string;
-let env: PathEnv;
+let env: ReturnType<typeof createPathEnv>;
 
 beforeEach(() => {
   tempDir = mkdtempSync(join(tmpdir(), 'mango-library-writer-'));
   sourceDir = join(tempDir, 'source');
   backupDir = join(tempDir, 'backups');
-  env = { platform: 'linux', homeDir: tempDir, env: {} };
+  env = createPathEnv({ platform: 'linux', homeDir: tempDir, env: {} });
   mkdirSync(sourceDir);
   writeFileSync(join(sourceDir, 'SKILL.md'), 'new content');
 });

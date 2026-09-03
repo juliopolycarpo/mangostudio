@@ -218,9 +218,10 @@ function describeSelfAgent(
   const target = getLibraryTarget(targetId);
   if (!target) throw new Error(`Missing library target definition for "${targetId}".`);
 
-  // The hub pins these for its own machine, where its configured paths and its
-  // own executable are the truth. Everywhere else this host answers for itself.
-  const configHome = params.self.configHome ?? target.resolveConfigHome(env);
+  // Config home travels on PathEnv with every other configured MangoStudio
+  // path. The hub's executable is still a fact about this process, so it stays
+  // on `self` for the hub's own machine; everywhere else this host answers.
+  const configHome = target.resolveConfigHome(env);
   const executablePath = params.self.executablePath ?? adapters.selfExecutablePath();
   const configHomeExists = directoryExists(configHome, adapters.authFs);
   const locations = adapters.describeLocations(targetId, env);
