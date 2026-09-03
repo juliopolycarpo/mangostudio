@@ -250,8 +250,9 @@ export function TerminalView({
 
 function noticeMessage(t: ReturnType<typeof useI18n>['t'], notice: TerminalNotice): string {
   switch (notice.kind) {
+    // Which hop discarded the bytes is the relay's business, not the viewer's:
+    // both read as a gap in the output, and both name how big it was.
     case 'dropped':
-      return formatMessage(t.terminal.dropped, { bytes: String(notice.bytes ?? 0) });
     case 'queue_overflow':
       return formatMessage(t.terminal.dropped, { bytes: String(notice.bytes ?? 0) });
     case 'runtime_disconnected':
