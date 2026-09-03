@@ -253,12 +253,25 @@ export function mockPassThroughDb(userId: string): () => { getDb: () => Record<s
   });
 }
 
+/**
+ * `environment_toolchains` is read directly (not through a mockable
+ * repository, the way chat ownership is) by every shell/terminal/install/
+ * external-agent spawn: routing it through the same catch-all as chat rows
+ * would hand back a chat row shaped like a `ToolchainSelection` and corrupt
+ * the PATH the spawned process gets. No row exists here, so it reads the same
+ * as an environment with no stored selection.
+ */
+function defaultSelectFrom(userId: string): (table: string) => Record<string, unknown> {
+  return (table) =>
+    table === 'environment_toolchains' ? makeChain(undefined) : makeChain(ownedChatRow(userId));
+}
+
 /** Builds a transactional stream DB mock that applies assistant-row updates. */
 export function createTestStreamDb(options: TestStreamDbOptions): Record<string, unknown> {
   const insertedMessages = options.insertedMessages ?? [];
   const chatSetCalls = options.chatSetCalls ?? [];
   const db: Record<string, unknown> = {
-    selectFrom: options.selectFrom ?? (() => makeChain(ownedChatRow(options.userId))),
+    selectFrom: options.selectFrom ?? defaultSelectFrom(options.userId),
     insertInto: (table: string) => createInsertCapture(table, insertedMessages, options.onInsert),
     updateTable: (table: string) => createUpdateCapture(table, insertedMessages, chatSetCalls),
   };
