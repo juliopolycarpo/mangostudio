@@ -37,16 +37,48 @@ export function FindingList({ findings, className = '' }: FindingListProps) {
 
   return (
     <ul className={`space-y-2 ${className}`.trim()} data-testid="finding-list">
-      {keyedFindings(findings).map(({ key, finding }) => (
-        <li
-          key={key}
-          className="flex items-start gap-2 text-sm text-on-surface-variant"
-          data-finding-code={finding.code}
-        >
-          <FindingIcon severity={findingSeverity(finding)} />
-          <span className="min-w-0">{describeFinding(t, finding, lookup)}</span>
-        </li>
-      ))}
+      {keyedFindings(findings).map(({ key, finding }) => {
+        const remedy = finding.params?.remedy;
+        // A remedy that is itself a URL (winget's own install page, for a
+        // prerequisite MangoStudio never installs) is a link a person can
+        // follow, not text to read past — the sentence is built once with it
+        // blanked out so the link is not duplicated inside the prose.
+        const remedyLink = remedy?.startsWith('https://') ? remedy : null;
+        const text = remedyLink
+          ? describeFinding(
+              t,
+              { ...finding, params: { ...finding.params, remedy: '' } },
+              lookup
+            ).trim()
+          : describeFinding(t, finding, lookup);
+
+        return (
+          <li
+            key={key}
+            className="flex items-start gap-2 text-sm text-on-surface-variant"
+            data-finding-code={finding.code}
+          >
+            <FindingIcon severity={findingSeverity(finding)} />
+            <span className="min-w-0">
+              {text}
+              {remedyLink && (
+                <>
+                  {' '}
+                  <a
+                    href={remedyLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary underline"
+                    data-testid="finding-remedy-link"
+                  >
+                    {remedyLink}
+                  </a>
+                </>
+              )}
+            </span>
+          </li>
+        );
+      })}
     </ul>
   );
 }

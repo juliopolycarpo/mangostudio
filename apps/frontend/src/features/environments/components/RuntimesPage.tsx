@@ -16,6 +16,7 @@ import { EnvironmentPageState } from './EnvironmentPageState';
 import { EnvironmentScopeHeader } from './EnvironmentScopeHeader';
 import { EnvironmentScopeNotice } from './EnvironmentScopeNotice';
 import { NodeVersionTable } from './NodeVersionTable';
+import { PrerequisiteCard } from './PrerequisiteCard';
 import { RuntimeCard } from './RuntimeCard';
 
 export function RuntimesPage() {
@@ -77,27 +78,39 @@ export function RuntimesPage() {
         />
       ) : (
         <div className="space-y-4">
-          {runtimes.map((runtime) => (
-            <RuntimeCard
-              key={runtime.id}
-              status={runtime}
-              recipes={recipes}
-              environmentId={scope.environmentId}
-            >
-              {/* Every version manager gets its own table here, not only nvm —
-                  the list already comes from whichever managers this release
-                  detects, so nothing here should re-narrow it to one id. */}
-              {runtime.id === 'node' &&
-                versionManagers.map((manager) => (
-                  <NodeVersionTable
-                    key={manager.id}
-                    status={manager}
-                    recipes={recipes}
-                    environmentId={scope.environmentId}
-                  />
-                ))}
-            </RuntimeCard>
-          ))}
+          {runtimes.map((runtime) =>
+            // winget is never installed or updated by MangoStudio — it only
+            // ever appears as something the other Windows recipes need, so it
+            // renders as the compact prerequisite card rather than a runtime
+            // with its own lifecycle.
+            runtime.id === 'winget' ? (
+              <PrerequisiteCard
+                key={runtime.id}
+                status={runtime}
+                environmentId={scope.environmentId}
+              />
+            ) : (
+              <RuntimeCard
+                key={runtime.id}
+                status={runtime}
+                recipes={recipes}
+                environmentId={scope.environmentId}
+              >
+                {/* Every version manager gets its own table here, not only nvm —
+                    the list already comes from whichever managers this release
+                    detects, so nothing here should re-narrow it to one id. */}
+                {runtime.id === 'node' &&
+                  versionManagers.map((manager) => (
+                    <NodeVersionTable
+                      key={manager.id}
+                      status={manager}
+                      recipes={recipes}
+                      environmentId={scope.environmentId}
+                    />
+                  ))}
+              </RuntimeCard>
+            )
+          )}
         </div>
       )}
     </div>
