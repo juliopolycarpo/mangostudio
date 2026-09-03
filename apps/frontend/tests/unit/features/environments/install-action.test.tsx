@@ -137,6 +137,38 @@ describe('InstallAction', () => {
     expect(installRequests()).toHaveLength(0);
   });
 
+  it('renders a copy-only recipe as a command with its reason and no run button', () => {
+    // codex.uninstall and cursor.uninstall ship exactly like this: no vendor-
+    // documented unattended shape, so `argv` never builds and the offer is the
+    // copyable command plus why it is the only offer.
+    const recipe = installRecipe({
+      id: 'cursor.uninstall',
+      runtimeId: 'cursor',
+      action: 'uninstall',
+      runnable: false,
+      unrunnableReason: 'vendor-undocumented',
+      copyCommand: 'rm -rf ~/.local/bin/agent ~/.cursor',
+    });
+
+    render(
+      <InstallAction
+        recipe={recipe}
+        catalog={[recipe]}
+        input={{ kind: 'none' }}
+        label="Uninstall Cursor"
+      />
+    );
+
+    expect(
+      screen.getByText(en.environments.install.unrunnable['vendor-undocumented'])
+    ).toBeInTheDocument();
+    const block = screen.getByTestId('copy-command-block');
+    expect(block.textContent).toContain(recipe.copyCommand);
+    // No run affordance at all — copying is the only path this recipe offers.
+    expect(screen.queryByRole('button', { name: 'Uninstall Cursor' })).not.toBeInTheDocument();
+    expect(installRequests()).toHaveLength(0);
+  });
+
   it('states the requirement instead of offering a button nothing here can satisfy', () => {
     // The catalog has no nvm recipe, so no chain reaches Node on this machine.
     render(

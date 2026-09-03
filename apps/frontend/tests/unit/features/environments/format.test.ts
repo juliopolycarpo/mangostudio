@@ -3,22 +3,26 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import type { RuntimeFinding } from '@mangostudio/shared/environments';
+import type { RuntimeFinding, RuntimeInstallation } from '@mangostudio/shared/environments';
 import { en, ptBR } from '@mangostudio/shared/i18n';
 import {
   describeFinding,
+  findInstallRecipe,
   findingSeverity,
   formatBytes,
   formatDuration,
   groupInstallations,
   healthRollup,
   keyedFindings,
+  nodeInstallStep,
+  nodeUpdateAffordance,
   pathPosition,
+  pathSourceLabel,
   prefixedVersionLabel,
   versionLabel,
   worstFinding,
 } from '../../../../src/features/environments/format';
-import { agentCliStatus, installation, runtimeStatus } from './fixtures';
+import { agentCliStatus, installation, installRecipe, runtimeStatus } from './fixtures';
 
 describe('groupInstallations', () => {
   it('puts the effective binary first even when it is last in the array', () => {
@@ -217,5 +221,212 @@ describe('formatting helpers', () => {
   it('formats install durations', () => {
     expect(formatDuration(1500)).toBe('2s');
     expect(formatDuration(65_000)).toBe('1m 05s');
+  });
+});
+
+describe('findInstallRecipe', () => {
+  it('prefers the supported entry when the catalog lists one per platform', () => {
+    const recipes = [
+      installRecipe({
+        id: 'nvm.node.install',
+        runtimeId: 'node',
+        action: 'use-version',
+        inputKind: 'node-version',
+        platforms: ['darwin', 'linux'],
+        supported: false,
+      }),
+      installRecipe({
+        id: 'fnm.node.install',
+        runtimeId: 'node',
+        action: 'use-version',
+        inputKind: 'node-version',
+        platforms: ['darwin', 'linux', 'win32'],
+        supported: true,
+      }),
+    ];
+
+    expect(findInstallRecipe(recipes, 'node', 'use-version')?.id).toBe('fnm.node.install');
+  });
+
+  it('falls back to the only match when nothing on offer is supported here', () => {
+    const recipes = [
+      installRecipe({
+        id: 'git.install.windows',
+        runtimeId: 'git',
+        action: 'install',
+        platforms: ['win32'],
+        supported: false,
+      }),
+    ];
+
+    expect(findInstallRecipe(recipes, 'git', 'install')?.id).toBe('git.install.windows');
+  });
+
+  it('is undefined when the catalog offers nothing for this runtime and action', () => {
+    expect(findInstallRecipe([], 'node', 'install')).toBeUndefined();
+  });
+});
+
+describe('nodeInstallStep', () => {
+  it('picks nvm first when it and fnm both offer a fresh install', () => {
+    const recipes = [
+      installRecipe({
+        id: 'nvm.node.install',
+        runtimeId: 'node',
+        action: 'use-version',
+        inputKind: 'node-version',
+        supported: true,
+      }),
+      installRecipe({
+        id: 'fnm.node.install',
+        runtimeId: 'node',
+        action: 'use-version',
+        inputKind: 'node-version',
+        supported: true,
+      }),
+    ];
+
+    const step = nodeInstallStep(recipes);
+
+    expect(step?.recipe.id).toBe('nvm.node.install');
+    expect(step?.input).toEqual({ kind: 'node-version', version: 'lts' });
+  });
+
+  it('falls back to winget, with no version input, when it is the only one supported here', () => {
+    const recipes = [
+      installRecipe({
+        id: 'nvm.node.install',
+        runtimeId: 'node',
+        action: 'use-version',
+        inputKind: 'node-version',
+        platforms: ['darwin', 'linux'],
+        supported: false,
+      }),
+      installRecipe({
+        id: 'winget.node.install',
+        runtimeId: 'node',
+        action: 'install',
+        inputKind: 'none',
+        platforms: ['win32'],
+        supported: true,
+      }),
+    ];
+
+    const step = nodeInstallStep(recipes);
+
+    expect(step?.recipe.id).toBe('winget.node.install');
+    expect(step?.input).toEqual({ kind: 'none' });
+  });
+
+  it('is undefined when nothing here installs a fresh Node', () => {
+    expect(nodeInstallStep([])).toBeUndefined();
+  });
+});
+
+describe('nodeUpdateAffordance', () => {
+  const NVM_INSTALL = installRecipe({
+    id: 'nvm.node.install',
+    runtimeId: 'node',
+    action: 'use-version',
+    inputKind: 'node-version',
+  });
+  const NVM_SET_DEFAULT = installRecipe({
+    id: 'nvm.node.set-default',
+    runtimeId: 'node',
+    action: 'set-default',
+    inputKind: 'node-version',
+  });
+  const FNM_INSTALL = installRecipe({
+    id: 'fnm.node.install',
+    runtimeId: 'node',
+    action: 'use-version',
+    inputKind: 'node-version',
+  });
+  const FNM_SET_DEFAULT = installRecipe({
+    id: 'fnm.node.set-default',
+    runtimeId: 'node',
+    action: 'set-default',
+    inputKind: 'node-version',
+  });
+  const WINGET_UPDATE = installRecipe({
+    id: 'winget.node.update',
+    runtimeId: 'node',
+    action: 'update',
+    inputKind: 'none',
+  });
+  const CATALOG = [NVM_INSTALL, NVM_SET_DEFAULT, FNM_INSTALL, FNM_SET_DEFAULT, WINGET_UPDATE];
+
+  function effectiveNode(pathSource: RuntimeInstallation['pathSource']) {
+    return runtimeStatus({
+      id: 'node',
+      installations: [
+        installation({
+          path: '/bin/node',
+          version: '20.11.0',
+          effective: true,
+          ...(pathSource && { pathSource }),
+        }),
+      ],
+    });
+  }
+
+  it('chains install then set-default for an nvm-managed Node', () => {
+    const affordance = nodeUpdateAffordance(effectiveNode('nvm'), CATALOG);
+
+    if (affordance.kind !== 'steps') throw new Error(`expected steps, got ${affordance.kind}`);
+    expect(affordance.primary.recipe.id).toBe('nvm.node.install');
+    expect(affordance.primary.input).toEqual({ kind: 'node-version', version: 'lts' });
+    expect(affordance.followUp.map((step) => step.recipe.id)).toEqual(['nvm.node.set-default']);
+  });
+
+  it('chains install then set-default for an fnm-managed Node', () => {
+    const affordance = nodeUpdateAffordance(effectiveNode('fnm'), CATALOG);
+
+    if (affordance.kind !== 'steps') throw new Error(`expected steps, got ${affordance.kind}`);
+    expect(affordance.primary.recipe.id).toBe('fnm.node.install');
+    expect(affordance.followUp.map((step) => step.recipe.id)).toEqual(['fnm.node.set-default']);
+  });
+
+  it('offers the single winget update for a winget-managed Node, with no follow-up', () => {
+    const affordance = nodeUpdateAffordance(effectiveNode('winget'), CATALOG);
+
+    if (affordance.kind !== 'steps') throw new Error(`expected steps, got ${affordance.kind}`);
+    expect(affordance.primary.recipe.id).toBe('winget.node.update');
+    expect(affordance.followUp).toEqual([]);
+  });
+
+  it('reports managed-elsewhere for a Volta-managed Node', () => {
+    expect(nodeUpdateAffordance(effectiveNode('volta'), CATALOG)).toEqual({
+      kind: 'managed-elsewhere',
+      source: 'volta',
+    });
+  });
+
+  it('reports managed-elsewhere, defaulting to system, when no manager is recorded', () => {
+    expect(nodeUpdateAffordance(effectiveNode(undefined), CATALOG)).toEqual({
+      kind: 'managed-elsewhere',
+      source: 'system',
+    });
+  });
+
+  it('is none when there is no effective installation to update', () => {
+    const status = runtimeStatus({ id: 'node', installations: [] });
+    expect(nodeUpdateAffordance(status, CATALOG)).toEqual({ kind: 'none' });
+  });
+});
+
+describe('pathSourceLabel', () => {
+  it('reads the source dictionary and defaults an absent source to system', () => {
+    expect(pathSourceLabel(en, 'nvm')).toBe('from nvm');
+    expect(pathSourceLabel(en, 'volta')).toBe('from Volta');
+    expect(pathSourceLabel(en, undefined)).toBe('system install');
+  });
+
+  it('has an entry for every source in both locales', () => {
+    for (const source of Object.keys(en.environments.pathSources)) {
+      expect(
+        ptBR.environments.pathSources[source as keyof typeof ptBR.environments.pathSources]
+      ).toBeTruthy();
+    }
   });
 });

@@ -2857,6 +2857,44 @@ export const messages = {
       libraryPresent: '{count} presentes',
       libraryDivergent: '{count} divergentes',
       libraryNone: 'Ainda não lê nada',
+      // A checklist "antes de começar" da visão geral. Cada linha lê o estado
+      // que as abas Toolchains, Agentes e Esta máquina já buscam — não há um
+      // endpoint dedicado por trás desta seção.
+      setup: {
+        title: 'Configuração',
+        description: 'O que uma máquina nova precisa antes de rodar agentes nela.',
+        status: {
+          done: 'Concluído',
+          todo: 'Pendente',
+          optional: 'Opcional',
+        },
+        git: {
+          label: 'Git',
+          explanation: 'Os agentes usam o Git para inspecionar o histórico e fazer seus commits.',
+        },
+        node: {
+          label: 'Um Node.js atual',
+          explanation:
+            'Algumas CLIs de agente e servidores MCP precisam de um LTS suportado do Node.js.',
+        },
+        bun: {
+          label: 'Bun',
+          explanation:
+            'O próprio MangoStudio roda em Bun. Opcional aqui, a menos que um dos seus agentes também precise dele.',
+        },
+        agent: {
+          label: 'Uma CLI de agente, autenticada',
+          explanation:
+            'Pelo menos uma CLI de agente precisa estar instalada e autenticada antes de você conversar.',
+        },
+        hubService: {
+          label: 'MangoStudio rodando como serviço',
+          explanation:
+            'Um serviço por usuário mantém o MangoStudio rodando depois que você fecha a janela dele.',
+        },
+        gitDarwinRemedy: 'Rode isto em um terminal:',
+        gitLinuxRemedy: 'Instale com o gerenciador de pacotes da sua distribuição Linux.',
+      },
     },
     entities: {
       title: 'Ambientes de execução',
@@ -3288,8 +3326,28 @@ export const messages = {
       notInstalled: '{runtime} ainda não está instalado.',
       install: 'Instalar {runtime}',
       update: 'Atualizar {runtime}',
+      uninstall: 'Desinstalar {runtime}',
       empty: 'Nenhum runtime foi detectado nesta máquina.',
       emptyHint: 'O MangoStudio pode instalar o que estiver faltando por você.',
+      managedElsewhere: 'Gerenciado por {manager}, não pelo MangoStudio.',
+      // Para uma instalação simples do sistema, que não tem um nome para
+      // encaixar no modelo acima — é a sua própria frase, não um valor de
+      // {manager} (evita a concordância "por o sistema").
+      managedBySystem: 'Uma instalação do sistema, não gerenciada pelo MangoStudio.',
+      nodeVersionManager: 'Gerenciador de versões do Node',
+      prerequisiteHint:
+        'Um gerenciador de pacotes do Windows que o MangoStudio usa para rodar outras receitas de instalação, não algo que ele instala sozinho.',
+    },
+    // De onde o binário de uma instalação veio, anexado à linha da instalação
+    // efetiva. Toda literal de `PathSource` tem uma entrada.
+    pathSources: {
+      system: 'instalação do sistema',
+      nvm: 'via nvm',
+      fnm: 'via fnm',
+      volta: 'via Volta',
+      winget: 'via winget',
+      bun: 'via instalador do Bun',
+      'mangostudio-managed': 'gerenciado pelo MangoStudio',
     },
     versions: {
       title: 'Gerenciado por {manager}',
@@ -3375,6 +3433,16 @@ export const messages = {
     install: {
       confirmTitle: 'Executar instalação',
       confirmDescription: 'Isto roda um comando nesta máquina. Confira antes de continuar.',
+      confirmUninstallTitle: 'Remover {target}?',
+      confirmUninstallDescription: 'Isto remove {paths} desta máquina. Confira antes de continuar.',
+      runUninstall: 'Remover',
+      // Mostrado no lugar do botão de executar quando a receita não tem uma
+      // forma documentada pelo fabricante para rodar sem interação — o comando
+      // copiável é a única oferta.
+      unrunnable: {
+        'vendor-undocumented':
+          'O fabricante não documenta esta etapa, então o MangoStudio só mostra o comando.',
+      },
       commandLabel: 'Comando',
       willWrite: 'Vai escrever em',
       requiresNetwork: 'Requer acesso à rede',
