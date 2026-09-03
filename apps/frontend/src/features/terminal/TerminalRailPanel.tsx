@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -46,7 +46,10 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
     chatId,
     environmentId !== null
   );
-  const sessions = sessionsQuery.data ?? [];
+  // Memoized so the empty fallback keeps one identity: it is an effect
+  // dependency below, and a fresh `[]` on every render re-runs that effect for
+  // the whole time the query has no data.
+  const sessions = useMemo(() => sessionsQuery.data ?? [], [sessionsQuery.data]);
 
   const openMutation = useOpenTerminalMutation();
   const renameMutation = useRenameTerminalMutation();
