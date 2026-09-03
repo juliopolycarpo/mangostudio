@@ -25,6 +25,8 @@ import { type TerminalSocketStatus, useTerminalSocket } from './use-terminal-soc
 /** Dim-line SGR: readable as output, distinct from anything the shell prints. */
 const DIM = '\x1b[2m';
 const RESET = '\x1b[0m';
+/** One encoder for every keystroke: `onData` fires per key, and the instance is stateless. */
+const keystrokeEncoder = new TextEncoder();
 
 function writeDimLine(term: Terminal, text: string): void {
   term.writeln(`${DIM}${text}${RESET}`);
@@ -181,7 +183,7 @@ export function TerminalView({
     termRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    term.onData((data) => socketRef.current.send(new TextEncoder().encode(data)));
+    term.onData((data) => socketRef.current.send(keystrokeEncoder.encode(data)));
 
     fitAndResize(term, fitAddon, socketRef.current);
     // JetBrains Mono is self-hosted; a mount before it finishes loading
