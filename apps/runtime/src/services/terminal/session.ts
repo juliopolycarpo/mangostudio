@@ -94,9 +94,24 @@ function assertTerminalSize(cols: number, rows: number): void {
   }
 }
 
+/**
+ * Base64 without the copy `Buffer.from(uint8Array)` makes: the three-argument
+ * form wraps the existing memory instead. Every caller here passes a buffer
+ * `ByteRingBuffer` just allocated and encodes it synchronously, so wrapping is
+ * safe and halves the per-chunk encode cost on the streaming path.
+ */
+function base64(bytes: Uint8Array): string {
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64');
+}
+
 /** Spawns the PTY and returns the session that owns it. */
 export function createTerminalSession(options: CreateTerminalSessionOptions): TerminalSession {
   assertTerminalSize(options.cols, options.rows);
+  // Destructured, not read through `options`, so the returned methods' closures
+  // capture these five fields instead of the whole bag. `argv` and `env` are
+  // consumed once by `spawn` below; keeping `options` alive would pin the entire
+  // sanitized process environment for as long as the shell runs.
+  const { sessionId, shell, cwd, emit } = options;
   const scrollback = new ByteRingBuffer(
     Math.min(
       options.scrollbackBytes ?? TERMINAL_SCROLLBACK_MAX_BYTES,
@@ -113,7 +128,7 @@ export function createTerminalSession(options: CreateTerminalSessionOptions): Te
 
   const safeEmit = (payload: RuntimeTerminalOutputEvent, end?: true): boolean => {
     try {
-      options.emit(payload, end);
+      emit(payload, end);
       return true;
     } catch {
       // The hub's socket closed under us. Nobody is listening, so stop
@@ -137,7 +152,7 @@ export function createTerminalSession(options: CreateTerminalSessionOptions): Te
       const size = Math.min(TERMINAL_CHUNK_MAX_BYTES, room, pending.byteLength);
       const chunk = pending.take(size);
       inflight += chunk.byteLength;
-      if (!safeEmit({ kind: 'data', data: Buffer.from(chunk).toString('base64') })) return;
+      if (!safeEmit({ kind: 'data', data: base64(chunk) })) return;
     }
   };
 
@@ -148,7 +163,7 @@ export function createTerminalSession(options: CreateTerminalSessionOptions): Te
 
   const handle = options.pty.spawn({
     argv: options.argv,
-    cwd: options.cwd,
+    cwd,
     env: options.env,
     cols,
     rows,
@@ -184,10 +199,10 @@ export function createTerminalSession(options: CreateTerminalSessionOptions): Te
   });
 
   return {
-    sessionId: options.sessionId,
+    sessionId,
     pid: handle.pid,
-    shell: options.shell,
-    cwd: options.cwd,
+    shell,
+    cwd,
 
     attach() {
       pending.clear();
@@ -200,8 +215,8 @@ export function createTerminalSession(options: CreateTerminalSessionOptions): Te
       const replay = scrollback.snapshot();
       inflight = replay.byteLength;
       return {
-        sessionId: options.sessionId,
-        scrollback: Buffer.from(replay).toString('base64'),
+        sessionId,
+        scrollback: base64(replay),
         status,
         exitCode: exit?.exitCode ?? null,
         signal: exit?.signal ?? null,
@@ -216,7 +231,7 @@ export function createTerminalSession(options: CreateTerminalSessionOptions): Te
     },
 
     write(dataBase64) {
-      if (status === 'exited') throw new TerminalExitedError(options.sessionId);
+      if (status === 'exited') throw new TerminalExitedError(sessionId);
       handle.write(Buffer.from(dataBase64, 'base64'));
     },
 
@@ -243,9 +258,9 @@ export function createTerminalSession(options: CreateTerminalSessionOptions): Te
 
     snapshot() {
       return {
-        sessionId: options.sessionId,
-        shell: options.shell,
-        cwd: options.cwd,
+        sessionId,
+        shell,
+        cwd,
         cols,
         rows,
         status,
