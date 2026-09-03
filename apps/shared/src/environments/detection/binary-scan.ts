@@ -291,6 +291,8 @@ function detectVersionManager(
       (path) =>
         path.includes('/.fnm/') ||
         path.includes('/.local/share/fnm/') ||
+        // macOS default root; `normalizedPath` lowercases but keeps spaces.
+        path.includes('/library/application support/fnm/') ||
         path.includes('/fnm_multishells/')
     )
   ) {

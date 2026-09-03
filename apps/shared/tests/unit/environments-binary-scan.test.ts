@@ -215,6 +215,29 @@ describe('scanRuntime', () => {
     });
   });
 
+  it('classifies fnm at its macOS default root with no FNM_DIR set', async () => {
+    const fnmBinDir =
+      '/Users/x/Library/Application Support/fnm/node-versions/v24.9.0/installation/bin';
+    const nodePath = `${fnmBinDir}/node`;
+
+    const result = await scanRuntime(
+      NODE_RUNTIME_DEFINITION,
+      fakeDeps({
+        platform: 'darwin',
+        homeDir: '/Users/x',
+        env: { PATH: fnmBinDir },
+        pathExists: (path) => path === nodePath,
+        probeVersion: (path) => Promise.resolve(path === nodePath ? 'v24.9.0' : null),
+      })
+    );
+
+    expect(result.installations[0]).toMatchObject({
+      rawPath: nodePath,
+      managedBy: 'fnm',
+      pathSource: 'fnm',
+    });
+  });
+
   it('identifies nvm installations under a custom NVM_DIR', async () => {
     const nodePath = '/opt/custom-nvm/versions/node/v24.18.0/bin/node';
 

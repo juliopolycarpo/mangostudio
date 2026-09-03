@@ -1,19 +1,20 @@
 import { join } from 'node:path';
 import type { PathEnv } from '../../runtime-env';
-import type { ManagedVersion, RuntimeFinding, VersionManagerStatus } from '../schemas';
+import type { ManagedVersion, VersionManagerStatus } from '../schemas';
+import { type NodeReleaseSchedule, normalizeNodeVersion } from './lts-policy';
 import {
-  classifyNodeLtsStatus,
-  findNodeReleaseLine,
-  type NodeReleaseSchedule,
-  normalizeNodeVersion,
-  parseExactNodeVersion,
-} from './lts-policy';
+  compareVersionStrings,
+  createManagedVersionFindings,
+  findCurrentVersion,
+  listOptionalDirectory,
+  type ManagedVersionFileSystem,
+  preferNewerVersion,
+  sortVersionsDescending,
+  toManagedVersions,
+} from './version-manager-support';
 
-export interface NvmFileSystem {
-  readonly pathExists: (path: string) => boolean | Promise<boolean>;
+export interface NvmFileSystem extends ManagedVersionFileSystem {
   readonly readFile: (path: string) => Promise<string>;
-  readonly readDirectory: (path: string) => Promise<readonly string[]>;
-  readonly realpath: (path: string) => Promise<string>;
 }
 
 export interface NvmDetectionOptions {
@@ -43,37 +44,6 @@ async function readOptionalFile(fs: NvmFileSystem, path: string): Promise<string
     return await fs.readFile(path);
   } catch {
     return undefined;
-  }
-}
-
-async function listOptionalDirectory(fs: NvmFileSystem, path: string): Promise<readonly string[]> {
-  try {
-    return await fs.readDirectory(path);
-  } catch {
-    return [];
-  }
-}
-
-function normalizedPath(path: string, platform: string): string {
-  const normalized = path.replaceAll('\\', '/').replace(/\/+$/, '');
-  return platform === 'win32' ? normalized.toLowerCase() : normalized;
-}
-
-function compareVersionStrings(left: string, right: string): number {
-  const leftVersion = parseExactNodeVersion(left);
-  const rightVersion = parseExactNodeVersion(right);
-  if (!leftVersion || !rightVersion) return left.localeCompare(right);
-  if (leftVersion.major !== rightVersion.major) return leftVersion.major - rightVersion.major;
-  if (leftVersion.minor !== rightVersion.minor) return leftVersion.minor - rightVersion.minor;
-  return leftVersion.patch - rightVersion.patch;
-}
-
-function preferNewerVersion(latestByMajor: Map<number, string>, versionValue: string): void {
-  const version = parseExactNodeVersion(versionValue);
-  if (!version) return;
-  const existing = latestByMajor.get(version.major);
-  if (!existing || compareVersionStrings(versionValue, existing) > 0) {
-    latestByMajor.set(version.major, versionValue);
   }
 }
 
@@ -143,7 +113,7 @@ async function readInstalledVersions(
     versions.push({ version: match[1] as string, path: resolvedPath });
   }
 
-  return versions.sort((left, right) => compareVersionStrings(right.version, left.version));
+  return sortVersionsDescending(versions);
 }
 
 function highestVersion(versions: readonly { version: string }[]): string | undefined {
@@ -200,36 +170,6 @@ function mergeLatestVersions(
   return latestByMajor;
 }
 
-function createFindings(
-  defaultAlias: string | undefined,
-  defaultVersion: string | undefined,
-  currentVersion: string | undefined,
-  versions: readonly ManagedVersion[]
-): RuntimeFinding[] {
-  const findings: RuntimeFinding[] = [];
-  if (defaultAlias && !currentVersion) {
-    findings.push({
-      code: 'managed-but-not-on-path',
-      params: {
-        manager: 'nvm',
-        defaultAlias,
-        ...(defaultVersion !== undefined && { defaultVersion }),
-      },
-    });
-  }
-
-  for (const version of versions) {
-    if (version.ltsStatus !== 'lts-outdated-patch' && version.ltsStatus !== 'lts-superseded') {
-      continue;
-    }
-    findings.push({
-      code: 'outdated-lts',
-      params: { version: version.version, ltsStatus: version.ltsStatus },
-    });
-  }
-  return findings;
-}
-
 export async function detectNvm(
   deps: NvmDetectionDeps,
   options: NvmDetectionOptions
@@ -254,26 +194,18 @@ export async function detectNvm(
   const defaultVersion = resolveDefaultAlias(defaultAlias, aliasCache, installedVersions);
   const managerVersion = nvmScript ? parseNvmVersion(nvmScript) : undefined;
   const latestByMajor = mergeLatestVersions(aliasCache, options.latestByMajor);
-  const currentPath = options.currentNodePath
-    ? normalizedPath(options.currentNodePath, deps.platform)
-    : undefined;
-  const currentVersion = installedVersions.find(
-    (version) => normalizedPath(version.path, deps.platform) === currentPath
-  )?.version;
-  const versions: ManagedVersion[] = installedVersions.map((version) => {
-    const releaseLine = findNodeReleaseLine(options.schedule, version.version);
-    return {
-      version: version.version,
-      path: version.path,
-      isDefault: version.version === defaultVersion,
-      isCurrent: version.version === currentVersion,
-      ltsStatus: classifyNodeLtsStatus(version.version, options.schedule, {
-        now: options.now,
-        latestByMajor,
-        liveDataAvailable: options.liveDataAvailable,
-      }),
-      ...(releaseLine?.codename !== undefined && { ltsCodename: releaseLine.codename }),
-    };
+  const currentVersion = findCurrentVersion(
+    installedVersions,
+    options.currentNodePath,
+    deps.platform
+  );
+  const versions: ManagedVersion[] = toManagedVersions(installedVersions, {
+    schedule: options.schedule,
+    now: options.now,
+    latestByMajor,
+    liveDataAvailable: options.liveDataAvailable,
+    defaultVersion,
+    currentVersion,
   });
 
   return {
@@ -285,6 +217,12 @@ export async function detectNvm(
     ...(defaultAlias !== undefined && { defaultAlias }),
     ...(defaultVersion !== undefined && { defaultVersion }),
     ...(currentVersion !== undefined && { currentVersion }),
-    findings: createFindings(defaultAlias, defaultVersion, currentVersion, versions),
+    findings: createManagedVersionFindings(
+      'nvm',
+      defaultAlias,
+      defaultVersion,
+      currentVersion,
+      versions
+    ),
   };
 }
