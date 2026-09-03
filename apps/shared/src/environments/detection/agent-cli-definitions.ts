@@ -94,14 +94,15 @@ export const CODEX_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = {
   },
 };
 
-// Verified on Linux 2026-07-26: `cursor-agent --version` printed
-// `2026.07.16-899851b`.
+// Verified against docs.cursor.com 2026-09-03: the CLI is documented and
+// installed as `agent`. `cursor-agent` stays second for an install laid down
+// before the rename — Cursor has not said the old name is ever removed.
 export const CURSOR_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = {
   kind: 'cli',
   targetId: 'cursor',
   runtime: {
     id: 'cursor',
-    binaryNames: ['cursor-agent'],
+    binaryNames: ['agent', 'cursor-agent'],
     versionArgs: ['--version'],
     parseVersion: parseCursorAgentVersion,
     keepUnparsedVersion: true,

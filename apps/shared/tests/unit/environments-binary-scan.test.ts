@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   type BinaryScanDeps,
   BUN_RUNTIME_DEFINITION,
+  CURSOR_AGENT_CLI_DEFINITION,
   NODE_RUNTIME_DEFINITION,
   parseBunVersion,
   parseNodeVersion,
@@ -285,6 +286,38 @@ describe('scanRuntime', () => {
       '/b/bin/node',
     ]);
     expect(result.installations[0]?.effective).toBe(true);
+  });
+
+  it('finds Cursor under its renamed `agent` binary before the legacy `cursor-agent`', async () => {
+    const result = await scanRuntime(
+      CURSOR_AGENT_CLI_DEFINITION.runtime,
+      fakeDeps({
+        env: { PATH: '/usr/local/bin' },
+        pathExists: (path) => path === '/usr/local/bin/agent',
+        probeVersion: (path) =>
+          Promise.resolve(path === '/usr/local/bin/agent' ? '2026.07.16-899851b' : null),
+      })
+    );
+
+    expect(result.installations.map((installation) => installation.rawPath)).toEqual([
+      '/usr/local/bin/agent',
+    ]);
+  });
+
+  it('still finds a pre-rename Cursor install under the legacy `cursor-agent` name', async () => {
+    const result = await scanRuntime(
+      CURSOR_AGENT_CLI_DEFINITION.runtime,
+      fakeDeps({
+        env: { PATH: '/usr/local/bin' },
+        pathExists: (path) => path === '/usr/local/bin/cursor-agent',
+        probeVersion: (path) =>
+          Promise.resolve(path === '/usr/local/bin/cursor-agent' ? '2026.07.16-899851b' : null),
+      })
+    );
+
+    expect(result.installations.map((installation) => installation.rawPath)).toEqual([
+      '/usr/local/bin/cursor-agent',
+    ]);
   });
 
   it('keeps scanning every candidate when stopWhen is absent', async () => {
