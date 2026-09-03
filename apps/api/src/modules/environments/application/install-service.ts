@@ -449,6 +449,9 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         supported,
         missingRequirements: requirements.missing,
         guard,
+        // Every recipe in the table executes today; copy-only entries land
+        // with the update/uninstall set and flip this from the recipe.
+        runnable: true,
         ...(recipe.download && {
           download: {
             url: artifact?.url ?? recipe.download.url,

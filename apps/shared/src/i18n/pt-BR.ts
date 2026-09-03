@@ -2737,6 +2737,8 @@ export const messages = {
       node: 'Node.js',
       nvm: 'nvm',
       fnm: 'fnm',
+      winget: 'winget',
+      git: 'Git',
       volta: 'Volta',
       mangostudio: 'MangoStudio',
       claude: 'Claude Code',
@@ -3337,6 +3339,8 @@ export const messages = {
         '{path} respondeu com uma versão que não foi reconhecida; as checagens de compatibilidade ficam de fora.',
       'location-unwritable':
         '{path} não é gravável, então o MangoStudio não consegue publicar recursos em {locationId}.',
+      'prerequisite-missing':
+        '{recipe} precisa de {requirement}, que não está instalado nesta máquina. {remedy}',
     },
     agents: {
       description:

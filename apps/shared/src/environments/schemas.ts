@@ -464,6 +464,55 @@ export const EnvironmentConnectionStatusSchema = Type.Object(
   { additionalProperties: false }
 );
 
+/**
+ * Who put an installation where it is, as far as the scanner can tell.
+ *
+ * `nvm | fnm | volta` come from the version-manager classification; `winget`
+ * is not visible by path (winget's MSI and the nodejs.org MSI both land in
+ * `Program Files\nodejs`), so a win32 probe asks winget once per scan and
+ * marks the match. `system` is everything the scanner could not attribute.
+ */
+export const PathSourceSchema = Type.Union([
+  Type.Literal('system'),
+  Type.Literal('nvm'),
+  Type.Literal('fnm'),
+  Type.Literal('volta'),
+  Type.Literal('winget'),
+  Type.Literal('bun'),
+  Type.Literal('mangostudio-managed'),
+]);
+
+/**
+ * Which installation a spawned process runs with. `auto` is what a login shell
+ * would see, computed without executing profiles; a path is the realpath of one
+ * installation the probe already returned.
+ */
+export const ToolchainChoiceSchema = Type.Union([
+  Type.Literal('auto'),
+  Type.String({ minLength: 1, maxLength: 4_096 }),
+]);
+
+export const ToolchainSelectionSchema = Type.Object(
+  {
+    node: ToolchainChoiceSchema,
+    bun: ToolchainChoiceSchema,
+  },
+  { additionalProperties: false }
+);
+
+export const ToolchainUpdateBodySchema = Type.Object(
+  {
+    node: Type.Optional(ToolchainChoiceSchema),
+    bun: Type.Optional(ToolchainChoiceSchema),
+  },
+  { additionalProperties: false, minProperties: 1 }
+);
+
+export const DEFAULT_TOOLCHAIN_SELECTION: Static<typeof ToolchainSelectionSchema> = {
+  node: 'auto',
+  bun: 'auto',
+};
+
 export const EnvironmentSchema = Type.Object(
   {
     id: EnvironmentIdSchema,
@@ -484,6 +533,11 @@ export const EnvironmentSchema = Type.Object(
     status: EnvironmentConnectionStatusSchema,
     /** Present for Direct URL environments; true when a token is in the secret store. */
     hasRuntimeToken: Type.Optional(Type.Boolean()),
+    /**
+     * Which Node and Bun every process spawned on this machine runs with.
+     * Absent reads as `auto` for both; the hub always sends it.
+     */
+    toolchain: Type.Optional(ToolchainSelectionSchema),
   },
   { additionalProperties: false }
 );
@@ -559,6 +613,12 @@ export const RuntimeIdSchema = Type.Union([
   Type.Literal('bun'),
   Type.Literal('node'),
   Type.Literal('nvm'),
+  /** Second helper-managed Node manager; the only one whose install ships on win32. */
+  Type.Literal('fnm'),
+  /** Probed as a prerequisite for the Windows recipes; never installed by MangoStudio. */
+  Type.Literal('winget'),
+  /** Probed for the setup checklist and offered as a recipe on win32 only. */
+  Type.Literal('git'),
   Type.Literal('mangostudio'),
   Type.Literal('claude'),
   Type.Literal('codex'),
@@ -610,6 +670,12 @@ export const RuntimeFindingCodeSchema = Type.Union([
   Type.Literal('not-authenticated'),
   Type.Literal('version-probe-failed'),
   Type.Literal('location-unwritable'),
+  /**
+   * A recipe this machine would offer needs a tool that is not there. Names
+   * the recipe that installs it, or the non-recipe remedy when nothing does
+   * (winget comes from the Microsoft Store, never from MangoStudio).
+   */
+  Type.Literal('prerequisite-missing'),
 ]);
 
 /**
@@ -643,6 +709,8 @@ export const RuntimeInstallationSchema = Type.Object({
   effective: Type.Boolean(),
   aliasOf: Type.Optional(Type.String({ minLength: 1 })),
   managedBy: Type.Optional(VersionManagerIdSchema),
+  /** Absent on a status from a peer that predates the field; read as `system`. */
+  pathSource: Type.Optional(PathSourceSchema),
 });
 
 export const RuntimeFindingSchema = Type.Object({
@@ -700,22 +768,48 @@ export const VersionManagerStatusListSchema = Type.Array(VersionManagerStatusSch
 export const InstallRecipeIdSchema = Type.Union([
   Type.Literal('bun.install.official'),
   Type.Literal('bun.update'),
+  Type.Literal('bun.uninstall'),
   Type.Literal('nvm.install'),
+  Type.Literal('nvm.update'),
   Type.Literal('nvm.node.install'),
   Type.Literal('nvm.node.set-default'),
+  Type.Literal('fnm.install'),
+  Type.Literal('fnm.node.install'),
+  Type.Literal('fnm.node.set-default'),
+  Type.Literal('winget.node.install'),
+  Type.Literal('winget.node.update'),
+  Type.Literal('git.install.windows'),
   Type.Literal('claude.install'),
+  Type.Literal('claude.update'),
+  Type.Literal('claude.uninstall'),
   Type.Literal('codex.install'),
+  Type.Literal('codex.update'),
+  Type.Literal('codex.uninstall'),
   Type.Literal('cursor.install'),
+  Type.Literal('cursor.update'),
+  Type.Literal('cursor.uninstall'),
 ]);
 
 export const InstallActionSchema = Type.Union([
   Type.Literal('install'),
   Type.Literal('update'),
+  Type.Literal('uninstall'),
   Type.Literal('use-version'),
   Type.Literal('set-default'),
 ]);
 
-export const InstallPlatformSchema = Type.Union([Type.Literal('darwin'), Type.Literal('linux')]);
+export const InstallPlatformSchema = Type.Union([
+  Type.Literal('darwin'),
+  Type.Literal('linux'),
+  Type.Literal('win32'),
+]);
+
+/**
+ * Why a recipe is listed but never run. A recipe MangoStudio executes must have
+ * a vendor-documented shape; one that does not is offered as a copyable
+ * command with this reason beside it.
+ */
+export const InstallUnrunnableReasonSchema = Type.Union([Type.Literal('vendor-undocumented')]);
 
 export const NodeVersionSpecSchema = Type.String({
   minLength: 1,
@@ -774,7 +868,13 @@ export const InstallGuardSchema = Type.Object({
 export const InstallRecipeDownloadSchema = Type.Object({
   url: Type.String({ minLength: 1 }),
   sizeBytes: Type.Optional(Type.Integer({ minimum: 1 })),
+  /** Digest of the bytes actually fetched; present once the installer is prepared. */
   sha256: Type.Optional(Type.String({ pattern: '^[a-f0-9]{64}$' })),
+  /**
+   * Digest the recipe pins. Set for installers fetched from an immutable URL
+   * (a tagged nvm release); a fetched body that does not match it is refused.
+   */
+  pinnedSha256: Type.Optional(Type.String({ pattern: '^[a-f0-9]{64}$' })),
 });
 
 export const InstallProfileSetupSchema = Type.Object({
@@ -798,6 +898,13 @@ export const InstallRecipePreviewSchema = Type.Object({
   supported: Type.Boolean(),
   missingRequirements: Type.Array(RuntimeIdSchema),
   guard: InstallGuardSchema,
+  /**
+   * Whether MangoStudio will execute this recipe at all. False is a property
+   * of the recipe, not of the machine: `argv` is empty, `copyCommand` is the
+   * whole offer, and `unrunnableReason` says why.
+   */
+  runnable: Type.Boolean(),
+  unrunnableReason: Type.Optional(InstallUnrunnableReasonSchema),
   download: Type.Optional(InstallRecipeDownloadSchema),
   profileSetup: Type.Optional(InstallProfileSetupSchema),
 });
@@ -910,6 +1017,11 @@ export const InstallStreamEventSchema = Type.Union([
 ]);
 
 export type RuntimeId = Static<typeof RuntimeIdSchema>;
+export type PathSource = Static<typeof PathSourceSchema>;
+export type ToolchainChoice = Static<typeof ToolchainChoiceSchema>;
+export type ToolchainSelection = Static<typeof ToolchainSelectionSchema>;
+export type ToolchainUpdateBody = Static<typeof ToolchainUpdateBodySchema>;
+export type InstallUnrunnableReason = Static<typeof InstallUnrunnableReasonSchema>;
 export type RuntimeOrigin = Static<typeof RuntimeOriginSchema>;
 export type VersionManagerId = Static<typeof VersionManagerIdSchema>;
 export type LtsStatus = Static<typeof LtsStatusSchema>;

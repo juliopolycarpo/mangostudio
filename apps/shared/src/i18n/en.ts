@@ -2734,6 +2734,8 @@ export const messages: Messages = {
       node: 'Node.js',
       nvm: 'nvm',
       fnm: 'fnm',
+      winget: 'winget',
+      git: 'Git',
       volta: 'Volta',
       mangostudio: 'MangoStudio',
       claude: 'Claude Code',
@@ -3330,6 +3332,8 @@ export const messages: Messages = {
         '{path} reported a version that was not recognized, so compatibility checks are skipped.',
       'location-unwritable':
         '{path} is not writable, so MangoStudio cannot publish resources to {locationId}.',
+      'prerequisite-missing':
+        '{recipe} needs {requirement}, which is not installed on this machine. {remedy}',
     },
     agents: {
       description: 'Each agent CLI, the configuration it reads, and where the Library can write.',

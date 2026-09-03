@@ -73,6 +73,7 @@ export function installRecipe(overrides: Partial<InstallRecipePreview> = {}): In
     argv: ['bash', '/tmp/installer.sh'],
     copyCommand: 'curl -fsSL https://bun.com/install | bash',
     requires: [],
+    runnable: true,
     writes: ['$HOME/.bun'],
     networkAccess: true,
     timeoutMs: 300_000,
