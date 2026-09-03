@@ -232,6 +232,30 @@ describe('detectFnm', () => {
       expect(status.versions.map((version) => version.version)).toEqual(['24.18.0']);
       expect(status.defaultVersion).toBe('24.18.0');
     });
+
+    it('matches the current Node path case-insensitively', async () => {
+      const nodePath = winInstall(WIN_ROOT, 'v24.18.0');
+      // A differently-cased drive letter and directory segment — the same path
+      // any Windows API can hand back — must still match the installation it
+      // names. `findCurrentVersion`'s win32 branch is otherwise untested: nvm
+      // never reaches it (it returns `installed: false` on win32 outright), so
+      // fnm is the first detector that actually exercises the lowercase compare.
+      const currentPath = nodePath.replace('C:\\Users\\tester', 'c:\\users\\tester');
+
+      const status = await detect(
+        createDeps(
+          { directories: [WIN_ROOT], files: [nodePath] },
+          {
+            platform: 'win32',
+            homeDir: WIN_HOME,
+            env: { APPDATA: `${WIN_HOME}\\AppData\\Roaming` },
+          }
+        ),
+        currentPath
+      );
+
+      expect(status.currentVersion).toBe('24.18.0');
+    });
   });
 
   it('returns not-found on win32 with neither FNM_DIR nor %APPDATA% set', async () => {
