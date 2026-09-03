@@ -94,6 +94,7 @@ describe('runtime install execution', () => {
         HTTPS_PROXY: 'https://proxy.test',
         ANTHROPIC_API_KEY: 'secret',
         GITHUB_TOKEN: 'secret',
+        FNM_DIR: '/home/tester/.local/share/fnm',
       },
       {
         PROFILE: '/dev/null',
@@ -107,6 +108,7 @@ describe('runtime install execution', () => {
       HOME: '/home/tester',
       XDG_CONFIG_HOME: '/home/tester/.config',
       HTTPS_PROXY: 'https://proxy.test',
+      FNM_DIR: '/home/tester/.local/share/fnm',
       PROFILE: '/dev/null',
       NVM_DIR: '/home/tester/.nvm',
     });
@@ -299,7 +301,7 @@ describe('runtime install execution', () => {
         sourceEnv: () => ({ PATH: '/usr/bin' }),
         platform: 'linux',
         homeDir: '/home/tester',
-        spawnEnvFs: { exists: () => false, readFile: () => null },
+        spawnEnvFs: { exists: () => false, readFile: () => null, readDirectory: () => null },
       },
     });
 

@@ -41,6 +41,9 @@ describe('external agent process environment', () => {
           LC_MESSAGES: 'pt_BR.UTF-8',
           CONNECTOR_SECRET: 'never-forward-this',
           VENDOR_CONFIG: 'adapter-owned',
+          NVM_DIR: '/home/ada/.nvm',
+          FNM_DIR: '/home/ada/.local/share/fnm',
+          BUN_INSTALL: '/home/ada/.bun',
         },
         ['VENDOR_CONFIG']
       )
@@ -50,6 +53,9 @@ describe('external agent process environment', () => {
       LANG: 'en_US.UTF-8',
       LC_MESSAGES: 'pt_BR.UTF-8',
       VENDOR_CONFIG: 'adapter-owned',
+      NVM_DIR: '/home/ada/.nvm',
+      FNM_DIR: '/home/ada/.local/share/fnm',
+      BUN_INSTALL: '/home/ada/.bun',
     });
   });
 
