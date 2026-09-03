@@ -75,10 +75,48 @@ builders are code constants in
 `apps/api/src/modules/environments/domain/install-recipes.ts`. The API accepts only the closed
 recipe-ID union.
 
-Most recipes accept no input. The two nvm version operations accept only `lts`, `latest`, or one
-to three numeric version components. The value is revalidated at the recipe boundary and passed
-as a positional argument to constant shell source; it is never interpolated into that source.
-nvm is loaded directly from its detected `nvm.sh`, so the user's login profile is not executed.
+Most recipes accept no input. The nvm and fnm version operations accept only `lts`, `latest`, or
+one to three numeric version components. The value is revalidated at the recipe boundary and
+passed as a positional argument to constant shell source, or as one argv element to the manager's
+binary; it is never interpolated into script text. nvm is loaded directly from its detected
+`nvm.sh`, so the user's login profile is not executed; fnm is driven only through `fnm install`
+and `fnm default`, never `fnm use`, which needs a shell hook.
+
+A recipe that invokes the tool itself (`bun upgrade`, `claude update`, `codex update`,
+`agent update`, every `fnm` call, every `winget` call) spawns the **absolute path** the
+requirement resolution found, because a runtime started by a service has a `PATH` that never saw
+the tool. Recipes may declare `acceptedExitCodes` for exits that mean success: winget answers an
+already-current package with `-1978335189` (`0x8A15002B`, "no applicable upgrade"), which is not
+a failure MangoStudio should report as one.
+
+### Copy-only recipes
+
+A recipe MangoStudio runs must have a vendor-documented shape; the audit row is the promise. A
+recipe whose vendor documents no such shape (`codex.uninstall`, `cursor.uninstall`) has no argv
+and is previewed with `runnable: false` and `unrunnableReason: 'vendor-undocumented'`: the
+copyable command is the whole offer, and `start` refuses it.
+
+### Windows
+
+The same table serves win32. Script installers (Bun, Claude Code, Codex, Cursor) declare a
+per-platform download, `.ps1` on Windows, and run as
+`powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <file>`. Node comes from
+winget's `OpenJS.NodeJS.LTS` (`winget.node.install`, `winget.node.update`) with
+`--exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity`;
+fnm from `winget install --id Schniz.fnm`; Git from `winget install --id Git.Git`. `winget` is a
+probed prerequisite and nothing installs it: a missing winget is a `prerequisite-missing` finding
+whose remedy is App Installer on the Microsoft Store. The runtime forwards the Windows keys
+PowerShell and the installers need (`SystemRoot`, `ComSpec`, `PATHEXT`, `USERPROFILE`,
+`LOCALAPPDATA`, `APPDATA`, `ProgramFiles`, …) on win32 only.
+
+Two facts about the winget Node package are accepted on purpose: it is a per-machine MSI declared
+`elevatesSelf`, so Windows shows a UAC prompt no flag suppresses, and the `.LTS` package tracks
+the current LTS *line*, so an upgrade crosses majors when Node promotes a new one. What has **not**
+been verified on a real host: whether the UAC prompt reaches the user when the installer is
+spawned from the runtime's hidden window, what happens from a service session with no
+interactive desktop, and whether `winget install` over a nodejs.org MSI takes its "found an
+existing package, trying to upgrade" path. The recipes are marked runnable on the documented
+behaviour; the audit row and the bounded log are what to read if a machine disagrees.
 
 ## Downloaded Installers
 
@@ -89,13 +127,16 @@ Official script installers have a prepare step before execution:
    provider base URLs, so a hijacked installer host cannot redirect the server onto a loopback,
    private, unique-local, or link-local endpoint.
 2. Stream the response through a size bound before allocating the complete body.
-3. Reject empty or implausibly small responses, oversized responses, HTML, and content without a
-   shell shebang.
-4. Store the bytes in a temporary file and return the resolved origin URL, byte size, and SHA-256
-   digest for confirmation.
-5. Bind that temporary artifact to the authenticated user, recipe, and validated input for ten
+3. When the recipe pins a digest (an immutable URL such as a tagged nvm release), refuse a body
+   whose SHA-256 differs, naming both digests.
+4. Reject empty or implausibly small responses, oversized responses, HTML, and content without a
+   shell shebang — or, for a PowerShell installer, without any PowerShell token.
+5. Store the bytes in a temporary file named by interpreter (`installer.sh` / `installer.ps1`) and
+   return the resolved origin URL, byte size, and SHA-256 digest for confirmation.
+6. Bind that temporary artifact to the authenticated user, recipe, and validated input for ten
    minutes. Starting a different request cannot reuse it.
-6. Execute the local file as `bash <file>` or `sh <file>` and remove it when the run finishes.
+7. Execute the local file as `bash <file>`, `sh <file>` or `powershell … -File <file>` and remove
+   it when the run finishes.
 
 MangoStudio never pipes a live network response into a shell.
 
@@ -118,9 +159,12 @@ offerable from a Windows hub when the environment is a WSL distribution; that is
 ## Execution Limits
 
 The runtime uses `Bun.spawn(argv)` with stdin disabled and stdout/stderr piped. It forwards only
-the runtime path/home/temp/XDG variables, proxy variables, and the small set of code-owned
-recipe overrides needed by nvm — read from *its* environment, not the hub's. Connector tokens, API
-keys, GitHub tokens, and other credential variables are withheld.
+the runtime path/home/temp/XDG variables, proxy variables, the version-manager roots, and the
+small set of code-owned recipe overrides (nvm's `PROFILE`, Codex's `CODEX_NON_INTERACTIVE`) —
+read from *its* environment, not the hub's. The `PATH` it starts from is the spawn environment
+described in [`environments.md`](../features/environments.md), so an installer sees the same Node
+and Bun every other spawned process does. Connector tokens, API keys, GitHub tokens, and other
+credential variables are withheld.
 
 Each run has:
 
