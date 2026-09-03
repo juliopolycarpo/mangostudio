@@ -14,7 +14,7 @@
 
 import type { InstallRecipePreview, RecipeInput } from '@mangostudio/shared/environments';
 import type { ReactNode } from 'react';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
@@ -68,6 +68,15 @@ export function InstallAction({
   const s = t.environments.install;
   const { resolve } = useToolIdentities();
   const flow = useInstallFlow(environmentId);
+  const { dismiss } = flow;
+  const refusedByGuard = flow.state.step === 'refused' && !flow.state.recipe.guard.allowed;
+  const guardAllowedNow = recipe?.guard.allowed === true;
+  // A refusal that was the guard's alone ends when the guard flips — the
+  // one-click enable re-fetches the catalog, and the card must offer the
+  // install again instead of keeping the stale copy block on screen.
+  useEffect(() => {
+    if (refusedByGuard && guardAllowedNow) dismiss();
+  }, [refusedByGuard, guardAllowedNow, dismiss]);
   // The console must survive the run that produced it: `finished` keeps the same
   // runId as `running`, so the stream hook is not torn down (and its buffer
   // reset to idle) the instant the exit event moves the flow forward.
@@ -103,7 +112,7 @@ export function InstallAction({
         <p className="text-sm text-on-surface-variant/70">
           {s.unrunnable[recipe.unrunnableReason ?? 'vendor-undocumented']}
         </p>
-        <CopyCommandBlock recipe={recipe} />
+        <CopyCommandBlock recipe={recipe} environmentId={environmentId} />
       </div>
     );
   }
@@ -165,7 +174,11 @@ export function InstallAction({
       )}
 
       {flow.state.step === 'refused' && (
-        <CopyCommandBlock recipe={flow.state.recipe} message={flow.state.message} />
+        <CopyCommandBlock
+          recipe={flow.state.recipe}
+          message={flow.state.message}
+          environmentId={environmentId}
+        />
       )}
 
       {(flow.state.step === 'confirming' ||

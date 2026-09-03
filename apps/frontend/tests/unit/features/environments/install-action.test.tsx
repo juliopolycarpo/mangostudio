@@ -137,6 +137,33 @@ describe('InstallAction', () => {
     expect(installRequests()).toHaveLength(0);
   });
 
+  it('offers the install again once the guard that refused it flips', async () => {
+    const refused = installRecipe({ guard: { allowed: false, reasons: ['disabled'] } });
+    const allowed = installRecipe({ guard: { allowed: true, reasons: [] } });
+    const view = render(
+      <InstallAction
+        recipe={refused}
+        catalog={[refused]}
+        input={{ kind: 'none' }}
+        label="Install Bun"
+      />
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Install Bun' }));
+    expect(screen.getByTestId('copy-command-block')).toBeTruthy();
+
+    view.rerender(
+      <InstallAction
+        recipe={allowed}
+        catalog={[allowed]}
+        input={{ kind: 'none' }}
+        label="Install Bun"
+      />
+    );
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Install Bun' })).toBeTruthy());
+    expect(screen.queryByTestId('copy-command-block')).toBeNull();
+  });
+
   it('renders a copy-only recipe as a command with its reason and no run button', () => {
     // codex.uninstall and cursor.uninstall ship exactly like this: no vendor-
     // documented unattended shape, so `argv` never builds and the offer is the
