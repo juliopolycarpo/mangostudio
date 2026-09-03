@@ -390,6 +390,19 @@ describe('machineService.writeConfig', () => {
     });
   }
 
+  it('reads and writes through a symlinked config.toml, reporting the target', async () => {
+    const fake = new FakeConfigFile({});
+    const service = makeConfigService(fake, {
+      resolveConfigPath: (path) =>
+        path === '/home/j/.mango/config.toml' ? '/home/j/dotfiles/mango.toml' : path,
+    });
+
+    const response = await service.writeConfig(BODY, LOCAL);
+
+    expect(response.configFile).toBe('/home/j/dotfiles/mango.toml');
+    expect(fake.writes.map((write) => write.path)).toEqual(['/home/j/dotfiles/mango.toml']);
+  });
+
   it('creates the [environments] table when the file has none', async () => {
     const fake = new FakeConfigFile({});
     const service = makeConfigService(fake);

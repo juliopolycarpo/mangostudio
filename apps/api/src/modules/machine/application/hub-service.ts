@@ -197,7 +197,8 @@ export function currentHubExecutable(overrides: Partial<HubExecutableProbe> = {}
   return resolveHubExecutable(currentHubExecutableProbe(overrides));
 }
 
-function realPathOrSelf(path: string): string {
+/** The file a path really names, or the path itself when it cannot be resolved. // Usage: realPathOrSelf('~/.mango/config.toml') */
+export function realPathOrSelf(path: string): string {
   try {
     return realpathSync(path);
   } catch {

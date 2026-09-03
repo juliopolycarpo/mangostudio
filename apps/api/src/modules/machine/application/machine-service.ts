@@ -80,6 +80,7 @@ import {
   hubServiceLogPath,
   hubServiceTargetFor,
   isAuthSecretPersisted,
+  realPathOrSelf,
 } from './hub-service';
 
 /** A mutating action was refused by the local-surface guard. */
@@ -143,6 +144,8 @@ export interface MachineServiceDeps {
   readonly secretPersisted: () => boolean;
   /** The canonical user config.toml path; never a hard-coded `~/.mango`. */
   readonly configFilePath: () => string;
+  /** Follows a symlinked `config.toml` (dotfiles) so the read and the write name the same file. */
+  readonly resolveConfigPath: (path: string) => string;
   readonly readConfigDocument: (path: string) => Record<string, unknown>;
   readonly writeConfigFile: (path: string, contents: string) => void;
   /**
@@ -341,17 +344,32 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
 
     // Every dependency this touches is synchronous (file I/O and the config
     // singleton are both sync APIs); the interface stays `Promise`-returning
-    // like its siblings so a caller never has to know that. The guard refusal
-    // is returned as a rejection rather than thrown, so a synchronous throw
-    // here never escapes past a caller expecting a promise.
+    // like its siblings so a caller never has to know that. Every failure —
+    // the guard's, an unreadable file's — leaves as a rejection, so a caller
+    // awaiting the promise is always the one that sees it.
     writeConfig(body, context) {
+      try {
+        return Promise.resolve(writeConfigNow(body, context));
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
+  };
+
+  function writeConfigNow(
+    body: MachineConfigWriteBody,
+    context: MachineRequestContext
+  ): MachineConfigWriteResponse {
+    {
       // The same loopback-only surface every mutating machine action shares —
       // no `installsEnabled` reason has meaning here, since this is the very
       // switch that turns it on.
       const guard = d.evaluateGuard(context.clientIp);
-      if (!guard.allowed) return Promise.reject(new MachineActionBlockedError(guard));
+      if (!guard.allowed) throw new MachineActionBlockedError(guard);
 
-      const configFile = d.configFilePath();
+      // A symlinked config.toml (dotfiles) is read through the link's target
+      // and written there too; the bounded reader refuses to follow links.
+      const configFile = d.resolveConfigPath(d.configFilePath());
       const doc = d.readConfigDocument(configFile);
       setTomlSectionBoolean(
         doc,
@@ -365,13 +383,11 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       // meant to say `true` from now on — but the response never claims
       // success for a switch that did not actually move.
       const installsEnabled = d.reloadEffectiveInstallsEnabled();
-      return Promise.resolve(
-        installsEnabled
-          ? { applied: true, configFile, installsEnabled }
-          : { applied: false, configFile, installsEnabled, reason: 'env-override' }
-      );
-    },
-  };
+      return installsEnabled
+        ? { applied: true, configFile, installsEnabled }
+        : { applied: false, configFile, installsEnabled, reason: 'env-override' };
+    }
+  }
 
   /**
    * Run one supervisor verb, turning its own refusal into a coded reason. The
@@ -509,6 +525,7 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
     serviceLogFile: deps.serviceLogFile ?? hubServiceLogPath,
     secretPersisted: deps.secretPersisted ?? (() => isAuthSecretPersisted()),
     configFilePath: deps.configFilePath ?? (() => getConfig().configFilePath),
+    resolveConfigPath: deps.resolveConfigPath ?? realPathOrSelf,
     readConfigDocument: deps.readConfigDocument ?? readTomlDocument,
     writeConfigFile: deps.writeConfigFile ?? ((path, contents) => writeFileAtomic(path, contents)),
     reloadEffectiveInstallsEnabled:
