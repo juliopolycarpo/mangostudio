@@ -153,12 +153,27 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
       // below fails with the same cause and closes the socket for it.
     }
 
+    /**
+     * Whether this socket may still speak for the session after an await.
+     * Answers false once the browser hung up or a takeover replaced this
+     * viewer, and closes a socket that only lost the session — a successor's
+     * `replaced.close()` normally does that, but it cannot if the loss came
+     * from anywhere else, and an open socket with no relay wiring is one the
+     * browser waits on forever.
+     */
+    const stillCurrent = (): boolean => {
+      if (state.socketClosed) return false;
+      if (service.isCurrentViewer(state.sessionId, viewer)) return true;
+      socket.close(TERMINAL_SOCKET_CLOSE_CODES.REPLACED, 'Replaced by a new viewer');
+      return false;
+    };
+
     // A takeover during that round trip must stop this socket here: attaching
     // after the successor did would re-snapshot its scrollback and hand it a
     // duplicate of everything in between. Viewer identity is what answers that,
     // rather than `socketClosed` alone — the handoff is recorded synchronously,
     // so this holds however the runtime schedules the replaced socket's `close`.
-    if (state.socketClosed || !service.isCurrentViewer(state.sessionId, viewer)) {
+    if (!stillCurrent()) {
       service.detachViewer(state.sessionId, viewer);
       return;
     }
@@ -211,11 +226,15 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
       return;
     }
 
-    if (state.socketClosed) {
+    if (!stillCurrent()) {
       // The browser hung up, or a takeover replaced this viewer, while
-      // attach() was in flight. Only detach the runtime if this was still
-      // the current viewer: a takeover already moved that job onto the
-      // successor, and detaching here would stop its stream instead.
+      // attach() was in flight. Viewer identity is checked alongside the close
+      // flag for the same reason it is above: the two coincide only because
+      // Bun dispatches a server-initiated close synchronously, and relying on
+      // that would let a stale socket replay a snapshot the successor already
+      // took. Only detach the runtime if this was still the current viewer: a
+      // takeover already moved that job onto the successor, and detaching here
+      // would stop its stream instead.
       teardown(state);
       const wasCurrent = service.detachViewer(state.sessionId, viewer);
       if (wasCurrent) {
