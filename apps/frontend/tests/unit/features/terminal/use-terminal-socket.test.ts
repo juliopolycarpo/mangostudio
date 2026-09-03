@@ -242,6 +242,23 @@ describe('createTerminalSocket', () => {
     expect(FakeTerminalSocket.instances).toHaveLength(2);
   });
 
+  // A 4429 means this client outran the hub's queue. Retrying in half a second
+  // would re-attach, replay the whole scrollback and outrun it again, so the
+  // schedule starts at its ceiling instead of walking up to it.
+  it('starts the backoff at its ceiling after a rate-limit close', async () => {
+    createSocket();
+    lastSocket().open();
+
+    lastSocket().drop(TERMINAL_SOCKET_CLOSE_CODES.RATE_LIMITED);
+
+    expect(statuses.at(-1)).toBe('reconnecting');
+    // 30s capped base, halved by the zero-jitter `random` above.
+    await advanceTimersByTimeAsync(14_999);
+    expect(FakeTerminalSocket.instances).toHaveLength(1);
+    await advanceTimersByTimeAsync(1);
+    expect(FakeTerminalSocket.instances).toHaveLength(2);
+  });
+
   it('pings on the shared heartbeat while open and forces a reconnect on a missed pong', async () => {
     createSocket();
     lastSocket().open();

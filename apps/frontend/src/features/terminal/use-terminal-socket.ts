@@ -30,7 +30,11 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { getWebSocketBaseUrl } from '@/lib/api-base-url';
 import { scheduleLoginRedirect } from '@/lib/auth-navigate';
-import { nextReconnectDelay, SOCKET_HEARTBEAT_MS } from '@/lib/realtime/reconnect-backoff';
+import {
+  nextReconnectDelay,
+  RECONNECT_MAX_FAILURES,
+  SOCKET_HEARTBEAT_MS,
+} from '@/lib/realtime/reconnect-backoff';
 
 /**
  * `open` is the only phase a frame may be sent in. The rest are terminal for
@@ -211,6 +215,14 @@ export function createTerminalSocket(options: TerminalSocketOptions): TerminalSo
         // The session ended; the exit line renders from the last `exit`
         // frame or a session refetch, not from this socket reopening.
         setStatus('gone');
+        return;
+      case codes.RATE_LIMITED:
+        // The hub refused a queue this client outran. Retrying in a second
+        // would re-attach, replay the whole scrollback, and outrun it again;
+        // limit rejections start at the ceiling instead of walking up to it,
+        // exactly as `realtime-client.ts` treats the same code.
+        failureCount = Math.max(failureCount, RECONNECT_MAX_FAILURES - 1);
+        scheduleReconnect();
         return;
       default:
         scheduleReconnect();

@@ -50,6 +50,15 @@ export const TERMINAL_HUB_QUEUE_MAX_BYTES = 1024 * 1024;
  */
 export const TERMINAL_SOCKET_SEND_HIGH_WATER_BYTES =
   (HUB_WEBSOCKET_BACKPRESSURE_LIMIT_BYTES / 4) * 3;
+/**
+ * Client frames the hub will hold un-dispatched per socket. Each one is a
+ * `terminal.*` round trip to the runtime and they are serialized, so without a
+ * ceiling a client that sends faster than the runtime answers grows the hub's
+ * promise chain — and up to `TERMINAL_CLIENT_MESSAGE_MAX_BYTES` per entry —
+ * without bound. `/api/ws` bounds its own chain the same way; a terminal only
+ * needs a larger number because a paste is many frames at once.
+ */
+export const TERMINAL_SOCKET_MAX_PENDING_MESSAGES = 256;
 
 export const TERMINAL_COLS_MIN = 2;
 export const TERMINAL_COLS_MAX = 500;
@@ -73,6 +82,7 @@ export const TERMINAL_SOCKET_PATH = '/api/terminal';
 export const TERMINAL_SOCKET_CLOSE_CODES = {
   UNAUTHORIZED: REALTIME_CLOSE_CODES.UNAUTHORIZED,
   FORBIDDEN: REALTIME_CLOSE_CODES.FORBIDDEN,
+  RATE_LIMITED: REALTIME_CLOSE_CODES.RATE_LIMITED,
   INTERNAL_ERROR: REALTIME_CLOSE_CODES.INTERNAL_ERROR,
   NOT_FOUND: 4404,
   REPLACED: 4409,

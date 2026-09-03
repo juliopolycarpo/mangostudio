@@ -9,6 +9,7 @@ import {
   decodeTerminalServerMessage,
   encodeTerminalClientMessage,
   TERMINAL_SOCKET_CLOSE_CODES,
+  TERMINAL_SOCKET_MAX_PENDING_MESSAGES,
   type TerminalServerMessage,
 } from '@mangostudio/shared/terminal';
 import { Elysia } from 'elysia';
@@ -433,6 +434,31 @@ describe('terminal socket relay', () => {
 
     expect(runtime.calls.write).toHaveLength(1);
     expect(second.socket.readyState).toBe(WebSocket.OPEN);
+  });
+
+  it('closes a client that queues more frames than the runtime can answer', async () => {
+    const user = await insertTestUser();
+    let releaseWrite!: () => void;
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    const runtime = new FakeTerminalRuntimeClient({ gateFirstWrite: () => writeGate });
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const viewer = await openViewer(service, user.id, session.id);
+
+    // The first write blocks on the gate, so every frame behind it sits
+    // un-dispatched in the socket's message chain, retaining its bytes.
+    const frame = encodeTerminalClientMessage({
+      type: 'data',
+      data: new TextEncoder().encode('x'),
+    });
+    for (let i = 0; i <= TERMINAL_SOCKET_MAX_PENDING_MESSAGES + 1; i += 1) {
+      viewer.socket.send(frame);
+    }
+
+    expect((await viewer.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.RATE_LIMITED);
+    releaseWrite();
   });
 });
 

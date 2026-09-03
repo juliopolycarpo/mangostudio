@@ -16,6 +16,7 @@ import {
   encodeTerminalServerMessage,
   TERMINAL_CHUNK_MAX_BYTES,
   TERMINAL_SOCKET_CLOSE_CODES,
+  TERMINAL_SOCKET_MAX_PENDING_MESSAGES,
   type TerminalExit,
 } from '@mangostudio/shared/terminal';
 import { Elysia, t } from 'elysia';
@@ -51,6 +52,8 @@ interface TerminalSocketState {
   socketClosed: boolean;
   /** Serializes async message handlers so client writes cannot reorder. */
   messageChain: Promise<void>;
+  /** Frames appended to `messageChain` and not yet run, bounded by the shared cap. */
+  pendingMessageCount: number;
 }
 
 interface TerminalSocket {
@@ -334,6 +337,7 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
           unsubscribeOutput: null,
           socketClosed: false,
           messageChain: Promise.resolve(),
+          pendingMessageCount: 0,
         } satisfies TerminalSocketState,
       };
     })
@@ -370,9 +374,22 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
           return;
         }
 
+        // Admitted before it is enqueued: each frame costs a serialized round
+        // trip to the runtime, so a client that sends faster than the runtime
+        // answers would otherwise grow this chain — and retain its bytes —
+        // without bound. `/api/ws` bounds its own chain the same way.
+        if (state.pendingMessageCount >= TERMINAL_SOCKET_MAX_PENDING_MESSAGES) {
+          socket.close(TERMINAL_SOCKET_CLOSE_CODES.RATE_LIMITED, 'Message queue limit exceeded');
+          return;
+        }
+
         // Serialized per socket: a write and the resize behind it must reach
         // the runtime in the order the browser sent them.
-        const run = (): Promise<void> => handleClientMessage(socket, bytes);
+        state.pendingMessageCount += 1;
+        const run = (): Promise<void> =>
+          handleClientMessage(socket, bytes).finally(() => {
+            state.pendingMessageCount -= 1;
+          });
         const queued = state.messageChain.then(run, run);
         state.messageChain = queued.then(
           () => undefined,
