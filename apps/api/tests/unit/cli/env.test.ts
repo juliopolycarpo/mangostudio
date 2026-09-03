@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import type {
   AgentCliStatus,
   InstallPreparation,
@@ -16,11 +16,13 @@ import type { EnvArgs } from '../../../src/cli/args';
 import { parseEnvArgs } from '../../../src/cli/args';
 import {
   CliEnvironmentSnapshotSchema,
+  cliInstallGuard,
   type EnvInstallDeps,
   runEnv,
   runEnvInstall,
 } from '../../../src/cli/commands/env';
 import { CliError } from '../../../src/cli/errors';
+import { loadConfigForTest, resetConfig } from '../../../src/lib/config';
 import {
   InstallBlockedError,
   InstallUnavailableError,
@@ -82,6 +84,95 @@ const agentStatus: AgentCliStatus = {
   authSignal: 'file-absent',
   locations: [],
 };
+
+describe('cliInstallGuard', () => {
+  afterEach(() => {
+    resetConfig();
+  });
+
+  it('allows a local install when installs are enabled and this is not a container', async () => {
+    loadConfigForTest({
+      environments: {
+        ltsRefresh: false,
+        installsEnabled: true,
+        container: false,
+        wslExecutable: '',
+      },
+    });
+
+    const guard = await cliInstallGuard({ userId: 'local', clientIp: undefined });
+
+    expect(guard).toEqual({ allowed: true, reasons: [] });
+  });
+
+  it('refuses when installs are disabled', async () => {
+    loadConfigForTest({
+      environments: {
+        ltsRefresh: false,
+        installsEnabled: false,
+        container: false,
+        wslExecutable: '',
+      },
+    });
+
+    const guard = await cliInstallGuard({ userId: 'local', clientIp: undefined });
+
+    expect(guard).toEqual({ allowed: false, reasons: ['disabled'] });
+  });
+
+  it('refuses when this process is running inside a container', async () => {
+    loadConfigForTest({
+      environments: {
+        ltsRefresh: false,
+        installsEnabled: true,
+        container: true,
+        wslExecutable: '',
+      },
+    });
+
+    const guard = await cliInstallGuard({ userId: 'local', clientIp: undefined });
+
+    expect(guard).toEqual({ allowed: false, reasons: ['container'] });
+  });
+
+  it('refuses a remote --environment, since the CLI has no session to resolve it against', async () => {
+    loadConfigForTest({
+      environments: {
+        ltsRefresh: false,
+        installsEnabled: true,
+        container: false,
+        wslExecutable: '',
+      },
+    });
+
+    const guard = await cliInstallGuard({
+      userId: 'local',
+      clientIp: undefined,
+      environmentId: 'dev-box',
+    });
+
+    expect(guard).toEqual({ allowed: false, reasons: ['environment-not-trusted'] });
+  });
+
+  it('reports both disabled and environment-not-trusted together, not just the first one found', async () => {
+    loadConfigForTest({
+      environments: {
+        ltsRefresh: false,
+        installsEnabled: false,
+        container: false,
+        wslExecutable: '',
+      },
+    });
+
+    const guard = await cliInstallGuard({
+      userId: 'local',
+      clientIp: undefined,
+      environmentId: 'dev-box',
+    });
+
+    expect(guard).toEqual({ allowed: false, reasons: ['disabled', 'environment-not-trusted'] });
+  });
+});
 
 describe('parseEnvArgs', () => {
   it('accepts --json without a subcommand', () => {

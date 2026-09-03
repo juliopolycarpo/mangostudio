@@ -101,8 +101,10 @@ export interface EnvInstallDeps {
  * the CLI process shares no such session. Rather than guess at a user, a
  * remote target is always refused with `environment-not-trusted` — the same
  * reason an environment nobody has opted in yet would report.
+ *
+ * // Usage: await cliInstallGuard({ userId: 'local', clientIp: undefined })
  */
-function cliInstallGuard(context: InstallRequestContext): Promise<InstallGuard> {
+export function cliInstallGuard(context: InstallRequestContext): Promise<InstallGuard> {
   const config = getConfig();
   const environmentId = context.environmentId ?? LOCAL_ENVIRONMENT_ID;
   const reasons: InstallGuardReason[] = [];
