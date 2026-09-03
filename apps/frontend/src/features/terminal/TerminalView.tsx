@@ -130,6 +130,12 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
     const container = containerRef.current;
     if (!container) return;
 
+    // Latched by the cleanup below and read by everything this effect starts
+    // that finishes later. The rail disposes this terminal on every tab
+    // switch, and a continuation that resumes afterwards is working on a
+    // disposed instance that still looks usable from the outside.
+    let disposed = false;
+
     const term = new Terminal({
       // Matches `--font-mono` in index.css; xterm needs a literal font stack,
       // not a CSS custom property, to measure glyph cells correctly.
@@ -159,7 +165,7 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
     // not take the whole terminal down with it — the DOM renderer is the
     // correct, working fallback, not a degraded one.
     if (canUseWebgl()) {
-      void loadWebglAddon(term);
+      void loadWebglAddon(term, () => disposed);
     }
 
     termRef.current = term;
@@ -169,8 +175,14 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
 
     fitAndResize(term, fitAddon, socketRef.current);
     // JetBrains Mono is self-hosted; a mount before it finishes loading
-    // measures cells against the fallback font and undersizes the grid.
-    void document.fonts?.ready?.then(() => fitAndResize(term, fitAddon, socketRef.current));
+    // measures cells against the fallback font and undersizes the grid. The
+    // latch is belt-and-braces here — `proposeDimensions()` returns nothing
+    // once `dispose()` has detached the element — but it keeps that from being
+    // an addon internal this file depends on.
+    void document.fonts?.ready?.then(() => {
+      if (disposed) return;
+      fitAndResize(term, fitAddon, socketRef.current);
+    });
 
     const resizeObserver = new ResizeObserver(() =>
       fitAndResize(term, fitAddon, socketRef.current)
@@ -178,6 +190,7 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
     resizeObserver.observe(container);
 
     return () => {
+      disposed = true;
       resizeObserver.disconnect();
       term.dispose();
       termRef.current = null;
@@ -291,9 +304,25 @@ function canUseWebgl(): boolean {
   return webglSupported;
 }
 
-async function loadWebglAddon(term: Terminal): Promise<void> {
+/**
+ * Loads the WebGL renderer into a terminal that is still alive when the chunk
+ * arrives.
+ *
+ * The import is asynchronous even when the chunk is cached, and the rail
+ * disposes this view on every tab switch, so the terminal can be gone by the
+ * time this resumes. Nothing downstream would say so: `loadAddon` does not
+ * refuse a disposed terminal, and `dispose()` only detaches `element` rather
+ * than clearing it, which is the one thing `WebglAddon.activate` checks. It
+ * would build a renderer, take a real `webgl2` context, and leave it held by
+ * an addon nobody can reach to dispose.
+ *
+ * @example
+ * void loadWebglAddon(term, () => disposed); // `disposed` latched in cleanup
+ */
+async function loadWebglAddon(term: Terminal, isDisposed: () => boolean): Promise<void> {
   try {
     const { WebglAddon } = await import('@xterm/addon-webgl');
+    if (isDisposed()) return;
     const webgl = new WebglAddon();
     webgl.onContextLoss(() => webgl.dispose());
     term.loadAddon(webgl);
