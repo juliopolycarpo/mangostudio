@@ -376,6 +376,27 @@ describe('RuntimeCard', () => {
       expect(screen.queryByTestId('toolchain-selected')).not.toBeInTheDocument();
     });
 
+    it('never renders the toolchain action for a runtime other than node or bun', async () => {
+      installEnvironmentsScenario();
+      const status = runtimeStatus({
+        id: 'fnm',
+        installations: [
+          installation({ path: '/usr/local/bin/fnm', version: '1.38.0', effective: true }),
+        ],
+      });
+
+      render(<RuntimeCard status={status} recipes={[]} />);
+
+      // Waits for the effective section to settle before asserting the
+      // negative, so the assertion is not just "ran before the query did".
+      await screen.findByTestId('effective-installation');
+      expect(
+        screen.queryByRole('button', { name: en.environments.runtimes.useThisVersion })
+      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId('toolchain-selected')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('toolchain-status')).not.toBeInTheDocument();
+    });
+
     it('shows the Selected badge on the pinned installation instead of the button', async () => {
       installEnvironmentsScenario({ node: '/opt/node/bin/node', bun: 'auto' });
 
