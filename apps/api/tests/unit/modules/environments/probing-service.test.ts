@@ -23,6 +23,8 @@ interface FakeClient {
   version: string;
   selfParams: unknown;
   pathEnvParams: unknown;
+  /** The `ids` the last `probing.runtimes` call was asked for. */
+  lastRuntimeIds: readonly string[];
   /** Leaves `probing.runtimes` pending so a second caller can race it. */
   holdRuntime: boolean;
   settleRuntime: () => void;
@@ -39,9 +41,11 @@ interface FakeClient {
 /**
  * Stands in for one runtime connection. A second instance is a reconnect: the
  * hub cache keys on identity, so handing out a new one is exactly what a
- * restarted machine looks like from up here.
+ * restarted machine looks like from up here. `platform` defaults to the
+ * shared `MANIFEST`'s `linux`; passing `win32` is how the platform-aware
+ * runtime-id tests get a manifest that asks for `winget` too.
  */
-function fakeClient(version = 'v1'): FakeClient {
+function fakeClient(version = 'v1', platform = MANIFEST.platform): FakeClient {
   const state: FakeClient = {
     client: null as unknown as RuntimeClient,
     runtimeCalls: 0,
@@ -50,6 +54,7 @@ function fakeClient(version = 'v1'): FakeClient {
     version,
     selfParams: null,
     pathEnvParams: null,
+    lastRuntimeIds: [],
     holdRuntime: false,
     settleRuntime: () => undefined,
     holdAgent: false,
@@ -60,11 +65,12 @@ function fakeClient(version = 'v1'): FakeClient {
   const pendingAgent: Array<(value: unknown) => void> = [];
 
   const client = {
-    manifest: MANIFEST,
+    manifest: { ...MANIFEST, platform },
     runtimeVersion: '2.0.0-remote',
     probing: {
-      runtimes: (params: { pathEnv?: unknown }) => {
+      runtimes: (params: { ids?: readonly string[]; pathEnv?: unknown }) => {
         state.runtimeCalls += 1;
+        state.lastRuntimeIds = params.ids ?? [];
         state.pathEnvParams = params.pathEnv ?? null;
         return new Promise((resolve) => {
           pendingRuntime.push(resolve);
@@ -334,6 +340,40 @@ describe('what the hub sends down with a probe', () => {
     // not the hub release that would be wrong on every peer.
     expect(remote.selfParams).toEqual({ version: '2.0.0-remote' });
     expect(remote.pathEnvParams).toBeNull();
+  });
+});
+
+describe('platform-aware runtime ids', () => {
+  it('omits winget on a non-Windows target', async () => {
+    const local = fakeClient('v1', 'linux');
+    const service = serviceFor(() => local);
+
+    await service.listRuntimeStatuses(LOCAL);
+
+    expect(local.lastRuntimeIds).toEqual(['bun', 'node', 'fnm', 'git']);
+  });
+
+  it('asks for winget on a Windows target, and enriches the full scan with a prerequisite-missing finding', async () => {
+    const remote = fakeClient('v1', 'win32');
+    const service = serviceFor(() => remote);
+
+    const statuses = await service.listRuntimeStatuses(WSL);
+
+    expect(remote.lastRuntimeIds).toEqual(['bun', 'node', 'fnm', 'winget', 'git']);
+
+    // fnm's only install recipe on win32 requires winget, and this fixture
+    // reports winget as not installed with no recipe of its own to fix
+    // that — the exact shape `computePrerequisiteMissingFindings` reports.
+    const fnm = statuses.find((status) => status.id === 'fnm');
+    expect(fnm?.findings).toContainEqual({
+      code: 'prerequisite-missing',
+      params: {
+        recipe: 'fnm.install',
+        requirement: 'winget',
+        remedy: expect.stringContaining('apps.microsoft.com'),
+      },
+      severity: 'warn',
+    });
   });
 });
 
