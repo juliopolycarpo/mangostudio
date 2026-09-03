@@ -8,6 +8,7 @@
  * environments are entities, and that is an addition here, not a rewrite.
  */
 
+import { useQuery } from '@tanstack/react-query';
 import { useI18n } from '@/hooks/use-i18n';
 import {
   useAgentCliStatuses,
@@ -15,6 +16,7 @@ import {
   useRuntimeStatuses,
 } from '../hooks/use-runtime-status';
 import { OverviewMachineSection } from '../machine/components/OverviewMachineSection';
+import { machineStatusQueryOptions } from '../machine/queries';
 import { EnvironmentEntitiesOverview } from './EnvironmentEntitiesOverview';
 import { EnvironmentPageState } from './EnvironmentPageState';
 import { OverviewAgentCard } from './OverviewAgentCard';
@@ -22,13 +24,25 @@ import { OverviewHealthRollup } from './OverviewHealthRollup';
 import { OverviewLibrarySnapshot } from './OverviewLibrarySnapshot';
 import { OverviewSection } from './OverviewSection';
 import { OverviewToolchainCard } from './OverviewToolchainCard';
+import { SetupChecklist } from './SetupChecklist';
 
 export function OverviewPage() {
   const { t } = useI18n();
+  const runtimes = useRuntimeStatuses();
+  const agents = useAgentCliStatuses();
+  const recipes = useInstallRecipes();
+  const machine = useQuery(machineStatusQueryOptions());
 
   return (
     <div className="space-y-6">
       <p className="text-sm text-on-surface-variant/60">{t.environments.overview.description}</p>
+
+      <SetupChecklist
+        runtimes={runtimes.data ?? []}
+        agents={agents.data ?? []}
+        recipes={recipes.data ?? []}
+        machine={machine.data}
+      />
 
       <EnvironmentEntitiesOverview />
       <AgentsOverview />
