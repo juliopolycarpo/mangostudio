@@ -105,9 +105,16 @@ function fakeClient(version = 'v1'): FakeClient {
   }
 
   function settleRuntime() {
+    // One status per id `RUNTIME_IDS` asks for — a real runtime answers every
+    // requested id (reporting `missing` health for a tool it does not have),
+    // and the cache only serves a lazy read once every requested id has an
+    // entry. Leaving one out here would force a re-probe on every read.
     const statuses = [
       { id: 'bun', effective: { version: state.version } },
       { id: 'node', effective: { version: state.version } },
+      { id: 'fnm', health: 'missing', installations: [], findings: [] },
+      { id: 'winget', health: 'missing', installations: [], findings: [] },
+      { id: 'git', health: 'missing', installations: [], findings: [] },
     ];
     for (const resolve of pendingRuntime.splice(0)) resolve({ statuses });
   }
@@ -349,16 +356,25 @@ describe('forced-probe admission', () => {
     await Promise.resolve();
 
     expect(resolvers).toHaveLength(2);
+    // Every requested id needs an entry, or the later lazy read below finds
+    // one uncached and starts a third scan nothing here ever resolves.
+    const otherRuntimeStatuses = [
+      { id: 'fnm', health: 'missing', installations: [], findings: [] },
+      { id: 'winget', health: 'missing', installations: [], findings: [] },
+      { id: 'git', health: 'missing', installations: [], findings: [] },
+    ];
     resolvers[0]?.({
       statuses: [
         { id: 'bun', effective: { version: callVersions[0] } },
         { id: 'node', effective: { version: callVersions[0] } },
+        ...otherRuntimeStatuses,
       ],
     });
     resolvers[1]?.({
       statuses: [
         { id: 'bun', effective: { version: callVersions[1] } },
         { id: 'node', effective: { version: callVersions[1] } },
+        ...otherRuntimeStatuses,
       ],
     });
 

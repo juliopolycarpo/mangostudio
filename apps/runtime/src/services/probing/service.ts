@@ -27,6 +27,8 @@ import {
   detectNvm,
   directoryExists,
   type ExternalAgentCliDefinition,
+  FNM_RUNTIME_DEFINITION,
+  GIT_RUNTIME_DEFINITION,
   markWingetOwnedNodeInstallations,
   NODE_LTS_WINGET_PACKAGE_ID,
   NODE_RELEASE_SCHEDULE,
@@ -37,6 +39,7 @@ import {
   type RuntimeDefinition,
   type RuntimeScanResult,
   scanRuntime,
+  WINGET_RUNTIME_DEFINITION,
   type WingetOwnership,
 } from '@mangostudio/shared/environments/detection';
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
@@ -101,7 +104,13 @@ const DEFAULT_ADAPTERS: ProbingHostAdapters = {
   authFs: NODE_AUTH_SIGNAL_FS,
   describeLocations: (targetId, env) =>
     describeTargetLocations(targetId, env, NODE_LOCATION_FS_PROBE),
-  runtimeDefinitions: [BUN_RUNTIME_DEFINITION, NODE_RUNTIME_DEFINITION],
+  runtimeDefinitions: [
+    BUN_RUNTIME_DEFINITION,
+    NODE_RUNTIME_DEFINITION,
+    FNM_RUNTIME_DEFINITION,
+    GIT_RUNTIME_DEFINITION,
+    WINGET_RUNTIME_DEFINITION,
+  ],
   agentDefinitions: AGENT_CLI_DEFINITIONS,
   now: Date.now,
   selfExecutablePath: () => process.execPath,
