@@ -13,7 +13,7 @@ import {
   parseStatusArgs,
 } from './args';
 import { runDoctor } from './commands/doctor';
-import { runEnv, runEnvInstall } from './commands/env';
+import { runEnv, runEnvInstall, runEnvToolchain } from './commands/env';
 import { runKillServer } from './commands/killserver';
 import { runLibrary } from './commands/library';
 import { runLogs } from './commands/logs';
@@ -90,6 +90,10 @@ async function route(command: string | undefined, rest: string[]): Promise<void>
         // error — it gets a numeric exit code rather than the stderr message
         // the catch block in `dispatch` prints for a `CliError`.
         process.exitCode = await runEnvInstall(envArgs);
+        return;
+      }
+      if (envArgs.subcommand === 'toolchain') {
+        await runEnvToolchain(envArgs);
         return;
       }
       await runEnv(envArgs);

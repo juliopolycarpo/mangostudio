@@ -9,6 +9,8 @@ import type {
   InstallStartResponse,
   InstallStreamEvent,
   RuntimeStatus,
+  ToolchainSelection,
+  ToolchainUpdateBody,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
 import Value from 'typebox/value';
@@ -18,8 +20,10 @@ import {
   CliEnvironmentSnapshotSchema,
   cliInstallGuard,
   type EnvInstallDeps,
+  type EnvToolchainDeps,
   runEnv,
   runEnvInstall,
+  runEnvToolchain,
 } from '../../../src/cli/commands/env';
 import { CliError } from '../../../src/cli/errors';
 import { loadConfigForTest, resetConfig } from '../../../src/lib/config';
@@ -27,6 +31,7 @@ import {
   InstallBlockedError,
   InstallUnavailableError,
 } from '../../../src/modules/environments/application/install-service';
+import { EnvironmentServiceError } from '../../../src/modules/environments/domain/environment-error';
 
 const runtimeStatus: RuntimeStatus = {
   id: 'bun',
@@ -211,6 +216,32 @@ describe('parseEnvArgs', () => {
   it('rejects extra positionals after the recipe id', () => {
     expect(() => parseEnvArgs(['install', 'bun.install.official', 'extra'])).toThrow(
       /Unexpected extra arguments/
+    );
+  });
+
+  it('parses toolchain with no arguments, and with a runtime and a choice', () => {
+    expect(parseEnvArgs(['toolchain'])).toEqual({ subcommand: 'toolchain', json: false });
+    expect(
+      parseEnvArgs(['toolchain', 'node', 'auto', '--environment', 'dev-box', '--user', 'me@x.io'])
+    ).toEqual({
+      subcommand: 'toolchain',
+      json: false,
+      runtime: 'node',
+      choice: 'auto',
+      environmentId: 'dev-box',
+      user: 'me@x.io',
+    });
+  });
+
+  it('refuses a toolchain runtime it does not know, and a runtime without a choice', () => {
+    expect(() => parseEnvArgs(['toolchain', 'git', 'auto'])).toThrow(
+      'Unknown toolchain runtime: git'
+    );
+    expect(() => parseEnvArgs(['toolchain', 'bun'])).toThrow(
+      'Missing selection for env toolchain bun'
+    );
+    expect(() => parseEnvArgs(['toolchain', 'bun', 'auto', 'extra'])).toThrow(
+      'Unexpected extra arguments for env toolchain: extra'
     );
   });
 
@@ -523,5 +554,92 @@ describe('runEnvInstall', () => {
         service,
       } as Partial<EnvInstallDeps>)
     ).rejects.toThrow(/env install does not run "uninstall" recipes/);
+  });
+});
+
+/** Stores one selection per (user, environment); `update` refuses paths not in `known`. */
+class FakeToolchainService {
+  readonly rows = new Map<string, ToolchainSelection>();
+  readonly updates: Array<{ userId: string; environmentId: string; body: ToolchainUpdateBody }> =
+    [];
+  constructor(private readonly known: readonly string[] = []) {}
+
+  resolve(userId: string, environmentId: string): Promise<ToolchainSelection> {
+    return Promise.resolve(
+      this.rows.get(`${userId}/${environmentId}`) ?? { node: 'auto', bun: 'auto' }
+    );
+  }
+
+  async update(
+    userId: string,
+    environmentId: string,
+    body: ToolchainUpdateBody
+  ): Promise<ToolchainSelection> {
+    this.updates.push({ userId, environmentId, body });
+    for (const choice of [body.node, body.bun]) {
+      if (choice !== undefined && choice !== 'auto' && !this.known.includes(choice)) {
+        throw new EnvironmentServiceError(
+          `Invalid node toolchain path: expected one of: ${this.known.join(', ')} | received: ${choice}`,
+          422
+        );
+      }
+    }
+    const merged = { ...(await this.resolve(userId, environmentId)), ...body };
+    this.rows.set(`${userId}/${environmentId}`, merged);
+    return merged;
+  }
+}
+
+describe('runEnvToolchain', () => {
+  const deps = (service: FakeToolchainService, lines: string[]): Partial<EnvToolchainDeps> => ({
+    service,
+    resolveUserId: () => Promise.resolve('user-1'),
+    log: (line) => lines.push(line),
+  });
+
+  it('prints the automatic selection for the local environment when nothing is pinned', async () => {
+    const lines: string[] = [];
+    await runEnvToolchain(
+      { subcommand: 'toolchain', json: false },
+      deps(new FakeToolchainService(), lines)
+    );
+
+    expect(lines).toEqual(['Toolchain for local', '  node  auto', '  bun   auto']);
+  });
+
+  it('writes a probed path through the service and prints the merged selection', async () => {
+    const service = new FakeToolchainService(['/opt/node/bin/node']);
+    const lines: string[] = [];
+    await runEnvToolchain(
+      {
+        subcommand: 'toolchain',
+        runtime: 'node',
+        choice: '/opt/node/bin/node',
+        environmentId: 'dev-box',
+        json: true,
+      },
+      deps(service, lines)
+    );
+
+    expect(service.updates).toEqual([
+      { userId: 'user-1', environmentId: 'dev-box', body: { node: '/opt/node/bin/node' } },
+    ]);
+    expect(JSON.parse(lines.join('\n'))).toEqual({
+      environmentId: 'dev-box',
+      toolchain: { node: '/opt/node/bin/node', bun: 'auto' },
+    });
+  });
+
+  it('turns the service refusal of an unknown path into a CLI error naming both sides', async () => {
+    const service = new FakeToolchainService(['/opt/node/bin/node']);
+    const attempt = runEnvToolchain(
+      { subcommand: 'toolchain', runtime: 'node', choice: '/tmp/evil/node', json: false },
+      deps(service, [])
+    );
+
+    await expect(attempt).rejects.toBeInstanceOf(CliError);
+    await expect(attempt).rejects.toThrow(
+      'expected one of: /opt/node/bin/node | received: /tmp/evil/node'
+    );
   });
 });

@@ -21,6 +21,7 @@ import type {
   RuntimeFinding,
   RuntimeStatus,
   RuntimeStatusList,
+  ToolchainSelection,
   VersionManagerStatus,
   VersionManagerStatusList,
 } from '@mangostudio/shared/environments';
@@ -36,6 +37,7 @@ import {
 } from '@mangostudio/shared/environments';
 import Type from 'typebox';
 import Value from 'typebox/value';
+import { getDb } from '../../db/database';
 import { getConfig } from '../../lib/config';
 import {
   createInstallService,
@@ -51,6 +53,11 @@ import {
   LOCAL_PROBE_SCOPE,
   type ProbeOptions,
 } from '../../modules/environments/application/probing-service';
+import {
+  type ToolchainService,
+  toolchainService,
+} from '../../modules/environments/application/toolchain-service';
+import { EnvironmentServiceError } from '../../modules/environments/domain/environment-error';
 import {
   getInstallRecipe,
   type InstallRecipe,
@@ -281,6 +288,86 @@ export async function runEnvInstall(
   }
 
   return status === 'succeeded' ? 0 : 1;
+}
+
+export interface EnvToolchainDeps {
+  readonly service: ToolchainService;
+  /** The account whose selection is read or written; by email, or the sole account. */
+  readonly resolveUserId: (email: string | undefined) => Promise<string>;
+  readonly log: (line: string) => void;
+}
+
+/**
+ * The selection is per account, and a terminal has no signed-in session, so
+ * the account is named by email — or implied when the hub has exactly one,
+ * which is the machine this command exists for.
+ */
+async function resolveToolchainUserId(email: string | undefined): Promise<string> {
+  const db = getDb();
+  if (email !== undefined) {
+    const user = await db
+      .selectFrom('user')
+      .select('id')
+      .where('email', '=', email)
+      .executeTakeFirst();
+    if (!user) throw new CliError(`No account with email ${email}.`);
+    return user.id;
+  }
+  const users = await db.selectFrom('user').select(['id', 'email']).limit(2).execute();
+  const [sole] = users;
+  if (!sole) throw new CliError('No account exists yet. Sign in once in the browser first.');
+  if (users.length > 1) {
+    throw new CliError('More than one account exists. Pass --user <email> to pick one.');
+  }
+  return sole.id;
+}
+
+function resolveToolchainDeps(deps: Partial<EnvToolchainDeps>): EnvToolchainDeps {
+  return {
+    service: deps.service ?? toolchainService,
+    resolveUserId: deps.resolveUserId ?? resolveToolchainUserId,
+    log: deps.log ?? writeLine,
+  };
+}
+
+/**
+ * `mangostudio env toolchain [node|bun <path|auto>]`: which Node and Bun every
+ * process spawned on an environment runs with, read or written through the
+ * same service the API's `PUT /environments/:id/toolchain` uses. A path must
+ * be one the environment's probe reported; the service's refusal is printed
+ * as the error, expected values included.
+ * // Usage: await runEnvToolchain({ subcommand: 'toolchain', runtime: 'node', choice: 'auto', json: false })
+ */
+export async function runEnvToolchain(
+  args: EnvArgs,
+  deps: Partial<EnvToolchainDeps> = {}
+): Promise<void> {
+  if (args.subcommand !== 'toolchain') {
+    throw new CliError(`runEnvToolchain called with subcommand "${String(args.subcommand)}".`);
+  }
+  const d = resolveToolchainDeps(deps);
+  const userId = await d.resolveUserId(args.user);
+  const environmentId = args.environmentId ?? LOCAL_ENVIRONMENT_ID;
+
+  let selection: ToolchainSelection;
+  if (args.runtime !== undefined && args.choice !== undefined) {
+    try {
+      selection = await d.service.update(userId, environmentId, { [args.runtime]: args.choice });
+    } catch (error) {
+      if (error instanceof EnvironmentServiceError) throw new CliError(error.message);
+      throw error;
+    }
+  } else {
+    selection = await d.service.resolve(userId, environmentId);
+  }
+
+  if (args.json) {
+    d.log(JSON.stringify({ environmentId, toolchain: selection }, null, 2));
+    return;
+  }
+  d.log(`Toolchain for ${environmentId}`);
+  d.log(`  node  ${selection.node}`);
+  d.log(`  bun   ${selection.bun}`);
 }
 
 function displayName(id: string): string {

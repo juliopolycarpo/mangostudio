@@ -31,8 +31,14 @@ export interface DoctorArgs {
 }
 
 export interface EnvArgs {
-  subcommand: 'runtimes' | 'agents' | 'install' | 'update' | null;
+  subcommand: 'runtimes' | 'agents' | 'install' | 'update' | 'toolchain' | null;
   json: boolean;
+  /** `toolchain` only: which runtime to pin; omitted means show the selection. */
+  runtime?: 'node' | 'bun';
+  /** `toolchain` only: `auto` or the path of a probed installation. */
+  choice?: string;
+  /** `toolchain` only: the account whose selection to read or write, by email. */
+  user?: string;
   /** `install`/`update` only: the recipe to run. */
   recipeId?: string;
   /** `install`/`update` only: which machine to run it on; omitted means the hub's own. */
@@ -247,6 +253,7 @@ export function parseEnvArgs(rest: string[]): EnvArgs {
   let json = false;
   let environmentId: string | undefined;
   let version: string | undefined;
+  let user: string | undefined;
   const positionals: string[] = [];
 
   for (let index = 0; index < rest.length; index += 1) {
@@ -270,6 +277,15 @@ export function parseEnvArgs(rest: string[]): EnvArgs {
         throw new CliError('Missing value for env --version');
       }
       version = value;
+      index += 1;
+      continue;
+    }
+    if (arg === '--user') {
+      const value = rest[index + 1];
+      if (!value || value.startsWith('-')) {
+        throw new CliError('Missing value for env --user');
+      }
+      user = value;
       index += 1;
       continue;
     }
@@ -309,7 +325,37 @@ export function parseEnvArgs(rest: string[]): EnvArgs {
       ...(version !== undefined && { version }),
     };
   }
+  if (subcommand === 'toolchain') {
+    return parseEnvToolchainArgs(positionals.slice(1), { json, environmentId, user });
+  }
   throw new CliError(`Unknown env subcommand: ${subcommand}`);
+}
+
+const TOOLCHAIN_USAGE =
+  'Usage: env toolchain [node|bun <path|auto>] [--environment <id>] [--user <email>]';
+
+function parseEnvToolchainArgs(
+  positionals: readonly string[],
+  flags: { json: boolean; environmentId?: string; user?: string }
+): EnvArgs {
+  const base: EnvArgs = {
+    subcommand: 'toolchain',
+    json: flags.json,
+    ...(flags.environmentId !== undefined && { environmentId: flags.environmentId }),
+    ...(flags.user !== undefined && { user: flags.user }),
+  };
+  if (positionals.length === 0) return base;
+  const [runtime, choice, ...extra] = positionals;
+  if (runtime !== 'node' && runtime !== 'bun') {
+    throw new CliError(`Unknown toolchain runtime: ${runtime}. ${TOOLCHAIN_USAGE}`);
+  }
+  if (choice === undefined) {
+    throw new CliError(`Missing selection for env toolchain ${runtime}. ${TOOLCHAIN_USAGE}`);
+  }
+  if (extra.length > 0) {
+    throw new CliError(`Unexpected extra arguments for env toolchain: ${extra.join(' ')}`);
+  }
+  return { ...base, runtime, choice };
 }
 
 const LIBRARY_KINDS = new Set<ResourceKind>([
