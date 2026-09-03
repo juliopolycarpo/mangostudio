@@ -9,7 +9,12 @@
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
 import type { Kysely } from 'kysely';
 import { getDb } from '../../../db/database';
-import type { Database } from '../../../db/types';
+import type {
+  Database,
+  EnvironmentToolchainInsert,
+  EnvironmentToolchainSelect,
+  EnvironmentToolchainUpdate,
+} from '../../../db/types';
 
 export interface EnvironmentToolchainRepository {
   get(userId: string, environmentId: string): Promise<ToolchainSelection | null>;
@@ -20,6 +25,10 @@ export interface EnvironmentToolchainRepository {
     updatedAt: number
   ): Promise<void>;
   remove(userId: string, environmentId: string): Promise<void>;
+}
+
+function toToolchainSelection(row: EnvironmentToolchainSelect): ToolchainSelection {
+  return { node: row.nodeSelection, bun: row.bunSelection };
 }
 
 /**
@@ -37,30 +46,30 @@ export function createEnvironmentToolchainRepository(
     async get(userId, environmentId) {
       const row = await db()
         .selectFrom('environment_toolchains')
-        .select(['nodeSelection', 'bunSelection'])
+        .selectAll()
         .where('userId', '=', userId)
         .where('environmentId', '=', environmentId)
         .executeTakeFirst();
-      return row ? { node: row.nodeSelection, bun: row.bunSelection } : null;
+      return row ? toToolchainSelection(row) : null;
     },
 
     async upsert(userId, environmentId, selection, updatedAt) {
+      const values: EnvironmentToolchainInsert = {
+        userId,
+        environmentId,
+        nodeSelection: selection.node,
+        bunSelection: selection.bun,
+        updatedAt,
+      };
+      const update: EnvironmentToolchainUpdate = {
+        nodeSelection: selection.node,
+        bunSelection: selection.bun,
+        updatedAt,
+      };
       await db()
         .insertInto('environment_toolchains')
-        .values({
-          userId,
-          environmentId,
-          nodeSelection: selection.node,
-          bunSelection: selection.bun,
-          updatedAt,
-        })
-        .onConflict((oc) =>
-          oc.columns(['userId', 'environmentId']).doUpdateSet({
-            nodeSelection: selection.node,
-            bunSelection: selection.bun,
-            updatedAt,
-          })
-        )
+        .values(values)
+        .onConflict((oc) => oc.columns(['userId', 'environmentId']).doUpdateSet(update))
         .execute();
     },
 

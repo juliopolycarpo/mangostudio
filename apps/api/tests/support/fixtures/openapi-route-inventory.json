@@ -50,6 +50,7 @@
   "/api/environments/{id}/runtime/runs/{runId}/cancel": ["post"],
   "/api/environments/{id}/runtime/runs/{runId}/log": ["get"],
   "/api/environments/{id}/runtime/setup": ["post"],
+  "/api/environments/{id}/toolchain": ["put"],
   "/api/external-agents": ["get"],
   "/api/external-agents/disclosures": ["get"],
   "/api/external-agents/sessions": ["get"],
