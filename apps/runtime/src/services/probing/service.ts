@@ -16,6 +16,7 @@ import type {
   RuntimeHealth,
   RuntimeStatus,
   VersionManagerId,
+  VersionManagerStatus,
 } from '@mangostudio/shared/environments';
 import {
   AGENT_CLI_DEFINITIONS,
@@ -24,10 +25,12 @@ import {
   analyzeRuntimeScan,
   type BinaryScanDeps,
   BUN_RUNTIME_DEFINITION,
+  detectFnm,
   detectNvm,
   directoryExists,
   type ExternalAgentCliDefinition,
   FNM_RUNTIME_DEFINITION,
+  type FnmDetectionDeps,
   GIT_RUNTIME_DEFINITION,
   markWingetOwnedNodeInstallations,
   NODE_LTS_WINGET_PACKAGE_ID,
@@ -58,6 +61,7 @@ import type {
 import { throwIfAborted } from '../cancellation';
 import {
   createBinaryScanDeps,
+  createFnmDetectionDeps,
   createNvmDetectionDeps,
   createRuntimePathEnv,
   NODE_AUTH_SIGNAL_FS,
@@ -81,6 +85,7 @@ export interface ProbingHostAdapters {
     signal?: AbortSignal
   ) => BinaryScanDeps;
   readonly createNvmDeps: (env: PathEnv) => NvmDetectionDeps;
+  readonly createFnmDeps: (env: PathEnv) => FnmDetectionDeps;
   readonly authFs: AuthSignalFs;
   readonly describeLocations: (targetId: LibraryTargetId, env: PathEnv) => LibraryLocationStatus[];
   readonly runtimeDefinitions: readonly RuntimeDefinition[];
@@ -101,6 +106,7 @@ const DEFAULT_ADAPTERS: ProbingHostAdapters = {
   createPathEnv: createRuntimePathEnv,
   createScanDeps: createBinaryScanDeps,
   createNvmDeps: createNvmDetectionDeps,
+  createFnmDeps: createFnmDetectionDeps,
   authFs: NODE_AUTH_SIGNAL_FS,
   describeLocations: (targetId, env) =>
     describeTargetLocations(targetId, env, NODE_LOCATION_FS_PROBE),
@@ -216,6 +222,26 @@ async function probeRuntimeDefinition(
 ): Promise<RuntimeStatus> {
   const scan = await scanRuntimeDefinition(adapters, definition, env, params, signal);
   return analyzeScannedRuntime(definition, scan, env, params, adapters.now());
+}
+
+/** Every manager `probeVersionManagers` can answer; both are asked unless the caller narrows it. */
+const SUPPORTED_VERSION_MANAGER_IDS: readonly VersionManagerId[] = ['nvm', 'fnm'];
+
+/**
+ * `fnm --version` (and any future manager scanned the same way) prints
+ * vendor-prefixed text (`fnm 1.38.1`); `RuntimeInstallation.version` stores
+ * that raw stdout, so this reparses it through the definition's own
+ * `parseVersion` to get the plain `major.minor.patch` a version-manager
+ * status publishes.
+ */
+function formattedManagerVersion(
+  status: RuntimeStatus | null,
+  definition: RuntimeDefinition | undefined
+): string | undefined {
+  const raw = status?.effective?.version;
+  if (!raw || !definition) return undefined;
+  const parsed = definition.parseVersion(raw);
+  return parsed ? `${parsed.major}.${parsed.minor}.${parsed.patch}` : undefined;
 }
 
 /** Whether this `probeRuntimes` call should ask winget about Node at all. */
@@ -432,46 +458,71 @@ export function createProbingService(overrides: Partial<ProbingHostAdapters> = {
 
     async probeVersionManagers(params, signal) {
       throwIfAborted(signal);
-      // Only nvm is detected today; asking for another manager is answered with
-      // an empty list rather than an error, the way the hub's registry already
-      // does for an id it holds no definition for.
-      const wanted: readonly VersionManagerId[] = params.ids ?? ['nvm'];
-      if (!wanted.includes('nvm')) return { statuses: [] };
+      // nvm and fnm are both detected today, and both are asked for unless the
+      // caller narrows it; any other id is answered with an empty list rather
+      // than an error, the way the hub's registry already does for an id it
+      // holds no definition for.
+      const wanted = (params.ids ?? SUPPORTED_VERSION_MANAGER_IDS).filter((id) =>
+        SUPPORTED_VERSION_MANAGER_IDS.includes(id)
+      );
+      if (wanted.length === 0) return { statuses: [] };
 
       const env = adapters.createPathEnv(params.pathEnv);
+      const runtimeParams: RuntimeProbeRuntimesParams = {
+        ...(params.budget && { budget: params.budget }),
+      };
       const nodeDefinition = adapters.runtimeDefinitions.find(
         (definition) => definition.id === 'node'
       );
-      // Which Node nvm considers current is read from the same scan the
-      // toolchain tab shows, so the two can never disagree about it.
+      // Which Node each manager considers current is read from the one scan
+      // the toolchain tab shows, so no manager can disagree with it about that.
       const nodeStatus = nodeDefinition
-        ? await probeRuntimeDefinition(
-            adapters,
-            nodeDefinition,
-            env,
-            {
-              ...(params.budget && { budget: params.budget }),
-            },
-            signal
-          )
+        ? await probeRuntimeDefinition(adapters, nodeDefinition, env, runtimeParams, signal)
         : null;
       throwIfAborted(signal);
-      const currentNodePath =
-        nodeStatus?.effective?.managedBy === 'nvm' ? nodeStatus.effective.path : undefined;
+      const currentNodePathFor = (managerId: VersionManagerId): string | undefined =>
+        nodeStatus?.effective?.managedBy === managerId ? nodeStatus.effective.path : undefined;
+
       const latestByMajor = params.latestByMajor
         ? new Map(
             Object.entries(params.latestByMajor).map(([major, version]) => [Number(major), version])
           )
         : undefined;
-
-      const status = await detectNvm(adapters.createNvmDeps(env), {
+      const scheduleOptions = {
         now: new Date(adapters.now()),
         schedule: NODE_RELEASE_SCHEDULE,
-        ...(currentNodePath !== undefined && { currentNodePath }),
         ...(latestByMajor !== undefined && { latestByMajor, liveDataAvailable: true }),
-      });
+      };
+
+      const statuses = await Promise.all(
+        wanted.map(async (id): Promise<VersionManagerStatus> => {
+          const currentNodePath = currentNodePathFor(id);
+          if (id === 'nvm') {
+            return detectNvm(adapters.createNvmDeps(env), {
+              ...scheduleOptions,
+              ...(currentNodePath !== undefined && { currentNodePath }),
+            });
+          }
+
+          const fnmDefinition = adapters.runtimeDefinitions.find(
+            (definition) => definition.id === 'fnm'
+          );
+          // fnm's own version comes from the same scan `probeRuntimes` already
+          // runs for it, rather than spawning `fnm --version` a second time.
+          const fnmRuntimeStatus = fnmDefinition
+            ? await probeRuntimeDefinition(adapters, fnmDefinition, env, runtimeParams, signal)
+            : null;
+          throwIfAborted(signal);
+          const managerVersion = formattedManagerVersion(fnmRuntimeStatus, fnmDefinition);
+          return detectFnm(adapters.createFnmDeps(env), {
+            ...scheduleOptions,
+            ...(currentNodePath !== undefined && { currentNodePath }),
+            ...(managerVersion !== undefined && { managerVersion }),
+          });
+        })
+      );
       throwIfAborted(signal);
-      return { statuses: [status] };
+      return { statuses };
     },
 
     async probeAgentClis(params, signal) {

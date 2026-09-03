@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import type {
   BinaryScanDeps,
+  FnmDetectionDeps,
   NvmDetectionDeps,
   WingetOwnership,
 } from '@mangostudio/shared/environments/detection';
-import { NODE_RUNTIME_DEFINITION } from '@mangostudio/shared/environments/detection';
+import {
+  FNM_RUNTIME_DEFINITION,
+  NODE_RUNTIME_DEFINITION,
+} from '@mangostudio/shared/environments/detection';
 import { createProbingService } from '../../../../src/services/probing/service';
 
 const LINUX_ENV = {
@@ -53,8 +57,37 @@ function missingNvmDeps(): NvmDetectionDeps {
   };
 }
 
+function missingFnmDeps(): FnmDetectionDeps {
+  return {
+    ...LINUX_ENV,
+    fs: {
+      pathExists: () => false,
+      readDirectory: () => Promise.resolve([]),
+      realpath: (path) => Promise.resolve(path),
+    },
+  };
+}
+
+/** A root that exists but has installed nothing yet — enough for `installed: true` with an empty list. */
+function installedEmptyFnmDeps(root = '/home/tester/.local/share/fnm'): FnmDetectionDeps {
+  return {
+    ...LINUX_ENV,
+    fs: {
+      pathExists: (path) => path === root,
+      readDirectory: () => Promise.resolve([]),
+      realpath: (path) => Promise.resolve(path),
+    },
+  };
+}
+
 const nodeOnly = {
   ...NODE_RUNTIME_DEFINITION,
+  wellKnownDirs: () => [],
+  includeBareBinaryNames: false,
+};
+
+const fnmOnly = {
+  ...FNM_RUNTIME_DEFINITION,
   wellKnownDirs: () => [],
   includeBareBinaryNames: false,
 };
@@ -255,13 +288,63 @@ describe('version manager probing', () => {
       now: () => Date.parse('2026-07-26T12:00:00.000Z'),
     });
 
-    const { statuses } = await service.probeVersionManagers({});
+    const { statuses } = await service.probeVersionManagers({ ids: ['nvm'] });
 
     expect(statuses).toHaveLength(1);
     expect(statuses[0]).toMatchObject({ id: 'nvm', installed: false });
   });
 
-  it('answers nothing for the managers this release does not detect', async () => {
+  it('detects fnm and reads the current Node from the same scan the tab shows', async () => {
+    const service = createProbingService({
+      runtimeDefinitions: [nodeOnly],
+      createPathEnv: () => LINUX_ENV,
+      createScanDeps: () => scanDeps(),
+      createFnmDeps: missingFnmDeps,
+      now: () => Date.parse('2026-07-26T12:00:00.000Z'),
+    });
+
+    const { statuses } = await service.probeVersionManagers({ ids: ['fnm'] });
+
+    expect(statuses).toHaveLength(1);
+    expect(statuses[0]).toMatchObject({ id: 'fnm', installed: false });
+  });
+
+  it('answers both nvm and fnm when the caller does not narrow the request', async () => {
+    const service = createProbingService({
+      runtimeDefinitions: [nodeOnly],
+      createPathEnv: () => LINUX_ENV,
+      createScanDeps: () => scanDeps(),
+      createNvmDeps: missingNvmDeps,
+      createFnmDeps: missingFnmDeps,
+    });
+
+    const { statuses } = await service.probeVersionManagers({});
+
+    expect(statuses.map((status) => status.id).sort()).toEqual(['fnm', 'nvm']);
+  });
+
+  it('reuses the fnm runtime scan for the version manager’s own version instead of asking again', async () => {
+    let fnmScans = 0;
+    const service = createProbingService({
+      runtimeDefinitions: [nodeOnly, fnmOnly],
+      createPathEnv: () => LINUX_ENV,
+      createScanDeps: (_env, definition) => {
+        if (definition.id === 'fnm') fnmScans += 1;
+        return scanDeps({
+          probeVersion: () => Promise.resolve(definition.id === 'fnm' ? 'fnm 1.38.1' : 'v22.13.0'),
+        });
+      },
+      createFnmDeps: () => installedEmptyFnmDeps(),
+    });
+
+    const { statuses } = await service.probeVersionManagers({ ids: ['fnm'] });
+
+    expect(statuses[0]).toMatchObject({ id: 'fnm', installed: true, managerVersion: '1.38.1' });
+    // One scan for fnm's own binary, not a second spawn from inside detectFnm.
+    expect(fnmScans).toBe(1);
+  });
+
+  it('answers nothing for a manager this release does not detect', async () => {
     let nvmDepsCount = 0;
     const service = createProbingService({
       runtimeDefinitions: [nodeOnly],
@@ -273,7 +356,7 @@ describe('version manager probing', () => {
       },
     });
 
-    const { statuses } = await service.probeVersionManagers({ ids: ['fnm', 'volta'] });
+    const { statuses } = await service.probeVersionManagers({ ids: ['volta'] });
 
     expect(statuses).toEqual([]);
     expect(nvmDepsCount).toBe(0);
@@ -291,7 +374,9 @@ describe('version manager probing', () => {
       },
     });
 
-    await expect(service.probeVersionManagers({}, controller.signal)).rejects.toMatchObject({
+    await expect(
+      service.probeVersionManagers({ ids: ['nvm'] }, controller.signal)
+    ).rejects.toMatchObject({
       name: 'AbortError',
     });
   });

@@ -26,6 +26,8 @@ import { promisify } from 'node:util';
 import {
   type AuthSignalFs,
   type BinaryScanDeps,
+  type FnmDetectionDeps,
+  type ManagedVersionFileSystem,
   type NvmDetectionDeps,
   type NvmFileSystem,
   parseWingetListOutput,
@@ -150,19 +152,33 @@ export function createBinaryScanDeps(
   };
 }
 
-export function createNvmDetectionDeps(env: PathEnv): NvmDetectionDeps {
-  return { platform: env.platform, homeDir: env.homeDir, env: env.env, fs: NODE_NVM_FILE_SYSTEM };
-}
-
-const NODE_NVM_FILE_SYSTEM: NvmFileSystem = {
+/** The filesystem seam nvm's and fnm's detectors share; nvm adds `readFile` on top of it. */
+const NODE_MANAGED_VERSION_FILE_SYSTEM: ManagedVersionFileSystem = {
   pathExists: existsSync,
-  readFile: (path) => readFile(path, 'utf8'),
   readDirectory: async (path) => {
     const entries = await readdir(path, { withFileTypes: true });
     return entries.map((entry) => entry.name);
   },
   realpath,
 };
+
+export function createNvmDetectionDeps(env: PathEnv): NvmDetectionDeps {
+  return { platform: env.platform, homeDir: env.homeDir, env: env.env, fs: NODE_NVM_FILE_SYSTEM };
+}
+
+const NODE_NVM_FILE_SYSTEM: NvmFileSystem = {
+  ...NODE_MANAGED_VERSION_FILE_SYSTEM,
+  readFile: (path) => readFile(path, 'utf8'),
+};
+
+export function createFnmDetectionDeps(env: PathEnv): FnmDetectionDeps {
+  return {
+    platform: env.platform,
+    homeDir: env.homeDir,
+    env: env.env,
+    fs: NODE_MANAGED_VERSION_FILE_SYSTEM,
+  };
+}
 
 /**
  * Above the caller's 5s scan budget on purpose: `winget list` is slow, this

@@ -64,7 +64,7 @@ const PROBE_REQUEST_TIMEOUT_MS = 15_000;
 const LOCATION_REQUEST_TIMEOUT_MS = 60_000;
 
 const RUNTIME_IDS: readonly RuntimeId[] = ['bun', 'node', 'fnm', 'winget', 'git'];
-const VERSION_MANAGER_IDS: readonly VersionManagerId[] = ['nvm'];
+const VERSION_MANAGER_IDS: readonly VersionManagerId[] = ['nvm', 'fnm'];
 const AGENT_TARGET_IDS: readonly LibraryTargetId[] = AGENT_CLI_DEFINITIONS.map(
   (definition) => definition.targetId
 );

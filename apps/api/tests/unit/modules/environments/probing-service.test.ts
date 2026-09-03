@@ -71,10 +71,23 @@ function fakeClient(version = 'v1'): FakeClient {
           if (!state.holdRuntime) settleRuntime();
         });
       },
-      versionManagers: () =>
-        Promise.resolve({
-          statuses: [{ id: 'nvm', installed: false, versions: [], findings: [] }],
-        }),
+      // Answers exactly the ids it was asked for, the way a real runtime does:
+      // `getVersionManagerStatus` destructures the first entry it gets back, so
+      // a fake that always returned the same fixed list regardless of `ids`
+      // would hand a `fnm` caller an `nvm` status wearing the wrong label.
+      versionManagers: (params: { ids?: readonly string[] }) => {
+        const known: Record<
+          string,
+          { id: string; installed: boolean; versions: never[]; findings: never[] }
+        > = {
+          nvm: { id: 'nvm', installed: false, versions: [], findings: [] },
+          fnm: { id: 'fnm', installed: false, versions: [], findings: [] },
+        };
+        const wanted = params.ids ?? ['nvm', 'fnm'];
+        return Promise.resolve({
+          statuses: wanted.map((id) => known[id]).filter((status) => status !== undefined),
+        });
+      },
       agentClis: (params: { self?: unknown; pathEnv?: unknown }) => {
         state.agentCalls += 1;
         state.selfParams = params.self ?? null;
@@ -257,9 +270,15 @@ describe('environment probing cache', () => {
     const local = fakeClient();
     const service = serviceFor(() => local);
 
-    expect(await service.getVersionManagerStatus(LOCAL, 'fnm')).toBeNull();
     expect(await service.getVersionManagerStatus(LOCAL, 'volta')).toBeNull();
     expect(local.runtimeCalls).toBe(0);
+  });
+
+  it('resolves fnm now that this release detects it too', async () => {
+    const local = fakeClient();
+    const service = serviceFor(() => local);
+
+    expect(await service.getVersionManagerStatus(LOCAL, 'fnm')).toMatchObject({ id: 'fnm' });
   });
 });
 
