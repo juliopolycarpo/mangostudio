@@ -752,6 +752,12 @@ export interface RuntimeInstallRunParams {
   /** Where this machine keeps the run's log; the hub's own path means nothing here. */
   readonly logPath: string;
   readonly outputLimitBytes?: number;
+  /**
+   * Exit codes besides 0 that still mean success — winget exits with its own
+   * "no applicable update found" code when a package is already current, and
+   * that is not a failure MangoStudio should report as one.
+   */
+  readonly acceptedExitCodes?: readonly number[];
 }
 
 export interface RuntimeInstallRunResult {

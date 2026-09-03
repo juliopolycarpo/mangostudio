@@ -112,6 +112,38 @@ describe('runtime install execution', () => {
     });
   });
 
+  it('accepts CODEX_NON_INTERACTIVE and FNM_DIR as constant recipe overrides', () => {
+    const env = buildInstallEnvironment(
+      { PATH: '/bin' },
+      { CODEX_NON_INTERACTIVE: '1', FNM_DIR: '/home/tester/.fnm', ANTHROPIC_API_KEY: 'secret' }
+    );
+
+    expect(env).toEqual({ PATH: '/bin', CODEX_NON_INTERACTIVE: '1', FNM_DIR: '/home/tester/.fnm' });
+  });
+
+  it('forwards the win32-only keys PowerShell and its installers need, only on win32', () => {
+    const source = {
+      PATH: 'C:\\bin',
+      SystemRoot: 'C:\\Windows',
+      WINDIR: 'C:\\Windows',
+      ComSpec: 'C:\\Windows\\System32\\cmd.exe',
+      PATHEXT: '.EXE;.BAT',
+      SystemDrive: 'C:',
+      USERPROFILE: 'C:\\Users\\tester',
+      LOCALAPPDATA: 'C:\\Users\\tester\\AppData\\Local',
+      APPDATA: 'C:\\Users\\tester\\AppData\\Roaming',
+      ProgramFiles: 'C:\\Program Files',
+      'ProgramFiles(x86)': 'C:\\Program Files (x86)',
+      ProgramData: 'C:\\ProgramData',
+    };
+
+    const win32Env = buildInstallEnvironment(source, {}, 'win32');
+    expect(win32Env).toEqual(source);
+
+    const posixEnv = buildInstallEnvironment(source, {}, 'linux');
+    expect(posixEnv).toEqual({ PATH: 'C:\\bin' });
+  });
+
   it('streams lines, writes a bounded raw log, and records success', async () => {
     const process = new FakeInstallProcess('hello\nworld\n', 'warning\n', 0);
     const captured = { log: [] as Uint8Array[] };
@@ -131,6 +163,42 @@ describe('runtime install execution', () => {
     expect(
       new TextDecoder().decode(Uint8Array.from(captured.log.flatMap((chunk) => [...chunk])))
     ).toBe('hello\nworld\nwarning\n');
+  });
+
+  it('treats an accepted non-zero exit code as success', async () => {
+    // winget's own "no applicable update found" — a package already at the
+    // version it would install exits with this instead of 0.
+    const WINGET_NO_APPLICABLE_UPGRADE = -1978335189;
+    const process = new FakeInstallProcess('', '', WINGET_NO_APPLICABLE_UPGRADE);
+    const runner = createRunner(process, { log: [] });
+
+    const result = await runner.run({
+      ...COMMAND,
+      acceptedExitCodes: [WINGET_NO_APPLICABLE_UPGRADE],
+    });
+
+    expect(result.status).toBe('succeeded');
+    expect(result.exitCode).toBe(WINGET_NO_APPLICABLE_UPGRADE);
+  });
+
+  it('still fails a non-zero exit code the recipe did not accept', async () => {
+    const process = new FakeInstallProcess('', '', 1);
+    const runner = createRunner(process, { log: [] });
+
+    const result = await runner.run({ ...COMMAND, acceptedExitCodes: [-1978335189] });
+
+    expect(result.status).toBe('failed');
+  });
+
+  it("matches an accepted exit code by bit pattern, not sign — a platform that reports the process's exit code unsigned still matches a recipe's signed constant", async () => {
+    // -1978335189 and 2316632107 are the same 32-bit pattern (0x8A15002B).
+    const process = new FakeInstallProcess('', '', 2316632107);
+    const runner = createRunner(process, { log: [] });
+
+    const result = await runner.run({ ...COMMAND, acceptedExitCodes: [-1978335189] });
+
+    expect(result.status).toBe('succeeded');
+    expect(result.exitCode).toBe(2316632107);
   });
 
   it('caps captured output while continuing to a terminal result', async () => {

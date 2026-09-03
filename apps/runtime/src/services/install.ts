@@ -51,7 +51,27 @@ const INSTALL_ENV_KEYS = [
   'no_proxy',
 ] as const;
 
-const RECIPE_ENV_KEYS = ['NVM_DIR', 'PROFILE'] as const;
+/**
+ * win32-only. `SystemRoot`/`WINDIR`/`ComSpec`/`PATHEXT` are what lets
+ * PowerShell start at all; the rest are what the win32 installers themselves
+ * read (winget, the vendor `.ps1` scripts). Kept out of the POSIX set because
+ * none of it means anything there.
+ */
+const WIN32_INSTALL_ENV_KEYS = [
+  'SystemRoot',
+  'WINDIR',
+  'ComSpec',
+  'PATHEXT',
+  'SystemDrive',
+  'USERPROFILE',
+  'LOCALAPPDATA',
+  'APPDATA',
+  'ProgramFiles',
+  'ProgramFiles(x86)',
+  'ProgramData',
+] as const;
+
+const RECIPE_ENV_KEYS = ['NVM_DIR', 'PROFILE', 'CODEX_NON_INTERACTIVE', 'FNM_DIR'] as const;
 
 interface InstallSubprocess {
   readonly stdout: ReadableStream<Uint8Array>;
@@ -114,10 +134,13 @@ const DEFAULT_DEPS: InstallHostDeps = {
 
 export function buildInstallEnvironment(
   source: Readonly<Record<string, string | undefined>>,
-  recipeEnv: Readonly<Record<string, string>> = {}
+  recipeEnv: Readonly<Record<string, string>> = {},
+  platform: NodeJS.Platform = process.platform
 ): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const key of INSTALL_ENV_KEYS) {
+  const keys =
+    platform === 'win32' ? [...INSTALL_ENV_KEYS, ...WIN32_INSTALL_ENV_KEYS] : INSTALL_ENV_KEYS;
+  for (const key of keys) {
     const value = source[key];
     if (value !== undefined) env[key] = value;
   }
@@ -126,6 +149,18 @@ export function buildInstallEnvironment(
     if (value !== undefined) env[key] = value;
   }
   return env;
+}
+
+/**
+ * Whether a non-zero exit code is one the recipe accepts as success anyway
+ * (winget's "no applicable update found"). Compared modulo 2^32 rather than
+ * with strict equality: a recipe pins the code as a signed HRESULT, but a
+ * spawned process's exit code can surface as that same bit pattern's unsigned
+ * form depending on the platform, and this makes either reading match.
+ */
+function isAcceptedExitCode(code: number | null, accepted: readonly number[] | undefined): boolean {
+  if (code === null || !accepted || accepted.length === 0) return false;
+  return accepted.some((candidate) => candidate >>> 0 === code >>> 0);
 }
 
 export interface InstallService {
@@ -316,9 +351,10 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
       }
 
       const finishedAt = deps.now();
+      const succeeded = exitCode === 0 || isAcceptedExitCode(exitCode, params.acceptedExitCodes);
       const status = streamFailed
         ? ('failed' as const)
-        : (termination ?? (exitCode === 0 ? ('succeeded' as const) : ('failed' as const)));
+        : (termination ?? (succeeded ? ('succeeded' as const) : ('failed' as const)));
       // Ends the stream so the hub stops waiting on frames that cannot arrive,
       // even though the terminal status also travels on the response.
       endStream();
