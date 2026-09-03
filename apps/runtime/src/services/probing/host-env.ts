@@ -167,9 +167,12 @@ const NODE_NVM_FILE_SYSTEM: NvmFileSystem = {
 /**
  * Above the caller's 5s scan budget on purpose: `winget list` is slow, this
  * runs once per `probeRuntimes` call rather than once per candidate, and a
- * cancelled probe answers `unknown` instead of hanging the scan.
+ * cancelled probe answers `unknown` instead of hanging the scan. Kept well
+ * under the hub's 15s deadline for the whole `probing.runtimes` request,
+ * because `unknown` (Node reads as `system`) is a far better outcome than the
+ * entire toolchain probe timing out.
  */
-const WINGET_OWNERSHIP_TIMEOUT_MS = 15_000;
+const WINGET_OWNERSHIP_TIMEOUT_MS = 8_000;
 
 /**
  * Asks winget whether it owns `packageId`, mapping every failure — the binary
