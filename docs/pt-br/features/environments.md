@@ -102,8 +102,8 @@ A tabela de receitas está descrita em
 ## Espelho na CLI
 
 `mangostudio env install <receita>` e `mangostudio env update <receita>` chamam o mesmo serviço
-de instalação e transmitem o mesmo log para o terminal, para quem está via SSH. Veja
-[`cli.md`](../reference/cli.md).
+de instalação e transmitem o mesmo log para o terminal, e `mangostudio env toolchain` lê ou grava
+a mesma seleção que o seletor, para quem está via SSH. Veja [`cli.md`](../reference/cli.md).
 
 ## Adiado
 

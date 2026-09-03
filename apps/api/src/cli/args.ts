@@ -37,7 +37,7 @@ export interface EnvArgs {
   runtime?: 'node' | 'bun';
   /** `toolchain` only: `auto` or the path of a probed installation. */
   choice?: string;
-  /** `toolchain` only: the account whose selection to read or write, by email. */
+  /** `install`/`update`/`toolchain`: the account to act as, by email; omitted means the sole account. */
   user?: string;
   /** `install`/`update` only: the recipe to run. */
   recipeId?: string;
@@ -323,6 +323,7 @@ export function parseEnvArgs(rest: string[]): EnvArgs {
       json,
       ...(environmentId !== undefined && { environmentId }),
       ...(version !== undefined && { version }),
+      ...(user !== undefined && { user }),
     };
   }
   if (subcommand === 'toolchain') {

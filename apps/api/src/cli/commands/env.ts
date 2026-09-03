@@ -91,7 +91,13 @@ const CLI_INSTALL_USER_ID = 'local';
 
 export interface EnvInstallDeps {
   readonly service: Pick<InstallService, 'prepare' | 'start' | 'getRunStream' | 'listRuns'>;
-  readonly userId: string;
+  /**
+   * The account the run is recorded under and whose toolchain selection the
+   * installer starts with — the sole account, or the one `--user` names. The
+   * sentinel keeps a hub nobody has signed in to installable from its own
+   * terminal.
+   */
+  readonly resolveUserId: (email: string | undefined) => Promise<string>;
   readonly log: (line: string) => void;
   readonly logError: (line: string) => void;
 }
@@ -124,7 +130,8 @@ export function cliInstallGuard(context: InstallRequestContext): Promise<Install
 function resolveInstallDeps(deps: Partial<EnvInstallDeps>): EnvInstallDeps {
   return {
     service: deps.service ?? createInstallService({ resolveGuard: cliInstallGuard }),
-    userId: deps.userId ?? CLI_INSTALL_USER_ID,
+    resolveUserId:
+      deps.resolveUserId ?? ((email) => resolveCliUserId(email, { fallback: CLI_INSTALL_USER_ID })),
     log: deps.log ?? writeLine,
     logError: deps.logError ?? writeError,
   };
@@ -229,7 +236,8 @@ export async function runEnvInstall(
   const d = resolveInstallDeps(deps);
   const recipe = resolveInstallRecipe(args.recipeId, args.subcommand);
   const input = buildRecipeInput(recipe, args.version);
-  const context: InstallRequestContext = { userId: d.userId, clientIp: undefined };
+  const userId = await d.resolveUserId(args.user);
+  const context: InstallRequestContext = { userId, clientIp: undefined };
   const requestBody = {
     recipeId: recipe.id,
     input,
@@ -271,7 +279,7 @@ export async function runEnvInstall(
     throw error;
   }
 
-  const stream = await d.service.getRunStream(started.runId, d.userId);
+  const stream = await d.service.getRunStream(started.runId, userId);
   let status: InstallRunStatus = 'failed';
   if (stream) {
     for await (const event of stream) {
@@ -282,7 +290,7 @@ export async function runEnvInstall(
   }
 
   if (args.json) {
-    const runs = await d.service.listRuns(d.userId);
+    const runs = await d.service.listRuns(userId);
     const run = runs.find((candidate: InstallRun) => candidate.id === started.runId);
     if (run) d.log(JSON.stringify(run, null, 2));
   }
@@ -298,11 +306,16 @@ export interface EnvToolchainDeps {
 }
 
 /**
- * The selection is per account, and a terminal has no signed-in session, so
- * the account is named by email — or implied when the hub has exactly one,
- * which is the machine this command exists for.
+ * Selections and audit rows are per account, and a terminal has no signed-in
+ * session, so the account is named by email — or implied when the hub has
+ * exactly one, which is the machine these commands exist for. `fallback`
+ * stands in when no account exists at all; a command that needs a real
+ * account (the toolchain selection nobody else would read) passes none.
  */
-async function resolveToolchainUserId(email: string | undefined): Promise<string> {
+async function resolveCliUserId(
+  email: string | undefined,
+  options: { readonly fallback?: string } = {}
+): Promise<string> {
   const db = getDb();
   if (email !== undefined) {
     const user = await db
@@ -315,7 +328,10 @@ async function resolveToolchainUserId(email: string | undefined): Promise<string
   }
   const users = await db.selectFrom('user').select(['id', 'email']).limit(2).execute();
   const [sole] = users;
-  if (!sole) throw new CliError('No account exists yet. Sign in once in the browser first.');
+  if (!sole) {
+    if (options.fallback !== undefined) return options.fallback;
+    throw new CliError('No account exists yet. Sign in once in the browser first.');
+  }
   if (users.length > 1) {
     throw new CliError('More than one account exists. Pass --user <email> to pick one.');
   }
@@ -325,7 +341,7 @@ async function resolveToolchainUserId(email: string | undefined): Promise<string
 function resolveToolchainDeps(deps: Partial<EnvToolchainDeps>): EnvToolchainDeps {
   return {
     service: deps.service ?? toolchainService,
-    resolveUserId: deps.resolveUserId ?? resolveToolchainUserId,
+    resolveUserId: deps.resolveUserId ?? ((email) => resolveCliUserId(email)),
     log: deps.log ?? writeLine,
   };
 }

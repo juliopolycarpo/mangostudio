@@ -100,8 +100,8 @@ What matters for this page:
 ## CLI mirror
 
 `mangostudio env install <recipe>` and `mangostudio env update <recipe>` call the same install
-service and stream the same log to the terminal, for people on SSH. See
-[`cli.md`](../reference/cli.md).
+service and stream the same log to the terminal, and `mangostudio env toolchain` reads or writes
+the same selection as the picker, for people on SSH. See [`cli.md`](../reference/cli.md).
 
 ## Deferred
 

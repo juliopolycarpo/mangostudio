@@ -394,7 +394,11 @@ describe('runEnvInstall', () => {
     const lines: string[] = [];
     const code = await runEnvInstall(
       { subcommand: 'update', recipeId: 'bun.update', json: false } as EnvArgs,
-      { service, log: (line) => lines.push(line) } as Partial<EnvInstallDeps>
+      {
+        service,
+        resolveUserId: () => Promise.resolve('user-1'),
+        log: (line) => lines.push(line),
+      } as Partial<EnvInstallDeps>
     );
 
     expect(code).toBe(0);
@@ -436,7 +440,11 @@ describe('runEnvInstall', () => {
     const lines: string[] = [];
     const code = await runEnvInstall(
       { subcommand: 'install', recipeId: 'bun.install.official', json: false },
-      { service, log: (line) => lines.push(line) } as Partial<EnvInstallDeps>
+      {
+        service,
+        resolveUserId: () => Promise.resolve('user-1'),
+        log: (line) => lines.push(line),
+      } as Partial<EnvInstallDeps>
     );
 
     expect(code).toBe(2);
@@ -457,7 +465,11 @@ describe('runEnvInstall', () => {
     const lines: string[] = [];
     const code = await runEnvInstall(
       { subcommand: 'install', recipeId: 'bun.install.official', json: false },
-      { service, log: (line) => lines.push(line) } as Partial<EnvInstallDeps>
+      {
+        service,
+        resolveUserId: () => Promise.resolve('user-1'),
+        log: (line) => lines.push(line),
+      } as Partial<EnvInstallDeps>
     );
 
     expect(code).toBe(2);

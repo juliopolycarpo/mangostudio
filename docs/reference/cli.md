@@ -220,11 +220,12 @@ mangostudio env install nvm.node.install --version 22
 mangostudio env update bun.update --json
 ```
 
-| Flag                 | Description                                                                                                                                              |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--environment <id>` | Accepted for parity with the API; currently always refused (see below) — the CLI has no session to check a paired environment's `allowInstalls` against. |
-| `--version <spec>`   | `lts`, `latest`, or a numeric version, for a recipe that takes a Node spec.                                                                              |
-| `--json`             | Print the final `InstallRun` audit row instead of a plain summary.                                                                                       |
+| Flag                 | Description                                                                                                                                                                    |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--environment <id>` | Accepted for parity with the API; currently always refused (see below) — the CLI has no session to check a paired environment's `allowInstalls` against.                       |
+| `--version <spec>`   | `lts`, `latest`, or a numeric version, for a recipe that takes a Node spec.                                                                                                    |
+| `--user <email>`     | The account the run is recorded under and whose toolchain selection the installer starts with; omitted means the hub's only account, or a local sentinel when none exists yet. |
+| `--json`             | Print the final `InstallRun` audit row instead of a plain summary.                                                                                                             |
 
 ### env toolchain
 

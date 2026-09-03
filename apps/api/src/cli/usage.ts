@@ -41,7 +41,7 @@ Commands:
   env [runtimes|agents] [--json]
                       Report runtimes, version managers, and agent CLIs
                       (read-only).
-  env install <recipe> [--environment <id>] [--version <spec>] [--json]
+  env install <recipe> [--environment <id>] [--version <spec>] [--user <email>] [--json]
                       Run an install recipe on this machine. --environment
                       is accepted but always refused for now (no session
                       to check a paired environment against). --version
