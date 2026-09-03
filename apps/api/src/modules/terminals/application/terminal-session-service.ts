@@ -145,8 +145,7 @@ async function defaultResolveChat(chatId: string, userId: string): Promise<Termi
 function defaultDeps(): TerminalSessionServiceDeps {
   return {
     getConfig: () => getApiConfig().terminal,
-    getRuntimeClient: (userId, environmentId) =>
-      getRuntimeClientDefault(userId, environmentId) as Promise<TerminalRuntimeClient>,
+    getRuntimeClient: (userId, environmentId) => getRuntimeClientDefault(userId, environmentId),
     isIdentityAttested: (userId, environmentId) =>
       getRuntimeConnectionManager().isIdentityAttested(userId, environmentId),
     resolveChat: defaultResolveChat,
