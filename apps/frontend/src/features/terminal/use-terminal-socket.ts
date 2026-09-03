@@ -224,7 +224,17 @@ export function createTerminalSocket(options: TerminalSocketOptions): TerminalSo
 
   function handleMessage(data: ArrayBuffer): void {
     awaitingPong = false;
-    const message = decodeTerminalServerMessage(new Uint8Array(data));
+    // A frame this build cannot decode — a newer hub's frame type, a truncated
+    // body — is one frame's worth of output, not a reason to throw out of the
+    // socket's `onmessage` and take the page's error handler with it. The
+    // session keeps streaming; the browser smoke asserts on an empty
+    // `pageerror` list and would fail on the alternative.
+    let message: ReturnType<typeof decodeTerminalServerMessage>;
+    try {
+      message = decodeTerminalServerMessage(new Uint8Array(data));
+    } catch {
+      return;
+    }
     switch (message.type) {
       case 'data':
         options.onData(message.data);

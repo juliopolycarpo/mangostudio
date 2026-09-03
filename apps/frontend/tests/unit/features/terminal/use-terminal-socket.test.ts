@@ -137,6 +137,22 @@ describe('createTerminalSocket', () => {
     expect(new TextDecoder().decode(data[0])).toBe('mango\n');
   });
 
+  it('ignores a frame it cannot decode instead of throwing out of onmessage', () => {
+    createSocket();
+    lastSocket().open();
+
+    // A type byte no build of this codec knows — what a newer hub's frame, or
+    // a truncated body, looks like from here.
+    const undecodable = new Uint8Array([9, 1, 2, 3]);
+    expect(() =>
+      lastSocket().onmessage?.({ data: undecodable.buffer } as MessageEvent)
+    ).not.toThrow();
+
+    // The session keeps streaming: the bad frame cost one frame, not the socket.
+    lastSocket().emitServerMessage({ type: 'data', data: new TextEncoder().encode('still here') });
+    expect(new TextDecoder().decode(data.at(-1))).toBe('still here');
+  });
+
   it('sends keystrokes as a framed data message once open', () => {
     const socket = createSocket();
     lastSocket().open();
