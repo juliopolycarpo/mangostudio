@@ -23,12 +23,15 @@ import {
 import { readdir, readFile, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
-import type {
-  AuthSignalFs,
-  BinaryScanDeps,
-  NvmDetectionDeps,
-  NvmFileSystem,
-  RuntimeDefinition,
+import {
+  type AuthSignalFs,
+  type BinaryScanDeps,
+  type NvmDetectionDeps,
+  type NvmFileSystem,
+  parseWingetListOutput,
+  type RuntimeDefinition,
+  WINGET_LIST_ARGV,
+  type WingetOwnership,
 } from '@mangostudio/shared/environments/detection';
 import type { LocationFsProbe } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
@@ -160,6 +163,41 @@ const NODE_NVM_FILE_SYSTEM: NvmFileSystem = {
   },
   realpath,
 };
+
+/**
+ * Above the caller's 5s scan budget on purpose: `winget list` is slow, this
+ * runs once per `probeRuntimes` call rather than once per candidate, and a
+ * cancelled probe answers `unknown` instead of hanging the scan.
+ */
+const WINGET_OWNERSHIP_TIMEOUT_MS = 15_000;
+
+/**
+ * Asks winget whether it owns `packageId`, mapping every failure — the binary
+ * missing, a timeout, an unrecognized exit code — to `unknown` rather than
+ * throwing: this is one signal among several the card can render without,
+ * and it must never be the thing that fails a runtime scan.
+ */
+export async function probeWingetOwnership(
+  packageId: string,
+  signal?: AbortSignal
+): Promise<WingetOwnership> {
+  try {
+    const { stdout } = await execFileAsync('winget', WINGET_LIST_ARGV(packageId), {
+      timeout: WINGET_OWNERSHIP_TIMEOUT_MS,
+      ...HIDDEN_WINDOW,
+      ...(signal ? { signal } : {}),
+    });
+    return parseWingetListOutput(stdout, 0, packageId);
+  } catch (error) {
+    // A killed-by-timeout or spawn-failed child reports `code` as `null` or a
+    // string errno (`ENOENT`), never the exit code the parser needs — both
+    // read as `unknown`. Only a child that actually exited non-zero, which
+    // `execFile` also surfaces as a rejection, carries a numeric `code`.
+    const execError = error as { readonly code?: unknown; readonly stdout?: string };
+    if (typeof execError.code !== 'number') return 'unknown';
+    return parseWingetListOutput(execError.stdout ?? '', execError.code, packageId);
+  }
+}
 
 /**
  * Reads at most `maxBytes` from a regular file, validating the descriptor after

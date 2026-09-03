@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import type { BinaryScanDeps, NvmDetectionDeps } from '@mangostudio/shared/environments/detection';
+import type {
+  BinaryScanDeps,
+  NvmDetectionDeps,
+  WingetOwnership,
+} from '@mangostudio/shared/environments/detection';
 import { NODE_RUNTIME_DEFINITION } from '@mangostudio/shared/environments/detection';
 import { createProbingService } from '../../../../src/services/probing/service';
 
@@ -9,6 +13,12 @@ const LINUX_ENV = {
   env: { PATH: '/node/bin' },
 } as const;
 
+const WIN32_ENV = {
+  platform: 'win32',
+  homeDir: 'C:\\Users\\tester',
+  env: { PATH: 'C:\\Program Files\\nodejs', ProgramFiles: 'C:\\Program Files' },
+} as const;
+
 function scanDeps(overrides: Partial<BinaryScanDeps> = {}): BinaryScanDeps {
   return {
     ...LINUX_ENV,
@@ -16,6 +26,18 @@ function scanDeps(overrides: Partial<BinaryScanDeps> = {}): BinaryScanDeps {
     probeVersion: () => Promise.resolve('v22.13.0'),
     realpath: (path) => Promise.resolve(path),
     ...overrides,
+  };
+}
+
+/** Records every package id it was asked about and answers with one fixed verdict. */
+class FakeWingetOwnership {
+  readonly calls: string[] = [];
+
+  constructor(private readonly verdict: WingetOwnership) {}
+
+  probe = (packageId: string): Promise<WingetOwnership> => {
+    this.calls.push(packageId);
+    return Promise.resolve(this.verdict);
   };
 }
 
@@ -135,6 +157,61 @@ describe('runtime probing', () => {
     await expect(service.probeRuntimes({}, controller.signal)).rejects.toMatchObject({
       name: 'AbortError',
     });
+  });
+
+  it('asks winget once on win32 and marks the Program Files Node it owns', async () => {
+    const winget = new FakeWingetOwnership('owned');
+    const service = createProbingService({
+      runtimeDefinitions: [nodeOnly],
+      createPathEnv: () => WIN32_ENV,
+      createScanDeps: () =>
+        scanDeps({
+          ...WIN32_ENV,
+          pathExists: (path) => path === 'C:\\Program Files\\nodejs\\node.exe',
+          probeVersion: (path) =>
+            Promise.resolve(path === 'C:\\Program Files\\nodejs\\node.exe' ? 'v22.13.0' : null),
+        }),
+      wingetOwnership: winget.probe,
+    });
+
+    const { statuses } = await service.probeRuntimes({});
+
+    expect(winget.calls).toEqual(['OpenJS.NodeJS.LTS']);
+    expect(statuses[0]?.effective).toMatchObject({ pathSource: 'winget' });
+  });
+
+  it('leaves pathSource as system when winget answers unknown', async () => {
+    const winget = new FakeWingetOwnership('unknown');
+    const service = createProbingService({
+      runtimeDefinitions: [nodeOnly],
+      createPathEnv: () => WIN32_ENV,
+      createScanDeps: () =>
+        scanDeps({
+          ...WIN32_ENV,
+          pathExists: (path) => path === 'C:\\Program Files\\nodejs\\node.exe',
+          probeVersion: (path) =>
+            Promise.resolve(path === 'C:\\Program Files\\nodejs\\node.exe' ? 'v22.13.0' : null),
+        }),
+      wingetOwnership: winget.probe,
+    });
+
+    const { statuses } = await service.probeRuntimes({});
+
+    expect(statuses[0]?.effective).toMatchObject({ pathSource: 'system' });
+  });
+
+  it('never calls the winget adapter on linux', async () => {
+    const winget = new FakeWingetOwnership('owned');
+    const service = createProbingService({
+      runtimeDefinitions: [nodeOnly],
+      createPathEnv: () => LINUX_ENV,
+      createScanDeps: () => scanDeps(),
+      wingetOwnership: winget.probe,
+    });
+
+    await service.probeRuntimes({});
+
+    expect(winget.calls).toEqual([]);
   });
 });
 

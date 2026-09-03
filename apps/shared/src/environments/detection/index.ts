@@ -15,3 +15,4 @@ export * from './lts-policy';
 export * from './node-release-schedule';
 export * from './nvm';
 export * from './runtime-definitions';
+export * from './winget-ownership';

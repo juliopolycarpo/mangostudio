@@ -27,13 +27,17 @@ import {
   detectNvm,
   directoryExists,
   type ExternalAgentCliDefinition,
+  markWingetOwnedNodeInstallations,
+  NODE_LTS_WINGET_PACKAGE_ID,
   NODE_RELEASE_SCHEDULE,
   NODE_RUNTIME_DEFINITION,
   type NvmDetectionDeps,
   probeAuthFile,
   probeConfigKey,
   type RuntimeDefinition,
+  type RuntimeScanResult,
   scanRuntime,
+  type WingetOwnership,
 } from '@mangostudio/shared/environments/detection';
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
 import { describeTargetLocations, getLibraryTarget } from '@mangostudio/shared/library/host';
@@ -55,6 +59,7 @@ import {
   createRuntimePathEnv,
   NODE_AUTH_SIGNAL_FS,
   NODE_LOCATION_FS_PROBE,
+  probeWingetOwnership,
 } from './host-env';
 
 /**
@@ -79,6 +84,14 @@ export interface ProbingHostAdapters {
   readonly agentDefinitions: readonly AgentCliDefinition[];
   readonly now: () => number;
   readonly selfExecutablePath: () => string;
+  /**
+   * Whether winget owns a package id, asked once per `probeRuntimes` call on
+   * win32 when Node is among the ids probed. Optional because every other
+   * platform has nothing to bind it to; {@link DEFAULT_ADAPTERS} always
+   * provides one, so only a test overriding the whole adapter set needs to
+   * think about its absence.
+   */
+  readonly wingetOwnership?: (packageId: string, signal?: AbortSignal) => Promise<WingetOwnership>;
 }
 
 const DEFAULT_ADAPTERS: ProbingHostAdapters = {
@@ -92,6 +105,7 @@ const DEFAULT_ADAPTERS: ProbingHostAdapters = {
   agentDefinitions: AGENT_CLI_DEFINITIONS,
   now: Date.now,
   selfExecutablePath: () => process.execPath,
+  wingetOwnership: probeWingetOwnership,
 };
 
 export interface ProbingService {
@@ -130,13 +144,13 @@ function selectById<T, Id extends string>(
   return definitions.filter((definition) => wanted.has(idOf(definition)));
 }
 
-async function probeRuntimeDefinition(
+async function scanRuntimeDefinition(
   adapters: ProbingHostAdapters,
   definition: RuntimeDefinition,
   env: PathEnv,
   params: RuntimeProbeRuntimesParams,
   signal?: AbortSignal
-): Promise<RuntimeStatus> {
+): Promise<RuntimeScanResult> {
   throwIfAborted(signal);
   const scan = await scanRuntime(
     definition,
@@ -146,14 +160,66 @@ async function probeRuntimeDefinition(
   // AbortError from the forwarded signal, so a cancelled call would otherwise
   // come back as a normal missing/ok status.
   throwIfAborted(signal);
+  return scan;
+}
+
+/**
+ * Turns a completed scan into the status the hub reads. Split from
+ * {@link scanRuntimeDefinition} so `probeRuntimes` can run every definition's
+ * scan alongside the one winget ownership probe it needs, instead of paying
+ * for winget sequentially after each scan finishes.
+ */
+function analyzeScannedRuntime(
+  definition: RuntimeDefinition,
+  scan: RuntimeScanResult,
+  env: PathEnv,
+  params: RuntimeProbeRuntimesParams,
+  probedAtMs: number,
+  wingetOwnership?: WingetOwnership
+): RuntimeStatus {
+  // Only Node needs this: winget's own MSI and the nodejs.org MSI are
+  // indistinguishable by path, so `system` there is ambiguous in a way no
+  // other runtime's `system` is.
+  const installations =
+    definition.id === 'node' && wingetOwnership === 'owned'
+      ? markWingetOwnedNodeInstallations(scan.installations, env.env.ProgramFiles)
+      : scan.installations;
   const minimumVersion = params.minimumVersions?.[definition.id];
   const consumerRequirements = params.consumerMinimumVersions?.[definition.id];
-  return analyzeRuntimeScan(definition, scan, {
-    probedAtMs: adapters.now(),
-    installable: params.installable?.[definition.id] ?? false,
-    ...(minimumVersion !== undefined && { minimumVersion }),
-    ...(consumerRequirements !== undefined && { consumerRequirements }),
-  });
+  return analyzeRuntimeScan(
+    definition,
+    { ...scan, installations },
+    {
+      probedAtMs,
+      installable: params.installable?.[definition.id] ?? false,
+      ...(minimumVersion !== undefined && { minimumVersion }),
+      ...(consumerRequirements !== undefined && { consumerRequirements }),
+    }
+  );
+}
+
+async function probeRuntimeDefinition(
+  adapters: ProbingHostAdapters,
+  definition: RuntimeDefinition,
+  env: PathEnv,
+  params: RuntimeProbeRuntimesParams,
+  signal?: AbortSignal
+): Promise<RuntimeStatus> {
+  const scan = await scanRuntimeDefinition(adapters, definition, env, params, signal);
+  return analyzeScannedRuntime(definition, scan, env, params, adapters.now());
+}
+
+/** Whether this `probeRuntimes` call should ask winget about Node at all. */
+function needsWingetOwnership(
+  adapters: ProbingHostAdapters,
+  definitions: readonly RuntimeDefinition[],
+  env: PathEnv
+): boolean {
+  return (
+    env.platform === 'win32' &&
+    adapters.wingetOwnership !== undefined &&
+    definitions.some((definition) => definition.id === 'node')
+  );
 }
 
 function mapRuntimeFindings(status: RuntimeStatus, targetId: LibraryTargetId): RuntimeFinding[] {
@@ -321,9 +387,31 @@ export function createProbingService(overrides: Partial<ProbingHostAdapters> = {
         params.ids,
         'runtime id'
       );
-      const statuses = await Promise.all(
-        definitions.map((definition) =>
-          probeRuntimeDefinition(adapters, definition, env, params, signal)
+
+      // The winget probe runs alongside every scan rather than after it: on a
+      // Windows host that already pays `probeTimeoutMs` per candidate, adding
+      // winget's own 15s sequentially would nearly triple a plain Node probe.
+      const wingetOwnershipPromise = needsWingetOwnership(adapters, definitions, env)
+        ? adapters.wingetOwnership?.(NODE_LTS_WINGET_PACKAGE_ID, signal)
+        : undefined;
+      const [scans, wingetOwnership] = await Promise.all([
+        Promise.all(
+          definitions.map((definition) =>
+            scanRuntimeDefinition(adapters, definition, env, params, signal)
+          )
+        ),
+        wingetOwnershipPromise,
+      ]);
+
+      const probedAtMs = adapters.now();
+      const statuses = definitions.map((definition, index) =>
+        analyzeScannedRuntime(
+          definition,
+          scans[index] as RuntimeScanResult,
+          env,
+          params,
+          probedAtMs,
+          wingetOwnership
         )
       );
       return { statuses };
