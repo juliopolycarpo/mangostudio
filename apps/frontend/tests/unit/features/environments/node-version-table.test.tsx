@@ -44,6 +44,30 @@ const NVM_INSTALL_RECIPE = installRecipe({
   copyCommand: 'curl -fsSL https://example.test/nvm | bash',
 });
 
+const FNM_NODE_INSTALL_RECIPE = installRecipe({
+  id: 'fnm.node.install',
+  runtimeId: 'node',
+  action: 'use-version',
+  inputKind: 'node-version',
+  requires: ['fnm'],
+  copyCommand: 'fnm install --lts',
+});
+
+/** The same recipe as the catalog reports it on a machine that has no fnm. */
+const NODE_WITHOUT_FNM = installRecipe({
+  ...FNM_NODE_INSTALL_RECIPE,
+  missingRequirements: ['fnm'],
+});
+
+const FNM_INSTALL_RECIPE = installRecipe({
+  id: 'fnm.install',
+  runtimeId: 'fnm',
+  action: 'install',
+  platforms: ['win32'],
+  writes: ['%LOCALAPPDATA%\\Microsoft\\WinGet\\Packages\\Schniz.fnm*'],
+  copyCommand: 'winget install Schniz.fnm',
+});
+
 describe('NodeVersionTable', () => {
   it('maps each LTS status to its own badge', () => {
     const statuses: LtsStatus[] = [
@@ -137,6 +161,33 @@ describe('NodeVersionTable', () => {
         'MangoStudio cannot install nvm on this machine'
       );
       expect(screen.queryByRole('button', { name: /Install/ })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('without fnm', () => {
+    const status = versionManagerStatus({ id: 'fnm', installed: false });
+    const fetchMock = jest.fn();
+
+    beforeEach(() => {
+      fetchMock.mockImplementation(() =>
+        Promise.resolve(
+          new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+        )
+      );
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+    });
+
+    afterEach(() => {
+      fetchMock.mockReset();
+    });
+
+    it('offers the fnm to Node chain, not the nvm one, for an fnm status', () => {
+      // Regression: the Node recipe id used to be hard-coded to `nvm.node.install`,
+      // so an fnm row silently fell back to nvm's chain (or nothing, once nvm's
+      // recipe was absent from the catalog) instead of fnm's own.
+      render(<NodeVersionTable status={status} recipes={[FNM_INSTALL_RECIPE, NODE_WITHOUT_FNM]} />);
+
+      expect(screen.getByRole('button', { name: 'Install fnm, then Node.js' })).toBeInTheDocument();
     });
   });
 });
