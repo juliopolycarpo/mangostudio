@@ -28,30 +28,44 @@ import type {
   RuntimeTerminalWriteParams,
 } from '../../methods';
 import { RUNTIME_TERMINAL_OUTPUT_TOPIC } from '../../methods';
-import {
-  findShellExecutable,
-  isShellAvailable,
-  resolveWorkingDirectory,
-  ShellExecutionError,
-} from '../shell';
+import { findShellExecutable, resolveWorkingDirectory, ShellExecutionError } from '../shell';
 import { sanitizeShellEnv } from '../shell-env';
 import { TerminalNotFoundError } from './errors';
 import { createBunPtyPort, type PtyPort } from './pty';
 import { createTerminalSession, type TerminalSession } from './session';
 
-/** Order a default shell is tried in; `powershell` only ever resolves on win32. */
-const SHELL_FALLBACK_ORDER: readonly RuntimeShellKind[] = ['bash', 'zsh', 'powershell'];
+/**
+ * Order a default shell is tried in, per platform.
+ *
+ * PowerShell comes first on Windows and never resolves anywhere else: a
+ * Windows box with Git for Windows or WSL installed answers `Bun.which('bash')`
+ * with `…\Git\usr\bin\bash.exe` or `System32\bash.exe` — the WSL launcher —
+ * so a POSIX-first order would hand a Windows user a shell on a different
+ * filesystem than the one their chat's working directory names.
+ */
+const SHELL_FALLBACK_ORDER: Readonly<Record<'win32' | 'posix', readonly RuntimeShellKind[]>> = {
+  win32: ['powershell', 'bash', 'zsh'],
+  posix: ['bash', 'zsh', 'powershell'],
+};
 
 interface TerminalServiceDeps {
   readonly pty: PtyPort;
   readonly sourceEnv: () => NodeJS.ProcessEnv;
   readonly platform: NodeJS.Platform;
+  /**
+   * PATH lookup for a shell kind. Injected alongside `platform` because the
+   * real one reads this host's PATH and hard-refuses `powershell` off win32,
+   * which leaves the Windows fallback order untestable anywhere it matters —
+   * and there is no Windows unit-test lane.
+   */
+  readonly findShell: (kind: RuntimeShellKind) => string | null;
 }
 
 const DEFAULT_DEPS: TerminalServiceDeps = {
   pty: createBunPtyPort(),
   sourceEnv: () => process.env,
   platform: process.platform,
+  findShell: findShellExecutable,
 };
 
 export interface TerminalService {
@@ -101,8 +115,8 @@ export function createTerminalService(options: TerminalServiceOptions): Terminal
         );
       }
 
-      const shell = params.shell ?? resolveDefaultShell(deps.sourceEnv());
-      const executable = findShellExecutable(shell);
+      const shell = params.shell ?? resolveDefaultShell(deps);
+      const executable = deps.findShell(shell);
       if (!executable) {
         throw new ShellExecutionError(`The "${shell}" shell is not available on this system.`);
       }
@@ -193,15 +207,22 @@ export function createTerminalService(options: TerminalServiceOptions): Terminal
 
 /**
  * Picks the shell when the hub did not name one: the caller's login shell
- * when it is one this runtime offers and can find, else the first of bash,
- * zsh, powershell that is actually installed.
+ * when it is one this runtime offers and can find, else the first of this
+ * platform's fallback order that is actually installed.
+ *
+ * `SHELL` is honoured only off Windows. A Windows process can inherit one from
+ * a Git Bash or MSYS parent, and it would name a shell for a filesystem this
+ * session is not going to run in.
  */
-function resolveDefaultShell(sourceEnv: NodeJS.ProcessEnv): RuntimeShellKind {
-  const loginShell = basename(sourceEnv.SHELL ?? '');
-  if ((loginShell === 'bash' || loginShell === 'zsh') && isShellAvailable(loginShell)) {
+function resolveDefaultShell(deps: TerminalServiceDeps): RuntimeShellKind {
+  const isWindows = deps.platform === 'win32';
+  const order = isWindows ? SHELL_FALLBACK_ORDER.win32 : SHELL_FALLBACK_ORDER.posix;
+  const available = (shell: RuntimeShellKind): boolean => deps.findShell(shell) !== null;
+  const loginShell = isWindows ? '' : basename(deps.sourceEnv().SHELL ?? '');
+  if ((loginShell === 'bash' || loginShell === 'zsh') && available(loginShell)) {
     return loginShell;
   }
-  const fallback = SHELL_FALLBACK_ORDER.find((shell) => isShellAvailable(shell));
+  const fallback = order.find(available);
   if (!fallback) {
     throw new ShellExecutionError(
       'No shell is available on this system; install bash, zsh, or (on Windows) PowerShell.'

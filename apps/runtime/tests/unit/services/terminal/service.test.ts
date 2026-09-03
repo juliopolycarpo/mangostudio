@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { homedir } from 'node:os';
+import type { RuntimeShellKind } from '@mangostudio/shared/runtime-protocol';
 import type { RuntimeEventInput } from '../../../../src/host';
 import { isShellAvailable } from '../../../../src/services/shell';
 import { TerminalNotFoundError } from '../../../../src/services/terminal/errors';
@@ -14,6 +15,7 @@ function createService(
     sourceEnv?: () => NodeJS.ProcessEnv;
     platform?: NodeJS.Platform;
     port?: FakePtyPort;
+    findShell?: (kind: RuntimeShellKind) => string | null;
   } = {}
 ) {
   const port = overrides.port ?? new FakePtyPort();
@@ -25,9 +27,16 @@ function createService(
       sourceEnv:
         overrides.sourceEnv ?? (() => ({ PATH: process.env.PATH ?? '' }) as NodeJS.ProcessEnv),
       platform: overrides.platform ?? process.platform,
+      ...(overrides.findShell ? { findShell: overrides.findShell } : {}),
     },
   });
   return { service, port, events };
+}
+
+/** A host where every shell in `installed` is on PATH and nothing else is. */
+function shellsOnPath(...installed: readonly RuntimeShellKind[]) {
+  return (kind: RuntimeShellKind): string | null =>
+    installed.includes(kind) ? `/fake/bin/${kind}` : null;
 }
 
 const OPEN = { sessionId: 'sess-1', cols: 80, rows: 24 } as const;
@@ -68,6 +77,31 @@ describe('createTerminalService', () => {
       expect(result.shell).toBe('bash');
     }
   );
+
+  it('prefers PowerShell on Windows even when a bash is on PATH', async () => {
+    // Git for Windows and the WSL launcher both put a `bash` on a Windows PATH,
+    // and neither runs on the filesystem the session's cwd names.
+    const { service } = createService({
+      platform: 'win32',
+      findShell: shellsOnPath('bash', 'zsh', 'powershell'),
+      sourceEnv: () => ({ SHELL: '/usr/bin/bash' }) as NodeJS.ProcessEnv,
+    });
+
+    const result = await service.open(OPEN);
+
+    expect(result.shell).toBe('powershell');
+  });
+
+  it('falls back to bash on Windows when no PowerShell is installed', async () => {
+    const { service } = createService({
+      platform: 'win32',
+      findShell: shellsOnPath('bash'),
+    });
+
+    const result = await service.open(OPEN);
+
+    expect(result.shell).toBe('bash');
+  });
 
   it.skipIf(isWindows)(
     'refuses an explicitly requested shell this platform does not have',
