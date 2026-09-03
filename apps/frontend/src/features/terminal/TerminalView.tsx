@@ -20,7 +20,7 @@ import { formatMessage } from '@/lib/i18n-format';
 import { createAckAccounting } from './ack-accounting';
 import { clampTerminalSize } from './terminal-fit';
 import { buildTerminalTheme, fontSizePx } from './terminal-theme';
-import { type TerminalSocketStatus, useTerminalSocket } from './use-terminal-socket';
+import { useTerminalSocket } from './use-terminal-socket';
 
 /** Dim-line SGR: readable as output, distinct from anything the shell prints. */
 const DIM = '\x1b[2m';
@@ -34,7 +34,6 @@ function writeDimLine(term: Terminal, text: string): void {
 
 export interface TerminalViewProps {
   readonly sessionId: string;
-  readonly onStatusChange?: (status: TerminalSocketStatus | 'idle') => void;
   readonly onExit?: (exit: TerminalExit) => void;
   /** Test seams; production callers never pass these. */
   readonly createSocket?: (url: string) => WebSocket;
@@ -52,13 +51,7 @@ export interface TerminalViewProps {
  * @example
  * <TerminalView sessionId={session.id} onExit={refetchSessions} />
  */
-export function TerminalView({
-  sessionId,
-  onStatusChange,
-  onExit,
-  createSocket,
-  resolveUrl,
-}: TerminalViewProps) {
+export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: TerminalViewProps) {
   const { t } = useI18n();
   const { resolvedTheme, config } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -67,13 +60,11 @@ export function TerminalView({
 
   // Read through refs so the mount effect — which creates one `Terminal` for
   // this component's whole lifetime — never depends on props that change
-  // every render (`onExit`, `onStatusChange`) or on translated strings.
+  // every render (`onExit`) or on translated strings.
   const tRef = useRef(t);
   tRef.current = t;
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
-  const onStatusChangeRef = useRef(onStatusChange);
-  onStatusChangeRef.current = onStatusChange;
 
   const socket = useTerminalSocket({
     sessionId,
@@ -119,13 +110,6 @@ export function TerminalView({
   });
   const socketRef = useRef(socket);
   socketRef.current = socket;
-
-  // Forwarded from an effect rather than from the hook's own callback: the
-  // hook already tracks `status` as state, so this is the one place it needs
-  // reporting outward to whatever renders the tab strip / unavailable line.
-  useEffect(() => {
-    onStatusChangeRef.current?.(socket.status);
-  }, [socket.status]);
 
   // GONE (close code 4410) follows a process exit, whose `exit` frame already
   // drew its own line, but it also arrives alone when the session was closed

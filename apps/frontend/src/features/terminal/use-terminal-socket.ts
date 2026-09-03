@@ -314,21 +314,14 @@ export function createTerminalSocket(options: TerminalSocketOptions): TerminalSo
   };
 }
 
-export interface UseTerminalSocketOptions {
-  /** `null` keeps the hook idle — no socket is opened. */
-  readonly sessionId: string | null;
-  readonly onData: (bytes: Uint8Array) => void;
-  readonly onExit: (exit: TerminalExit) => void;
-  readonly onNotice: (notice: TerminalNotice) => void;
-  readonly onConnected: () => void;
-  readonly createSocket?: (url: string) => WebSocket;
-  readonly resolveUrl?: (sessionId: string) => string;
-  readonly random?: () => number;
-  readonly onUnauthorized?: () => void;
-}
+/**
+ * Everything `createTerminalSocket` takes except the status sink, which the
+ * hook owns: it reports status as React state instead.
+ */
+export type UseTerminalSocketOptions = Omit<TerminalSocketOptions, 'onStatusChange'>;
 
 export interface UseTerminalSocketResult {
-  readonly status: TerminalSocketStatus | 'idle';
+  readonly status: TerminalSocketStatus;
   send(bytes: Uint8Array): void;
   resize(cols: number, rows: number): void;
   acknowledge(bytes: number): void;
@@ -346,9 +339,7 @@ export interface UseTerminalSocketResult {
  */
 export function useTerminalSocket(options: UseTerminalSocketOptions): UseTerminalSocketResult {
   const { sessionId } = options;
-  const [status, setStatus] = useState<TerminalSocketStatus | 'idle'>(
-    sessionId === null ? 'idle' : 'connecting'
-  );
+  const [status, setStatus] = useState<TerminalSocketStatus>('connecting');
   const socketRef = useRef<TerminalSocket | null>(null);
 
   // Read through refs so the effect below depends on `sessionId` alone: an
@@ -358,10 +349,6 @@ export function useTerminalSocket(options: UseTerminalSocketOptions): UseTermina
   callbacksRef.current = options;
 
   useEffect(() => {
-    if (sessionId === null) {
-      setStatus('idle');
-      return;
-    }
     const socket = createTerminalSocket({
       sessionId,
       createSocket: callbacksRef.current.createSocket,
