@@ -2012,10 +2012,8 @@ export const messages: Messages = {
     openInWindow: 'This terminal is open in another window.',
     takeOver: 'Bring it here',
     tabs: 'Terminal sessions',
-    sessionTitle: 'Terminal {index}',
     empty: 'No terminal is open for this chat.',
     emptyHint: 'Open one to run commands where this environment runs.',
-    connecting: 'Connecting...',
     reconnecting: 'Reconnecting...',
     disconnected: 'Disconnected from the terminal.',
     exited: 'Process exited with code {code}.',
@@ -2034,22 +2032,16 @@ export const messages: Messages = {
       unavailable:
         'This environment cannot open a terminal. It needs a shell and the shell permission.',
       disconnected: 'The environment is not connected.',
-      noShell: 'The container image has no shell to run.',
     },
     page: {
       title: 'Terminal',
-      environment: 'Environment',
       sessions: 'Sessions',
       openHere: 'Open here',
       noSessions: 'No terminals are open for this environment.',
-      notFound: 'This terminal no longer exists.',
     },
     commands: {
       openPanel: 'Open terminal panel',
       newSession: 'New terminal session',
-    },
-    shell: {
-      label: 'Shell',
     },
   },
 

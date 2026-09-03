@@ -2033,10 +2033,8 @@ export const messages = {
     openInWindow: 'Este terminal está aberto em outra janela.',
     takeOver: 'Trazer para cá',
     tabs: 'Sessões de terminal',
-    sessionTitle: 'Terminal {index}',
     empty: 'Nenhum terminal aberto para este chat.',
     emptyHint: 'Abra um para executar comandos onde este ambiente roda.',
-    connecting: 'Conectando...',
     reconnecting: 'Reconectando...',
     disconnected: 'Desconectado do terminal.',
     exited: 'Processo encerrado com código {code}.',
@@ -2055,22 +2053,16 @@ export const messages = {
       unavailable:
         'Este ambiente não pode abrir um terminal. Ele precisa de um shell e da permissão de shell.',
       disconnected: 'O ambiente não está conectado.',
-      noShell: 'A imagem do contêiner não tem um shell para executar.',
     },
     page: {
       title: 'Terminal',
-      environment: 'Ambiente',
       sessions: 'Sessões',
       openHere: 'Abrir aqui',
       noSessions: 'Nenhum terminal aberto para este ambiente.',
-      notFound: 'Este terminal não existe mais.',
     },
     commands: {
       openPanel: 'Abrir painel do terminal',
       newSession: 'Nova sessão de terminal',
-    },
-    shell: {
-      label: 'Shell',
     },
   },
 

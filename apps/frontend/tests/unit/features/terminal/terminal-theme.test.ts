@@ -1,16 +1,12 @@
 /**
- * Terminal palette contrast and its sync with `index.css`.
+ * Terminal palette contrast.
  *
- * The palette lives as literal TS (see `terminal-theme.ts`'s module comment
- * for why) and is mirrored into `--terminal-ansi-*` custom properties in
- * `index.css` for non-JS consumers. The sync test below is what keeps the two
- * from drifting apart silently — a hex changed in one place and not the other
- * would otherwise ship a palette that only *looks* validated.
+ * The palette lives as literal TS (see `terminal-theme.ts`'s module comment for
+ * why) and is handed to xterm directly, so these contrast ratios are checked
+ * against the exact numbers a screen paints.
  */
 
 import { describe, expect, it } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import {
   buildTerminalTheme,
   fontSizePx,
@@ -42,8 +38,6 @@ function contrastRatio(a: string, b: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-const INDEX_CSS = readFileSync(join(import.meta.dir, '../../../../src/index.css'), 'utf8');
-
 describe('terminal palette contrast', () => {
   for (const [appTheme, palette] of Object.entries(TERMINAL_PALETTES)) {
     it(`clears WCAG AA for the default foreground/background in ${appTheme}`, () => {
@@ -60,16 +54,6 @@ describe('terminal palette contrast', () => {
           contrastRatio(hex, palette.background),
           `${appTheme}.${name}`
         ).toBeGreaterThanOrEqual(ANSI_CONTRAST);
-      }
-    });
-  }
-});
-
-describe('terminal palette / index.css sync', () => {
-  for (const [appTheme, palette] of Object.entries(TERMINAL_PALETTES)) {
-    it(`mirrors every ${appTheme} ANSI hex into index.css`, () => {
-      for (const hex of Object.values(palette.ansi)) {
-        expect(INDEX_CSS.toLowerCase().includes(hex.toLowerCase()), hex).toBe(true);
       }
     });
   }

@@ -7,9 +7,9 @@ import type { ITheme } from '@xterm/xterm';
  * Values are literal, not read from `index.css`'s custom properties, on the
  * same reasoning as `tool-avatar-palette.ts`: a contrast test has to check the
  * numbers a screen actually paints, and a CSS variable indirection would leave
- * it checking nothing. `index.css` carries the same sixteen hex values under
- * `--terminal-ansi-*` for non-JS consumers (e.g. the scrollbar); the contrast
- * test below asserts the two stay identical.
+ * it checking nothing. This module is the only source; xterm is handed these
+ * objects directly. If a CSS consumer ever needs them, generate the custom
+ * properties from `TERMINAL_PALETTES` rather than hand-mirroring the hexes.
  *
  * The "black"/"white" pair breaks the usual "bright is lighter" rule for the
  * light theme's chromatic colours (red, green, yellow, blue, magenta, cyan):
