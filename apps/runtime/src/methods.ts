@@ -815,8 +815,10 @@ export interface RuntimeTerminalAttachParams {
 
 /**
  * Attaching replays what the session kept and starts the live stream. The
- * in-flight window is reset by the attach: whatever was unacknowledged for a
- * previous viewer is owed nothing by this one.
+ * in-flight window is re-based by the attach: whatever was unacknowledged for a
+ * previous viewer is owed nothing by this one, and the replay below is charged
+ * to the window instead, because the viewer acks replayed bytes exactly as it
+ * acks live ones.
  */
 export interface RuntimeTerminalAttachResult {
   readonly sessionId: string;

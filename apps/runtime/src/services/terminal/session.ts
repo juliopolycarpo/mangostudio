@@ -167,12 +167,18 @@ export function createTerminalSession(options: CreateTerminalSessionOptions): Te
     cwd: options.cwd,
 
     attach() {
-      inflight = 0;
       pending.clear();
       attached = true;
+      // The replay is bytes this runtime hands the viewer, so it is charged to
+      // the window like any other output. Zeroing here instead would credit the
+      // window twice: the viewer cannot tell replayed bytes from live ones, so
+      // it acks both, and every scrollback byte would then buy a live byte that
+      // was never accounted for.
+      const replay = scrollback.snapshot();
+      inflight = replay.byteLength;
       return {
         sessionId: options.sessionId,
-        scrollback: Buffer.from(scrollback.snapshot()).toString('base64'),
+        scrollback: Buffer.from(replay).toString('base64'),
         status,
         exitCode: exit?.exitCode ?? null,
         signal: exit?.signal ?? null,

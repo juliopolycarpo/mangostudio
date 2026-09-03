@@ -229,6 +229,22 @@ describe('createTerminalSession', () => {
     expect(frames.filter((frame) => frame.kind === 'dropped')).toHaveLength(0);
   });
 
+  it('charges the replayed scrollback to the in-flight window', () => {
+    const { session, port, frames } = createHarness();
+    // Emit while detached so the bytes reach scrollback without spending window.
+    port.handles[0]?.emitData(bytesOf(TERMINAL_INFLIGHT_WINDOW_BYTES, 0x67));
+
+    session.attach();
+    port.handles[0]?.emitData(bytesOf(10, 0x68));
+
+    // The replay filled the window, so live output waits for the viewer's ack
+    // rather than riding on credit the replay already spent.
+    expect(totalDataBytes(frames)).toBe(0);
+
+    session.ack(TERMINAL_INFLIGHT_WINDOW_BYTES);
+    expect(totalDataBytes(frames)).toBe(10);
+  });
+
   it('exit while detached is reported by the next attach, not by a stream frame', () => {
     const { session, port, frames } = createHarness();
     port.handles[0]?.emitExit(1, 'SIGKILL');
