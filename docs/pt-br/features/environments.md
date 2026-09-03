@@ -108,5 +108,5 @@ de instalação e transmitem o mesmo log para o terminal, para quem está via SS
 ## Adiado
 
 Gerenciadores de Node além do winget LTS e do fnm (nvm-windows v2 quando tiver id no winget, um
-`fnm.install` POSIX, classificação apenas de detecção para Scoop e mise) estão registrados em uma
-única issue de acompanhamento ligada ao pull request que introduziu esta página.
+`fnm.install` POSIX, classificação apenas de detecção para Scoop e mise) estão registrados em
+[#1011](https://github.com/juliopolycarpo/mangostudio/issues/1011).

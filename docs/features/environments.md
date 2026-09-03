@@ -106,5 +106,5 @@ service and stream the same log to the terminal, for people on SSH. See
 ## Deferred
 
 Node managers beyond winget LTS and fnm (nvm-windows v2 once it has a winget id, a POSIX
-`fnm.install`, detect-only classification for Scoop and mise) are tracked in one follow-up
-issue linked from the pull request that introduced this page.
+`fnm.install`, detect-only classification for Scoop and mise) are tracked in
+[#1011](https://github.com/juliopolycarpo/mangostudio/issues/1011).
