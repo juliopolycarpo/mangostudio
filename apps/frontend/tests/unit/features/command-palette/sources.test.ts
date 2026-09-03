@@ -184,6 +184,7 @@ describe('actionCommands', () => {
       resolvedTheme: 'dark',
       hasChat: true,
       githubPanelVisible: true,
+      terminalPanelVisible: true,
       isGenerating: false,
       chatHasTurns: false,
       newChatShortcut: 'Ctrl+N',
@@ -194,6 +195,8 @@ describe('actionCommands', () => {
       onOpenWorkdirPicker: jest.fn(),
       onOpenGithubPanel: jest.fn(),
       onCreateGithubPr: jest.fn(),
+      onOpenTerminalPanel: jest.fn(),
+      onNewTerminalSession: jest.fn(),
       ...overrides,
     });
   }
@@ -288,5 +291,26 @@ describe('actionCommands', () => {
     expect(ids).not.toContain('action:github-panel');
     expect(ids).not.toContain('action:github-create-pr');
     expect(ids).not.toContain('action:github-review-requests');
+  });
+
+  it('offers the Terminal rows and runs each from the row of that name', () => {
+    const onOpenTerminalPanel = jest.fn();
+    const onNewTerminalSession = jest.fn();
+    const items = build({ onOpenTerminalPanel, onNewTerminalSession });
+
+    items.find((item) => item.id === 'action:terminal-panel')?.run();
+    items.find((item) => item.id === 'action:terminal-new-session')?.run();
+
+    expect(onOpenTerminalPanel).toHaveBeenCalledTimes(1);
+    expect(onNewTerminalSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides every Terminal row when the panel is not in the rail, or with no chat', () => {
+    expect(build({ terminalPanelVisible: false }).map((item) => item.id)).not.toContain(
+      'action:terminal-panel'
+    );
+    expect(build({ hasChat: false }).map((item) => item.id)).not.toContain(
+      'action:terminal-new-session'
+    );
   });
 });

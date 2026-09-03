@@ -481,5 +481,12 @@ export const RuntimeHealthReportSchema = Type.Object({
   auditError: Type.Optional(Type.Union([Type.String({ maxLength: 1_024 }), Type.Null()])),
   /** Optional so health from a 1.0 runtime remains decodable by a 1.0.1 hub. */
   externalAgents: Type.Optional(RuntimeExternalAgentHealthSchema),
+  /**
+   * Whether `terminal.*` can open a PTY here. Carried on the report for the
+   * same reason `gh` is: the hub rebuilds a remote peer's manifest from health
+   * after a consent change, and a capability that only travelled on `hello`
+   * would vanish on the first refresh. Absent means unavailable.
+   */
+  terminal: Type.Optional(Type.Boolean()),
 });
 export type RuntimeHealthReport = Static<typeof RuntimeHealthReportSchema>;

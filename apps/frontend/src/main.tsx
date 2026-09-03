@@ -8,6 +8,11 @@ import { setAuthNavigate } from './lib/auth-navigate';
 import { queryClient } from './lib/query-client';
 import { router } from './router';
 import './index.css';
+// Eager, not from `TerminalView.tsx` (which is lazy-loaded): a CSS file
+// reachable only through a dynamic `import()` becomes a second stylesheet
+// `build.ts` refuses to ship, because nothing in this bundler injects a
+// `<link>` for a lazy chunk's own CSS the way a dev server would.
+import '@xterm/xterm/css/xterm.css';
 
 setAuthNavigate(() => {
   router.navigate({ to: '/login' });

@@ -123,6 +123,8 @@ const DETACH_ENV_ALLOWLIST = new Set<string>([
   'TZ',
   'LANG',
   'LC_ALL',
+  // allow-node-env: passes the variable through to detached children; it is
+  // not a production branch.
   'NODE_ENV',
   'NODE_EXTRA_CA_CERTS',
   'SSL_CERT_FILE',

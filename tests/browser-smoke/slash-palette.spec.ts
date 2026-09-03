@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { dismissWorkdirPicker } from './support/workdir-picker';
 
 /**
  * The palette in a real browser, asserted on the one outcome that does not
@@ -32,15 +33,7 @@ test('the composer answers a slash with the command palette', async ({ page }) =
   // bound and shows nothing. Reproduce the CI shape with `CI=true bun run test
   // --e2e`, and run the whole suite — the chat this picker needs is left behind
   // by an alphabetically earlier spec.
-  const workdirPicker = page.getByRole('dialog', { name: 'Working directory' });
-  const pickerOpened = await workdirPicker
-    .waitFor({ state: 'visible', timeout: 10_000 })
-    .then(() => true)
-    .catch(() => false);
-  if (pickerOpened) {
-    await page.keyboard.press('Escape');
-    await expect(workdirPicker).toBeHidden({ timeout: 10_000 });
-  }
+  await dismissWorkdirPicker(page, 10_000);
 
   // Located by element, not by role: the composer is a `textbox` until the
   // palette opens and a `combobox` while it is open, and a role-based locator

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { dismissWorkdirPicker } from './support/workdir-picker';
 
 test('github rail panel renders and obeys its visibility setting', async ({ page }) => {
   // A cold `gh` call on the runtime costs more than the 30s project default, so
@@ -13,6 +14,12 @@ test('github rail panel renders and obeys its visibility setting', async ({ page
   // straight onto the authenticated shell.
   await page.goto('/');
 
+  // A chat with no working directory opens the folder picker by itself, and it
+  // is a modal that swallows the clicks below. The landing may already have
+  // opened a chat — and its picker — before this spec ran, so dismiss whatever
+  // is up before reaching for "New Chat" as well as after it.
+  await dismissWorkdirPicker(page);
+
   // The rail only exists on the chat surface and only once a chat does.
   // Scoped to `main` because the sidebar carries a second button with the same
   // label, and an unscoped locator is a strict-mode violation that would kill
@@ -20,19 +27,16 @@ test('github rail panel renders and obeys its visibility setting', async ({ page
   // rather than a <header>, so it has no `banner` role to scope to.
   await page.getByRole('main').getByRole('button', { name: 'New Chat' }).click();
 
-  // A brand-new chat on an account with no default working directory opens the
-  // folder picker by itself (see `use-runner-selection`), and it is a modal — it
-  // covers the rail and swallows the click below. Dismissing it is also what
-  // sets up the one deterministic assertion further down: the chat stays
-  // unbound, so "This repo" has nothing to ask GitHub about.
-  const workdirPicker = page.getByRole('dialog', { name: 'Working directory' });
-  await expect(workdirPicker).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press('Escape');
-  await expect(workdirPicker).toBeHidden({ timeout: 10_000 });
+  // The new chat brings a picker of its own. Dismissing it is also what sets up
+  // the one deterministic assertion further down: the chat stays unbound, so
+  // "This repo" has nothing to ask GitHub about.
+  await dismissWorkdirPicker(page);
 
   const railButton = page.getByRole('button', { name: 'Show GitHub panel' });
   await expect(railButton).toBeVisible({ timeout: 15_000 });
-  await railButton.click();
+  // The rail remembers which panel was open, so this one may already be it —
+  // and clicking then would close the panel the assertions below need.
+  if ((await railButton.getAttribute('aria-pressed')) !== 'true') await railButton.click();
 
   await expect(page.getByTestId('github-panel')).toBeVisible({ timeout: 15_000 });
 

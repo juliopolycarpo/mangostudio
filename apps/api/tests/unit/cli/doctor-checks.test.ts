@@ -54,6 +54,7 @@ function makeConfig(overrides: Partial<MangoConfig> = {}): MangoConfig {
       container: false,
       wslExecutable: '',
     },
+    terminal: { enabled: true, idleTimeoutMinutes: 30, maxSessionsPerUser: 8, scrollbackKib: 256 },
     chatgpt: { authBaseUrl: 'https://auth.openai.com', apiBaseUrl: 'https://api.openai.com' },
     secretStore: { unsafeFileFallbackDir: '' },
     corsOrigins: [],

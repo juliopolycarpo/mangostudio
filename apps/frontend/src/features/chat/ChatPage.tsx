@@ -272,6 +272,7 @@ export function ChatPage({
             key={chatId}
             chatId={chatId}
             workdir={workdir}
+            environmentId={environmentId}
             settings={workspaceSettings.sidePanel}
             onWidthChange={onWorkspacePanelWidthChange}
           />

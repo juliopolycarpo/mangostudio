@@ -2002,6 +2002,51 @@ export const messages: Messages = {
     },
   },
 
+  terminal: {
+    title: 'Terminal',
+    newSession: 'New terminal',
+    closeSession: 'Close terminal',
+    rename: 'Rename terminal',
+    renameLabel: 'Terminal name',
+    popOut: 'Open in a window',
+    openInWindow: 'This terminal is open in another window.',
+    takeOver: 'Bring it here',
+    tabs: 'Terminal sessions',
+    empty: 'No terminal is open for this chat.',
+    emptyHint: 'Open one to run commands where this environment runs.',
+    reconnecting: 'Reconnecting...',
+    disconnected: 'Disconnected from the terminal.',
+    notFound: 'This terminal session no longer exists.',
+    refused: 'This terminal session cannot be opened from here.',
+    exited: 'Process exited with code {code}.',
+    exitedBySignal: 'Process ended by {signal}.',
+    dropped: '{bytes} bytes of output were dropped because the viewer could not keep up.',
+    runtimeDisconnected: 'The runtime went away; this session ended.',
+    closeConfirmTitle: 'Close this terminal?',
+    closeConfirmDescription: 'The shell and anything it is running will be stopped.',
+    cancel: 'Cancel',
+    unavailableTitle: 'Terminal is unavailable',
+    unavailable: {
+      disabled: 'Terminals are turned off on this hub.',
+      limit: 'You already have the maximum number of open terminals.',
+      notIsolated:
+        'The Local runtime shares the hub’s account with other users, so terminals stay off there.',
+      unavailable:
+        'This environment cannot open a terminal. It needs a shell and the shell permission.',
+      disconnected: 'The environment is not connected.',
+    },
+    page: {
+      title: 'Terminal',
+      sessions: 'Sessions',
+      openHere: 'Open here',
+      noSessions: 'No terminals are open for this environment.',
+    },
+    commands: {
+      openPanel: 'Open terminal panel',
+      newSession: 'New terminal session',
+    },
+  },
+
   common: {
     loading: 'Loading...',
     appName: 'Mango Studio',

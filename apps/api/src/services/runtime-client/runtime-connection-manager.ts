@@ -70,6 +70,14 @@ type RuntimeConnectionCloseReason = 'released' | 'superseded';
 
 export interface ManagedRuntimeConnection {
   readonly client: RuntimeClient;
+  /**
+   * True only for a Local connection the single-user-host connector proved is
+   * bound to one MangoStudio account (see `createLocalRuntimeConnector`).
+   * Absent for every other transport, and for a Local connection opened before
+   * a real user was known (the `local` stand-in) or after a second account
+   * showed up and the process fell back to unproven isolation.
+   */
+  readonly identityAttested?: boolean;
   /** May resolve when an out-of-process runtime is gone; in-process is immediate. */
   close(reason?: RuntimeConnectionCloseReason): void | Promise<void>;
 }
@@ -509,6 +517,20 @@ export class RuntimeConnectionManager {
     const entry = this.#entries.get(connectionKey(userId, environmentId));
     if (!entry?.health || entry.healthReadAtMs === undefined) return null;
     return { health: entry.health, readAtMs: entry.healthReadAtMs };
+  }
+
+  /**
+   * Whether the live connection for this user/environment is a Local runtime
+   * the single-user-host connector has proved is bound to one account.
+   *
+   * Reads the entry's current connection rather than the client passed in, so
+   * a caller cannot be fooled by a `RuntimeClient` reference to a connection
+   * that has since been superseded or released.
+   */
+  isIdentityAttested(userId: string, environmentId: string): boolean {
+    return (
+      this.#entries.get(connectionKey(userId, environmentId))?.connection?.identityAttested === true
+    );
   }
 
   async getClient(
@@ -1312,6 +1334,7 @@ export function createLocalRuntimeConnector(
       active.add(entry);
       return {
         client: connection.client,
+        identityAttested: entry.identityAttested,
         async close(reason) {
           active.delete(entry);
           await connection.close(reason);

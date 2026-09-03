@@ -14,15 +14,13 @@
  * Unlike those siblings, a request here is allowed to arrive before the
  * GitHub panel is mounted: the palette action pairs this with
  * `requestRailPanel('github')`, whose own state update hasn't committed yet
- * when this fires, so `GithubRepoSection` isn't subscribed until the next
- * render. A one-shot latch covers that gap — a request with no listener
- * mounted is held, and replayed to the first listener that subscribes, then
- * cleared. A request while a listener *is* already mounted is delivered
- * directly and never latched, so a later remount doesn't replay a stale one.
+ * when this fires. That is what the latch covers — see
+ * `workspace/rail/latched-request-channel` for the semantics.
  */
 
-const listeners = new Set<() => void>();
-let pending = false;
+import { createLatchedRequestChannel } from '../../workspace/rail/latched-request-channel';
+
+const channel = createLatchedRequestChannel();
 
 /**
  * Asks the mounted GitHub panel to switch to the pull requests tab and open
@@ -32,13 +30,7 @@ let pending = false;
  * requestRailPanel('github');
  * requestGithubCreatePr();
  */
-export function requestGithubCreatePr(): void {
-  if (listeners.size === 0) {
-    pending = true;
-    return;
-  }
-  for (const listener of listeners) listener();
-}
+export const requestGithubCreatePr = channel.request;
 
 /**
  * Subscribes to create-pull-request requests. Immediately replays a request
@@ -47,13 +39,4 @@ export function requestGithubCreatePr(): void {
  * @example
  * useEffect(() => onGithubCreatePrRequest(openCreateForm), [openCreateForm]);
  */
-export function onGithubCreatePrRequest(listener: () => void): () => void {
-  listeners.add(listener);
-  if (pending) {
-    pending = false;
-    listener();
-  }
-  return () => {
-    listeners.delete(listener);
-  };
-}
+export const onGithubCreatePrRequest = channel.subscribe;

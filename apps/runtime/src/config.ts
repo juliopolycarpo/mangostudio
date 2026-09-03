@@ -36,6 +36,8 @@ export function loadRuntimeConfig(
   const home = env.MANGO_HOME?.trim();
   const setupProfile = env.MANGOSTUDIO_RUNTIME_SETUP?.trim();
   return {
+    // allow-node-env: enables frame validation outside production; this is a
+    // production discriminator, not a test seam.
     validateInProcessFrames: env.NODE_ENV !== 'production',
     pairingToken: pairing && pairing.length > 0 ? pairing : null,
     serveToken: serve && serve.length > 0 ? serve : null,

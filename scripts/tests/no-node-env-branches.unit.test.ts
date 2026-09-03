@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import {
   assertNoProductionNodeEnvBranches,
   findDisallowedNodeEnvReads,
-  NODE_ENV_READ_ALLOWLIST,
 } from '../lib/no-node-env-branches';
 
 const tempDirs: string[] = [];
@@ -72,20 +71,52 @@ describe('production NODE_ENV guard', () => {
     ).toEqual([]);
   });
 
-  it('does not exempt another read in an allowlisted file', () => {
+  it('does not exempt an unmarked read in a file that also holds a marked one', () => {
     expect(
       findDisallowedNodeEnvReads([
         {
           path: 'apps/api/src/lib/config.ts',
-          content: 'const mode = process.env.NODE_ENV;',
+          content:
+            '// allow-node-env: the intentional one\n' +
+            'const seam = process.env.NODE_ENV;\n' +
+            '\n' +
+            'const mode = process.env.NODE_ENV;',
         },
-      ])
-    ).toHaveLength(1);
+      ]).map(({ line }) => line)
+    ).toEqual([4]);
   });
 
-  it('keeps intentional exceptions reasoned and accepted', () => {
-    expect(NODE_ENV_READ_ALLOWLIST.every(({ reason }) => reason.length > 0)).toBe(true);
-    expect(NODE_ENV_READ_ALLOWLIST).toHaveLength(3);
+  it('accepts a read marked above it or trailing on its own line', () => {
+    expect(
+      findDisallowedNodeEnvReads([
+        {
+          path: 'apps/api/src/marked.ts',
+          content:
+            '// allow-node-env: reasoned\n' +
+            'const above = process.env.NODE_ENV;\n' +
+            'const trailing = process.env.NODE_ENV; // allow-node-env: reasoned\n' +
+            '/**\n' +
+            ' * allow-node-env: reasoned inside a docstring\n' +
+            ' */\n' +
+            'const block = process.env.NODE_ENV;',
+        },
+      ])
+    ).toEqual([]);
+  });
+
+  // The marker excuses the read it sits against, never one further down: a
+  // blank line ends the comment run, which is what stops a stale marker from
+  // drifting onto an unrelated read the way an absolute line number could.
+  it('does not let a marker reach past a blank line', () => {
+    expect(
+      findDisallowedNodeEnvReads([
+        {
+          path: 'apps/api/src/distant.ts',
+          content:
+            '// allow-node-env: reasoned\n' + '\n' + 'const detached = process.env.NODE_ENV;',
+        },
+      ]).map(({ line }) => line)
+    ).toEqual([3]);
   });
 
   // The tree scan reads and filters files before the parser sees them, so it

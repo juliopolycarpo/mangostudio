@@ -1,0 +1,223 @@
+/**
+ * Mounts `TerminalView` under happy-dom.
+ *
+ * xterm.js measures glyphs with real canvas/DOM APIs happy-dom only partly
+ * implements, and the WebGL addon needs a `webgl2` context happy-dom has
+ * none of — this is the test that proves both degrade instead of throwing,
+ * before anything (`TerminalRailPanel`, the routes) is built on top of it.
+ */
+
+import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import {
+  decodeTerminalClientMessage,
+  encodeTerminalServerMessage,
+  TERMINAL_SOCKET_CLOSE_CODES,
+} from '@mangostudio/shared/terminal';
+import { act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { FitAddon } from '@xterm/addon-fit';
+import { Terminal } from '@xterm/xterm';
+import { TerminalView } from '../../../../src/features/terminal/TerminalView';
+import { render, screen } from '../../../support/harness/render';
+import { FakeTerminalSocket } from './fake-terminal-socket';
+
+describe('TerminalView', () => {
+  beforeEach(() => {
+    FakeTerminalSocket.instances = [];
+  });
+
+  it('mounts xterm over a container without throwing', () => {
+    expect(() =>
+      render(
+        <TerminalView
+          sessionId="session-1"
+          createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
+          resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
+        />
+      )
+    ).not.toThrow();
+  });
+
+  it('renders its container', () => {
+    const { getByTestId } = render(
+      <TerminalView
+        sessionId="session-1"
+        createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
+        resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
+      />
+    );
+
+    expect(getByTestId('terminal-view')).toBeTruthy();
+  });
+
+  it('unmounts cleanly (disposes xterm and its ResizeObserver)', () => {
+    const { unmount } = render(
+      <TerminalView
+        sessionId="session-1"
+        createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
+        resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
+      />
+    );
+
+    expect(unmount).not.toThrow();
+  });
+
+  it('shows a take-over overlay when another window replaces this session, and reconnects on click', async () => {
+    const user = userEvent.setup();
+    render(
+      <TerminalView
+        sessionId="session-1"
+        createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
+        resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
+      />
+    );
+
+    const first = FakeTerminalSocket.instances[0];
+    act(() => first?.open());
+    act(() => first?.drop(TERMINAL_SOCKET_CLOSE_CODES.REPLACED));
+
+    const takeOver = await screen.findByRole('button', { name: 'Bring it here' });
+    expect(screen.getByText('This terminal is open in another window.')).toBeVisible();
+    // xterm's link-layer canvas is z-index 2; an overlay without its own
+    // z-index rendered visibly but never received the click in a real browser.
+    expect(screen.getByTestId('terminal-replaced-overlay').className).toContain('z-10');
+
+    await user.click(takeOver);
+
+    // Reconnecting opens a second socket instead of retrying the first.
+    expect(FakeTerminalSocket.instances).toHaveLength(2);
+  });
+
+  it('sends the fitted size when the socket opens, not while it is still connecting', () => {
+    const propose = spyOn(FitAddon.prototype, 'proposeDimensions').mockReturnValue({
+      cols: 120,
+      rows: 40,
+    });
+    try {
+      render(
+        <TerminalView
+          sessionId="session-1"
+          createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
+          resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
+        />
+      );
+      const socket = FakeTerminalSocket.instances[0];
+
+      // The mount-time fit and the `document.fonts.ready` one both run while
+      // the socket is `connecting`, and a frame sent then is dropped.
+      expect(socket?.sent ?? []).toHaveLength(0);
+
+      act(() => socket?.open());
+
+      // Nothing else retries: `ResizeObserver` fires on container changes, so
+      // without this the PTY keeps the 80x24 it was opened with. One frame,
+      // not one per fit that was dropped on the way here.
+      const frames = (socket?.sent ?? []).map((bytes) => decodeTerminalClientMessage(bytes));
+      expect(frames.filter((frame) => frame.type === 'resize')).toEqual([
+        { type: 'resize', cols: 120, rows: 40 },
+      ]);
+    } finally {
+      propose.mockRestore();
+    }
+  });
+
+  it('narrates a process exit once, even though GONE follows the exit frame', () => {
+    const writes: string[] = [];
+    const writeln = spyOn(Terminal.prototype, 'writeln').mockImplementation(function (
+      this: Terminal,
+      data: string | Uint8Array
+    ) {
+      writes.push(String(data));
+    });
+    try {
+      render(
+        <TerminalView
+          sessionId="session-1"
+          createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
+          resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
+        />
+      );
+      const socket = FakeTerminalSocket.instances[0];
+      act(() => socket?.open());
+      const exitFrame = encodeTerminalServerMessage({
+        type: 'exit',
+        exit: { exitCode: 0, signal: null },
+      });
+      act(() =>
+        socket?.onmessage?.({
+          data: exitFrame.buffer.slice(
+            exitFrame.byteOffset,
+            exitFrame.byteOffset + exitFrame.byteLength
+          ),
+        } as MessageEvent)
+      );
+      // The server closes with GONE right after the exit frame; that close
+      // must not add a second "disconnected" line under the exit line.
+      act(() => socket?.drop(TERMINAL_SOCKET_CLOSE_CODES.GONE));
+
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toContain('Process exited with code 0.');
+    } finally {
+      writeln.mockRestore();
+    }
+  });
+
+  it('narrates GONE on its own when no exit frame preceded it', () => {
+    const writes: string[] = [];
+    const writeln = spyOn(Terminal.prototype, 'writeln').mockImplementation(function (
+      this: Terminal,
+      data: string | Uint8Array
+    ) {
+      writes.push(String(data));
+    });
+    try {
+      render(
+        <TerminalView
+          sessionId="session-1"
+          createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
+          resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
+        />
+      );
+      const socket = FakeTerminalSocket.instances[0];
+      act(() => socket?.open());
+      act(() => socket?.drop(TERMINAL_SOCKET_CLOSE_CODES.GONE));
+
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toContain('Disconnected from the terminal.');
+    } finally {
+      writeln.mockRestore();
+    }
+  });
+
+  // A pop-out reached with a stale id closes 4404 and never reconnects. With
+  // nothing drawn, the window is a blank black rectangle that explains nothing.
+  it.each([
+    [TERMINAL_SOCKET_CLOSE_CODES.NOT_FOUND, 'This terminal session no longer exists.'],
+    [TERMINAL_SOCKET_CLOSE_CODES.FORBIDDEN, 'This terminal session cannot be opened from here.'],
+  ])('narrates the close code %i instead of leaving a blank pane', (code, expected) => {
+    const writes: string[] = [];
+    const writeln = spyOn(Terminal.prototype, 'writeln').mockImplementation(function (
+      this: Terminal,
+      data: string | Uint8Array
+    ) {
+      writes.push(String(data));
+    });
+    try {
+      render(
+        <TerminalView
+          sessionId="session-1"
+          createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
+          resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
+        />
+      );
+      const socket = FakeTerminalSocket.instances[0];
+      act(() => socket?.open());
+      act(() => socket?.drop(code));
+
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toContain(expected);
+    } finally {
+      writeln.mockRestore();
+    }
+  });
+});

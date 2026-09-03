@@ -15,7 +15,15 @@ import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
-import { FolderOpen, GitPullRequest, Moon, Plus, RefreshCw, Sun } from 'lucide-react';
+import {
+  FolderOpen,
+  GitPullRequest,
+  Moon,
+  Plus,
+  RefreshCw,
+  Sun,
+  TerminalSquare,
+} from 'lucide-react';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -41,6 +49,11 @@ export interface ActionCommandParams {
    * panel is first in the order.
    */
   readonly githubPanelVisible: boolean;
+  /**
+   * False once the user removes the Terminal panel from the rail in settings,
+   * on the same reasoning as `githubPanelVisible`.
+   */
+  readonly terminalPanelVisible: boolean;
   /**
    * True while a turn is streaming. Hides the workdir row for the same reason
    * the composer disables its workdir chip: repointing the binding mid-turn
@@ -82,6 +95,14 @@ export interface ActionCommandParams {
    * panel" affordance.
    */
   readonly onCreateGithubPr: () => void | Promise<void>;
+  /** Navigates to the chat surface and asks its rail for the Terminal panel. */
+  readonly onOpenTerminalPanel: () => void | Promise<void>;
+  /**
+   * Navigates to the chat surface, opens the Terminal panel, and asks it to
+   * open a new session — what the row labeled "New terminal session" promises
+   * rather than a second "open the panel" affordance.
+   */
+  readonly onNewTerminalSession: () => void | Promise<void>;
 }
 
 export function actionCommands({
@@ -91,6 +112,7 @@ export function actionCommands({
   resolvedTheme,
   hasChat,
   githubPanelVisible,
+  terminalPanelVisible,
   isGenerating,
   chatHasTurns,
   newChatShortcut,
@@ -101,6 +123,8 @@ export function actionCommands({
   onOpenWorkdirPicker,
   onOpenGithubPanel,
   onCreateGithubPr,
+  onOpenTerminalPanel,
+  onNewTerminalSession,
 }: ActionCommandParams): CommandItem[] {
   const labels = t.commandPalette.actions;
 
@@ -222,6 +246,28 @@ export function actionCommands({
         keywords: t.github.panel.inbox,
         icon: GitPullRequest,
         run: onOpenGithubPanel,
+      }
+    );
+  }
+
+  // Same shortcut story as the GitHub rows above: the rail has no keyboard
+  // shortcut of its own for switching panels.
+  if (hasChat && terminalPanelVisible) {
+    items.push(
+      {
+        id: 'action:terminal-panel',
+        section: 'actions',
+        label: t.terminal.commands.openPanel,
+        keywords: t.terminal.title,
+        icon: TerminalSquare,
+        run: onOpenTerminalPanel,
+      },
+      {
+        id: 'action:terminal-new-session',
+        section: 'actions',
+        label: t.terminal.commands.newSession,
+        icon: TerminalSquare,
+        run: onNewTerminalSession,
       }
     );
   }

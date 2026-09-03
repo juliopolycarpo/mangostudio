@@ -611,6 +611,40 @@ change groups, with the GitHub card collapsed at the bottom.
 - `apps/frontend/tests/unit/components/git-panel.test.tsx` mocks the hook module
   wholesale, so a new hook must be added to that mock before the panel can render.
 
+## Live Terminal
+
+Open these first:
+
+- `apps/shared/src/terminal/` — session shape, limits, and the binary socket codec
+- `apps/runtime/src/services/terminal/` — `pty.ts` (the `Bun.Terminal` seam), the bounded
+  buffers, the session and the service behind `terminal.*`
+- `apps/api/src/modules/terminals/` — session registry, HTTP routes, and the socket relay
+- `apps/frontend/src/features/terminal/` — xterm.js view, socket hook, rail panel, pop-out
+
+Rules that are easy to get wrong:
+
+- The runtime never emits `terminal.output` before `terminal.attach`, and it emits at most
+  `TERMINAL_INFLIGHT_WINDOW_BYTES` unacknowledged. Change a limit in
+  `apps/shared/src/terminal/schemas.ts`, never in one hop; the shared test pins that every
+  hop's limit fits the next.
+- `RuntimeHost.emit` throws once the socket port is closed. The session wraps emit and
+  treats a throw as "viewer gone".
+- Exit status comes from `proc.exited`; the `Bun.Terminal` `exit` callback reports `1, null`
+  for a clean exit and a SIGKILL alike on Bun 1.4.0.
+- The relay never lets the socket throttle: it stops sending under
+  `TERMINAL_SOCKET_SEND_HIGH_WATER_BYTES`, resumes on `drain`, and drops with a notice past
+  `TERMINAL_HUB_QUEUE_MAX_BYTES`. Bun would otherwise close the socket at 64 KiB.
+- Local sessions need the `single-user-host` attestation on the connection entry; a second
+  user ends them through the same `onClose` path a dropped runtime does.
+- The panel id `terminal` is in `WORKSPACE_PANEL_IDS`; the exhaustive titles record in
+  `WorkspaceRail.tsx` is the compile-time guard, and the settings normaliser backfills it
+  for existing users.
+
+Tests: `apps/runtime/tests/unit/services/terminal/` (fake `PtyPort` plus real-PTY cases that
+skip without `Bun.Terminal`), `apps/api/tests/unit/modules/terminals/` and
+`apps/api/tests/integration/routes/terminal*.integration.test.ts`,
+`apps/frontend/tests/unit/features/terminal/`, and `tests/browser-smoke/terminal.spec.ts`.
+
 ## Prompt Rules
 
 Open these first:

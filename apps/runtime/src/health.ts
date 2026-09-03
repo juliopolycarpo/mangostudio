@@ -99,6 +99,7 @@ export async function collectRuntimeHealth(
     // peer's manifest from health after every consent change, so a `gh` that
     // travelled on the handshake alone would disappear on the first refresh.
     ...(manifest.gh ? { gh: manifest.gh } : {}),
+    ...(manifest.terminal === undefined ? {} : { terminal: manifest.terminal }),
     lastError: error,
     audit: config.audit,
     ...(auditError ? { auditError } : {}),

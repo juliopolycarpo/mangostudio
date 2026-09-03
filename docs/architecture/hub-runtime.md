@@ -31,6 +31,8 @@ executors.
 | Detection policy: recipes, Node release data, cache freshness                 | Hub (`apps/api`)                | Installability, live LTS metadata, and how long an answer may be reused are hub decisions and travel down as parameters. Cache keys include the connection, so a reconnect drops what it said.  |
 | Install execution (`install.run`, `install.cancel`)                           | Runtime (`apps/runtime`)        | The argv arrives already built from a code-defined recipe; output streams back on `install.output`. See [environment-installs.md](environment-installs.md).                                     |
 | Install recipes, guards, audit rows, and the SSE stream                       | Hub (`apps/api`)                | Whether a recipe may run — including the per-environment `allowInstalls` opt-in — and the system of record for what ran.                                                                        |
+| Interactive terminal sessions (`terminal.*`)                                  | Runtime (`apps/runtime`)        | The PTY, the shell, its env and its lifetime; output streams back on `terminal.output` under an ack window. See [terminal.md](../features/terminal.md).                                         |
+| Terminal registry, limits, Local isolation gate, and the browser socket relay | Hub (`apps/api`)                | Who may open one, how many, for how long idle; `/api/terminal/:id` relays bytes with its own flow control because `/api/ws` is invalidation-only.                                               |
 | Frame schemas, compatibility, and NDJSON codec                                | Shared (`apps/shared`)          | Both sides import the same framework-agnostic contract.                                                                                                                                         |
 
 The runtime must not import API modules or persist product state. The hub must not bypass
@@ -131,6 +133,12 @@ Additive protocol changes stay on major/minor `1.0` while the wire stays compati
   reconnects. An unreadable config answers `none` here for the same reason the dispatch
   gate does — the report is what the hub caches, so it must not advertise what every call
   will refuse.
+- **A new event topic is safe only if the peer asks for it first.** `evt` topics are a free
+  string, so adding one never fails a decode — but an older hub that cannot read the payload
+  would still receive the frames. `terminal.output` holds the invariant that makes this
+  additive: the runtime never emits on it before a hub has called `terminal.attach`, so a hub
+  that does not know the method never sees the topic. A future streaming topic owes the same
+  handshake.
 
 ## Transports
 

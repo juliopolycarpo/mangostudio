@@ -2023,6 +2023,51 @@ export const messages = {
     },
   },
 
+  terminal: {
+    title: 'Terminal',
+    newSession: 'Novo terminal',
+    closeSession: 'Fechar terminal',
+    rename: 'Renomear terminal',
+    renameLabel: 'Nome do terminal',
+    popOut: 'Abrir em uma janela',
+    openInWindow: 'Este terminal está aberto em outra janela.',
+    takeOver: 'Trazer para cá',
+    tabs: 'Sessões de terminal',
+    empty: 'Nenhum terminal aberto para este chat.',
+    emptyHint: 'Abra um para executar comandos onde este ambiente roda.',
+    reconnecting: 'Reconectando...',
+    disconnected: 'Desconectado do terminal.',
+    notFound: 'Esta sessão de terminal não existe mais.',
+    refused: 'Esta sessão de terminal não pode ser aberta daqui.',
+    exited: 'Processo encerrado com código {code}.',
+    exitedBySignal: 'Processo encerrado por {signal}.',
+    dropped: '{bytes} bytes de saída foram descartados porque o visualizador não acompanhou.',
+    runtimeDisconnected: 'O runtime se desconectou; esta sessão terminou.',
+    closeConfirmTitle: 'Fechar este terminal?',
+    closeConfirmDescription: 'O shell e tudo o que ele estiver executando serão interrompidos.',
+    cancel: 'Cancelar',
+    unavailableTitle: 'Terminal indisponível',
+    unavailable: {
+      disabled: 'Os terminais estão desligados neste hub.',
+      limit: 'Você já tem o número máximo de terminais abertos.',
+      notIsolated:
+        'O runtime Local compartilha a conta do hub com outros usuários, então os terminais ficam desligados nele.',
+      unavailable:
+        'Este ambiente não pode abrir um terminal. Ele precisa de um shell e da permissão de shell.',
+      disconnected: 'O ambiente não está conectado.',
+    },
+    page: {
+      title: 'Terminal',
+      sessions: 'Sessões',
+      openHere: 'Abrir aqui',
+      noSessions: 'Nenhum terminal aberto para este ambiente.',
+    },
+    commands: {
+      openPanel: 'Abrir painel do terminal',
+      newSession: 'Nova sessão de terminal',
+    },
+  },
+
   common: {
     loading: 'Carregando...',
     appName: 'Mango Studio',

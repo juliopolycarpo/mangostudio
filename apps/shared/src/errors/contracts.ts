@@ -87,6 +87,17 @@ export const ERROR_CODES = {
    * instead of an apology.
    */
   MODEL_PROVIDER_DEPRECATED: 'MODEL_PROVIDER_DEPRECATED',
+  /** The hub's `[terminal] enabled` is off; the panel is hidden and opens are refused. */
+  TERMINAL_DISABLED: 'TERMINAL_DISABLED',
+  /** The user already holds the configured number of running terminal sessions. */
+  TERMINAL_LIMIT: 'TERMINAL_LIMIT',
+  /**
+   * A terminal on the Local runtime — the hub's own OS account — was asked for
+   * on a hub with more than one user. Its own code for the same reason
+   * `EXTERNAL_ISOLATION_UNPROVEN` has one: the remedy is an operator's, not a
+   * setting the user can find.
+   */
+  TERMINAL_NOT_ISOLATED: 'TERMINAL_NOT_ISOLATED',
   INTERNAL: 'INTERNAL',
 } as const;
 

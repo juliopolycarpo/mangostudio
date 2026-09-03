@@ -302,12 +302,12 @@ describe('useGlobalSettings', () => {
       result.current.setChatSidebarWidth(10_000);
     });
 
-    // Hiding `git` leaves the other two visible, and moving `todos` up swaps it
+    // Hiding `git` leaves the others visible, and moving `todos` up swaps it
     // past `github`. Both lists start from the full default panel set, so they
     // grow whenever a panel ships.
     const expectedSidePanel: WorkspacePanelSettings = {
-      visiblePanelIds: ['github', 'todos'],
-      panelOrder: ['git', 'todos', 'github'],
+      visiblePanelIds: ['github', 'todos', 'terminal'],
+      panelOrder: ['git', 'todos', 'github', 'terminal'],
       width: 640,
     };
 

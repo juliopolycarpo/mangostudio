@@ -26,6 +26,7 @@ import {
 } from './services/runtime-update';
 import { runShellCommand } from './services/shell';
 import { captureFileSnapshot, hashFileAtPath, revertRuntimeSnapshots } from './services/snapshot';
+import { createTerminalService } from './services/terminal/service';
 import {
   browseWorkspace,
   resolveContainedWorkspacePath,
@@ -67,6 +68,7 @@ export function createRuntimeMethodHandlers(
 ): RuntimeMethodRegistry {
   const mcp = createMcpService({ runtimeVersion: options.runtimeVersion, emit: options.emit });
   const install = createInstallService({ emit: options.emit });
+  const terminal = createTerminalService({ emit: options.emit });
   const update = createRuntimeUpdateService({
     slot: options.slot ?? 'host',
     ...options.update,
@@ -182,6 +184,14 @@ export function createRuntimeMethodHandlers(
       ),
       handler('install.run', (params) => install.run(params)),
       handler('install.cancel', (params) => install.cancel(params)),
+      handler('terminal.open', (params) => terminal.open(params)),
+      handler('terminal.attach', (params) => terminal.attach(params)),
+      handler('terminal.detach', (params) => terminal.detach(params)),
+      handler('terminal.write', (params) => terminal.write(params)),
+      handler('terminal.resize', (params) => terminal.resize(params)),
+      handler('terminal.ack', (params) => terminal.ack(params)),
+      handler('terminal.close', (params) => terminal.closeSession(params)),
+      handler('terminal.list', () => terminal.list()),
       handler('library.scan', (params, context) => libraryService.scan(params, context.signal)),
       handler('library.read', (params) => libraryService.read(params)),
       handler('library.read-tree', (params, context) =>
@@ -219,8 +229,11 @@ export function createRuntimeMethodHandlers(
       // its teardown and leak them for the life of the runtime. `install.close`
       // is in here for the same reason — it aborts hub-supplied argv, and a
       // throw from one of those aborts must not take the reaper down with it.
+      // `terminal.close` kills every open shell for the same reason: sessions do
+      // not survive a host close, since a reconnect builds a fresh host.
       const results = await Promise.allSettled([
         (async () => install.close())(),
+        (async () => terminal.close())(),
         update.close(),
         mcp.close(),
         externalAgents.close(),

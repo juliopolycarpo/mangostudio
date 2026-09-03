@@ -60,6 +60,24 @@ describe('RUNTIME_METHOD_CAPABILITIES', () => {
     expect(RUNTIME_CONSENT_PRESETS.readonly.shell).toBe(false);
   });
 
+  it('puts every terminal leg behind shell, reads included', () => {
+    // A `readonly` machine refuses `shell`, and an interactive PTY is broader
+    // than any single command. Listing and attaching are gated too: there is
+    // nothing to list on a machine that could never have opened one.
+    for (const method of [
+      'terminal.open',
+      'terminal.attach',
+      'terminal.detach',
+      'terminal.write',
+      'terminal.resize',
+      'terminal.ack',
+      'terminal.close',
+      'terminal.list',
+    ]) {
+      expect(capabilities[method]).toEqual(['shell']);
+    }
+  });
+
   it('requires a write capability for everything that writes', () => {
     // `readonly` grants `library` and refuses `fsWrite`, so a library method
     // that touches files has to name both — listing only `library` would let

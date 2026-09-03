@@ -125,6 +125,13 @@ const PUBLISHED: [ErrorCode, string, string][] = [
     'https://mangostudio.dev/problems/model-provider-deprecated',
     'Model provider no longer offered',
   ],
+  ['TERMINAL_DISABLED', 'https://mangostudio.dev/problems/terminal-disabled', 'Terminals disabled'],
+  ['TERMINAL_LIMIT', 'https://mangostudio.dev/problems/terminal-limit', 'Terminal limit reached'],
+  [
+    'TERMINAL_NOT_ISOLATED',
+    'https://mangostudio.dev/problems/terminal-not-isolated',
+    'Terminal host not isolated',
+  ],
   ['INTERNAL', 'https://mangostudio.dev/problems/internal', 'Internal server error'],
 ];
 

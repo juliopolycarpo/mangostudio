@@ -23,6 +23,7 @@ import {
   PartialReadError,
   PathAccessError,
   RUNTIME_EXTERNAL_AGENT_TOPIC,
+  RUNTIME_TERMINAL_OUTPUT_TOPIC,
   type RuntimeApplyPatchParams,
   type RuntimeApplyPatchResult,
   type RuntimeBeforeSnapshot,
@@ -107,6 +108,17 @@ import {
   type RuntimeSnapshotHashResult,
   type RuntimeSnapshotRevertParams,
   type RuntimeSnapshotRevertResult,
+  type RuntimeTerminalAckParams,
+  type RuntimeTerminalAttachParams,
+  type RuntimeTerminalAttachResult,
+  type RuntimeTerminalCloseParams,
+  type RuntimeTerminalDetachParams,
+  type RuntimeTerminalListResult,
+  type RuntimeTerminalOpenParams,
+  type RuntimeTerminalOpenResult,
+  type RuntimeTerminalOutputEvent,
+  type RuntimeTerminalResizeParams,
+  type RuntimeTerminalWriteParams,
   type RuntimeUpdateBeginParams,
   type RuntimeUpdateBeginResult,
   type RuntimeUpdateChunkParams,
@@ -236,6 +248,53 @@ interface RuntimeWorkspaceClient {
     params: RuntimeWorkspaceResolveContainedParams,
     options?: RuntimeRequestOptions
   ): Promise<RuntimeWorkspaceResolveContainedResult>;
+}
+
+/**
+ * One interactive shell on the target machine, addressed by a hub-minted
+ * session id exactly like the external-agent client below.
+ */
+interface RuntimeTerminalClient {
+  open(
+    params: RuntimeTerminalOpenParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeTerminalOpenResult>;
+  attach(
+    params: RuntimeTerminalAttachParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeTerminalAttachResult>;
+  detach(
+    params: RuntimeTerminalDetachParams,
+    options?: RuntimeRequestOptions
+  ): Promise<{ readonly ok: true }>;
+  write(
+    params: RuntimeTerminalWriteParams,
+    options?: RuntimeRequestOptions
+  ): Promise<{ readonly ok: true }>;
+  resize(
+    params: RuntimeTerminalResizeParams,
+    options?: RuntimeRequestOptions
+  ): Promise<{ readonly ok: true }>;
+  ack(
+    params: RuntimeTerminalAckParams,
+    options?: RuntimeRequestOptions
+  ): Promise<{ readonly ok: true }>;
+  close(
+    params: RuntimeTerminalCloseParams,
+    options?: RuntimeRequestOptions
+  ): Promise<{ readonly ok: true }>;
+  list(options?: RuntimeRequestOptions): Promise<RuntimeTerminalListResult>;
+  /**
+   * Subscribes to one session's output frames, filtered by `streamId` the way
+   * `RuntimeExternalAgentsClient.onEvent` filters by `sessionId`.
+   *
+   * The topic has no buffer and frames are dispatched synchronously, while a
+   * response only settles its promise a microtask later — so a frame the port
+   * delivers in the same read as the `terminal.attach` response reaches an
+   * empty listener set and is dropped. Subscribe *before* sending the request,
+   * not after it resolves.
+   */
+  onOutput(sessionId: string, listener: (event: RuntimeTerminalOutputEvent) => void): () => void;
 }
 
 /**
@@ -441,6 +500,7 @@ export class RuntimeClient {
   readonly library: RuntimeLibraryClient;
   readonly snapshot: RuntimeSnapshotClient;
   readonly workspace: RuntimeWorkspaceClient;
+  readonly terminal: RuntimeTerminalClient;
   private targetPaths?: TargetPaths;
   private unenforcedContainment = false;
   private pathPolicyEnforced = false;
@@ -559,6 +619,22 @@ export class RuntimeClient {
       validate: (params, options) => this.request('workspace.validate', params, options),
       resolveContained: (params, options) =>
         this.request('workspace.resolve-contained', params, options),
+    };
+    this.terminal = {
+      open: (params, options) => this.request('terminal.open', params, options),
+      attach: (params, options) => this.request('terminal.attach', params, options),
+      detach: (params, options) => this.request('terminal.detach', params, options),
+      write: (params, options) => this.request('terminal.write', params, options),
+      resize: (params, options) => this.request('terminal.resize', params, options),
+      ack: (params, options) => this.request('terminal.ack', params, options),
+      close: (params, options) => this.request('terminal.close', params, options),
+      list: (options) => this.request('terminal.list', {}, options),
+      onOutput: (sessionId, listener) =>
+        this.protocol.onEvent((frame) => {
+          if (frame.topic !== RUNTIME_TERMINAL_OUTPUT_TOPIC) return;
+          if (frame.streamId !== sessionId) return;
+          listener(frame.payload as RuntimeTerminalOutputEvent);
+        }),
     };
   }
 

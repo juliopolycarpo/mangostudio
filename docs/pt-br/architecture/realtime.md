@@ -224,3 +224,7 @@ Estenda o canal nesta ordem:
 6. Atualize este documento e seu espelho em inglês.
 
 Watchers de filesystem e sincronização de entidades não pertencem a este canal.
+Nem a E/S de terminal: sessões interativas usam uma rota própria,
+`/api/terminal/:id`, com controle de fluxo por socket, porque as opções de
+socket que este canal compartilha fecham a conexão sob backpressure em vez de
+desacelerá-la (veja [terminal.md](../features/terminal.md)).

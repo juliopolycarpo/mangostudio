@@ -51,7 +51,7 @@ export const RECENT_WORKDIRS_MAX = 10;
  * adding a panel means editing both. Everything downstream — `maxItems`, the
  * settings normalizer's backfill, the rail — reads one of these two.
  */
-export const WORKSPACE_PANEL_IDS = ['git', 'github', 'todos'] as const;
+export const WORKSPACE_PANEL_IDS = ['git', 'github', 'todos', 'terminal'] as const;
 export const WORKSPACE_PANEL_WIDTH_MIN = 280;
 export const WORKSPACE_PANEL_WIDTH_MAX = 640;
 export const WORKSPACE_PANEL_WIDTH_DEFAULT = 360;
@@ -66,6 +66,7 @@ export const WorkspacePanelIdSchema = Type.Union([
   Type.Literal('git'),
   Type.Literal('github'),
   Type.Literal('todos'),
+  Type.Literal('terminal'),
 ]);
 
 export const WorkspacePanelSettingsSchema = Type.Object({

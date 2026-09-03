@@ -12,6 +12,10 @@ export type RuntimeServiceErrorKind =
   | 'stale_line_numbers'
   | 'unobserved_line_numbers'
   | 'shell_execution'
+  /** A `terminal.*` call named a session id this runtime does not hold. */
+  | 'terminal_not_found'
+  /** A `terminal.write` reached a session whose shell has already exited. */
+  | 'terminal_exited'
   | 'git_execution'
   | 'gh_execution'
   | 'workspace_browser'

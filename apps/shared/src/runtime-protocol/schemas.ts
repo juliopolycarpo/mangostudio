@@ -161,6 +161,15 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
   /** Positive attestation of per-user vendor credential isolation; absent is unproven. */
   identityIsolation: Type.Optional(ExternalIdentityIsolationSchema),
   /**
+   * Whether this runtime can open an interactive PTY (`terminal.*`). Consent
+   * *and* ability: false when the owner refused `shell`, when no shell is
+   * present, or when the build has no PTY support. Absent means **unavailable**
+   * — the `gh` reading, not the `features` one — because a peer built before
+   * the key carries no `terminal.*` handlers and would only answer
+   * `METHOD_UNSUPPORTED`.
+   */
+  terminal: Type.Optional(Type.Boolean()),
+  /**
    * Whether this runtime's frame decoder knows the `hub` field on `hello_ack`.
    *
    * Frame envelopes are closed, so a hub that sends `hub` to a runtime built

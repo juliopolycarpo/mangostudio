@@ -77,13 +77,21 @@ describe('workspace panel registry', () => {
     expect(panels.map(({ id }) => id)).toEqual(['todos']);
   });
 
-  it('ships all three panels visible by default', () => {
+  it('ships all four panels visible by default', () => {
     const panels = getAvailableWorkspacePanels(
       { chatId: 'chat-1', workdir: '/srv/projects/mango', todoCount: 2 },
       DEFAULT_WORKSPACE_SETTINGS.sidePanel
     );
 
-    expect(panels.map(({ id }) => id)).toEqual(['git', 'github', 'todos']);
+    expect(panels.map(({ id }) => id)).toEqual(['git', 'github', 'todos', 'terminal']);
+  });
+
+  it('offers Terminal on a chat alone, with or without a working directory', () => {
+    const panel = WORKSPACE_PANEL_REGISTRY.find(({ id }) => id === 'terminal');
+    expect(panel).toBeDefined();
+
+    expect(panel?.availability({ chatId: 'chat-1', workdir: null, todoCount: 0 })).toBe(true);
+    expect(panel?.availability({ chatId: null, workdir: null, todoCount: 0 })).toBe(false);
   });
 
   it('hides GitHub when the user turned it off', () => {

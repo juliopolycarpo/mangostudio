@@ -25,6 +25,7 @@ import {
   GitPullRequest,
   ListTodo,
   RotateCcw,
+  TerminalSquare,
   X,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -108,11 +109,13 @@ export function GeneralSettings({
     git: t.git.title,
     github: t.github.title,
     todos: t.chat.todo.title,
+    terminal: t.terminal.title,
   };
   const panelIcons = {
     git: FolderGit2,
     github: GitPullRequest,
     todos: ListTodo,
+    terminal: TerminalSquare,
   } satisfies Readonly<Record<WorkspacePanelId, typeof FolderGit2>>;
   const [isWorkdirPickerOpen, setWorkdirPickerOpen] = useState(false);
   const missingTitleModelOption =

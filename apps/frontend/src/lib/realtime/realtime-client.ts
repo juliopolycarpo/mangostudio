@@ -1,12 +1,16 @@
 import {
   REALTIME_CLOSE_CODES,
-  REALTIME_IDLE_TIMEOUT_SECONDS,
   type RealtimeClientMessage,
   type RealtimeInvalidateMessage,
 } from '@mangostudio/shared/realtime';
 import { getWebSocketBaseUrl } from '../api-base-url';
 import { scheduleLoginRedirect } from '../auth-navigate';
 import { parseServerMessage } from './parse-server-message';
+import {
+  RECONNECT_MAX_FAILURES,
+  SOCKET_HEARTBEAT_MS,
+  nextReconnectDelay as sharedReconnectDelay,
+} from './reconnect-backoff';
 
 const REALTIME_PATH = '/api/ws';
 
@@ -20,19 +24,8 @@ const MAX_TOPICS_PER_FRAME = 32;
  */
 const LINGER_MS = 5_000;
 
-/**
- * Heartbeat interval, derived from the server idle window so the two cannot
- * drift apart. Comfortably under the timeout even if one tick is missed.
- */
-const HEARTBEAT_MS = Math.floor((REALTIME_IDLE_TIMEOUT_SECONDS * 1_000) / 2.5);
-
 /** A connection must stay up this long before its failures are forgiven. */
 const STABILITY_MS = 10_000;
-
-const RECONNECT_BASE_DELAY_MS = 1_000;
-const RECONNECT_MAX_DELAY_MS = 30_000;
-/** Lowest consecutive-failure count whose base delay already saturates the cap. */
-const RECONNECT_MAX_FAILURES = 6;
 
 export type RealtimeSignal =
   /** The topic is active on a live socket, so anything cached for it may predate it. */
@@ -247,10 +240,7 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
   }
 
   function nextReconnectDelay(): number {
-    const exponent = Math.min(failureCount, RECONNECT_MAX_FAILURES) - 1;
-    const base = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** exponent, RECONNECT_MAX_DELAY_MS);
-    // Half jitter, never full: a near-zero retry is exactly the case being bounded.
-    return base / 2 + random() * (base / 2);
+    return sharedReconnectDelay(failureCount, random);
   }
 
   function scheduleReconnect(): void {
@@ -283,7 +273,7 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
   function handleReady(): void {
     phase = 'ready';
     stopHeartbeat();
-    heartbeatTimer = setInterval(onHeartbeat, HEARTBEAT_MS);
+    heartbeatTimer = setInterval(onHeartbeat, SOCKET_HEARTBEAT_MS);
     clearStabilityTimer();
     // Backoff resets on proven stability rather than on `ready`, so a server that
     // acks and then drops — eight tabs against the connection cap — still

@@ -189,6 +189,42 @@ describe('rotateIfNeeded', () => {
 });
 
 describe('createRuntimeAuditSink', () => {
+  it('drops the per-keystroke terminal legs so they cannot roll the retention window', async () => {
+    const { home, env } = await tempHome();
+    const path = join(home, 'audit.log');
+    const sink = createRuntimeAuditSink({
+      slot: 'remote',
+      enabled: true,
+      env,
+      path,
+      flushIntervalMs: 10_000,
+    });
+    sink.record({ method: 'terminal.open', outcome: 'ok', durationMs: 1, params: { cols: 80 } });
+    for (let i = 0; i < 200; i += 1) {
+      sink.record({ method: 'terminal.write', outcome: 'ok', durationMs: 1, params: {} });
+      sink.record({ method: 'terminal.ack', outcome: 'ok', durationMs: 1, params: {} });
+      sink.record({ method: 'terminal.resize', outcome: 'ok', durationMs: 1, params: {} });
+    }
+    // A refusal is exactly what the log exists for, so it survives the filter.
+    sink.record({
+      method: 'terminal.write',
+      outcome: 'denied',
+      durationMs: 1,
+      params: {},
+      capability: 'shell',
+    });
+    sink.record({ method: 'shell.run', outcome: 'ok', durationMs: 1, params: { command: 'ls' } });
+    await sink.flush();
+    await sink.close();
+
+    const records = await readRuntimeAuditLog({ path });
+    expect(records.map((record) => `${record.method}:${record.outcome}`)).toEqual([
+      'terminal.open:ok',
+      'terminal.write:denied',
+      'shell.run:ok',
+    ]);
+  });
+
   it('buffers, flushes, and never exceeds the rotated budget for many lines', async () => {
     const { home, env } = await tempHome();
     const path = join(home, 'slot', 'audit.log');

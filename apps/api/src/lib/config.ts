@@ -12,8 +12,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
+import { TERMINAL_SCROLLBACK_MAX_BYTES } from '@mangostudio/shared/terminal';
 import { parse as parseToml } from 'smol-toml';
 import { CliError } from '../cli/errors';
+
+/** `terminal.scrollback_kib` is threaded to the runtime as bytes; it cannot ask for more than the ring buffer holds. */
+const TERMINAL_SCROLLBACK_KIB_MAX = TERMINAL_SCROLLBACK_MAX_BYTES / 1024;
 
 /**
  * Absolute path to the monorepo root, derived from this file's location.
@@ -139,6 +143,16 @@ export interface MangoConfig {
      */
     wslExecutable: string;
   };
+  terminal: {
+    /** Master switch for opening live terminal sessions on any environment. */
+    enabled: boolean;
+    /** A session with no attached viewer this long is closed by the idle reaper. */
+    idleTimeoutMinutes: number;
+    /** Running sessions one user may hold at once, across every environment. */
+    maxSessionsPerUser: number;
+    /** Bytes of output the runtime keeps per session for `terminal.attach` replay. */
+    scrollbackKib: number;
+  };
   /** The server's own origins plus every `server.allowedOrigins` entry. */
   corsOrigins: string[];
   /** Path to the config.toml that was loaded (for TOML-based services). */
@@ -172,6 +186,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   auth: { secret: '', url: '' },
   security: { trustProxy: false, allowDirectLoopback: true },
   environments: { ltsRefresh: false, installsEnabled: false, container: false, wslExecutable: '' },
+  terminal: { enabled: true, idleTimeoutMinutes: 30, maxSessionsPerUser: 8, scrollbackKib: 256 },
   chatgpt: {
     authBaseUrl: 'https://auth.openai.com',
     apiBaseUrl: 'https://chatgpt.com/backend-api/codex',
@@ -188,6 +203,24 @@ export const AUTH_SECRET_MIN_LENGTH = 32;
  */
 export function parseBooleanFlag(value: string): boolean {
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
+/**
+ * A positive safe integer within an optional ceiling, or `undefined` for
+ * anything else — so a caller can fall back to the default with `??` instead of
+ * restating the guard.
+ *
+ * Deliberately number-only: TOML has real types, so a quoted `"30"` there is a
+ * config error rather than a value to coerce. Env callers pass `Number(v)`
+ * themselves, which is the one place a string is expected. Sharing the guard is
+ * what keeps an env var and its TOML twin from validating differently.
+ *
+ * // Usage: readPositiveInteger(64, 1024) // → 64
+ */
+export function readPositiveInteger(value: unknown, max?: number): number | undefined {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) return undefined;
+  if (max !== undefined && value > max) return undefined;
+  return value;
 }
 
 /**
@@ -296,6 +329,21 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
     if (Number.isSafeInteger(bytes) && bytes > 0) {
       cfg.library.backupRetentionBytes = bytes;
     }
+  },
+  MANGO_TERMINAL_ENABLED: (cfg, v) => {
+    cfg.terminal.enabled = parseBooleanFlag(v);
+  },
+  MANGO_TERMINAL_IDLE_TIMEOUT_MINUTES: (cfg, v) => {
+    cfg.terminal.idleTimeoutMinutes =
+      readPositiveInteger(Number(v)) ?? cfg.terminal.idleTimeoutMinutes;
+  },
+  MANGO_TERMINAL_MAX_SESSIONS_PER_USER: (cfg, v) => {
+    cfg.terminal.maxSessionsPerUser =
+      readPositiveInteger(Number(v)) ?? cfg.terminal.maxSessionsPerUser;
+  },
+  MANGO_TERMINAL_SCROLLBACK_KIB: (cfg, v) => {
+    cfg.terminal.scrollbackKib =
+      readPositiveInteger(Number(v), TERMINAL_SCROLLBACK_KIB_MAX) ?? cfg.terminal.scrollbackKib;
   },
 };
 
@@ -551,6 +599,7 @@ function cloneDefaults(): MangoConfig {
     auth: { ...DEFAULT_CONFIG.auth },
     security: { ...DEFAULT_CONFIG.security },
     environments: { ...DEFAULT_CONFIG.environments },
+    terminal: { ...DEFAULT_CONFIG.terminal },
     chatgpt: { ...DEFAULT_CONFIG.chatgpt },
     secretStore: { ...DEFAULT_CONFIG.secretStore },
     corsOrigins: [],
@@ -655,6 +704,18 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
     if (typeof environments.installs_enabled === 'boolean') {
       cfg.environments.installsEnabled = environments.installs_enabled;
     }
+  }
+
+  const terminal = parsed.terminal as Record<string, unknown> | undefined;
+  if (terminal) {
+    if (typeof terminal.enabled === 'boolean') cfg.terminal.enabled = terminal.enabled;
+    cfg.terminal.idleTimeoutMinutes =
+      readPositiveInteger(terminal.idle_timeout_minutes) ?? cfg.terminal.idleTimeoutMinutes;
+    cfg.terminal.maxSessionsPerUser =
+      readPositiveInteger(terminal.max_sessions_per_user) ?? cfg.terminal.maxSessionsPerUser;
+    cfg.terminal.scrollbackKib =
+      readPositiveInteger(terminal.scrollback_kib, TERMINAL_SCROLLBACK_KIB_MAX) ??
+      cfg.terminal.scrollbackKib;
   }
 
   const chatgpt = parsed.chatgpt as Record<string, unknown> | undefined;
@@ -793,6 +854,8 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
  * // Usage: if (isTestRuntime()) { ... }
  */
 function isTestRuntime(): boolean {
+  // allow-node-env: selects the isolated test config path; moving this seam
+  // risks clobbering a real user file.
   return process.env.NODE_ENV === 'test';
 }
 
@@ -942,6 +1005,7 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (partial.auth) Object.assign(cfg.auth, partial.auth);
   if (partial.security) Object.assign(cfg.security, partial.security);
   if (partial.environments) Object.assign(cfg.environments, partial.environments);
+  if (partial.terminal) Object.assign(cfg.terminal, partial.terminal);
   if (partial.chatgpt) Object.assign(cfg.chatgpt, partial.chatgpt);
   if (partial.secretStore) Object.assign(cfg.secretStore, partial.secretStore);
   if (partial.corsOrigins) cfg.corsOrigins = partial.corsOrigins;

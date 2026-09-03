@@ -273,7 +273,16 @@ function buildInvocation(kind: ShellKind, executable: string, command: string): 
   return [executable, '-c', command];
 }
 
-function resolveWorkingDirectory(cwd: string | undefined): string | undefined {
+/**
+ * Resolves a caller-supplied working directory to an absolute path, expanding
+ * a leading `~`. Undefined in, undefined out — callers that want a default
+ * apply it themselves, since "no cwd given" and "cwd given but not found" mean
+ * different things to a shell command (undefined) and a terminal session
+ * (falls back to home).
+ *
+ * // Usage: resolveWorkingDirectory('~/projects') // => '/home/tester/projects'
+ */
+export function resolveWorkingDirectory(cwd: string | undefined): string | undefined {
   if (!cwd) return undefined;
   return resolve(expandHome(cwd));
 }

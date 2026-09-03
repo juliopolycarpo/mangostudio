@@ -4,29 +4,21 @@ import ts from '@typescript/typescript6';
 import { ROOT_DIR } from './config';
 
 /**
- * These are the only production source files where NODE_ENV is intentional.
- * Keep the reason next to every exception so the list does not become a
- * historical record of unexplained escapes.
+ * Marker that exempts one intentional `NODE_ENV` read, written directly above
+ * it or as a trailing comment on the same line, with the reason after the
+ * colon:
+ *
+ *   // allow-node-env: selects the isolated test config path
+ *   return process.env.NODE_ENV === 'test';
+ *
+ * Keyed on the marker rather than on an absolute line number, which the three
+ * exceptions previously were. A line number has to be re-synced by whoever
+ * inserts anything above it — it moved three times in one pull request — and,
+ * worse, it fails open: when code shifts so the allowlisted line lands on a
+ * *different* `NODE_ENV` read, that read is silently exempted instead. The
+ * marker travels with the code it excuses and cannot drift onto another one.
  */
-export const NODE_ENV_READ_ALLOWLIST = [
-  {
-    path: 'apps/api/src/lib/config.ts',
-    line: 796,
-    reason:
-      'selects the isolated test config path; moving this seam risks clobbering a real user file',
-  },
-  {
-    path: 'apps/runtime/src/config.ts',
-    line: 39,
-    reason:
-      'enables frame validation outside production; this is a production discriminator, not a test seam',
-  },
-  {
-    path: 'apps/api/src/cli/detach.ts',
-    line: 126,
-    reason: 'passes through the variable to detached children; it is not a production branch',
-  },
-] as const;
+const NODE_ENV_ALLOW_MARKER = 'allow-node-env:';
 
 export interface ProductionSourceFile {
   readonly path: string;
@@ -55,6 +47,24 @@ function mayHoldNodeEnvToken(content: string): boolean {
   return content.includes('NODE_ENV') || content.includes('\\');
 }
 
+/**
+ * Whether the read on `lineIndex` carries an allow marker: either trailing on
+ * its own line, or in the run of comment lines immediately above it. Blank
+ * lines end the run, so a marker cannot excuse a read it is not adjacent to.
+ */
+function hasAllowMarker(lines: readonly string[], lineIndex: number): boolean {
+  if (lines[lineIndex]?.includes(NODE_ENV_ALLOW_MARKER)) return true;
+
+  for (let i = lineIndex - 1; i >= 0; i--) {
+    const line = lines[i]?.trim() ?? '';
+    const isComment =
+      line.startsWith('//') || line.startsWith('*') || line.startsWith('/*') || line === '*/';
+    if (!isComment) return false;
+    if (line.includes(NODE_ENV_ALLOW_MARKER)) return true;
+  }
+  return false;
+}
+
 export function findDisallowedNodeEnvReads(
   sources: readonly ProductionSourceFile[]
 ): NodeEnvReadViolation[] {
@@ -71,9 +81,7 @@ export function findDisallowedNodeEnvReads(
       ts.ScriptTarget.Latest,
       false
     );
-    const allowlistedLines = new Set<number>(
-      NODE_ENV_READ_ALLOWLIST.filter(({ path }) => path === source.path).map(({ line }) => line)
-    );
+    const lines = source.content.split('\n');
 
     const visit = (node: ts.Node): void => {
       const isNodeEnvToken =
@@ -84,11 +92,10 @@ export function findDisallowedNodeEnvReads(
         const { line, character } = sourceFile.getLineAndCharacterOfPosition(
           node.getStart(sourceFile)
         );
-        const lineNumber = line + 1;
-        if (!allowlistedLines.has(lineNumber)) {
+        if (!hasAllowMarker(lines, line)) {
           violations.push({
             path: source.path,
-            line: lineNumber,
+            line: line + 1,
             column: character + 1,
           });
         }
