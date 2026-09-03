@@ -335,6 +335,14 @@ Open these first:
 - `apps/api/src/modules/environments/application/probing-service.ts` (per-environment
   cache, force/dedupe, and the policy the hub sends down)
 - `apps/api/src/modules/environments/application/install-service.ts` (guards, prepare, run)
+- `apps/api/src/modules/environments/domain/install-recipes.ts` (the recipe table: platforms,
+  downloads, argv builders, accepted exit codes, copy-only entries)
+- `apps/api/src/modules/environments/application/toolchain-service.ts` and
+  `apps/runtime/src/services/spawn-env.ts` (which Node and Bun a spawned process runs with;
+  see `docs/features/environments.md`)
+- `apps/api/src/modules/environments/domain/prerequisite-findings.ts` (hub-side
+  `prerequisite-missing` findings from the recipe table)
+- `apps/frontend/src/features/environments/setup-checklist.ts` (the Overview's Setup rows)
 - `apps/runtime/src/services/install.ts` (the spawn+capture loop, and only that)
 - `apps/api/src/modules/environments/http/environment-routes.ts`, `install-routes.ts`
 - `apps/shared/src/environments/schemas.ts` (single source of truth for every shape)
