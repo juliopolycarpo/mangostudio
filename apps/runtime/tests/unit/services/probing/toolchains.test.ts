@@ -213,6 +213,36 @@ describe('runtime probing', () => {
 
     expect(winget.calls).toEqual([]);
   });
+
+  it('refuses a runtime probe cancelled after its scan finished but while winget was still in flight', async () => {
+    // The scan settles immediately; the abort fires only once winget resolves,
+    // well after `scanRuntimeDefinition`'s own `throwIfAborted` already ran
+    // clean. Without a check after the two settle together, this would return
+    // normal-looking statuses for a call the caller already gave up on.
+    const controller = new AbortController();
+    const service = createProbingService({
+      runtimeDefinitions: [nodeOnly],
+      createPathEnv: () => WIN32_ENV,
+      createScanDeps: () =>
+        scanDeps({
+          ...WIN32_ENV,
+          pathExists: (path) => path === 'C:\\Program Files\\nodejs\\node.exe',
+          probeVersion: (path) =>
+            Promise.resolve(path === 'C:\\Program Files\\nodejs\\node.exe' ? 'v22.13.0' : null),
+        }),
+      wingetOwnership: () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            controller.abort();
+            resolve('unknown');
+          }, 5);
+        }),
+    });
+
+    await expect(service.probeRuntimes({}, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+  });
 });
 
 describe('version manager probing', () => {

@@ -402,6 +402,10 @@ export function createProbingService(overrides: Partial<ProbingHostAdapters> = {
         ),
         wingetOwnershipPromise,
       ]);
+      // The default winget adapter maps an abort to `unknown` rather than
+      // rejecting, so a cancellation that lands while every scan has already
+      // settled would otherwise resolve here unnoticed.
+      throwIfAborted(signal);
 
       const probedAtMs = adapters.now();
       const statuses = definitions.map((definition, index) =>
