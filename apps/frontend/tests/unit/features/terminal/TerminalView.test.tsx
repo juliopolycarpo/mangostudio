@@ -19,45 +19,11 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { TerminalView } from '../../../../src/features/terminal/TerminalView';
 import { render, screen } from '../../../support/harness/render';
-
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = [];
-  static readonly OPEN = 1;
-  static readonly CLOSED = 3;
-
-  readyState = 0;
-  binaryType = '';
-  onmessage: ((event: MessageEvent) => void) | null = null;
-  onclose: ((event: CloseEvent) => void) | null = null;
-  onopen: ((event: Event) => void) | null = null;
-  sent: Uint8Array[] = [];
-
-  constructor(readonly url: string) {
-    FakeWebSocket.instances.push(this);
-  }
-
-  send(data: Uint8Array): void {
-    this.sent.push(data);
-  }
-
-  close(): void {
-    this.readyState = FakeWebSocket.CLOSED;
-  }
-
-  open(): void {
-    this.readyState = FakeWebSocket.OPEN;
-    this.onopen?.(new Event('open'));
-  }
-
-  drop(code: number): void {
-    this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.({ code } as CloseEvent);
-  }
-}
+import { FakeTerminalSocket } from './fake-terminal-socket';
 
 describe('TerminalView', () => {
   beforeEach(() => {
-    FakeWebSocket.instances = [];
+    FakeTerminalSocket.instances = [];
   });
 
   it('mounts xterm over a container without throwing', () => {
@@ -65,7 +31,7 @@ describe('TerminalView', () => {
       render(
         <TerminalView
           sessionId="session-1"
-          createSocket={(url) => new FakeWebSocket(url) as unknown as WebSocket}
+          createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
           resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
         />
       )
@@ -76,7 +42,7 @@ describe('TerminalView', () => {
     const { getByTestId } = render(
       <TerminalView
         sessionId="session-1"
-        createSocket={(url) => new FakeWebSocket(url) as unknown as WebSocket}
+        createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
         resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
       />
     );
@@ -88,7 +54,7 @@ describe('TerminalView', () => {
     const { unmount } = render(
       <TerminalView
         sessionId="session-1"
-        createSocket={(url) => new FakeWebSocket(url) as unknown as WebSocket}
+        createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
         resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
       />
     );
@@ -101,12 +67,12 @@ describe('TerminalView', () => {
     render(
       <TerminalView
         sessionId="session-1"
-        createSocket={(url) => new FakeWebSocket(url) as unknown as WebSocket}
+        createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
         resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
       />
     );
 
-    const first = FakeWebSocket.instances[0];
+    const first = FakeTerminalSocket.instances[0];
     act(() => first?.open());
     act(() => first?.drop(TERMINAL_SOCKET_CLOSE_CODES.REPLACED));
 
@@ -119,7 +85,7 @@ describe('TerminalView', () => {
     await user.click(takeOver);
 
     // Reconnecting opens a second socket instead of retrying the first.
-    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(FakeTerminalSocket.instances).toHaveLength(2);
   });
 
   it('sends the fitted size when the socket opens, not while it is still connecting', () => {
@@ -131,11 +97,11 @@ describe('TerminalView', () => {
       render(
         <TerminalView
           sessionId="session-1"
-          createSocket={(url) => new FakeWebSocket(url) as unknown as WebSocket}
+          createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
           resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
         />
       );
-      const socket = FakeWebSocket.instances[0];
+      const socket = FakeTerminalSocket.instances[0];
 
       // The mount-time fit and the `document.fonts.ready` one both run while
       // the socket is `connecting`, and a frame sent then is dropped.
@@ -167,11 +133,11 @@ describe('TerminalView', () => {
       render(
         <TerminalView
           sessionId="session-1"
-          createSocket={(url) => new FakeWebSocket(url) as unknown as WebSocket}
+          createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
           resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
         />
       );
-      const socket = FakeWebSocket.instances[0];
+      const socket = FakeTerminalSocket.instances[0];
       act(() => socket?.open());
       const exitFrame = encodeTerminalServerMessage({
         type: 'exit',
@@ -208,11 +174,11 @@ describe('TerminalView', () => {
       render(
         <TerminalView
           sessionId="session-1"
-          createSocket={(url) => new FakeWebSocket(url) as unknown as WebSocket}
+          createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
           resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
         />
       );
-      const socket = FakeWebSocket.instances[0];
+      const socket = FakeTerminalSocket.instances[0];
       act(() => socket?.open());
       act(() => socket?.drop(TERMINAL_SOCKET_CLOSE_CODES.GONE));
 

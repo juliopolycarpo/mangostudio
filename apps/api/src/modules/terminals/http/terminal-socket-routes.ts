@@ -16,6 +16,7 @@ import {
   encodeTerminalServerMessage,
   TERMINAL_CHUNK_MAX_BYTES,
   TERMINAL_SOCKET_CLOSE_CODES,
+  type TerminalExit,
 } from '@mangostudio/shared/terminal';
 import { Elysia, t } from 'elysia';
 import { createDiagnosticLogger } from '../../../lib/logger';
@@ -115,6 +116,18 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
     });
     state.relay = relay;
 
+    /**
+     * Records the exit, tells the viewer, and closes. Reached two ways — an
+     * `exit` output frame while attached, and an `attach` that answers with a
+     * session which had already ended — that must not report a shell's end
+     * differently.
+     */
+    const endWithExit = (exit: TerminalExit): void => {
+      service.recordExit(state.sessionId, exit);
+      relay.push(encodeTerminalServerMessage({ type: 'exit', exit }));
+      socket.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session exited');
+    };
+
     const viewer: TerminalSessionViewer = {
       pushNotice: (notice) => relay.push(encodeTerminalServerMessage({ type: 'notice', notice })),
       close: (code, reason) => socket.raw.close(code, reason),
@@ -172,12 +185,8 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
             })
           );
           return;
-        case 'exit': {
-          const exit = { exitCode: event.exitCode, signal: event.signal };
-          service.recordExit(state.sessionId, exit);
-          relay.push(encodeTerminalServerMessage({ type: 'exit', exit }));
-          socket.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session exited');
-        }
+        case 'exit':
+          endWithExit({ exitCode: event.exitCode, signal: event.signal });
       }
     };
     state.unsubscribeOutput = client.terminal.onOutput(state.sessionId, (event) => {
@@ -224,10 +233,7 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
       // Nothing can have been queued: the runtime emits only while attached,
       // and this session had already ended before it was.
       teardown(state);
-      const exit = { exitCode: attachResult.exitCode, signal: attachResult.signal };
-      service.recordExit(state.sessionId, exit);
-      relay.push(encodeTerminalServerMessage({ type: 'exit', exit }));
-      socket.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session exited');
+      endWithExit({ exitCode: attachResult.exitCode, signal: attachResult.signal });
       return;
     }
 

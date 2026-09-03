@@ -11,60 +11,9 @@ import {
   type TerminalSocketStatus,
 } from '../../../../src/features/terminal/use-terminal-socket';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../../support/harness/timers';
+import { FakeTerminalSocket } from './fake-terminal-socket';
 
-/**
- * Local to this file, mirroring `realtime-client.test.ts`'s `FakeWebSocket`:
- * `send()` throwing outside OPEN turns a frame sent before `open` into a loud
- * failure, and `drop()` fires a close the way a real transport would.
- */
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = [];
-  static readonly OPEN = 1;
-  static readonly CLOSED = 3;
-
-  readyState = 0;
-  binaryType = '';
-  sent: Uint8Array[] = [];
-  onmessage: ((event: MessageEvent) => void) | null = null;
-  onclose: ((event: CloseEvent) => void) | null = null;
-  onopen: ((event: Event) => void) | null = null;
-  url: string;
-
-  constructor(url: string) {
-    this.url = url;
-    FakeWebSocket.instances.push(this);
-  }
-
-  send(data: Uint8Array): void {
-    if (this.readyState !== FakeWebSocket.OPEN) {
-      throw new Error('InvalidStateError: socket is not open');
-    }
-    this.sent.push(data);
-  }
-
-  close(): void {
-    this.readyState = FakeWebSocket.CLOSED;
-  }
-
-  open(): void {
-    this.readyState = FakeWebSocket.OPEN;
-    this.onopen?.(new Event('open'));
-  }
-
-  emitServerMessage(message: Parameters<typeof encodeTerminalServerMessage>[0]): void {
-    const bytes = encodeTerminalServerMessage(message);
-    this.onmessage?.({
-      data: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-    } as MessageEvent);
-  }
-
-  drop(code: number): void {
-    this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.({ code } as CloseEvent);
-  }
-}
-
-function decodedFrames(socket: FakeWebSocket) {
+function decodedFrames(socket: FakeTerminalSocket) {
   return socket.sent.map((bytes) => decodeTerminalClientMessage(bytes));
 }
 
@@ -75,21 +24,21 @@ describe('createTerminalSocket', () => {
   let onUnauthorized: ReturnType<typeof jest.fn>;
 
   beforeEach(() => {
-    FakeWebSocket.instances = [];
+    FakeTerminalSocket.instances = [];
     statuses = [];
     data = [];
     connectedCount = 0;
     onUnauthorized = jest.fn();
     // A dropped test would otherwise leave a real reconnect timer armed, which
     // can fire mid-way through an unrelated later test and push a stray
-    // instance into its (freshly reset) `FakeWebSocket.instances`.
+    // instance into its (freshly reset) `FakeTerminalSocket.instances`.
     useFakeTimers();
   });
 
   function createSocket(overrides: Partial<TerminalSocketOptions> = {}): TerminalSocket {
     return createTerminalSocket({
       sessionId: 'session-1',
-      createSocket: (url) => new FakeWebSocket(url) as unknown as WebSocket,
+      createSocket: (url) => new FakeTerminalSocket(url) as unknown as WebSocket,
       resolveUrl: (sessionId) => `ws://terminal.test/api/terminal/${sessionId}`,
       random: () => 0,
       onUnauthorized,
@@ -104,8 +53,8 @@ describe('createTerminalSocket', () => {
     });
   }
 
-  function lastSocket(): FakeWebSocket {
-    const socket = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+  function lastSocket(): FakeTerminalSocket {
+    const socket = FakeTerminalSocket.instances[FakeTerminalSocket.instances.length - 1];
     if (!socket) throw new Error('No socket was created');
     return socket;
   }
@@ -222,7 +171,7 @@ describe('createTerminalSocket', () => {
 
     expect(statuses.at(-1)).toBe('unauthorized');
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
-    expect(FakeWebSocket.instances).toHaveLength(1); // no reconnect attempt
+    expect(FakeTerminalSocket.instances).toHaveLength(1); // no reconnect attempt
   });
 
   it('stops on 4403 without reconnecting', () => {
@@ -232,7 +181,7 @@ describe('createTerminalSocket', () => {
     lastSocket().drop(TERMINAL_SOCKET_CLOSE_CODES.FORBIDDEN);
 
     expect(statuses.at(-1)).toBe('forbidden');
-    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(FakeTerminalSocket.instances).toHaveLength(1);
   });
 
   it('stops on 4404 without reconnecting', () => {
@@ -242,7 +191,7 @@ describe('createTerminalSocket', () => {
     lastSocket().drop(TERMINAL_SOCKET_CLOSE_CODES.NOT_FOUND);
 
     expect(statuses.at(-1)).toBe('not-found');
-    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(FakeTerminalSocket.instances).toHaveLength(1);
   });
 
   it('stops on 4409 (replaced) without reconnecting on its own', () => {
@@ -252,7 +201,7 @@ describe('createTerminalSocket', () => {
     lastSocket().drop(TERMINAL_SOCKET_CLOSE_CODES.REPLACED);
 
     expect(statuses.at(-1)).toBe('replaced');
-    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(FakeTerminalSocket.instances).toHaveLength(1);
   });
 
   it('stops on 4410 (gone) without reconnecting', () => {
@@ -262,7 +211,7 @@ describe('createTerminalSocket', () => {
     lastSocket().drop(TERMINAL_SOCKET_CLOSE_CODES.GONE);
 
     expect(statuses.at(-1)).toBe('gone');
-    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(FakeTerminalSocket.instances).toHaveLength(1);
   });
 
   it('reconnect() opens a fresh socket from a stopped status like replaced', () => {
@@ -272,7 +221,7 @@ describe('createTerminalSocket', () => {
 
     socket.reconnect();
 
-    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(FakeTerminalSocket.instances).toHaveLength(2);
     expect(statuses.at(-1)).toBe('connecting');
   });
 
@@ -283,13 +232,13 @@ describe('createTerminalSocket', () => {
     lastSocket().drop(1006);
 
     expect(statuses.at(-1)).toBe('reconnecting');
-    expect(FakeWebSocket.instances).toHaveLength(1); // the retry is scheduled, not immediate
+    expect(FakeTerminalSocket.instances).toHaveLength(1); // the retry is scheduled, not immediate
 
     // First failure, zero jitter: base delay 1000ms halved is 500ms.
     await advanceTimersByTimeAsync(499);
-    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(FakeTerminalSocket.instances).toHaveLength(1);
     await advanceTimersByTimeAsync(1);
-    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(FakeTerminalSocket.instances).toHaveLength(2);
   });
 
   it('sends a ping every 25s while open and forces a reconnect on a missed pong', async () => {
