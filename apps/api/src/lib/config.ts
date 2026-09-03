@@ -206,6 +206,24 @@ export function parseBooleanFlag(value: string): boolean {
 }
 
 /**
+ * A positive safe integer within an optional ceiling, or `undefined` for
+ * anything else — so a caller can fall back to the default with `??` instead of
+ * restating the guard.
+ *
+ * Deliberately number-only: TOML has real types, so a quoted `"30"` there is a
+ * config error rather than a value to coerce. Env callers pass `Number(v)`
+ * themselves, which is the one place a string is expected. Sharing the guard is
+ * what keeps an env var and its TOML twin from validating differently.
+ *
+ * // Usage: readPositiveInteger(64, 1024) // → 64
+ */
+export function readPositiveInteger(value: unknown, max?: number): number | undefined {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) return undefined;
+  if (max !== undefined && value > max) return undefined;
+  return value;
+}
+
+/**
  * Trims an origin list and drops the empty entries a trailing comma or a blank
  * TOML string leaves behind. Nothing else is filtered: a malformed entry is
  * kept so `computeDerived` can reject it out loud, rather than the value
@@ -316,22 +334,16 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
     cfg.terminal.enabled = parseBooleanFlag(v);
   },
   MANGO_TERMINAL_IDLE_TIMEOUT_MINUTES: (cfg, v) => {
-    const minutes = Number(v);
-    if (Number.isSafeInteger(minutes) && minutes > 0) {
-      cfg.terminal.idleTimeoutMinutes = minutes;
-    }
+    cfg.terminal.idleTimeoutMinutes =
+      readPositiveInteger(Number(v)) ?? cfg.terminal.idleTimeoutMinutes;
   },
   MANGO_TERMINAL_MAX_SESSIONS_PER_USER: (cfg, v) => {
-    const count = Number(v);
-    if (Number.isSafeInteger(count) && count > 0) {
-      cfg.terminal.maxSessionsPerUser = count;
-    }
+    cfg.terminal.maxSessionsPerUser =
+      readPositiveInteger(Number(v)) ?? cfg.terminal.maxSessionsPerUser;
   },
   MANGO_TERMINAL_SCROLLBACK_KIB: (cfg, v) => {
-    const kib = Number(v);
-    if (Number.isSafeInteger(kib) && kib > 0 && kib <= TERMINAL_SCROLLBACK_KIB_MAX) {
-      cfg.terminal.scrollbackKib = kib;
-    }
+    cfg.terminal.scrollbackKib =
+      readPositiveInteger(Number(v), TERMINAL_SCROLLBACK_KIB_MAX) ?? cfg.terminal.scrollbackKib;
   },
 };
 
@@ -697,28 +709,13 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
   const terminal = parsed.terminal as Record<string, unknown> | undefined;
   if (terminal) {
     if (typeof terminal.enabled === 'boolean') cfg.terminal.enabled = terminal.enabled;
-    if (
-      typeof terminal.idle_timeout_minutes === 'number' &&
-      Number.isSafeInteger(terminal.idle_timeout_minutes) &&
-      terminal.idle_timeout_minutes > 0
-    ) {
-      cfg.terminal.idleTimeoutMinutes = terminal.idle_timeout_minutes;
-    }
-    if (
-      typeof terminal.max_sessions_per_user === 'number' &&
-      Number.isSafeInteger(terminal.max_sessions_per_user) &&
-      terminal.max_sessions_per_user > 0
-    ) {
-      cfg.terminal.maxSessionsPerUser = terminal.max_sessions_per_user;
-    }
-    if (
-      typeof terminal.scrollback_kib === 'number' &&
-      Number.isSafeInteger(terminal.scrollback_kib) &&
-      terminal.scrollback_kib > 0 &&
-      terminal.scrollback_kib <= TERMINAL_SCROLLBACK_KIB_MAX
-    ) {
-      cfg.terminal.scrollbackKib = terminal.scrollback_kib;
-    }
+    cfg.terminal.idleTimeoutMinutes =
+      readPositiveInteger(terminal.idle_timeout_minutes) ?? cfg.terminal.idleTimeoutMinutes;
+    cfg.terminal.maxSessionsPerUser =
+      readPositiveInteger(terminal.max_sessions_per_user) ?? cfg.terminal.maxSessionsPerUser;
+    cfg.terminal.scrollbackKib =
+      readPositiveInteger(terminal.scrollback_kib, TERMINAL_SCROLLBACK_KIB_MAX) ??
+      cfg.terminal.scrollbackKib;
   }
 
   const chatgpt = parsed.chatgpt as Record<string, unknown> | undefined;
@@ -857,6 +854,8 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
  * // Usage: if (isTestRuntime()) { ... }
  */
 function isTestRuntime(): boolean {
+  // allow-node-env: selects the isolated test config path; moving this seam
+  // risks clobbering a real user file.
   return process.env.NODE_ENV === 'test';
 }
 
