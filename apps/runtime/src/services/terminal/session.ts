@@ -72,8 +72,31 @@ export interface CreateTerminalSessionOptions {
   readonly emit: (payload: RuntimeTerminalOutputEvent, end?: true) => void;
 }
 
+/**
+ * Rejects a size the wire schema would not accept, so `terminal.open` and
+ * `terminal.resize` refuse the same values. Only the hub validates the request
+ * body, and a runtime is not entitled to assume the peer on the other end of
+ * the socket is one — a `cols: 0` reaching `Bun.spawn` is a PTY nobody can
+ * render into rather than an error anyone can read.
+ *
+ * // Usage: assertTerminalSize(80, 24)
+ */
+function assertTerminalSize(cols: number, rows: number): void {
+  if (!Number.isInteger(cols) || cols < TERMINAL_COLS_MIN || cols > TERMINAL_COLS_MAX) {
+    throw new RuntimeToolArgumentError(
+      `Terminal cols must be an integer between ${TERMINAL_COLS_MIN} and ${TERMINAL_COLS_MAX}; received ${cols}.`
+    );
+  }
+  if (!Number.isInteger(rows) || rows < TERMINAL_ROWS_MIN || rows > TERMINAL_ROWS_MAX) {
+    throw new RuntimeToolArgumentError(
+      `Terminal rows must be an integer between ${TERMINAL_ROWS_MIN} and ${TERMINAL_ROWS_MAX}; received ${rows}.`
+    );
+  }
+}
+
 /** Spawns the PTY and returns the session that owns it. */
 export function createTerminalSession(options: CreateTerminalSessionOptions): TerminalSession {
+  assertTerminalSize(options.cols, options.rows);
   const scrollback = new ByteRingBuffer(
     Math.min(
       options.scrollbackBytes ?? TERMINAL_SCROLLBACK_MAX_BYTES,
@@ -198,24 +221,7 @@ export function createTerminalSession(options: CreateTerminalSessionOptions): Te
     },
 
     resize(nextCols, nextRows) {
-      if (
-        !Number.isInteger(nextCols) ||
-        nextCols < TERMINAL_COLS_MIN ||
-        nextCols > TERMINAL_COLS_MAX
-      ) {
-        throw new RuntimeToolArgumentError(
-          `Terminal cols must be an integer between ${TERMINAL_COLS_MIN} and ${TERMINAL_COLS_MAX}; received ${nextCols}.`
-        );
-      }
-      if (
-        !Number.isInteger(nextRows) ||
-        nextRows < TERMINAL_ROWS_MIN ||
-        nextRows > TERMINAL_ROWS_MAX
-      ) {
-        throw new RuntimeToolArgumentError(
-          `Terminal rows must be an integer between ${TERMINAL_ROWS_MIN} and ${TERMINAL_ROWS_MAX}; received ${nextRows}.`
-        );
-      }
+      assertTerminalSize(nextCols, nextRows);
       cols = nextCols;
       rows = nextRows;
       handle.resize(cols, rows);

@@ -271,6 +271,27 @@ describe('createTerminalSession', () => {
     expect(port.handles[0]?.writes[0]).toEqual(new TextEncoder().encode('echo hi\n'));
   });
 
+  it('refuses an out-of-range size at open, not only at resize', () => {
+    const port = new FakePtyPort();
+    const create = (cols: number, rows: number) =>
+      createTerminalSession({
+        sessionId: 'sess-bad-size',
+        shell: 'bash',
+        cwd: '/home/tester',
+        argv: ['bash'],
+        env: {},
+        cols,
+        rows,
+        pty: port,
+        emit: () => undefined,
+      });
+
+    expect(() => create(0, 24)).toThrow(/cols must be an integer/);
+    expect(() => create(80, 0)).toThrow(/rows must be an integer/);
+    // Nothing was spawned for either refusal.
+    expect(port.handles).toHaveLength(0);
+  });
+
   it('resize validates bounds and forwards a valid size to the pty', () => {
     const { session, port } = createHarness();
 
