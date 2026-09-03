@@ -237,6 +237,20 @@ export type RealtimeServerMessage = Static<typeof RealtimeServerMessageSchema>;
  */
 export const REALTIME_IDLE_TIMEOUT_SECONDS = 60;
 
+/**
+ * Largest payload any hub WebSocket route accepts. Applied process-wide, so it
+ * bounds every browser socket, not just `/api/ws`. uWebSockets refuses a payload
+ * *greater* than this, so a client limit equal to it is the largest that still
+ * arrives; anything above closes the socket with 1009.
+ */
+export const HUB_WEBSOCKET_MAX_PAYLOAD_BYTES = 16 * 1024;
+
+/**
+ * Queued-bytes ceiling before the hub closes a socket for backpressure. A route
+ * that queues its own frames must stay below this rather than let Bun decide.
+ */
+export const HUB_WEBSOCKET_BACKPRESSURE_LIMIT_BYTES = 64 * 1024;
+
 /** Stable close codes used by WebSocket clients to choose reconnect behavior. */
 export const REALTIME_CLOSE_CODES = {
   INVALID_MESSAGE: 4400,

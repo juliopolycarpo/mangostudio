@@ -163,15 +163,14 @@ describe('createTerminalSocketRelay', () => {
 });
 
 /**
- * The one pin the shared package cannot hold: `@mangostudio/shared/terminal`
- * cannot see the hub's socket options, so nothing there catches a client limit
- * raised past what the transport will carry.
+ * Both terminal limits are now *derived* from the hub's websocket bounds rather
+ * than copied, so these assert the wiring reaches the options the server applies
+ * — not that two hand-typed numbers still happen to agree.
  */
 describe('terminal socket limits against the shared websocket options', () => {
   test('the largest client message still fits one websocket payload', () => {
     // uWebSockets refuses a payload *greater* than `maxPayloadLength`, so equal
-    // is legal and is what the wire is tuned to. Raising the client limit alone
-    // closes the socket with 1009 on the first full-size paste.
+    // is legal and is what the wire is tuned to.
     expect(TERMINAL_CLIENT_MESSAGE_MAX_BYTES).toBeLessThanOrEqual(
       REALTIME_WEBSOCKET_OPTIONS.maxPayloadLength
     );

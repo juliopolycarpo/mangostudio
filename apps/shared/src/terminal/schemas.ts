@@ -11,18 +11,21 @@
 
 import type { Static } from 'typebox';
 import Type from 'typebox';
+import {
+  HUB_WEBSOCKET_BACKPRESSURE_LIMIT_BYTES,
+  HUB_WEBSOCKET_MAX_PAYLOAD_BYTES,
+  REALTIME_CLOSE_CODES,
+} from '../realtime/schemas';
 import { RuntimeShellKindSchema } from '../runtime-protocol/schemas';
 
 /** Largest raw byte run in one `terminal.output` frame and one socket data frame. */
 export const TERMINAL_CHUNK_MAX_BYTES = 8 * 1024;
 /**
- * Largest browser→hub message, including its one-byte type prefix. Exactly the
- * shared `maxPayloadLength` of every hub WebSocket route (16 KiB) — uWebSockets
- * refuses a payload *greater* than the limit, so equal is the largest value
- * that still arrives. Raising this without raising that one closes the socket
- * with 1009 on the first full-size paste; an API test pins the pair.
+ * Largest browser→hub message, including its one-byte type prefix: exactly the
+ * payload ceiling every hub WebSocket route enforces. Derived rather than
+ * restated, so it cannot drift past the transport that has to carry it.
  */
-export const TERMINAL_CLIENT_MESSAGE_MAX_BYTES = 16 * 1024;
+export const TERMINAL_CLIENT_MESSAGE_MAX_BYTES = HUB_WEBSOCKET_MAX_PAYLOAD_BYTES;
 /** Bytes of output the runtime keeps per session for `terminal.attach` replay. */
 export const TERMINAL_SCROLLBACK_MAX_BYTES = 256 * 1024;
 /**
@@ -41,11 +44,12 @@ export const TERMINAL_PENDING_MAX_BYTES = 1024 * 1024;
 /** Bytes the hub queues per browser socket before it drops with a notice. */
 export const TERMINAL_HUB_QUEUE_MAX_BYTES = 1024 * 1024;
 /**
- * Hub-side send high-water mark. The shared socket options close a connection
- * at 64 KiB of backpressure, so the relay holds its queue below that instead
- * of letting Bun decide.
+ * Hub-side send high-water mark. The hub closes a socket at its backpressure
+ * limit, so the relay holds its queue at three quarters of that instead of
+ * letting Bun decide — derived, so raising the limit moves this with it.
  */
-export const TERMINAL_SOCKET_SEND_HIGH_WATER_BYTES = 48 * 1024;
+export const TERMINAL_SOCKET_SEND_HIGH_WATER_BYTES =
+  (HUB_WEBSOCKET_BACKPRESSURE_LIMIT_BYTES / 4) * 3;
 
 export const TERMINAL_COLS_MIN = 2;
 export const TERMINAL_COLS_MAX = 500;
@@ -60,13 +64,16 @@ export const TERMINAL_CWD_MAX_LENGTH = 4_096;
 export const TERMINAL_SOCKET_PATH = '/api/terminal';
 
 /**
- * Close codes the terminal socket uses. `4401`/`4403` mean what they mean on
- * `/api/ws`; the rest are this route's own. `REPLACED` is the one a client
- * must not reconnect from: another viewer took the session, on purpose.
+ * Close codes the terminal socket uses. The rejection triple is *derived* from
+ * `REALTIME_CLOSE_CODES` rather than restated, so a browser socket rejects the
+ * same way on every route by construction; the rest are this route's own.
+ * `REPLACED` is the one a client must not reconnect from: another viewer took
+ * the session, on purpose.
  */
 export const TERMINAL_SOCKET_CLOSE_CODES = {
-  UNAUTHORIZED: 4401,
-  FORBIDDEN: 4403,
+  UNAUTHORIZED: REALTIME_CLOSE_CODES.UNAUTHORIZED,
+  FORBIDDEN: REALTIME_CLOSE_CODES.FORBIDDEN,
+  INTERNAL_ERROR: REALTIME_CLOSE_CODES.INTERNAL_ERROR,
   NOT_FOUND: 4404,
   REPLACED: 4409,
   GONE: 4410,

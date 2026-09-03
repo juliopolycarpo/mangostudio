@@ -36,8 +36,6 @@ import type { TerminalRuntimeClient } from '../domain/terminal-runtime-client';
 
 const logger = createDiagnosticLogger('terminals-ws');
 
-/** Standard "internal error" WS close code; this route defines no code of its own for it. */
-const INTERNAL_ERROR_CLOSE_CODE = 1011;
 /** Standard "malformed frame" WS close code. */
 const PROTOCOL_ERROR_CLOSE_CODE = 1003;
 
@@ -326,7 +324,7 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
           return;
         }
         if (state.rejection === 'internal') {
-          socket.close(INTERNAL_ERROR_CLOSE_CODE, 'Internal error');
+          socket.close(TERMINAL_SOCKET_CLOSE_CODES.INTERNAL_ERROR, 'Internal error');
           return;
         }
         if (state.rejection === 'unauthorized' || !state.userId) {

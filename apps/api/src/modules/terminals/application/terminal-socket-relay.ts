@@ -23,6 +23,7 @@
 
 import {
   TERMINAL_HUB_QUEUE_MAX_BYTES,
+  TERMINAL_SOCKET_CLOSE_CODES,
   TERMINAL_SOCKET_SEND_HIGH_WATER_BYTES,
 } from '@mangostudio/shared/terminal';
 
@@ -48,7 +49,6 @@ export interface TerminalSocketRelay {
   queuedBytes(): number;
 }
 
-const DROPPED_CLOSE_CODE = 1011;
 const DROPPED_CLOSE_REASON = 'Send buffer exceeded';
 
 export function createTerminalSocketRelay(deps: TerminalSocketRelayDeps): TerminalSocketRelay {
@@ -76,7 +76,7 @@ export function createTerminalSocketRelay(deps: TerminalSocketRelayDeps): Termin
 
       if (result === 0) {
         closed = true;
-        deps.close(DROPPED_CLOSE_CODE, DROPPED_CLOSE_REASON);
+        deps.close(TERMINAL_SOCKET_CLOSE_CODES.INTERNAL_ERROR, DROPPED_CLOSE_REASON);
         return;
       }
       if (result < 0) {

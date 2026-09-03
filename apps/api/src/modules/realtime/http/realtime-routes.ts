@@ -3,6 +3,8 @@ import {
   ACTIVITY_TOPIC,
   ENVIRONMENTS_TOPIC,
   EXTERNAL_AGENTS_TOPIC,
+  HUB_WEBSOCKET_BACKPRESSURE_LIMIT_BYTES,
+  HUB_WEBSOCKET_MAX_PAYLOAD_BYTES,
   parseGitTopic,
   REALTIME_CLOSE_CODES,
   REALTIME_IDLE_TIMEOUT_SECONDS,
@@ -31,10 +33,16 @@ const MAX_PENDING_MESSAGES = MAX_MESSAGES_PER_SECOND;
 const MAX_ACTIVE_TOPICS = 64;
 const MESSAGE_RATE_WINDOW_MS = 1_000;
 
+/**
+ * Applied process-wide in `app.ts`, so these bounds are every browser socket's,
+ * not just this route's. The two byte limits live in `@mangostudio/shared` for
+ * that reason: a route that has to stay under them can derive its own limits
+ * from the same constants instead of copying the numbers.
+ */
 export const REALTIME_WEBSOCKET_OPTIONS = {
   idleTimeout: REALTIME_IDLE_TIMEOUT_SECONDS,
-  maxPayloadLength: 16 * 1024,
-  backpressureLimit: 64 * 1024,
+  maxPayloadLength: HUB_WEBSOCKET_MAX_PAYLOAD_BYTES,
+  backpressureLimit: HUB_WEBSOCKET_BACKPRESSURE_LIMIT_BYTES,
   closeOnBackpressureLimit: true,
 } as const;
 
