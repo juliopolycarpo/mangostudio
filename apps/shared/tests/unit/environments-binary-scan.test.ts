@@ -3,11 +3,18 @@ import {
   type BinaryScanDeps,
   BUN_RUNTIME_DEFINITION,
   CURSOR_AGENT_CLI_DEFINITION,
+  FNM_RUNTIME_DEFINITION,
+  GIT_RUNTIME_DEFINITION,
   NODE_RUNTIME_DEFINITION,
   parseBunVersion,
+  parseFnmVersion,
+  parseGitVersion,
   parseNodeVersion,
+  parseWingetVersion,
   scanRuntime,
+  WINGET_RUNTIME_DEFINITION,
 } from '@mangostudio/shared/environments/detection';
+import type { PathEnv } from '@mangostudio/shared/runtime-env';
 
 function fakeDeps(overrides: Partial<BinaryScanDeps> = {}): BinaryScanDeps {
   return {
@@ -431,6 +438,72 @@ describe('runtime version parsing', () => {
     expect(parseBunVersion('1.2.3')).toEqual({ major: 1, minor: 2, patch: 3 });
     expect(parseNodeVersion('not a version')).toBeNull();
     expect(parseBunVersion('v1.2.3')).toBeNull();
+  });
+
+  it('parses `fnm --version`', () => {
+    expect(parseFnmVersion('fnm 1.38.1')).toEqual({ major: 1, minor: 38, patch: 1 });
+    expect(parseFnmVersion('not a version')).toBeNull();
+  });
+
+  it('parses `git --version`, dropping a win32 `.windows.N` suffix', () => {
+    expect(parseGitVersion('git version 2.43.0')).toEqual({ major: 2, minor: 43, patch: 0 });
+    expect(parseGitVersion('git version 2.43.0.windows.1')).toEqual({
+      major: 2,
+      minor: 43,
+      patch: 0,
+    });
+    expect(parseGitVersion('not a version')).toBeNull();
+  });
+
+  it('parses `winget --version`', () => {
+    expect(parseWingetVersion('v1.29.290')).toEqual({ major: 1, minor: 29, patch: 290 });
+    expect(parseWingetVersion('not a version')).toBeNull();
+  });
+});
+
+describe('win32-only prerequisite definitions', () => {
+  const win32Env: PathEnv = {
+    platform: 'win32',
+    homeDir: 'C:\\Users\\tester',
+    env: {
+      LOCALAPPDATA: 'C:\\Users\\tester\\AppData\\Local',
+      APPDATA: 'C:\\Users\\tester\\AppData\\Roaming',
+      ProgramFiles: 'C:\\Program Files',
+    },
+  };
+  const posixEnv: PathEnv = {
+    platform: 'linux',
+    homeDir: '/home/tester',
+    env: {},
+  };
+
+  it('resolves fnm well-known directories: the winget link, then FNM_DIR or its default', () => {
+    expect(FNM_RUNTIME_DEFINITION.wellKnownDirs(win32Env)).toEqual([
+      'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WinGet\\Links',
+      'C:\\Users\\tester\\AppData\\Roaming\\fnm',
+    ]);
+    expect(
+      FNM_RUNTIME_DEFINITION.wellKnownDirs({
+        ...win32Env,
+        env: { ...win32Env.env, FNM_DIR: 'C:\\custom\\fnm' },
+      })
+    ).toEqual(['C:\\Users\\tester\\AppData\\Local\\Microsoft\\WinGet\\Links', 'C:\\custom\\fnm']);
+    expect(FNM_RUNTIME_DEFINITION.wellKnownDirs(posixEnv)).toEqual([
+      '/home/tester/.local/share/fnm',
+      '/home/tester/.fnm',
+    ]);
+  });
+
+  it('resolves git well-known directories on win32 only', () => {
+    expect(GIT_RUNTIME_DEFINITION.wellKnownDirs(win32Env)).toEqual(['C:\\Program Files\\Git\\cmd']);
+    expect(GIT_RUNTIME_DEFINITION.wellKnownDirs(posixEnv)).toEqual([]);
+  });
+
+  it('resolves winget well-known directories on win32 only', () => {
+    expect(WINGET_RUNTIME_DEFINITION.wellKnownDirs(win32Env)).toEqual([
+      'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps',
+    ]);
+    expect(WINGET_RUNTIME_DEFINITION.wellKnownDirs(posixEnv)).toEqual([]);
   });
 });
 

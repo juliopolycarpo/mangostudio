@@ -66,3 +66,81 @@ export const BUN_RUNTIME_DEFINITION: RuntimeDefinition = {
   parseVersion: parseBunVersion,
   wellKnownDirs: wellKnownBunDirectories,
 };
+
+/** `raw` is searched rather than anchored: fnm and git prefix their version with their own name. */
+function parseSemVerAnywhere(raw: string, pattern: RegExp): SemVer | null {
+  const match = raw.match(pattern);
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  };
+}
+
+/** `fnm --version` prints `fnm 1.38.1`. */
+export function parseFnmVersion(raw: string): SemVer | null {
+  return parseSemVerAnywhere(raw, /(\d+)\.(\d+)\.(\d+)/);
+}
+
+/** `git --version` prints `git version 2.43.0`, or `2.43.0.windows.1` on win32; the suffix is dropped. */
+export function parseGitVersion(raw: string): SemVer | null {
+  return parseSemVerAnywhere(raw, /git version\s+(\d+)\.(\d+)\.(\d+)/i);
+}
+
+/** `winget --version` prints `v1.29.290`. */
+export function parseWingetVersion(raw: string): SemVer | null {
+  return parseSemVer(raw, 'optional-v');
+}
+
+function wellKnownFnmDirectories(env: PathEnv): string[] {
+  if (env.platform === 'win32') {
+    const { LOCALAPPDATA, FNM_DIR, APPDATA } = env.env;
+    return [
+      // winget's fnm manifest links here — see the comment on `fnm.install`.
+      LOCALAPPDATA ? win32.join(LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links') : undefined,
+      FNM_DIR?.trim() || (APPDATA ? win32.join(APPDATA, 'fnm') : undefined),
+    ].filter((directory): directory is string => Boolean(directory?.trim()));
+  }
+
+  return [posix.join(env.homeDir, '.local', 'share', 'fnm'), posix.join(env.homeDir, '.fnm')];
+}
+
+function wellKnownGitDirectories(env: PathEnv): string[] {
+  if (env.platform !== 'win32') return [];
+  const { ProgramFiles } = env.env;
+  return ProgramFiles ? [win32.join(ProgramFiles, 'Git', 'cmd')] : [];
+}
+
+function wellKnownWingetDirectories(env: PathEnv): string[] {
+  if (env.platform !== 'win32') return [];
+  const { LOCALAPPDATA } = env.env;
+  return LOCALAPPDATA ? [win32.join(LOCALAPPDATA, 'Microsoft', 'WindowsApps')] : [];
+}
+
+/** Second helper-managed Node manager; win32-installable, unlike nvm. */
+export const FNM_RUNTIME_DEFINITION: RuntimeDefinition = {
+  id: 'fnm',
+  binaryNames: ['fnm'],
+  versionArgs: ['--version'],
+  parseVersion: parseFnmVersion,
+  wellKnownDirs: wellKnownFnmDirectories,
+};
+
+/** Probed as a prerequisite for the Windows recipes; never installed by MangoStudio. */
+export const GIT_RUNTIME_DEFINITION: RuntimeDefinition = {
+  id: 'git',
+  binaryNames: ['git'],
+  versionArgs: ['--version'],
+  parseVersion: parseGitVersion,
+  wellKnownDirs: wellKnownGitDirectories,
+};
+
+/** Probed as a prerequisite for the Windows recipes; never installed by MangoStudio. */
+export const WINGET_RUNTIME_DEFINITION: RuntimeDefinition = {
+  id: 'winget',
+  binaryNames: ['winget'],
+  versionArgs: ['--version'],
+  parseVersion: parseWingetVersion,
+  wellKnownDirs: wellKnownWingetDirectories,
+};
