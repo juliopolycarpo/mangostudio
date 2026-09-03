@@ -29,7 +29,8 @@ import type { RuntimeClient } from '../../../services/runtime-client/runtime-cli
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 import { LibraryFeatureUnavailableError } from '../../library/domain/library-feature-error';
 import { hubLibraryEnvFor } from '../../library/infrastructure/location-probe';
-import { hasInstallRecipeForRuntime } from '../domain/install-recipes';
+import { hasInstallRecipeForRuntime, INSTALL_RECIPES } from '../domain/install-recipes';
+import { computePrerequisiteMissingFindings } from '../domain/prerequisite-findings';
 import {
   loadNodeReleaseMetadata,
   type NodeReleaseMetadata,
@@ -63,7 +64,24 @@ const PROBE_REQUEST_TIMEOUT_MS = 15_000;
  */
 const LOCATION_REQUEST_TIMEOUT_MS = 60_000;
 
-const RUNTIME_IDS: readonly RuntimeId[] = ['bun', 'node', 'fnm', 'winget', 'git'];
+/**
+ * Every runtime id this service ever probes, on any platform. `getRuntimeStatus`
+ * validates a single-id request against this set regardless of target platform,
+ * so `winget` stays askable by name — install-service's requirement resolver
+ * calls it on whatever platform the recipe that named it applies to, and a
+ * platform-scoped id list would turn that into a silent `null` instead of the
+ * "not found" answer a probe of an absent binary already gives honestly.
+ */
+const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['bun', 'node', 'fnm', 'winget', 'git'];
+/**
+ * `winget` is a Windows-only prerequisite: probing it from a Linux hub can
+ * only ever report "not found", so a Linux hub's own runtime list omits it
+ * rather than surfacing a finding about a tool this machine will never need.
+ * // Usage: runtimeIdsFor(client.manifest.platform)
+ */
+function runtimeIdsFor(platform: string): readonly RuntimeId[] {
+  return platform === 'win32' ? ALL_RUNTIME_IDS : ALL_RUNTIME_IDS.filter((id) => id !== 'winget');
+}
 const VERSION_MANAGER_IDS: readonly VersionManagerId[] = ['nvm', 'fnm'];
 const AGENT_TARGET_IDS: readonly LibraryTargetId[] = AGENT_CLI_DEFINITIONS.map(
   (definition) => definition.targetId
@@ -440,6 +458,28 @@ export function createEnvironmentProbingService(
     return (await promise) as T[];
   };
 
+  /**
+   * Only a scan that covers every id this platform's recipes could name may
+   * enrich with `prerequisite-missing` findings — the same rule
+   * `seedsLocations` applies to the location cache below, for the same
+   * reason: "is `winget` installed" can only be answered by having `winget`'s
+   * own status in the same batch, and a single-id re-check never has it.
+   */
+  const isFullRuntimeScan = (ids: readonly RuntimeId[], platform: string): boolean =>
+    runtimeIdsFor(platform).every((id) => ids.includes(id));
+
+  const withPrerequisiteFindings = (
+    statuses: readonly RuntimeStatus[],
+    platform: string
+  ): RuntimeStatus[] => {
+    const findingsById = computePrerequisiteMissingFindings(statuses, platform, INSTALL_RECIPES);
+    if (findingsById.size === 0) return [...statuses];
+    return statuses.map((status) => {
+      const extra = findingsById.get(status.id);
+      return extra ? { ...status, findings: [...status.findings, ...extra] } : status;
+    });
+  };
+
   const probeRuntimes = (
     scope: ProbeScope,
     ids: readonly RuntimeId[],
@@ -461,7 +501,9 @@ export function createEnvironmentProbingService(
           },
           { timeoutMs: PROBE_REQUEST_TIMEOUT_MS }
         );
-        return result.statuses;
+        return isFullRuntimeScan(ids, client.manifest.platform)
+          ? withPrerequisiteFindings(result.statuses, client.manifest.platform)
+          : result.statuses;
       }
     );
 
@@ -557,11 +599,21 @@ export function createEnvironmentProbingService(
     );
 
   return {
-    listRuntimeStatuses: (scope, probeOptions) =>
-      probeRuntimes(scope, RUNTIME_IDS, probeOptions?.force === true),
+    async listRuntimeStatuses(scope, probeOptions) {
+      // The id list depends on the target's platform, so the client is
+      // resolved here rather than left to `probe`'s own resolution — this is
+      // the one caller that needs to know the platform before it can even
+      // name what it is asking for.
+      const client = await resolveClient(scope);
+      return probeRuntimes(
+        scope,
+        runtimeIdsFor(client.manifest.platform),
+        probeOptions?.force === true
+      );
+    },
 
     async getRuntimeStatus(scope, id, probeOptions) {
-      if (!RUNTIME_IDS.includes(id)) return null;
+      if (!ALL_RUNTIME_IDS.includes(id)) return null;
       const [status] = await probeRuntimes(scope, [id], probeOptions?.force === true);
       return status ?? null;
     },

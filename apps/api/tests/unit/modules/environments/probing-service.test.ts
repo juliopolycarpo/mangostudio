@@ -118,13 +118,43 @@ function fakeClient(version = 'v1'): FakeClient {
   }
 
   function settleRuntime() {
-    // One status per id `RUNTIME_IDS` asks for — a real runtime answers every
-    // requested id (reporting `missing` health for a tool it does not have),
-    // and the cache only serves a lazy read once every requested id has an
-    // entry. Leaving one out here would force a re-probe on every read.
+    // One status per id the requested platform's runtime list asks for — a
+    // real runtime answers every requested id (reporting `missing` health for
+    // a tool it does not have), and the cache only serves a lazy read once
+    // every requested id has an entry. Leaving one out here would force a
+    // re-probe on every read. `installations` is non-empty for bun/node —
+    // matching their `effective` entry — so the prerequisite-findings pass
+    // that reads every status in the batch sees a real "installed" shape
+    // rather than a fixture-only gap.
     const statuses = [
-      { id: 'bun', effective: { version: state.version } },
-      { id: 'node', effective: { version: state.version } },
+      {
+        id: 'bun',
+        effective: { version: state.version },
+        installations: [
+          {
+            path: '/bun',
+            rawPath: '/bun',
+            version: state.version,
+            origin: 'path',
+            effective: true,
+          },
+        ],
+        findings: [],
+      },
+      {
+        id: 'node',
+        effective: { version: state.version },
+        installations: [
+          {
+            path: '/node',
+            rawPath: '/node',
+            version: state.version,
+            origin: 'path',
+            effective: true,
+          },
+        ],
+        findings: [],
+      },
       { id: 'fnm', health: 'missing', installations: [], findings: [] },
       { id: 'winget', health: 'missing', installations: [], findings: [] },
       { id: 'git', health: 'missing', installations: [], findings: [] },
@@ -382,17 +412,27 @@ describe('forced-probe admission', () => {
       { id: 'winget', health: 'missing', installations: [], findings: [] },
       { id: 'git', health: 'missing', installations: [], findings: [] },
     ];
+    // `installations` non-empty so the prerequisite-findings pass, which
+    // reads every status in the batch, sees a real "installed" shape.
+    const installedEntry = (id: string, version: string) => ({
+      id,
+      effective: { version },
+      installations: [
+        { path: `/${id}`, rawPath: `/${id}`, version, origin: 'path', effective: true },
+      ],
+      findings: [],
+    });
     resolvers[0]?.({
       statuses: [
-        { id: 'bun', effective: { version: callVersions[0] } },
-        { id: 'node', effective: { version: callVersions[0] } },
+        installedEntry('bun', callVersions[0] as string),
+        installedEntry('node', callVersions[0] as string),
         ...otherRuntimeStatuses,
       ],
     });
     resolvers[1]?.({
       statuses: [
-        { id: 'bun', effective: { version: callVersions[1] } },
-        { id: 'node', effective: { version: callVersions[1] } },
+        installedEntry('bun', callVersions[1] as string),
+        installedEntry('node', callVersions[1] as string),
         ...otherRuntimeStatuses,
       ],
     });
