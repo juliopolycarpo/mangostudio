@@ -31,7 +31,9 @@ test('typing in the terminal panel runs a real command', async ({ page }) => {
     await dismissWorkdirPicker(page);
   }
   await expect(railButton).toBeVisible({ timeout: 15_000 });
-  await railButton.click();
+  // The rail remembers which panel was open, so this one may already be it —
+  // and clicking then would close the panel the assertions below need.
+  if ((await railButton.getAttribute('aria-pressed')) !== 'true') await railButton.click();
 
   // A fresh chat has no session yet: the panel opens on its empty state with
   // the button that opens one.
