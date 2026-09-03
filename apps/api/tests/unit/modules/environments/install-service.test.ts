@@ -5,14 +5,17 @@ import type {
   InstallRun,
   RecipeInput,
   RuntimeStatus,
+  ToolchainSelection,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
+import { DEFAULT_TOOLCHAIN_SELECTION } from '@mangostudio/shared/environments';
 import {
   createInstallService,
   InstallBlockedError,
   InstallPreparationError,
 } from '../../../../src/modules/environments/application/install-service';
 import type { EnvironmentProbingService } from '../../../../src/modules/environments/application/probing-service';
+import type { ToolchainService } from '../../../../src/modules/environments/application/toolchain-service';
 import {
   getInstallRecipe,
   INSTALL_RECIPES,
@@ -25,6 +28,17 @@ import type {
   InstallerArtifact,
   InstallerDownloader,
 } from '../../../../src/modules/environments/infrastructure/installer-download';
+
+/** Always answers the default selection; no run in this file exercises a stored override. */
+class FakeToolchainService implements ToolchainService {
+  resolve(): Promise<ToolchainSelection> {
+    return Promise.resolve(DEFAULT_TOOLCHAIN_SELECTION);
+  }
+  update(): Promise<ToolchainSelection> {
+    return Promise.resolve(DEFAULT_TOOLCHAIN_SELECTION);
+  }
+}
+const NO_OP_TOOLCHAIN = new FakeToolchainService();
 
 const ALLOWED_GUARD: InstallGuard = { allowed: true, reasons: [] };
 const BLOCKED_GUARD: InstallGuard = { allowed: false, reasons: ['disabled'] };
@@ -244,6 +258,7 @@ describe('install service', () => {
     const controlled = deferredRunner();
     let nextId = 0;
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository: memory.repository,
@@ -329,6 +344,7 @@ describe('install service', () => {
       const memory = createMemoryRepository();
       let nextId = 0;
       const service = createInstallService({
+        toolchain: NO_OP_TOOLCHAIN,
         recipes: [recipe],
         probingService: detection.probingService,
         repository: memory.repository,
@@ -381,6 +397,7 @@ describe('install service', () => {
       ],
     };
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [recipe],
       probingService: detection.probingService,
       repository: memory.repository,
@@ -416,6 +433,7 @@ describe('install service', () => {
     const recipe = getInstallRecipe('nvm.node.install');
     const memory = createMemoryRepository();
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [recipe],
       probingService: detection.probingService,
       repository: memory.repository,
@@ -481,6 +499,7 @@ describe('install service', () => {
     };
     let nextId = 0;
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository,
@@ -512,6 +531,7 @@ describe('install service', () => {
     const detection = createDetectionServices();
     const memory = createMemoryRepository();
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository: memory.repository,
@@ -537,6 +557,7 @@ describe('install service', () => {
     const detection = createDetectionServices();
     const memory = createMemoryRepository();
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.install.official')],
       ...detection,
       repository: memory.repository,
@@ -634,6 +655,7 @@ describe('install service', () => {
     };
     let nextId = 0;
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.install.official')],
       ...detection,
       repository: memory.repository,
@@ -675,6 +697,7 @@ describe('install service', () => {
     const memory = createMemoryRepository();
     const controlled = deferredRunner();
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository: memory.repository,
@@ -718,6 +741,7 @@ describe('install service', () => {
       },
     };
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository: memory.repository,
@@ -763,6 +787,7 @@ describe('install service', () => {
       truncated: false,
     });
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository: memory.repository,
@@ -803,6 +828,7 @@ describe('install service', () => {
       run: () => Promise.reject(new Error('runner exploded')),
     };
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository: memory.repository,
@@ -849,6 +875,7 @@ describe('install service', () => {
         }),
     };
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository,
@@ -882,6 +909,7 @@ describe('install service', () => {
     const scopes: string[] = [];
     const guardEnvironments: (string | undefined)[] = [];
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       probingService: {
         ...detection.probingService,
@@ -917,6 +945,7 @@ describe('install service', () => {
     const detection = createDetectionServices();
     const memory = createMemoryRepository();
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository: memory.repository,

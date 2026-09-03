@@ -55,6 +55,7 @@ import {
   environmentProbingService,
   type ProbeScope,
 } from './probing-service';
+import { type ToolchainService, toolchainService } from './toolchain-service';
 
 const PREPARATION_TTL_MS = 10 * 60 * 1000;
 const MAX_RECENT_STREAMS = 20;
@@ -163,6 +164,7 @@ interface RecipeRequirements {
 interface InstallServiceDeps {
   readonly recipes: readonly InstallRecipe[];
   readonly probingService: EnvironmentProbingService;
+  readonly toolchain: ToolchainService;
   readonly repository: InstallRunRepository;
   readonly downloader: InstallerDownloader;
   readonly runner: InstallRunner;
@@ -358,6 +360,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
   const deps: InstallServiceDeps = {
     recipes: INSTALL_RECIPES,
     probingService: environmentProbingService,
+    toolchain: toolchainService,
     repository: createInstallRunRepository(),
     downloader: installerDownloader,
     runner: installRunner,
@@ -675,6 +678,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     artifact: InstallerArtifact | undefined
   ): Promise<void> => {
     try {
+      const toolchain = await deps.toolchain.resolve(scope.userId, scope.environmentId);
       const result = await deps.runner.run(
         {
           runId: active.runId,
@@ -684,6 +688,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
           env: recipeEnv,
           timeoutMs: recipe.timeoutMs,
           ...(recipe.acceptedExitCodes && { acceptedExitCodes: recipe.acceptedExitCodes }),
+          toolchain,
         },
         {
           signal: active.abortController.signal,

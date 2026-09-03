@@ -17,7 +17,7 @@ import {
   type RuntimeInstallOutputEvent,
   type RuntimeInstallRunResult,
 } from '@mangostudio/runtime';
-import type { InstallRunStatus } from '@mangostudio/shared/environments';
+import type { InstallRunStatus, ToolchainSelection } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { getInstallLogPath } from '../../../lib/mango-paths';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
@@ -39,6 +39,8 @@ interface RunInstallCommand {
   readonly timeoutMs: number;
   /** Exit codes besides 0 that still count as `succeeded` (winget's "already current"). */
   readonly acceptedExitCodes?: readonly number[];
+  /** Absent: the runtime's own PATH. The service resolves this per environment. */
+  readonly toolchain?: ToolchainSelection;
 }
 
 interface RunInstallOptions {
@@ -147,6 +149,7 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
             ...(command.env && { env: command.env }),
             timeoutMs: command.timeoutMs,
             logPath: deps.logPathFor(command.runId, command.environmentId),
+            ...(command.toolchain && { toolchain: command.toolchain }),
             ...(options.outputLimitBytes !== undefined && {
               outputLimitBytes: options.outputLimitBytes,
             }),

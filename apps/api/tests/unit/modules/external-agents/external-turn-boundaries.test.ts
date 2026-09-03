@@ -323,6 +323,7 @@ describe('external turn boundaries', () => {
       'sessionId',
       'targetId',
       'timeoutMs',
+      'toolchain',
       'workspacePath',
     ]);
     expect(Object.keys(runtime.calls.turn[0] ?? {}).sort()).toEqual([

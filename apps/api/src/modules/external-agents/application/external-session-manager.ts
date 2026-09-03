@@ -23,6 +23,7 @@
  *   running for a conversation that is gone.
  */
 
+import type { ToolchainSelection } from '@mangostudio/shared/environments';
 import type {
   ExternalAgentCapabilities,
   ExternalAgentConfiguration,
@@ -38,6 +39,7 @@ import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getRuntimeClient, type RuntimeClient } from '../../../services/runtime-client';
 import { generateId } from '../../../utils/id';
+import { toolchainService } from '../../environments/application/toolchain-service';
 import {
   type ExternalEnvelopeVerdict,
   ExternalEventSequencer,
@@ -194,6 +196,10 @@ export interface ExternalSessionManager {
 
 export interface ExternalSessionManagerOptions {
   readonly resolveRuntimeClient?: (userId: string, environmentId: string) => Promise<RuntimeClient>;
+  readonly resolveToolchain?: (
+    userId: string,
+    environmentId: string
+  ) => Promise<ToolchainSelection>;
   readonly db?: () => Kysely<Database>;
   readonly now?: () => number;
   readonly newSessionId?: () => string;
@@ -235,6 +241,9 @@ export function createExternalSessionManager(
   options: ExternalSessionManagerOptions = {}
 ): ExternalSessionManager {
   const resolveRuntimeClient = options.resolveRuntimeClient ?? getRuntimeClient;
+  const resolveToolchain =
+    options.resolveToolchain ??
+    ((userId: string, environmentId: string) => toolchainService.resolve(userId, environmentId));
   const resolveDb = options.db ?? getDb;
   const now = options.now ?? Date.now;
   const newSessionId = options.newSessionId ?? generateId;
@@ -407,6 +416,7 @@ export function createExternalSessionManager(
     }
 
     const client = await resolveRuntimeClient(input.userId, input.environmentId);
+    const toolchain = await resolveToolchain(input.userId, input.environmentId);
     const sessionId = newSessionId();
     const opened = await client.externalAgents.open(
       {
@@ -422,6 +432,7 @@ export function createExternalSessionManager(
         // after the vendor confirms the resume is an ordinary turn again.
         resumeMode: resumable?.pendingAdoption ? 'strict' : 'fallback',
         timeoutMs: openTimeoutMs,
+        toolchain,
       },
       { timeoutMs: openTimeoutMs }
     );
