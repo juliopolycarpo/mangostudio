@@ -13,16 +13,34 @@ import {
   formatDuration,
   groupInstallations,
   healthRollup,
+  type IdentityResolver,
   keyedFindings,
   nodeInstallStep,
   nodeUpdateAffordance,
   pathPosition,
   pathSourceLabel,
   prefixedVersionLabel,
+  toolchainProcessLine,
   versionLabel,
   worstFinding,
 } from '../../../../src/features/environments/format';
 import { agentCliStatus, installation, installRecipe, runtimeStatus } from './fixtures';
+
+/**
+ * `pathSourceManagerName` only reaches the identity registry for `volta`;
+ * every other source reads the product dictionary directly. This fake only
+ * needs to answer that one case plausibly.
+ */
+const identityResolver: IdentityResolver = (_kind, id) => ({
+  subjectKey: id,
+  name: id === 'volta' ? 'Volta' : id,
+  monogram: id.slice(0, 2).toUpperCase(),
+  image: null,
+  storedName: null,
+  storedMonogram: null,
+  storedImage: null,
+  customized: false,
+});
 
 describe('groupInstallations', () => {
   it('puts the effective binary first even when it is last in the array', () => {
@@ -428,5 +446,76 @@ describe('pathSourceLabel', () => {
         ptBR.environments.pathSources[source as keyof typeof ptBR.environments.pathSources]
       ).toBeTruthy();
     }
+  });
+});
+
+describe('toolchainProcessLine', () => {
+  function nvmManagedNode() {
+    return runtimeStatus({
+      id: 'node',
+      installations: [
+        installation({
+          path: '/home/dev/.nvm/versions/node/v20/bin/node',
+          version: '20.11.0',
+          effective: true,
+          pathSource: 'nvm',
+        }),
+      ],
+    });
+  }
+
+  it('names the manager on auto, asserted as the full sentence so a doubled preposition cannot hide in a substring match', () => {
+    expect(toolchainProcessLine(en, identityResolver, nvmManagedNode(), 'auto')).toBe(
+      'Processes run the automatic choice: 20.11.0 from nvm.'
+    );
+  });
+
+  it('renders the pt-BR sentence for the same named-source case', () => {
+    expect(toolchainProcessLine(ptBR, identityResolver, nvmManagedNode(), 'auto')).toBe(
+      'Os processos rodam a escolha automática: 20.11.0 via nvm.'
+    );
+  });
+
+  it('reads its own sentence for a plain system install on auto, never "from the system"', () => {
+    const status = runtimeStatus({
+      id: 'node',
+      installations: [installation({ path: '/usr/bin/node', version: '20.11.0', effective: true })],
+    });
+
+    expect(toolchainProcessLine(en, identityResolver, status, 'auto')).toBe(
+      'Processes run the automatic choice: 20.11.0, a system install.'
+    );
+  });
+
+  it('has nothing to say on auto when nothing is effective', () => {
+    const status = runtimeStatus({ id: 'node', installations: [] });
+    expect(toolchainProcessLine(en, identityResolver, status, 'auto')).toBeUndefined();
+  });
+
+  it('names the pinned installation, not the effective one, when they differ', () => {
+    const status = runtimeStatus({
+      id: 'node',
+      installations: [
+        installation({ path: '/opt/node/bin/node', version: '18.19.0' }),
+        installation({
+          path: '/home/dev/.nvm/versions/node/v20/bin/node',
+          version: '20.11.0',
+          effective: true,
+          pathSource: 'nvm',
+        }),
+      ],
+    });
+
+    expect(toolchainProcessLine(en, identityResolver, status, '/opt/node/bin/node')).toBe(
+      'Processes run 18.19.0 from /opt/node/bin/node.'
+    );
+  });
+
+  it('still names a pinned path once its installation drops out of the latest probe', () => {
+    const status = runtimeStatus({ id: 'node', installations: [] });
+
+    expect(toolchainProcessLine(en, identityResolver, status, '/opt/node/bin/node')).toBe(
+      'Processes run unknown version from /opt/node/bin/node.'
+    );
   });
 });

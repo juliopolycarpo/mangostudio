@@ -3332,6 +3332,15 @@ export const messages: Messages = {
       nodeVersionManager: 'Node version manager',
       prerequisiteHint:
         'A Windows package manager MangoStudio uses to run other install recipes, not something it installs itself.',
+      useThisVersion: 'Use this version',
+      selected: 'Selected',
+      backToAutomatic: 'Back to automatic',
+      toolchainAuto: 'Processes run the automatic choice: {version} from {source}.',
+      // For a plain system install, which has no name to plug into the
+      // template above — same reasoning as `managedBySystem`.
+      toolchainAutoSystem: 'Processes run the automatic choice: {version}, a system install.',
+      toolchainPinned: 'Processes run {version} from {path}.',
+      toolchainUpdateFailed: 'The toolchain selection could not be updated.',
     },
     // Where an installation's binary was found to come from, appended to the
     // effective-installation line. Every `PathSource` literal has an entry.

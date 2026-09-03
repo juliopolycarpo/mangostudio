@@ -18,6 +18,8 @@ import type {
   RecipeInput,
   RuntimeId,
   RuntimeStatus,
+  ToolchainSelection,
+  ToolchainUpdateBody,
   VersionManagerId,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
@@ -165,4 +167,18 @@ export async function enableInstalls(): Promise<MachineConfigWriteResponse> {
   });
   if (error) throw new ApiError(error.value);
   return data as MachineConfigWriteResponse;
+}
+
+/**
+ * Writes which Node and/or Bun installation every process the hub spawns on
+ * `environmentId` runs with. `body` only needs the runtime being changed —
+ * the other one is left as it was.
+ */
+export async function updateToolchain(
+  environmentId: string,
+  body: ToolchainUpdateBody
+): Promise<ToolchainSelection> {
+  const { data, error } = await client.api.environments({ id: environmentId }).toolchain.put(body);
+  if (error) throw new ApiError(error.value);
+  return data as ToolchainSelection;
 }

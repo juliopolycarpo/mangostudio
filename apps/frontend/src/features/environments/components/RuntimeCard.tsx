@@ -7,10 +7,13 @@
  */
 
 import type { InstallRecipePreview, RuntimeStatus } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { Download } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import {
   effectiveInstallation,
   findInstallRecipe,
@@ -21,16 +24,21 @@ import {
   pathPosition,
   pathSourceLabel,
   pathSourceManagerName,
+  toolchainProcessLine,
+  toolchainRuntimeId,
   versionLabel,
 } from '../format';
 import { useProbeRuntime } from '../hooks/use-runtime-status';
+import { useUpdateToolchainMutation } from '../hooks/use-toolchain';
 import { useToolIdentities } from '../identity/use-tool-identities';
+import { useEnvironmentEntitiesQuery } from '../queries';
 import { FindingList } from './FindingList';
 import { HealthBadge } from './HealthBadge';
 import { InstallAction } from './InstallAction';
 import { InstallationList } from './InstallationList';
 import { ProbeButton } from './ProbeButton';
 import { CardSectionLabel, ToolCard } from './ToolCard';
+import { ToolchainAction } from './ToolchainAction';
 
 interface RuntimeCardProps {
   status: RuntimeStatus;
@@ -49,6 +57,27 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
   const isNode = status.id === 'node';
 
   const { groups, group: effectiveGroup, installation: effective } = effectiveInstallation(status);
+
+  // Only node and bun carry a toolchain pin — `ToolchainSelectionSchema` has
+  // no field for fnm, nvm, or winget, so every lookup below reads as "no
+  // action here" for those cards rather than guessing at a shape that does
+  // not exist on the wire.
+  const runtimeId = toolchainRuntimeId(status.id);
+  const scopedEnvironmentId = environmentId ?? LOCAL_ENVIRONMENT_ID;
+  const environments = useEnvironmentEntitiesQuery();
+  const environment = environments.data?.find((candidate) => candidate.id === scopedEnvironmentId);
+  const toolchainSelection = runtimeId ? (environment?.toolchain?.[runtimeId] ?? 'auto') : 'auto';
+  const toolchain = useUpdateToolchainMutation(scopedEnvironmentId);
+  const processLine = runtimeId
+    ? toolchainProcessLine(t, resolve, status, toolchainSelection)
+    : undefined;
+
+  const selectToolchain = (path: string) => {
+    if (runtimeId) toolchain.mutate({ runtimeId, choice: path });
+  };
+  const resetToolchain = () => {
+    if (runtimeId) toolchain.mutate({ runtimeId, choice: 'auto' });
+  };
 
   const installAction = isNode
     ? renderNodeInstall(recipes, name, environmentId, e)
@@ -120,6 +149,14 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
             <span className="min-w-0 break-all font-mono text-xs text-on-surface-variant/70">
               {effective.rawPath}
             </span>
+            {runtimeId && (
+              <ToolchainAction
+                path={effective.path}
+                selected={toolchainSelection === effective.path}
+                isPending={toolchain.isPending}
+                onSelect={selectToolchain}
+              />
+            )}
           </div>
           <p className="text-xs text-on-surface-variant/60">
             {[
@@ -149,12 +186,44 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
         </p>
       )}
 
+      {runtimeId && (processLine || toolchainSelection !== 'auto' || toolchain.isError) && (
+        <section className="space-y-1.5" data-testid="toolchain-status">
+          {processLine && <p className="text-xs text-on-surface-variant/60">{processLine}</p>}
+          {toolchainSelection !== 'auto' && (
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={toolchain.isPending}
+              onClick={resetToolchain}
+            >
+              {e.runtimes.backToAutomatic}
+            </Button>
+          )}
+          {toolchain.isError && (
+            <p className="text-xs text-error" role="alert">
+              {resolveApiErrorMessage(toolchain.error, e.runtimes.toolchainUpdateFailed)}
+            </p>
+          )}
+        </section>
+      )}
+
       <FindingList findings={status.findings} />
 
       {groups.length > 1 && (
         <section className="space-y-2">
           <CardSectionLabel>{e.runtimes.otherInstallations}</CardSectionLabel>
-          <InstallationList groups={groups.filter((group) => !group.effective)} />
+          <InstallationList
+            groups={groups.filter((group) => !group.effective)}
+            toolchain={
+              runtimeId
+                ? {
+                    selection: toolchainSelection,
+                    isPending: toolchain.isPending,
+                    onSelect: selectToolchain,
+                  }
+                : undefined
+            }
+          />
         </section>
       )}
 

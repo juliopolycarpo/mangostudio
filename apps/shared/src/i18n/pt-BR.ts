@@ -3337,6 +3337,16 @@ export const messages = {
       nodeVersionManager: 'Gerenciador de versões do Node',
       prerequisiteHint:
         'Um gerenciador de pacotes do Windows que o MangoStudio usa para rodar outras receitas de instalação, não algo que ele instala sozinho.',
+      useThisVersion: 'Usar esta versão',
+      selected: 'Selecionado',
+      backToAutomatic: 'Voltar ao automático',
+      toolchainAuto: 'Os processos rodam a escolha automática: {version} via {source}.',
+      // Para uma instalação simples do sistema, que não tem um nome para
+      // encaixar no modelo acima — mesmo motivo de `managedBySystem`.
+      toolchainAutoSystem:
+        'Os processos rodam a escolha automática: {version}, uma instalação do sistema.',
+      toolchainPinned: 'Os processos rodam {version} a partir de {path}.',
+      toolchainUpdateFailed: 'A seleção de toolchain não pôde ser atualizada.',
     },
     // De onde o binário de uma instalação veio, anexado à linha da instalação
     // efetiva. Toda literal de `PathSource` tem uma entrada.

@@ -3,11 +3,13 @@
  * finding names both paths and both PATH positions.
  */
 
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
+import type { Environment } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
 import { RuntimeCard } from '../../../../src/features/environments/components/RuntimeCard';
-import { render, screen, within } from '../../../support/harness/render';
+import { render, screen, waitFor, within } from '../../../support/harness/render';
+import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 import { installation, installRecipe, runtimeStatus } from './fixtures';
 
 describe('RuntimeCard', () => {
@@ -307,5 +309,143 @@ describe('RuntimeCard', () => {
     expect(await screen.findByTestId('probe-error')).toHaveTextContent(
       en.environments.actions.refreshFailed
     );
+  });
+
+  describe('toolchain pin', () => {
+    const scenario = createFetchScenario();
+
+    afterEach(() => {
+      scenario.restore();
+    });
+
+    function nodeWithTwoInstallations() {
+      return runtimeStatus({
+        id: 'node',
+        installations: [
+          installation({
+            path: '/home/dev/.nvm/versions/node/v20/bin/node',
+            version: '20.11.0',
+            effective: true,
+            pathIndex: 0,
+            pathSource: 'nvm',
+          }),
+          installation({
+            path: '/opt/node/bin/node',
+            version: '18.19.0',
+            pathIndex: 1,
+          }),
+        ],
+      });
+    }
+
+    function localEnvironment(toolchain?: Environment['toolchain']): Environment {
+      return {
+        id: 'local',
+        name: 'Local',
+        transportKind: 'in-process',
+        config: {},
+        enabled: true,
+        allowInstalls: false,
+        virtual: true,
+        createdAt: null,
+        updatedAt: null,
+        status: { state: 'connected' },
+        ...(toolchain && { toolchain }),
+      };
+    }
+
+    function installEnvironmentsScenario(toolchain?: Environment['toolchain']) {
+      scenario.respondWithJson('GET', '/api/environments', { body: [localEnvironment(toolchain)] });
+      scenario.install();
+    }
+
+    function putCalls(): RequestInit[] {
+      return scenario.fetchMock.mock.calls
+        .filter(([, init]) => init?.method?.toUpperCase() === 'PUT')
+        .map(([, init]) => init as RequestInit);
+    }
+
+    it('offers "Use this version" for every installation when nothing is pinned', async () => {
+      installEnvironmentsScenario();
+
+      render(<RuntimeCard status={nodeWithTwoInstallations()} recipes={[]} />);
+
+      expect(
+        await screen.findAllByRole('button', { name: en.environments.runtimes.useThisVersion })
+      ).toHaveLength(2);
+      expect(screen.queryByTestId('toolchain-selected')).not.toBeInTheDocument();
+    });
+
+    it('shows the Selected badge on the pinned installation instead of the button', async () => {
+      installEnvironmentsScenario({ node: '/opt/node/bin/node', bun: 'auto' });
+
+      render(<RuntimeCard status={nodeWithTwoInstallations()} recipes={[]} />);
+
+      expect(await screen.findByTestId('toolchain-selected')).toHaveTextContent(
+        en.environments.runtimes.selected
+      );
+      // The effective installation is no longer the pin, so it still offers the button.
+      expect(
+        await screen.findAllByRole('button', { name: en.environments.runtimes.useThisVersion })
+      ).toHaveLength(1);
+    });
+
+    it('writes the installation path when "Use this version" is clicked', async () => {
+      const user = userEvent.setup();
+      installEnvironmentsScenario();
+      scenario.respondWithJson('PUT', '/api/environments/local/toolchain', {
+        body: { node: '/opt/node/bin/node', bun: 'auto' },
+      });
+
+      render(<RuntimeCard status={nodeWithTwoInstallations()} recipes={[]} />);
+
+      const buttons = await screen.findAllByRole('button', {
+        name: en.environments.runtimes.useThisVersion,
+      });
+      // Effective-first: the second button belongs to the non-effective
+      // installation, /opt/node/bin/node.
+      await user.click(buttons[1] as HTMLElement);
+
+      await waitFor(() => expect(putCalls()).toHaveLength(1));
+      expect(JSON.parse(String(putCalls()[0]?.body))).toEqual({ node: '/opt/node/bin/node' });
+    });
+
+    it('writes auto when "Back to automatic" is clicked', async () => {
+      const user = userEvent.setup();
+      installEnvironmentsScenario({ node: '/opt/node/bin/node', bun: 'auto' });
+      scenario.respondWithJson('PUT', '/api/environments/local/toolchain', {
+        body: { node: 'auto', bun: 'auto' },
+      });
+
+      render(<RuntimeCard status={nodeWithTwoInstallations()} recipes={[]} />);
+
+      const resetButton = await screen.findByRole('button', {
+        name: en.environments.runtimes.backToAutomatic,
+      });
+      await user.click(resetButton);
+
+      await waitFor(() => expect(putCalls()).toHaveLength(1));
+      expect(JSON.parse(String(putCalls()[0]?.body))).toEqual({ node: 'auto' });
+    });
+
+    it('renders the 422 message when the write is rejected', async () => {
+      const user = userEvent.setup();
+      const message =
+        'Invalid node toolchain path: expected one of: /opt/node/bin/node | received: /bogus';
+      installEnvironmentsScenario();
+      scenario.respondWithJson('PUT', '/api/environments/local/toolchain', {
+        status: 422,
+        body: { error: message, code: 'validation_error' },
+      });
+
+      render(<RuntimeCard status={nodeWithTwoInstallations()} recipes={[]} />);
+
+      const buttons = await screen.findAllByRole('button', {
+        name: en.environments.runtimes.useThisVersion,
+      });
+      await user.click(buttons[1] as HTMLElement);
+
+      expect(await screen.findByText(message)).toBeInTheDocument();
+    });
   });
 });

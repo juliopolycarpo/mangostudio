@@ -18,6 +18,7 @@ import type {
   RuntimeHealth,
   RuntimeInstallation,
   RuntimeStatus,
+  ToolchainChoice,
 } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
 import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
@@ -483,4 +484,55 @@ export function pathSourceManagerName(
   if (source === 'bun') return displayName(t, 'bun');
   if (source === 'mangostudio-managed') return displayName(t, 'mangostudio');
   return displayName(t, source);
+}
+
+/** The two runtimes a toolchain pin can name — `ToolchainSelectionSchema`'s own keys. */
+export type ToolchainRuntimeId = 'node' | 'bun';
+
+/** Whether `id` is one this card offers a toolchain pin for. Never fnm, nvm, winget, or an agent. */
+export function toolchainRuntimeId(id: RuntimeStatus['id']): ToolchainRuntimeId | undefined {
+  return id === 'node' || id === 'bun' ? id : undefined;
+}
+
+/**
+ * "Processes run …" — what a spawned shell, terminal, vendor agent, or
+ * installer actually gets on PATH, as opposed to the "Effective" section
+ * above it, which is what this machine's own shell resolves right now. On
+ * `auto` the two agree, so this reads the same effective installation; on a
+ * pin, it reads whichever installation the choice names, wherever that sits
+ * on PATH.
+ *
+ * `undefined` when there is nothing to say: `auto` with no effective binary
+ * at all.
+ */
+export function toolchainProcessLine(
+  t: Messages,
+  resolve: IdentityResolver,
+  status: RuntimeStatus,
+  selection: ToolchainChoice
+): string | undefined {
+  if (selection === 'auto') {
+    const { installation } = effectiveInstallation(status);
+    if (!installation) return undefined;
+    const source = installation.pathSource ?? 'system';
+    return source === 'system'
+      ? formatMessage(t.environments.runtimes.toolchainAutoSystem, {
+          version: versionLabel(t, installation.version),
+        })
+      : formatMessage(t.environments.runtimes.toolchainAuto, {
+          version: versionLabel(t, installation.version),
+          source: pathSourceManagerName(t, resolve, source),
+        });
+  }
+
+  // Aliases share `canonical.path`, so the pin's own path resolves to the
+  // group's canonical entry — the same one "Use this version" wrote when it
+  // read `installation.path` off this same group.
+  const canonical = groupInstallations(status.installations).find(
+    (group) => group.canonical.path === selection
+  )?.canonical;
+  return formatMessage(t.environments.runtimes.toolchainPinned, {
+    version: versionLabel(t, canonical?.version ?? null),
+    path: canonical?.rawPath ?? selection,
+  });
 }
