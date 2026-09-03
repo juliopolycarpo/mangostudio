@@ -40,7 +40,19 @@ async function assertKnownPath(
 ): Promise<void> {
   if (choice === 'auto') return;
 
-  const status = await probing.getRuntimeStatus({ userId, environmentId }, runtime);
+  let status: Awaited<ReturnType<EnvironmentProbingService['getRuntimeStatus']>>;
+  try {
+    status = await probing.getRuntimeStatus({ userId, environmentId }, runtime);
+  } catch (error) {
+    // A machine that cannot be asked is unavailable, not an invalid request:
+    // the path may well be right, and 422 would send the user to fix a value
+    // when the fix is bringing the environment back.
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new EnvironmentServiceError(
+      `Cannot verify ${runtime} installations on "${environmentId}": ${detail}`,
+      503
+    );
+  }
   const known = status?.installations.map((installation) => installation.path) ?? [];
   if (known.includes(choice)) return;
 
