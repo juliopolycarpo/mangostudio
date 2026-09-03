@@ -18,6 +18,9 @@ mock.module('../../../../src/features/terminal/TerminalView', () => ({
 // Below the mock, never as a static import: a static import is evaluated
 // before the mock is installed and would bind the real `TerminalView`.
 const { TerminalRailPanel } = await import('../../../../src/features/terminal/TerminalRailPanel');
+const { requestNewTerminalSession } = await import(
+  '../../../../src/features/terminal/terminal-panel-request'
+);
 
 const ENVIRONMENT_ID = 'env-1';
 const CHAT_ID = 'chat-1';
@@ -145,6 +148,34 @@ describe('TerminalRailPanel', () => {
 
     expect(await screen.findByText('No terminal is open for this chat.')).toBeVisible();
     expect(screen.getByRole('button', { name: 'New terminal' })).toBeVisible();
+  });
+
+  it('holds a palette new-session request until the chat’s environment is known', async () => {
+    mockAvailable();
+    fetchScenario.respondWithJson(
+      'GET',
+      `/api/terminals?environmentId=${ENVIRONMENT_ID}&chatId=${CHAT_ID}`,
+      { body: { sessions: [] } }
+    );
+    fetchScenario.respondWithJson('POST', '/api/terminals', {
+      status: 201,
+      body: { session: session() },
+    });
+
+    // The palette opens the rail and fires in the same tick, so the panel's
+    // first mount is the one that has not resolved the machine yet. A listener
+    // that subscribes here consumes the latch and then drops it on its own
+    // `!environmentId` guard.
+    const { rerender } = render(<TerminalRailPanel chatId={CHAT_ID} environmentId={null} />);
+    requestNewTerminalSession();
+
+    rerender(<TerminalRailPanel chatId={CHAT_ID} environmentId={ENVIRONMENT_ID} />);
+
+    await waitFor(() =>
+      expect(fetchScenario.fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(
+        true
+      )
+    );
   });
 
   it('confirms before closing a session, then sends the delete', async () => {

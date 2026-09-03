@@ -83,8 +83,15 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
   }, [environmentId, chatId, unavailable]);
 
   // The command palette's "New terminal session" row: fires whether or not
-  // this panel happened to be mounted yet.
-  useEffect(() => onNewTerminalSessionRequest(openSession), [openSession]);
+  // this panel happened to be mounted yet. Subscribing is deferred until the
+  // environment is known, because subscribing consumes the latched request and
+  // `openSession` would then drop it on its own `!environmentId` guard — the
+  // palette opens the rail and fires in the same tick, so the first mount is
+  // exactly the one that has not resolved the chat's machine yet.
+  useEffect(
+    () => (environmentId ? onNewTerminalSessionRequest(openSession) : undefined),
+    [environmentId, openSession]
+  );
 
   function confirmClose(): void {
     if (!closingId) return;
