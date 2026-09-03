@@ -2037,6 +2037,8 @@ export const messages = {
     emptyHint: 'Abra um para executar comandos onde este ambiente roda.',
     reconnecting: 'Reconectando...',
     disconnected: 'Desconectado do terminal.',
+    notFound: 'Esta sessão de terminal não existe mais.',
+    refused: 'Esta sessão de terminal não pode ser aberta daqui.',
     exited: 'Processo encerrado com código {code}.',
     exitedBySignal: 'Processo encerrado por {signal}.',
     dropped: '{bytes} bytes de saída foram descartados porque o visualizador não acompanhou.',

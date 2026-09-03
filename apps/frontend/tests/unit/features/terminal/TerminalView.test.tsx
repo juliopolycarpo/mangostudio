@@ -188,4 +188,36 @@ describe('TerminalView', () => {
       writeln.mockRestore();
     }
   });
+
+  // A pop-out reached with a stale id closes 4404 and never reconnects. With
+  // nothing drawn, the window is a blank black rectangle that explains nothing.
+  it.each([
+    [TERMINAL_SOCKET_CLOSE_CODES.NOT_FOUND, 'This terminal session no longer exists.'],
+    [TERMINAL_SOCKET_CLOSE_CODES.FORBIDDEN, 'This terminal session cannot be opened from here.'],
+  ])('narrates the close code %i instead of leaving a blank pane', (code, expected) => {
+    const writes: string[] = [];
+    const writeln = spyOn(Terminal.prototype, 'writeln').mockImplementation(function (
+      this: Terminal,
+      data: string | Uint8Array
+    ) {
+      writes.push(String(data));
+    });
+    try {
+      render(
+        <TerminalView
+          sessionId="session-1"
+          createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
+          resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
+        />
+      );
+      const socket = FakeTerminalSocket.instances[0];
+      act(() => socket?.open());
+      act(() => socket?.drop(code));
+
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toContain(expected);
+    } finally {
+      writeln.mockRestore();
+    }
+  });
 });

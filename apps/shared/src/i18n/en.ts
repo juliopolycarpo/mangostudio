@@ -2016,6 +2016,8 @@ export const messages: Messages = {
     emptyHint: 'Open one to run commands where this environment runs.',
     reconnecting: 'Reconnecting...',
     disconnected: 'Disconnected from the terminal.',
+    notFound: 'This terminal session no longer exists.',
+    refused: 'This terminal session cannot be opened from here.',
     exited: 'Process exited with code {code}.',
     exitedBySignal: 'Process ended by {signal}.',
     dropped: '{bytes} bytes of output were dropped because the viewer could not keep up.',

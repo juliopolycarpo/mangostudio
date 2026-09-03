@@ -20,7 +20,7 @@ import { formatMessage } from '@/lib/i18n-format';
 import { createAckAccounting } from './ack-accounting';
 import { clampTerminalSize } from './terminal-fit';
 import { buildTerminalTheme, fontSizePx } from './terminal-theme';
-import { useTerminalSocket } from './use-terminal-socket';
+import { type TerminalSocketStatus, useTerminalSocket } from './use-terminal-socket';
 
 /** Dim-line SGR: readable as output, distinct from anything the shell prints. */
 const DIM = '\x1b[2m';
@@ -111,13 +111,18 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
   const socketRef = useRef(socket);
   socketRef.current = socket;
 
-  // GONE (close code 4410) follows a process exit, whose `exit` frame already
-  // drew its own line, but it also arrives alone when the session was closed
-  // elsewhere or died with its runtime. Only that second case needs narrating.
+  // Every status the socket cannot come back from draws a dim line, or the
+  // pane is a blank black rectangle with nothing to explain it — a pop-out on
+  // a session the hub no longer holds closes with 4404 and used to render
+  // exactly that. `replaced` is the exception: it has an overlay with the
+  // action that recovers it. GONE (4410) follows a process exit, whose `exit`
+  // frame already drew its own line, so only the second case narrates.
   useEffect(() => {
-    if (socket.status !== 'gone' || exitRenderedRef.current) return;
+    if (socket.status === 'gone' && exitRenderedRef.current) return;
+    const message = closedStatusMessage(tRef.current, socket.status);
+    if (!message) return;
     const term = termRef.current;
-    if (term) writeDimLine(term, tRef.current.terminal.disconnected);
+    if (term) writeDimLine(term, message);
   }, [socket.status]);
 
   const ackAccountingRef = useRef<ReturnType<typeof createAckAccounting> | null>(null);
@@ -232,6 +237,31 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
       )}
     </div>
   );
+}
+
+/**
+ * What to draw when the socket reaches a status it cannot leave on its own.
+ * Null for the statuses that are still live (`connecting`, `open`,
+ * `reconnecting`), the one the overlay already explains (`replaced`), and the
+ * one that navigates away instead (`unauthorized`).
+ *
+ * @example
+ * const message = closedStatusMessage(t, 'not-found'); // the session is gone
+ */
+function closedStatusMessage(
+  t: ReturnType<typeof useI18n>['t'],
+  status: TerminalSocketStatus
+): string | null {
+  switch (status) {
+    case 'gone':
+      return t.terminal.disconnected;
+    case 'not-found':
+      return t.terminal.notFound;
+    case 'forbidden':
+      return t.terminal.refused;
+    default:
+      return null;
+  }
 }
 
 function noticeMessage(t: ReturnType<typeof useI18n>['t'], notice: TerminalNotice): string {
