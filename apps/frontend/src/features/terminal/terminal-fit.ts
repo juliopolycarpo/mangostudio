@@ -8,27 +8,35 @@
  * as a transport failure and reconnects — proposing the same oversized fit
  * again, forever.
  *
+ * The bounds are read from the contract rather than passed in: "the wire's
+ * bounds" is the whole reason this function exists, and parameterizing them let
+ * the test assert the arithmetic against four numbers it had retyped itself —
+ * so a change to `TERMINAL_COLS_MAX` would leave it green.
+ *
  * @example
- * const size = clampTerminalSize(proposed, { colsMin, colsMax, rowsMin, rowsMax });
+ * const size = clampTerminalSize(proposed);
  * if (size) term.resize(size.cols, size.rows);
  */
-export function clampTerminalSize(
-  proposed: { readonly cols: number; readonly rows: number },
-  bounds: {
-    readonly colsMin: number;
-    readonly colsMax: number;
-    readonly rowsMin: number;
-    readonly rowsMax: number;
-  }
-): { readonly cols: number; readonly rows: number } | null {
+
+import {
+  TERMINAL_COLS_MAX,
+  TERMINAL_COLS_MIN,
+  TERMINAL_ROWS_MAX,
+  TERMINAL_ROWS_MIN,
+} from '@mangostudio/shared/terminal';
+
+export function clampTerminalSize(proposed: {
+  readonly cols: number;
+  readonly rows: number;
+}): { readonly cols: number; readonly rows: number } | null {
   // `NaN` survives every comparison below (`NaN < 2` is false) and `Math.min`
   // propagates it, so an unmeasurable container would otherwise reach the wire
   // as `{"cols":null}` — a schema violation the hub answers with a 1003 close,
   // which is the reconnect loop this whole function exists to prevent.
   if (!Number.isFinite(proposed.cols) || !Number.isFinite(proposed.rows)) return null;
-  if (proposed.cols < bounds.colsMin || proposed.rows < bounds.rowsMin) return null;
+  if (proposed.cols < TERMINAL_COLS_MIN || proposed.rows < TERMINAL_ROWS_MIN) return null;
   return {
-    cols: Math.min(proposed.cols, bounds.colsMax),
-    rows: Math.min(proposed.rows, bounds.rowsMax),
+    cols: Math.min(proposed.cols, TERMINAL_COLS_MAX),
+    rows: Math.min(proposed.rows, TERMINAL_ROWS_MAX),
   };
 }

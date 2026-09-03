@@ -283,12 +283,7 @@ function fitAndResize(
 ): void {
   const proposed = fitAddon.proposeDimensions();
   if (!proposed) return;
-  const size = clampTerminalSize(proposed, {
-    colsMin: TERMINAL_COLS_MIN,
-    colsMax: TERMINAL_COLS_MAX,
-    rowsMin: TERMINAL_ROWS_MIN,
-    rowsMax: TERMINAL_ROWS_MAX,
-  });
+  const size = clampTerminalSize(proposed);
   if (!size) return;
   term.resize(size.cols, size.rows);
   socket.resize(term.cols, term.rows);

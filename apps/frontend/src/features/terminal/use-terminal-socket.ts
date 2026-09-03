@@ -30,12 +30,9 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { getWebSocketBaseUrl } from '@/lib/api-base-url';
 import { scheduleLoginRedirect } from '@/lib/auth-navigate';
+import { nextReconnectDelay } from '@/lib/realtime/reconnect-backoff';
 
 const PING_MS = 25_000;
-const RECONNECT_BASE_DELAY_MS = 1_000;
-const RECONNECT_MAX_DELAY_MS = 30_000;
-/** Lowest consecutive-failure count whose base delay already saturates the cap. */
-const RECONNECT_MAX_FAILURES = 6;
 
 /**
  * `open` is the only phase a frame may be sent in. The rest are terminal for
@@ -92,13 +89,6 @@ export interface TerminalSocket {
 
 function defaultResolveUrl(sessionId: string): string {
   return `${getWebSocketBaseUrl()}${TERMINAL_SOCKET_PATH}/${encodeURIComponent(sessionId)}`;
-}
-
-function nextReconnectDelay(failureCount: number, random: () => number): number {
-  const exponent = Math.min(failureCount, RECONNECT_MAX_FAILURES) - 1;
-  const base = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** exponent, RECONNECT_MAX_DELAY_MS);
-  // Half jitter, never full: a near-zero retry is exactly the case being bounded.
-  return base / 2 + random() * (base / 2);
 }
 
 /**

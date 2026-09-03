@@ -7,6 +7,10 @@ import {
 import { getWebSocketBaseUrl } from '../api-base-url';
 import { scheduleLoginRedirect } from '../auth-navigate';
 import { parseServerMessage } from './parse-server-message';
+import {
+  RECONNECT_MAX_FAILURES,
+  nextReconnectDelay as sharedReconnectDelay,
+} from './reconnect-backoff';
 
 const REALTIME_PATH = '/api/ws';
 
@@ -28,11 +32,6 @@ const HEARTBEAT_MS = Math.floor((REALTIME_IDLE_TIMEOUT_SECONDS * 1_000) / 2.5);
 
 /** A connection must stay up this long before its failures are forgiven. */
 const STABILITY_MS = 10_000;
-
-const RECONNECT_BASE_DELAY_MS = 1_000;
-const RECONNECT_MAX_DELAY_MS = 30_000;
-/** Lowest consecutive-failure count whose base delay already saturates the cap. */
-const RECONNECT_MAX_FAILURES = 6;
 
 export type RealtimeSignal =
   /** The topic is active on a live socket, so anything cached for it may predate it. */
@@ -247,10 +246,7 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
   }
 
   function nextReconnectDelay(): number {
-    const exponent = Math.min(failureCount, RECONNECT_MAX_FAILURES) - 1;
-    const base = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** exponent, RECONNECT_MAX_DELAY_MS);
-    // Half jitter, never full: a near-zero retry is exactly the case being bounded.
-    return base / 2 + random() * (base / 2);
+    return sharedReconnectDelay(failureCount, random);
   }
 
   function scheduleReconnect(): void {
