@@ -1,6 +1,7 @@
 /**
- * Runtimes screen: one card per runtime, plus the nvm-managed Node versions
- * folded into the Node card where they belong.
+ * Runtimes screen: one card per runtime, plus every version manager's
+ * managed Node versions (nvm, fnm, …) folded into the Node card where they
+ * belong.
  *
  * Everything here is about one machine, named by the scope picker. Switching
  * machines switches the dataset outright rather than merging — "which node
@@ -64,8 +65,6 @@ export function RuntimesPage() {
     );
   }
 
-  const nvm = versionManagers.find((manager) => manager.id === 'nvm');
-
   return (
     <div className="space-y-4">
       {header}
@@ -85,13 +84,18 @@ export function RuntimesPage() {
               recipes={recipes}
               environmentId={scope.environmentId}
             >
-              {runtime.id === 'node' && nvm ? (
-                <NodeVersionTable
-                  status={nvm}
-                  recipes={recipes}
-                  environmentId={scope.environmentId}
-                />
-              ) : null}
+              {/* Every version manager gets its own table here, not only nvm —
+                  the list already comes from whichever managers this release
+                  detects, so nothing here should re-narrow it to one id. */}
+              {runtime.id === 'node' &&
+                versionManagers.map((manager) => (
+                  <NodeVersionTable
+                    key={manager.id}
+                    status={manager}
+                    recipes={recipes}
+                    environmentId={scope.environmentId}
+                  />
+                ))}
             </RuntimeCard>
           ))}
         </div>
