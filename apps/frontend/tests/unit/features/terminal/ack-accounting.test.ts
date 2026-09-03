@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import { createAckAccounting } from '../../../../src/features/terminal/ack-accounting';
+import {
+  TERMINAL_CHUNK_MAX_BYTES,
+  TERMINAL_INFLIGHT_WINDOW_BYTES,
+} from '@mangostudio/shared/terminal';
+import {
+  createAckAccounting,
+  DEFAULT_FLUSH_BYTES,
+} from '../../../../src/features/terminal/ack-accounting';
 
 /** A controllable clock: `run()` fires every timer whose delay has elapsed. */
 class FakeClock {
@@ -160,5 +167,22 @@ describe('createAckAccounting', () => {
 
     expect(flushed).toEqual([]);
     expect(clock.armedCount).toBe(0);
+  });
+});
+
+/**
+ * The default only batches inside a band. These pin the relationship to the
+ * wire constants rather than the number itself, because the number is a
+ * derivation of them and a magic-number assertion would just restate it.
+ */
+describe('the default flush threshold', () => {
+  it('is at least one full data frame, so a saturated stream actually coalesces', () => {
+    // Below this every single `add()` clears the threshold on its own and the
+    // module sends one ack per PTY chunk — exactly what it exists to avoid.
+    expect(DEFAULT_FLUSH_BYTES).toBeGreaterThanOrEqual(TERMINAL_CHUNK_MAX_BYTES);
+  });
+
+  it('stays under half the in-flight window, so the runtime never waits on an ack it earned', () => {
+    expect(DEFAULT_FLUSH_BYTES).toBeLessThanOrEqual(TERMINAL_INFLIGHT_WINDOW_BYTES / 2);
   });
 });

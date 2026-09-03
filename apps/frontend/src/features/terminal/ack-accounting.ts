@@ -16,11 +16,21 @@
  * acks.add(chunk.byteLength); // after term.write(chunk, cb) calls back
  */
 
-const DEFAULT_FLUSH_BYTES = 4 * 1024;
+import { TERMINAL_INFLIGHT_WINDOW_BYTES } from '@mangostudio/shared/terminal';
+
+/**
+ * A quarter of the server's in-flight window (64 KiB), which is the band that
+ * actually batches: below `TERMINAL_CHUNK_MAX_BYTES` every single data frame
+ * clears the threshold on its own and the module coalesces nothing, while above
+ * half the window the runtime stalls waiting for an ack boundary it has already
+ * earned. `flushMs` still bounds the interactive tail, so a prompt echo of a few
+ * bytes acks on time regardless.
+ */
+export const DEFAULT_FLUSH_BYTES = TERMINAL_INFLIGHT_WINDOW_BYTES / 4;
 const DEFAULT_FLUSH_MS = 50;
 
 export interface AckAccountingOptions {
-  /** Bytes accumulated before a flush fires early. Default 4 KiB. */
+  /** Bytes accumulated before a flush fires early. Defaults to `DEFAULT_FLUSH_BYTES`. */
   readonly flushBytes?: number;
   /** Longest an ack may wait once bytes are pending. Default 50 ms. */
   readonly flushMs?: number;
