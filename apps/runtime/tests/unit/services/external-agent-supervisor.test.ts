@@ -338,7 +338,7 @@ describe('external-agent adapter registry and supervisor', () => {
       env: { PATH: '/usr/bin' } as NodeJS.ProcessEnv,
       platform: 'linux',
       homeDir: '/home/tester',
-      spawnEnvFs: { exists: () => false, readFile: () => null },
+      spawnEnvFs: { exists: () => false, readFile: () => null, readDirectory: () => null },
     });
 
     await value.supervisor.open(

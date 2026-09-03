@@ -5,9 +5,18 @@ import { buildSpawnEnv, findPathKey, type SpawnEnvFs } from '../../../src/servic
 /** In-memory filesystem keyed by exact path strings, so a test controls exactly what "exists". */
 class FakeSpawnEnvFs implements SpawnEnvFs {
   readonly #files: Map<string, string>;
+  readonly #directories: Map<string, readonly string[]>;
 
-  constructor(files: Record<string, string> = {}) {
+  constructor(
+    files: Record<string, string> = {},
+    directories: Record<string, readonly string[]> = {}
+  ) {
     this.#files = new Map(Object.entries(files));
+    this.#directories = new Map(Object.entries(directories));
+  }
+
+  readDirectory(path: string): readonly string[] | null {
+    return this.#directories.get(path) ?? null;
   }
 
   exists(path: string): boolean {
@@ -93,6 +102,52 @@ describe('buildSpawnEnv', () => {
       [posix.join(nvmDir, 'alias', 'lts', 'jod')]: 'v22.13.0',
       [posix.join(nodeDir, 'node')]: 'binary',
     });
+
+    const result = buildSpawnEnv({
+      source: { PATH: '/usr/bin' },
+      toolchain: { node: 'auto', bun: 'auto' },
+      platform: 'linux',
+      homeDir: HOME,
+      fs,
+    });
+
+    expect(result.PATH).toBe(`${nodeDir}:/usr/bin`);
+  });
+
+  it('resolves the `node` alias to the newest installed version', () => {
+    const nvmDir = posix.join(HOME, '.nvm');
+    const versions = posix.join(nvmDir, 'versions', 'node');
+    const nodeDir = posix.join(versions, 'v24.2.0', 'bin');
+    const fs = new FakeSpawnEnvFs(
+      {
+        [posix.join(nvmDir, 'alias', 'default')]: 'node',
+        [posix.join(nodeDir, 'node')]: 'binary',
+      },
+      { [versions]: ['v20.19.0', 'v24.2.0', 'v22.13.0', '.cache'] }
+    );
+
+    const result = buildSpawnEnv({
+      source: { PATH: '/usr/bin' },
+      toolchain: { node: 'auto', bun: 'auto' },
+      platform: 'linux',
+      homeDir: HOME,
+      fs,
+    });
+
+    expect(result.PATH).toBe(`${nodeDir}:/usr/bin`);
+  });
+
+  it('resolves a bare major alias to the newest installed version of that line', () => {
+    const nvmDir = posix.join(HOME, '.nvm');
+    const versions = posix.join(nvmDir, 'versions', 'node');
+    const nodeDir = posix.join(versions, 'v22.13.0', 'bin');
+    const fs = new FakeSpawnEnvFs(
+      {
+        [posix.join(nvmDir, 'alias', 'default')]: '22',
+        [posix.join(nodeDir, 'node')]: 'binary',
+      },
+      { [versions]: ['v22.9.0', 'v24.2.0', 'v22.13.0'] }
+    );
 
     const result = buildSpawnEnv({
       source: { PATH: '/usr/bin' },

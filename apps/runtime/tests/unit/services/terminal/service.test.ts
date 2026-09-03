@@ -12,7 +12,11 @@ const hasBash = isShellAvailable('bash');
 const isWindows = process.platform === 'win32';
 
 /** No files anywhere — every `auto` toolchain lookup misses. */
-const NO_FILES_FS: SpawnEnvFs = { exists: () => false, readFile: () => null };
+const NO_FILES_FS: SpawnEnvFs = {
+  exists: () => false,
+  readFile: () => null,
+  readDirectory: () => null,
+};
 
 function createService(
   overrides: {

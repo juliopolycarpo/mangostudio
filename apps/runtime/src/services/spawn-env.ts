@@ -10,7 +10,7 @@
  * else is forwarded — only where Node and Bun are found.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { posix, win32 } from 'node:path';
 import type { ToolchainChoice, ToolchainSelection } from '@mangostudio/shared/environments';
@@ -23,6 +23,8 @@ import {
 export interface SpawnEnvFs {
   readonly exists: (path: string) => boolean;
   readonly readFile: (path: string) => string | null;
+  /** Entry names of a directory, or `null` when it cannot be listed. */
+  readonly readDirectory: (path: string) => readonly string[] | null;
 }
 
 /** Platform facts the resolution needs, injected so tests never touch a real machine. */
@@ -46,9 +48,18 @@ function readTextFileOrNull(path: string): string | null {
   }
 }
 
+function readDirectoryOrNull(path: string): readonly string[] | null {
+  try {
+    return readdirSync(path);
+  } catch {
+    return null;
+  }
+}
+
 const NODE_SPAWN_ENV_FS: SpawnEnvFs = {
   exists: existsSync,
   readFile: readTextFileOrNull,
+  readDirectory: readDirectoryOrNull,
 };
 
 /** The real machine this runtime is running on. Captured once; these facts do not change mid-process. */
@@ -81,6 +92,48 @@ const SAFE_ALIAS_PATTERN = /^[a-zA-Z0-9_.*/-]+$/;
 /** Backstop against a cyclic alias file; the `seen` set is the real guard. */
 const MAX_ALIAS_CHAIN = 8;
 
+/** nvm's built-in aliases that mean "the newest installed version". */
+const NEWEST_INSTALLED_ALIASES = new Set(['node', 'stable', 'unstable']);
+
+/** A bare major or major.minor (`22`, `22.1`) nvm resolves to the newest matching install. */
+const PARTIAL_VERSION_PATTERN = /^v?(\d+)(?:\.(\d+))?$/;
+
+function compareVersions(left: string, right: string): number {
+  const [l, r] = [left.split('.').map(Number), right.split('.').map(Number)];
+  for (let index = 0; index < 3; index += 1) {
+    const delta = (l[index] ?? 0) - (r[index] ?? 0);
+    if (delta !== 0) return delta;
+  }
+  return 0;
+}
+
+/**
+ * The newest version under `versions/node` that a partial selector names —
+ * `node` is the newest of all, `22` the newest 22.x, `22.1` the newest 22.1.x.
+ * These are the aliases nvm answers by listing installs rather than by
+ * reading a file, so the same listing is what answers them here.
+ */
+function newestInstalledNvmVersion(
+  fs: SpawnEnvFs,
+  nvmDir: string,
+  selector: string
+): string | undefined {
+  const partial = NEWEST_INSTALLED_ALIASES.has(selector)
+    ? []
+    : selector.match(PARTIAL_VERSION_PATTERN)?.slice(1).filter(Boolean).map(Number);
+  if (!partial) return undefined;
+  const entries = fs.readDirectory(posix.join(nvmDir, 'versions', 'node')) ?? [];
+  let newest: string | undefined;
+  for (const entry of entries) {
+    const version = normalizeNodeVersion(entry);
+    if (!version) continue;
+    const parts = version.split('.').map(Number);
+    if (partial.some((component, index) => parts[index] !== component)) continue;
+    if (newest === undefined || compareVersions(version, newest) > 0) newest = version;
+  }
+  return newest;
+}
+
 /**
  * Follows nvm's `alias/default` through however many pointers it names — an
  * alias may name another alias, e.g. `lts/*` → `lts/jod` → `v22.13.0` — to the
@@ -94,6 +147,8 @@ function resolveNvmDefaultVersion(fs: SpawnEnvFs, nvmDir: string): string | unde
     if (!current) return undefined;
     const version = normalizeNodeVersion(current);
     if (version) return version;
+    const newest = newestInstalledNvmVersion(fs, nvmDir, current);
+    if (newest) return newest;
     if (!SAFE_ALIAS_PATTERN.test(current) || seen.has(current)) return undefined;
     seen.add(current);
     const aliasPath = current.startsWith('lts/')
