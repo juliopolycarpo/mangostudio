@@ -262,7 +262,7 @@ export function createTerminalSessionService(
         ...(body.shell ? { shell: body.shell } : {}),
         ...(cwd ? { cwd } : {}),
         ...(chatId ? { env: { MANGOSTUDIO_CHAT_ID: chatId } } : {}),
-        toolchain,
+        ...(client.manifest.features.toolchain === true ? { toolchain } : {}),
       });
 
       const now = d.now();

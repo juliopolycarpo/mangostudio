@@ -37,6 +37,7 @@ export const FAKE_TERMINAL_MANIFEST: RuntimeCapabilityManifest = {
     mcp: false,
     library: false,
     checkpoints: true,
+    toolchain: true,
   },
   terminal: true,
 };

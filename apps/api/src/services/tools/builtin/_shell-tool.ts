@@ -113,7 +113,9 @@ async function execute(
       timeoutMs: settings.timeoutSeconds * 1000,
       maxOutputBytes: settings.maxOutputBytes,
       envPolicy: { allow: settings.allowedEnvVars, deny: settings.deniedEnvVars },
-      toolchain,
+      // Only a peer that advertises the selection is sent one; older runtimes
+      // keep their own PATH exactly as before.
+      ...(runtime.manifest.features.toolchain === true ? { toolchain } : {}),
     },
     context.signal ? { signal: context.signal } : undefined
   );

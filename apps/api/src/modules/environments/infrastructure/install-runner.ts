@@ -149,7 +149,8 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
             ...(command.env && { env: command.env }),
             timeoutMs: command.timeoutMs,
             logPath: deps.logPathFor(command.runId, command.environmentId),
-            ...(command.toolchain && { toolchain: command.toolchain }),
+            ...(command.toolchain &&
+              client.manifest.features.toolchain === true && { toolchain: command.toolchain }),
             ...(options.outputLimitBytes !== undefined && {
               outputLimitBytes: options.outputLimitBytes,
             }),
