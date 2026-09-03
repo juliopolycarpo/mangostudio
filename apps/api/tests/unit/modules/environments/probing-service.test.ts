@@ -13,7 +13,10 @@ const WSL: ProbeScope = { userId: 'ada', environmentId: 'ubuntu' };
 
 // `features.library` is real here because the location probe guards on it:
 // a fake without it would make every location test throw inside the guard.
-const MANIFEST = { platform: 'linux', features: { library: true } } as RuntimeCapabilityManifest;
+const MANIFEST = {
+  platform: 'linux',
+  features: { library: true, toolchain: true },
+} as RuntimeCapabilityManifest;
 
 interface FakeClient {
   client: RuntimeClient;
@@ -45,7 +48,11 @@ interface FakeClient {
  * shared `MANIFEST`'s `linux`; passing `win32` is how the platform-aware
  * runtime-id tests get a manifest that asks for `winget` too.
  */
-function fakeClient(version = 'v1', platform = MANIFEST.platform): FakeClient {
+function fakeClient(
+  version = 'v1',
+  platform = MANIFEST.platform,
+  features = MANIFEST.features
+): FakeClient {
   const state: FakeClient = {
     client: null as unknown as RuntimeClient,
     runtimeCalls: 0,
@@ -65,7 +72,7 @@ function fakeClient(version = 'v1', platform = MANIFEST.platform): FakeClient {
   const pendingAgent: Array<(value: unknown) => void> = [];
 
   const client = {
-    manifest: { ...MANIFEST, platform },
+    manifest: { ...MANIFEST, platform, features },
     runtimeVersion: '2.0.0-remote',
     probing: {
       runtimes: (params: { ids?: readonly string[]; pathEnv?: unknown }) => {
@@ -344,6 +351,17 @@ describe('what the hub sends down with a probe', () => {
 });
 
 describe('platform-aware runtime ids', () => {
+  it('asks a peer that predates the extended definitions for bun and node only', async () => {
+    const legacy = fakeClient('v1', 'linux', { ...MANIFEST.features, toolchain: undefined });
+    const service = serviceFor(() => legacy);
+
+    await service.listRuntimeStatuses(LOCAL);
+
+    // The fake answers every id it knows; what matters is what was asked.
+    expect(legacy.lastRuntimeIds).toEqual(['bun', 'node']);
+    await expect(service.getRuntimeStatus(LOCAL, 'fnm')).resolves.toBeNull();
+  });
+
   it('omits winget on a non-Windows target', async () => {
     const local = fakeClient('v1', 'linux');
     const service = serviceFor(() => local);

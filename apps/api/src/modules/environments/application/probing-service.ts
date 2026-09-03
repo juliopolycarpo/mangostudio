@@ -24,6 +24,7 @@ import {
 } from '@mangostudio/shared/environments/detection';
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
 import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { getConfig, getHomeMangoDir, getVersion } from '../../../lib/config';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
@@ -77,11 +78,20 @@ const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['bun', 'node', 'fnm', 'winget', '
  * `winget` is a Windows-only prerequisite: probing it from a Linux hub can
  * only ever report "not found", so a Linux hub's own runtime list omits it
  * rather than surfacing a finding about a tool this machine will never need.
- * // Usage: runtimeIdsFor(client.manifest.platform)
+ * // Usage: runtimeIdsFor(client.manifest)
  */
-function runtimeIdsFor(platform: string): readonly RuntimeId[] {
-  return platform === 'win32' ? ALL_RUNTIME_IDS : ALL_RUNTIME_IDS.filter((id) => id !== 'winget');
+function runtimeIdsFor(manifest: RuntimeCapabilityManifest): readonly RuntimeId[] {
+  // A peer built before `fnm`/`git`/`winget` had definitions refuses the whole
+  // call on an unknown id, and `features.toolchain` is the manifest flag that
+  // shipped with them — so it doubles as "this peer knows the extended list".
+  if (manifest.features.toolchain !== true) return LEGACY_RUNTIME_IDS;
+  return manifest.platform === 'win32'
+    ? ALL_RUNTIME_IDS
+    : ALL_RUNTIME_IDS.filter((id) => id !== 'winget');
 }
+
+/** What every runtime answered for before the extended definitions existed. */
+const LEGACY_RUNTIME_IDS: readonly RuntimeId[] = ['bun', 'node'];
 const VERSION_MANAGER_IDS: readonly VersionManagerId[] = ['nvm', 'fnm'];
 const AGENT_TARGET_IDS: readonly LibraryTargetId[] = AGENT_CLI_DEFINITIONS.map(
   (definition) => definition.targetId
@@ -465,8 +475,11 @@ export function createEnvironmentProbingService(
    * reason: "is `winget` installed" can only be answered by having `winget`'s
    * own status in the same batch, and a single-id re-check never has it.
    */
-  const isFullRuntimeScan = (ids: readonly RuntimeId[], platform: string): boolean =>
-    runtimeIdsFor(platform).every((id) => ids.includes(id));
+  const isFullRuntimeScan = (
+    ids: readonly RuntimeId[],
+    manifest: RuntimeCapabilityManifest
+  ): boolean =>
+    manifest.features.toolchain === true && runtimeIdsFor(manifest).every((id) => ids.includes(id));
 
   const withPrerequisiteFindings = (
     statuses: readonly RuntimeStatus[],
@@ -501,7 +514,7 @@ export function createEnvironmentProbingService(
           },
           { timeoutMs: PROBE_REQUEST_TIMEOUT_MS }
         );
-        return isFullRuntimeScan(ids, client.manifest.platform)
+        return isFullRuntimeScan(ids, client.manifest)
           ? withPrerequisiteFindings(result.statuses, client.manifest.platform)
           : result.statuses;
       }
@@ -605,15 +618,15 @@ export function createEnvironmentProbingService(
       // the one caller that needs to know the platform before it can even
       // name what it is asking for.
       const client = await resolveClient(scope);
-      return probeRuntimes(
-        scope,
-        runtimeIdsFor(client.manifest.platform),
-        probeOptions?.force === true
-      );
+      return probeRuntimes(scope, runtimeIdsFor(client.manifest), probeOptions?.force === true);
     },
 
     async getRuntimeStatus(scope, id, probeOptions) {
       if (!ALL_RUNTIME_IDS.includes(id)) return null;
+      // An id the peer has no definition for is `null` here, never a request
+      // it would refuse outright.
+      const client = await resolveClient(scope);
+      if (!runtimeIdsFor(client.manifest).includes(id)) return null;
       const [status] = await probeRuntimes(scope, [id], probeOptions?.force === true);
       return status ?? null;
     },
