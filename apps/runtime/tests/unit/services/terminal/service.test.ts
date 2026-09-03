@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import type { RuntimeShellKind } from '@mangostudio/shared/runtime-protocol';
 import type { RuntimeEventInput } from '../../../../src/host';
 import { isShellAvailable } from '../../../../src/services/shell';
+import type { SpawnEnvFs } from '../../../../src/services/spawn-env';
 import { TerminalNotFoundError } from '../../../../src/services/terminal/errors';
 import { createTerminalService } from '../../../../src/services/terminal/service';
 import { FakePtyPort } from './fake-pty';
@@ -10,12 +11,17 @@ import { FakePtyPort } from './fake-pty';
 const hasBash = isShellAvailable('bash');
 const isWindows = process.platform === 'win32';
 
+/** No files anywhere — every `auto` toolchain lookup misses. */
+const NO_FILES_FS: SpawnEnvFs = { exists: () => false, readFile: () => null };
+
 function createService(
   overrides: {
     sourceEnv?: () => NodeJS.ProcessEnv;
     platform?: NodeJS.Platform;
     port?: FakePtyPort;
     findShell?: (kind: RuntimeShellKind) => string | null;
+    homeDir?: string;
+    spawnEnvFs?: SpawnEnvFs;
   } = {}
 ) {
   const port = overrides.port ?? new FakePtyPort();
@@ -27,6 +33,8 @@ function createService(
       sourceEnv:
         overrides.sourceEnv ?? (() => ({ PATH: process.env.PATH ?? '' }) as NodeJS.ProcessEnv),
       platform: overrides.platform ?? process.platform,
+      homeDir: overrides.homeDir ?? homedir(),
+      spawnEnvFs: overrides.spawnEnvFs ?? NO_FILES_FS,
       ...(overrides.findShell ? { findShell: overrides.findShell } : {}),
     },
   });
@@ -246,5 +254,28 @@ describe('createTerminalService', () => {
     await service.attach({ sessionId: OPEN.sessionId });
 
     expect(() => port.handles[0]?.emitData(new TextEncoder().encode('hi'))).not.toThrow();
+  });
+
+  it.skipIf(!hasBash)('prepends the resolved toolchain node dir to the session PATH', async () => {
+    const { service, port } = createService({
+      sourceEnv: () => ({ PATH: '/usr/bin' }) as NodeJS.ProcessEnv,
+    });
+
+    await service.open({
+      ...OPEN,
+      toolchain: { node: '/opt/custom/node/bin/node', bun: 'auto' },
+    });
+
+    expect(port.spawnInputs[0]?.env.PATH).toBe('/opt/custom/node/bin:/usr/bin');
+  });
+
+  it.skipIf(!hasBash)('leaves PATH untouched when the open carries no toolchain', async () => {
+    const { service, port } = createService({
+      sourceEnv: () => ({ PATH: '/usr/bin' }) as NodeJS.ProcessEnv,
+    });
+
+    await service.open(OPEN);
+
+    expect(port.spawnInputs[0]?.env.PATH).toBe('/usr/bin');
   });
 });

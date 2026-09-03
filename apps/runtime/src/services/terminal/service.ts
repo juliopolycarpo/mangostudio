@@ -30,6 +30,7 @@ import type {
 import { RUNTIME_TERMINAL_OUTPUT_TOPIC } from '../../methods';
 import { findShellExecutable, resolveWorkingDirectory, ShellExecutionError } from '../shell';
 import { sanitizeShellEnv } from '../shell-env';
+import { buildSpawnEnv, nodeSpawnEnvHost, type SpawnEnvFs } from '../spawn-env';
 import { TerminalNotFoundError } from './errors';
 import { createBunPtyPort, type PtyPort } from './pty';
 import { createTerminalSession, type TerminalSession } from './session';
@@ -59,6 +60,9 @@ interface TerminalServiceDeps {
    * and there is no Windows unit-test lane.
    */
   readonly findShell: (kind: RuntimeShellKind) => string | null;
+  /** Host facts `buildSpawnEnv` resolves the environment's toolchain against. */
+  readonly homeDir: string;
+  readonly spawnEnvFs: SpawnEnvFs;
 }
 
 const DEFAULT_DEPS: TerminalServiceDeps = {
@@ -66,6 +70,8 @@ const DEFAULT_DEPS: TerminalServiceDeps = {
   sourceEnv: () => process.env,
   platform: process.platform,
   findShell: findShellExecutable,
+  homeDir: nodeSpawnEnvHost.homeDir,
+  spawnEnvFs: nodeSpawnEnvHost.fs,
 };
 
 export interface TerminalService {
@@ -137,7 +143,7 @@ export function createTerminalService(options: TerminalServiceOptions): Terminal
       }
 
       const cwd = resolveSessionCwd(params.cwd);
-      const env = buildSessionEnv(params, deps.sourceEnv());
+      const env = buildSessionEnv(params, deps);
       const argv = buildShellArgv(shell, executable, deps.platform);
 
       const session = createTerminalSession({
@@ -264,8 +270,15 @@ function resolveSessionCwd(requested: string | undefined): string {
 
 function buildSessionEnv(
   params: RuntimeTerminalOpenParams,
-  source: NodeJS.ProcessEnv
+  deps: TerminalServiceDeps
 ): Record<string, string> {
+  const source = buildSpawnEnv({
+    source: deps.sourceEnv(),
+    toolchain: params.toolchain,
+    platform: deps.platform,
+    homeDir: deps.homeDir,
+    fs: deps.spawnEnvFs,
+  });
   return {
     ...sanitizeShellEnv(params.envPolicy, source),
     TERM: 'xterm-256color',

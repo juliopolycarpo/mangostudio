@@ -21,6 +21,7 @@
  */
 
 import Type, { type Static } from 'typebox';
+import { ToolchainSelectionSchema } from '../environments/toolchain-schemas';
 import { ReadonlyArraySchema } from '../schema-helpers';
 import {
   EXTERNAL_APPROVAL_MAX_OPTIONS,
@@ -1001,6 +1002,8 @@ export const ExternalAgentOpenParamsSchema = Type.Object(
     resumeRef: Type.Optional(ExternalAgentOpaqueIdSchema),
     resumeMode: ExternalAgentResumeModeSchema,
     timeoutMs: ExternalAgentTimeoutSchema,
+    /** Absent: inherit the runtime's own PATH; the hub always sends the environment's selection. */
+    toolchain: Type.Optional(ToolchainSelectionSchema),
   },
   { additionalProperties: false }
 );

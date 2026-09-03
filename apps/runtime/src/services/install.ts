@@ -21,6 +21,7 @@ import type {
 } from '../methods';
 import { RUNTIME_INSTALL_OUTPUT_TOPIC } from '../methods';
 import { HIDDEN_WINDOW } from './process-window';
+import { buildSpawnEnv, findPathKey, nodeSpawnEnvHost, type SpawnEnvFs } from './spawn-env';
 
 const INSTALL_OUTPUT_LIMIT_BYTES = 1024 * 1024;
 
@@ -89,6 +90,10 @@ interface InstallHostDeps {
   readonly sourceEnv: () => Readonly<Record<string, string | undefined>>;
   /** Root used to resolve relative log paths from the hub. */
   readonly runtimeHome?: () => string;
+  /** Host facts `buildSpawnEnv` resolves the environment's toolchain against. */
+  readonly platform: string;
+  readonly homeDir: string;
+  readonly spawnEnvFs: SpawnEnvFs;
 }
 
 function defaultRuntimeHome(env: NodeJS.ProcessEnv = process.env): string {
@@ -130,6 +135,9 @@ const DEFAULT_DEPS: InstallHostDeps = {
   appendLog: (path, bytes) => appendFile(path, bytes),
   sourceEnv: () => process.env,
   runtimeHome: () => defaultRuntimeHome(),
+  platform: nodeSpawnEnvHost.platform,
+  homeDir: nodeSpawnEnvHost.homeDir,
+  spawnEnvFs: nodeSpawnEnvHost.fs,
 };
 
 export function buildInstallEnvironment(
@@ -140,8 +148,12 @@ export function buildInstallEnvironment(
   const env: Record<string, string> = {};
   const keys =
     platform === 'win32' ? [...INSTALL_ENV_KEYS, ...WIN32_INSTALL_ENV_KEYS] : INSTALL_ENV_KEYS;
+  // `buildSpawnEnv` may hand back the toolchain-adjusted PATH under `Path`
+  // (Windows) rather than `PATH`; the allowlist only knows the latter, so
+  // this key is resolved case-insensitively instead of by exact match.
+  const pathKey = findPathKey(source, 'PATH');
   for (const key of keys) {
-    const value = source[key];
+    const value = key === 'PATH' ? source[pathKey] : source[key];
     if (value !== undefined) env[key] = value;
   }
   for (const key of RECIPE_ENV_KEYS) {
@@ -234,7 +246,19 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
 
       let child: InstallSubprocess;
       try {
-        child = deps.spawn(params.argv, buildInstallEnvironment(deps.sourceEnv(), params.env));
+        child = deps.spawn(
+          params.argv,
+          buildInstallEnvironment(
+            buildSpawnEnv({
+              source: deps.sourceEnv(),
+              toolchain: params.toolchain,
+              platform: deps.platform,
+              homeDir: deps.homeDir,
+              fs: deps.spawnEnvFs,
+            }),
+            params.env
+          )
+        );
       } catch (error) {
         active.delete(params.runId);
         const detail = error instanceof Error ? error.message : 'Unable to start installer.';

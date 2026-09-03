@@ -3,6 +3,7 @@ import type {
   AgentCliStatus,
   RuntimeId,
   RuntimeStatus,
+  ToolchainSelection,
   VersionManagerId,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
@@ -356,6 +357,8 @@ export interface RuntimeShellRunParams {
     readonly allow?: readonly string[];
     readonly deny?: readonly string[];
   };
+  /** Absent: inherit the runtime's own PATH; the hub always sends the environment's selection. */
+  readonly toolchain?: ToolchainSelection;
 }
 
 export interface RuntimeShellResult {
@@ -758,6 +761,8 @@ export interface RuntimeInstallRunParams {
    * that is not a failure MangoStudio should report as one.
    */
   readonly acceptedExitCodes?: readonly number[];
+  /** Absent: inherit the runtime's own PATH; the hub always sends the environment's selection. */
+  readonly toolchain?: ToolchainSelection;
 }
 
 export interface RuntimeInstallRunResult {
@@ -806,6 +811,8 @@ export interface RuntimeTerminalOpenParams {
   readonly envPolicy?: RuntimeShellRunParams['envPolicy'];
   /** Omitted: `TERMINAL_SCROLLBACK_MAX_BYTES`, which is also the hard ceiling this is clamped to. */
   readonly scrollbackBytes?: number;
+  /** Absent: inherit the runtime's own PATH; the hub always sends the environment's selection. */
+  readonly toolchain?: ToolchainSelection;
 }
 
 export interface RuntimeTerminalOpenResult {

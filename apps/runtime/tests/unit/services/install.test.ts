@@ -144,6 +144,15 @@ describe('runtime install execution', () => {
     expect(posixEnv).toEqual({ PATH: 'C:\\bin' });
   });
 
+  it('reads a differently-cased PATH key and normalizes it to PATH', () => {
+    // buildSpawnEnv hands back a Windows PATH under the key it found in the
+    // source env (`Path`), not the literal `PATH` this allowlist declares.
+    const env = buildInstallEnvironment({ Path: 'C:\\nodejs', HOME: 'C:\\Users\\tester' });
+
+    expect(env).toEqual({ PATH: 'C:\\nodejs', HOME: 'C:\\Users\\tester' });
+    expect(env.Path).toBeUndefined();
+  });
+
   it('streams lines, writes a bounded raw log, and records success', async () => {
     const process = new FakeInstallProcess('hello\nworld\n', 'warning\n', 0);
     const captured = { log: [] as Uint8Array[] };
@@ -274,5 +283,51 @@ describe('runtime install execution', () => {
     expect(result.status).toBe('spawn-failed');
     expect(result.exitCode).toBeNull();
     expect(events).toEqual([{ stream: 'system', line: 'binary missing' }]);
+  });
+
+  it('prepends the resolved toolchain node dir to the spawned PATH', async () => {
+    const process = new FakeInstallProcess('', '', 0);
+    let capturedEnv: Record<string, string> | undefined;
+    const runner = createInstallService({
+      emit: () => undefined,
+      deps: {
+        spawn: (_argv, env) => {
+          capturedEnv = env;
+          return process;
+        },
+        prepareLog: () => Promise.resolve(),
+        sourceEnv: () => ({ PATH: '/usr/bin' }),
+        platform: 'linux',
+        homeDir: '/home/tester',
+        spawnEnvFs: { exists: () => false, readFile: () => null },
+      },
+    });
+
+    await runner.run({
+      ...COMMAND,
+      toolchain: { node: '/opt/custom/node/bin/node', bun: 'auto' },
+    });
+
+    expect(capturedEnv?.PATH).toBe('/opt/custom/node/bin:/usr/bin');
+  });
+
+  it('leaves PATH untouched when the run carries no toolchain', async () => {
+    const process = new FakeInstallProcess('', '', 0);
+    let capturedEnv: Record<string, string> | undefined;
+    const runner = createInstallService({
+      emit: () => undefined,
+      deps: {
+        spawn: (_argv, env) => {
+          capturedEnv = env;
+          return process;
+        },
+        prepareLog: () => Promise.resolve(),
+        sourceEnv: () => ({ PATH: '/usr/bin' }),
+      },
+    });
+
+    await runner.run(COMMAND);
+
+    expect(capturedEnv?.PATH).toBe('/usr/bin');
   });
 });

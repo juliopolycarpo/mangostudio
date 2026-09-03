@@ -457,3 +457,27 @@ describe('runShellCommand env sanitization', () => {
     expect(result.stdout.trim()).toBe('[]');
   });
 });
+
+describe('runShellCommand toolchain', () => {
+  it.skipIf(!hasBash)('prepends an explicit node dir choice to the spawned PATH', async () => {
+    const nodeDir = join(tempDir, 'node', 'bin');
+    const result = await runShellCommand({
+      kind: 'bash',
+      command: 'echo "$PATH"',
+      timeoutMs: 5000,
+      maxOutputBytes: 1000,
+      toolchain: { node: join(nodeDir, 'node'), bun: 'auto' },
+    });
+    expect(result.stdout.trim().startsWith(`${nodeDir}:`)).toBe(true);
+  });
+
+  it.skipIf(!hasBash)('leaves PATH untouched when no toolchain is sent', async () => {
+    const withoutToolchain = await runShellCommand({
+      kind: 'bash',
+      command: 'echo "$PATH"',
+      timeoutMs: 5000,
+      maxOutputBytes: 1024 * 1024,
+    });
+    expect(withoutToolchain.stdout.trim()).toBe(process.env.PATH ?? '');
+  });
+});

@@ -16,6 +16,7 @@ import { createLocalRuntimeManifest } from '../../../src/manifest';
 import type { ExternalAgentAdapter } from '../../../src/services/external-agents/adapter';
 import { ExternalAgentAdapterRegistry } from '../../../src/services/external-agents/registry';
 import { ExternalAgentSessionSupervisor } from '../../../src/services/external-agents/supervisor';
+import type { SpawnEnvFs } from '../../../src/services/spawn-env';
 import { FakeExternalAgentAdapter } from '../../support/fake-external-agent-adapter';
 
 const CONFIGURATION = {
@@ -62,6 +63,9 @@ async function fixture(
     readonly omitWorkspaceAuthorization?: boolean;
     readonly resolveExecutable?: () => Promise<{ readonly path?: string }>;
     readonly env?: NodeJS.ProcessEnv;
+    readonly platform?: string;
+    readonly homeDir?: string;
+    readonly spawnEnvFs?: SpawnEnvFs;
   } = {}
 ) {
   const adapter = options.adapter ?? new FakeExternalAgentAdapter();
@@ -78,6 +82,9 @@ async function fixture(
     emit: (event) => events.push(event),
     consent: { slot: 'host', ...consent },
     env: options.env,
+    ...(options.platform !== undefined && { platform: options.platform }),
+    ...(options.homeDir !== undefined && { homeDir: options.homeDir }),
+    ...(options.spawnEnvFs !== undefined && { spawnEnvFs: options.spawnEnvFs }),
     resolveExecutable: options.resolveExecutable ?? (async () => ({ path: process.execPath })),
     consentPollMs: 5,
     ...(!options.omitWorkspaceAuthorization
@@ -323,6 +330,49 @@ describe('external-agent adapter registry and supervisor', () => {
     // has nothing else to spawn from, and cannot re-resolve one itself.
     expect(value.adapter.opens[0]?.context.executablePath).toBe(process.execPath);
     expect(value.adapter.turns[0]?.context.executablePath).toBe(process.execPath);
+    await value.supervisor.close();
+  });
+
+  it('resolves the toolchain open carried and reuses it for every later turn', async () => {
+    const value = await fixture({
+      env: { PATH: '/usr/bin' } as NodeJS.ProcessEnv,
+      platform: 'linux',
+      homeDir: '/home/tester',
+      spawnEnvFs: { exists: () => false, readFile: () => null },
+    });
+
+    await value.supervisor.open(
+      {
+        sessionId: 'session-1',
+        targetId: 'codex',
+        workspacePath: value.workspacePath,
+        configuration: CONFIGURATION,
+        resumeMode: 'fallback',
+        timeoutMs: 1_000,
+        toolchain: { node: '/opt/custom/node/bin/node', bun: 'auto' },
+      },
+      new AbortController().signal
+    );
+    await value.supervisor.turn({
+      sessionId: 'session-1',
+      clientMessageId: 'message-1',
+      input: 'hello',
+      configuration: CONFIGURATION,
+    });
+
+    // A vendor hosted over a per-turn process — Claude Code's headless stream —
+    // never re-sends `open`, so the choice `open` resolved has to be kept and
+    // reused, not just applied to the first spawn.
+    expect(value.adapter.opens[0]?.context.environment.PATH).toBe('/opt/custom/node/bin:/usr/bin');
+    expect(value.adapter.turns[0]?.context.environment.PATH).toBe('/opt/custom/node/bin:/usr/bin');
+    await value.supervisor.close();
+  });
+
+  it('leaves PATH untouched when open carries no toolchain', async () => {
+    const value = await fixture({ env: { PATH: '/usr/bin' } as NodeJS.ProcessEnv });
+    await openSession(value);
+
+    expect(value.adapter.opens[0]?.context.environment.PATH).toBe('/usr/bin');
     await value.supervisor.close();
   });
 

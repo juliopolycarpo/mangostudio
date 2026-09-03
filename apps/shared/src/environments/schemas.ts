@@ -12,6 +12,9 @@ import {
   RuntimeErrorCodeSchema,
 } from '../runtime-protocol/schemas';
 import { ReadonlyArraySchema } from '../schema-helpers';
+import { ToolchainSelectionSchema } from './toolchain-schemas';
+
+export * from './toolchain-schemas';
 
 export const LOCAL_ENVIRONMENT_ID = 'local' as const;
 
@@ -481,37 +484,6 @@ export const PathSourceSchema = Type.Union([
   Type.Literal('bun'),
   Type.Literal('mangostudio-managed'),
 ]);
-
-/**
- * Which installation a spawned process runs with. `auto` is what a login shell
- * would see, computed without executing profiles; a path is the realpath of one
- * installation the probe already returned.
- */
-export const ToolchainChoiceSchema = Type.Union([
-  Type.Literal('auto'),
-  Type.String({ minLength: 1, maxLength: 4_096 }),
-]);
-
-export const ToolchainSelectionSchema = Type.Object(
-  {
-    node: ToolchainChoiceSchema,
-    bun: ToolchainChoiceSchema,
-  },
-  { additionalProperties: false }
-);
-
-export const ToolchainUpdateBodySchema = Type.Object(
-  {
-    node: Type.Optional(ToolchainChoiceSchema),
-    bun: Type.Optional(ToolchainChoiceSchema),
-  },
-  { additionalProperties: false, minProperties: 1 }
-);
-
-export const DEFAULT_TOOLCHAIN_SELECTION: Static<typeof ToolchainSelectionSchema> = {
-  node: 'auto',
-  bun: 'auto',
-};
 
 export const EnvironmentSchema = Type.Object(
   {
@@ -1018,9 +990,6 @@ export const InstallStreamEventSchema = Type.Union([
 
 export type RuntimeId = Static<typeof RuntimeIdSchema>;
 export type PathSource = Static<typeof PathSourceSchema>;
-export type ToolchainChoice = Static<typeof ToolchainChoiceSchema>;
-export type ToolchainSelection = Static<typeof ToolchainSelectionSchema>;
-export type ToolchainUpdateBody = Static<typeof ToolchainUpdateBodySchema>;
 export type InstallUnrunnableReason = Static<typeof InstallUnrunnableReasonSchema>;
 export type RuntimeOrigin = Static<typeof RuntimeOriginSchema>;
 export type VersionManagerId = Static<typeof VersionManagerIdSchema>;
