@@ -1,6 +1,7 @@
 import { posix, win32 } from 'node:path';
 import type { PathEnv } from '../../runtime-env';
 import { type RuntimeDefinition, type SemVer, windowsDefaultFnmDir } from './binary-scan';
+import { fnmDefaultAliasBinDir, fnmRootCandidates } from './fnm';
 
 function parseSemVer(raw: string, prefix: 'optional-v' | 'none'): SemVer | null {
   const pattern = prefix === 'optional-v' ? /^v?(\d+)\.(\d+)\.(\d+)/ : /^(\d+)\.(\d+)\.(\d+)/;
@@ -41,7 +42,7 @@ export function wellKnownNodeDirectories(env: PathEnv): string[] {
     '/usr/local/bin',
     '/opt/homebrew/bin',
     posix.join(env.homeDir, '.volta', 'bin'),
-    posix.join(env.homeDir, '.local', 'share', 'fnm', 'aliases', 'default', 'bin'),
+    ...fnmRootCandidates(env).map((root) => fnmDefaultAliasBinDir(env.platform, root)),
   ];
 }
 

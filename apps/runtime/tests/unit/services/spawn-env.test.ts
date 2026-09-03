@@ -214,6 +214,42 @@ describe('buildSpawnEnv', () => {
     expect(result.FNM_DIR).toBe(fnmRoot);
   });
 
+  it('resolves fnm from the macOS platform default, not the XDG one', () => {
+    const fnmRoot = posix.join('/Users/tester', 'Library', 'Application Support', 'fnm');
+    const nodeDir = posix.join(fnmRoot, 'aliases', 'default', 'bin');
+    const fs = new FakeSpawnEnvFs({
+      [posix.join(nodeDir, 'node')]: 'binary',
+      '/opt/homebrew/bin/node': 'binary',
+    });
+
+    const result = buildSpawnEnv({
+      source: { PATH: '/usr/bin' },
+      toolchain: { node: 'auto', bun: 'auto' },
+      platform: 'darwin',
+      homeDir: '/Users/tester',
+      fs,
+    });
+
+    expect(result.PATH).toBe(`${nodeDir}:/usr/bin`);
+    expect(result.FNM_DIR).toBe(fnmRoot);
+  });
+
+  it('keeps a single PATH key on win32 when the inherited env spells it PATH', () => {
+    const nodeDir = 'C:\\Program Files\\nodejs';
+    const fs = new FakeSpawnEnvFs({ [win32.join(nodeDir, 'node.exe')]: 'binary' });
+
+    const result = buildSpawnEnv({
+      source: { PATH: 'C:\\Windows', ProgramFiles: 'C:\\Program Files' },
+      toolchain: { node: 'auto', bun: 'auto' },
+      platform: 'win32',
+      homeDir: 'C:\\Users\\tester',
+      fs,
+    });
+
+    expect(Object.keys(result).filter((key) => key.toUpperCase() === 'PATH')).toEqual(['PATH']);
+    expect(result.PATH).toBe(`${nodeDir};C:\\Windows`);
+  });
+
   it('resolves fnm from the win32 platform default (%APPDATA%\\fnm) when FNM_DIR is unset', () => {
     const appData = 'C:\\Users\\tester\\AppData\\Roaming';
     const fnmRoot = win32.join(appData, 'fnm');

@@ -64,25 +64,42 @@ function nodeBinaryPath(root: string, versionDir: string, platform: string): str
  * at the platform default.
  */
 async function resolveFnmRoot(deps: FnmDetectionDeps): Promise<string | undefined> {
-  const api = pathApi(deps.platform);
-  const configuredRoot = deps.env.FNM_DIR?.trim();
-  const platformDefault =
-    deps.platform === 'win32'
-      ? windowsDefaultFnmDir(deps)
-      : deps.platform === 'darwin'
-        ? api.join(deps.homeDir, 'Library', 'Application Support', 'fnm')
-        : api.join(deps.homeDir, '.local', 'share', 'fnm');
-  const legacyRoot = deps.platform === 'win32' ? undefined : api.join(deps.homeDir, '.fnm');
-
-  const candidates = [configuredRoot, platformDefault, legacyRoot].filter(
-    (candidate, index, roots): candidate is string =>
-      Boolean(candidate?.trim()) && roots.indexOf(candidate) === index
-  );
-
-  for (const root of candidates) {
+  for (const root of fnmRootCandidates(deps)) {
     if (await deps.fs.pathExists(root)) return root;
   }
   return undefined;
+}
+
+/**
+ * Every directory fnm may call its root, most specific first: `FNM_DIR`, the
+ * platform default (`%APPDATA%\fnm`, `~/Library/Application Support/fnm` on
+ * macOS, `~/.local/share/fnm` elsewhere), then the pre-XDG `~/.fnm`. One list
+ * for the detector, the well-known Node dirs and the spawn-env builder, so no
+ * two of them can disagree about where fnm lives on a platform.
+ * // Usage: fnmRootCandidates({ platform: 'darwin', homeDir: '/Users/a', env: {} })
+ */
+export function fnmRootCandidates(env: Pick<PathEnv, 'platform' | 'homeDir' | 'env'>): string[] {
+  const api = pathApi(env.platform);
+  const configuredRoot = env.env.FNM_DIR?.trim();
+  const platformDefault =
+    env.platform === 'win32'
+      ? windowsDefaultFnmDir(env)
+      : env.platform === 'darwin'
+        ? api.join(env.homeDir, 'Library', 'Application Support', 'fnm')
+        : api.join(env.homeDir, '.local', 'share', 'fnm');
+  const legacyRoot = env.platform === 'win32' ? undefined : api.join(env.homeDir, '.fnm');
+
+  return [configuredRoot, platformDefault, legacyRoot].filter(
+    (candidate, index, roots): candidate is string =>
+      Boolean(candidate?.trim()) && roots.indexOf(candidate) === index
+  );
+}
+
+/** The directory fnm's `default` alias exposes a `node` binary in, under `root`. */
+export function fnmDefaultAliasBinDir(platform: string, root: string): string {
+  return platform === 'win32'
+    ? win32.join(root, 'aliases', 'default')
+    : posix.join(root, 'aliases', 'default', 'bin');
 }
 
 async function readInstalledVersions(

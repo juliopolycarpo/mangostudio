@@ -15,6 +15,8 @@ import { homedir } from 'node:os';
 import { posix, win32 } from 'node:path';
 import type { ToolchainChoice, ToolchainSelection } from '@mangostudio/shared/environments';
 import {
+  fnmDefaultAliasBinDir,
+  fnmRootCandidates,
   normalizeNodeVersion,
   wellKnownNodeDirectories,
 } from '@mangostudio/shared/environments/detection';
@@ -81,7 +83,9 @@ export function findPathKey(
   env: Readonly<Record<string, string | undefined>>,
   fallback: string
 ): string {
-  if (fallback in env) return fallback;
+  // Scan first: `process.env` on Windows answers `'Path' in env` for any
+  // casing, so trusting the fallback there would add a second PATH-cased key
+  // beside the real one. A key that is actually present always wins.
   const existing = Object.keys(env).find((key) => key.toUpperCase() === 'PATH');
   return existing ?? fallback;
 }
@@ -203,20 +207,17 @@ function resolveAutoNodeDir(
     }
   }
 
+  const pathApi = host.platform === 'win32' ? win32 : posix;
   const configuredFnmDir = source.FNM_DIR?.trim();
-  const fnmRoot =
-    configuredFnmDir ||
-    (host.platform === 'win32'
-      ? source.APPDATA?.trim()
-        ? win32.join(source.APPDATA.trim(), 'fnm')
-        : undefined
-      : posix.join(host.homeDir, '.local', 'share', 'fnm'));
-  if (fnmRoot) {
-    const pathApi = host.platform === 'win32' ? win32 : posix;
-    const dir =
-      host.platform === 'win32'
-        ? win32.join(fnmRoot, 'aliases', 'default')
-        : posix.join(fnmRoot, 'aliases', 'default', 'bin');
+  // The same root ladder the fnm detector walks, so the Node the card says
+  // fnm manages is the one that ends up on PATH — on macOS too, where the
+  // default root is not the XDG one.
+  for (const fnmRoot of fnmRootCandidates({
+    platform: host.platform,
+    homeDir: host.homeDir,
+    env: source,
+  })) {
+    const dir = fnmDefaultAliasBinDir(host.platform, fnmRoot);
     if (host.fs.exists(pathApi.join(dir, binaryName))) {
       return {
         dir,
@@ -225,7 +226,6 @@ function resolveAutoNodeDir(
     }
   }
 
-  const pathApi = host.platform === 'win32' ? win32 : posix;
   for (const dir of wellKnownNodeDirectories({
     platform: host.platform,
     homeDir: host.homeDir,
@@ -298,9 +298,9 @@ export function buildSpawnEnv(options: BuildSpawnEnvOptions): NodeJS.ProcessEnv 
   const dirs = [node?.dir, bun?.dir].filter((dir): dir is string => Boolean(dir));
   if (dirs.length === 0) return env;
 
-  const pathKey = findPathKey(source, platform === 'win32' ? 'Path' : 'PATH');
+  const pathKey = findPathKey(env, platform === 'win32' ? 'Path' : 'PATH');
   const separator = platform === 'win32' ? ';' : ':';
-  const existing = source[pathKey];
+  const existing = env[pathKey];
   env[pathKey] = (existing ? [...dirs, existing] : dirs).join(separator);
   return env;
 }
