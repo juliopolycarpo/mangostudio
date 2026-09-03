@@ -13,7 +13,7 @@ import {
   parseStatusArgs,
 } from './args';
 import { runDoctor } from './commands/doctor';
-import { runEnv } from './commands/env';
+import { runEnv, runEnvInstall } from './commands/env';
 import { runKillServer } from './commands/killserver';
 import { runLibrary } from './commands/library';
 import { runLogs } from './commands/logs';
@@ -83,9 +83,18 @@ async function route(command: string | undefined, rest: string[]): Promise<void>
     case 'doctor':
       await runDoctor(parseDoctorArgs(rest));
       return;
-    case 'env':
-      await runEnv(parseEnvArgs(rest));
+    case 'env': {
+      const envArgs = parseEnvArgs(rest);
+      if (envArgs.subcommand === 'install' || envArgs.subcommand === 'update') {
+        // A refused or failed install is an expected outcome, not an operator
+        // error — it gets a numeric exit code rather than the stderr message
+        // the catch block in `dispatch` prints for a `CliError`.
+        process.exitCode = await runEnvInstall(envArgs);
+        return;
+      }
+      await runEnv(envArgs);
       return;
+    }
     case 'library':
       await runLibrary(parseLibraryArgs(rest));
       return;
