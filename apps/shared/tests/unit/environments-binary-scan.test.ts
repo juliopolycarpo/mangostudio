@@ -45,6 +45,7 @@ describe('scanRuntime', () => {
         origin: 'path',
         pathIndex: 0,
         effective: true,
+        pathSource: 'system',
       },
       {
         path: '/second/bin/node',
@@ -53,6 +54,7 @@ describe('scanRuntime', () => {
         origin: 'path',
         pathIndex: 1,
         effective: false,
+        pathSource: 'system',
       },
     ]);
   });
@@ -160,6 +162,7 @@ describe('scanRuntime', () => {
       managedBy: 'volta',
       pathIndex: 0,
       effective: true,
+      pathSource: 'volta',
     });
   });
 
@@ -180,6 +183,7 @@ describe('scanRuntime', () => {
     expect(result.installations[0]).toMatchObject({
       rawPath: nodePath,
       managedBy: 'fnm',
+      pathSource: 'fnm',
     });
   });
 
@@ -200,6 +204,7 @@ describe('scanRuntime', () => {
     expect(result.installations[0]).toMatchObject({
       rawPath: nodePath,
       managedBy: 'fnm',
+      pathSource: 'fnm',
     });
   });
 
@@ -222,7 +227,25 @@ describe('scanRuntime', () => {
       rawPath: nodePath,
       origin: 'version-manager',
       managedBy: 'nvm',
+      pathSource: 'nvm',
     });
+  });
+
+  it('attributes a plain system install to no version manager or Bun install', async () => {
+    const result = await scanRuntime(
+      NODE_RUNTIME_DEFINITION,
+      fakeDeps({
+        env: { PATH: '/usr/bin' },
+        pathExists: (path) => path === '/usr/bin/node',
+        probeVersion: (path) => Promise.resolve(path === '/usr/bin/node' ? 'v22.13.0' : null),
+      })
+    );
+
+    expect(result.installations[0]).toMatchObject({
+      rawPath: '/usr/bin/node',
+      pathSource: 'system',
+    });
+    expect(result.installations[0]).not.toHaveProperty('managedBy');
   });
 
   it('treats an authoritative configured binary as the only candidate', async () => {
@@ -244,6 +267,7 @@ describe('scanRuntime', () => {
         version: 'v22.13.0',
         origin: 'configured',
         effective: false,
+        pathSource: 'system',
       },
     ]);
   });
@@ -281,7 +305,22 @@ describe('scanRuntime', () => {
       version: '1.2.3',
       origin: 'well-known',
       effective: false,
+      pathSource: 'bun',
     });
+  });
+
+  it('attributes a Bun install under a custom BUN_INSTALL to bun', async () => {
+    const bunPath = '/opt/bun-custom/bin/bun';
+    const result = await scanRuntime(
+      BUN_RUNTIME_DEFINITION,
+      fakeDeps({
+        env: { PATH: '', BUN_INSTALL: '/opt/bun-custom' },
+        pathExists: (path) => path === bunPath,
+        probeVersion: (path) => Promise.resolve(path === bunPath ? '1.2.3' : null),
+      })
+    );
+
+    expect(result.installations[0]).toMatchObject({ rawPath: bunPath, pathSource: 'bun' });
   });
 
   it('honors Windows PATHEXT order when locating command shims', async () => {

@@ -1,6 +1,12 @@
 import { posix, win32 } from 'node:path';
 import type { PathEnv } from '../../runtime-env';
-import type { RuntimeId, RuntimeInstallation, RuntimeOrigin, VersionManagerId } from '../schemas';
+import type {
+  PathSource,
+  RuntimeId,
+  RuntimeInstallation,
+  RuntimeOrigin,
+  VersionManagerId,
+} from '../schemas';
 
 export interface SemVer {
   readonly major: number;
@@ -296,6 +302,32 @@ function detectVersionManager(
   return undefined;
 }
 
+/** Whether `path` resolves under `BUN_INSTALL`, or Bun's own `~/.bun` default. */
+function isBunManagedPath(path: string, deps: BinaryScanDeps): boolean {
+  const normalizedTarget = normalizedPath(path);
+  const roots = [deps.env.BUN_INSTALL, `${deps.homeDir}/.bun`]
+    .filter((root): root is string => Boolean(root?.trim()))
+    .map(normalizedRoot);
+  return roots.some((root) => normalizedTarget.startsWith(`${root}/`));
+}
+
+/**
+ * Who put an installation where it is, as far as the scanner can tell.
+ * `winget` is never assigned here — winget's own MSI is indistinguishable by
+ * path from the nodejs.org MSI, so only a live winget probe can attribute it,
+ * and that happens after the scan, on the host adapter that ran it.
+ */
+function resolvePathSource(
+  rawPath: string,
+  resolvedPath: string,
+  managedBy: VersionManagerId | undefined,
+  deps: BinaryScanDeps
+): PathSource {
+  if (managedBy) return managedBy;
+  if (isBunManagedPath(rawPath, deps) || isBunManagedPath(resolvedPath, deps)) return 'bun';
+  return 'system';
+}
+
 export async function scanRuntime(
   definition: RuntimeDefinition,
   deps: BinaryScanDeps
@@ -393,6 +425,7 @@ export async function scanRuntime(
     // Version-manager binaries retain that provenance through `pathIndex`.
     const effective: boolean = candidate.origin === 'path' && !hasEffectiveInstallation;
     hasEffectiveInstallation ||= effective;
+    const pathSource = resolvePathSource(candidate.path, path, managedBy, deps);
 
     installations.push({
       path,
@@ -403,6 +436,7 @@ export async function scanRuntime(
       effective,
       ...(aliasOf !== undefined && { aliasOf }),
       ...(managedBy !== undefined && { managedBy }),
+      pathSource,
     });
   }
 
