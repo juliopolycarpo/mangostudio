@@ -16,9 +16,11 @@ import { RuntimeShellKindSchema } from '../runtime-protocol/schemas';
 /** Largest raw byte run in one `terminal.output` frame and one socket data frame. */
 export const TERMINAL_CHUNK_MAX_BYTES = 8 * 1024;
 /**
- * Largest browser→hub message, including its one-byte type prefix. Below the
- * shared `maxPayloadLength` of every hub WebSocket route (16 KiB); a paste is
- * split to fit.
+ * Largest browser→hub message, including its one-byte type prefix. Exactly the
+ * shared `maxPayloadLength` of every hub WebSocket route (16 KiB) — uWebSockets
+ * refuses a payload *greater* than the limit, so equal is the largest value
+ * that still arrives. Raising this without raising that one closes the socket
+ * with 1009 on the first full-size paste; an API test pins the pair.
  */
 export const TERMINAL_CLIENT_MESSAGE_MAX_BYTES = 16 * 1024;
 /** Bytes of output the runtime keeps per session for `terminal.attach` replay. */

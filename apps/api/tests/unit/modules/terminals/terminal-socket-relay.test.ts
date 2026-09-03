@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  TERMINAL_CLIENT_MESSAGE_MAX_BYTES,
+  TERMINAL_SOCKET_SEND_HIGH_WATER_BYTES,
+} from '@mangostudio/shared/terminal';
+import { REALTIME_WEBSOCKET_OPTIONS } from '../../../../src/modules/realtime/http/realtime-routes';
+import {
   createTerminalSocketRelay,
   type TerminalSocketRelayDeps,
 } from '../../../../src/modules/terminals/application/terminal-socket-relay';
@@ -154,5 +159,27 @@ describe('createTerminalSocketRelay', () => {
 
     expect(socket.sent).toEqual([bytes(10, 1), bytes(10, 2)]);
     expect(relay.queuedBytes()).toBe(0);
+  });
+});
+
+/**
+ * The one pin the shared package cannot hold: `@mangostudio/shared/terminal`
+ * cannot see the hub's socket options, so nothing there catches a client limit
+ * raised past what the transport will carry.
+ */
+describe('terminal socket limits against the shared websocket options', () => {
+  test('the largest client message still fits one websocket payload', () => {
+    // uWebSockets refuses a payload *greater* than `maxPayloadLength`, so equal
+    // is legal and is what the wire is tuned to. Raising the client limit alone
+    // closes the socket with 1009 on the first full-size paste.
+    expect(TERMINAL_CLIENT_MESSAGE_MAX_BYTES).toBeLessThanOrEqual(
+      REALTIME_WEBSOCKET_OPTIONS.maxPayloadLength
+    );
+  });
+
+  test('the relay holds its queue below the backpressure limit that closes a socket', () => {
+    expect(TERMINAL_SOCKET_SEND_HIGH_WATER_BYTES).toBeLessThan(
+      REALTIME_WEBSOCKET_OPTIONS.backpressureLimit
+    );
   });
 });
