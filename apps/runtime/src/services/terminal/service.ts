@@ -106,6 +106,21 @@ export function createTerminalService(options: TerminalServiceOptions): Terminal
     return session;
   };
 
+  /**
+   * Runs `act` against a session that must exist, answering the bare `ok` the
+   * mutating methods share. `async` so an unknown session id rejects the
+   * promise rather than throwing synchronously into the caller's frame — the
+   * one reason each of these methods was declared `async` with no `await`.
+   */
+  // biome-ignore lint/suspicious/useAwait: an unknown session id must reject.
+  const onSession = async (
+    sessionId: string,
+    act: (session: TerminalSession) => void
+  ): Promise<{ readonly ok: true }> => {
+    act(requireSession(sessionId));
+    return { ok: true as const };
+  };
+
   return {
     // biome-ignore lint/suspicious/useAwait: a synchronous throw here must reject the promise, not escape it.
     async open(params) {
@@ -149,28 +164,20 @@ export function createTerminalService(options: TerminalServiceOptions): Terminal
       return requireSession(params.sessionId).attach();
     },
 
-    // biome-ignore lint/suspicious/useAwait: an unknown session id must reject.
-    async detach(params) {
-      requireSession(params.sessionId).detach();
-      return { ok: true as const };
+    detach(params) {
+      return onSession(params.sessionId, (session) => session.detach());
     },
 
-    // biome-ignore lint/suspicious/useAwait: an unknown session id must reject.
-    async write(params) {
-      requireSession(params.sessionId).write(params.data);
-      return { ok: true as const };
+    write(params) {
+      return onSession(params.sessionId, (session) => session.write(params.data));
     },
 
-    // biome-ignore lint/suspicious/useAwait: an unknown session id must reject.
-    async resize(params) {
-      requireSession(params.sessionId).resize(params.cols, params.rows);
-      return { ok: true as const };
+    resize(params) {
+      return onSession(params.sessionId, (session) => session.resize(params.cols, params.rows));
     },
 
-    // biome-ignore lint/suspicious/useAwait: an unknown session id must reject.
-    async ack(params) {
-      requireSession(params.sessionId).ack(params.bytes);
-      return { ok: true as const };
+    ack(params) {
+      return onSession(params.sessionId, (session) => session.ack(params.bytes));
     },
 
     closeSession(params) {
