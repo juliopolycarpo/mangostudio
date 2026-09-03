@@ -73,6 +73,33 @@ const ARGV_SUMMARY_LIMIT = 8;
 const STRING_SUMMARY_LIMIT = 256;
 
 /**
+ * Methods whose successful calls are per-interaction rather than per-operation.
+ * A terminal session sends one `terminal.write` per keystroke and a
+ * `terminal.ack` for every window of output, so recording them rolls the
+ * `maxBytes` × `maxFiles` retention window in minutes and takes every
+ * `shell.run`, `library.*` and `gh.*` receipt with it — the log stops being a
+ * record of what the hub did and becomes a transcript of somebody typing.
+ * `terminal.open`, `.attach`, `.detach` and `.close` are the operations here,
+ * and they stay.
+ */
+const HIGH_FREQUENCY_METHODS: ReadonlySet<string> = new Set([
+  'terminal.write',
+  'terminal.ack',
+  'terminal.resize',
+]);
+
+/**
+ * Whether one call earns a line. A refusal or a failure always does — a denied
+ * `terminal.write` is exactly the kind of event this file exists for — so only
+ * the successful high-frequency legs are dropped.
+ *
+ * // Usage: if (shouldRecordAudit('terminal.write', 'ok')) buffer.push(line)
+ */
+function shouldRecordAudit(method: string, outcome: RuntimeAuditOutcome): boolean {
+  return outcome !== 'ok' || !HIGH_FREQUENCY_METHODS.has(method);
+}
+
+/**
  * Builds a sink that buffers lines and flushes on an interval. When `enabled`
  * is false, every method is a no-op — host slots default off.
  */
@@ -175,6 +202,7 @@ export function createRuntimeAuditSink(options: RuntimeAuditSinkOptions): Runtim
     },
     record(input) {
       if (closed) return;
+      if (!shouldRecordAudit(input.method, input.outcome)) return;
       const args = summarizeAuditArgs(input.method, input.params);
       const record: RuntimeAuditRecord = {
         ts: new Date().toISOString(),
