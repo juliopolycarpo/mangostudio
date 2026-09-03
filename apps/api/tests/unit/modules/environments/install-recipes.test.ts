@@ -13,9 +13,7 @@ import {
  * declared and still leave its surface stale.
  */
 const RUNTIME_IDS = ['bun', 'node', 'fnm', 'winget', 'git'];
-// fnm has no version-manager detector yet (only `nvm` does) — its recipes
-// declare only a `runtime` probe target, so this list stays as-is.
-const VERSION_MANAGER_IDS = ['nvm'];
+const VERSION_MANAGER_IDS = ['nvm', 'fnm'];
 const AGENT_TARGET_IDS = AGENT_CLI_DEFINITIONS.map((definition) => definition.targetId);
 
 /** winget's HRESULT for "no applicable update found" (0x8A15002B), signed. */

@@ -546,10 +546,12 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     networkAccess: true,
     timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
     // `fnm install --lts` also writes the `lts-latest` alias that
-    // `fnm.node.set-default` relies on. Only `node` is re-probed: unlike nvm,
-    // there is no fnm version-manager detector yet for the other surface to
-    // refresh against.
-    probe: [{ kind: 'runtime', runtimeId: 'node' }],
+    // `fnm.node.set-default` relies on. Both surfaces move: a new managed
+    // version is a node the machine can now run and a version fnm now lists.
+    probe: [
+      { kind: 'runtime', runtimeId: 'node' },
+      { kind: 'version-manager', versionManagerId: 'fnm' },
+    ],
     argv: (input, context) => fnmNodeArgv('install', input, context),
     copyCommand: (input) => {
       const validated = assertRecipeInput(input, 'node-version');
@@ -567,7 +569,10 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     writes: ['<FNM_DIR>/aliases/default'],
     networkAccess: false,
     timeoutMs: 30_000,
-    probe: [{ kind: 'runtime', runtimeId: 'node' }],
+    probe: [
+      { kind: 'runtime', runtimeId: 'node' },
+      { kind: 'version-manager', versionManagerId: 'fnm' },
+    ],
     argv: (input, context) => fnmNodeArgv('set-default', input, context),
     copyCommand: (input) => {
       const validated = assertRecipeInput(input, 'node-version');
