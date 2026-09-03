@@ -31,8 +31,15 @@ import {
   versionManagerStatusesQueryOptions,
 } from '../queries';
 
-export function useRuntimeStatuses(environmentId?: string) {
-  return useQuery(runtimeStatusesQueryOptions(environmentId));
+/**
+ * `enabled` defaults to on for the runtimes screen, which always wants the
+ * data. A caller that lists many machines at once — the entities overview's
+ * toolchain summary — passes it explicitly tied to connection state, the same
+ * way {@link useEnvironmentHealth} does: a sleeping remote must not wake just
+ * because its card is on screen.
+ */
+export function useRuntimeStatuses(environmentId?: string, enabled = true) {
+  return useQuery({ ...runtimeStatusesQueryOptions(environmentId), enabled });
 }
 
 export function useAgentCliStatuses(environmentId?: string) {

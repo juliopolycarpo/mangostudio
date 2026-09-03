@@ -6,6 +6,8 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { resolveApiErrorMessage } from '@/lib/utils';
+import { toolchainSummary } from '../format';
+import { useRuntimeStatuses } from '../hooks/use-runtime-status';
 import { MachineOnboardingWizard } from '../onboarding/MachineOnboardingWizard';
 import {
   useConnectEnvironmentMutation,
@@ -230,6 +232,8 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
 
         <CapabilityChips environment={environment} />
 
+        <ToolchainSummaryLine environment={environment} />
+
         <RuntimeRelease environment={environment} />
 
         <PermissionsRow environment={environment} />
@@ -358,6 +362,32 @@ function formatSlotBytes(bytes: number | null): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * "Node {version} ({source}) · Bun {version}" for this machine, read off its
+ * own runtime statuses.
+ *
+ * Gated on `connected` for the same reason {@link useEnvironmentHealth} gates
+ * its own queries: a card in a grid of many machines must not wake a sleeping
+ * remote just by being on screen. Renders nothing rather than a loading state
+ * — the line either has an answer or it does not exist yet.
+ */
+function ToolchainSummaryLine({ environment }: { environment: Environment }) {
+  const { t } = useI18n();
+  const connected = environment.status.state === 'connected';
+  const runtimes = useRuntimeStatuses(environment.id, connected);
+  const summary = toolchainSummary(t, runtimes.data);
+  if (!summary) return null;
+
+  return (
+    <p
+      className="text-[11px] text-on-surface-variant/65"
+      data-testid="environment-toolchain-summary"
+    >
+      {summary}
+    </p>
+  );
 }
 
 /**

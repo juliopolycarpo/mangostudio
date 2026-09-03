@@ -536,3 +536,41 @@ export function toolchainProcessLine(
     path: canonical?.rawPath ?? selection,
   });
 }
+
+/**
+ * "Node {version} ({source}) · Bun {version}" for the entities overview: what
+ * this machine's shell resolves for each runtime, at a glance.
+ *
+ * `undefined` while runtime statuses have not loaded yet — the line waits
+ * rather than guessing at a machine it has not heard from. Once loaded, a
+ * runtime with no effective installation reads as not installed instead of
+ * disappearing, so the line never silently drops one half of the pair.
+ */
+export function toolchainSummary(
+  t: Messages,
+  statuses: readonly RuntimeStatus[] | undefined
+): string | undefined {
+  if (statuses === undefined) return undefined;
+
+  const node = statuses.find((status) => status.id === 'node');
+  const bun = statuses.find((status) => status.id === 'bun');
+  const nodeInstallation = node && effectiveInstallation(node).installation;
+  const bunInstallation = bun && effectiveInstallation(bun).installation;
+
+  // The compact form ("Node", not the `names` dictionary's "Node.js") to
+  // match the installed branch's own template below.
+  const nodePart = nodeInstallation
+    ? formatMessage(t.environments.entities.toolchainSummaryNode, {
+        version: versionLabel(t, nodeInstallation.version),
+        source: pathSourceLabel(t, nodeInstallation.pathSource),
+      })
+    : formatMessage(t.environments.entities.toolchainSummaryMissing, { runtime: 'Node' });
+
+  const bunPart = bunInstallation
+    ? formatMessage(t.environments.entities.toolchainSummaryBun, {
+        version: versionLabel(t, bunInstallation.version),
+      })
+    : formatMessage(t.environments.entities.toolchainSummaryMissing, { runtime: 'Bun' });
+
+  return `${nodePart} · ${bunPart}`;
+}

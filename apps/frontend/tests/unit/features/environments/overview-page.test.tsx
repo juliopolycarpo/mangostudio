@@ -236,6 +236,15 @@ describe('OverviewPage', () => {
     expect(within(local).getByText('Connected')).toBeInTheDocument();
     expect(within(local).getByText('Git 2.47.0')).toBeInTheDocument();
     expect(within(local).getByText('Checkpoints')).toBeInTheDocument();
+    // RUNTIMES' node is found but not effective (the 002 shadowing case), so
+    // the summary line names it as not installed rather than dropping it —
+    // Bun is effective and reads its version normally.
+    expect(await within(local).findByTestId('environment-toolchain-summary')).toHaveTextContent(
+      'Node not installed · Bun 1.3.14'
+    );
+    // remote-dev is disconnected, so its toolchain summary never fetches —
+    // a sleeping machine must not wake just because its card is on screen.
+    expect(within(remote).queryByTestId('environment-toolchain-summary')).not.toBeInTheDocument();
     expect(within(remote).getByRole('button', { name: 'Connect' })).toBeInTheDocument();
     expect(within(remote).getByRole('button', { name: 'Edit name' })).toBeInTheDocument();
     expect(within(remote).getByRole('button', { name: 'Remove' })).toBeInTheDocument();
@@ -263,6 +272,53 @@ describe('OverviewPage', () => {
         name: en.environments.overview.open.replace('{section}', en.environments.tabs.agents),
       })
     ).toHaveAttribute('href', '/environments/agents');
+  });
+
+  it('names both the source and the version once Node itself is the effective binary', async () => {
+    const BOTH_EFFECTIVE_RUNTIMES = [
+      runtimeStatus({
+        id: 'node',
+        health: 'ok',
+        installations: [
+          installation({
+            path: '/home/dev/.nvm/versions/node/v20/bin/node',
+            version: '20.11.0',
+            effective: true,
+            pathSource: 'nvm',
+          }),
+        ],
+      }),
+      runtimeStatus({
+        id: 'bun',
+        health: 'ok',
+        installations: [
+          installation({ path: '/home/dev/.bun/bin/bun', version: '1.3.14', effective: true }),
+        ],
+      }),
+    ];
+    scenario
+      .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+      .respondWithJson('GET', '/api/machine/status', { body: MACHINE_STATUS })
+      .respondWithJson('GET', '/api/environments', { body: ENVIRONMENTS })
+      .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
+      .respondWithJson('GET', '/api/environments/runtimes', { body: BOTH_EFFECTIVE_RUNTIMES })
+      .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
+      .respondWithJson('GET', '/api/library/resources', {
+        body: { resources: RESOURCES, unreadableEntries: [] },
+      })
+      .respondWithJson('GET', '/api/library/targets', { body: TARGETS })
+      .install();
+
+    await renderWithRouter(<OverviewPage />);
+
+    const environments = await screen.findByTestId('overview-environments');
+    const local = within(environments)
+      .getAllByTestId('environment-entity-card')
+      .find((card) => card.getAttribute('data-environment-id') === 'local') as HTMLElement;
+
+    expect(await within(local).findByTestId('environment-toolchain-summary')).toHaveTextContent(
+      'Node 20.11.0 (from nvm) · Bun 1.3.14'
+    );
   });
 
   // A live self-update ends with a deliberate disconnect. Reporting that as an

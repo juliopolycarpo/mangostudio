@@ -2943,6 +2943,11 @@ export const messages = {
       platform: '{platform} · {arch}',
       runtimeVersionDrift:
         'Esta máquina roda o runtime {version}, que não é a versão distribuída por este MangoStudio. A conexão continua funcionando; atualize o runtime lá quando possível.',
+      // A linha-resumo do toolchain: o que o shell desta máquina resolve
+      // para Node e Bun, em um relance.
+      toolchainSummaryNode: 'Node {version} ({source})',
+      toolchainSummaryBun: 'Bun {version}',
+      toolchainSummaryMissing: '{runtime} não instalado',
       permissions: {
         title: 'Permissões',
         profile: {

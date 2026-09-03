@@ -2938,6 +2938,11 @@ export const messages: Messages = {
       platform: '{platform} · {arch}',
       runtimeVersionDrift:
         'This machine runs runtime {version}, which is not the release this MangoStudio ships. It still connects; update the runtime there when you can.',
+      // The toolchain summary line: what this machine's shell resolves for
+      // Node and Bun, at a glance.
+      toolchainSummaryNode: 'Node {version} ({source})',
+      toolchainSummaryBun: 'Bun {version}',
+      toolchainSummaryMissing: '{runtime} not installed',
       permissions: {
         title: 'Permissions',
         profile: {

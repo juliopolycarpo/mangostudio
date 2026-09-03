@@ -21,6 +21,7 @@ import {
   pathSourceLabel,
   prefixedVersionLabel,
   toolchainProcessLine,
+  toolchainSummary,
   versionLabel,
   worstFinding,
 } from '../../../../src/features/environments/format';
@@ -517,5 +518,49 @@ describe('toolchainProcessLine', () => {
     expect(toolchainProcessLine(en, identityResolver, status, '/opt/node/bin/node')).toBe(
       'Processes run unknown version from /opt/node/bin/node.'
     );
+  });
+});
+
+describe('toolchainSummary', () => {
+  it('is undefined while runtime statuses have not loaded', () => {
+    expect(toolchainSummary(en, undefined)).toBeUndefined();
+  });
+
+  it('reads both runtimes once loaded', () => {
+    const statuses = [
+      runtimeStatus({
+        id: 'node',
+        installations: [
+          installation({
+            path: '/home/dev/.nvm/versions/node/v20/bin/node',
+            version: '20.11.0',
+            effective: true,
+            pathSource: 'nvm',
+          }),
+        ],
+      }),
+      runtimeStatus({
+        id: 'bun',
+        installations: [
+          installation({ path: '/home/dev/.bun/bin/bun', version: '1.3.14', effective: true }),
+        ],
+      }),
+    ];
+
+    expect(toolchainSummary(en, statuses)).toBe('Node 20.11.0 (from nvm) · Bun 1.3.14');
+  });
+
+  it('names a runtime with no effective installation as not installed instead of dropping it', () => {
+    const statuses = [
+      runtimeStatus({ id: 'node', installations: [] }),
+      runtimeStatus({
+        id: 'bun',
+        installations: [
+          installation({ path: '/home/dev/.bun/bin/bun', version: '1.3.14', effective: true }),
+        ],
+      }),
+    ];
+
+    expect(toolchainSummary(en, statuses)).toBe('Node not installed · Bun 1.3.14');
   });
 });
