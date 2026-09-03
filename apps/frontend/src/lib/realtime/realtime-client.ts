@@ -1,6 +1,5 @@
 import {
   REALTIME_CLOSE_CODES,
-  REALTIME_IDLE_TIMEOUT_SECONDS,
   type RealtimeClientMessage,
   type RealtimeInvalidateMessage,
 } from '@mangostudio/shared/realtime';
@@ -9,6 +8,7 @@ import { scheduleLoginRedirect } from '../auth-navigate';
 import { parseServerMessage } from './parse-server-message';
 import {
   RECONNECT_MAX_FAILURES,
+  SOCKET_HEARTBEAT_MS,
   nextReconnectDelay as sharedReconnectDelay,
 } from './reconnect-backoff';
 
@@ -23,12 +23,6 @@ const MAX_TOPICS_PER_FRAME = 32;
  * that a page cycling through chats cannot approach the 64-topic server cap.
  */
 const LINGER_MS = 5_000;
-
-/**
- * Heartbeat interval, derived from the server idle window so the two cannot
- * drift apart. Comfortably under the timeout even if one tick is missed.
- */
-const HEARTBEAT_MS = Math.floor((REALTIME_IDLE_TIMEOUT_SECONDS * 1_000) / 2.5);
 
 /** A connection must stay up this long before its failures are forgiven. */
 const STABILITY_MS = 10_000;
@@ -279,7 +273,7 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
   function handleReady(): void {
     phase = 'ready';
     stopHeartbeat();
-    heartbeatTimer = setInterval(onHeartbeat, HEARTBEAT_MS);
+    heartbeatTimer = setInterval(onHeartbeat, SOCKET_HEARTBEAT_MS);
     clearStabilityTimer();
     // Backoff resets on proven stability rather than on `ready`, so a server that
     // acks and then drops — eight tabs against the connection cap — still

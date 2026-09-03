@@ -30,9 +30,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { getWebSocketBaseUrl } from '@/lib/api-base-url';
 import { scheduleLoginRedirect } from '@/lib/auth-navigate';
-import { nextReconnectDelay } from '@/lib/realtime/reconnect-backoff';
-
-const PING_MS = 25_000;
+import { nextReconnectDelay, SOCKET_HEARTBEAT_MS } from '@/lib/realtime/reconnect-backoff';
 
 /**
  * `open` is the only phase a frame may be sent in. The rest are terminal for
@@ -270,7 +268,7 @@ export function createTerminalSocket(options: TerminalSocketOptions): TerminalSo
       setStatus('open');
       options.onConnected();
       stopPing();
-      pingTimer = setInterval(onPingTick, PING_MS);
+      pingTimer = setInterval(onPingTick, SOCKET_HEARTBEAT_MS);
     };
     created.onmessage = (event: MessageEvent) => {
       if (socket !== created) return;

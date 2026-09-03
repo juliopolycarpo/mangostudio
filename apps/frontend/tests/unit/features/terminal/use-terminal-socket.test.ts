@@ -10,6 +10,7 @@ import {
   type TerminalSocketOptions,
   type TerminalSocketStatus,
 } from '../../../../src/features/terminal/use-terminal-socket';
+import { SOCKET_HEARTBEAT_MS } from '../../../../src/lib/realtime/reconnect-backoff';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../../support/harness/timers';
 import { FakeTerminalSocket } from './fake-terminal-socket';
 
@@ -241,15 +242,15 @@ describe('createTerminalSocket', () => {
     expect(FakeTerminalSocket.instances).toHaveLength(2);
   });
 
-  it('sends a ping every 25s while open and forces a reconnect on a missed pong', async () => {
+  it('pings on the shared heartbeat while open and forces a reconnect on a missed pong', async () => {
     createSocket();
     lastSocket().open();
 
-    await advanceTimersByTimeAsync(25_000);
+    await advanceTimersByTimeAsync(SOCKET_HEARTBEAT_MS);
     expect(decodedFrames(lastSocket())).toEqual([{ type: 'ping' }]);
 
     // No pong arrives before the next tick: the socket is treated as half-open.
-    await advanceTimersByTimeAsync(25_000);
+    await advanceTimersByTimeAsync(SOCKET_HEARTBEAT_MS);
 
     expect(statuses.at(-1)).toBe('reconnecting');
   });
@@ -258,9 +259,9 @@ describe('createTerminalSocket', () => {
     createSocket();
     lastSocket().open();
 
-    await advanceTimersByTimeAsync(25_000);
+    await advanceTimersByTimeAsync(SOCKET_HEARTBEAT_MS);
     lastSocket().emitServerMessage({ type: 'pong' });
-    await advanceTimersByTimeAsync(25_000);
+    await advanceTimersByTimeAsync(SOCKET_HEARTBEAT_MS);
 
     // A second ping went out and the socket is still open — no reconnect.
     expect(decodedFrames(lastSocket())).toEqual([{ type: 'ping' }, { type: 'ping' }]);

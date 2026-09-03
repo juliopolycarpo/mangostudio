@@ -1,10 +1,22 @@
 /**
- * The reconnect schedule every browser socket in this app retries on.
+ * The timing schedule every browser socket in this app keeps: when it pings,
+ * and how long it waits before retrying.
  *
  * Shared rather than copied: the realtime client and the terminal socket had
  * byte-identical constants and delay arithmetic, so tuning one left the other
  * on the old curve with nothing to say so at compile time.
  */
+
+import { REALTIME_IDLE_TIMEOUT_SECONDS } from '@mangostudio/shared/realtime';
+
+/**
+ * Ping interval, comfortably inside the idle timeout every hub WebSocket route
+ * is mounted with (`REALTIME_WEBSOCKET_OPTIONS`, applied process-wide). Derived
+ * from that timeout rather than restated: a hardcoded interval above a lowered
+ * timeout is a socket the hub closes on schedule and the client reopens on
+ * schedule, forever.
+ */
+export const SOCKET_HEARTBEAT_MS = Math.floor((REALTIME_IDLE_TIMEOUT_SECONDS * 1_000) / 2.5);
 
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
