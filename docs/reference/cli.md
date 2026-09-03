@@ -22,30 +22,32 @@ copy-paste commands, or:
 
 ## Commands
 
-| Command                                             | Description                                                                    |
-| --------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `mangostudio`                                       | Print help and the command list.                                               |
-| `serve [host\|port\|host:port]`                     | Start the server in the foreground (default `localhost:3001`).                 |
-| `serve [host\|port\|host:port] -d`                  | Start the server in the background (detached) and return.                      |
-| `status`                                            | Show whether a server is running, its URL, launch mode, and health.            |
-| `status --json`                                     | Emit the shared hub status document instead of plain text.                     |
-| `stop`                                              | Gracefully stop the running server (SIGTERM).                                  |
-| `restart`                                           | Restart the running server the way it was started.                             |
-| `killserver`                                        | Force-kill the running server (SIGKILL).                                       |
-| `service <action> [host\|port\|host:port] [--json]` | Keep the server running across logout and reboot.                              |
-| `logs [-f] [-n <count>]`                            | Print the tail of the server log; `-f` follows it.                             |
-| `open`                                              | Open the running server in the default browser.                                |
-| `doctor`                                            | Run environment and configuration diagnostics.                                 |
-| `doctor --all`                                      | Include ChatGPT connector checks even without a configured connector.          |
-| `doctor --chatgpt-refresh`                          | Perform a live ChatGPT token refresh probe (rotates the stored refresh token). |
-| `doctor --probe`                                    | Actively connect to each enabled MCP server (spawns children / hits URLs).     |
-| `doctor --env` / `--library`                        | Limit extra sections to environments and/or library (core checks always run).  |
-| `doctor --json`                                     | Emit structured JSON (checks, warning/failure counts).                         |
-| `env [runtimes\|agents] [--json]`                   | Report runtimes, version managers, and agent CLIs (read-only).                 |
-| `library [locations] [--json]`                      | Library coverage matrix and location health (read-only).                       |
-| `library --kind <kind>`                             | Filter resources by kind (`skill`, `subagent`, etc.).                          |
-| `library --divergent`                               | List only resources whose copies disagree across locations.                    |
-| `version`, `--version`, `-v`                        | Print the embedded MangoStudio version.                                        |
+| Command                                                        | Description                                                                    |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `mangostudio`                                                  | Print help and the command list.                                               |
+| `serve [host\|port\|host:port]`                                | Start the server in the foreground (default `localhost:3001`).                 |
+| `serve [host\|port\|host:port] -d`                             | Start the server in the background (detached) and return.                      |
+| `status`                                                       | Show whether a server is running, its URL, launch mode, and health.            |
+| `status --json`                                                | Emit the shared hub status document instead of plain text.                     |
+| `stop`                                                         | Gracefully stop the running server (SIGTERM).                                  |
+| `restart`                                                      | Restart the running server the way it was started.                             |
+| `killserver`                                                   | Force-kill the running server (SIGKILL).                                       |
+| `service <action> [host\|port\|host:port] [--json]`            | Keep the server running across logout and reboot.                              |
+| `logs [-f] [-n <count>]`                                       | Print the tail of the server log; `-f` follows it.                             |
+| `open`                                                         | Open the running server in the default browser.                                |
+| `doctor`                                                       | Run environment and configuration diagnostics.                                 |
+| `doctor --all`                                                 | Include ChatGPT connector checks even without a configured connector.          |
+| `doctor --chatgpt-refresh`                                     | Perform a live ChatGPT token refresh probe (rotates the stored refresh token). |
+| `doctor --probe`                                               | Actively connect to each enabled MCP server (spawns children / hits URLs).     |
+| `doctor --env` / `--library`                                   | Limit extra sections to environments and/or library (core checks always run).  |
+| `doctor --json`                                                | Emit structured JSON (checks, warning/failure counts).                         |
+| `env [runtimes\|agents] [--json]`                              | Report runtimes, version managers, and agent CLIs (read-only).                 |
+| `env install <recipe> [--environment <id>] [--version <spec>]` | Run an install recipe on this machine or a paired one.                         |
+| `env update <recipe> [--environment <id>]`                     | Same as `env install`, restricted to update recipes.                           |
+| `library [locations] [--json]`                                 | Library coverage matrix and location health (read-only).                       |
+| `library --kind <kind>`                                        | Filter resources by kind (`skill`, `subagent`, etc.).                          |
+| `library --divergent`                                          | List only resources whose copies disagree across locations.                    |
+| `version`, `--version`, `-v`                                   | Print the embedded MangoStudio version.                                        |
 
 `-d` / `--detach` and the positional host/port target may be combined in any
 order, e.g. `mangostudio serve 127.0.0.1:3000 -d`.
@@ -201,6 +203,48 @@ last run is still readable. The default is the last 100 lines; `-n` takes up to
 10 000. `-f` follows the file, polling twice a second, and re-reads from the
 start when it is rotated or truncated. A foreground `serve` writes to its
 terminal, so there is nothing to tail.
+
+### env install / env update
+
+The CLI mirror of the Environments page's install flow, for the person typing
+at this machine's own terminal rather than a browser. Both call the same
+install service the API does — recipe ids, previews, download verification,
+audit rows, everything in
+[`docs/architecture/environment-installs.md`](../architecture/environment-installs.md)
+applies unchanged.
+
+```bash
+mangostudio env install bun.install.official
+mangostudio env install nvm.node.install --version 22
+mangostudio env update bun.update --json
+mangostudio env install winget.node.install --environment dev-box
+```
+
+| Flag                 | Description                                                                 |
+| -------------------- | --------------------------------------------------------------------------- |
+| `--environment <id>` | Run on a paired environment instead of this machine.                        |
+| `--version <spec>`   | `lts`, `latest`, or a numeric version, for a recipe that takes a Node spec. |
+| `--json`             | Print the final `InstallRun` audit row instead of a plain summary.          |
+
+`env install` accepts `install`, `use-version`, and `set-default` recipes;
+`env update` accepts only `update` recipes — there is no `env uninstall` yet,
+so an uninstall recipe is not reachable from the CLI in this pass. Installs
+must be enabled first (`config.toml` `[environments] installs_enabled = true`,
+or `MANGO_ENV_INSTALLS_ENABLED=true`); a container refuses too. Unlike the
+guard a browser answers to, loopback is not part of it — a terminal on this
+machine is definitionally local — but a remote `--environment` is always
+refused, because the CLI has no signed-in session to check that environment's
+`allowInstalls` against.
+
+The flow prints the recipe preview (argv, writes, download origin/size/sha256,
+whether it is runnable) and, for a blocked or copy-only recipe, the command to
+run by hand instead — then exits `2` without starting anything. Otherwise it
+starts the run and streams its log to stdout as it arrives, exiting `0` on
+`succeeded` and `1` on any other terminal status.
+
+The CLI process shares this machine's SQLite database with a running hub, but
+not its in-process dedupe of active runs: two processes racing the same
+recipe each spawn a child rather than one attaching to the other's.
 
 ## `mangostudio-runtime`
 
@@ -494,7 +538,11 @@ servers MCP is designed around.
 - `0` — success (including idempotent `stop`/`status` when nothing is running).
 - `1` — usage error (bad flag or port), refused start (already running), failed
   background start, or a `stop` that timed out (try `killserver`). `doctor`
-  exits `1` if any check fails.
+  exits `1` if any check fails. `env install`/`env update` also use `1` for a
+  run that finished in any status other than `succeeded`.
+- `2` — `env install`/`env update` only: the recipe never started (blocked by
+  the guard, unsupported on this platform, missing a requirement, or
+  copy-only).
 
 ## Configuration
 
