@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, jest } from 'bun:test';
 import {
   decodeTerminalClientMessage,
-  encodeTerminalServerMessage,
   TERMINAL_SOCKET_CLOSE_CODES,
 } from '@mangostudio/shared/terminal';
 import {

@@ -1,11 +1,4 @@
-import {
-  TERMINAL_COLS_MAX,
-  TERMINAL_COLS_MIN,
-  TERMINAL_ROWS_MAX,
-  TERMINAL_ROWS_MIN,
-  type TerminalExit,
-  type TerminalNotice,
-} from '@mangostudio/shared/terminal';
+import type { TerminalExit, TerminalNotice } from '@mangostudio/shared/terminal';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
