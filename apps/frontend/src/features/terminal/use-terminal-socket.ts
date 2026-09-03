@@ -124,6 +124,13 @@ export function createTerminalSocket(options: TerminalSocketOptions): TerminalSo
   let awaitingPong = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let pingTimer: ReturnType<typeof setInterval> | undefined;
+  /**
+   * Last size actually put on the wire, to skip resends of an unchanged grid.
+   * Cleared on every `connect()`: the hub never tells the browser the PTY's
+   * size, so after a reconnect or a takeover the size must be resent even when
+   * it matches what this client last sent.
+   */
+  let lastSentSize: { cols: number; rows: number } | null = null;
 
   function setStatus(next: TerminalSocketStatus): void {
     status = next;
@@ -254,6 +261,7 @@ export function createTerminalSocket(options: TerminalSocketOptions): TerminalSo
     if (disposed) return;
     setStatus(failureCount > 0 ? 'reconnecting' : 'connecting');
     awaitingPong = false;
+    lastSentSize = null;
 
     let created: WebSocket;
     try {
@@ -295,7 +303,13 @@ export function createTerminalSocket(options: TerminalSocketOptions): TerminalSo
     },
     resize(cols: number, rows: number): void {
       if (cols < TERMINAL_COLS_MIN || rows < TERMINAL_ROWS_MIN) return;
-      sendFrame(encodeTerminalClientMessage({ type: 'resize', cols, rows }));
+      // A `ResizeObserver` fires per animation frame during a drag, but the cell
+      // grid usually does not change; each redundant frame costs a schema check
+      // and an awaited `terminal.resize` RPC on the socket's serialized message
+      // chain, which head-of-line-blocks keystrokes for the whole drag.
+      if (lastSentSize?.cols === cols && lastSentSize.rows === rows) return;
+      if (!sendFrame(encodeTerminalClientMessage({ type: 'resize', cols, rows }))) return;
+      lastSentSize = { cols, rows };
     },
     acknowledge(bytes: number): void {
       sendFrame(encodeTerminalClientMessage({ type: 'ack', bytes }));

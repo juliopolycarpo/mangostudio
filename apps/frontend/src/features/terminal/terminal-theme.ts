@@ -96,15 +96,7 @@ export const TERMINAL_PALETTES: Readonly<Record<TerminalAppTheme, TerminalPalett
   },
 };
 
-/**
- * Builds xterm's `ITheme` for one app theme, so a terminal painted in either
- * theme matches the surface it sits on instead of carrying its own palette.
- *
- * @example
- * const term = new Terminal({ theme: buildTerminalTheme('dark') });
- */
-export function buildTerminalTheme(appTheme: TerminalAppTheme): ITheme {
-  const palette = TERMINAL_PALETTES[appTheme];
+function toXtermTheme(palette: TerminalPalette): ITheme {
   return {
     background: palette.background,
     foreground: palette.foreground,
@@ -112,6 +104,29 @@ export function buildTerminalTheme(appTheme: TerminalAppTheme): ITheme {
     selectionBackground: palette.selectionBackground,
     ...palette.ansi,
   };
+}
+
+/**
+ * One frozen `ITheme` per app theme. xterm's option setter guards with a
+ * reference comparison, so handing it a structurally identical *new* object
+ * still fires `onChangeColors` — which rebuilds the ANSI stylesheet in the DOM
+ * renderer and invalidates the WebGL glyph atlas. Built once, the constructor
+ * and the theme effect pass the same reference and that guard short-circuits.
+ */
+const XTERM_THEMES: Readonly<Record<TerminalAppTheme, ITheme>> = {
+  dark: toXtermTheme(TERMINAL_PALETTES.dark),
+  light: toXtermTheme(TERMINAL_PALETTES.light),
+};
+
+/**
+ * xterm's `ITheme` for one app theme, so a terminal painted in either theme
+ * matches the surface it sits on instead of carrying its own palette.
+ *
+ * @example
+ * const term = new Terminal({ theme: buildTerminalTheme('dark') });
+ */
+export function buildTerminalTheme(appTheme: TerminalAppTheme): ITheme {
+  return XTERM_THEMES[appTheme];
 }
 
 /** Pixel sizes matching `--chat-font-size` in `index.css` for each setting. */
