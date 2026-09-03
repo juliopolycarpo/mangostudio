@@ -163,6 +163,46 @@ describe('scanRuntime', () => {
     });
   });
 
+  it('classifies a win32 fnm Node under the default %APPDATA%\\fnm alias with no FNM_DIR set', async () => {
+    const nodePath = 'C:\\Users\\x\\AppData\\Roaming\\fnm\\aliases\\default\\node.exe';
+
+    const result = await scanRuntime(
+      NODE_RUNTIME_DEFINITION,
+      fakeDeps({
+        platform: 'win32',
+        homeDir: 'C:\\Users\\x',
+        env: { PATH: '', APPDATA: 'C:\\Users\\x\\AppData\\Roaming' },
+        pathExists: (path) => path === nodePath,
+        probeVersion: (path) => Promise.resolve(path === nodePath ? 'v24.9.0' : null),
+      })
+    );
+
+    expect(result.installations[0]).toMatchObject({
+      rawPath: nodePath,
+      managedBy: 'fnm',
+    });
+  });
+
+  it('still classifies fnm on win32 when FNM_DIR points somewhere else', async () => {
+    const nodePath = 'D:\\tools\\fnm\\aliases\\default\\node.exe';
+
+    const result = await scanRuntime(
+      NODE_RUNTIME_DEFINITION,
+      fakeDeps({
+        platform: 'win32',
+        homeDir: 'C:\\Users\\x',
+        env: { PATH: '', FNM_DIR: 'D:\\tools\\fnm' },
+        pathExists: (path) => path === nodePath,
+        probeVersion: (path) => Promise.resolve(path === nodePath ? 'v24.9.0' : null),
+      })
+    );
+
+    expect(result.installations[0]).toMatchObject({
+      rawPath: nodePath,
+      managedBy: 'fnm',
+    });
+  });
+
   it('identifies nvm installations under a custom NVM_DIR', async () => {
     const nodePath = '/opt/custom-nvm/versions/node/v24.18.0/bin/node';
 

@@ -233,13 +233,26 @@ function probeWithTimeout(
   });
 }
 
-function normalizedPath(path: string): string {
+export function normalizedPath(path: string): string {
   return path.replaceAll('\\', '/').toLowerCase();
 }
 
 /** Version-manager roots are compared as prefixes, so trailing separators must go. */
 function normalizedRoot(path: string): string {
   return normalizedPath(path.trim()).replace(/\/+$/, '');
+}
+
+/**
+ * fnm's root on Windows when `FNM_DIR` is unset, mirroring the POSIX
+ * `~/.local/share/fnm` fallback below: fnm's own Windows installer sets
+ * neither an environment variable nor a registry key for its default,
+ * `%APPDATA%\fnm`, so an install left at that default reads as `system`
+ * without this.
+ */
+export function windowsDefaultFnmDir(env: Pick<PathEnv, 'platform' | 'env'>): string | undefined {
+  if (env.platform !== 'win32') return undefined;
+  const appData = env.env.APPDATA?.trim();
+  return appData ? win32.join(appData, 'fnm') : undefined;
 }
 
 function detectVersionManager(
@@ -250,7 +263,7 @@ function detectVersionManager(
   const paths = [rawPath, realpath].map(normalizedPath);
   const configuredRoots = [
     ['nvm', deps.env.NVM_DIR, deps.env.NVM_HOME, deps.env.NVM_SYMLINK],
-    ['fnm', deps.env.FNM_DIR],
+    ['fnm', deps.env.FNM_DIR, windowsDefaultFnmDir(deps)],
     ['volta', deps.env.VOLTA_HOME],
   ] as const;
 

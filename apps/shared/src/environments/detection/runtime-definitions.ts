@@ -1,6 +1,6 @@
 import { posix, win32 } from 'node:path';
 import type { PathEnv } from '../../runtime-env';
-import type { RuntimeDefinition, SemVer } from './binary-scan';
+import { type RuntimeDefinition, type SemVer, windowsDefaultFnmDir } from './binary-scan';
 
 function parseSemVer(raw: string, prefix: 'optional-v' | 'none'): SemVer | null {
   const pattern = prefix === 'optional-v' ? /^v?(\d+)\.(\d+)\.(\d+)/ : /^(\d+)\.(\d+)\.(\d+)/;
@@ -23,7 +23,8 @@ export function parseBunVersion(raw: string): SemVer | null {
 
 export function wellKnownNodeDirectories(env: PathEnv): string[] {
   if (env.platform === 'win32') {
-    const { ProgramFiles, LOCALAPPDATA, NVM_SYMLINK, VOLTA_HOME } = env.env;
+    const { ProgramFiles, LOCALAPPDATA, NVM_SYMLINK, VOLTA_HOME, FNM_DIR } = env.env;
+    const fnmDir = FNM_DIR?.trim() || windowsDefaultFnmDir(env);
     return [
       NVM_SYMLINK,
       ProgramFiles ? win32.join(ProgramFiles, 'nodejs') : undefined,
@@ -31,6 +32,7 @@ export function wellKnownNodeDirectories(env: PathEnv): string[] {
         ? win32.join(env.env['ProgramFiles(x86)'] as string, 'nodejs')
         : undefined,
       LOCALAPPDATA ? win32.join(LOCALAPPDATA, 'Programs', 'nodejs') : undefined,
+      fnmDir ? win32.join(fnmDir, 'aliases', 'default') : undefined,
       VOLTA_HOME ? win32.join(VOLTA_HOME, 'bin') : undefined,
     ].filter((directory): directory is string => Boolean(directory?.trim()));
   }
