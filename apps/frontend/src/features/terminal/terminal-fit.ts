@@ -21,6 +21,11 @@ export function clampTerminalSize(
     readonly rowsMax: number;
   }
 ): { readonly cols: number; readonly rows: number } | null {
+  // `NaN` survives every comparison below (`NaN < 2` is false) and `Math.min`
+  // propagates it, so an unmeasurable container would otherwise reach the wire
+  // as `{"cols":null}` — a schema violation the hub answers with a 1003 close,
+  // which is the reconnect loop this whole function exists to prevent.
+  if (!Number.isFinite(proposed.cols) || !Number.isFinite(proposed.rows)) return null;
   if (proposed.cols < bounds.colsMin || proposed.rows < bounds.rowsMin) return null;
   return {
     cols: Math.min(proposed.cols, bounds.colsMax),

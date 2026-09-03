@@ -16,4 +16,12 @@ describe('clampTerminalSize', () => {
     expect(clampTerminalSize({ cols: 1, rows: 40 }, BOUNDS)).toBeNull();
     expect(clampTerminalSize({ cols: 120, rows: 0 }, BOUNDS)).toBeNull();
   });
+
+  it('drops a non-finite proposal, which every comparison here would otherwise pass', () => {
+    // `NaN < 2` is false and `Math.min(NaN, 500)` is NaN, so an unguarded clamp
+    // sends `{"cols":null}` — a schema violation the hub closes the socket for.
+    expect(clampTerminalSize({ cols: Number.NaN, rows: 40 }, BOUNDS)).toBeNull();
+    expect(clampTerminalSize({ cols: 120, rows: Number.NaN }, BOUNDS)).toBeNull();
+    expect(clampTerminalSize({ cols: Number.POSITIVE_INFINITY, rows: 40 }, BOUNDS)).toBeNull();
+  });
 });
