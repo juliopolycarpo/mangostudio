@@ -297,6 +297,33 @@ describe('install service', () => {
   // Table-driven over the registry itself so a ninth recipe joins without
   // anyone remembering to extend this file — which is the failure #699 is about.
   for (const recipe of INSTALL_RECIPES) {
+    // A copy-only recipe has no automated run at all: `start` always refuses
+    // it, so what this table asserts for it is the refusal, not a probe.
+    if (!recipe.argv) {
+      it(`refuses to start ${recipe.id}, which has no automated run`, async () => {
+        const detection = createRecordingProbingService();
+        const memory = createMemoryRepository();
+        const service = createInstallService({
+          recipes: [recipe],
+          probingService: detection.probingService,
+          repository: memory.repository,
+          runner: succeedingRunner(),
+          resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+          now: () => 1_700_000_000_000,
+          platform: recipe.platforms[0],
+        });
+
+        const input: RecipeInput =
+          recipe.inputKind === 'node-version' ? { kind: 'node-version', version: 'lts' } : NO_INPUT;
+
+        await expect(
+          service.start({ recipeId: recipe.id, input }, REQUEST_CONTEXT)
+        ).rejects.toThrow('has no automated run');
+        expect(detection.forced).toEqual([]);
+      });
+      continue;
+    }
+
     it(`re-probes exactly what ${recipe.id} declares`, async () => {
       const detection = createRecordingProbingService();
       const memory = createMemoryRepository();
@@ -313,7 +340,7 @@ describe('install service', () => {
           return `${recipe.id}-${nextId}`;
         },
         now: () => 1_700_000_000_000,
-        platform: 'linux',
+        platform: recipe.platforms[0],
       });
 
       const input: RecipeInput =
@@ -495,7 +522,10 @@ describe('install service', () => {
     const [preview] = await service.listRecipes(REQUEST_CONTEXT);
 
     expect(preview?.guard).toEqual(BLOCKED_GUARD);
-    expect(preview?.argv).toEqual(['bun', 'upgrade']);
+    // The runner spawns the resolved absolute path — a service-launched
+    // runtime's own PATH is exactly what this sidesteps — while the copy
+    // command still shows the plain name for the user's own shell.
+    expect(preview?.argv).toEqual(['/home/tester/.bun/bin/bun', 'upgrade']);
     expect(preview?.copyCommand).toBe('bun upgrade');
     await expect(
       service.start({ recipeId: 'bun.update', input: NO_INPUT }, REQUEST_CONTEXT)
@@ -527,6 +557,46 @@ describe('install service', () => {
       present: true,
       detectedIn: ['/home/tester/.zshrc'],
     });
+  });
+
+  it("reports nvm.install's pinned digest before anything has been downloaded", async () => {
+    const detection = createDetectionServices();
+    const memory = createMemoryRepository();
+    const service = createInstallService({
+      recipes: [getInstallRecipe('nvm.install')],
+      ...detection,
+      repository: memory.repository,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+      platform: 'linux',
+    });
+
+    const [preview] = await service.listRecipes(REQUEST_CONTEXT);
+
+    expect(preview?.download).toMatchObject({
+      url: 'https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.7/install.sh',
+      pinnedSha256: '066ce4eaf4d78eaa6410433bc9ba58faaba646157cbbed6109153e6c24c5f8a5',
+    });
+    // Not fetched yet — no verified digest of the actual bytes exists.
+    expect(preview?.download?.sha256).toBeUndefined();
+  });
+
+  it('offers a copy-only recipe with an empty argv and runnable: false', async () => {
+    const detection = createDetectionServices();
+    const memory = createMemoryRepository();
+    const service = createInstallService({
+      recipes: [getInstallRecipe('cursor.uninstall')],
+      ...detection,
+      repository: memory.repository,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+      platform: 'linux',
+    });
+
+    const [preview] = await service.listRecipes(REQUEST_CONTEXT);
+
+    expect(preview?.runnable).toBe(false);
+    expect(preview?.unrunnableReason).toBe('vendor-undocumented');
+    expect(preview?.argv).toEqual([]);
+    expect(preview?.copyCommand).toBe('rm -rf ~/.local/bin/agent ~/.cursor');
   });
 
   it('binds downloaded artifacts to one preparation and cleans replaced artifacts', async () => {

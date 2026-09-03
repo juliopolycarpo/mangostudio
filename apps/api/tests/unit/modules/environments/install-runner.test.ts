@@ -115,6 +115,22 @@ describe('install relay', () => {
     ]);
   });
 
+  it("forwards the recipe's accepted exit codes to the runtime", async () => {
+    const fake = fakeClient();
+
+    await runnerFor(fake.client).run({ ...COMMAND, acceptedExitCodes: [-1978335189] });
+
+    expect(fake.runParams).toEqual([expect.objectContaining({ acceptedExitCodes: [-1978335189] })]);
+  });
+
+  it('omits acceptedExitCodes entirely when the recipe declares none', async () => {
+    const fake = fakeClient();
+
+    await runnerFor(fake.client).run(COMMAND);
+
+    expect(fake.runParams[0]).not.toHaveProperty('acceptedExitCodes');
+  });
+
   it('ignores frames belonging to another run or another topic', async () => {
     const fake = fakeClient({
       frames: [

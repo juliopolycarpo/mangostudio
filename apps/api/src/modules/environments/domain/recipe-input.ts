@@ -51,3 +51,17 @@ export function toNvmDefaultArgument(version: NodeVersionSpec): string {
   if (validated === 'latest') return 'node';
   return validated;
 }
+
+export function toFnmVersionArgument(version: NodeVersionSpec): string {
+  const validated = assertNodeVersionSpec(version);
+  if (validated === 'lts') return '--lts';
+  if (validated === 'latest') return '--latest';
+  return validated;
+}
+
+export function toFnmDefaultArgument(version: NodeVersionSpec): string {
+  const validated = assertNodeVersionSpec(version);
+  if (validated === 'lts') return 'lts-latest';
+  if (validated === 'latest') return 'latest';
+  return validated;
+}

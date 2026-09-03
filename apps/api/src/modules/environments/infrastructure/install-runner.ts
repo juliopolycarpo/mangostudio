@@ -37,6 +37,8 @@ interface RunInstallCommand {
   readonly argv: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
   readonly timeoutMs: number;
+  /** Exit codes besides 0 that still count as `succeeded` (winget's "already current"). */
+  readonly acceptedExitCodes?: readonly number[];
 }
 
 interface RunInstallOptions {
@@ -148,6 +150,7 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
             ...(options.outputLimitBytes !== undefined && {
               outputLimitBytes: options.outputLimitBytes,
             }),
+            ...(command.acceptedExitCodes && { acceptedExitCodes: command.acceptedExitCodes }),
           },
           // Above the recipe's own timeout: the runtime kills the child on
           // time, and this deadline only catches a link that stopped answering.
