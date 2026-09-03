@@ -143,6 +143,12 @@ export function createTerminalSession(options: CreateTerminalSessionOptions): Te
       // the exit frame is the only one carrying `end: true`, so it must be
       // the last thing sent regardless of how much pending output survives.
       drain();
+      // Whatever the window would not let through dies with the stream. Say
+      // so: silently truncating the tail of a command's output reads to the
+      // viewer as the command having printed less than it did, which is the
+      // one thing the `dropped` marker exists to prevent.
+      const lost = pending.byteLength + pending.takeDroppedBytes();
+      if (lost > 0 && attached) safeEmit({ kind: 'dropped', bytes: lost });
       if (attached) safeEmit({ kind: 'exit', exitCode, signal }, true);
       // The exit frame is the last one this stream may ever carry — `emit`
       // dropped its sequence counter for it, so anything sent afterwards

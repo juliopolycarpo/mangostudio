@@ -205,6 +205,30 @@ describe('createTerminalSession', () => {
     expect(frames.at(-1)).toEqual({ kind: 'exit', exitCode: 0, signal: null });
   });
 
+  it('names the pending output the exit throws away instead of truncating in silence', () => {
+    const { session, port, frames } = createHarness();
+    session.attach();
+
+    // Fill the window so the last 1 000 bytes are still parked when it exits.
+    port.handles[0]?.emitData(bytesOf(TERMINAL_INFLIGHT_WINDOW_BYTES, 0x65));
+    port.handles[0]?.emitData(bytesOf(1_000, 0x66));
+
+    port.handles[0]?.emitExit(0, null);
+
+    expect(frames.at(-2)).toEqual({ kind: 'dropped', bytes: 1_000 });
+    expect(frames.at(-1)).toEqual({ kind: 'exit', exitCode: 0, signal: null });
+  });
+
+  it('raises no dropped marker when the exit had nothing left to flush', () => {
+    const { session, port, frames } = createHarness();
+    session.attach();
+    port.handles[0]?.emitData(new TextEncoder().encode('bye'));
+
+    port.handles[0]?.emitExit(0, null);
+
+    expect(frames.filter((frame) => frame.kind === 'dropped')).toHaveLength(0);
+  });
+
   it('exit while detached is reported by the next attach, not by a stream frame', () => {
     const { session, port, frames } = createHarness();
     port.handles[0]?.emitExit(1, 'SIGKILL');
