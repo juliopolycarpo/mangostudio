@@ -32,6 +32,28 @@ export function AgentCliCard({ status, recipes, environmentId }: AgentCliCardPro
   const { resolve } = useToolIdentities();
   const name = resolve('agent', status.targetId).name;
   const installRecipe = findInstallRecipe(recipes, status.id, 'install');
+  const updateRecipe = findInstallRecipe(recipes, status.id, 'update');
+  const uninstallRecipe = findInstallRecipe(recipes, status.id, 'uninstall');
+
+  const updateAction = updateRecipe && (
+    <InstallAction
+      recipe={updateRecipe}
+      catalog={recipes}
+      input={{ kind: 'none' }}
+      label={formatMessage(e.runtimes.update, { runtime: name })}
+      environmentId={environmentId}
+    />
+  );
+  const uninstallAction = uninstallRecipe && (
+    <InstallAction
+      recipe={uninstallRecipe}
+      catalog={recipes}
+      input={{ kind: 'none' }}
+      label={formatMessage(e.runtimes.uninstall, { runtime: name })}
+      variant="ghost"
+      environmentId={environmentId}
+    />
+  );
 
   return (
     <ToolCard
@@ -56,17 +78,27 @@ export function AgentCliCard({ status, recipes, environmentId }: AgentCliCardPro
           />
         </>
       }
+      // Install when nothing runs yet; update and/or uninstall once it does.
+      // A fragment would always be truthy, so an empty pair still has to fall
+      // back to `null` rather than close the card on a gap.
       footer={
-        !status.effective && installRecipe ? (
-          <InstallAction
-            recipe={installRecipe}
-            catalog={recipes}
-            input={{ kind: 'none' }}
-            label={formatMessage(e.runtimes.install, { runtime: name })}
-            variant="primary"
-            icon={<Download size={14} />}
-            environmentId={environmentId}
-          />
+        !status.effective ? (
+          installRecipe && (
+            <InstallAction
+              recipe={installRecipe}
+              catalog={recipes}
+              input={{ kind: 'none' }}
+              label={formatMessage(e.runtimes.install, { runtime: name })}
+              variant="primary"
+              icon={<Download size={14} />}
+              environmentId={environmentId}
+            />
+          )
+        ) : updateAction || uninstallAction ? (
+          <>
+            {updateAction}
+            {uninstallAction}
+          </>
         ) : null
       }
     >
