@@ -62,6 +62,18 @@ export function parseTomlDocument(content: string): Record<string, unknown> {
   return isRecord(parsed) ? parsed : {};
 }
 
+/** Shared by every `setTomlSection*` writer: replace one key, keep the rest of the section. */
+function setTomlSectionEntry(
+  doc: Record<string, unknown>,
+  section: string,
+  key: string,
+  value: string | boolean
+): void {
+  const current = isRecord(doc[section]) ? { ...(doc[section] as Record<string, unknown>) } : {};
+  current[key] = value;
+  doc[section] = current;
+}
+
 /**
  * Set a string `key` in `section` of `doc`, preserving the rest of the document.
  * Mutates `doc` in place so a read-modify-write keeps unrelated config intact.
@@ -72,9 +84,17 @@ export function setTomlSectionValue(
   key: string,
   value: string
 ): void {
-  const current = isRecord(doc[section]) ? { ...(doc[section] as Record<string, unknown>) } : {};
-  current[key] = value;
-  doc[section] = current;
+  setTomlSectionEntry(doc, section, key, value);
+}
+
+/** The boolean counterpart of {@link setTomlSectionValue}, for flags like `installs_enabled`. */
+export function setTomlSectionBoolean(
+  doc: Record<string, unknown>,
+  section: string,
+  key: string,
+  value: boolean
+): void {
+  setTomlSectionEntry(doc, section, key, value);
 }
 
 /**

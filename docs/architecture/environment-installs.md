@@ -22,6 +22,15 @@ MANGO_ENV_INSTALLS_ENABLED=true
 Enable this only for a MangoStudio process running on the same machine as its user. The setting
 does not override the local-surface checks below.
 
+`POST /api/machine/config` is a one-click alternative to hand-editing the file: it writes
+`installs_enabled = true` into `config.toml` (creating the `[environments]` table if the file has
+none, preserving every other key), then reloads the config and reports the effective value. It is
+gated by the same loopback-only guard as every other machine action (`evaluateMachineActionGuard`),
+so it is refused with 403 from anywhere but a browser on the hub's own machine. If `.env` or the
+process environment still overrides `installs_enabled` (`MANGO_ENV_INSTALLS_ENABLED`), the file is
+written anyway but the response reports `applied: false` and `reason: "env-override"`, so the page
+never claims a switch moved when it did not.
+
 ## Guard Model
 
 Every recipe preview reports whether execution is allowed and, when it is not, every reason that
@@ -159,3 +168,5 @@ event, so a reconnecting client never waits on a stream that has nothing left to
 - `GET /api/environments/install/:runId/log` streams run events as SSE.
 - `POST /api/environments/install/:runId/cancel` requests cancellation.
 - `GET /api/environments/install/runs` returns the authenticated user's audit history.
+- `POST /api/machine/config` writes `[environments] installs_enabled = true` into `config.toml`.
+  Loopback-only, see "Enabling Installs" above.

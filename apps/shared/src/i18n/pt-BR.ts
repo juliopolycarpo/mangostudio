@@ -3500,6 +3500,19 @@ export const messages = {
         'runtime-denied':
           'Essa máquina recusa shell, e toda instalação precisa dele. Execute mangostudio-runtime setup lá e conceda shell, ou instale manualmente.',
       },
+      enableInstalls: {
+        button: 'Ativar instalações nesta máquina',
+        title: 'Ativar instalações nesta máquina?',
+        description:
+          'O MangoStudio vai aceitar comandos protegidos de instalação e atualização enviados por um navegador nesta máquina.',
+        threatModel:
+          'Ative isto apenas para um processo do MangoStudio rodando na mesma máquina do seu usuário. A configuração não substitui as verificações de superfície local que continuam valendo.',
+        confirm: 'Ativar',
+        success: 'As instalações estão ativadas nesta máquina agora. Tente de novo.',
+        envOverride:
+          'Uma variável de ambiente ainda substitui essa configuração, então as instalações continuam desativadas. Remova MANGO_ENV_INSTALLS_ENABLED, ou defina como true, e tente de novo.',
+        failed: 'Não foi possível salvar a configuração.',
+      },
     },
   },
 

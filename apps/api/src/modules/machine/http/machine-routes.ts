@@ -6,6 +6,8 @@ import {
 import {
   MACHINE_LOG_TAIL_MAX,
   MachineActionResponseSchema,
+  MachineConfigWriteBodySchema,
+  MachineConfigWriteResponseSchema,
   MachineDoctorReportSchema,
   type MachineDoctorSection,
   MachineDoctorSectionSchema,
@@ -139,6 +141,23 @@ export function createMachineRoutes(
           const response = await service.service(body.action, { clientIp: guardClientIp });
           set.status = 202;
           return response;
+        } catch (error) {
+          return mapMachineError(error, set);
+        }
+      }
+    )
+    .post(
+      '/machine/config',
+      {
+        body: MachineConfigWriteBodySchema,
+        response: {
+          200: MachineConfigWriteResponseSchema,
+          403: ApiErrorResponseSchema,
+        },
+      },
+      async ({ body, guardClientIp, set }) => {
+        try {
+          return await service.writeConfig(body, { clientIp: guardClientIp });
         } catch (error) {
           return mapMachineError(error, set);
         }

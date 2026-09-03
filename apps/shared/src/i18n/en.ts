@@ -3492,6 +3492,19 @@ export const messages: Messages = {
         'runtime-denied':
           'That machine refuses shell, which every install needs. Run mangostudio-runtime setup there and grant shell, or install by hand.',
       },
+      enableInstalls: {
+        button: 'Enable installs on this machine',
+        title: 'Enable installs on this machine?',
+        description:
+          'MangoStudio will accept guarded install and update commands sent from a browser on this machine.',
+        threatModel:
+          'Enable this only for a MangoStudio process running on the same machine as its user. The setting does not override the local-surface checks that still apply.',
+        confirm: 'Enable',
+        success: 'Installs are enabled on this machine now. Try again.',
+        envOverride:
+          'An environment variable still overrides this setting, so installs stay off. Unset MANGO_ENV_INSTALLS_ENABLED, or set it to true, then try again.',
+        failed: 'The setting could not be saved.',
+      },
     },
   },
 

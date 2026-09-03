@@ -5,6 +5,7 @@ import {
   MACHINE_CHECK_LABEL_MAX,
   MACHINE_DOCTOR_CHECK_LIMIT,
   MACHINE_ERROR_MAX,
+  MachineConfigWriteResponseSchema,
   MachineDoctorReportSchema,
   MachineStatusSchema,
 } from '@mangostudio/shared/machine';
@@ -12,6 +13,7 @@ import { USER_SERVICE_ERROR_MAX } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
 import { tailLines } from '../../../../src/cli/log-tail';
 import type { ServerState } from '../../../../src/lib/server-state';
+import { parseTomlDocument } from '../../../../src/lib/toml';
 import {
   createMachineService,
   MachineActionBlockedError,
@@ -23,6 +25,34 @@ import {
   FakeServiceManager,
   installedAndRunning,
 } from '../../../support/mocks/fake-service-manager';
+
+/**
+ * Stands in for `config.toml` on disk: `read`/`write` are the two injected
+ * deps `writeConfig` calls, and `write` round-trips through the real TOML
+ * stringifier/parser so a test asserts against the same document a real file
+ * would hold, without ever touching the filesystem.
+ */
+class FakeConfigFile {
+  writes: Array<{ path: string; contents: string }> = [];
+
+  constructor(
+    private doc: Record<string, unknown> = {},
+    private effectiveInstallsEnabled = true
+  ) {}
+
+  read = (_path: string): Record<string, unknown> => this.doc;
+
+  write = (path: string, contents: string): void => {
+    this.writes.push({ path, contents });
+    this.doc = parseTomlDocument(contents);
+  };
+
+  reloadEffective = (): boolean => this.effectiveInstallsEnabled;
+
+  setEffective(value: boolean): void {
+    this.effectiveInstallsEnabled = value;
+  }
+}
 
 const DETACHED: ServerState = {
   pid: 42,
@@ -340,5 +370,78 @@ describe('machineService.service', () => {
     expect(managed.manager.calls).not.toContain('uninstall');
     await managed.recorder.flush();
     expect(managed.manager.calls).toContain('uninstall');
+  });
+});
+
+describe('machineService.writeConfig', () => {
+  const BODY = { environments: { installsEnabled: true as const } };
+
+  function makeConfigService(fake: FakeConfigFile, overrides: Partial<MachineServiceDeps> = {}) {
+    return createMachineService({
+      configFilePath: () => '/home/j/.mango/config.toml',
+      readConfigDocument: fake.read,
+      writeConfigFile: fake.write,
+      reloadEffectiveInstallsEnabled: fake.reloadEffective,
+      evaluateGuard: (clientIp) =>
+        clientIp === '127.0.0.1'
+          ? { allowed: true, reasons: [] }
+          : { allowed: false, reasons: ['client-not-loopback'] },
+      ...overrides,
+    });
+  }
+
+  it('creates the [environments] table when the file has none', async () => {
+    const fake = new FakeConfigFile({});
+    const service = makeConfigService(fake);
+    const response = await service.writeConfig(BODY, LOCAL);
+    expect(Value.Check(MachineConfigWriteResponseSchema, response)).toBe(true);
+    expect(response).toEqual({
+      applied: true,
+      configFile: '/home/j/.mango/config.toml',
+      installsEnabled: true,
+    });
+    expect(fake.writes).toHaveLength(1);
+    expect(fake.writes[0]?.path).toBe('/home/j/.mango/config.toml');
+    expect(parseTomlDocument(fake.writes[0]?.contents ?? '')).toEqual({
+      environments: { installs_enabled: true },
+    });
+  });
+
+  it('preserves every other key already in the file', async () => {
+    const fake = new FakeConfigFile({
+      server: { port: 4000 },
+      environments: { lts_refresh: true },
+    });
+    const service = makeConfigService(fake);
+    await service.writeConfig(BODY, LOCAL);
+    expect(parseTomlDocument(fake.writes[0]?.contents ?? '')).toEqual({
+      server: { port: 4000 },
+      environments: { lts_refresh: true, installs_enabled: true },
+    });
+  });
+
+  it('reports applied: false with reason env-override when .env still overrides it', async () => {
+    const fake = new FakeConfigFile({});
+    fake.setEffective(false);
+    const service = makeConfigService(fake);
+    const response = await service.writeConfig(BODY, LOCAL);
+    expect(response).toEqual({
+      applied: false,
+      configFile: '/home/j/.mango/config.toml',
+      installsEnabled: false,
+      reason: 'env-override',
+    });
+    // The write still happened: the file is meant to say `true` from now on
+    // even though the environment override holds the effective value at false.
+    expect(fake.writes).toHaveLength(1);
+  });
+
+  it('refuses a remote browser with the guard, before touching the file', async () => {
+    const fake = new FakeConfigFile({});
+    const service = makeConfigService(fake);
+    await expect(service.writeConfig(BODY, { clientIp: '10.0.0.7' })).rejects.toBeInstanceOf(
+      MachineActionBlockedError
+    );
+    expect(fake.writes).toHaveLength(0);
   });
 });

@@ -12,6 +12,8 @@ import type {
   MachineActionReason,
   MachineActionResponse,
   MachineCheck,
+  MachineConfigWriteBody,
+  MachineConfigWriteResponse,
   MachineDoctorReport,
   MachineDoctorSection,
   MachineLogTail,
@@ -29,6 +31,7 @@ import {
   USER_SERVICE_ERROR_MAX,
   type UserServiceStatus,
 } from '@mangostudio/shared/runtime-home';
+import { stringify as stringifyToml } from 'smol-toml';
 import { spawnServeChild } from '../../../cli/detach';
 import { canProbeHealth, probeHealth, probeHubHealth } from '../../../cli/health';
 import {
@@ -45,11 +48,14 @@ import {
   getHomeMangoDir,
   getRuntimeHomeMangoDir,
   getVersion,
+  resetConfig,
 } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getLogsDir, getServerLogPath } from '../../../lib/mango-paths';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
+import { writeFileAtomic } from '../../../lib/safe-file';
 import { isStateLive, readState, type ServerState } from '../../../lib/server-state';
+import { readTomlDocument, setTomlSectionBoolean } from '../../../lib/toml';
 import { requestShutdown } from '../../../server/shutdown-request';
 import type { HubExecutable } from '../domain/hub-executable';
 import { describeHubProcess, hubLaunchMode } from '../domain/hub-process';
@@ -135,6 +141,18 @@ export interface MachineServiceDeps {
   readonly executable: () => HubExecutable;
   readonly serviceLogFile: () => string;
   readonly secretPersisted: () => boolean;
+  /** The canonical user config.toml path; never a hard-coded `~/.mango`. */
+  readonly configFilePath: () => string;
+  readonly readConfigDocument: (path: string) => Record<string, unknown>;
+  readonly writeConfigFile: (path: string, contents: string) => void;
+  /**
+   * Reloads the in-process config from disk and reports the effective
+   * `installsEnabled` afterward — not what was just written, because `.env`
+   * beside `config.toml` can override it. Injected so a test can script the
+   * override without the real singleton's test-runner sandbox getting in the
+   * way (`getConfig()` never touches disk under `bun test`).
+   */
+  readonly reloadEffectiveInstallsEnabled: () => boolean;
   /** Spawn the detached successor that waits for this process before binding. */
   readonly spawnSuccessor: (state: ServerState) => void;
   /** Let go of the port and the state file, then exit. */
@@ -154,6 +172,10 @@ export interface MachineService {
     action: MachineServiceAction,
     context: MachineRequestContext
   ): Promise<MachineActionResponse>;
+  writeConfig(
+    body: MachineConfigWriteBody,
+    context: MachineRequestContext
+  ): Promise<MachineConfigWriteResponse>;
 }
 
 const AFTER_RESPONSE_MS = 50;
@@ -316,6 +338,39 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       );
       return { accepted: true, outcome: 'service-removed' };
     },
+
+    // Every dependency this touches is synchronous (file I/O and the config
+    // singleton are both sync APIs); the interface stays `Promise`-returning
+    // like its siblings so a caller never has to know that. The guard refusal
+    // is returned as a rejection rather than thrown, so a synchronous throw
+    // here never escapes past a caller expecting a promise.
+    writeConfig(body, context) {
+      // The same loopback-only surface every mutating machine action shares —
+      // no `installsEnabled` reason has meaning here, since this is the very
+      // switch that turns it on.
+      const guard = d.evaluateGuard(context.clientIp);
+      if (!guard.allowed) return Promise.reject(new MachineActionBlockedError(guard));
+
+      const configFile = d.configFilePath();
+      const doc = d.readConfigDocument(configFile);
+      setTomlSectionBoolean(
+        doc,
+        'environments',
+        'installs_enabled',
+        body.environments.installsEnabled
+      );
+      d.writeConfigFile(configFile, stringifyToml(doc));
+
+      // The write always happens — even under an env override, the file is
+      // meant to say `true` from now on — but the response never claims
+      // success for a switch that did not actually move.
+      const installsEnabled = d.reloadEffectiveInstallsEnabled();
+      return Promise.resolve(
+        installsEnabled
+          ? { applied: true, configFile, installsEnabled }
+          : { applied: false, configFile, installsEnabled, reason: 'env-override' }
+      );
+    },
   };
 
   /**
@@ -453,6 +508,15 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
     executable: deps.executable ?? (() => currentHubExecutable()),
     serviceLogFile: deps.serviceLogFile ?? hubServiceLogPath,
     secretPersisted: deps.secretPersisted ?? (() => isAuthSecretPersisted()),
+    configFilePath: deps.configFilePath ?? (() => getConfig().configFilePath),
+    readConfigDocument: deps.readConfigDocument ?? readTomlDocument,
+    writeConfigFile: deps.writeConfigFile ?? ((path, contents) => writeFileAtomic(path, contents)),
+    reloadEffectiveInstallsEnabled:
+      deps.reloadEffectiveInstallsEnabled ??
+      (() => {
+        resetConfig();
+        return getConfig().environments.installsEnabled;
+      }),
     spawnSuccessor:
       deps.spawnSuccessor ??
       ((state) => {

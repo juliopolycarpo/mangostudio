@@ -23,6 +23,7 @@ import type {
 } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { LibraryTargetId } from '@mangostudio/shared/library';
+import type { MachineConfigWriteResponse } from '@mangostudio/shared/machine';
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 
@@ -150,4 +151,18 @@ export async function cancelInstall(runId: string): Promise<InstallCancelRespons
   const { data, error } = await client.api.environments.install({ runId }).cancel.post();
   if (error) throw new ApiError(error.value);
   return data as InstallCancelResponse;
+}
+
+/**
+ * Turns on guarded local installs by writing `installs_enabled = true` into
+ * this machine's `config.toml`. Loopback-only, same as every other machine
+ * action — a caller not on this machine gets the same 403 the page's other
+ * guarded buttons do.
+ */
+export async function enableInstalls(): Promise<MachineConfigWriteResponse> {
+  const { data, error } = await client.api.machine.config.post({
+    environments: { installsEnabled: true },
+  });
+  if (error) throw new ApiError(error.value);
+  return data as MachineConfigWriteResponse;
 }
