@@ -22,32 +22,32 @@ copy-paste commands, or:
 
 ## Commands
 
-| Command                                                        | Description                                                                    |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `mangostudio`                                                  | Print help and the command list.                                               |
-| `serve [host\|port\|host:port]`                                | Start the server in the foreground (default `localhost:3001`).                 |
-| `serve [host\|port\|host:port] -d`                             | Start the server in the background (detached) and return.                      |
-| `status`                                                       | Show whether a server is running, its URL, launch mode, and health.            |
-| `status --json`                                                | Emit the shared hub status document instead of plain text.                     |
-| `stop`                                                         | Gracefully stop the running server (SIGTERM).                                  |
-| `restart`                                                      | Restart the running server the way it was started.                             |
-| `killserver`                                                   | Force-kill the running server (SIGKILL).                                       |
-| `service <action> [host\|port\|host:port] [--json]`            | Keep the server running across logout and reboot.                              |
-| `logs [-f] [-n <count>]`                                       | Print the tail of the server log; `-f` follows it.                             |
-| `open`                                                         | Open the running server in the default browser.                                |
-| `doctor`                                                       | Run environment and configuration diagnostics.                                 |
-| `doctor --all`                                                 | Include ChatGPT connector checks even without a configured connector.          |
-| `doctor --chatgpt-refresh`                                     | Perform a live ChatGPT token refresh probe (rotates the stored refresh token). |
-| `doctor --probe`                                               | Actively connect to each enabled MCP server (spawns children / hits URLs).     |
-| `doctor --env` / `--library`                                   | Limit extra sections to environments and/or library (core checks always run).  |
-| `doctor --json`                                                | Emit structured JSON (checks, warning/failure counts).                         |
-| `env [runtimes\|agents] [--json]`                              | Report runtimes, version managers, and agent CLIs (read-only).                 |
-| `env install <recipe> [--environment <id>] [--version <spec>]` | Run an install recipe on this machine or a paired one.                         |
-| `env update <recipe> [--environment <id>]`                     | Same as `env install`, restricted to update recipes.                           |
-| `library [locations] [--json]`                                 | Library coverage matrix and location health (read-only).                       |
-| `library --kind <kind>`                                        | Filter resources by kind (`skill`, `subagent`, etc.).                          |
-| `library --divergent`                                          | List only resources whose copies disagree across locations.                    |
-| `version`, `--version`, `-v`                                   | Print the embedded MangoStudio version.                                        |
+| Command                                                        | Description                                                                          |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `mangostudio`                                                  | Print help and the command list.                                                     |
+| `serve [host\|port\|host:port]`                                | Start the server in the foreground (default `localhost:3001`).                       |
+| `serve [host\|port\|host:port] -d`                             | Start the server in the background (detached) and return.                            |
+| `status`                                                       | Show whether a server is running, its URL, launch mode, and health.                  |
+| `status --json`                                                | Emit the shared hub status document instead of plain text.                           |
+| `stop`                                                         | Gracefully stop the running server (SIGTERM).                                        |
+| `restart`                                                      | Restart the running server the way it was started.                                   |
+| `killserver`                                                   | Force-kill the running server (SIGKILL).                                             |
+| `service <action> [host\|port\|host:port] [--json]`            | Keep the server running across logout and reboot.                                    |
+| `logs [-f] [-n <count>]`                                       | Print the tail of the server log; `-f` follows it.                                   |
+| `open`                                                         | Open the running server in the default browser.                                      |
+| `doctor`                                                       | Run environment and configuration diagnostics.                                       |
+| `doctor --all`                                                 | Include ChatGPT connector checks even without a configured connector.                |
+| `doctor --chatgpt-refresh`                                     | Perform a live ChatGPT token refresh probe (rotates the stored refresh token).       |
+| `doctor --probe`                                               | Actively connect to each enabled MCP server (spawns children / hits URLs).           |
+| `doctor --env` / `--library`                                   | Limit extra sections to environments and/or library (core checks always run).        |
+| `doctor --json`                                                | Emit structured JSON (checks, warning/failure counts).                               |
+| `env [runtimes\|agents] [--json]`                              | Report runtimes, version managers, and agent CLIs (read-only).                       |
+| `env install <recipe> [--environment <id>] [--version <spec>]` | Run an install recipe on this machine (`--environment` is currently always refused). |
+| `env update <recipe> [--environment <id>]`                     | Same as `env install`, restricted to update recipes.                                 |
+| `library [locations] [--json]`                                 | Library coverage matrix and location health (read-only).                             |
+| `library --kind <kind>`                                        | Filter resources by kind (`skill`, `subagent`, etc.).                                |
+| `library --divergent`                                          | List only resources whose copies disagree across locations.                          |
+| `version`, `--version`, `-v`                                   | Print the embedded MangoStudio version.                                              |
 
 `-d` / `--detach` and the positional host/port target may be combined in any
 order, e.g. `mangostudio serve 127.0.0.1:3000 -d`.
@@ -217,14 +217,13 @@ applies unchanged.
 mangostudio env install bun.install.official
 mangostudio env install nvm.node.install --version 22
 mangostudio env update bun.update --json
-mangostudio env install winget.node.install --environment dev-box
 ```
 
-| Flag                 | Description                                                                 |
-| -------------------- | --------------------------------------------------------------------------- |
-| `--environment <id>` | Run on a paired environment instead of this machine.                        |
-| `--version <spec>`   | `lts`, `latest`, or a numeric version, for a recipe that takes a Node spec. |
-| `--json`             | Print the final `InstallRun` audit row instead of a plain summary.          |
+| Flag                 | Description                                                                                                                                              |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--environment <id>` | Accepted for parity with the API; currently always refused (see below) — the CLI has no session to check a paired environment's `allowInstalls` against. |
+| `--version <spec>`   | `lts`, `latest`, or a numeric version, for a recipe that takes a Node spec.                                                                              |
+| `--json`             | Print the final `InstallRun` audit row instead of a plain summary.                                                                                       |
 
 `env install` accepts `install`, `use-version`, and `set-default` recipes;
 `env update` accepts only `update` recipes — there is no `env uninstall` yet,
