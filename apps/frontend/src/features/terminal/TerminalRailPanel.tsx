@@ -1,25 +1,21 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
+import { LazyTerminalView } from './LazyTerminalView';
 import { SessionTabs } from './SessionTabs';
 import {
   terminalKeys,
   useCloseTerminalMutation,
   useOpenTerminalMutation,
   useRenameTerminalMutation,
-  useTerminalAvailabilityQuery,
   useTerminalSessionsQuery,
 } from './services/terminal-service';
+import { TerminalUnavailableNotice } from './TerminalUnavailableNotice';
 import { onNewTerminalSessionRequest } from './terminal-panel-request';
-import { unavailableMessage } from './unavailable-message';
-
-// Xterm and its addons (~300 KB with CSS) load only once a session is
-// actually shown, not with every chat page's first paint.
-const TerminalView = lazy(() =>
-  import('./TerminalView').then((module) => ({ default: module.TerminalView }))
-);
+import { useTerminalAvailability } from './use-terminal-availability';
 
 export interface TerminalRailPanelProps {
   readonly chatId: string;
@@ -44,10 +40,7 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
   const [activeId, setActiveId] = useState<string | null>(null);
   const [closingId, setClosingId] = useState<string | null>(null);
 
-  const availabilityQuery = useTerminalAvailabilityQuery(
-    environmentId ?? '',
-    environmentId !== null
-  );
+  const { unavailable, message: unavailableHint } = useTerminalAvailability(environmentId);
   const sessionsQuery = useTerminalSessionsQuery(
     environmentId ?? '',
     chatId,
@@ -58,12 +51,6 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
   const openMutation = useOpenTerminalMutation();
   const renameMutation = useRenameTerminalMutation();
   const closeMutation = useCloseTerminalMutation();
-
-  // Availability answers whether another session may be *opened*, not whether
-  // the open ones are still usable: at the per-user cap they are exactly what
-  // fills it. So it gates the new-session button, not the tab strip.
-  const unavailable = availabilityQuery.isSuccess && !availabilityQuery.data.available;
-  const unavailableReason = availabilityQuery.data?.reason ?? 'unavailable';
 
   useEffect(() => {
     if (activeId !== null && sessions.some((session) => session.id === activeId)) return;
@@ -110,30 +97,26 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
   }
 
   if (!environmentId || (unavailable && sessions.length === 0)) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
-        <p className="text-sm font-medium text-on-surface">{t.terminal.unavailableTitle}</p>
-        <p className="text-sm text-on-surface-variant">
-          {unavailableMessage(t, unavailableReason)}
-        </p>
-      </div>
-    );
+    return <TerminalUnavailableNotice message={unavailableHint} className="h-full" />;
   }
 
   if (sessionsQuery.isSuccess && sessions.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-        <p className="text-sm font-medium text-on-surface">{t.terminal.empty}</p>
-        <p className="text-sm text-on-surface-variant">{t.terminal.emptyHint}</p>
-        <Button
-          type="button"
-          variant="primary"
-          onClick={openSession}
-          loading={openMutation.isPending}
-        >
-          {t.terminal.newSession}
-        </Button>
-      </div>
+      <EmptyState
+        className="h-full"
+        title={t.terminal.empty}
+        hint={t.terminal.emptyHint}
+        action={
+          <Button
+            type="button"
+            variant="primary"
+            onClick={openSession}
+            loading={openMutation.isPending}
+          >
+            {t.terminal.newSession}
+          </Button>
+        }
+      />
     );
   }
 
@@ -148,7 +131,7 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
         onNew={openSession}
         newSessionPending={openMutation.isPending}
         newSessionDisabled={unavailable}
-        newSessionHint={unavailableMessage(t, unavailableReason)}
+        newSessionHint={unavailableHint}
         onRequestClose={setClosingId}
         onRename={(id, title) => renameMutation.mutate({ id, body: { title } })}
         onPopOut={popOut}
@@ -156,7 +139,7 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
       <div className="min-h-0 flex-1">
         {activeId ? (
           <Suspense fallback={null}>
-            <TerminalView key={activeId} sessionId={activeId} onExit={refreshAfterExit} />
+            <LazyTerminalView key={activeId} sessionId={activeId} onExit={refreshAfterExit} />
           </Suspense>
         ) : null}
       </div>

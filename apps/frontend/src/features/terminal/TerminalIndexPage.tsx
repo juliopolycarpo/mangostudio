@@ -1,23 +1,15 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { TerminalSquare } from 'lucide-react';
-import { lazy, Suspense, useState } from 'react';
+import { Suspense, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
 import type { EnvironmentScopeSearch } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
-import {
-  useOpenTerminalMutation,
-  useTerminalAvailabilityQuery,
-  useTerminalSessionsQuery,
-} from './services/terminal-service';
-import { unavailableMessage } from './unavailable-message';
-
-// Same reasoning as the rail panel: xterm and its addons load only once a
-// session is actually shown.
-const TerminalView = lazy(() =>
-  import('./TerminalView').then((module) => ({ default: module.TerminalView }))
-);
+import { LazyTerminalView } from './LazyTerminalView';
+import { useOpenTerminalMutation, useTerminalSessionsQuery } from './services/terminal-service';
+import { TerminalUnavailableNotice } from './TerminalUnavailableNotice';
+import { useTerminalAvailability } from './use-terminal-availability';
 
 /**
  * `/terminal`: every session on a chosen machine, independent of any chat.
@@ -32,7 +24,7 @@ export function TerminalIndexPage() {
   const environmentId = search.environmentId ?? LOCAL_ENVIRONMENT_ID;
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  const availabilityQuery = useTerminalAvailabilityQuery(environmentId);
+  const { unavailable, message: unavailableHint } = useTerminalAvailability(environmentId);
   const sessionsQuery = useTerminalSessionsQuery(environmentId, null);
   const sessions = sessionsQuery.data ?? [];
   const openMutation = useOpenTerminalMutation();
@@ -46,12 +38,6 @@ export function TerminalIndexPage() {
       },
     });
   }
-
-  // Availability answers whether another session may be *opened*. At the
-  // per-user cap the sessions that fill it are still live and still the only
-  // place to close one, so it refuses this button rather than the list.
-  const unavailable = availabilityQuery.isSuccess && !availabilityQuery.data.available;
-  const unavailableReason = availabilityQuery.data?.reason ?? 'unavailable';
 
   function openNewSession(): void {
     if (unavailable) return;
@@ -75,14 +61,7 @@ export function TerminalIndexPage() {
         />
       </div>
 
-      {unavailable ? (
-        <div className="flex flex-col items-center justify-center gap-1 py-6 text-center">
-          <p className="text-sm font-medium text-on-surface">{t.terminal.unavailableTitle}</p>
-          <p className="text-sm text-on-surface-variant">
-            {unavailableMessage(t, unavailableReason)}
-          </p>
-        </div>
-      ) : null}
+      {unavailable ? <TerminalUnavailableNotice message={unavailableHint} /> : null}
 
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-on-surface-variant">
@@ -94,7 +73,7 @@ export function TerminalIndexPage() {
           size="sm"
           onClick={openNewSession}
           disabled={unavailable}
-          title={unavailable ? unavailableMessage(t, unavailableReason) : undefined}
+          title={unavailable ? unavailableHint : undefined}
           loading={openMutation.isPending}
         >
           {t.terminal.newSession}
@@ -128,7 +107,7 @@ export function TerminalIndexPage() {
       {activeId ? (
         <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-outline-variant/15">
           <Suspense fallback={null}>
-            <TerminalView key={activeId} sessionId={activeId} />
+            <LazyTerminalView key={activeId} sessionId={activeId} />
           </Suspense>
         </div>
       ) : null}
