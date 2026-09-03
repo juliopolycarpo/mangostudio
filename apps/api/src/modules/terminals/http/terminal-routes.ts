@@ -14,12 +14,12 @@ import {
 } from '@mangostudio/shared/terminal';
 import { Elysia, t } from 'elysia';
 import { requireAuth } from '../../../plugins/auth-middleware';
+import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
 import {
   type TerminalSessionService,
   terminalSessionService,
 } from '../application/terminal-session-service';
 import {
-  TerminalChatNotFoundError,
   TerminalDisabledError,
   TerminalLimitError,
   TerminalNotIsolatedError,
@@ -53,11 +53,7 @@ function mapTerminalError(error: unknown, set: { status?: number | string }): Ap
       details: { reason: error.reason },
     };
   }
-  if (error instanceof TerminalChatNotFoundError) {
-    set.status = 404;
-    return { error: error.message, code: ERROR_CODES.NOT_FOUND };
-  }
-  if (error instanceof TerminalSessionNotFoundError) {
+  if (error instanceof ChatNotFoundError || error instanceof TerminalSessionNotFoundError) {
     set.status = 404;
     return { error: error.message, code: ERROR_CODES.NOT_FOUND };
   }
@@ -84,12 +80,7 @@ export function createTerminalRoutes(service: TerminalSessionService = terminalS
         query: TerminalListQuerySchema,
         response: { 200: TerminalListResponseSchema },
       },
-      ({ query, user }) => ({
-        sessions: service.list(user?.id ?? '', {
-          ...(query.environmentId ? { environmentId: query.environmentId } : {}),
-          ...(query.chatId ? { chatId: query.chatId } : {}),
-        }),
-      })
+      ({ query, user }) => ({ sessions: service.list(user?.id ?? '', query) })
     )
     .post(
       '/terminals',

@@ -14,21 +14,24 @@ import {
   TERMINAL_DEFAULT_ROWS,
   TERMINAL_SOCKET_CLOSE_CODES,
   type TerminalAvailability,
+  type TerminalExit,
+  type TerminalListQuery,
   type TerminalNotice,
   type TerminalOpenBody,
+  type TerminalRefusalReason,
   type TerminalRenameBody,
   type TerminalSession,
 } from '@mangostudio/shared/terminal';
 import { getDb } from '../../../db/database';
-import { getConfig as getApiConfig } from '../../../lib/config';
+import { getConfig as getApiConfig, type MangoConfig } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import {
   getRuntimeClient as getRuntimeClientDefault,
   getRuntimeConnectionManager,
 } from '../../../services/runtime-client/runtime-connection-manager';
+import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
 import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
 import {
-  TerminalChatNotFoundError,
   TerminalDisabledError,
   TerminalLimitError,
   TerminalNotIsolatedError,
@@ -51,12 +54,8 @@ export type TerminalChatResolution =
   | { readonly ok: true; readonly chatId: string; readonly workdir: string | null }
   | { readonly ok: false };
 
-export interface TerminalConfig {
-  readonly enabled: boolean;
-  readonly idleTimeoutMinutes: number;
-  readonly maxSessionsPerUser: number;
-  readonly scrollbackKib: number;
-}
+/** The `[terminal]` block of the hub config, whose parsing owns these bounds. */
+export type TerminalConfig = MangoConfig['terminal'];
 
 /**
  * The one thing a socket route hands the service so it can be told about
@@ -65,11 +64,6 @@ export interface TerminalConfig {
 export interface TerminalSessionViewer {
   readonly pushNotice: (notice: TerminalNotice) => void;
   readonly close: (code: number, reason: string) => void;
-}
-
-export interface TerminalListFilter {
-  readonly environmentId?: string;
-  readonly chatId?: string;
 }
 
 export interface TerminalSessionServiceDeps {
@@ -86,7 +80,7 @@ export interface TerminalSessionServiceDeps {
 
 export interface TerminalSessionService {
   open(userId: string, body: TerminalOpenBody): Promise<TerminalSession>;
-  list(userId: string, filter?: TerminalListFilter): TerminalSession[];
+  list(userId: string, filter?: TerminalListQuery): TerminalSession[];
   rename(userId: string, id: string, body: TerminalRenameBody): TerminalSession;
   close(userId: string, id: string): Promise<void>;
   availability(userId: string, environmentId: string): Promise<TerminalAvailability>;
@@ -116,7 +110,7 @@ export interface TerminalSessionService {
   detachViewer(sessionId: string, viewer: TerminalSessionViewer): boolean;
   touchActivity(sessionId: string): void;
   /** Records a `terminal.output` exit frame, or an `attach` reply that arrived already exited. */
-  recordExit(sessionId: string, exit: { exitCode: number | null; signal: string | null }): void;
+  recordExit(sessionId: string, exit: TerminalExit): void;
   /** Records a client `resize` the runtime accepted. */
   recordResize(sessionId: string, cols: number, rows: number): void;
   /** Closes every session with no attached viewer, idle past the configured timeout. */
@@ -244,7 +238,7 @@ export function createTerminalSessionService(
       let chatId: string | null = null;
       if (body.chatId) {
         const resolved = await d.resolveChat(body.chatId, userId);
-        if (!resolved.ok) throw new TerminalChatNotFoundError(body.chatId);
+        if (!resolved.ok) throw new ChatNotFoundError(body.chatId);
         chatId = resolved.chatId;
         cwd ??= resolved.workdir;
       }
@@ -324,22 +318,27 @@ export function createTerminalSessionService(
         openSessions: countRunning(userId),
         maxSessions: config.maxSessionsPerUser,
       };
-      if (!config.enabled) return { ...base, available: false, reason: 'disabled', shells: [] };
-      if (base.openSessions >= config.maxSessionsPerUser) {
-        return { ...base, available: false, reason: 'limit', shells: [] };
-      }
+      // `shells` is empty on every refusal (`TerminalAvailabilitySchema`), so the
+      // refusals share one constructor rather than restating that invariant five times.
+      const refuse = (reason: TerminalRefusalReason): TerminalAvailability => ({
+        ...base,
+        available: false,
+        reason,
+        shells: [],
+      });
+
+      if (!config.enabled) return refuse('disabled');
+      if (base.openSessions >= config.maxSessionsPerUser) return refuse('limit');
 
       let client: TerminalRuntimeClient;
       try {
         client = await d.getRuntimeClient(userId, environmentId);
       } catch {
-        return { ...base, available: false, reason: 'disconnected', shells: [] };
+        return refuse('disconnected');
       }
-      if (client.manifest.terminal !== true) {
-        return { ...base, available: false, reason: 'unavailable', shells: [] };
-      }
+      if (client.manifest.terminal !== true) return refuse('unavailable');
       if (environmentId === LOCAL_ENVIRONMENT_ID && !d.isIdentityAttested(userId, environmentId)) {
-        return { ...base, available: false, reason: 'not-isolated', shells: [] };
+        return refuse('not-isolated');
       }
       return { ...base, available: true, shells: [...client.manifest.shells] };
     },

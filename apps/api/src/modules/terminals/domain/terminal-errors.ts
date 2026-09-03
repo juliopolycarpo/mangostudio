@@ -1,4 +1,11 @@
-/** Typed refusals `terminal-session-service.ts` throws; `terminal-routes.ts` maps them to `ApiErrorResponse`. */
+/**
+ * Typed refusals `terminal-session-service.ts` throws; `terminal-routes.ts` maps
+ * them to `ApiErrorResponse`.
+ *
+ * A missing or foreign chat is not among them: that is `ChatNotFoundError` from
+ * `chats/domain/chat-ownership`, which every other module already answers 404 to
+ * and which carries the same "never distinguish missing from foreign" semantics.
+ */
 
 import type { TerminalRefusalReason } from '@mangostudio/shared/terminal';
 
@@ -34,13 +41,6 @@ export class TerminalUnavailableError extends Error {
   ) {
     super(message);
     this.name = 'TerminalUnavailableError';
-  }
-}
-
-export class TerminalChatNotFoundError extends Error {
-  constructor(readonly chatId: string) {
-    super(`Chat "${chatId}" was not found.`);
-    this.name = 'TerminalChatNotFoundError';
   }
 }
 

@@ -4,60 +4,15 @@
  * A structural subset rather than the concrete class, so a `FakeRuntimeClient`
  * in tests can stand in for it without extending or mocking the real facade —
  * `RuntimeClient` itself satisfies this shape.
+ *
+ * Projected from `RuntimeClient` rather than retyped, so a signature that moves
+ * on the facade cannot leave a structurally-satisfied copy behind here: the
+ * service would keep compiling against a shape the runtime no longer speaks and
+ * fail only at the wire.
  */
 
-import type {
-  RuntimeCapabilityManifest,
-  RuntimeRequestOptions,
-  RuntimeTerminalAckParams,
-  RuntimeTerminalAttachParams,
-  RuntimeTerminalAttachResult,
-  RuntimeTerminalCloseParams,
-  RuntimeTerminalDetachParams,
-  RuntimeTerminalListResult,
-  RuntimeTerminalOpenParams,
-  RuntimeTerminalOpenResult,
-  RuntimeTerminalOutputEvent,
-  RuntimeTerminalResizeParams,
-  RuntimeTerminalWriteParams,
-} from '@mangostudio/runtime';
+import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 
-export interface TerminalRuntimeTerminalClient {
-  open(
-    params: RuntimeTerminalOpenParams,
-    options?: RuntimeRequestOptions
-  ): Promise<RuntimeTerminalOpenResult>;
-  attach(
-    params: RuntimeTerminalAttachParams,
-    options?: RuntimeRequestOptions
-  ): Promise<RuntimeTerminalAttachResult>;
-  detach(
-    params: RuntimeTerminalDetachParams,
-    options?: RuntimeRequestOptions
-  ): Promise<{ readonly ok: true }>;
-  write(
-    params: RuntimeTerminalWriteParams,
-    options?: RuntimeRequestOptions
-  ): Promise<{ readonly ok: true }>;
-  resize(
-    params: RuntimeTerminalResizeParams,
-    options?: RuntimeRequestOptions
-  ): Promise<{ readonly ok: true }>;
-  ack(
-    params: RuntimeTerminalAckParams,
-    options?: RuntimeRequestOptions
-  ): Promise<{ readonly ok: true }>;
-  close(
-    params: RuntimeTerminalCloseParams,
-    options?: RuntimeRequestOptions
-  ): Promise<{ readonly ok: true }>;
-  list(options?: RuntimeRequestOptions): Promise<RuntimeTerminalListResult>;
-  onOutput(sessionId: string, listener: (event: RuntimeTerminalOutputEvent) => void): () => void;
-}
+export type TerminalRuntimeTerminalClient = RuntimeClient['terminal'];
 
-export interface TerminalRuntimeClient {
-  readonly manifest: RuntimeCapabilityManifest;
-  readonly terminal: TerminalRuntimeTerminalClient;
-  /** Fires once, when the underlying connection to this environment ends. */
-  onClose(listener: () => void): () => void;
-}
+export type TerminalRuntimeClient = Pick<RuntimeClient, 'manifest' | 'terminal' | 'onClose'>;

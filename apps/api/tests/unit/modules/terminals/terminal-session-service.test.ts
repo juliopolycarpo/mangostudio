@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { ChatNotFoundError } from '../../../../src/modules/chats/domain/chat-ownership';
 import {
   createTerminalSessionService,
   type TerminalChatResolution,
@@ -8,7 +9,6 @@ import {
   type TerminalSessionViewer,
 } from '../../../../src/modules/terminals/application/terminal-session-service';
 import {
-  TerminalChatNotFoundError,
   TerminalDisabledError,
   TerminalLimitError,
   TerminalNotIsolatedError,
@@ -151,7 +151,7 @@ describe('terminalSessionService.open', () => {
 
     await expect(
       service.open(USER_ID, { environmentId: ENVIRONMENT_ID, chatId: 'ghost' })
-    ).rejects.toBeInstanceOf(TerminalChatNotFoundError);
+    ).rejects.toBeInstanceOf(ChatNotFoundError);
   });
 
   test("rejects another user's chat with the same error as a missing one", async () => {
@@ -162,7 +162,7 @@ describe('terminalSessionService.open', () => {
 
     await expect(
       service.open(USER_ID, { environmentId: ENVIRONMENT_ID, chatId: 'someone-elses' })
-    ).rejects.toBeInstanceOf(TerminalChatNotFoundError);
+    ).rejects.toBeInstanceOf(ChatNotFoundError);
   });
 
   test('reports a runtime with no terminal support as unavailable', async () => {
