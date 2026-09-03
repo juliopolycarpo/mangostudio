@@ -233,6 +233,15 @@ export function createEnvironmentRepository(injected?: Kysely<Database>): Enviro
             .where('environmentId', '=', id)
             .execute();
 
+          // Same reasoning as the backup index: a toolchain selection means
+          // nothing once the machine it named is gone, and nothing here
+          // resurrects the row's meaning by leaving it behind.
+          await transaction
+            .deleteFrom('environment_toolchains')
+            .where('userId', '=', userId)
+            .where('environmentId', '=', id)
+            .execute();
+
           await transaction
             .deleteFrom('environments')
             .where('userId', '=', userId)

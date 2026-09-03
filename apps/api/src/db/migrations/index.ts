@@ -51,6 +51,7 @@ import { externalSessionAdoption } from './050_external_session_adoption';
 import { messageUncheckpointedSources } from './051_message_uncheckpointed_sources';
 import { clearStaleDivergenceAcks } from './052_clear_stale_divergence_acks';
 import { activityEvents } from './053_activity_events';
+import { environmentToolchains } from './054_environment_toolchains';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -106,4 +107,5 @@ export const allMigrations = {
   '051_message_uncheckpointed_sources': messageUncheckpointedSources,
   '052_clear_stale_divergence_acks': clearStaleDivergenceAcks,
   '053_activity_events': activityEvents,
+  '054_environment_toolchains': environmentToolchains,
 };

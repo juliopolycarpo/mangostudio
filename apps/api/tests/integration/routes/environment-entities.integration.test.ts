@@ -187,6 +187,7 @@ describe('environment entity routes', () => {
         createdAt: null,
         updatedAt: null,
         status: { state: 'disconnected' },
+        toolchain: { node: 'auto', bun: 'auto' },
       },
     ]);
   });

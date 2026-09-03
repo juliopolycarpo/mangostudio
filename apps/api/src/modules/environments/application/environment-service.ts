@@ -28,6 +28,7 @@ import {
 import { createSshCommandRunner } from '../infrastructure/ssh-command-runner';
 import { wslProvisioner } from '../infrastructure/wsl-provisioner';
 import { runtimeLifecycleService } from './runtime-lifecycle-service';
+import { type ToolchainService, toolchainService } from './toolchain-service';
 
 function statusForTokenPersistFailure(error: unknown): 400 | 503 {
   // Secret-store outages are server conditions; a malformed request stays 400.
@@ -64,7 +65,8 @@ function localRecord(userId: string): EnvironmentRecord {
 async function toEnvironment(
   record: EnvironmentRecord,
   manager: RuntimeConnectionManager,
-  secretStore: SecretStore
+  secretStore: SecretStore,
+  toolchain: ToolchainService
 ): Promise<Environment> {
   // Consent is answered on the machine, so nothing here can invalidate the
   // manifest cached at connect. Reading an environment is the moment someone
@@ -83,6 +85,7 @@ async function toEnvironment(
     createdAt: record.id === LOCAL_ENVIRONMENT_ID ? null : record.createdAt,
     updatedAt: record.id === LOCAL_ENVIRONMENT_ID ? null : record.updatedAt,
     status: manager.getStatus(record.userId, record.id),
+    toolchain: await toolchain.resolve(record.userId, record.id),
     ...(record.transportKind === 'http'
       ? { hasRuntimeToken: await hasRuntimeToken(record.userId, record.id, secretStore) }
       : {}),
@@ -132,7 +135,8 @@ export function createEnvironmentService(
   manager: RuntimeConnectionManager = getRuntimeConnectionManager(),
   publish: (userId: string) => void = publishEnvironmentInvalidation,
   secretStore: SecretStore = bunSecretStore,
-  runtimeEffects: EnvironmentRuntimeEffects = defaultEnvironmentRuntimeEffects
+  runtimeEffects: EnvironmentRuntimeEffects = defaultEnvironmentRuntimeEffects,
+  toolchain: ToolchainService = toolchainService
 ): EnvironmentService {
   async function findRecord(userId: string, id: string): Promise<EnvironmentRecord | null> {
     if (id === LOCAL_ENVIRONMENT_ID) return localRecord(userId);
@@ -149,13 +153,15 @@ export function createEnvironmentService(
     async list(userId) {
       const rows = await repository.list(userId);
       return await Promise.all(
-        [localRecord(userId), ...rows].map((record) => toEnvironment(record, manager, secretStore))
+        [localRecord(userId), ...rows].map((record) =>
+          toEnvironment(record, manager, secretStore, toolchain)
+        )
       );
     },
 
     async find(userId, id) {
       const record = await findRecord(userId, id);
-      return record ? await toEnvironment(record, manager, secretStore) : null;
+      return record ? await toEnvironment(record, manager, secretStore, toolchain) : null;
     },
 
     async create(userId, input) {
@@ -204,7 +210,7 @@ export function createEnvironmentService(
       }
 
       publish(userId);
-      return await toEnvironment(record, manager, secretStore);
+      return await toEnvironment(record, manager, secretStore, toolchain);
     },
 
     async update(userId, id, input) {
@@ -285,7 +291,7 @@ export function createEnvironmentService(
         manager.clearBackoff(userId, id);
       }
       publish(userId);
-      return await toEnvironment(updated, manager, secretStore);
+      return await toEnvironment(updated, manager, secretStore, toolchain);
     },
 
     async remove(userId, id, options = {}) {
@@ -378,13 +384,13 @@ export function createEnvironmentService(
         );
       }
       const record = await requireRecord(userId, id);
-      return await toEnvironment(record, manager, secretStore);
+      return await toEnvironment(record, manager, secretStore, toolchain);
     },
 
     async disconnect(userId, id) {
       const record = await requireRecord(userId, id);
       manager.disconnect(userId, id);
-      return await toEnvironment(record, manager, secretStore);
+      return await toEnvironment(record, manager, secretStore, toolchain);
     },
   };
 }

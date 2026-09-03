@@ -9,7 +9,7 @@
 export class EnvironmentServiceError extends Error {
   constructor(
     message: string,
-    readonly status: 400 | 404 | 409 | 503
+    readonly status: 400 | 404 | 409 | 422 | 503
   ) {
     super(message);
     this.name = 'EnvironmentServiceError';
