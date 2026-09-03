@@ -131,6 +131,18 @@ describe('external session manager', () => {
     expect(seen).toEqual([{ userId, environmentId: 'local' }]);
   });
 
+  it('omits the toolchain when the peer does not advertise support for it', async () => {
+    const runtime = createFakeExternalRuntime();
+    (runtime.client.manifest.features as { toolchain?: boolean }).toolchain = undefined;
+    const manager = managerFor(runtime, [], () =>
+      Promise.resolve({ node: '/opt/custom/node/bin/node', bun: 'auto' })
+    );
+
+    await manager.ensureSession(baseInput());
+
+    expect(runtime.calls.open[0]).not.toHaveProperty('toolchain');
+  });
+
   it('reuses the live session for a later send with the same binding', async () => {
     const runtime = createFakeExternalRuntime();
     const manager = managerFor(runtime);

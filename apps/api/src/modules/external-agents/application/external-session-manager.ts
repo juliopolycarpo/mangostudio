@@ -432,7 +432,9 @@ export function createExternalSessionManager(
         // after the vendor confirms the resume is an ordinary turn again.
         resumeMode: resumable?.pendingAdoption ? 'strict' : 'fallback',
         timeoutMs: openTimeoutMs,
-        toolchain,
+        // `external-agent.open` refuses unknown fields, so a peer that predates
+        // the selection must not be sent one; it keeps its own PATH.
+        ...(client.manifest.features.toolchain === true ? { toolchain } : {}),
       },
       { timeoutMs: openTimeoutMs }
     );

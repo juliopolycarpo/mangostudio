@@ -147,6 +147,12 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
      * this key cannot safely be assumed to support or have consent for it.
      */
     externalAgents: Type.Optional(Type.Boolean()),
+    /**
+     * Whether spawn methods accept a `toolchain` selection. Absent means
+     * false: `external-agent.open` validates its params strictly, so a hub
+     * must not send the field to a peer built before it existed.
+     */
+    toolchain: Type.Optional(Type.Boolean()),
   }),
   /**
    * Targets backed by adapters in this runtime. Absent means none; an older

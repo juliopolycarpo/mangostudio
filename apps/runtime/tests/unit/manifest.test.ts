@@ -13,6 +13,7 @@ describe('createLocalRuntimeManifest', () => {
     expect(manifest.features.shell).toBe(true);
     expect(manifest.features.update).toBe(true);
     expect(manifest.features.tools).toBe(true);
+    expect(manifest.features.toolchain).toBe(true);
     expect(manifest.enforcesPathPolicy).toBe(true);
     expect(manifest.directoryHashDomain).toBe(directoryHashDomainVersion());
     // A shell binary is what CI actually has, so this is asserted as agreement
