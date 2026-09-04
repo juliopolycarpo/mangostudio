@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { useExternalTurnRequest } from '../../../src/hooks/use-external-turn-request';
-import { act, renderHook } from '../../support/harness/render';
+import { act, flushAsyncRender, renderHook } from '../../support/harness/render';
 
 describe('useExternalTurnRequest', () => {
   it('keeps a vendor choice for the chat it was made in', () => {
@@ -123,7 +123,10 @@ describe('the durable selection behind the session one', () => {
     renderHook(() =>
       useExternalTurnRequest('chat-1', {
         stored: { model: 'opus' },
-        persist: (selection) => persisted.push(selection),
+        persist: (_chatId, selection) => {
+          persisted.push(selection);
+          return Promise.resolve();
+        },
       })
     );
 
@@ -135,7 +138,10 @@ describe('the durable selection behind the session one', () => {
     const { result } = renderHook(() =>
       useExternalTurnRequest('chat-1', {
         stored: { model: 'opus', effort: 'high' },
-        persist: (selection) => persisted.push(selection),
+        persist: (_chatId, selection) => {
+          persisted.push(selection);
+          return Promise.resolve();
+        },
       })
     );
 
@@ -153,7 +159,12 @@ describe('the durable selection behind the session one', () => {
     const persisted: unknown[] = [];
     const { result, rerender } = renderHook(
       ({ chatId }: { chatId: string | null }) =>
-        useExternalTurnRequest(chatId, { persist: (selection) => persisted.push(selection) }),
+        useExternalTurnRequest(chatId, {
+          persist: (_chatId, selection) => {
+            persisted.push(selection);
+            return Promise.resolve();
+          },
+        }),
       { initialProps: { chatId: 'chat-1' as string | null } }
     );
 
@@ -182,7 +193,10 @@ describe('a pick that changes both fields at once', () => {
     const { result } = renderHook(() =>
       useExternalTurnRequest('chat-1', {
         stored: { model: 'opus', effort: 'high' },
-        persist: (selection) => persisted.push(selection),
+        persist: (_chatId, selection) => {
+          persisted.push(selection);
+          return Promise.resolve();
+        },
       })
     );
 
@@ -191,7 +205,10 @@ describe('a pick that changes both fields at once', () => {
       result.current.setExternalTurnRequest((current) => ({ ...current, effort: undefined }));
     });
 
-    expect(persisted.at(-1)).toEqual({ model: 'sonnet' });
+    // One write, not two: the intermediate pair — the new model carrying the
+    // previous model's effort — never reaches the wire, so it cannot be the
+    // response that lands last.
+    expect(persisted).toEqual([{ model: 'sonnet' }]);
     expect(result.current.externalTurnRequest).toEqual({ model: 'sonnet' });
   });
 
@@ -221,7 +238,10 @@ describe('a pick that changes both fields at once', () => {
     const { result } = renderHook(() =>
       useExternalTurnRequest('chat-1', {
         stored: { model: 'opus' },
-        persist: (selection) => persisted.push(selection),
+        persist: (_chatId, selection) => {
+          persisted.push(selection);
+          return Promise.resolve();
+        },
       })
     );
 
@@ -232,5 +252,84 @@ describe('a pick that changes both fields at once', () => {
     expect(persisted).toEqual([{}]);
     expect(result.current.externalTurnRequest).toEqual({});
     expect(result.current.getExternalTurnRequest()).toBeUndefined();
+  });
+});
+
+describe('a write that does not land', () => {
+  /**
+   * The write goes to the chat the pick was made in.
+   *
+   * Reading the active chat id at write time instead would send a pick made in
+   * one conversation to whichever one the user had switched to while it was in
+   * flight.
+   */
+  it('names the chat the pick was made in', async () => {
+    const writes: Array<{ chatId: string; selection: unknown }> = [];
+    const { result } = renderHook(() =>
+      useExternalTurnRequest('chat-1', {
+        persist: (chatId, selection) => {
+          writes.push({ chatId, selection });
+          return Promise.resolve();
+        },
+      })
+    );
+
+    act(() => {
+      result.current.setExternalTurnRequest((current) => ({ ...current, model: 'sonnet' }));
+    });
+    await flushAsyncRender();
+
+    expect(writes).toEqual([{ chatId: 'chat-1', selection: { model: 'sonnet' } }]);
+  });
+
+  /**
+   * A rejected write takes the pick back, as the runner and permission writes
+   * do.
+   *
+   * The selection is optimistic: swallowing the failure would leave the
+   * composer showing a model the chat does not store, and the next turn would
+   * be sent under a model the user only thinks they changed.
+   */
+  it('takes the selection back when the write is rejected', async () => {
+    const { result } = renderHook(() =>
+      useExternalTurnRequest('chat-1', {
+        stored: { model: 'opus' },
+        persist: () => Promise.reject(new Error('nope')),
+      })
+    );
+
+    act(() => {
+      result.current.setExternalTurnRequest((current) => ({ ...current, model: 'sonnet' }));
+    });
+    await flushAsyncRender();
+
+    expect(result.current.externalTurnRequest).toEqual({ model: 'opus' });
+    // The send path reads through a ref, so it has to see the rollback too.
+    expect(result.current.getExternalTurnRequest()).toBeUndefined();
+  });
+
+  /** A pick made while the failing write was in flight is not undone by it. */
+  it('keeps a newer pick made while the failed write was in flight', async () => {
+    let rejectWrite: (() => void) | undefined;
+    const { result } = renderHook(() =>
+      useExternalTurnRequest('chat-1', {
+        stored: { model: 'opus' },
+        persist: () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectWrite = () => reject(new Error('nope'));
+          }),
+      })
+    );
+
+    act(() => {
+      result.current.setExternalTurnRequest((current) => ({ ...current, model: 'sonnet' }));
+    });
+    act(() => {
+      result.current.setExternalTurnRequest((current) => ({ ...current, model: 'haiku' }));
+      rejectWrite?.();
+    });
+    await flushAsyncRender();
+
+    expect(result.current.externalTurnRequest).toEqual({ model: 'haiku' });
   });
 });

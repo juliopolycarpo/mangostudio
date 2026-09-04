@@ -41,11 +41,10 @@ export function useAppState() {
   const { externalTurnRequest, setExternalTurnRequest, getExternalTurnRequest } =
     useExternalTurnRequest(chats.currentChatId, {
       ...(currentChat?.runnerModelSelection ? { stored: currentChat.runnerModelSelection } : {}),
-      persist: (selection) => {
-        const chatId = chats.currentChatId;
-        if (!chatId) return;
-        void chats.updateChatRunnerModelSelection(chatId, selection).catch(() => undefined);
-      },
+      // Handed the chat the pick was made in, and allowed to reject: the hook
+      // coalesces a pick into one write and takes the selection back when that
+      // write fails.
+      persist: chats.updateChatRunnerModelSelection,
     });
 
   // Read through a ref for the same reason the vendor options are: the send

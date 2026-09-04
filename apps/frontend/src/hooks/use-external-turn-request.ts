@@ -47,7 +47,7 @@
 
 import type { ChatRunnerModelSelection } from '@mangostudio/shared/chat';
 import type { ExternalTurnRequest } from '@mangostudio/shared/generation';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /** Shared so a chat with no vendor choice keeps the same identity every render. */
 const NO_EXTERNAL_TURN_REQUEST: ExternalTurnRequest = {};
@@ -71,8 +71,12 @@ export interface ExternalTurnRequestOptions {
    * chat's own, already resolved against the per-target default by the caller.
    */
   readonly stored?: ChatRunnerModelSelection;
-  /** Called with the whole pair on an explicit pick, never on a read. */
-  readonly persist?: (selection: ChatRunnerModelSelection) => void;
+  /**
+   * Called once per pick with the whole pair, never on a read, and with the
+   * chat the pick was made in rather than whichever one is active when the
+   * write goes out. Rejecting takes the pick back.
+   */
+  readonly persist?: (chatId: string, selection: ChatRunnerModelSelection) => Promise<void>;
 }
 
 export interface ExternalTurnRequestState {
@@ -125,14 +129,38 @@ export function useExternalTurnRequest(
       const next = onlyChosen(updater(base));
       scopedRef.current = { chatId, touched: true, request: next };
       setScoped(scopedRef.current);
-      if (!chatId) return;
-      // Written as a pair for the reason the repository writes them as a pair:
-      // an effort belongs to the model it was chosen for, so a model change
-      // must never leave the previous model's effort behind it.
-      persistRef.current?.(next);
     },
     []
   );
+
+  // One write per pick, not one per field.
+  //
+  // The composer changes both fields in the same event — picking a model
+  // invalidates the effort that belonged to the old one, and the gone-selection
+  // effect clears both — so writing from the setter put two requests on the
+  // wire for a single pick. They are concurrent, and the first of them carries
+  // exactly the pair written as a pair to prevent: the new model with the
+  // previous model's effort. Whichever answers last is what the chat keeps, so
+  // a slow first response or a failed second one leaves that pair durable.
+  //
+  // Persisting from an effect instead writes what React committed, which is
+  // the pair the composer is showing and the only one worth storing.
+  const persistedRef = useRef(scoped);
+  useEffect(() => {
+    if (scoped === persistedRef.current) return;
+    persistedRef.current = scoped;
+    const { chatId, touched, request } = scoped;
+    if (!chatId || !touched) return;
+    void persistRef.current?.(chatId, request).catch(() => {
+      // Optimistic, so a rejected write has to take the pick back the way the
+      // runner and permission writes do: a composer showing a model the chat
+      // does not store would send the next turn under a model the user only
+      // thinks they changed.
+      if (scopedRef.current !== scoped) return;
+      scopedRef.current = { chatId, touched: false, request: NO_EXTERNAL_TURN_REQUEST };
+      setScoped(scopedRef.current);
+    });
+  }, [scoped]);
 
   const getExternalTurnRequest = useCallback(() => {
     const current = scopedRef.current;
