@@ -5,6 +5,7 @@ import {
   getInstallRecipe,
   hasInstallRecipeForRuntime,
   INSTALL_RECIPES,
+  writesForPlatform,
 } from '../../../../src/modules/environments/domain/install-recipes';
 
 /**
@@ -285,6 +286,35 @@ describe('install recipes', () => {
         expect(recipe.writes).toContain(path);
       }
     }
+  });
+
+  // Regression: a cross-platform recipe declares both spellings in one list,
+  // and the uninstall confirmation reads that list back verbatim as "this
+  // removes …". A Windows path in a Linux delete dialog names a file that
+  // does not exist.
+  describe('writesForPlatform', () => {
+    it('drops the Windows spellings on a POSIX target', () => {
+      const writes = writesForPlatform(getInstallRecipe('claude.uninstall').writes, 'linux');
+      expect(writes).toEqual(['$HOME/.local/bin/claude', '$HOME/.local/share/claude']);
+    });
+
+    it('drops the POSIX spellings on a win32 target', () => {
+      const writes = writesForPlatform(getInstallRecipe('claude.uninstall').writes, 'win32');
+      expect(writes).toEqual([
+        '%USERPROFILE%\\.local\\bin\\claude.exe',
+        '%USERPROFILE%\\.local\\share\\claude',
+      ]);
+    });
+
+    it('keeps a placeholder that reads the same on both', () => {
+      const writes = writesForPlatform(getInstallRecipe('fnm.node.install').writes, 'win32');
+      expect(writes).toEqual(['<FNM_DIR>/node-versions']);
+    });
+
+    it('keeps every entry rather than disclosing nothing for a single-platform recipe', () => {
+      const recipe = getInstallRecipe('winget.node.install');
+      expect(writesForPlatform(recipe.writes, 'linux')).toEqual([...recipe.writes]);
+    });
   });
 
   it('offers uninstall and update recipes as copy-only when no vendor shape exists', () => {

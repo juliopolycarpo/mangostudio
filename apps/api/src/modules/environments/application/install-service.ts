@@ -35,6 +35,7 @@ import {
   INSTALL_RECIPES,
   type InstallRecipe,
   type InstallRecipeBuildContext,
+  writesForPlatform,
 } from '../domain/install-recipes';
 import { assertRecipeInput } from '../domain/recipe-input';
 import { environmentRepository } from '../infrastructure/environment-repository';
@@ -500,7 +501,10 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         argv: [...argv],
         copyCommand: recipe.copyCommand(input, platform),
         requires: [...recipe.requires],
-        writes: [...recipe.writes],
+        // Narrowed to this machine's spelling: the uninstall confirmation
+        // reads these back as "this will remove …", and a Windows path in a
+        // Linux dialog names a file that does not exist.
+        writes: [...writesForPlatform(recipe.writes, platform)],
         networkAccess: recipe.networkAccess,
         timeoutMs: recipe.timeoutMs,
         supported,

@@ -606,6 +606,25 @@ describe('install service', () => {
     expect(preview?.profileSetup).toBeUndefined();
   });
 
+  // Regression: `writes` is one flat cross-platform list, and the uninstall
+  // confirmation reads it back verbatim as "this removes …".
+  it('discloses only this platform’s spelling of the paths a recipe writes', async () => {
+    const detection = createDetectionServices();
+    const memory = createMemoryRepository();
+    const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
+      recipes: [getInstallRecipe('claude.uninstall')],
+      ...detection,
+      repository: memory.repository,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+      platform: 'linux',
+    });
+
+    const [preview] = await service.listRecipes(REQUEST_CONTEXT);
+
+    expect(preview?.writes).toEqual(['$HOME/.local/bin/claude', '$HOME/.local/share/claude']);
+  });
+
   it("reports nvm.install's pinned digest before anything has been downloaded", async () => {
     const detection = createDetectionServices();
     const memory = createMemoryRepository();

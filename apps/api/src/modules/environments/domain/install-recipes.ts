@@ -852,6 +852,40 @@ export function getInstallRecipe(id: InstallRecipeId): InstallRecipe {
   return recipe;
 }
 
+/** A write entry spelled the Windows way: `%VAR%` expansion, or a backslash separator. */
+const WIN32_WRITE_SHAPE = /^%[^%]+%|\\/;
+/** A write entry spelled the POSIX way: `$VAR` expansion, `~`, or an absolute path. */
+const POSIX_WRITE_SHAPE = /^[$~/]/;
+
+/**
+ * The paths a recipe declares it writes, narrowed to the ones that mean
+ * anything on `platform`.
+ *
+ * A cross-platform recipe declares both spellings in one flat list
+ * (`$HOME/.local/bin/claude` *and* `%USERPROFILE%\.local\bin\claude.exe`), and
+ * every consumer reads that list as a fact about the machine in front of the
+ * user: the uninstall confirmation names them as what it is about to delete,
+ * and the card matches an installation's path against them to decide whether
+ * the recipe owns it. Showing a Windows path in a Linux "this will remove"
+ * dialog is wrong in the one place being precise matters most.
+ *
+ * An entry in neither spelling (`<FNM_DIR>/node-versions`) is a placeholder
+ * that reads the same everywhere and is kept on every platform.
+ *
+ * // Usage: writesForPlatform(recipe.writes, 'linux') // ['$HOME/.local/bin/claude', …]
+ */
+export function writesForPlatform(
+  writes: readonly string[],
+  platform: InstallPlatform
+): readonly string[] {
+  const narrowed = writes.filter((write) =>
+    platform === 'win32' ? !POSIX_WRITE_SHAPE.test(write) : !WIN32_WRITE_SHAPE.test(write)
+  );
+  // A recipe whose every entry reads as the other platform's is malformed
+  // rather than silent: disclosing nothing would understate what runs.
+  return narrowed.length > 0 ? narrowed : writes;
+}
+
 export function hasInstallRecipeForRuntime(
   runtimeId: RuntimeId,
   platform: string = process.platform
