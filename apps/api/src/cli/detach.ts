@@ -110,6 +110,11 @@ const DETACH_ENV_ALLOWLIST = new Set<string>([
   'MANGO_LOG_FILE',
   'VERSION',
   'MANGOSTUDIO_DIAGNOSTIC_LOGS',
+  // Who launched this hub, so a `serve -d` child still knows how it was
+  // installed — detectInstallOrigin reads these, and an upgrade started from
+  // the detached child needs the same answer the foreground process had.
+  'MANGOSTUDIO_LAUNCHER',
+  'MANGOSTUDIO_LAUNCHER_PATH',
   // System and networking essentials. Bun.spawn replaces (not merges) the
   // child's environment, so omitting these would leave the detached server
   // without executable lookup (breaking the shell-exec tool), home-dir

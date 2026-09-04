@@ -21,6 +21,8 @@ const MUTATED_ENV_KEYS = [
   'ANOTHER_SECRET',
   'ProgramFiles',
   'ProgramW6432',
+  'MANGOSTUDIO_LAUNCHER',
+  'MANGOSTUDIO_LAUNCHER_PATH',
 ];
 
 let envSnapshot: Record<string, string | undefined> = {};
@@ -97,6 +99,19 @@ describe('buildDetachedEnv', () => {
 
     expect(env.SOME_RANDOM_VAR).toBeUndefined();
     expect(env.ANOTHER_SECRET).toBeUndefined();
+  });
+
+  it('forwards the launcher marker, so a serve -d child still knows how it was installed', () => {
+    process.env.MANGOSTUDIO_LAUNCHER = 'npm';
+    process.env.MANGOSTUDIO_LAUNCHER_PATH =
+      '/home/user/.bun/install/global/node_modules/.bin/mangostudio';
+
+    const env = buildDetachedEnv('localhost', 3001, '/tmp/server.log');
+
+    expect(env.MANGOSTUDIO_LAUNCHER).toBe('npm');
+    expect(env.MANGOSTUDIO_LAUNCHER_PATH).toBe(
+      '/home/user/.bun/install/global/node_modules/.bin/mangostudio'
+    );
   });
 
   it('preserves diagnostic log toggle when set to 0', () => {
