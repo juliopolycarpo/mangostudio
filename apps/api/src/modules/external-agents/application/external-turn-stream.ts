@@ -19,6 +19,10 @@ import type {
   ExternalAgentUnavailableReason,
   ExternalReviewTarget,
 } from '@mangostudio/shared/external-agents';
+import {
+  EXTERNAL_ATTACHMENT_MAX_BYTES,
+  EXTERNAL_TURN_MAX_ATTACHMENTS,
+} from '@mangostudio/shared/external-agents';
 import type { ExternalTurnRequest } from '@mangostudio/shared/generation';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import {
@@ -30,6 +34,10 @@ import {
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
+import type {
+  ExternalAgentAttachmentRefusal,
+  ExternalAgentAttachmentResolution,
+} from '../../attachments/application/runtime-attachment-resolver';
 import { resolveExternalAgentAttachments } from '../../attachments/application/runtime-attachment-resolver';
 import { getOwnedChat, type OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import { findActiveTurnByChat } from '../../generation/application/active-turn-registry';
@@ -228,15 +236,21 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
     }
 
     // Attachments are resolved here, before the 200 is committed, so a file
-    // that cannot be read fails as a request error rather than as a stream that
-    // opens and then dies.
+    // that cannot be read — or that the vendor wire cannot carry — fails as a
+    // request error rather than as a stream that opens and then dies.
     //
-    // A target that cannot take images **refuses the send** rather than
-    // stripping them. Dropping them silently would let the user watch the agent
-    // answer confidently about a picture it never received, which is the one
-    // outcome worse than not sending at all.
+    // Every refusal is stated rather than worked around. A target that cannot
+    // take images refuses the send instead of stripping them; a kind no vendor
+    // maps refuses instead of being dropped; a set larger than
+    // `ExternalAgentTurnParamsSchema` accepts refuses here instead of being
+    // rejected by the runtime after the response is already a stream. Dropping
+    // any of them silently would let the user watch the agent answer
+    // confidently about a file it never received, which is the one outcome
+    // worse than not sending at all.
     let attachments: readonly ExternalAgentAttachment[] = [];
     if (input.attachmentIds.length > 0) {
+      // First, and without touching the database: a target that reads no
+      // attachment at all needs no question answered about which ones.
       if (!resolution.descriptor.capabilities.images) {
         return {
           ok: false,
@@ -246,8 +260,9 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
           },
         };
       }
+      let resolved: ExternalAgentAttachmentResolution;
       try {
-        attachments = await resolveExternalAgentAttachments(
+        resolved = await resolveExternalAgentAttachments(
           {
             attachmentIds: [...input.attachmentIds],
             userId: input.userId,
@@ -261,6 +276,10 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
           failure: { kind: 'validation', message: 'One or more attachments could not be read.' },
         };
       }
+      if (!resolved.ok) {
+        return { ok: false, failure: attachmentRefusal(resolved.refusal) };
+      }
+      attachments = resolved.attachments;
     }
 
     // The descriptor this machine actually answered with, before anything is
@@ -383,6 +402,34 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
     }
 
     return { ok: true, response: openStream(input, resolution, attachments, db, controller) };
+  };
+}
+
+/**
+ * How a resolver refusal reads as a preflight failure.
+ *
+ * `non-image` is `unsupported`, because no retry of the same request would
+ * change it — the vendor takes pictures and this is not one. The two bounds are
+ * `validation`, because what is wrong is the request's size and a smaller one
+ * would go through. Both name the limit rather than referring to it: a message
+ * that says "too many" without saying how many is a dead end.
+ */
+function attachmentRefusal(refusal: ExternalAgentAttachmentRefusal): ExternalTurnPreflightFailure {
+  if (refusal === 'non-image') {
+    return {
+      kind: 'unsupported',
+      message: 'This agent can only take image attachments.',
+    };
+  }
+  if (refusal === 'too-many') {
+    return {
+      kind: 'validation',
+      message: `An external agent turn takes at most ${EXTERNAL_TURN_MAX_ATTACHMENTS} attachments.`,
+    };
+  }
+  return {
+    kind: 'validation',
+    message: `Each attachment sent to an external agent must be under ${EXTERNAL_ATTACHMENT_MAX_BYTES / (1024 * 1024)} MB.`,
   };
 }
 

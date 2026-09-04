@@ -285,13 +285,29 @@ export const ExternalAgentConfigurationSchema = Type.Object(
 
 export type ExternalAgentConfiguration = Static<typeof ExternalAgentConfigurationSchema>;
 
+/**
+ * The largest attachment the vendor wire carries, and how many of them.
+ *
+ * Exported because the send path has to refuse an oversized or overlong set
+ * *before* the response is committed. A chat attachment may be far larger than
+ * this — the upload cap is 20 MB and a turn may name twenty of them — and the
+ * only thing standing between that and a stream that opens and then dies is a
+ * check on this side that measures against the same two numbers the runtime's
+ * own schema does.
+ */
+export const EXTERNAL_ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024;
+export const EXTERNAL_TURN_MAX_ATTACHMENTS = 4;
+
+/** Base64 is four characters per three bytes, rounded up to the padded block. */
+const EXTERNAL_ATTACHMENT_MAX_BASE64_LENGTH = 4 * Math.ceil(EXTERNAL_ATTACHMENT_MAX_BYTES / 3);
+
 /** Bytes for one hub-owned attachment crossing to the machine that runs the vendor. */
 export const ExternalAgentAttachmentSchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 256 }),
     originalName: Type.String({ minLength: 1, maxLength: 512 }),
     mimeType: Type.String({ minLength: 1, maxLength: 255 }),
-    sizeBytes: Type.Integer({ minimum: 1, maximum: 2 * 1024 * 1024 }),
+    sizeBytes: Type.Integer({ minimum: 1, maximum: EXTERNAL_ATTACHMENT_MAX_BYTES }),
     kind: Type.Union([
       Type.Literal('image'),
       Type.Literal('text'),
@@ -299,7 +315,10 @@ export const ExternalAgentAttachmentSchema = Type.Object(
       Type.Literal('data'),
       Type.Literal('unknown'),
     ]),
-    bytesBase64: Type.String({ minLength: 1, maxLength: 2_796_204 }),
+    bytesBase64: Type.String({
+      minLength: 1,
+      maxLength: EXTERNAL_ATTACHMENT_MAX_BASE64_LENGTH,
+    }),
   },
   { additionalProperties: false }
 );
@@ -1124,7 +1143,10 @@ export const ExternalAgentTurnParamsSchema = Type.Object(
     input: Type.String({ maxLength: 1024 * 1024 }),
     configuration: ExternalAgentConfigurationSchema,
     attachments: Type.Optional(
-      ReadonlyArraySchema(ExternalAgentAttachmentSchema, { maxItems: 4, uniqueItems: true })
+      ReadonlyArraySchema(ExternalAgentAttachmentSchema, {
+        maxItems: EXTERNAL_TURN_MAX_ATTACHMENTS,
+        uniqueItems: true,
+      })
     ),
   },
   { additionalProperties: false }

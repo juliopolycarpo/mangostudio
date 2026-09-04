@@ -1,10 +1,15 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
+import type { ChatAttachmentKind } from '@mangostudio/shared/chat';
 import type {
   ExternalAgentCapabilities,
   ExternalAgentDescriptor,
   ExternalSupportedConfiguration,
 } from '@mangostudio/shared/external-agents';
-import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
+import {
+  EXTERNAL_ATTACHMENT_MAX_BYTES,
+  EXTERNAL_TURN_MAX_ATTACHMENTS,
+  NO_EXTERNAL_AGENT_CAPABILITIES,
+} from '@mangostudio/shared/external-agents';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import { getDb } from '../../../../src/db/database';
 import type { OwnedChatRecord } from '../../../../src/modules/chats/infrastructure/chat-repository';
@@ -981,5 +986,108 @@ describe('the native review action', () => {
     if (result.ok) return;
     expect(result.failure.kind).toBe('conflict');
     expect(runtime.calls.startReview).toHaveLength(0);
+  });
+});
+
+/**
+ * What the vendor wire can carry, decided before the response is committed.
+ *
+ * `ExternalAgentTurnParamsSchema` takes at most four attachments of at most
+ * `EXTERNAL_ATTACHMENT_MAX_BYTES` each, while a chat attachment may be 20 MB and
+ * a turn may name twenty of them. Without a check on this side the runtime
+ * raises the refusal instead — after the 200 is already a stream, so a turn the
+ * user is watching dies with a message about an invalid payload.
+ */
+describe('attachments the vendor wire cannot carry', () => {
+  const IMAGE_CAPABILITIES: ExternalAgentCapabilities = {
+    ...NO_EXTERNAL_AGENT_CAPABILITIES,
+    structuredStreaming: true,
+    images: true,
+  };
+
+  function imageHarness() {
+    return harness({
+      agents: [descriptor({ capabilities: IMAGE_CAPABILITIES })],
+      sessionCapabilities: IMAGE_CAPABILITIES,
+    });
+  }
+
+  async function insertAttachment(
+    overrides: { kind?: ChatAttachmentKind; sizeBytes?: number } = {}
+  ): Promise<string> {
+    const id = crypto.randomUUID();
+    await getDb()
+      .insertInto('chat_attachments')
+      .values({
+        id,
+        userId,
+        chatId,
+        messageId: null,
+        originalName: 'shot.png',
+        storedName: `${id}-shot.png`,
+        relativePath: `${chatId}/${id}-shot.png`,
+        url: `/uploads/${chatId}/${id}-shot.png`,
+        mimeType: 'image/png',
+        sizeBytes: overrides.sizeBytes ?? 1024,
+        kind: overrides.kind ?? 'image',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+      .execute();
+    return id;
+  }
+
+  function sendWith(attachmentIds: readonly string[]) {
+    return {
+      userId,
+      chat: chatRecord(),
+      chatId,
+      prompt: 'what is in this picture',
+      attachmentIds,
+      externalTurn: undefined,
+    };
+  }
+
+  it('refuses more attachments than the turn schema accepts', async () => {
+    const { stream } = imageHarness();
+    const ids = await Promise.all(Array.from({ length: 5 }, () => insertAttachment()));
+
+    const result = await stream(sendWith(ids), getDb());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.kind).toBe('validation');
+    expect(result.failure.message).toContain(String(EXTERNAL_TURN_MAX_ATTACHMENTS));
+  });
+
+  it('refuses an attachment larger than the turn schema accepts', async () => {
+    const { stream } = imageHarness();
+    const id = await insertAttachment({ sizeBytes: EXTERNAL_ATTACHMENT_MAX_BYTES + 1 });
+
+    const result = await stream(sendWith([id]), getDb());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.kind).toBe('validation');
+    expect(result.failure.message).toMatch(/under 2 MB/i);
+  });
+
+  /**
+   * A kind no adapter maps is refused, never dropped.
+   *
+   * Codex maps every attachment it is handed as an image regardless of kind, so
+   * a PDF would arrive as a broken picture; filtering it out instead would let
+   * the agent answer confidently about a document it never received.
+   */
+  it('refuses a kind the vendor wire cannot carry rather than dropping it', async () => {
+    const { stream } = imageHarness();
+    const id = await insertAttachment({ kind: 'text' });
+
+    const result = await stream(sendWith([id]), getDb());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.kind).toBe('unsupported');
+    expect(result.failure.message).toMatch(/only take image attachments/i);
   });
 });
