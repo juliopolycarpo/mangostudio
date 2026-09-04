@@ -9,7 +9,9 @@ export {
 export {
   parseVendorCliSurface,
   type VendorCliSurface,
+  vendorCliBareChoiceList,
   vendorCliOptionBlock,
+  vendorCliQuotedExamples,
 } from './cli-surface';
 export {
   DEFAULT_EXTERNAL_AGENT_SETTINGS,

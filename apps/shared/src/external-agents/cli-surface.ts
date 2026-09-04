@@ -150,3 +150,100 @@ export function vendorCliOptionBlock(help: string, flag: string): string | undef
   }
   return undefined;
 }
+
+/**
+ * Every `( … )` group in a block, in order, without its delimiters.
+ *
+ * Scanned rather than matched, for the reason `choiceListIn` gives above:
+ * every unanchored regular expression for this is quadratic on an input that
+ * opens a group it never closes.
+ */
+function* parenGroups(block: string): Generator<string> {
+  let cursor = 0;
+  while (cursor < block.length) {
+    const open = block.indexOf('(', cursor);
+    if (open < 0) return;
+    const close = block.indexOf(')', open + 1);
+    if (close < 0) return;
+    yield block.slice(open + 1, close);
+    cursor = close + 1;
+  }
+}
+
+/** A single bare lowercase identifier, anchored so it cannot backtrack. */
+const BARE_IDENTIFIER = /^[a-z][a-z0-9-]*$/;
+
+/** The group's contents as a comma-separated identifier list, or nothing. */
+function bareIdentifierList(group: string): readonly string[] {
+  const parts = group.split(',').map((part) => part.trim());
+  return parts.length > 1 && parts.every((part) => BARE_IDENTIFIER.test(part)) ? parts : [];
+}
+
+/**
+ * An option's vocabulary when it is printed as a bare list rather than as
+ * commander's own `(choices: …)`.
+ *
+ * `(low, medium, high, xhigh, max)` is a real thing a commander CLI prints for
+ * an option commander does not know the choices of, and it is invisible to
+ * `parseVendorCliSurface`. The first group whose contents are a comma-separated
+ * run of bare identifiers wins, which rejects `(only works with --print …)` and
+ * `(choices: "host", "none")` by the same rule rather than by special-casing
+ * either.
+ *
+ * `undefined` means the option is not declared or states no such list — never
+ * an empty set, so a caller can tell "this build says nothing" from "this build
+ * accepts nothing".
+ *
+ * @example
+ * vendorCliBareChoiceList(help, '--effort'); // Set { 'low', 'medium', 'high' }
+ */
+export function vendorCliBareChoiceList(
+  help: string,
+  flag: string
+): ReadonlySet<string> | undefined {
+  const block = vendorCliOptionBlock(help, flag);
+  if (block === undefined) return undefined;
+  for (const group of parenGroups(block)) {
+    const values = bareIdentifierList(group);
+    if (values.length > 0) return new Set(values);
+  }
+  return undefined;
+}
+
+/** Marks the group that holds a vendor's own examples. */
+const EXAMPLE_PREFIX = 'e.g.';
+/** A quoted example: bare, so a quote opened by an apostrophe cannot close on one. */
+const QUOTED_EXAMPLE = /'([a-z][a-z0-9.-]*)'/g;
+
+/**
+ * The quoted values in an option's **first** `(e.g. …)` group.
+ *
+ * Bounded to one group, and that bound is the whole correctness argument:
+ *
+ * - Prose around these lists contains apostrophes ("a model's full name"). A
+ *   scan for quoted tokens across the block opens a quote on the apostrophe and
+ *   closes it on the next one, inventing a value out of the words in between.
+ * - A description with two example groups is describing two *different* things.
+ *   Claude's `--model` names its aliases in the first and one full model name in
+ *   the second; merging them advertises a specific model as though it were an
+ *   alias the vendor promises to resolve.
+ *
+ * `undefined` for an option that is absent or states no examples, with the same
+ * absent-is-not-empty rule as `vendorCliBareChoiceList`.
+ *
+ * @example
+ * vendorCliQuotedExamples(help, '--model'); // Set { 'fable', 'opus', 'sonnet' }
+ */
+export function vendorCliQuotedExamples(
+  help: string,
+  flag: string
+): ReadonlySet<string> | undefined {
+  const block = vendorCliOptionBlock(help, flag);
+  if (block === undefined) return undefined;
+  for (const group of parenGroups(block)) {
+    if (!group.trimStart().startsWith(EXAMPLE_PREFIX)) continue;
+    const examples = [...group.matchAll(QUOTED_EXAMPLE)].map(([, value]) => value ?? '');
+    return examples.length > 0 ? new Set(examples) : undefined;
+  }
+  return undefined;
+}
