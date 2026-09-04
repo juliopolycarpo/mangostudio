@@ -76,7 +76,10 @@ current version and LTS status per version. Cursor's CLI is found under its curr
 
 A `prerequisite-missing` finding names a recipe this machine would offer and the tool it needs
 but does not have. Nothing installs winget itself, so its remedy is a link to App Installer on
-the Microsoft Store, rendered with the copy-only shape rather than a run button.
+the Microsoft Store, rendered with the copy-only shape rather than a run button. A remedy is a
+bare URL and never a sentence: it is interpolated into a localized finding message, so prose put
+there would reach a pt-BR reader in English, and the frontend only renders a remedy as a
+followable link when the whole value is a URL.
 
 ## Recipes
 

@@ -21,9 +21,13 @@ import { hasInstallRecipeForRuntime, type InstallRecipe } from './install-recipe
  * recipe on some platform, which is what keeps it out of a
  * `prerequisite-missing` finding in the first place; the empty-string branch
  * covers a future requirement that might not.
+ *
+ * The URL alone, with no sentence around it. A remedy is interpolated into a
+ * localized finding message, so prose written here would reach a pt-BR reader
+ * in English — and `FindingList` only turns a remedy into a followable link
+ * when the whole value is one.
  */
-const WINGET_REMEDY =
-  'Install App Installer from the Microsoft Store: https://apps.microsoft.com/detail/9nblggh4nns1';
+const WINGET_REMEDY = 'https://apps.microsoft.com/detail/9nblggh4nns1';
 
 function remedyFor(requirement: RuntimeId): string {
   return requirement === 'winget' ? WINGET_REMEDY : '';

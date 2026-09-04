@@ -3,8 +3,9 @@ import type { RuntimeId, RuntimeStatus } from '@mangostudio/shared/environments'
 import { INSTALL_RECIPES } from '../../../../src/modules/environments/domain/install-recipes';
 import { computePrerequisiteMissingFindings } from '../../../../src/modules/environments/domain/prerequisite-findings';
 
-const WINGET_REMEDY =
-  'Install App Installer from the Microsoft Store: https://apps.microsoft.com/detail/9nblggh4nns1';
+// The URL alone: a remedy is interpolated into a localized sentence, and the
+// frontend only links a remedy that is entirely a URL.
+const WINGET_REMEDY = 'https://apps.microsoft.com/detail/9nblggh4nns1';
 
 function notInstalled(id: RuntimeId): RuntimeStatus {
   return {
@@ -92,5 +93,21 @@ describe('computePrerequisiteMissingFindings', () => {
     const statuses = [notInstalled('winget')];
     const result = computePrerequisiteMissingFindings(statuses, 'win32', INSTALL_RECIPES);
     expect(result.has('winget')).toBe(false);
+  });
+
+  // A remedy is interpolated into a localized sentence, so any prose written
+  // here reaches a pt-BR reader in English — and `FindingList` only renders a
+  // remedy as a followable link when the whole value is a URL. Both failures
+  // come from the same mistake: wrapping the URL in a sentence.
+  it('carries the remedy as a bare URL, with no prose to leave untranslated', () => {
+    const result = computePrerequisiteMissingFindings(
+      [notInstalled('node')],
+      'win32',
+      INSTALL_RECIPES
+    );
+    const remedy = result.get('node')?.[0]?.params?.remedy;
+
+    expect(remedy).toBeDefined();
+    expect(remedy).toMatch(/^https:\/\/\S+$/);
   });
 });
