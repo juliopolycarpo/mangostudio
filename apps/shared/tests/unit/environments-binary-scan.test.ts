@@ -514,7 +514,7 @@ describe('win32-only prerequisite definitions', () => {
     env: {},
   };
 
-  it('resolves fnm well-known directories: the winget link, then FNM_DIR or its default', () => {
+  it('resolves fnm well-known directories: the winget link, then FNM_DIR, then its default', () => {
     expect(FNM_RUNTIME_DEFINITION.wellKnownDirs(win32Env)).toEqual([
       'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WinGet\\Links',
       'C:\\Users\\tester\\AppData\\Roaming\\fnm',
@@ -524,11 +524,38 @@ describe('win32-only prerequisite definitions', () => {
         ...win32Env,
         env: { ...win32Env.env, FNM_DIR: 'C:\\custom\\fnm' },
       })
-    ).toEqual(['C:\\Users\\tester\\AppData\\Local\\Microsoft\\WinGet\\Links', 'C:\\custom\\fnm']);
+    ).toEqual([
+      'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WinGet\\Links',
+      'C:\\custom\\fnm',
+      'C:\\Users\\tester\\AppData\\Roaming\\fnm',
+    ]);
     expect(FNM_RUNTIME_DEFINITION.wellKnownDirs(posixEnv)).toEqual([
       '/home/tester/.local/share/fnm',
       '/home/tester/.fnm',
     ]);
+  });
+
+  it('walks the same fnm root ladder the detector does, on every platform', () => {
+    expect(
+      FNM_RUNTIME_DEFINITION.wellKnownDirs({
+        platform: 'darwin',
+        homeDir: '/Users/tester',
+        env: {},
+      })
+    ).toEqual(['/Users/tester/Library/Application Support/fnm', '/Users/tester/.fnm']);
+
+    expect(
+      FNM_RUNTIME_DEFINITION.wellKnownDirs({ ...posixEnv, env: { FNM_DIR: '/opt/fnm' } })
+    ).toEqual(['/opt/fnm', '/home/tester/.local/share/fnm', '/home/tester/.fnm']);
+
+    // A configured root is a candidate, never a replacement: one that points
+    // nowhere must not hide a real install at the platform default.
+    expect(
+      FNM_RUNTIME_DEFINITION.wellKnownDirs({
+        ...win32Env,
+        env: { ...win32Env.env, FNM_DIR: 'C:\\custom\\fnm' },
+      })
+    ).toContain('C:\\Users\\tester\\AppData\\Roaming\\fnm');
   });
 
   it('resolves git well-known directories on win32 only', () => {

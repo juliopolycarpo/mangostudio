@@ -101,17 +101,21 @@ export function parseWingetVersion(raw: string): SemVer | null {
   return parseSemVer(raw, 'optional-v');
 }
 
+/**
+ * fnm installs its binary into its own root, so the search list is the root
+ * ladder itself — `fnmRootCandidates`, never a second spelling of it. On win32
+ * winget links the executable elsewhere, which is the one directory the ladder
+ * does not own.
+ */
 function wellKnownFnmDirectories(env: PathEnv): string[] {
-  if (env.platform === 'win32') {
-    const { LOCALAPPDATA, FNM_DIR, APPDATA } = env.env;
-    return [
-      // winget's fnm manifest links here — see the comment on `fnm.install`.
-      LOCALAPPDATA ? win32.join(LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links') : undefined,
-      FNM_DIR?.trim() || (APPDATA ? win32.join(APPDATA, 'fnm') : undefined),
-    ].filter((directory): directory is string => Boolean(directory?.trim()));
-  }
+  const { LOCALAPPDATA } = env.env;
+  const wingetLinks =
+    env.platform === 'win32' && LOCALAPPDATA
+      ? // winget's fnm manifest links here — see the comment on `fnm.install`.
+        [win32.join(LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links')]
+      : [];
 
-  return [posix.join(env.homeDir, '.local', 'share', 'fnm'), posix.join(env.homeDir, '.fnm')];
+  return [...wingetLinks, ...fnmRootCandidates(env)];
 }
 
 function wellKnownGitDirectories(env: PathEnv): string[] {
