@@ -4,9 +4,18 @@
  */
 
 import type { HubHealth } from '@mangostudio/shared/machine';
+import type { UpdateCheck } from '@mangostudio/shared/updates';
 import { formatBuildInfo, formatBuildSha } from '../../lib/build-info';
+import { getConfig, getVersion } from '../../lib/config';
 import { isStateLive, readState, removeState, type ServerState } from '../../lib/server-state';
+import { currentInstallOriginProbe } from '../../modules/machine/application/hub-service';
 import { describeHubProcess } from '../../modules/machine/domain/hub-process';
+import {
+  type InstallStatus,
+  resolveInstallStatus,
+} from '../../modules/updates/application/install-status';
+import { updateChecker } from '../../modules/updates/application/update-check';
+import { describeInstallManager } from '../../modules/updates/domain/install-origin';
 import type { StatusArgs } from '../args';
 import { formatUptime } from '../format';
 import { canProbeHealth, probeHealth, probeHubHealth } from '../health';
@@ -21,6 +30,10 @@ export interface StatusDeps {
   canProbeHealth: typeof canProbeHealth;
   log: (msg: string) => void;
   now: () => number;
+  /** Never hits the network: install origin plus the effective channel and upgrade command. */
+  installStatus: () => InstallStatus;
+  /** Whatever the release checker last wrote to disk; never a network call. */
+  readCachedUpdate: () => UpdateCheck | null;
 }
 
 const DEFAULT_ARGS: StatusArgs = { json: false };
@@ -73,6 +86,17 @@ function printRunning(state: ServerState, health: HubHealth, d: Required<StatusD
   d.log(`  Health:  ${health}`);
   d.log(`  Version: ${state.version} (${formatBuildSha(state.buildInfo)})`);
   d.log(`  Build:   ${formatBuildInfo(state.buildInfo)}`);
+
+  const install = d.installStatus();
+  d.log(
+    `  Installed via: ${describeInstallManager(install.installedVia.manager)} · channel: ${install.channel}`
+  );
+  const check = d.readCachedUpdate();
+  if (check?.updateAvailable) {
+    d.log(
+      `  Update:  ${check.latestVersion ?? 'a newer build'} available — run: ${install.command}`
+    );
+  }
 }
 
 function resolveDeps(deps: Partial<StatusDeps>): Required<StatusDeps> {
@@ -84,5 +108,14 @@ function resolveDeps(deps: Partial<StatusDeps>): Required<StatusDeps> {
     canProbeHealth: deps.canProbeHealth ?? canProbeHealth,
     log: deps.log ?? writeLine,
     now: deps.now ?? Date.now,
+    installStatus:
+      deps.installStatus ??
+      (() =>
+        resolveInstallStatus(
+          currentInstallOriginProbe(),
+          getConfig().updates.channel,
+          getVersion()
+        )),
+    readCachedUpdate: deps.readCachedUpdate ?? (() => updateChecker.readCached()),
   };
 }
