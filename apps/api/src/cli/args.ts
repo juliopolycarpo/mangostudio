@@ -244,6 +244,19 @@ export function parseLogsArgs(rest: string[]): LogsArgs {
   return { follow, lines };
 }
 
+/** `env` options that take the next argument as their value, and where it lands. */
+const ENV_VALUE_FLAGS = {
+  '--environment': 'environmentId',
+  '--version': 'version',
+  '--user': 'user',
+} as const;
+
+type EnvValueFlag = keyof typeof ENV_VALUE_FLAGS;
+
+function isEnvValueFlag(arg: string | undefined): arg is EnvValueFlag {
+  return arg !== undefined && arg in ENV_VALUE_FLAGS;
+}
+
 /**
  * Parse `env` args: optional subcommand and --json, plus `install`/`update`'s
  * own `<recipe>`, `--environment <id>`, and `--version <spec>`.
@@ -251,9 +264,7 @@ export function parseLogsArgs(rest: string[]): LogsArgs {
  */
 export function parseEnvArgs(rest: string[]): EnvArgs {
   let json = false;
-  let environmentId: string | undefined;
-  let version: string | undefined;
-  let user: string | undefined;
+  const values: Partial<Record<(typeof ENV_VALUE_FLAGS)[EnvValueFlag], string>> = {};
   const positionals: string[] = [];
 
   for (let index = 0; index < rest.length; index += 1) {
@@ -262,30 +273,13 @@ export function parseEnvArgs(rest: string[]): EnvArgs {
       json = true;
       continue;
     }
-    if (arg === '--environment') {
+    const field = isEnvValueFlag(arg) ? ENV_VALUE_FLAGS[arg] : undefined;
+    if (field) {
       const value = rest[index + 1];
       if (!value || value.startsWith('-')) {
-        throw new CliError('Missing value for env --environment');
+        throw new CliError(`Missing value for env ${arg}`);
       }
-      environmentId = value;
-      index += 1;
-      continue;
-    }
-    if (arg === '--version') {
-      const value = rest[index + 1];
-      if (!value || value.startsWith('-')) {
-        throw new CliError('Missing value for env --version');
-      }
-      version = value;
-      index += 1;
-      continue;
-    }
-    if (arg === '--user') {
-      const value = rest[index + 1];
-      if (!value || value.startsWith('-')) {
-        throw new CliError('Missing value for env --user');
-      }
-      user = value;
+      values[field] = value;
       index += 1;
       continue;
     }
@@ -295,6 +289,7 @@ export function parseEnvArgs(rest: string[]): EnvArgs {
     if (arg !== undefined) positionals.push(arg);
   }
 
+  const { environmentId, version, user } = values;
   const subcommand = positionals[0];
   if (subcommand === undefined) {
     return { subcommand: null, json };
