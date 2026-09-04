@@ -44,4 +44,16 @@ export const DEFAULT_TOOLCHAIN_SELECTION: Static<typeof ToolchainSelectionSchema
 
 export type ToolchainChoice = Static<typeof ToolchainChoiceSchema>;
 export type ToolchainSelection = Static<typeof ToolchainSelectionSchema>;
+
+/**
+ * The runtimes a toolchain pin can name — derived from the selection rather
+ * than restated, so adding a third one reaches every consumer that iterates
+ * or switches on it instead of compiling clean and doing nothing.
+ */
+export type ToolchainRuntimeId = keyof ToolchainSelection;
+
+/** Every pinnable runtime, for a caller that has to visit each in turn. */
+export const TOOLCHAIN_RUNTIME_IDS = Object.keys(
+  ToolchainSelectionSchema.properties
+) as readonly ToolchainRuntimeId[];
 export type ToolchainUpdateBody = Static<typeof ToolchainUpdateBodySchema>;

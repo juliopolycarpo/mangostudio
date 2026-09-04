@@ -10,11 +10,10 @@
  * spawn a process with.
  */
 
-import type { ToolchainChoice } from '@mangostudio/shared/environments';
+import type { ToolchainChoice, ToolchainRuntimeId } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { updateToolchain } from '../api';
-import type { ToolchainRuntimeId } from '../format';
 import { environmentKeys } from '../queries';
 
 export interface ToolchainSelectionInput {
@@ -24,7 +23,7 @@ export interface ToolchainSelectionInput {
 
 /** Builds the partial body the route expects: only the runtime that changed. */
 function toolchainBody(input: ToolchainSelectionInput) {
-  return input.runtimeId === 'node' ? { node: input.choice } : { bun: input.choice };
+  return { [input.runtimeId]: input.choice };
 }
 
 export function useUpdateToolchainMutation(environmentId: string = LOCAL_ENVIRONMENT_ID) {

@@ -19,8 +19,10 @@ import type {
   RuntimeInstallation,
   RuntimeStatus,
   ToolchainChoice,
+  ToolchainRuntimeId,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
+import { TOOLCHAIN_RUNTIME_IDS } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
 import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
@@ -615,12 +617,11 @@ export function pathSourceManagerName(
   return displayName(t, source);
 }
 
-/** The two runtimes a toolchain pin can name — `ToolchainSelectionSchema`'s own keys. */
-export type ToolchainRuntimeId = 'node' | 'bun';
-
 /** Whether `id` is one this card offers a toolchain pin for. Never fnm, nvm, winget, or an agent. */
 export function toolchainRuntimeId(id: RuntimeStatus['id']): ToolchainRuntimeId | undefined {
-  return id === 'node' || id === 'bun' ? id : undefined;
+  return (TOOLCHAIN_RUNTIME_IDS as readonly string[]).includes(id)
+    ? (id as ToolchainRuntimeId)
+    : undefined;
 }
 
 /**

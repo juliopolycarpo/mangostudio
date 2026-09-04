@@ -14,7 +14,10 @@ import type {
   ToolchainSelection,
   ToolchainUpdateBody,
 } from '@mangostudio/shared/environments';
-import { DEFAULT_TOOLCHAIN_SELECTION } from '@mangostudio/shared/environments';
+import {
+  DEFAULT_TOOLCHAIN_SELECTION,
+  TOOLCHAIN_RUNTIME_IDS,
+} from '@mangostudio/shared/environments';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { publishEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation';
 import { EnvironmentServiceError } from '../domain/environment-error';
@@ -109,11 +112,13 @@ export function createToolchainService(
     },
 
     async update(userId, environmentId, body) {
-      if (body.node !== undefined) {
-        await assertKnownPath(probing, userId, environmentId, 'node', body.node);
-      }
-      if (body.bun !== undefined) {
-        await assertKnownPath(probing, userId, environmentId, 'bun', body.bun);
+      // Keyed off the selection's own runtimes, so a third pinnable one is
+      // validated here the moment the schema names it.
+      for (const runtimeId of TOOLCHAIN_RUNTIME_IDS) {
+        const choice = body[runtimeId];
+        if (choice !== undefined) {
+          await assertKnownPath(probing, userId, environmentId, runtimeId, choice);
+        }
       }
 
       // The body is already the patch: the repository merges it into the
