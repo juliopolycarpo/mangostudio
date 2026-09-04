@@ -3,7 +3,10 @@ import type {
   ExternalAgentDescriptor,
   ExternalAgentSettings,
 } from '@mangostudio/shared/external-agents';
-import { DEFAULT_EXTERNAL_AGENT_SETTINGS } from '@mangostudio/shared/external-agents';
+import {
+  DEFAULT_EXTERNAL_AGENT_SETTINGS,
+  NO_EXTERNAL_AGENT_CAPABILITIES,
+} from '@mangostudio/shared/external-agents';
 import type { OwnedChatRecord } from '../../../../src/modules/chats/infrastructure/chat-repository';
 import { createExternalTurnConfigurationResolver } from '../../../../src/modules/external-agents/application/external-turn-configuration';
 
@@ -28,25 +31,20 @@ function descriptor(overrides: Partial<ExternalAgentDescriptor> = {}): ExternalA
     installed: true,
     authState: 'signed-in',
     capabilities: {
+      ...NO_EXTERNAL_AGENT_CAPABILITIES,
       structuredStreaming: true,
-      reasoningStream: false,
       resume: true,
       cancellation: true,
       usageReporting: true,
-      interactiveApprovals: false,
-      images: false,
-      steering: false,
-      sessionListing: false,
-      nativeReview: false,
-      accountUsage: false,
       modelCatalog: true,
-      commandCatalog: false,
     },
-    supportedConfigurations: [{ level: 'default', routing: 'user', supported: true }],
+    supportedConfigurations: [
+      { level: 'default', routing: 'user', supported: true, unattended: false },
+    ],
     models: CATALOG,
     environmentId: 'local',
     ...overrides,
-  } as ExternalAgentDescriptor;
+  };
 }
 
 function chat(selection: OwnedChatRecord['runnerModelSelection'] = {}): OwnedChatRecord {
