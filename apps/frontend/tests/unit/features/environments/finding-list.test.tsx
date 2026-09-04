@@ -10,23 +10,22 @@ import { render, screen } from '../../../support/harness/render';
 
 describe('FindingList', () => {
   it('renders a URL remedy as a link, separate from the sentence around it', () => {
+    const remedy = 'https://apps.microsoft.com/detail/9nblggh4nns1';
     const finding: RuntimeFinding = {
       code: 'prerequisite-missing',
-      params: {
-        recipe: 'Install Node',
-        requirement: 'winget',
-        remedy: 'https://apps.microsoft.com/detail/9nblggh4nns1',
-      },
+      params: { recipe: 'Install Node', requirement: 'winget', remedy },
     };
 
     render(<FindingList findings={[finding]} />);
 
     const link = screen.getByTestId('finding-remedy-link');
-    expect(link).toHaveAttribute('href', 'https://apps.microsoft.com/detail/9nblggh4nns1');
-    expect(link.textContent).toBe('https://apps.microsoft.com/detail/9nblggh4nns1');
-    // The link text is not duplicated inside the sentence around it.
+    expect(link).toHaveAttribute('href', remedy);
+    expect(link.textContent).toBe(remedy);
+    // The link text is not duplicated inside the sentence around it. Counted by
+    // splitting rather than matching: an unanchored URL pattern is the shape
+    // CodeQL flags, and nothing here needs a regular expression.
     const item = screen.getByTestId('finding-list').textContent ?? '';
-    expect(item.match(/https:\/\/apps\.microsoft\.com/g)).toHaveLength(1);
+    expect(item.split(remedy).length - 1).toBe(1);
   });
 
   it('renders a non-URL remedy as plain text, with no link', () => {
