@@ -165,3 +165,72 @@ describe('the durable selection behind the session one', () => {
     expect(persisted).toEqual([]);
   });
 });
+
+describe('a pick that changes both fields at once', () => {
+  /**
+   * The composer's own shape, and the regression this pins.
+   *
+   * `ExternalComposerControls` invalidates the effort in the same event that
+   * changes the model — the effort vocabulary belongs to the model — so the
+   * hook is called twice with no render between the calls. Applying the second
+   * one to the render's copy of the state would apply it to the pair from
+   * before the first, and the write that lands last would be the one that never
+   * saw the model the user just chose.
+   */
+  it('persists the model the user just picked, not the one it replaced', () => {
+    const persisted: unknown[] = [];
+    const { result } = renderHook(() =>
+      useExternalTurnRequest('chat-1', {
+        stored: { model: 'opus', effort: 'high' },
+        persist: (selection) => persisted.push(selection),
+      })
+    );
+
+    act(() => {
+      result.current.setExternalTurnRequest((current) => ({ ...current, model: 'sonnet' }));
+      result.current.setExternalTurnRequest((current) => ({ ...current, effort: undefined }));
+    });
+
+    expect(persisted.at(-1)).toEqual({ model: 'sonnet' });
+    expect(result.current.externalTurnRequest).toEqual({ model: 'sonnet' });
+  });
+
+  /** The wire agrees with the composer: no effort chosen for the new model. */
+  it('does not send the previous model’s effort', () => {
+    const { result } = renderHook(() =>
+      useExternalTurnRequest('chat-1', { stored: { model: 'opus', effort: 'high' } })
+    );
+
+    act(() => {
+      result.current.setExternalTurnRequest((current) => ({ ...current, model: 'sonnet' }));
+      result.current.setExternalTurnRequest((current) => ({ ...current, effort: undefined }));
+    });
+
+    expect(result.current.getExternalTurnRequest()).toEqual({ model: 'sonnet' });
+  });
+
+  /**
+   * Clearing is a choice, and it has to be expressible.
+   *
+   * A per-field fallback to the stored pair cannot tell "left alone" from "set
+   * back to the vendor's default", so it reads the stored model back and writes
+   * it straight out again — leaving the picker unable to return to Default.
+   */
+  it('lets the user clear a stored model back to the vendor default', () => {
+    const persisted: unknown[] = [];
+    const { result } = renderHook(() =>
+      useExternalTurnRequest('chat-1', {
+        stored: { model: 'opus' },
+        persist: (selection) => persisted.push(selection),
+      })
+    );
+
+    act(() => {
+      result.current.setExternalTurnRequest((current) => ({ ...current, model: undefined }));
+    });
+
+    expect(persisted).toEqual([{}]);
+    expect(result.current.externalTurnRequest).toEqual({});
+    expect(result.current.getExternalTurnRequest()).toBeUndefined();
+  });
+});
