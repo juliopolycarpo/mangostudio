@@ -1,0 +1,687 @@
+/**
+ * `mangostudio upgrade`'s engine: resolve a target, download and verify it,
+ * run the embedded install script, and restart the hub — or hand the job to
+ * the package manager that owns the binary, or refuse with the command that
+ * would do it instead. The CLI and `POST /api/machine/upgrade` are both thin
+ * callers of `run()`/`rollback()`; every branch they need lives here once.
+ *
+ * Every external effect is injected, and `run`/`rollback` never reject: a
+ * throw from any of them (a network error, a spawn failure) becomes a
+ * `failed` report with exit 2, the same as a script that ran and exited
+ * non-zero. A caller streaming this over SSE can therefore always end with a
+ * `done` event built from the return value, never an `error` event from a
+ * rejected promise.
+ */
+
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { posix, win32 } from 'node:path';
+import type { HubLaunchMode } from '@mangostudio/shared/machine';
+import {
+  UPDATE_ERROR_MAX,
+  UPDATE_VERSION_MAX,
+  UPGRADE_COMMAND_MAX,
+  UPGRADE_OUTPUT_LINE_MAX,
+  type UpdateChannel,
+  type UpgradeReport,
+  type UpgradeStage,
+  type UpgradeStreamEvent,
+  type UpgradeTarget,
+} from '@mangostudio/shared/updates';
+import {
+  restartExecutableOptions,
+  type SpawnDetachedWaiterInput,
+  spawnDetached,
+  spawnDetachedWaiter,
+} from '../../../cli/detach';
+import { createProcessController, stopPidOrThrow } from '../../../cli/process-control';
+import { sleep } from '../../../cli/sleep';
+import { type BuildInfo, getBuildInfo } from '../../../lib/build-info';
+import { getConfig, getVersion } from '../../../lib/config';
+import { getUpgradeLogPath } from '../../../lib/mango-paths';
+import type { SafeFetchDeps } from '../../../lib/safe-fetch';
+import { readState, type ServerState } from '../../../lib/server-state';
+import {
+  createHubServiceManager,
+  currentHubExecutable,
+  currentInstallOriginProbe,
+} from '../../machine/application/hub-service';
+import type { HubExecutable } from '../../machine/domain/hub-executable';
+import { hubLaunchMode } from '../../machine/domain/hub-process';
+import { fitToLimit } from '../../machine/domain/machine-limits';
+import { decideRestart } from '../domain/decide-restart';
+import {
+  detectInstallOrigin,
+  fitInstalledVia,
+  type InstallOrigin,
+  type InstallOriginProbe,
+} from '../domain/install-origin';
+import { type ReleasePlatformId, resolveBuildPlatformId } from '../domain/platform-id';
+import {
+  isAlreadyCurrent,
+  type ResolvedDownload,
+  resolveUpgradeTarget as resolveUpgradeTargetImpl,
+  type UpgradeTargetContext,
+  type UpgradeTargetRequest,
+} from '../domain/resolve-target';
+import { planUpgrade, type UpgradePlan } from '../domain/upgrade-plan';
+import {
+  embeddedInstaller,
+  embeddedInstallerFileName,
+  type InstallerKind,
+} from '../infrastructure/embedded-installers';
+import {
+  type DownloadedUpgrade,
+  downloadVerified as downloadVerifiedImpl,
+} from '../infrastructure/release-download';
+import {
+  type RunScript,
+  runScript as runScriptImpl,
+  type ScriptOutputLine,
+  type ScriptRun,
+} from '../infrastructure/run-script';
+
+export interface UpgradeRunRequest {
+  readonly channel?: UpdateChannel;
+  readonly version?: string;
+  readonly sha?: string;
+  readonly restart: boolean;
+  readonly checkOnly?: boolean;
+}
+
+export type EmitUpgradeEvent = (event: UpgradeStreamEvent) => void;
+
+export interface UpgradeService {
+  run(request: UpgradeRunRequest, emit: EmitUpgradeEvent): Promise<UpgradeReport>;
+  rollback(emit: EmitUpgradeEvent): Promise<UpgradeReport>;
+}
+
+export interface UpgradeServiceDeps {
+  /** Same shape `resolveInstallStatus`/`detectInstallOrigin` read; freshly probed each call. */
+  readonly probe: () => InstallOriginProbe;
+  readonly configuredChannel: () => UpdateChannel | null;
+  readonly resolveUpgradeTarget: (
+    request: UpgradeTargetRequest,
+    context: UpgradeTargetContext
+  ) => ReturnType<typeof resolveUpgradeTargetImpl>;
+  readonly downloadVerified: (
+    resolved: ResolvedDownload,
+    destinationDir: string
+  ) => Promise<DownloadedUpgrade>;
+  readonly runScript: RunScript;
+  readonly writeTempScript: (directory: string, kind: InstallerKind) => Promise<string>;
+  readonly which: (name: string) => string | null;
+  readonly mkdir: (path: string) => Promise<void>;
+  readonly removeDir: (path: string) => Promise<void>;
+  readonly spawnDetachedWaiter: (input: SpawnDetachedWaiterInput) => number;
+  /** Effect for a `'scheduled'` restart decision; a route defers this itself instead (see machine-routes.ts). */
+  readonly restartHub: (input: { state: ServerState; launch: HubLaunchMode }) => Promise<void>;
+  readonly currentExecutable: () => HubExecutable;
+  readonly readState: typeof readState;
+  readonly now: () => number;
+  readonly platform: NodeJS.Platform;
+  readonly env: NodeJS.ProcessEnv;
+  readonly getVersion: () => string;
+  readonly getBuildInfo: () => BuildInfo;
+  readonly platformId: ReleasePlatformId;
+  readonly pid: number;
+}
+
+const SCRIPT_ENV_PASSTHROUGH: readonly string[] = [
+  'PATH',
+  'HOME',
+  'USERPROFILE',
+  'LOCALAPPDATA',
+  'TEMP',
+  'TMP',
+  'SystemRoot',
+];
+
+/** Path joining that follows the deps' platform, not the one running the process — see hub-executable.ts's `joiner`. */
+function joinPath(platform: NodeJS.Platform, ...segments: string[]): string {
+  return (platform === 'win32' ? win32.join : posix.join)(...segments);
+}
+
+function stageEvent(stage: UpgradeStage, detail?: string): UpgradeStreamEvent {
+  return detail !== undefined
+    ? { type: 'stage', stage, detail, done: false }
+    : { type: 'stage', stage, done: false };
+}
+
+function outputEvent(line: ScriptOutputLine): UpgradeStreamEvent {
+  return {
+    type: 'output',
+    stream: line.stream,
+    line: fitToLimit(line.line, UPGRADE_OUTPUT_LINE_MAX),
+    done: false,
+  };
+}
+
+/** Relays every line of a script run as an `output` event and resolves its exit code. */
+async function relayLines(run: ScriptRun, emit: EmitUpgradeEvent): Promise<number> {
+  for await (const line of run.lines) emit(outputEvent(line));
+  return await run.exitCode;
+}
+
+/** A resolved download, cut to the wire `UpgradeTarget` shape — no internal verification fields. */
+function toWireTarget(resolved: ResolvedDownload): UpgradeTarget {
+  return {
+    channel: resolved.channel,
+    version: fitToLimit(resolved.version, UPDATE_VERSION_MAX),
+    ...(resolved.sourceSha !== undefined ? { sourceSha: fitToLimit(resolved.sourceSha, 64) } : {}),
+    assetName: fitToLimit(resolved.assetName, 256),
+    url: fitToLimit(resolved.url, 2_048),
+    kind: resolved.kind,
+    verification: resolved.verification,
+  };
+}
+
+function joinMessages(...parts: readonly (string | undefined)[]): string | undefined {
+  const filtered = parts.filter((part): part is string => Boolean(part?.trim()));
+  return filtered.length > 0 ? filtered.join(' ') : undefined;
+}
+
+function toEnvRecord(env: NodeJS.ProcessEnv): Record<string, string> {
+  const record: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined) record[key] = value;
+  }
+  return record;
+}
+
+/** Env the embedded install script receives: the passthrough set plus what tells it this is an upgrade. */
+function buildScriptEnv(
+  env: NodeJS.ProcessEnv,
+  installedVia: InstallOrigin
+): Record<string, string> {
+  const scriptEnv: Record<string, string> = {};
+  for (const key of SCRIPT_ENV_PASSTHROUGH) {
+    const value = env[key];
+    if (value !== undefined) scriptEnv[key] = value;
+  }
+  scriptEnv.MANGOSTUDIO_INSTALL_ORIGIN = 'upgrade';
+  if (installedVia.distRoot !== undefined)
+    scriptEnv.MANGOSTUDIO_INSTALL_DIR = installedVia.distRoot;
+  if (installedVia.record?.binDir !== undefined) {
+    scriptEnv.MANGOSTUDIO_BIN_DIR = installedVia.record.binDir;
+  }
+  return scriptEnv;
+}
+
+function powershellInterpreter(which: (name: string) => string | null): string {
+  return which('pwsh') !== null ? 'pwsh' : 'powershell.exe';
+}
+
+/** argv for the embedded script's install path, one flag set per shell. */
+function selfInstallArgv(
+  kind: InstallerKind,
+  scriptPath: string,
+  archivePath: string,
+  target: ResolvedDownload,
+  which: (name: string) => string | null
+): string[] {
+  const versionArg = target.kind === 'npm-tarball' ? [target.version] : [];
+  if (kind === 'sh') {
+    return [
+      'bash',
+      scriptPath,
+      '--local',
+      archivePath,
+      ...(versionArg.length ? ['--version', ...versionArg] : []),
+    ];
+  }
+  return [
+    powershellInterpreter(which),
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    scriptPath,
+    '-Local',
+    archivePath,
+    ...(versionArg.length ? ['-Version', ...versionArg] : []),
+  ];
+}
+
+/** argv for the embedded script's `--use`/`-Use` path — no download, just a pointer swap. */
+function useVersionArgv(
+  kind: InstallerKind,
+  scriptPath: string,
+  version: string,
+  which: (name: string) => string | null
+): string[] {
+  if (kind === 'sh') return ['bash', scriptPath, '--use', version];
+  return [
+    powershellInterpreter(which),
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    scriptPath,
+    '-Use',
+    version,
+  ];
+}
+
+function scriptFailedReport(
+  installedVia: InstallOrigin,
+  currentVersion: string,
+  exitCode: number,
+  target?: ResolvedDownload
+): UpgradeReport {
+  return {
+    outcome: 'failed',
+    installedVia: fitInstalledVia(installedVia),
+    currentVersion,
+    ...(target ? { target: toWireTarget(target) } : {}),
+    exitCode: 2,
+    message: fitToLimit(`Install script exited with code ${exitCode}.`, UPDATE_ERROR_MAX),
+  };
+}
+
+function caughtFailure(
+  installedVia: InstallOrigin,
+  currentVersion: string,
+  error: unknown
+): UpgradeReport {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    outcome: 'failed',
+    installedVia: fitInstalledVia(installedVia),
+    currentVersion,
+    exitCode: 2,
+    message: fitToLimit(message, UPDATE_ERROR_MAX),
+  };
+}
+
+const UNKNOWN_INSTALLED_VIA: InstallOrigin = {
+  manager: 'unknown',
+  channel: 'stable',
+  executable: '',
+};
+
+/** After the pointer moves: emit `restart`, decide the outcome, and run the effect for `'scheduled'`. */
+async function withRestart(
+  installedVia: InstallOrigin,
+  currentVersion: string,
+  target: ResolvedDownload | undefined,
+  wantsRestart: boolean,
+  d: UpgradeServiceDeps,
+  emit: EmitUpgradeEvent
+): Promise<UpgradeReport> {
+  emit(stageEvent('restart'));
+  const state = await d.readState();
+  const launch: HubLaunchMode | null = state ? hubLaunchMode(state) : null;
+  const decision = decideRestart({ launch, platform: d.platform, restart: wantsRestart });
+
+  if (decision.restart === 'scheduled' && state && launch) {
+    await d.restartHub({ state, launch });
+  }
+
+  // A legacy self-managed root migrates its `current` pointer as part of this
+  // same install; re-probe rather than trust a value captured before it ran.
+  const executable = d.currentExecutable();
+  const versionedNote = executable.pointer === 'versioned' ? executable.note : undefined;
+  const message = joinMessages(decision.message, versionedNote);
+
+  return {
+    outcome: 'upgraded',
+    installedVia: fitInstalledVia(installedVia),
+    currentVersion,
+    ...(target ? { target: toWireTarget(target) } : {}),
+    restart: decision.restart,
+    ...(message ? { message: fitToLimit(message, UPDATE_ERROR_MAX) } : {}),
+    exitCode: 0,
+  };
+}
+
+/** POSIX: run the package manager's own command directly, relaying its output. Windows: see `runWindowsDelegate`. */
+async function runPosixDelegate(
+  plan: Extract<UpgradePlan, { kind: 'delegate' }>,
+  installedVia: InstallOrigin,
+  d: UpgradeServiceDeps,
+  emit: EmitUpgradeEvent
+): Promise<UpgradeReport> {
+  emit(stageEvent('install'));
+  const run = d.runScript(plan.argv, { env: toEnvRecord(d.env) });
+  const exitCode = await relayLines(run, emit);
+  if (exitCode !== 0) return scriptFailedReport(installedVia, d.getVersion(), exitCode);
+  return {
+    outcome: 'upgraded',
+    installedVia: fitInstalledVia(installedVia),
+    currentVersion: d.getVersion(),
+    exitCode: 0,
+  };
+}
+
+/**
+ * Windows: the manager that owns the binary cannot replace a file this
+ * process still has open, so it runs detached, after this process exits.
+ */
+function runWindowsDelegate(
+  plan: Extract<UpgradePlan, { kind: 'delegate' }>,
+  installedVia: InstallOrigin,
+  d: UpgradeServiceDeps,
+  emit: EmitUpgradeEvent
+): UpgradeReport {
+  emit(stageEvent('install'));
+  const logFile = getUpgradeLogPath(d.now());
+  d.spawnDetachedWaiter({ argv: plan.argv, waitForPid: d.pid, logFile });
+  return {
+    outcome: 'upgraded',
+    installedVia: fitInstalledVia(installedVia),
+    currentVersion: d.getVersion(),
+    restart: 'skipped',
+    logFile,
+    message: fitToLimit(
+      'The package manager runs after this process exits; check the log and run "mangostudio --version" in a minute.',
+      UPDATE_ERROR_MAX
+    ),
+    exitCode: 0,
+  };
+}
+
+async function runDelegate(
+  plan: Extract<UpgradePlan, { kind: 'delegate' }>,
+  installedVia: InstallOrigin,
+  request: UpgradeRunRequest,
+  d: UpgradeServiceDeps,
+  emit: EmitUpgradeEvent
+): Promise<UpgradeReport> {
+  // Nothing to preview: a delegate plan resolves its own version (a dist-tag,
+  // or the package manager's own "latest") at run time, not through this
+  // engine, so a --check here can only name the command instead of running it.
+  if (request.checkOnly) {
+    return {
+      outcome: 'refused',
+      installedVia: fitInstalledVia(installedVia),
+      currentVersion: d.getVersion(),
+      reason: 'package-manager',
+      command: fitToLimit(plan.command, UPGRADE_COMMAND_MAX),
+      exitCode: 1,
+    };
+  }
+  if (d.platform === 'win32') return runWindowsDelegate(plan, installedVia, d, emit);
+  return await runPosixDelegate(plan, installedVia, d, emit);
+}
+
+async function runSelf(
+  installedVia: InstallOrigin,
+  channel: UpdateChannel,
+  request: UpgradeRunRequest,
+  d: UpgradeServiceDeps,
+  emit: EmitUpgradeEvent
+): Promise<UpgradeReport> {
+  const context: UpgradeTargetContext = {
+    platformId: d.platformId,
+    currentVersion: d.getVersion(),
+    buildSha: d.getBuildInfo().gitSha,
+  };
+  const resolved = await d.resolveUpgradeTarget(
+    { channel, version: request.version, sha: request.sha },
+    context
+  );
+  if ('reason' in resolved) {
+    return {
+      outcome: 'refused',
+      installedVia: fitInstalledVia(installedVia),
+      currentVersion: d.getVersion(),
+      reason: resolved.reason,
+      message: fitToLimit(resolved.message, UPDATE_ERROR_MAX),
+      exitCode: 1,
+    };
+  }
+
+  if (isAlreadyCurrent(resolved, { currentVersion: d.getVersion(), buildSha: context.buildSha })) {
+    return {
+      outcome: 'already-current',
+      installedVia: fitInstalledVia(installedVia),
+      currentVersion: d.getVersion(),
+      target: toWireTarget(resolved),
+      exitCode: 0,
+    };
+  }
+  if (request.checkOnly) {
+    return {
+      outcome: 'available',
+      installedVia: fitInstalledVia(installedVia),
+      currentVersion: d.getVersion(),
+      target: toWireTarget(resolved),
+      exitCode: 0,
+    };
+  }
+
+  if (installedVia.distRoot === undefined) {
+    throw new Error(
+      `A self-managed install has no distRoot on installedVia: ${installedVia.executable}`
+    );
+  }
+  const stagingDir = joinPath(
+    d.platform,
+    installedVia.distRoot,
+    `.staging-${resolved.version}-${d.pid}`
+  );
+
+  try {
+    emit(stageEvent('download', resolved.assetName));
+    await d.mkdir(stagingDir);
+    const downloaded = await d.downloadVerified(resolved, stagingDir);
+    emit(stageEvent('verify', downloaded.verification));
+
+    emit(stageEvent('install'));
+    const kind: InstallerKind = d.platform === 'win32' ? 'ps1' : 'sh';
+    const scriptPath = await d.writeTempScript(stagingDir, kind);
+    const argv = selfInstallArgv(kind, scriptPath, downloaded.path, resolved, d.which);
+    const run = d.runScript(argv, { env: buildScriptEnv(d.env, installedVia) });
+    const exitCode = await relayLines(run, emit);
+    if (exitCode !== 0) return scriptFailedReport(installedVia, d.getVersion(), exitCode, resolved);
+
+    return await withRestart(installedVia, d.getVersion(), resolved, request.restart, d, emit);
+  } finally {
+    await d.removeDir(stagingDir);
+  }
+}
+
+/**
+ * Runs `body`, catching any throw into a `failed` report rather than letting
+ * it reject — a network error or a spawn failure reports the same way a
+ * script that ran and exited non-zero does. `installedViaRef` is read at
+ * catch time so a failure reports whatever the flow had already resolved
+ * (the real origin, once known) instead of a placeholder.
+ */
+async function neverRejects(
+  installedViaRef: { current: InstallOrigin },
+  currentVersion: string,
+  body: () => Promise<UpgradeReport>
+): Promise<UpgradeReport> {
+  try {
+    return await body();
+  } catch (error) {
+    return caughtFailure(installedViaRef.current, currentVersion, error);
+  }
+}
+
+async function runInner(
+  request: UpgradeRunRequest,
+  emit: EmitUpgradeEvent,
+  d: UpgradeServiceDeps,
+  installedViaRef: { current: InstallOrigin }
+): Promise<UpgradeReport> {
+  emit(stageEvent('resolve'));
+  const installedVia = detectInstallOrigin(d.probe());
+  installedViaRef.current = installedVia;
+  const channel = request.channel ?? d.configuredChannel() ?? installedVia.channel;
+  const plan = planUpgrade(
+    installedVia.manager,
+    { channel, version: request.version, sha: request.sha },
+    { platform: d.platform, currentVersion: d.getVersion() }
+  );
+
+  if (plan.kind === 'refused') {
+    return {
+      outcome: 'refused',
+      installedVia: fitInstalledVia(installedVia),
+      currentVersion: d.getVersion(),
+      reason: plan.reason,
+      command: fitToLimit(plan.command, UPGRADE_COMMAND_MAX),
+      message: fitToLimit(plan.message, UPDATE_ERROR_MAX),
+      exitCode: 1,
+    };
+  }
+  if (plan.kind === 'delegate') return await runDelegate(plan, installedVia, request, d, emit);
+  return await runSelf(installedVia, channel, request, d, emit);
+}
+
+async function rollbackInner(
+  emit: EmitUpgradeEvent,
+  d: UpgradeServiceDeps,
+  installedViaRef: { current: InstallOrigin }
+): Promise<UpgradeReport> {
+  emit(stageEvent('resolve'));
+  const installedVia = detectInstallOrigin(d.probe());
+  installedViaRef.current = installedVia;
+  const channel = d.configuredChannel() ?? installedVia.channel;
+  const plan = planUpgrade(
+    installedVia.manager,
+    { channel },
+    { platform: d.platform, currentVersion: d.getVersion() }
+  );
+
+  if (plan.kind !== 'self') {
+    const reason = plan.kind === 'refused' ? plan.reason : 'package-manager';
+    return {
+      outcome: 'refused',
+      installedVia: fitInstalledVia(installedVia),
+      currentVersion: d.getVersion(),
+      reason,
+      command: fitToLimit(plan.command, UPGRADE_COMMAND_MAX),
+      message: fitToLimit('Rollback only applies to a self-managed install.', UPDATE_ERROR_MAX),
+      exitCode: 1,
+    };
+  }
+
+  const previousVersion = installedVia.record?.previousVersion;
+  if (!previousVersion) {
+    return {
+      outcome: 'refused',
+      installedVia: fitInstalledVia(installedVia),
+      currentVersion: d.getVersion(),
+      reason: 'unknown-origin',
+      command: 'mangostudio upgrade',
+      message: fitToLimit('No previous version recorded to roll back to.', UPDATE_ERROR_MAX),
+      exitCode: 1,
+    };
+  }
+  if (installedVia.distRoot === undefined) {
+    throw new Error(
+      `A self-managed install has no distRoot on installedVia: ${installedVia.executable}`
+    );
+  }
+
+  const stagingDir = joinPath(
+    d.platform,
+    installedVia.distRoot,
+    `.rollback-${previousVersion}-${d.pid}`
+  );
+  try {
+    emit(stageEvent('install'));
+    await d.mkdir(stagingDir);
+    const kind: InstallerKind = d.platform === 'win32' ? 'ps1' : 'sh';
+    const scriptPath = await d.writeTempScript(stagingDir, kind);
+    const argv = useVersionArgv(kind, scriptPath, previousVersion, d.which);
+    const run = d.runScript(argv, { env: buildScriptEnv(d.env, installedVia) });
+    const exitCode = await relayLines(run, emit);
+    if (exitCode !== 0) return scriptFailedReport(installedVia, d.getVersion(), exitCode);
+
+    return await withRestart(installedVia, d.getVersion(), undefined, true, d, emit);
+  } finally {
+    await d.removeDir(stagingDir);
+  }
+}
+
+/**
+ * Real `restartHub` effect: service-managed bounces through the supervisor,
+ * detached stops the old pid and spawns a successor through the installer's
+ * `current` pointer when it resolves to one. Fire-and-forget by design — it
+ * does not wait for the successor to become healthy, matching the report's
+ * own `'scheduled'` wording rather than a confirmed restart.
+ */
+async function defaultRestartHub(input: {
+  state: ServerState;
+  launch: HubLaunchMode;
+}): Promise<void> {
+  if (input.launch === 'service') {
+    await createHubServiceManager().restart();
+    return;
+  }
+  const controller = createProcessController();
+  await stopPidOrThrow(
+    { controller, now: Date.now, sleep },
+    input.state.pid,
+    `MangoStudio (PID ${input.state.pid}) did not stop within 10s.`
+  );
+  await spawnDetached(
+    input.state.port,
+    input.state.host,
+    {},
+    { waitForPid: input.state.pid, ...restartExecutableOptions(currentHubExecutable()) }
+  );
+}
+
+async function writeTempScriptReal(directory: string, kind: InstallerKind): Promise<string> {
+  const path = joinPath(process.platform, directory, embeddedInstallerFileName(kind));
+  await writeFile(path, embeddedInstaller(kind), { mode: kind === 'sh' ? 0o755 : 0o644 });
+  return path;
+}
+
+const safeFetchDeps: SafeFetchDeps = { fetch };
+
+function resolveDeps(deps: Partial<UpgradeServiceDeps>): UpgradeServiceDeps {
+  return {
+    probe: deps.probe ?? (() => currentInstallOriginProbe()),
+    configuredChannel: deps.configuredChannel ?? (() => getConfig().updates.channel),
+    resolveUpgradeTarget:
+      deps.resolveUpgradeTarget ??
+      ((request, context) => resolveUpgradeTargetImpl(request, context, safeFetchDeps)),
+    downloadVerified:
+      deps.downloadVerified ??
+      ((resolved, destinationDir) => downloadVerifiedImpl(resolved, destinationDir, safeFetchDeps)),
+    runScript: deps.runScript ?? runScriptImpl,
+    writeTempScript: deps.writeTempScript ?? writeTempScriptReal,
+    which: deps.which ?? ((name) => Bun.which(name)),
+    mkdir: deps.mkdir ?? (async (path) => void (await mkdir(path, { recursive: true }))),
+    removeDir:
+      deps.removeDir ?? (async (path) => void (await rm(path, { recursive: true, force: true }))),
+    spawnDetachedWaiter: deps.spawnDetachedWaiter ?? spawnDetachedWaiter,
+    restartHub: deps.restartHub ?? defaultRestartHub,
+    currentExecutable: deps.currentExecutable ?? (() => currentHubExecutable()),
+    readState: deps.readState ?? readState,
+    now: deps.now ?? Date.now,
+    platform: deps.platform ?? process.platform,
+    env: deps.env ?? process.env,
+    getVersion: deps.getVersion ?? getVersion,
+    getBuildInfo: deps.getBuildInfo ?? getBuildInfo,
+    platformId: deps.platformId ?? resolveBuildPlatformId(),
+    pid: deps.pid ?? process.pid,
+  };
+}
+
+/** Build the engine. // Usage: createUpgradeService().run({ restart: true }, emit) */
+export function createUpgradeService(deps: Partial<UpgradeServiceDeps> = {}): UpgradeService {
+  const d = resolveDeps(deps);
+  return {
+    run: (request, emit) => {
+      const installedViaRef = { current: UNKNOWN_INSTALLED_VIA };
+      return neverRejects(installedViaRef, d.getVersion(), () =>
+        runInner(request, emit, d, installedViaRef)
+      );
+    },
+    rollback: (emit) => {
+      const installedViaRef = { current: UNKNOWN_INSTALLED_VIA };
+      return neverRejects(installedViaRef, d.getVersion(), () =>
+        rollbackInner(emit, d, installedViaRef)
+      );
+    },
+  };
+}
