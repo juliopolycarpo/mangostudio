@@ -227,20 +227,32 @@ describe('install recipes', () => {
     ]);
   });
 
-  // Detection resolves Bun's root as `$BUN_INSTALL` before `~/.bun`
-  // (`isBunManagedPath`), and the card only offers this recipe for an
-  // installation it classified as Bun-managed. A hardcoded `~/.bun` would
-  // therefore delete the wrong directory for anyone who set `BUN_INSTALL`,
-  // leave the effective Bun running, and still report success.
-  it("removes Bun from the same root detection resolves, not a hardcoded '~/.bun'", () => {
+  // `$BUN_INSTALL` is a prefix, not the Bun directory — detection joins `bin`
+  // onto it — so expanding it here would aim `rm -rf` at whatever it points
+  // to. `BUN_INSTALL=/usr/local` would delete that whole tree. The command
+  // deletes the default root and nothing else, and proves it is a Bun root
+  // first rather than removing a directory it cannot vouch for.
+  it('never expands $BUN_INSTALL into the directory it deletes', () => {
     const recipe = getInstallRecipe('bun.uninstall');
 
     const posix = recipe.argv?.({ kind: 'none' }, { platform: 'linux', binaryPaths: {} });
-    expect(posix?.at(-1)).toContain('${BUN_INSTALL:-$HOME/.bun}');
+    const win32 = recipe.argv?.({ kind: 'none' }, { platform: 'win32', binaryPaths: {} });
+
+    expect(posix?.at(-1)).not.toContain('BUN_INSTALL');
+    expect(win32?.at(-1)).not.toContain('BUN_INSTALL');
+    expect(recipe.writes).not.toContain('$BUN_INSTALL');
+  });
+
+  it('refuses to remove a default root that does not hold a Bun binary', () => {
+    const recipe = getInstallRecipe('bun.uninstall');
+
+    const posix = recipe.argv?.({ kind: 'none' }, { platform: 'linux', binaryPaths: {} });
+    expect(posix?.at(-1)).toContain('[ -x "$root/bin/bun" ]');
+    expect(posix?.at(-1)).toContain('exit 1');
 
     const win32 = recipe.argv?.({ kind: 'none' }, { platform: 'win32', binaryPaths: {} });
-    expect(win32?.at(-1)).toContain('$env:BUN_INSTALL');
-    expect(recipe.writes).toContain('$BUN_INSTALL');
+    expect(win32?.at(-1)).toContain('Test-Path -LiteralPath "$root\\uninstall.ps1"');
+    expect(win32?.at(-1)).toContain('exit 1');
   });
 
   it('offers uninstall and update recipes as copy-only when no vendor shape exists', () => {

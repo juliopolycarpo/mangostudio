@@ -370,16 +370,31 @@ const CURSOR_DOWNLOADS: Partial<Record<InstallPlatform, DownloadedInstaller>> = 
 };
 
 /**
- * Bun's root is `$BUN_INSTALL` when set and `~/.bun` otherwise — the same
- * ladder `isBunManagedPath` walks to decide an installation is Bun-managed.
- * Resolving it here rather than hardcoding `~/.bun` keeps removal pointed at
- * the installation detection actually attributed to Bun.
+ * Removes Bun's *default* root only, and proves the directory is one before
+ * deleting it.
+ *
+ * `$BUN_INSTALL` is deliberately not expanded here. It is a prefix, not the
+ * Bun directory — detection joins `bin` onto it (`wellKnownBunDirectories`) —
+ * so a machine that points it at a shared location turns `rm -rf "$BUN_INSTALL"`
+ * into a delete of that whole tree. A Bun installed under a custom prefix is
+ * therefore detected but not removable from here: the guard fails loudly
+ * rather than deleting a root this recipe cannot vouch for.
  */
 const BUN_UNINSTALL_ARGV = platformArgv(
-  posixShellArgv('rm -rf "${BUN_INSTALL:-$HOME/.bun}"'),
+  posixShellArgv(
+    [
+      'root="$HOME/.bun"',
+      '[ -x "$root/bin/bun" ] || { echo "refusing to remove $root: no bin/bun inside it" >&2; exit 1; }',
+      'rm -rf -- "$root"',
+    ].join('\n')
+  ),
   powershellCommandArgv(
-    '$root = if ($env:BUN_INSTALL) { $env:BUN_INSTALL } else { "$env:USERPROFILE\\.bun" }; ' +
-      '& "$root\\uninstall.ps1"'
+    [
+      '$root = "$env:USERPROFILE\\.bun"',
+      'if (-not (Test-Path -LiteralPath "$root\\uninstall.ps1")) { ' +
+        'Write-Error "refusing to remove $root: no uninstall.ps1 inside it"; exit 1 }',
+      '& "$root\\uninstall.ps1"',
+    ].join('; ')
   )
 );
 
@@ -436,7 +451,7 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     inputKind: 'none',
     platforms: ALL_PLATFORMS,
     requires: [],
-    writes: ['$BUN_INSTALL', '$HOME/.bun', '%USERPROFILE%\\.bun'],
+    writes: ['$HOME/.bun', '%USERPROFILE%\\.bun'],
     networkAccess: false,
     timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
     probe: [{ kind: 'runtime', runtimeId: 'bun' }],
