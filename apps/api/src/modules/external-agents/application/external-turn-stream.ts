@@ -15,6 +15,7 @@
 
 import type {
   ExternalAgentAttachment,
+  ExternalAgentDescriptor,
   ExternalAgentTargetId,
   ExternalAgentUnavailableReason,
   ExternalReviewTarget,
@@ -251,62 +252,9 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
     // any of them silently would let the user watch the agent answer
     // confidently about a file it never received, which is the one outcome
     // worse than not sending at all.
-    let attachments: readonly ExternalAgentAttachment[] = [];
-    if (input.attachmentIds.length > 0) {
-      // First, and without touching the database: a target that reads no
-      // attachment at all needs no question answered about which ones.
-      if (!resolution.descriptor.capabilities.images) {
-        return {
-          ok: false,
-          failure: {
-            kind: 'unsupported',
-            message: 'This agent cannot read attachments.',
-          },
-        };
-      }
-      let resolved: ExternalAgentAttachmentResolution;
-      try {
-        resolved = await resolveExternalAgentAttachments(
-          {
-            attachmentIds: [...input.attachmentIds],
-            userId: input.userId,
-            chatId: input.chatId,
-          },
-          db
-        );
-      } catch (error) {
-        // "Could not be read" is a sentence about the upload, so only the two
-        // errors that are actually about one may say it. A database that is
-        // down or a disk that is gone is not the user's file being wrong, and
-        // blaming it on the upload sends them to re-attach a file that was
-        // never the problem — and, unlogged, leaves nothing behind saying
-        // otherwise.
-        if (
-          error instanceof ChatAttachmentNotFoundError ||
-          error instanceof ChatAttachmentFileUnavailableError
-        ) {
-          return {
-            ok: false,
-            failure: { kind: 'validation', message: 'One or more attachments could not be read.' },
-          };
-        }
-        logger.warn('attachments_unresolved', {
-          chatId: input.chatId,
-          error: error instanceof Error ? error.message : 'unknown error',
-        });
-        return {
-          ok: false,
-          failure: {
-            kind: 'unavailable',
-            message: 'Could not reach the machine this chat runs on.',
-          },
-        };
-      }
-      if (!resolved.ok) {
-        return { ok: false, failure: attachmentRefusal(resolved.refusal) };
-      }
-      attachments = resolved.attachments;
-    }
+    const preflight = await preflightAttachments(input, resolution.descriptor, db);
+    if (!preflight.ok) return { ok: false, failure: preflight.failure };
+    const attachments = preflight.attachments;
 
     // The descriptor this machine actually answered with, before anything is
     // spent on the review: the session's own capabilities are checked again at
@@ -432,6 +380,71 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
 }
 
 /**
+ * The attachments a turn may carry, or the refusal that stops it.
+ *
+ * Lifted out of `streamExternalTurn` because it is a self-contained gate with
+ * four ways to say no, and inlining it put every one of them three levels deep
+ * inside the one function every external send passes through.
+ */
+async function preflightAttachments(
+  input: Pick<StreamExternalTurnInput, 'attachmentIds' | 'userId' | 'chatId'>,
+  descriptor: ExternalAgentDescriptor,
+  db: Kysely<Database>
+): Promise<
+  | { ok: true; attachments: readonly ExternalAgentAttachment[] }
+  | { ok: false; failure: ExternalTurnPreflightFailure }
+> {
+  if (input.attachmentIds.length === 0) return { ok: true, attachments: [] };
+
+  // First, and without touching the database: a target that reads no
+  // attachment at all needs no question answered about which ones.
+  if (!descriptor.capabilities.images) {
+    return {
+      ok: false,
+      failure: { kind: 'unsupported', message: 'This agent cannot read attachments.' },
+    };
+  }
+
+  let resolved: ExternalAgentAttachmentResolution;
+  try {
+    resolved = await resolveExternalAgentAttachments(
+      {
+        attachmentIds: [...input.attachmentIds],
+        userId: input.userId,
+        chatId: input.chatId,
+      },
+      db
+    );
+  } catch (error) {
+    // "Could not be read" is a sentence about the upload, so only the two
+    // errors that are actually about one may say it. A database that is down or
+    // a disk that is gone is not the user's file being wrong, and blaming it on
+    // the upload sends them to re-attach a file that was never the problem —
+    // and, unlogged, leaves nothing behind saying otherwise.
+    if (
+      error instanceof ChatAttachmentNotFoundError ||
+      error instanceof ChatAttachmentFileUnavailableError
+    ) {
+      return {
+        ok: false,
+        failure: { kind: 'validation', message: 'One or more attachments could not be read.' },
+      };
+    }
+    logger.warn('attachments_unresolved', {
+      chatId: input.chatId,
+      error: error instanceof Error ? error.message : 'unknown error',
+    });
+    return {
+      ok: false,
+      failure: { kind: 'unavailable', message: 'Could not reach the machine this chat runs on.' },
+    };
+  }
+
+  if (!resolved.ok) return { ok: false, failure: attachmentRefusal(resolved.refusal) };
+  return { ok: true, attachments: resolved.attachments };
+}
+
+/**
  * How a resolver refusal reads as a preflight failure.
  *
  * `non-image` is `unsupported`, because no retry of the same request would
@@ -441,22 +454,25 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
  * that says "too many" without saying how many is a dead end.
  */
 function attachmentRefusal(refusal: ExternalAgentAttachmentRefusal): ExternalTurnPreflightFailure {
-  if (refusal === 'non-image') {
-    return {
-      kind: 'unsupported',
-      message: 'This agent can only take image attachments.',
-    };
+  // A `switch` with no `default`, so a refusal added to the union fails to
+  // compile here rather than silently rendering as the size message.
+  switch (refusal) {
+    case 'non-image':
+      return {
+        kind: 'unsupported',
+        message: 'This agent can only take image attachments.',
+      };
+    case 'too-many':
+      return {
+        kind: 'validation',
+        message: `An external agent turn takes at most ${EXTERNAL_TURN_MAX_ATTACHMENTS} attachments.`,
+      };
+    case 'too-large':
+      return {
+        kind: 'validation',
+        message: `Each attachment sent to an external agent must be under ${EXTERNAL_ATTACHMENT_MAX_BYTES / (1024 * 1024)} MB.`,
+      };
   }
-  if (refusal === 'too-many') {
-    return {
-      kind: 'validation',
-      message: `An external agent turn takes at most ${EXTERNAL_TURN_MAX_ATTACHMENTS} attachments.`,
-    };
-  }
-  return {
-    kind: 'validation',
-    message: `Each attachment sent to an external agent must be under ${EXTERNAL_ATTACHMENT_MAX_BYTES / (1024 * 1024)} MB.`,
-  };
 }
 
 function chatBindingChanged(left: OwnedChatRecord, right: OwnedChatRecord): boolean {
