@@ -251,7 +251,10 @@ describe('a pick that changes both fields at once', () => {
 
     expect(persisted).toEqual([{}]);
     expect(result.current.externalTurnRequest).toEqual({});
-    expect(result.current.getExternalTurnRequest()).toBeUndefined();
+    // Sent, not omitted. The hub reads a present request as the whole pair, so
+    // an empty one is how a send that races this write says "neither half" —
+    // omitting it would fall through to the model the row still stores.
+    expect(result.current.getExternalTurnRequest()).toEqual({});
   });
 });
 

@@ -89,6 +89,11 @@ export interface ExternalTurnRequestState {
    * What the send path should put on the wire, or `undefined` for "the server
    * decides". Reads through a ref so it sees what is on screen now rather than
    * what was on screen when the callback was created.
+   *
+   * An empty pair from a session that has picked something is a choice — "the
+   * vendor's own default, for both halves" — and not the same answer as
+   * `undefined`. The hub reads a present request as the whole pair, so sending
+   * `{}` is what makes a clear visible to a send that races its write.
    */
   readonly getExternalTurnRequest: () => ExternalTurnRequest | undefined;
 }
@@ -165,7 +170,7 @@ export function useExternalTurnRequest(
   const getExternalTurnRequest = useCallback(() => {
     const current = scopedRef.current;
     if (current.chatId !== currentChatIdRef.current || !current.touched) return undefined;
-    return hasChoice(current.request) ? current.request : undefined;
+    return current.request;
   }, []);
 
   return { externalTurnRequest, setExternalTurnRequest, getExternalTurnRequest };
@@ -183,8 +188,4 @@ function onlyChosen(request: ExternalTurnRequest): ExternalTurnRequest {
     ...(request.model ? { model: request.model } : {}),
     ...(request.effort ? { effort: request.effort } : {}),
   };
-}
-
-function hasChoice(request: ExternalTurnRequest): boolean {
-  return request.model !== undefined || request.effort !== undefined;
 }
