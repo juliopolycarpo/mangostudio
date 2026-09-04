@@ -474,11 +474,24 @@ export function createProbingService(overrides: Partial<ProbingHostAdapters> = {
       const nodeDefinition = adapters.runtimeDefinitions.find(
         (definition) => definition.id === 'node'
       );
-      // Which Node each manager considers current is read from the one scan
-      // the toolchain tab shows, so no manager can disagree with it about that.
-      const nodeStatus = nodeDefinition
-        ? await probeRuntimeDefinition(adapters, nodeDefinition, env, runtimeParams, signal)
-        : null;
+      const fnmDefinition = adapters.runtimeDefinitions.find(
+        (definition) => definition.id === 'fnm'
+      );
+      // Two independent runtime scans: which Node each manager considers
+      // current — read from the one scan the toolchain tab shows, so no
+      // manager can disagree with it — and fnm's own version, taken from the
+      // same scan `probeRuntimes` already runs for it rather than spawning
+      // `fnm --version` a second time. Each carries the full probe budget, so
+      // they go out together: serialized, the pair alone could spend the hub's
+      // whole `probing.runtimes` deadline.
+      const [nodeStatus, fnmRuntimeStatus] = await Promise.all([
+        nodeDefinition
+          ? probeRuntimeDefinition(adapters, nodeDefinition, env, runtimeParams, signal)
+          : null,
+        fnmDefinition && wanted.includes('fnm')
+          ? probeRuntimeDefinition(adapters, fnmDefinition, env, runtimeParams, signal)
+          : null,
+      ]);
       throwIfAborted(signal);
       const currentNodePathFor = (managerId: VersionManagerId): string | undefined =>
         nodeStatus?.effective?.managedBy === managerId ? nodeStatus.effective.path : undefined;
@@ -495,7 +508,7 @@ export function createProbingService(overrides: Partial<ProbingHostAdapters> = {
       };
 
       const statuses = await Promise.all(
-        wanted.map(async (id): Promise<VersionManagerStatus> => {
+        wanted.map((id): Promise<VersionManagerStatus> => {
           const currentNodePath = currentNodePathFor(id);
           if (id === 'nvm') {
             return detectNvm(adapters.createNvmDeps(env), {
@@ -504,15 +517,6 @@ export function createProbingService(overrides: Partial<ProbingHostAdapters> = {
             });
           }
 
-          const fnmDefinition = adapters.runtimeDefinitions.find(
-            (definition) => definition.id === 'fnm'
-          );
-          // fnm's own version comes from the same scan `probeRuntimes` already
-          // runs for it, rather than spawning `fnm --version` a second time.
-          const fnmRuntimeStatus = fnmDefinition
-            ? await probeRuntimeDefinition(adapters, fnmDefinition, env, runtimeParams, signal)
-            : null;
-          throwIfAborted(signal);
           const managerVersion = formattedManagerVersion(fnmRuntimeStatus, fnmDefinition);
           return detectFnm(adapters.createFnmDeps(env), {
             ...scheduleOptions,
