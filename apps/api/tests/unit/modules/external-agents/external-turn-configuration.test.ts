@@ -128,6 +128,38 @@ describe('the model a turn resolves to', () => {
     expect(configuration.model).toBe('sonnet');
   });
 
+  /**
+   * The send is a pair, so a model with no effort means "no effort for this
+   * model".
+   *
+   * The composer clears the effort in the same event that changes the model —
+   * the vocabulary belongs to the model — and the row is written as a pair for
+   * the same reason. Filling the missing half from the row would rebuild here
+   * the one combination neither side ever stores: the new model carrying the
+   * previous model's effort.
+   */
+  it("does not fill the send's missing half from the row", async () => {
+    const configuration = await resolve(DEFAULT_EXTERNAL_AGENT_SETTINGS, {
+      ...BASE,
+      chat: chat({ model: 'opus', effort: 'high' }),
+      request: { model: 'sonnet' },
+    });
+
+    expect(configuration.model).toBe('sonnet');
+    expect(configuration.effort).toBeUndefined();
+  });
+
+  /** The target default is not a pair anyone picked, so it still fills in per field. */
+  it("still takes the target's default effort under a send that named only a model", async () => {
+    const configuration = await resolve(
+      { ...DEFAULT_EXTERNAL_AGENT_SETTINGS, defaults: { claude: { effort: 'low' } } },
+      { ...BASE, chat: chat({ model: 'opus', effort: 'high' }), request: { model: 'sonnet' } }
+    );
+
+    expect(configuration.model).toBe('sonnet');
+    expect(configuration.effort).toBe('low');
+  });
+
   it('falls back to the model the chat stored', async () => {
     const configuration = await resolve(DEFAULT_EXTERNAL_AGENT_SETTINGS, {
       ...BASE,

@@ -209,9 +209,19 @@ export function createExternalTurnConfigurationResolver(
     // same model again in every new chat. Only the winner is vetted against the
     // catalog, so a stale stored value falls through to the vendor's default
     // rather than being refused.
+    //
+    // The send and the row are each a *pair*, so whichever wins, wins whole. An
+    // effort belongs to the model it was chosen for, and the composer clears it
+    // in the same event that changes the model — so a send that names a model
+    // and no effort means "no effort for this model", not "read the effort the
+    // previous model had". Merging those two per field would reconstruct on the
+    // read path exactly the combination the row is written as a pair to
+    // prevent. Only the target default, which is not a pair anyone picked
+    // together, still fills in per field underneath.
     const selection = input.chat.runnerModelSelection;
-    const chosenModel = input.request?.model ?? selection.model;
-    const chosenEffort = input.request?.effort ?? selection.effort;
+    const chosen = input.request ?? selection;
+    const chosenModel = chosen.model;
+    const chosenEffort = chosen.effort;
     // Read only when something above it is still unanswered. The settings row
     // is a database round trip plus a full normalization, on the one path a
     // user is watching, and the chain discards it outright whenever the request
