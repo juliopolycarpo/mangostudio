@@ -21,6 +21,7 @@ import type {
 } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 import { getConfig } from '../../../lib/config';
 import { getInstallLogPath } from '../../../lib/mango-paths';
 import { assertRequestedProfileId, resolveActiveProfileId } from '../../../lib/profile-context';
@@ -340,13 +341,6 @@ function isInstallPlatform(platform: string): platform is InstallPlatform {
   return platform === 'darwin' || platform === 'linux' || platform === 'win32';
 }
 
-/** The three vendor CLIs the library probes rather than the runtime detector. */
-const AGENT_RUNTIME_IDS = ['claude', 'codex', 'cursor'] as const;
-type AgentRuntimeId = (typeof AGENT_RUNTIME_IDS)[number];
-function isAgentRuntimeId(id: RuntimeId): id is AgentRuntimeId {
-  return (AGENT_RUNTIME_IDS as readonly string[]).includes(id);
-}
-
 async function defaultResolvePlatform(scope: ProbeScope, fallback: string): Promise<string> {
   if (scope.environmentId === LOCAL_ENVIRONMENT_ID) return fallback;
   try {
@@ -402,15 +396,12 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         ...(status?.root && { nvmDir: status.root }),
       };
     }
-    if (isAgentRuntimeId(requirement)) {
-      const status = await deps.probingService.getAgentCliStatus(scope, requirement);
-      const path = status?.effective?.path ?? status?.installations[0]?.path;
-      return {
-        available: Boolean(status && status.installations.length > 0),
-        ...(path && { path }),
-      };
-    }
-    const status = await deps.probingService.getRuntimeStatus(scope, requirement);
+    // A vendor CLI is probed by the library rather than the runtime detector,
+    // but what a resolved requirement *is* — installed, and where — does not
+    // depend on which service answered.
+    const status = isExternalAgentTargetId(requirement)
+      ? await deps.probingService.getAgentCliStatus(scope, requirement)
+      : await deps.probingService.getRuntimeStatus(scope, requirement);
     const path = status?.effective?.path ?? status?.installations[0]?.path;
     return {
       available: Boolean(status && status.installations.length > 0),
