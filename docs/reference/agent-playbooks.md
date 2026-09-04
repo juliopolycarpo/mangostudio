@@ -449,6 +449,10 @@ Open these first:
 - `apps/shared/src/external-agents/vendor-text.ts` (the code-point bounds applied to anything a
   vendor emitted, at the runtime boundary)
 - `apps/shared/src/external-agents/permissions.ts` (reading a persisted choice back, restrictively)
+- `apps/shared/src/external-agents/presets.ts` (the three named permission choices and the
+  per-vendor candidate resolution behind them — a *different* responsibility from reading one back)
+- `apps/shared/src/external-agents/remedies.ts` (reason → what would fix it, `satisfies`-guarded so
+  a new reason cannot ship without one)
 - `apps/runtime/src/services/external-agents/` (semantic adapters, registry, session lifecycle,
   vendor-output normalization, process framing and descendant cleanup)
 - `apps/runtime/src/services/external-agents/codex/` (the Codex `app-server` adapter — start at
@@ -461,6 +465,8 @@ Open these first:
   minimum version, and the notification opt-out list)
 - `apps/runtime/src/services/external-agents/*/contract/` (**captured** — the committed vendor
   contracts and their provenance manifests; `scripts/vendor/` records and diffs them)
+- `apps/runtime/src/services/external-agents/claude/models.ts` (the model catalog read out of
+  `--model`'s own prose, and why nothing in it is marked default)
 - `apps/runtime/src/services/external-agents/claude/cli-surface.ts`,
   `apps/runtime/src/services/external-agents/cursor/handshake.ts` (the discovery-time probes that
   decide availability, so a version number never does it alone)

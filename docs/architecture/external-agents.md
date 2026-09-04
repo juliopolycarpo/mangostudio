@@ -154,6 +154,13 @@ a different version, and the runtime is the one that would actually run the turn
 | `nativeReview`         | The vendor's own review of uncommitted changes             |
 | `accountUsage`         | Plan-level usage and rate limits                           |
 
+Most are constants per adapter, decided by what the vendor's protocol offers. `modelCatalog` is the
+exception and is decided **per install**: Claude publishes its model aliases in `--model`'s own
+description, so a build that states them has a catalog and one that does not keeps the picker
+hidden exactly as before. It is derived once and reported identically by `discover` and
+`openSession` — a session that disagreed with the descriptor it was chosen from would offer a
+picker the hub never validated a model against.
+
 ## Slash commands
 
 Every vendor expands `/name` at the head of a prompt, in the exact non-interactive mode its adapter
@@ -207,6 +214,48 @@ They are separate because in at least one vendor they genuinely are. Codex sets 
 do with a sandbox plus an approval policy, while a separate field decides who reviews the prompts,
 and that reviewer applies at *any* sandbox level. A flat list of four choices could not express
 "read-only **and** auto-reviewed".
+
+### Presets
+
+Two axes is an honest model of what the vendors offer and also two questions a non-expert did not
+ask. Crossed, they are six cells — three of which no vendor offers and one of which is dangerous —
+while the user's actual question is how much the agent should bother them. Three named presets
+answer that, and the matrix moves behind an "Advanced" disclosure in the same panel rather than
+away: it is what anyone who wants the axes reaches for, and what a stored custom pair is edited
+with.
+
+| Preset       | Candidates, in order                               |
+| ------------ | -------------------------------------------------- |
+| `careful`    | `read-only × user`                                 |
+| `balanced`   | `default × user`                                   |
+| `autonomous` | `full-access × user`, then `default × auto-review` |
+
+A preset is a list of pairs, not one pair, because the same preset is not the same pair everywhere:
+Claude's `auto-review` is an account-gated classifier and Codex's is a sandbox. The first candidate
+the descriptor reports `supported` wins, and `autonomous` leads with `full-access × user` precisely
+because both its candidates are unattended and only the first is expressible on every vendor.
+
+A preset with no supported candidate is **not offered** rather than offered and refused: a control
+that cannot work reads as a MangoStudio fault instead of as something this vendor does not do. The
+matrix opens expanded when the stored pair matches no preset, so a user who already chose a custom
+combination is not told it vanished.
+
+The unattended warning follows the axis the preset *resolved* to, not the preset. `autonomous`
+falling back to `default × auto-review` cannot leave the workspace, so the level warning would be
+false there — the true statement is that its approvals are answered without the user.
+
+### Who answers a Claude prompt
+
+Nobody, and Claude is now told so. `--permission-prompts none` is on every turn's argv for a build
+that declares the flag (2.1.259+), because `interactiveApprovals` is false for this target and a
+prompt has nowhere to go — see **Deliberately out of scope** for why the control channel is not
+reachable.
+
+This is pinning rather than a fix. On 2.1.260, with the flag's default of `host` and stdin closed
+after the prompt, an unmatched `Write` under `--permission-mode default` already produces
+`system/permission_denied`, a `tool_result` marked in error, exit 0 and no file. Nothing hangs.
+What the flag buys is that the property survives another default change: a future build honouring
+`host` by *waiting* would park every approval-needing turn until the idle timeout.
 
 Roughly, per vendor:
 
@@ -620,13 +669,25 @@ protocol archaeology:
 - **`AskForApproval`'s granular object.** The neutral levels use the coarse policy. The granular
   form (`mcp_elicitations`, `rules`, `sandbox_approval`, and the optional `request_permissions` and
   `skill_approval`) is where a finer-grained mode would go.
-- **Attachments.** `ExternalAgentAttachment` crosses the protocol, but the composer does not yet
-  offer images to an external runner.
-- **Claude's `--permission-prompt-tool`.** It exists and is documented, and it is the only way
-  headless Claude could deliver an answerable approval. Hosting one makes MangoStudio part of the
-  authorization path for an agent it does not own, which needs authenticated request ids, replay
-  protection, expiry, owner binding, fail-closed behaviour and a threat model — its own security
-  feature, not a flag in an adapter.
+- **Claude's interactive approvals.** Claude Code has a real bidirectional control channel —
+  `control_request` / `control_response`, with a `can_use_tool` subtype whose shapes the binary
+  documents itself — and it is **not reachable from a host like this one**. Probed against 2.1.260
+  on 2026-09-04: the routing decision is a single function, and the "an SDK host answers" branch is
+  reachable only when `--sdk-url` is set, which the CLI allowlists to Anthropic's own backend
+  (`--sdk-url rejected: … reserved for Remote Control worker processes`). Sending an `initialize`
+  control request first — which the CLI answers in full over plain stdio — does not unlock it
+  either.
+
+  So a Claude turn that needs permission is denied by the vendor and reported, and
+  `--permission-prompts none` states that outright rather than relying on a default that has
+  already changed once. See **Permissions** below.
+
+  The one remaining public route is `--permission-prompt-tool`, and it stays out of scope on two
+  counts. It takes an **MCP tool**, so serving it would make MangoStudio part of the authorization
+  path for an agent it does not own — authenticated request ids, replay protection, expiry, owner
+  binding, fail-closed behaviour and a threat model, i.e. its own security feature rather than a
+  flag in an adapter. It is also absent from printed `--help`, so no capability could honestly be
+  derived by probing for it.
 - **Claude's `--safe-mode`.** Disables the machine's own hooks, plugins, MCP servers and `CLAUDE.md`
   while auth, model selection and permissions keep working. It would close the inheritance limit
   above, at the cost of silently dropping the project memory and skills a workspace depends on, so
@@ -645,6 +706,39 @@ Discovery reports each target on its own merits — installed, signed out, unrea
 unproven — and the blanket `not-yet-available` gate is gone. It existed while hosting a turn
 arrived in stages, because a selectable runner that could block on an approval nobody can answer is
 worse than no runner at all. Its removal was the release-unit boundary.
+
+`installed-but-unusable` is the one reason no adapter reports. It is inferred hub-side from a
+matrix an adapter *did* answer with: every adapter already states, per cell, why that cell is
+refused, and this is what "every cell" adds up to. An **empty** matrix is a cold cache rather than
+a finding, so it does not trigger it — reading one as a verdict would grey out a working target on
+the first render after a restart.
+
+### Remedies
+
+A reason is a diagnosis. Every reason therefore carries a **remedy**: the next step, named as
+something the interface can render as a control rather than as prose.
+
+| Reason                    | Remedy              | What the user sees                               |
+| ------------------------- | ------------------- | ------------------------------------------------ |
+| `not-installed`           | `install`           | A link into `/environments/agents`               |
+| `version-unsupported`     | `update`            | The same link; the recipes live there            |
+| `signed-out`              | `sign-in`           | The vendor's own command, with a copy button     |
+| `disclosure-required`     | `accept-disclosure` | The dialog that is already reachable             |
+| `runtime-denied`          | `contact-admin`     | Who to ask                                       |
+| `environment-unreachable` | `contact-admin`     | Who to ask                                       |
+| `isolation-unproven`      | `contact-admin`     | Who to ask, plus the transport-specific guidance |
+| `installed-but-unusable`  | `contact-admin`     | Who to ask                                       |
+| `runtime-unsupported`     | `none`              | Nothing — the *runtime* lacks the adapter        |
+
+The map is `satisfies Record<ExternalAgentUnavailableReason, ExternalAgentRemedyKind>`, so a reason
+added later cannot ship without someone deciding what to do about it. That is why it is data rather
+than a `switch` at each render site: three call sites each falling through to "no action" is how a
+new reason silently becomes a dead end.
+
+The refusal a *send* produces carries the reason as a field rather than interpolated into an English
+sentence. `version-unsupported` is developer vocabulary; the client translates it from the catalog
+it already has, and the English message stays as the fallback an External API consumer sees when it
+renders nothing itself.
 
 ## Vendor pinning and drift
 
