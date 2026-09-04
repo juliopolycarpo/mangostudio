@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -23,7 +31,13 @@ afterEach(() => {
 // Mirrors a real global install: the wrapper lives in
 // node_modules/mangostudio/bin and resolves the platform package through the
 // shared ancestor node_modules, exactly as npm lays it out.
-function stageInstall({ withPlatformPackage = true } = {}): string {
+function stageInstall({
+  withPlatformPackage = true,
+  binaryScript,
+}: {
+  withPlatformPackage?: boolean;
+  binaryScript?: string;
+} = {}): string {
   const root = mkdtempSync(join(tmpdir(), 'mangostudio-cli-wrapper-'));
   tempDirs.push(root);
 
@@ -38,7 +52,13 @@ function stageInstall({ withPlatformPackage = true } = {}): string {
       join(packageDir, 'package.json'),
       JSON.stringify({ name: HOST_PACKAGE, version: '9.9.9' })
     );
-    writeFileSync(join(packageDir, HOST_BINARY), 'not a real binary');
+    const binaryPath = join(packageDir, HOST_BINARY);
+    if (binaryScript) {
+      writeFileSync(binaryPath, binaryScript);
+      chmodSync(binaryPath, 0o755);
+    } else {
+      writeFileSync(binaryPath, 'not a real binary');
+    }
   }
 
   return join(wrapperDir, 'mangostudio.js');
@@ -74,4 +94,38 @@ describe('npm wrapper platform resolution info', () => {
     expect(result.stderr).toContain(`"${HOST_PACKAGE}" is not installed`);
     expect(result.stderr).toContain('optional dependencies');
   });
+
+  test('reports its own real path as launcherPath', () => {
+    const wrapperPath = stageInstall();
+    const result = runWrapperInfo(wrapperPath);
+
+    const lines = result.stdout.trim().split('\n');
+    // realpath, not the tempdir path stageInstall handed back: on some hosts
+    // the tempdir itself is a symlink (macOS /tmp -> /private/tmp), so this
+    // checks the wrapper resolved *something*, not that it equals the string
+    // this test built the path from.
+    expect(
+      lines.some((line) => line.startsWith('launcherPath=') && line.endsWith('mangostudio.js'))
+    ).toBe(true);
+  });
+});
+
+describe('npm wrapper launcher markers', () => {
+  // Windows lacks a shell to interpret the `#!/bin/sh` fixture below.
+  test.skipIf(process.platform === 'win32')(
+    'passes MANGOSTUDIO_LAUNCHER and MANGOSTUDIO_LAUNCHER_PATH to the spawned binary',
+    () => {
+      const wrapperPath = stageInstall({
+        binaryScript:
+          '#!/bin/sh\nprintf \'%s %s\' "$MANGOSTUDIO_LAUNCHER" "$MANGOSTUDIO_LAUNCHER_PATH"\n',
+      });
+
+      const result = spawnSync(process.execPath, [wrapperPath], { encoding: 'utf8' });
+
+      expect(result.status).toBe(0);
+      const [launcher, launcherPath] = result.stdout.split(' ');
+      expect(launcher).toBe('npm');
+      expect(launcherPath).toBe(realpathSync(wrapperPath));
+    }
+  );
 });
