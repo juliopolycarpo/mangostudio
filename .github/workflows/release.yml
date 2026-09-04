@@ -216,8 +216,9 @@ jobs:
     environment: release
     timeout-minutes: 10
     permissions:
-      attestations: read # fetch build provenance for gh attestation verify
+      attestations: write # verify build provenance, then attest the published checksums
       contents: write # create the tagged GitHub Release and upload assets
+      id-token: write # sign the SHA256SUMS and install-script attestation
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -236,6 +237,19 @@ jobs:
           channel: release
           scope: assets
           verify-attestation: "true"
+
+      # SHA256SUMS names every archive and raw binary, so attesting it covers
+      # the whole asset set transitively; the two install scripts are attested
+      # by themselves because they are what a user pipes into a shell. A hub
+      # can later verify these against the GitHub attestations API before it
+      # trusts a download.
+      - name: Attest release checksums and install scripts
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            release-assets/SHA256SUMS
+            release-assets/install.sh
+            release-assets/install.ps1
 
       - name: Generate release notes
         run: bunx git-cliff --tag "v${{ needs.build.outputs.version }}" --latest --strip all > RELEASE_NOTES.md
