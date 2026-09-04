@@ -63,6 +63,22 @@ beforeAll(() => {
   windowsTempMount = toLinuxPath(temp.stdout.replace(/\r/g, '').trim());
 });
 
+// Fresh installs, -Use, and -Rollback all call Add-UserPath, which writes
+// the fixture's bin dir into the real HKCU\Environment\Path — a machine-wide
+// side effect that outlives the temp dir it points at. -Uninstall reverses
+// it, but not every case in this matrix uninstalls (prune bookkeeping,
+// unknown-line survival, the failure paths), so sweep by the mkdtemp prefix
+// unconditionally rather than tracking which layouts actually ran a path
+// mutation.
+function pruneStalePathEntries(): void {
+  const command = [
+    "$path = [Environment]::GetEnvironmentVariable('Path','User')",
+    "$entries = $path -split ';' | Where-Object { $_ -and $_ -notmatch 'mango-ps1-' }",
+    "[Environment]::SetEnvironmentVariable('Path', ($entries -join ';'), 'User')",
+  ].join('; ');
+  sh([POWERSHELL as string, '-NoProfile', '-Command', command]);
+}
+
 afterEach(() => {
   // A killed powershell.exe can leave a lock on a file it briefly opened, and
   // failing cleanup here would otherwise replace the test's real failure with
@@ -75,6 +91,8 @@ afterEach(() => {
     }
   }
   tempDirs = [];
+
+  if (POWERSHELL) pruneStalePathEntries();
 });
 
 interface Layout {
