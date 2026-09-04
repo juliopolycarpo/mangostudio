@@ -20,13 +20,20 @@ import {
   pathPosition,
   pathSourceLabel,
   prefixedVersionLabel,
+  renderableVersionManagers,
   runtimeUninstallRecipe,
   toolchainProcessLine,
   toolchainSummary,
   versionLabel,
   worstFinding,
 } from '../../../../src/features/environments/format';
-import { agentCliStatus, installation, installRecipe, runtimeStatus } from './fixtures';
+import {
+  agentCliStatus,
+  installation,
+  installRecipe,
+  runtimeStatus,
+  versionManagerStatus,
+} from './fixtures';
 
 /**
  * `pathSourceManagerName` only reaches the identity registry for `volta`;
@@ -439,6 +446,69 @@ describe('runtimeUninstallRecipe', () => {
 
   it('is undefined when the catalog has no uninstall for the runtime', () => {
     expect(runtimeUninstallRecipe(bunStatus('bun', '/home/dev/.bun/bin/bun'), [])).toBeUndefined();
+  });
+});
+
+describe('renderableVersionManagers', () => {
+  /** `<manager>.node.install`, always supported, always needing the manager itself. */
+  const nodeRecipe = (manager: 'nvm' | 'fnm') =>
+    installRecipe({
+      id: `${manager}.node.install`,
+      runtimeId: 'node',
+      action: 'use-version',
+      inputKind: 'node-version',
+      supported: true,
+      requires: [manager],
+      missingRequirements: [manager],
+    });
+
+  it('keeps a manager that is installed, whatever the catalog offers', () => {
+    const managers = [versionManagerStatus({ id: 'fnm', installed: true })];
+    // A catalog with no path to fnm at all: the manager is kept for being
+    // installed, not for the catalog being unreadable.
+    const recipes = [nodeRecipe('nvm')];
+
+    expect(renderableVersionManagers(managers, recipes).map((manager) => manager.id)).toEqual([
+      'fnm',
+    ]);
+  });
+
+  // Regression: the Node card rendered a table per detected manager, so a
+  // POSIX machine grew a second "fnm is not installed" block whose only
+  // affordance resolves to "nothing here installs fnm" — fnm's sole install
+  // recipe is winget's, and winget is win32-only.
+  it('drops an absent manager whose own install recipe cannot run here', () => {
+    const managers = [
+      versionManagerStatus({ id: 'nvm', installed: false }),
+      versionManagerStatus({ id: 'fnm', installed: false }),
+    ];
+    const recipes = [
+      nodeRecipe('nvm'),
+      installRecipe({ id: 'nvm.install', runtimeId: 'nvm', action: 'install', supported: true }),
+      nodeRecipe('fnm'),
+      // Present in the catalog, but win32-only.
+      installRecipe({
+        id: 'fnm.install',
+        runtimeId: 'fnm',
+        action: 'install',
+        platforms: ['win32'],
+        supported: false,
+      }),
+    ];
+
+    expect(renderableVersionManagers(managers, recipes).map((manager) => manager.id)).toEqual([
+      'nvm',
+    ]);
+  });
+
+  // `RuntimesPage` renders as soon as the *status* queries resolve, passing
+  // `recipes.data ?? []` while the catalog is still in flight. Narrowing on an
+  // empty catalog would drop a reachable manager's table on first paint and
+  // flash it in — an empty catalog says nothing about reachability.
+  it('keeps every manager while the catalog is still empty', () => {
+    const managers = [versionManagerStatus({ id: 'nvm', installed: false })];
+
+    expect(renderableVersionManagers(managers, []).map((manager) => manager.id)).toEqual(['nvm']);
   });
 });
 

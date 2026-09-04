@@ -10,6 +10,7 @@
  */
 
 import { useI18n } from '@/hooks/use-i18n';
+import { renderableVersionManagers } from '../format';
 import { useRuntimesScreenData } from '../hooks/use-runtime-status';
 import { useEnvironmentScope } from '../use-environment-scope';
 import { EnvironmentPageState } from './EnvironmentPageState';
@@ -26,6 +27,8 @@ export function RuntimesPage() {
   const { runtimes, versionManagers, recipes, isPending, error, refetch } = useRuntimesScreenData(
     scope.environmentId
   );
+
+  const managerTables = renderableVersionManagers(versionManagers, recipes);
 
   const header = (
     <EnvironmentScopeHeader
@@ -97,10 +100,11 @@ export function RuntimesPage() {
                 environmentId={scope.environmentId}
               >
                 {/* Every version manager gets its own table here, not only nvm —
-                    the list already comes from whichever managers this release
-                    detects, so nothing here should re-narrow it to one id. */}
+                    but only the ones this machine can actually act on, so an
+                    absent manager with no install path here (fnm on POSIX)
+                    does not add a dead row inside the Node card. */}
                 {runtime.id === 'node' &&
-                  versionManagers.map((manager) => (
+                  managerTables.map((manager) => (
                     <NodeVersionTable
                       key={manager.id}
                       status={manager}

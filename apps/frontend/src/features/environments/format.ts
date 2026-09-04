@@ -19,6 +19,7 @@ import type {
   RuntimeInstallation,
   RuntimeStatus,
   ToolchainChoice,
+  VersionManagerStatus,
 } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
 import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
@@ -461,6 +462,39 @@ function nodeRecipeInput(recipe: InstallRecipePreview): RecipeInput {
   return recipe.inputKind === 'node-version'
     ? { kind: 'node-version', version: 'lts' }
     : { kind: 'none' };
+}
+
+/**
+ * The version managers whose Node table is worth showing on this machine:
+ * the ones actually installed, plus any absent one whose Node chain could
+ * still run here.
+ *
+ * The probe answers for every manager this release detects, on every platform.
+ * Rendering all of them puts a "{manager} is not installed" block — and an
+ * affordance that resolves to "nothing here installs {manager}" — inside the
+ * Node card for a manager this machine has no path to: fnm on POSIX, whose
+ * only install recipe is winget's. A manager with nothing installed and no way
+ * to get there is not a row a reader can act on.
+ *
+ * An empty catalog is "unknown", not "unreachable": the page passes
+ * `recipes.data ?? []` while the catalog loads, and narrowing on that would
+ * hide a reachable manager's table on first paint and flash it in.
+ *
+ * @example renderableVersionManagers(managers, recipes).map((m) => m.id) // ['nvm']
+ */
+export function renderableVersionManagers(
+  managers: readonly VersionManagerStatus[],
+  recipes: readonly InstallRecipePreview[]
+): VersionManagerStatus[] {
+  if (recipes.length === 0) return [...managers];
+  return managers.filter((manager) => {
+    if (manager.installed) return true;
+    const nodeRecipe = recipes.find(
+      (recipe) => recipe.id === `${manager.id}.node.install` && recipe.supported
+    );
+    if (!nodeRecipe) return false;
+    return resolveInstallChain(recipes, nodeRecipe, nodeRecipeInput(nodeRecipe)).kind === 'ready';
+  });
 }
 
 /**
