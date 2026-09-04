@@ -43,6 +43,25 @@ export async function listOptionalDirectory(
 /** How both managers name a version directory: `24.18.0`, optionally `v`-prefixed. */
 const VERSION_DIRECTORY_PATTERN = /^v?(\d+\.\d+\.\d+)$/;
 
+/** One version directory, or `undefined` when it names no installed Node. */
+async function readVersion(
+  fs: Pick<ManagedVersionFileSystem, 'pathExists' | 'realpath'>,
+  entry: string,
+  nodeBinaryPathFor: (versionDirectory: string) => string
+): Promise<{ version: string; path: string } | undefined> {
+  const match = VERSION_DIRECTORY_PATTERN.exec(entry);
+  if (!match) return undefined;
+  const nodePath = nodeBinaryPathFor(entry);
+  if (!(await fs.pathExists(nodePath))) return undefined;
+
+  try {
+    return { version: match[1] as string, path: await fs.realpath(nodePath) };
+  } catch {
+    // The binary exists, so retain its stable layout path when realpath fails.
+    return { version: match[1] as string, path: nodePath };
+  }
+}
+
 /**
  * The versions a manager has installed under `versionsRoot`, newest first.
  *
@@ -58,24 +77,16 @@ export async function readManagedVersions(
   versionsRoot: string,
   nodeBinaryPathFor: (versionDirectory: string) => string
 ): Promise<Array<{ version: string; path: string }>> {
-  const versions: Array<{ version: string; path: string }> = [];
+  const entries = await listOptionalDirectory(fs, versionsRoot);
 
-  for (const entry of await listOptionalDirectory(fs, versionsRoot)) {
-    const match = VERSION_DIRECTORY_PATTERN.exec(entry);
-    if (!match) continue;
-    const nodePath = nodeBinaryPathFor(entry);
-    if (!(await fs.pathExists(nodePath))) continue;
+  // Each version directory is independent, so the `pathExists`/`realpath` pair
+  // goes out for all of them at once rather than one round trip at a time —
+  // a machine with eight installed versions pays two waves, not sixteen hops.
+  const versions = await Promise.all(
+    entries.map((entry) => readVersion(fs, entry, nodeBinaryPathFor))
+  );
 
-    let resolvedPath = nodePath;
-    try {
-      resolvedPath = await fs.realpath(nodePath);
-    } catch {
-      // The binary exists, so retain its stable layout path when realpath fails.
-    }
-    versions.push({ version: match[1] as string, path: resolvedPath });
-  }
-
-  return sortVersionsDescending(versions);
+  return sortVersionsDescending(versions.filter((version) => version !== undefined));
 }
 
 /**
