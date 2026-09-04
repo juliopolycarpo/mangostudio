@@ -27,6 +27,7 @@ import {
   ExternalAgentCommandCatalogResponseSchema,
   type ExternalAgentDescriptor,
   ExternalAgentDescriptorListResponseSchema,
+  externalRemedyFor,
   isExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
 import { Elysia, t } from 'elysia';
@@ -398,9 +399,17 @@ async function withDisclosureReasons(
           : null,
         db
       );
-      return required
-        ? { ...descriptor, unavailableReason: 'disclosure-required' as const }
-        : descriptor;
+      if (!required) return descriptor;
+      // The remedy travels with the reason, always — `ExternalAgentDescriptor`
+      // says it is absent exactly when the reason is. Stamping a reason here
+      // without the matching remedy would leave the one row whose fix is a
+      // dialog this app already owns with nothing to click.
+      const remedy = externalRemedyFor('disclosure-required');
+      return {
+        ...descriptor,
+        unavailableReason: 'disclosure-required' as const,
+        ...(remedy ? { remedy } : {}),
+      };
     })
   );
 }
