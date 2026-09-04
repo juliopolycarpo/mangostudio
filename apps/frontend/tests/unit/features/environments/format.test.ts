@@ -337,6 +337,70 @@ describe('nodeInstallStep', () => {
     expect(step?.input).toEqual({ kind: 'none' });
   });
 
+  // `supported` is decided by platform alone, so a fresh Windows machine has
+  // fnm supported whether or not fnm is installed. Preferring it there would
+  // expand the documented one-step Windows default into the three-step fnm
+  // chain, which is the fallback, not the default.
+  it('prefers winget over fnm on a Windows catalog, where both are supported', () => {
+    const recipes = [
+      installRecipe({
+        id: 'nvm.node.install',
+        runtimeId: 'node',
+        action: 'use-version',
+        inputKind: 'node-version',
+        platforms: ['darwin', 'linux'],
+        supported: false,
+      }),
+      installRecipe({
+        id: 'fnm.node.install',
+        runtimeId: 'node',
+        action: 'use-version',
+        inputKind: 'node-version',
+        supported: true,
+      }),
+      installRecipe({
+        id: 'winget.node.install',
+        runtimeId: 'node',
+        action: 'install',
+        inputKind: 'none',
+        platforms: ['win32'],
+        supported: true,
+      }),
+    ];
+
+    const step = nodeInstallStep(recipes);
+
+    expect(step?.recipe.id).toBe('winget.node.install');
+    expect(step?.input).toEqual({ kind: 'none' });
+  });
+
+  // winget is Windows-only, so on a machine without it the fnm chain is what
+  // is left — reordering must not cost the fallback.
+  it('falls back to fnm when winget is not supported here', () => {
+    const recipes = [
+      installRecipe({
+        id: 'fnm.node.install',
+        runtimeId: 'node',
+        action: 'use-version',
+        inputKind: 'node-version',
+        supported: true,
+      }),
+      installRecipe({
+        id: 'winget.node.install',
+        runtimeId: 'node',
+        action: 'install',
+        inputKind: 'none',
+        platforms: ['win32'],
+        supported: false,
+      }),
+    ];
+
+    const step = nodeInstallStep(recipes);
+
+    expect(step?.recipe.id).toBe('fnm.node.install');
+    expect(step?.input).toEqual({ kind: 'node-version', version: 'lts' });
+  });
+
   it('is undefined when nothing here installs a fresh Node', () => {
     expect(nodeInstallStep([])).toBeUndefined();
   });

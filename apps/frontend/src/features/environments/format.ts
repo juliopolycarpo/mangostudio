@@ -372,16 +372,17 @@ export function pathSourceLabel(t: Messages, source: PathSource | undefined): st
 
 /**
  * The recipe ids that install a fresh Node, in the order this machine's
- * catalog is tried: nvm and fnm both need an explicit version, so neither can
- * stand in as a `findInstallRecipe(..., 'install')` prerequisite — only
- * `winget.node.install` has that shape. Ordering nvm before fnm is arbitrary
- * between two equally good choices; winget last because it is Windows-only
- * and everything before it, if present, is preferred.
+ * catalog is tried. nvm is POSIX-only and winget is Windows-only, so those two
+ * never compete: each is its platform's documented default. fnm runs
+ * everywhere and is the fallback behind both — a preview's `supported` is
+ * decided by platform alone, so on a fresh Windows machine fnm looks available
+ * whether or not it is installed, and preferring it there would replace the
+ * one-step winget default with the three-step fnm chain.
  */
 const NODE_INSTALL_RECIPE_IDS: readonly InstallRecipeId[] = [
   'nvm.node.install',
-  'fnm.node.install',
   'winget.node.install',
+  'fnm.node.install',
 ];
 
 /** The `RecipeInput` a Node recipe needs, derived from its own declared shape. */
