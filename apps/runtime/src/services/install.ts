@@ -144,7 +144,7 @@ const DEFAULT_DEPS: InstallHostDeps = {
 export function buildInstallEnvironment(
   source: Readonly<Record<string, string | undefined>>,
   recipeEnv: Readonly<Record<string, string>> = {},
-  platform: NodeJS.Platform = process.platform
+  platform: string = process.platform
 ): Record<string, string> {
   const env: Record<string, string> = {};
   const keys =
@@ -257,7 +257,10 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
               homeDir: deps.homeDir,
               fs: deps.spawnEnvFs,
             }),
-            params.env
+            params.env,
+            // The host's platform, injected — not `process.platform`, which
+            // would leave the win32 env allowlist unreachable from a test.
+            deps.platform
           )
         );
       } catch (error) {

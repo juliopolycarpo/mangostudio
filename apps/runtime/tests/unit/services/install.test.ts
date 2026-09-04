@@ -313,6 +313,38 @@ describe('runtime install execution', () => {
     expect(capturedEnv?.PATH).toBe('/opt/custom/node/bin:/usr/bin');
   });
 
+  // Regression: the win32 allowlist was selected from `process.platform`
+  // rather than the injected host platform, so `SystemRoot` and friends — what
+  // lets PowerShell start at all — were unreachable from anything but a real
+  // Windows host.
+  it('selects the win32 environment allowlist from the injected platform', async () => {
+    const process = new FakeInstallProcess('', '', 0);
+    let capturedEnv: Record<string, string> | undefined;
+    const runner = createInstallService({
+      emit: () => undefined,
+      deps: {
+        spawn: (_argv, env) => {
+          capturedEnv = env;
+          return process;
+        },
+        prepareLog: () => Promise.resolve(),
+        sourceEnv: () => ({
+          Path: 'C:\\Windows',
+          SystemRoot: 'C:\\Windows',
+          ComSpec: 'C:\\Windows\\system32\\cmd.exe',
+        }),
+        platform: 'win32',
+        homeDir: 'C:\\Users\\tester',
+        spawnEnvFs: { exists: () => false, readFile: () => null, readDirectory: () => null },
+      },
+    });
+
+    await runner.run(COMMAND);
+
+    expect(capturedEnv?.SystemRoot).toBe('C:\\Windows');
+    expect(capturedEnv?.ComSpec).toBe('C:\\Windows\\system32\\cmd.exe');
+  });
+
   it('leaves PATH untouched when the run carries no toolchain', async () => {
     const process = new FakeInstallProcess('', '', 0);
     let capturedEnv: Record<string, string> | undefined;
