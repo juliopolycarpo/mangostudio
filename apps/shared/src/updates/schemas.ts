@@ -185,6 +185,8 @@ export type UpgradeOutputEvent = Static<typeof UpgradeOutputEventSchema>;
 export const UpgradeOutcomeSchema = Type.Union([
   Type.Literal('upgraded'),
   Type.Literal('already-current'),
+  /** `--check`: a newer build exists, named on `target`; nothing was downloaded. */
+  Type.Literal('available'),
   /** The hub would not act; `command` names what to run instead. */
   Type.Literal('refused'),
   /** Download, verification or the script failed; nothing was published. */
@@ -204,8 +206,9 @@ export type UpgradeRestart = Static<typeof UpgradeRestartSchema>;
 
 /**
  * The upgrade's final word. Also the `--json` document `mangostudio upgrade`
- * prints, minus `type`/`done`. `exitCode` follows the CLI contract: 0 done or
- * already current, 1 refused, 2 download, verification or script failure.
+ * prints, minus `type`/`done`. `exitCode` follows the CLI contract: 0 done,
+ * already current, or a `--check` preview (available or not), 1 refused, 2
+ * download, verification or script failure.
  */
 export const UpgradeReportSchema = Type.Object({
   outcome: UpgradeOutcomeSchema,

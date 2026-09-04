@@ -3,6 +3,7 @@ import Value from 'typebox/value';
 import {
   MachineUpdateStatusSchema,
   MachineUpgradeBodySchema,
+  UpgradeReportSchema,
   type UpgradeStreamEvent,
   UpgradeStreamEventSchema,
 } from '../../src/updates';
@@ -59,5 +60,24 @@ describe('updates contract', () => {
     expect(Value.Check(UpgradeStreamEventSchema, { type: 'done', done: true, exitCode: 7 })).toBe(
       false
     );
+  });
+
+  it('accepts an "available" outcome for a --check preview with no download', () => {
+    expect(
+      Value.Check(UpgradeReportSchema, {
+        outcome: 'available',
+        installedVia: { manager: 'self-managed', channel: 'stable', executable: '/x' },
+        currentVersion: '0.1.1',
+        target: {
+          channel: 'stable',
+          version: '0.1.2',
+          assetName: 'mangostudio-0.1.2-linux-x64.tar.gz',
+          url: 'https://example.test/mangostudio-0.1.2-linux-x64.tar.gz',
+          kind: 'archive',
+          verification: 'sha256-sums',
+        },
+        exitCode: 0,
+      })
+    ).toBe(true);
   });
 });
