@@ -143,8 +143,16 @@ interface Harness {
 /**
  * A context whose `spawn` answers the two probes `openSession` runs, then hands
  * out the scripted turn processes in order.
+ *
+ * `help` defaults to the 2.1.227 excerpt, which is what most of this file wants:
+ * the build every existing assertion was written against. A test about a
+ * newer build passes the 2.1.260 one, and the difference between them is what
+ * proves a per-install capability is actually read per install.
  */
-function harness(turnScripts: readonly ProcessScript[]): Harness {
+function harness(
+  turnScripts: readonly ProcessScript[],
+  help: readonly string[] = CLAUDE_HELP_LINES
+): Harness {
   const queued = [...turnScripts];
   const turnArgv: Array<readonly string[]> = [];
   const turns: ScriptedProcess[] = [];
@@ -155,8 +163,7 @@ function harness(turnScripts: readonly ProcessScript[]): Harness {
     environment: {},
     spawn({ argv }) {
       if (argv.includes('--version')) return scriptedProcess({ lines: [VERSION_LINE] }).process;
-      if (argv.includes('--help'))
-        return scriptedProcess({ lines: [...CLAUDE_HELP_LINES] }).process;
+      if (argv.includes('--help')) return scriptedProcess({ lines: [...help] }).process;
       if (argv.includes('auth')) return scriptedProcess({ lines: [SUBSCRIPTION_AUTH] }).process;
       turnArgv.push(argv);
       const turn = scriptedProcess(queued.shift() ?? {});
@@ -169,13 +176,16 @@ function harness(turnScripts: readonly ProcessScript[]): Harness {
 }
 
 /** Opens a session and hands back the adapter that owns it. */
-async function openSession(turnScripts: readonly ProcessScript[]) {
-  const harnessed = harness(turnScripts);
+async function openSession(
+  turnScripts: readonly ProcessScript[],
+  options: { readonly help?: readonly string[] } = {}
+) {
+  const harnessed = harness(turnScripts, options.help);
   const adapter = new ClaudeCodeAdapter({
     newSessionId: () => MINTED_SESSION_ID,
     readManagedSettings: () => Promise.resolve({}),
   });
-  await adapter.openSession({
+  const opened = await adapter.openSession({
     params: {
       sessionId: 'chat-1',
       targetId: 'claude',
@@ -186,7 +196,7 @@ async function openSession(turnScripts: readonly ProcessScript[]) {
     },
     context: harnessed.context,
   });
-  return { adapter, ...harnessed };
+  return { adapter, opened, ...harnessed };
 }
 
 function startTurn(
@@ -403,6 +413,53 @@ describe('session state folded back from a run', () => {
 
     await collect(startTurn(adapter, context, { id: 'message-2' }));
     expect(argumentAfter(turnArgv[1] ?? [], '--permission-mode')).toBe('manual');
+  });
+
+  /**
+   * What the session learned from `--help`, seen from the turn rather than from
+   * the parser.
+   *
+   * `buildTurnArgv`'s own tests pass `acceptedEfforts` in directly, which
+   * proves the rule and not the wiring: nothing there would notice
+   * `openSession` forgetting to read the probe, and the symptom would be a
+   * silently ignored effort on every turn.
+   */
+  describe('what the session read off the build', () => {
+    it('passes an effort level a 2.1.260 session learned from the probe', async () => {
+      const { adapter, context, turnArgv } = await openSession([{ lines: RECORDED }], {
+        help: CLAUDE_HELP_LINES_2_1_260,
+      });
+
+      await collect(
+        startTurn(adapter, context, { configuration: { ...CONFIGURATION, effort: 'high' } })
+      );
+
+      expect(argumentAfter(turnArgv[0] ?? [], '--effort')).toBe('high');
+    });
+
+    it('passes no effort on a build whose probe declared none', async () => {
+      const { adapter, context, turnArgv } = await openSession([{ lines: RECORDED }]);
+
+      await collect(
+        startTurn(adapter, context, { configuration: { ...CONFIGURATION, effort: 'high' } })
+      );
+
+      expect(turnArgv[0]).not.toContain('--effort');
+    });
+
+    /**
+     * The capability the *session* reports has to agree with the one discovery
+     * reported, because they are read from the same probe but returned by two
+     * different methods. A session that disagreed would offer a picker the hub
+     * never validated a model against.
+     */
+    it('reports the same catalog capability the descriptor did', async () => {
+      const { opened } = await openSession([], { help: CLAUDE_HELP_LINES_2_1_260 });
+      expect(opened.capabilities.modelCatalog).toBe(true);
+
+      const older = await openSession([]);
+      expect(older.opened.capabilities.modelCatalog).toBe(false);
+    });
   });
 });
 
