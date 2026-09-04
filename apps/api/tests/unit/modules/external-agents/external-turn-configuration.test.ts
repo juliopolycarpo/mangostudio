@@ -177,4 +177,51 @@ describe('the model a turn resolves to', () => {
 
     expect(configuration.model).toBeUndefined();
   });
+
+  /**
+   * The settings row sits at the bottom of the chain, so it is read only when
+   * something above it is still unanswered.
+   *
+   * A database round trip plus a full `normalizeAppSettings`, on the one path a
+   * user is watching, for a value the `??` chain then discards.
+   */
+  it('does not read the settings when the request already decided both halves', async () => {
+    let reads = 0;
+    const resolver = createExternalTurnConfigurationResolver({
+      ...new FakeConfigurationPorts(DEFAULT_EXTERNAL_AGENT_SETTINGS, descriptor()).dependencies(),
+      readExternalAgentSettings: () => {
+        reads += 1;
+        return Promise.resolve(DEFAULT_EXTERNAL_AGENT_SETTINGS);
+      },
+    });
+
+    const resolution = await resolver({
+      ...BASE,
+      chat: chat(),
+      request: { model: 'opus', effort: 'high' },
+    });
+
+    expect(resolution.ok).toBe(true);
+    expect(reads).toBe(0);
+  });
+
+  it('reads the settings when only one half was decided above them', async () => {
+    let reads = 0;
+    const resolver = createExternalTurnConfigurationResolver({
+      ...new FakeConfigurationPorts(DEFAULT_EXTERNAL_AGENT_SETTINGS, descriptor()).dependencies(),
+      readExternalAgentSettings: () => {
+        reads += 1;
+        return Promise.resolve({
+          ...DEFAULT_EXTERNAL_AGENT_SETTINGS,
+          defaults: { claude: { effort: 'high' } },
+        });
+      },
+    });
+
+    const resolution = await resolver({ ...BASE, chat: chat(), request: { model: 'opus' } });
+
+    expect(reads).toBe(1);
+    if (!resolution.ok) throw new Error(resolution.message);
+    expect(resolution.configuration.effort).toBe('high');
+  });
 });

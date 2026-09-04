@@ -210,16 +210,18 @@ export function createExternalTurnConfigurationResolver(
     // catalog, so a stale stored value falls through to the vendor's default
     // rather than being refused.
     const selection = input.chat.runnerModelSelection;
-    const targetDefaults = (await readSettings(input.userId)).defaults?.[input.targetId];
-    const model = pickModel(
-      descriptor,
-      input.request?.model ?? selection.model ?? targetDefaults?.model
-    );
-    const effort = pickEffort(
-      descriptor,
-      model,
-      input.request?.effort ?? selection.effort ?? targetDefaults?.effort
-    );
+    const chosenModel = input.request?.model ?? selection.model;
+    const chosenEffort = input.request?.effort ?? selection.effort;
+    // Read only when something above it is still unanswered. The settings row
+    // is a database round trip plus a full normalization, on the one path a
+    // user is watching, and the chain discards it outright whenever the request
+    // or the chat already decided both halves.
+    const targetDefaults =
+      chosenModel === undefined || chosenEffort === undefined
+        ? (await readSettings(input.userId)).defaults?.[input.targetId]
+        : undefined;
+    const model = pickModel(descriptor, chosenModel ?? targetDefaults?.model);
+    const effort = pickEffort(descriptor, model, chosenEffort ?? targetDefaults?.effort);
 
     return {
       ok: true,
