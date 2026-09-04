@@ -25,7 +25,11 @@
  */
 
 import Type, { type Static } from 'typebox';
-import type { ExternalApprovalRouting, ExternalPermissionLevel } from './schemas';
+import type {
+  ExternalApprovalRouting,
+  ExternalPermissionLevel,
+  ExternalSupportedConfiguration,
+} from './schemas';
 
 export const ExternalPermissionPresetIdSchema = Type.Union([
   Type.Literal('careful'),
@@ -68,16 +72,17 @@ export const EXTERNAL_PERMISSION_PRESETS: readonly ExternalPermissionPreset[] = 
   },
 ];
 
-/** Just the ids, for an i18n parity table that has to cover every one. */
-export const EXTERNAL_PERMISSION_PRESET_IDS: readonly ExternalPermissionPresetId[] =
-  EXTERNAL_PERMISSION_PRESETS.map((preset) => preset.id);
-
-/** What a descriptor has to answer for a pair to be offered. */
-export interface ExternalPermissionSupport {
-  readonly level: ExternalPermissionLevel;
-  readonly routing: ExternalApprovalRouting;
-  readonly supported: boolean;
-}
+/**
+ * What a descriptor has to answer for a pair to be offered.
+ *
+ * A narrow view of `ExternalSupportedConfiguration` rather than a copy of it, so
+ * this port keeps stating only what it reads while the schema stays the one
+ * place those three fields are defined.
+ */
+export type ExternalPermissionSupport = Pick<
+  ExternalSupportedConfiguration,
+  'level' | 'routing' | 'supported'
+>;
 
 /**
  * The pair a preset means for this vendor, or `undefined` when it means none.
