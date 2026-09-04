@@ -313,24 +313,49 @@ export function findInstallRecipe(
   return unsupportedMatch;
 }
 
-/**
- * The installation source each runtime's uninstall recipe is able to remove.
- * `bun.uninstall` deletes Bun's own install root, so it is the right button
- * only for a Bun the official installer put there. A runtime absent here has
- * no source to match and is offered whenever the catalog lists a recipe.
- */
-const UNINSTALL_SOURCE_BY_RUNTIME: Partial<Record<string, PathSource>> = {
-  bun: 'bun',
-};
+/** `$HOME/` and `%USERPROFILE%\` both stand for "this account's home", wherever it is. */
+const HOME_PLACEHOLDER = /^(?:\$HOME|%USERPROFILE%)[/\\]/;
 
 /**
- * The uninstall step to offer for this runtime — undefined when the catalog
- * has none here, or when the binary that actually runs is not the one the
- * recipe knows how to remove.
+ * A declared write path reduced to the part that identifies it below the home
+ * directory, in one separator style. Compared case-insensitively because the
+ * same path is spelled either way on Windows.
+ */
+function ownedLocation(write: string): string {
+  return write.replace(HOME_PLACEHOLDER, '').replaceAll('\\', '/').toLowerCase();
+}
+
+/**
+ * Whether `path` is the installation this recipe removes: the exact file it
+ * deletes, or a file inside a directory it deletes.
+ */
+function removesInstallationAt(recipe: InstallRecipePreview, path: string): boolean {
+  const target = path.replaceAll('\\', '/').toLowerCase();
+  return recipe.writes.some((write) => {
+    const location = ownedLocation(write);
+    // A `writes` entry that is nothing but the placeholder would own the whole
+    // home directory; no recipe declares that, and matching it would be worse
+    // than offering nothing.
+    if (!location) return false;
+    return target.endsWith(`/${location}`) || target.includes(`/${location}/`);
+  });
+}
+
+/**
+ * The uninstall step to offer for this tool — undefined when the catalog has
+ * none here, or when the binary that actually runs is not one this recipe
+ * removes.
  *
- * Offering it regardless is worse than offering nothing: against a Homebrew or
- * system Bun, `bun.uninstall` deletes a different installation (or none),
- * leaves the effective binary in place, and still reports success.
+ * Offering it regardless is worse than offering nothing: against a Homebrew
+ * Bun or a package-managed `claude`, the recipe deletes a different
+ * installation (or none), leaves the effective binary in place, and still
+ * reports success. Ownership is read from the recipe's own `writes` rather
+ * than from `pathSource`, which cannot tell a vendor-installed CLI from a
+ * system one, and which reports a custom `$BUN_INSTALL` prefix as Bun-managed
+ * even though the recipe only removes the default root.
+ *
+ * A copy-only recipe is exempt: it deletes nothing on its own, and the command
+ * it discloses is the user's to judge.
  *
  * @example runtimeUninstallRecipe(bunStatus, recipes)?.id // 'bun.uninstall'
  */
@@ -340,13 +365,11 @@ export function runtimeUninstallRecipe(
 ): InstallRecipePreview | undefined {
   const recipe = findInstallRecipe(recipes, status.id, 'uninstall');
   if (!recipe) return undefined;
-
-  const managedSource = UNINSTALL_SOURCE_BY_RUNTIME[status.id];
-  if (!managedSource) return recipe;
+  if (!recipe.runnable) return recipe;
 
   const { installation } = effectiveInstallation(status);
   if (!installation) return undefined;
-  return (installation.pathSource ?? 'system') === managedSource ? recipe : undefined;
+  return removesInstallationAt(recipe, installation.path) ? recipe : undefined;
 }
 
 /** Human-readable byte count for the installer download disclosure. */

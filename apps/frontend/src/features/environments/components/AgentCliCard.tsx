@@ -8,7 +8,7 @@ import type { Messages } from '@mangostudio/shared/i18n';
 import { Download } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { findInstallRecipe, prefixedVersionLabel } from '../format';
+import { findInstallRecipe, prefixedVersionLabel, runtimeUninstallRecipe } from '../format';
 import { useProbeAgentCli } from '../hooks/use-runtime-status';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import { AgentAuthState } from './AgentAuthState';
@@ -33,7 +33,7 @@ export function AgentCliCard({ status, recipes, environmentId }: AgentCliCardPro
   const name = resolve('agent', status.targetId).name;
   const installRecipe = findInstallRecipe(recipes, status.id, 'install');
   const updateRecipe = findInstallRecipe(recipes, status.id, 'update');
-  const uninstallRecipe = findInstallRecipe(recipes, status.id, 'uninstall');
+  const uninstallRecipe = runtimeUninstallRecipe(status, recipes);
 
   const updateAction = updateRecipe && (
     <InstallAction

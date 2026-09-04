@@ -39,11 +39,14 @@ describe('AgentCliCard', () => {
   });
 
   it('offers Update and Uninstall, after each other, once the CLI is installed', () => {
+    // The vendor-owned path: `claude.uninstall` removes exactly this file, so
+    // it is the installation the button is entitled to remove.
+    const vendorPath = '/home/dev/.local/bin/claude';
     const status = agentCliStatus({
       targetId: 'claude',
       id: 'claude',
-      installations: [installation({ path: '/usr/local/bin/claude', version: '2.1.220' })],
-      effective: installation({ path: '/usr/local/bin/claude', version: '2.1.220' }),
+      installations: [installation({ path: vendorPath, version: '2.1.220' })],
+      effective: installation({ path: vendorPath, version: '2.1.220' }),
     });
 
     render(
@@ -51,7 +54,12 @@ describe('AgentCliCard', () => {
         status={status}
         recipes={[
           installRecipe({ id: 'claude.update', runtimeId: 'claude', action: 'update' }),
-          installRecipe({ id: 'claude.uninstall', runtimeId: 'claude', action: 'uninstall' }),
+          installRecipe({
+            id: 'claude.uninstall',
+            runtimeId: 'claude',
+            action: 'uninstall',
+            writes: ['$HOME/.local/bin/claude', '%USERPROFILE%\\.local\\bin\\claude.exe'],
+          }),
         ]}
       />
     );
@@ -66,6 +74,39 @@ describe('AgentCliCard', () => {
     expect(
       update.compareDocumentPosition(uninstall) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
+  });
+
+  // `claude.uninstall` removes `~/.local/bin/claude`. Against a CLI installed
+  // by a package manager somewhere else it would leave the effective binary
+  // running, and could delete a separate vendor install while reporting
+  // success.
+  it('offers no Uninstall when the effective CLI is not the one the recipe owns', () => {
+    const status = agentCliStatus({
+      targetId: 'claude',
+      id: 'claude',
+      installations: [installation({ path: '/usr/local/bin/claude', version: '2.1.220' })],
+      effective: installation({ path: '/usr/local/bin/claude', version: '2.1.220' }),
+    });
+
+    render(
+      <AgentCliCard
+        status={status}
+        recipes={[
+          installRecipe({
+            id: 'claude.uninstall',
+            runtimeId: 'claude',
+            action: 'uninstall',
+            writes: ['$HOME/.local/bin/claude', '%USERPROFILE%\\.local\\bin\\claude.exe'],
+          }),
+        ]}
+      />
+    );
+
+    expect(
+      screen.queryByRole('button', {
+        name: en.environments.runtimes.uninstall.replace('{runtime}', 'Claude Code'),
+      })
+    ).not.toBeInTheDocument();
   });
 
   it('renders a copy-only uninstall for a CLI whose vendor never documented one', () => {

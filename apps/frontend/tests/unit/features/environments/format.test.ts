@@ -324,15 +324,78 @@ describe('runtimeUninstallRecipe', () => {
     expect(runtimeUninstallRecipe(status, [bunUninstall])).toBeUndefined();
   });
 
-  it('offers a runtime with no source rule whatever the catalog lists', () => {
-    const recipe = installRecipe({
-      id: 'claude.uninstall',
-      runtimeId: 'claude',
-      action: 'uninstall',
-    });
-    const status = runtimeStatus({ id: 'claude', installations: [] });
+  // The same rule serves the agent CLIs: `AgentCliStatus` extends
+  // `RuntimeStatus`, and ownership is read from the recipe's own `writes`.
+  const claudeUninstall = installRecipe({
+    id: 'claude.uninstall',
+    runtimeId: 'claude',
+    action: 'uninstall',
+    writes: ['$HOME/.local/bin/claude', '%USERPROFILE%\\.local\\bin\\claude.exe'],
+  });
 
-    expect(runtimeUninstallRecipe(status, [recipe])?.id).toBe('claude.uninstall');
+  function claudeStatus(path: string) {
+    return runtimeStatus({
+      id: 'claude',
+      installations: [installation({ path, version: '2.1.220', effective: true })],
+    });
+  }
+
+  it('offers an agent CLI uninstall for the file the recipe removes', () => {
+    expect(
+      runtimeUninstallRecipe(claudeStatus('/home/dev/.local/bin/claude'), [claudeUninstall])
+    ).toBe(claudeUninstall);
+  });
+
+  it('withholds it from a package-managed CLI the recipe never wrote', () => {
+    expect(
+      runtimeUninstallRecipe(claudeStatus('/usr/local/bin/claude'), [claudeUninstall])
+    ).toBeUndefined();
+  });
+
+  it('matches a Windows path against the same declared location', () => {
+    const status = claudeStatus('C:\\Users\\Dev\\.local\\bin\\Claude.exe');
+
+    expect(runtimeUninstallRecipe(status, [claudeUninstall])).toBe(claudeUninstall);
+  });
+
+  // A copy-only recipe removes nothing itself — the card shows the command and
+  // the reason it cannot be run, which stays useful whatever the provenance.
+  it('leaves a copy-only uninstall visible regardless of provenance', () => {
+    const recipe = installRecipe({
+      id: 'codex.uninstall',
+      runtimeId: 'codex',
+      action: 'uninstall',
+      runnable: false,
+      unrunnableReason: 'vendor-undocumented',
+      writes: ['$HOME/.local/bin/codex'],
+    });
+    const status = runtimeStatus({
+      id: 'codex',
+      installations: [
+        installation({ path: '/usr/local/bin/codex', version: '1.0.0', effective: true }),
+      ],
+    });
+
+    expect(runtimeUninstallRecipe(status, [recipe])).toBe(recipe);
+  });
+
+  // A custom `$BUN_INSTALL` prefix is reported as Bun-managed by detection,
+  // but `bun.uninstall` only removes the default root — so the button would
+  // have deleted the wrong tree or nothing at all.
+  it('withholds it from a Bun outside the default root, whatever pathSource says', () => {
+    const status = runtimeStatus({
+      id: 'bun',
+      installations: [
+        installation({
+          path: '/usr/local/bin/bun',
+          version: '1.3.14',
+          effective: true,
+          pathSource: 'bun',
+        }),
+      ],
+    });
+
+    expect(runtimeUninstallRecipe(status, [bunUninstall])).toBeUndefined();
   });
 
   it('is undefined when the catalog has no uninstall for the runtime', () => {
