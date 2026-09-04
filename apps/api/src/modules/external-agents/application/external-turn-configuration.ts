@@ -46,7 +46,7 @@ import {
 import type { ExternalTurnRequest } from '@mangostudio/shared/generation';
 import { getDb } from '../../../db/database';
 import { getRuntimeClient } from '../../../services/runtime-client';
-import { getAppSettings } from '../../app-settings/application/app-settings-service';
+import { getSavedAppSettings } from '../../app-settings/infrastructure/app-settings-repository';
 import type { OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import {
   type ExternalAgentDiscoveryService,
@@ -112,14 +112,20 @@ export interface ExternalTurnConfigurationDependencies {
 }
 
 /**
- * The stored settings, read through the app-settings service.
+ * The stored settings, read straight off the row.
  *
  * The default only; a caller that already has a handle injects its own. This
  * resolver reads settings for exactly one thing — the per-target model default
  * — so the port is that narrow rather than a whole db.
+ *
+ * `getSavedAppSettings` rather than `getAppSettings`: the latter first awaits
+ * `libraryLocationDefaults()`, which probes every agent CLI on a cold cache.
+ * That seeds which library locations default to enabled and has nothing to say
+ * about a model default, so on this path it is a multi-second stall in front of
+ * a send. `plugins/api-key-guard.ts` reads the row directly for the same reason.
  */
 async function readStoredExternalAgentSettings(userId: string): Promise<ExternalAgentSettings> {
-  const settings = await getAppSettings(getDb(), userId);
+  const settings = await getSavedAppSettings(getDb(), userId);
   return settings.externalAgentSettings;
 }
 
