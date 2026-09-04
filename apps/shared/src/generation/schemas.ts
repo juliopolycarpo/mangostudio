@@ -23,7 +23,6 @@ export const GENERATION_ATTACHMENT_ID_MAX_LENGTH = 256;
 export const GENERATION_REFERENCE_IMAGE_URL_MAX_LENGTH = 4_096;
 export const GENERATION_IMAGE_QUALITY_MAX_LENGTH = 64;
 export const GENERATION_THINKING_VISIBILITY_MAX_LENGTH = 32;
-/** Matches `vendorId` in `EXTERNAL_TEXT_LIMITS`, doubled for UTF-16 units. */
 
 const ChatIdSchema = Type.String({ maxLength: GENERATION_CHAT_ID_MAX_LENGTH });
 const PromptSchema = Type.String({ maxLength: GENERATION_PROMPT_MAX_LENGTH });
