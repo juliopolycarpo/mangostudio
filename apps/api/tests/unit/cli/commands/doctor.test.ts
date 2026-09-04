@@ -36,6 +36,7 @@ function makeConfig(): MangoConfig {
     checkpoints: { dir: '/data/checkpoints' },
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
     security: { trustProxy: false, allowDirectLoopback: true },
+    updates: { check: true, channel: null },
     environments: {
       ltsRefresh: false,
       installsEnabled: false,

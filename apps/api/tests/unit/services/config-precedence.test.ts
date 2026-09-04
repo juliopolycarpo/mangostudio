@@ -38,6 +38,8 @@ const WATCHED_ENV_KEYS = [
   'IMAGES_DIR',
   'TRUST_PROXY',
   'ALLOW_DIRECT_LOOPBACK',
+  'MANGO_UPDATES_CHECK',
+  'MANGO_UPDATES_CHANNEL',
   'MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR',
   'MANGO_LIBRARY_BACKUP_DIR',
   'MANGO_LIBRARY_BACKUP_RETENTION_COUNT',
@@ -272,6 +274,60 @@ describe('config precedence', () => {
     const cfg = loadConfig(TMP_TOML);
 
     expect(cfg.security.allowDirectLoopback).toBe(true);
+  });
+
+  test('updates.check defaults to true', () => {
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(cfg.updates.check).toBe(true);
+  });
+
+  test('loads updates.check from config.toml', () => {
+    writeFileSync(TMP_TOML, '[updates]\ncheck = false\n');
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.updates.check).toBe(false);
+  });
+
+  test('process.env MANGO_UPDATES_CHECK overrides config.toml updates.check', () => {
+    writeFileSync(TMP_TOML, '[updates]\ncheck = false\n');
+    process.env.MANGO_UPDATES_CHECK = 'true';
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.updates.check).toBe(true);
+  });
+
+  test('updates.channel defaults to null (this build’s own channel)', () => {
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(cfg.updates.channel).toBeNull();
+  });
+
+  test('loads updates.channel from config.toml', () => {
+    writeFileSync(TMP_TOML, '[updates]\nchannel = "canary"\n');
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.updates.channel).toBe('canary');
+  });
+
+  test('ignores an unrecognized updates.channel value', () => {
+    writeFileSync(TMP_TOML, '[updates]\nchannel = "nightly"\n');
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.updates.channel).toBeNull();
+  });
+
+  test('process.env MANGO_UPDATES_CHANNEL overrides config.toml updates.channel', () => {
+    writeFileSync(TMP_TOML, '[updates]\nchannel = "canary"\n');
+    process.env.MANGO_UPDATES_CHANNEL = 'stable';
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.updates.channel).toBe('stable');
   });
 
   test('keeps live Node LTS refresh opt-in and lets env override TOML', () => {

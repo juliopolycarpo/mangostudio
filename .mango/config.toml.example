@@ -60,6 +60,16 @@ url = ""
 # otherwise clients can spoof their IP. Default: false.
 # trustProxy = false
 
+[updates]
+# Whether the hub checks GitHub for a newer release in the background and
+# reports it in `status`, `doctor` and the machine page. Also skipped when
+# NO_UPDATE_NOTIFIER, DO_NOT_TRACK or CI is set in the environment, or when
+# running a `dev` build. Default: true.
+# check = true
+# Force a channel instead of the one this build came from ("stable" or
+# "canary"). Empty/unset = this build's own channel.
+# channel = "stable"
+
 # Gemini API key connectors.
 # Keys defined here appear automatically in the Settings UI.
 # You can enable/disable specific models per connector in the UI.
