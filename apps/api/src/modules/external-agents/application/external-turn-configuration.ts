@@ -33,6 +33,7 @@
 import type {
   ExternalAgentConfiguration,
   ExternalAgentDescriptor,
+  ExternalAgentModel,
   ExternalAgentSettings,
   ExternalAgentTargetId,
   ExternalAgentUnavailableReason,
@@ -292,9 +293,22 @@ function pickModel(
  * Same rule for effort, scoped to the model actually chosen.
  *
  * When the vendor advertised a catalog but no model resolved out of it — a
- * request naming something unlisted, and no visible default to fall back to —
- * the requested effort was never vetted against anything, so nothing is sent.
- * Forwarding it would be this function claiming a scope it does not have.
+ * request naming something unlisted, or a catalog that names no default at all
+ * — the effort has no single model to be vetted against. It is still forwarded
+ * when *every* entry in the catalog accepts it, because then whichever model
+ * the vendor falls back to accepts it too, and no claim is being made about a
+ * scope this function cannot see. Claude is the catalog that shape describes:
+ * `--effort` is session-scoped there, so the levels ride on every entry, and
+ * nothing is marked default on purpose — without this an `{ effort: 'max' }`
+ * with no model picked would be dropped in silence.
+ *
+ * Only an asked-for effort travels that path. A per-model
+ * `defaultReasoningEffort` still needs its model, since picking one of those
+ * without knowing which model runs would be inventing the pair.
+ *
+ * Hidden entries count here, unlike in `pickModel`: the vendor's own fallback
+ * may well be one of them, so an effort the catalog only mostly accepts is not
+ * safe to send.
  */
 function pickEffort(
   descriptor: ExternalAgentDescriptor,
@@ -305,11 +319,22 @@ function pickEffort(
   // No catalog at all: the request is the only signal there is.
   if (!models || models.length === 0) return requested;
   const model = models.find((candidate) => candidate.id === modelId);
-  if (!model) return undefined;
+  if (!model) return acceptedByEveryModel(models, requested) ? requested : undefined;
   const efforts = model.supportedReasoningEfforts;
   if (!efforts || efforts.length === 0) return undefined;
   if (requested && efforts.some((effort) => effort.id === requested)) return requested;
   return model.defaultReasoningEffort;
+}
+
+/** Whether the catalog offers this effort under every model it lists. */
+function acceptedByEveryModel(
+  models: readonly ExternalAgentModel[],
+  requested: string | undefined
+): boolean {
+  if (requested === undefined) return false;
+  return models.every((model) =>
+    (model.supportedReasoningEfforts ?? []).some((effort) => effort.id === requested)
+  );
 }
 
 export const resolveExternalTurnConfiguration = createExternalTurnConfigurationResolver();

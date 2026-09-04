@@ -194,6 +194,53 @@ describe('the model a turn resolves to', () => {
   });
 
   /**
+   * An effort with no model still travels, as long as every entry in the
+   * catalog accepts it.
+   *
+   * This is Claude's whole shape: `--effort` is session-scoped there, so the
+   * levels ride on every model, and nothing is marked default on purpose.
+   * Scoping the effort to a model that resolved to nothing would drop an
+   * explicitly asked-for `max` in silence — reachable from an External API
+   * body, from a per-target settings default, and from a `PUT /chats/:id` that
+   * writes an effort without a model.
+   */
+  it('sends an effort with no model when the whole catalog accepts it', async () => {
+    const configuration = await resolve(DEFAULT_EXTERNAL_AGENT_SETTINGS, {
+      ...BASE,
+      chat: chat(),
+      request: { effort: 'high' },
+    });
+
+    expect(configuration.model).toBeUndefined();
+    expect(configuration.effort).toBe('high');
+  });
+
+  /**
+   * The other half of that rule. With no model resolved, the vendor picks one —
+   * so an effort only *some* entries offer could land on an entry that does not
+   * offer it, which on a command line is read as a new flag rather than as
+   * `--effort`'s value.
+   */
+  it('drops an effort with no model when one catalog entry does not offer it', async () => {
+    // Hidden counts as an entry: `pickModel` skips it when choosing a default,
+    // but the vendor's own fallback may well be it.
+    const resolver = resolverWith(
+      DEFAULT_EXTERNAL_AGENT_SETTINGS,
+      descriptor({
+        models: [
+          { id: 'opus', supportedReasoningEfforts: [{ id: 'low' }, { id: 'high' }] },
+          { id: 'legacy', hidden: true, supportedReasoningEfforts: [{ id: 'low' }] },
+        ],
+      })
+    );
+
+    const resolution = await resolver({ ...BASE, chat: chat(), request: { effort: 'high' } });
+
+    if (!resolution.ok) throw new Error(resolution.message);
+    expect(resolution.configuration.effort).toBeUndefined();
+  });
+
+  /**
    * A stored model the vendor no longer lists is dropped, not refused: catalogs
    * are per-account and change between the render that filled the picker and
    * the send. Failing a turn over a stale dropdown is worse than running on the
