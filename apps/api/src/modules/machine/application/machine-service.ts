@@ -32,8 +32,6 @@ import {
   type UserServiceStatus,
 } from '@mangostudio/shared/runtime-home';
 import {
-  INSTALLED_VIA_PATH_MAX,
-  type InstalledVia,
   type MachineUpdateStatus,
   UPDATE_ERROR_MAX,
   UPDATE_VERSION_MAX,
@@ -72,7 +70,7 @@ import {
   upgradeRefusalReason,
 } from '../../updates/application/install-status';
 import { type UpdateChecker, updateChecker } from '../../updates/application/update-check';
-import type { InstallOriginProbe } from '../../updates/domain/install-origin';
+import { fitInstalledVia, type InstallOriginProbe } from '../../updates/domain/install-origin';
 import type { HubExecutable } from '../domain/hub-executable';
 import { describeHubProcess, hubLaunchMode } from '../domain/hub-process';
 import { hubServiceUnitName } from '../domain/hub-service-identity';
@@ -608,22 +606,6 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
     installOriginProbe: deps.installOriginProbe ?? currentInstallOriginProbe,
     updatesConfig: deps.updatesConfig ?? (() => getConfig().updates),
     checker: deps.checker ?? updateChecker,
-  };
-}
-
-/** `InstalledVia` cut to the wire caps — a launcher path or dist root can be arbitrarily long. */
-function fitInstalledVia(via: InstalledVia): InstalledVia {
-  return {
-    manager: via.manager,
-    channel: via.channel,
-    executable: fitToLimit(via.executable, INSTALLED_VIA_PATH_MAX),
-    ...(via.distRoot !== undefined
-      ? { distRoot: fitToLimit(via.distRoot, INSTALLED_VIA_PATH_MAX) }
-      : {}),
-    ...(via.legacy !== undefined ? { legacy: via.legacy } : {}),
-    ...(via.launcherPath !== undefined
-      ? { launcherPath: fitToLimit(via.launcherPath, INSTALLED_VIA_PATH_MAX) }
-      : {}),
   };
 }
 

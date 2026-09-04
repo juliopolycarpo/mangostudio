@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+import { INSTALLED_VIA_PATH_MAX } from '@mangostudio/shared/updates';
 import {
   detectInstallOrigin,
+  fitInstalledVia,
   type InstallOriginProbe,
   npmFamilyFromPath,
   parseInstallOriginRecord,
@@ -173,6 +175,32 @@ describe('parseInstallOriginRecord', () => {
       parseInstallOriginRecord('{"origin":"elsewhere","channel":"stable","version":"1"}')
     ).toBeNull();
     expect(parseInstallOriginRecord('{"origin":"installer","channel":"stable"}')).toBeNull();
+  });
+});
+
+describe('fitInstalledVia', () => {
+  it('truncates every path field to the wire cap, dropping nothing else', () => {
+    const overlong = 'x'.repeat(INSTALLED_VIA_PATH_MAX + 10);
+    const fitted = fitInstalledVia({
+      manager: 'self-managed',
+      channel: 'stable',
+      executable: overlong,
+      distRoot: overlong,
+      legacy: true,
+      launcherPath: overlong,
+    });
+
+    expect(fitted.executable).toHaveLength(INSTALLED_VIA_PATH_MAX);
+    expect(fitted.distRoot).toHaveLength(INSTALLED_VIA_PATH_MAX);
+    expect(fitted.launcherPath).toHaveLength(INSTALLED_VIA_PATH_MAX);
+    expect(fitted.legacy).toBe(true);
+    expect(fitted.manager).toBe('self-managed');
+  });
+
+  it('omits optional fields that were absent rather than fitting undefined', () => {
+    const fitted = fitInstalledVia({ manager: 'unknown', channel: 'stable', executable: '/x' });
+
+    expect(fitted).toEqual({ manager: 'unknown', channel: 'stable', executable: '/x' });
   });
 });
 

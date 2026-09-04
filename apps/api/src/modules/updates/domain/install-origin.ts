@@ -9,9 +9,15 @@
  * probe so every branch is testable without a filesystem.
  */
 
-import type { InstalledVia, InstallManager, UpdateChannel } from '@mangostudio/shared/updates';
+import {
+  INSTALLED_VIA_PATH_MAX,
+  type InstalledVia,
+  type InstallManager,
+  type UpdateChannel,
+} from '@mangostudio/shared/updates';
 import { resolveRuntimeRelease } from '../../environments/domain/runtime-release-resolution';
 import { hubDistRoot } from '../../machine/domain/hub-executable';
+import { fitToLimit } from '../../machine/domain/machine-limits';
 
 export const LAUNCHER_ENV = 'MANGOSTUDIO_LAUNCHER';
 export const LAUNCHER_PATH_ENV = 'MANGOSTUDIO_LAUNCHER_PATH';
@@ -180,6 +186,28 @@ export function detectInstallOrigin(probe: InstallOriginProbe): InstallOrigin {
   }
   if (probe.container) return { ...base, manager: 'docker' };
   return fromLauncher(probe, base) ?? fromDistRoot(probe, base) ?? fromPath(probe, base);
+}
+
+/**
+ * `InstalledVia` cut to the wire caps — a launcher path or dist root can be
+ * arbitrarily long. Shared by the machine API's `GET /machine/update` and
+ * the upgrade engine's report, so the two surfaces cannot disagree about how
+ * much of a path survives onto the wire.
+ * // Usage: fitInstalledVia(installedVia)
+ */
+export function fitInstalledVia(via: InstalledVia): InstalledVia {
+  return {
+    manager: via.manager,
+    channel: via.channel,
+    executable: fitToLimit(via.executable, INSTALLED_VIA_PATH_MAX),
+    ...(via.distRoot !== undefined
+      ? { distRoot: fitToLimit(via.distRoot, INSTALLED_VIA_PATH_MAX) }
+      : {}),
+    ...(via.legacy !== undefined ? { legacy: via.legacy } : {}),
+    ...(via.launcherPath !== undefined
+      ? { launcherPath: fitToLimit(via.launcherPath, INSTALLED_VIA_PATH_MAX) }
+      : {}),
+  };
 }
 
 /** Wording for `doctor`, `status` and the CLI. // Usage: describeInstallManager('bun') → 'npm (bun global)' */
