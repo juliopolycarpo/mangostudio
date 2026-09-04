@@ -28,6 +28,7 @@ interface FakeClient {
   pathEnvParams: unknown;
   /** The `ids` the last `probing.runtimes` call was asked for. */
   lastRuntimeIds: readonly string[];
+  lastVersionManagerIds: readonly string[];
   /** Leaves `probing.runtimes` pending so a second caller can race it. */
   holdRuntime: boolean;
   settleRuntime: () => void;
@@ -62,6 +63,7 @@ function fakeClient(
     selfParams: null,
     pathEnvParams: null,
     lastRuntimeIds: [],
+    lastVersionManagerIds: [],
     holdRuntime: false,
     settleRuntime: () => undefined,
     holdAgent: false,
@@ -89,6 +91,7 @@ function fakeClient(
       // a fake that always returned the same fixed list regardless of `ids`
       // would hand a `fnm` caller an `nvm` status wearing the wrong label.
       versionManagers: (params: { ids?: readonly string[] }) => {
+        state.lastVersionManagerIds = params.ids ?? [];
         const known: Record<
           string,
           { id: string; installed: boolean; versions: never[]; findings: never[] }
@@ -96,6 +99,8 @@ function fakeClient(
           nvm: { id: 'nvm', installed: false, versions: [], findings: [] },
           fnm: { id: 'fnm', installed: false, versions: [], findings: [] },
         };
+        // A peer that predates fnm detection answers only for nvm, whatever it
+        // was asked — the shape this fake reproduces by filtering `known`.
         const wanted = params.ids ?? ['nvm', 'fnm'];
         return Promise.resolve({
           statuses: wanted.map((id) => known[id]).filter((status) => status !== undefined),
@@ -360,6 +365,34 @@ describe('platform-aware runtime ids', () => {
     // The fake answers every id it knows; what matters is what was asked.
     expect(legacy.lastRuntimeIds).toEqual(['bun', 'node']);
     await expect(service.getRuntimeStatus(LOCAL, 'fnm')).resolves.toBeNull();
+  });
+
+  // Regression: the version-manager list was sent unnarrowed. A peer that
+  // predates fnm answers a request for both with nvm's status alone, and the
+  // probe cache only reads back as fresh once *every* requested id has an
+  // entry — so every list stayed a cache miss and re-probed nvm on each poll.
+  it('asks a peer that predates fnm detection for nvm only, and caches that answer', async () => {
+    const legacy = fakeClient('v1', 'linux', { ...MANIFEST.features, toolchain: undefined });
+    const service = serviceFor(() => legacy);
+
+    const first = await service.listVersionManagerStatuses(LOCAL);
+    legacy.lastVersionManagerIds = [];
+    const second = await service.listVersionManagerStatuses(LOCAL);
+
+    expect(first.map((status) => status.id)).toEqual(['nvm']);
+    expect(second.map((status) => status.id)).toEqual(['nvm']);
+    // Empty because the second read never reached the peer at all.
+    expect(legacy.lastVersionManagerIds).toEqual([]);
+    await expect(service.getVersionManagerStatus(LOCAL, 'fnm')).resolves.toBeNull();
+  });
+
+  it('still asks a current peer for both managers', async () => {
+    const current = fakeClient();
+    const service = serviceFor(() => current);
+
+    await service.listVersionManagerStatuses(LOCAL);
+
+    expect(current.lastVersionManagerIds).toEqual(['nvm', 'fnm']);
   });
 
   it('omits winget on a non-Windows target', async () => {

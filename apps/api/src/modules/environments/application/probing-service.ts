@@ -92,7 +92,22 @@ function runtimeIdsFor(manifest: RuntimeCapabilityManifest): readonly RuntimeId[
 
 /** What every runtime answered for before the extended definitions existed. */
 const LEGACY_RUNTIME_IDS: readonly RuntimeId[] = ['bun', 'node'];
+
 const VERSION_MANAGER_IDS: readonly VersionManagerId[] = ['nvm', 'fnm'];
+/** The only manager a peer built before `features.toolchain` ever answers for. */
+const LEGACY_VERSION_MANAGER_IDS: readonly VersionManagerId[] = ['nvm'];
+
+/**
+ * Which managers to ask this peer about. A peer that predates fnm detection
+ * answers a request for `['nvm', 'fnm']` with nvm's status alone, and the probe
+ * cache only reads back as fresh when *every* requested id is present — so
+ * asking an old peer for fnm would turn every list into a cache miss and
+ * re-probe nvm on each poll.
+ * // Usage: versionManagerIdsFor(client.manifest)
+ */
+function versionManagerIdsFor(manifest: RuntimeCapabilityManifest): readonly VersionManagerId[] {
+  return manifest.features.toolchain === true ? VERSION_MANAGER_IDS : LEGACY_VERSION_MANAGER_IDS;
+}
 const AGENT_TARGET_IDS: readonly LibraryTargetId[] = AGENT_CLI_DEFINITIONS.map(
   (definition) => definition.targetId
 );
@@ -631,11 +646,19 @@ export function createEnvironmentProbingService(
       return status ?? null;
     },
 
-    listVersionManagerStatuses: (scope, probeOptions) =>
-      probeVersionManagers(scope, VERSION_MANAGER_IDS, probeOptions?.force === true),
+    async listVersionManagerStatuses(scope, probeOptions) {
+      const client = await resolveClient(scope);
+      return probeVersionManagers(
+        scope,
+        versionManagerIdsFor(client.manifest),
+        probeOptions?.force === true
+      );
+    },
 
     async getVersionManagerStatus(scope, id, probeOptions) {
       if (!VERSION_MANAGER_IDS.includes(id)) return null;
+      const client = await resolveClient(scope);
+      if (!versionManagerIdsFor(client.manifest).includes(id)) return null;
       const [status] = await probeVersionManagers(scope, [id], probeOptions?.force === true);
       return status ?? null;
     },
