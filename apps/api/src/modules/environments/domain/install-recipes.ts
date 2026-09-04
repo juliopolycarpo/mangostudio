@@ -701,8 +701,17 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     platforms: ALL_PLATFORMS,
     requires: [],
     // Deliberately leaves `~/.claude` (settings, credentials) untouched — this
-    // removes the binary, not the user's configuration.
-    writes: ['$HOME/.local/bin/claude', '%USERPROFILE%\\.local\\bin\\claude.exe'],
+    // removes the binary, not the user's configuration. The versioned install
+    // under `share` is named as well as the entry point: the argv deletes it
+    // recursively, the confirm dialog discloses this list verbatim, and the
+    // card reads it to decide whether the effective installation is one this
+    // recipe owns — which for a vendor symlink resolves under `share`.
+    writes: [
+      '$HOME/.local/bin/claude',
+      '$HOME/.local/share/claude',
+      '%USERPROFILE%\\.local\\bin\\claude.exe',
+      '%USERPROFILE%\\.local\\share\\claude',
+    ],
     networkAccess: false,
     timeoutMs: 30_000,
     probe: [{ kind: 'agent', targetId: 'claude' }],

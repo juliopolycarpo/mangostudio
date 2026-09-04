@@ -265,6 +265,28 @@ describe('install recipes', () => {
     );
   });
 
+  // `writes` is load-bearing twice over: the confirm dialog interpolates it as
+  // the paths that will be removed, and the card reads it to decide whether
+  // the effective installation is one this recipe owns. A path the argv
+  // deletes but does not declare understates the delete and hides the
+  // installation from its own uninstall.
+  it('declares every home path its uninstall argv removes', () => {
+    const uninstalls = INSTALL_RECIPES.filter(
+      (recipe) => recipe.action === 'uninstall' && recipe.argv
+    );
+    expect(uninstalls.length).toBeGreaterThan(0);
+
+    for (const recipe of uninstalls) {
+      const script =
+        recipe.argv?.({ kind: 'none' }, { platform: 'linux', binaryPaths: {} })?.at(-1) ?? '';
+      const removed = new Set([...script.matchAll(/\$HOME\/[A-Za-z0-9._/-]+/g)].map(([m]) => m));
+      expect(removed.size).toBeGreaterThan(0);
+      for (const path of removed) {
+        expect(recipe.writes).toContain(path);
+      }
+    }
+  });
+
   it('offers uninstall and update recipes as copy-only when no vendor shape exists', () => {
     for (const id of ['codex.uninstall', 'cursor.uninstall'] as const) {
       const recipe = getInstallRecipe(id);

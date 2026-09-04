@@ -330,7 +330,12 @@ describe('runtimeUninstallRecipe', () => {
     id: 'claude.uninstall',
     runtimeId: 'claude',
     action: 'uninstall',
-    writes: ['$HOME/.local/bin/claude', '%USERPROFILE%\\.local\\bin\\claude.exe'],
+    writes: [
+      '$HOME/.local/bin/claude',
+      '$HOME/.local/share/claude',
+      '%USERPROFILE%\\.local\\bin\\claude.exe',
+      '%USERPROFILE%\\.local\\share\\claude',
+    ],
   });
 
   function claudeStatus(path: string) {
@@ -366,6 +371,20 @@ describe('runtimeUninstallRecipe', () => {
           version: '2.1.260',
           effective: true,
         }),
+      ],
+    });
+
+    expect(runtimeUninstallRecipe(status, [claudeUninstall])).toBe(claudeUninstall);
+  });
+
+  // The versioned directory is declared too, so the realpath matches on its
+  // own — the gate does not depend on `rawPath` still being the symlink.
+  it('matches the realpath alone when the link is not what was scanned', () => {
+    const versioned = '/home/dev/.local/share/claude/versions/2.1.260/claude';
+    const status = runtimeStatus({
+      id: 'claude',
+      installations: [
+        installation({ path: versioned, rawPath: versioned, version: '2.1.260', effective: true }),
       ],
     });
 
