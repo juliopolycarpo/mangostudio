@@ -15,6 +15,7 @@ import { chatListQueryOptions, messagesQueryOptions } from '@/features/chat/quer
 import { CommandPaletteHost } from '@/features/command-palette/CommandPaletteHost';
 import { useCommandPalette } from '@/features/command-palette/use-command-palette';
 import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
+import { UpdateBanner } from '@/features/environments/machine/components/UpdateBanner';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { ExternalDisclosureGate } from '@/features/external-agents/ExternalDisclosureGate';
 import { ExternalWorkspaceTrustGate } from '@/features/external-agents/ExternalWorkspaceTrustGate';
@@ -188,6 +189,11 @@ function AuthenticatedLayout() {
           onOpenCommandPalette={commandPalette.open}
           onMobileMenuToggle={() => setIsMobileSidebarOpen((v) => !v)}
         />
+
+        {/* Above every page, not inside one: the hub this whole session runs
+            on is what may be out of date, not whichever route happens to be
+            open. */}
+        <UpdateBanner />
 
         {/* Keyed on the page rather than the pathname, so switching chats — or
             settings tabs — changes nothing here. Only a move between top-level

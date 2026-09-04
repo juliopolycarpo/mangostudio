@@ -10,6 +10,7 @@ import type {
   MachineLogTail,
   MachineStatus,
 } from '@mangostudio/shared/machine';
+import type { MachineUpdateStatus } from '@mangostudio/shared/updates';
 import userEvent from '@testing-library/user-event';
 import { MachinePage } from '../../../../src/features/environments/machine/components/MachinePage';
 import { render, screen, waitFor, within } from '../../../support/harness/render';
@@ -84,13 +85,34 @@ const LOGS: MachineLogTail = {
   truncated: false,
 };
 
+const UPDATE_STATUS: MachineUpdateStatus = {
+  installedVia: {
+    manager: 'self-managed',
+    channel: 'stable',
+    executable: '/home/j/.mango/dist/current/mangostudio',
+  },
+  check: {
+    channel: 'stable',
+    currentVersion: '0.1.1',
+    latestVersion: '0.1.1',
+    updateAvailable: false,
+    checkedAt: 1_700_000_000_000,
+  },
+  checksEnabled: true,
+  canUpgrade: true,
+};
+
 const scenario = createFetchScenario();
 
-function mountScenario(status: MachineStatus = STATUS) {
+function mountScenario(
+  status: MachineStatus = STATUS,
+  update: MachineUpdateStatus = UPDATE_STATUS
+) {
   scenario
     .respondWithJson('GET', '/api/machine/status', { body: status })
     .respondWithJson('GET', '/api/machine/doctor', { body: DOCTOR })
     .respondWithJson('GET', '/api/machine/logs?tail=200', { body: LOGS })
+    .respondWithJson('GET', '/api/machine/update', { body: update })
     .install();
 }
 
@@ -167,6 +189,7 @@ describe('MachinePage', () => {
           details: { reasons: 'client-not-loopback' },
         },
       })
+      .respondWithJson('GET', '/api/machine/update', { body: UPDATE_STATUS })
       .install();
     render(<MachinePage />);
     const refused = await screen.findByTestId('machine-logs-refused');
@@ -246,5 +269,15 @@ describe('MachinePage', () => {
       ([, init]) => init?.method?.toUpperCase() === 'POST'
     );
     expect(posts).toHaveLength(1);
+  });
+
+  it('shows what installed the hub and the release checker last answer', async () => {
+    mountScenario();
+    render(<MachinePage />);
+
+    const card = await screen.findByTestId('machine-update-card');
+    expect(within(card).getByText('Installed via')).toBeTruthy();
+    expect(within(card).getByText('Install script')).toBeTruthy();
+    expect(within(card).getByText('Up to date (0.1.1)')).toBeTruthy();
   });
 });
