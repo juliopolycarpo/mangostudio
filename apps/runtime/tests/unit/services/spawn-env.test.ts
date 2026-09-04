@@ -306,6 +306,77 @@ describe('buildSpawnEnv', () => {
     expect(Object.keys(result).filter((key) => key.toUpperCase() === 'PATH')).toEqual(['Path']);
   });
 
+  it('leaves PATH alone when the well-known node dir is already on the inherited PATH', () => {
+    // Regression: `auto` used to hoist `/opt/homebrew/bin` to the front, which
+    // also moved every other binary in it (`git`, `python3`) ahead of the
+    // directories the login shell had ordered first.
+    const inherited = `${posix.join(HOME, '.local', 'bin')}:/opt/homebrew/bin:/usr/bin`;
+    const fs = new FakeSpawnEnvFs({ '/opt/homebrew/bin/node': 'binary' });
+
+    const result = buildSpawnEnv({
+      source: { PATH: inherited },
+      toolchain: { node: 'auto', bun: 'auto' },
+      platform: 'darwin',
+      homeDir: HOME,
+      fs,
+    });
+
+    expect(result.PATH).toBe(inherited);
+  });
+
+  it('leaves PATH alone when a later well-known dir is the one already on it', () => {
+    // Migrated Intel → Apple Silicon Mac: a stale `/usr/local/bin/node` still
+    // exists and sorts first, but the shell resolves the Homebrew one. Deciding
+    // per candidate would hoist the stale directory — and its `git` — instead.
+    const inherited = '/opt/homebrew/bin:/usr/bin';
+    const fs = new FakeSpawnEnvFs({
+      '/usr/local/bin/node': 'binary',
+      '/opt/homebrew/bin/node': 'binary',
+    });
+
+    const result = buildSpawnEnv({
+      source: { PATH: inherited },
+      toolchain: { node: 'auto', bun: 'auto' },
+      platform: 'darwin',
+      homeDir: HOME,
+      fs,
+    });
+
+    expect(result.PATH).toBe(inherited);
+  });
+
+  it('still prepends a well-known node dir the inherited PATH does not list', () => {
+    const fs = new FakeSpawnEnvFs({ '/opt/homebrew/bin/node': 'binary' });
+
+    const result = buildSpawnEnv({
+      source: { PATH: '/usr/bin' },
+      toolchain: { node: 'auto', bun: 'auto' },
+      platform: 'darwin',
+      homeDir: HOME,
+      fs,
+    });
+
+    expect(result.PATH).toBe('/opt/homebrew/bin:/usr/bin');
+  });
+
+  it('compares win32 well-known dirs case-insensitively against the inherited Path', () => {
+    const programFiles = 'C:\\Program Files';
+    const inherited = 'C:\\Windows;c:\\program files\\nodejs\\';
+    const fs = new FakeSpawnEnvFs({
+      [win32.join(programFiles, 'nodejs', 'node.exe')]: 'binary',
+    });
+
+    const result = buildSpawnEnv({
+      source: { Path: inherited, ProgramFiles: programFiles },
+      toolchain: { node: 'auto', bun: 'auto' },
+      platform: 'win32',
+      homeDir: 'C:\\Users\\tester',
+      fs,
+    });
+
+    expect(result.Path).toBe(inherited);
+  });
+
   it('uses dirname of an explicit path choice without checking existence', () => {
     const result = buildSpawnEnv({
       source: { PATH: '/usr/bin' },

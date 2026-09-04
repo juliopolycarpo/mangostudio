@@ -192,6 +192,29 @@ function resolveExplicitDir(path: string, platform: string): ToolchainDirResolut
 }
 
 /**
+ * The inherited `PATH`, split into normalized directory entries.
+ *
+ * `auto` means "what a login shell would see", so a directory the inherited
+ * `PATH` already lists needs no prepending — and prepending it anyway would
+ * reorder every *other* binary that directory happens to hold.
+ */
+function inheritedPathDirs(source: NodeJS.ProcessEnv, platform: string): Set<string> {
+  const raw = source[findPathKey(source, platform === 'win32' ? 'Path' : 'PATH')];
+  if (!raw) return new Set();
+  const entries = raw
+    .split(platform === 'win32' ? ';' : ':')
+    .map((entry) => normalizedPathEntry(entry, platform))
+    .filter((entry) => entry.length > 0);
+  return new Set(entries);
+}
+
+/** Trailing separators and (on win32) case are noise when comparing two spellings of one directory. */
+function normalizedPathEntry(entry: string, platform: string): string {
+  const trimmed = entry.trim().replaceAll('\\', '/').replace(/\/+$/, '');
+  return platform === 'win32' ? trimmed.toLowerCase() : trimmed;
+}
+
+/**
  * `auto` for node: nvm's default alias, then fnm's default alias, then the
  * well-known install locations — in that order, stopping at the first
  * directory that actually contains a `node` binary. Never nvm on win32: nvm
@@ -237,13 +260,29 @@ function resolveAutoNodeDir(
     }
   }
 
-  for (const dir of wellKnownNodeDirectories({
+  // Unlike a version manager's alias directory — which holds node, npm and
+  // npx and nothing else — the well-known list is general-purpose
+  // (`/usr/local/bin`, `/opt/homebrew/bin`). Prepending one of those ahead of
+  // the inherited PATH would change which `git` or `python3` runs, not just
+  // which `node`.
+  //
+  // So: if the inherited PATH already reaches *any* of them, the login shell
+  // has already picked a node and `auto` has nothing to add. Only when it
+  // reaches none is the first candidate prepended — a service session with a
+  // bare PATH, which is the case this fallback exists for. Deciding per
+  // candidate instead would hoist a stale `/usr/local/bin` (an Intel-era node
+  // on a migrated Mac) ahead of the `/opt/homebrew/bin` the shell resolves.
+  const inherited = inheritedPathDirs(source, host.platform);
+  const candidates = wellKnownNodeDirectories({
     platform: host.platform,
     homeDir: host.homeDir,
     env: source,
-  })) {
-    if (host.fs.exists(pathApi.join(dir, binaryName))) return { dir };
+  }).filter((dir) => host.fs.exists(pathApi.join(dir, binaryName)));
+  if (candidates.some((dir) => inherited.has(normalizedPathEntry(dir, host.platform)))) {
+    return undefined;
   }
+  const [firstCandidate] = candidates;
+  if (firstCandidate) return { dir: firstCandidate };
 
   return undefined;
 }
