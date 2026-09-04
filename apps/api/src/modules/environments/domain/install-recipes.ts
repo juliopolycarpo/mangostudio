@@ -137,11 +137,34 @@ function requireBinaryPath(context: InstallRecipeBuildContext, id: RuntimeId): s
   return path;
 }
 
-/** Spreads one script descriptor across both POSIX platforms. */
-function posixDownload(
-  descriptor: Omit<DownloadedInstaller, 'interpreter'> & { readonly interpreter: 'bash' | 'sh' }
-): Partial<Record<InstallPlatform, DownloadedInstaller>> {
-  return { darwin: descriptor, linux: descriptor };
+/**
+ * A vendor's install script per platform: one POSIX body shared by darwin and
+ * linux, and optionally a PowerShell one for win32. Every downloaded installer
+ * is held to the same size bounds, so they are filled in here rather than
+ * restated per vendor.
+ * // Usage: vendorDownloads({ posix: 'https://bun.com/install', interpreter: 'bash', win32: 'https://bun.sh/install.ps1' })
+ */
+function vendorDownloads(descriptor: {
+  readonly posix: string;
+  readonly interpreter: 'bash' | 'sh';
+  readonly win32?: string;
+  readonly sha256?: string;
+}): Partial<Record<InstallPlatform, DownloadedInstaller>> {
+  const bounds = { minBytes: INSTALLER_MIN_BYTES, maxBytes: INSTALLER_MAX_BYTES } as const;
+  const posix: DownloadedInstaller = {
+    url: descriptor.posix,
+    interpreter: descriptor.interpreter,
+    ...bounds,
+    ...(descriptor.sha256 !== undefined && { sha256: descriptor.sha256 }),
+  };
+
+  return {
+    darwin: posix,
+    linux: posix,
+    ...(descriptor.win32 !== undefined && {
+      win32: { url: descriptor.win32, interpreter: 'powershell', ...bounds },
+    }),
+  };
 }
 
 function downloadFor(
@@ -281,31 +304,20 @@ function fnmNodeArgv(
   return [fnmPath, subcommand, argument];
 }
 
-const BUN_DOWNLOADS: Partial<Record<InstallPlatform, DownloadedInstaller>> = {
-  ...posixDownload({
-    url: 'https://bun.com/install',
-    interpreter: 'bash',
-    minBytes: INSTALLER_MIN_BYTES,
-    maxBytes: INSTALLER_MAX_BYTES,
-  }),
-  win32: {
-    url: 'https://bun.sh/install.ps1',
-    interpreter: 'powershell',
-    minBytes: INSTALLER_MIN_BYTES,
-    maxBytes: INSTALLER_MAX_BYTES,
-  },
-};
+const BUN_DOWNLOADS = vendorDownloads({
+  posix: 'https://bun.com/install',
+  interpreter: 'bash',
+  win32: 'https://bun.sh/install.ps1',
+});
 
 const NVM_INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.7/install.sh';
 // A tag URL is immutable, so this digest can be pinned; the downloader
 // verifies the fetched body against it before anything runs.
 const NVM_INSTALL_SCRIPT_SHA256 =
   '066ce4eaf4d78eaa6410433bc9ba58faaba646157cbbed6109153e6c24c5f8a5';
-const NVM_DOWNLOADS: Partial<Record<InstallPlatform, DownloadedInstaller>> = posixDownload({
-  url: NVM_INSTALL_SCRIPT_URL,
+const NVM_DOWNLOADS = vendorDownloads({
+  posix: NVM_INSTALL_SCRIPT_URL,
   interpreter: 'bash',
-  minBytes: INSTALLER_MIN_BYTES,
-  maxBytes: INSTALLER_MAX_BYTES,
   sha256: NVM_INSTALL_SCRIPT_SHA256,
 });
 const NVM_PROFILE_LINES = [
@@ -318,50 +330,23 @@ function nvmScriptCopyCommand(input: RecipeInput, _platform: InstallPlatform): s
   return `curl -fsSL ${NVM_INSTALL_SCRIPT_URL} | PROFILE=/dev/null bash`;
 }
 
-const CLAUDE_DOWNLOADS: Partial<Record<InstallPlatform, DownloadedInstaller>> = {
-  ...posixDownload({
-    url: 'https://claude.ai/install.sh',
-    interpreter: 'bash',
-    minBytes: INSTALLER_MIN_BYTES,
-    maxBytes: INSTALLER_MAX_BYTES,
-  }),
-  win32: {
-    url: 'https://claude.ai/install.ps1',
-    interpreter: 'powershell',
-    minBytes: INSTALLER_MIN_BYTES,
-    maxBytes: INSTALLER_MAX_BYTES,
-  },
-};
+const CLAUDE_DOWNLOADS = vendorDownloads({
+  posix: 'https://claude.ai/install.sh',
+  interpreter: 'bash',
+  win32: 'https://claude.ai/install.ps1',
+});
 
-const CODEX_DOWNLOADS: Partial<Record<InstallPlatform, DownloadedInstaller>> = {
-  ...posixDownload({
-    url: 'https://chatgpt.com/codex/install.sh',
-    interpreter: 'sh',
-    minBytes: INSTALLER_MIN_BYTES,
-    maxBytes: INSTALLER_MAX_BYTES,
-  }),
-  win32: {
-    url: 'https://chatgpt.com/codex/install.ps1',
-    interpreter: 'powershell',
-    minBytes: INSTALLER_MIN_BYTES,
-    maxBytes: INSTALLER_MAX_BYTES,
-  },
-};
+const CODEX_DOWNLOADS = vendorDownloads({
+  posix: 'https://chatgpt.com/codex/install.sh',
+  interpreter: 'sh',
+  win32: 'https://chatgpt.com/codex/install.ps1',
+});
 
-const CURSOR_DOWNLOADS: Partial<Record<InstallPlatform, DownloadedInstaller>> = {
-  ...posixDownload({
-    url: 'https://cursor.com/install',
-    interpreter: 'bash',
-    minBytes: INSTALLER_MIN_BYTES,
-    maxBytes: INSTALLER_MAX_BYTES,
-  }),
-  win32: {
-    url: 'https://cursor.com/install?win32=true',
-    interpreter: 'powershell',
-    minBytes: INSTALLER_MIN_BYTES,
-    maxBytes: INSTALLER_MAX_BYTES,
-  },
-};
+const CURSOR_DOWNLOADS = vendorDownloads({
+  posix: 'https://cursor.com/install',
+  interpreter: 'bash',
+  win32: 'https://cursor.com/install?win32=true',
+});
 
 /**
  * Removes Bun's *default* root only, and proves the directory is one before
