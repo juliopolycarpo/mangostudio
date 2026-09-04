@@ -44,7 +44,6 @@ export {
   RESTRICTIVE_PERMISSION_LEVEL,
 } from './permissions';
 export {
-  EXTERNAL_PERMISSION_PRESET_IDS,
   EXTERNAL_PERMISSION_PRESETS,
   type ExternalPermissionPair,
   type ExternalPermissionPreset,
@@ -226,6 +225,8 @@ export {
   type ExternalTextLimit,
   sanitizeVendorText,
   schemaMaxLengthFor,
+  usableVendorId,
+  vendorSelection,
 } from './vendor-text';
 export {
   EXTERNAL_AGENT_VENDORS,

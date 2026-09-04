@@ -46,6 +46,7 @@
  */
 
 import type { ChatRunnerModelSelection } from '@mangostudio/shared/chat';
+import { vendorSelection } from '@mangostudio/shared/external-agents';
 import type { ExternalTurnRequest } from '@mangostudio/shared/generation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -184,8 +185,5 @@ export function useExternalTurnRequest(
  * carry `{ effort: undefined }` and the wire shape would too.
  */
 function onlyChosen(request: ExternalTurnRequest): ExternalTurnRequest {
-  return {
-    ...(request.model ? { model: request.model } : {}),
-    ...(request.effort ? { effort: request.effort } : {}),
-  };
+  return vendorSelection(request.model, request.effort);
 }

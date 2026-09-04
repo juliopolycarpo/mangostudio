@@ -196,3 +196,44 @@ export function schemaMaxLengthFor(limit: ExternalTextLimit): number {
  * settings save that fails for a reason no control on screen explains.
  */
 export const EXTERNAL_VENDOR_ID_MAX_LENGTH = schemaMaxLengthFor('vendorId');
+
+/**
+ * A vendor id worth keeping, or `undefined`.
+ *
+ * Trimmed, non-blank, and inside the schema's bound. Exported because every
+ * layer that stores or forwards one needs the same answer: the settings
+ * normalizer, the chat repository's read and write paths, and the composer that
+ * builds a send. A blank is not a choice anybody made, and passing one on puts
+ * `--model ''` within reach of an adapter.
+ *
+ * @example
+ * usableVendorId('  opus  '); // 'opus'
+ * usableVendorId('   ');      // undefined
+ */
+export function usableVendorId(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > EXTERNAL_VENDOR_ID_MAX_LENGTH) return undefined;
+  return trimmed;
+}
+
+/**
+ * The `{ model?, effort? }` pair with unusable halves dropped entirely.
+ *
+ * A key holding `undefined` survives a spread and would reach the wire, so an
+ * absent half has to be an absent key rather than an undefined value.
+ *
+ * @example
+ * vendorSelection('opus', '  '); // { model: 'opus' }
+ */
+export function vendorSelection(
+  model: unknown,
+  effort: unknown
+): { model?: string; effort?: string } {
+  const usableModel = usableVendorId(model);
+  const usableEffort = usableVendorId(effort);
+  return {
+    ...(usableModel ? { model: usableModel } : {}),
+    ...(usableEffort ? { effort: usableEffort } : {}),
+  };
+}

@@ -9,6 +9,8 @@ import {
   isExternalAgentTargetId,
   normalizeApprovalRouting,
   normalizePermissionLevel,
+  usableVendorId,
+  vendorSelection,
 } from '@mangostudio/shared/external-agents';
 import type { Kysely, Selectable, Updateable } from 'kysely';
 import type { Database } from '../../../db/types';
@@ -81,12 +83,7 @@ type RunnerModelColumns = Pick<Selectable<Database['chats']>, 'runnerModel' | 'r
  * anybody made, and passing it on would put `--model ''` within reach.
  */
 function toRunnerModelSelection(row: RunnerModelColumns): ChatRunnerModelSelection {
-  const model = row.runnerModel?.trim();
-  const effort = row.runnerEffort?.trim();
-  return {
-    ...(model ? { model } : {}),
-    ...(effort ? { effort } : {}),
-  };
+  return vendorSelection(row.runnerModel, row.runnerEffort);
 }
 
 /**
@@ -407,8 +404,8 @@ export async function updateChat(
     // the vendor a combination nobody picked.
     // Trimmed on the way in as well as on the way out, so the row never holds
     // a value the read path would reject as blank.
-    dbUpdates.runnerModel = data.runnerModelSelection.model?.trim() || null;
-    dbUpdates.runnerEffort = data.runnerModelSelection.effort?.trim() || null;
+    dbUpdates.runnerModel = usableVendorId(data.runnerModelSelection.model) ?? null;
+    dbUpdates.runnerEffort = usableVendorId(data.runnerModelSelection.effort) ?? null;
   }
   if (data.workdir !== undefined) dbUpdates.workdir = data.workdir;
   if (data.environmentId !== undefined) dbUpdates.environmentId = data.environmentId;

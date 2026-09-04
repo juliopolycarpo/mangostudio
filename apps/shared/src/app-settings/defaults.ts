@@ -15,11 +15,11 @@ import {
   DEFAULT_EXTERNAL_AGENT_SETTINGS,
   EXTERNAL_AGENT_TARGET_IDS,
   EXTERNAL_DISCLOSURE_FINGERPRINT_MAX_LENGTH,
-  EXTERNAL_VENDOR_ID_MAX_LENGTH,
   EXTERNAL_WORKSPACE_TRUST_MAX_ENTRIES,
   type ExternalAgentSettings,
   type ExternalWorkspaceTrust,
   isExternalAgentTargetId,
+  vendorSelection,
 } from '../external-agents';
 import {
   COMMIT_MESSAGE_MAX_DIFF_KB_DEFAULT,
@@ -763,21 +763,11 @@ function normalizeExternalAgentDefaults(value: unknown): ExternalAgentSettings['
   for (const targetId of EXTERNAL_AGENT_TARGET_IDS) {
     const entry = value[targetId];
     if (!isRecord(entry)) continue;
-    const model = usableVendorId(entry.model);
-    const effort = usableVendorId(entry.effort);
-    if (!model && !effort) continue;
-    defaults[targetId] = { ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
+    const selection = vendorSelection(entry.model, entry.effort);
+    if (!selection.model && !selection.effort) continue;
+    defaults[targetId] = selection;
   }
   return defaults;
-}
-
-/** A vendor id worth storing: a non-blank string inside the schema's bound. */
-function usableVendorId(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 && trimmed.length <= EXTERNAL_VENDOR_ID_MAX_LENGTH
-    ? trimmed
-    : undefined;
 }
 
 /**
