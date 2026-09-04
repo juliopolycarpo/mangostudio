@@ -65,6 +65,26 @@ describe('runRestart', () => {
     expect(lines[0]).toBe('MangoStudio restarted (PID 43, http://localhost:3001).');
   });
 
+  it('respawns through the installer pointer when the executable resolves to it', async () => {
+    const controller = new FakeProcessController([42]);
+    const spawned: unknown[] = [];
+    const { deps } = baseDeps({
+      controller,
+      readState: () => Promise.resolve(DETACHED),
+      sleep: () => {
+        controller.die(42);
+        return Promise.resolve();
+      },
+      spawnDetached: (port, host, _deps, options) => {
+        spawned.push(options);
+        return Promise.resolve({ pid: 43, port, logFile: '/x.log' });
+      },
+      executable: () => ({ pointer: 'current', argv: ['/mango/dist/current/mangostudio'] }),
+    });
+    await runRestart(deps);
+    expect(spawned).toEqual([{ waitForPid: 42, executable: ['/mango/dist/current/mangostudio'] }]);
+  });
+
   it('bounces a service-managed instance through the supervisor and waits for the successor', async () => {
     const controller = new FakeProcessController([42]);
     let reads = 0;

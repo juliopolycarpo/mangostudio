@@ -42,7 +42,7 @@ import {
   type UpdateCheck,
 } from '@mangostudio/shared/updates';
 import { stringify as stringifyToml } from 'smol-toml';
-import { spawnServeChild } from '../../../cli/detach';
+import { restartExecutableOptions, spawnServeChild } from '../../../cli/detach';
 import { canProbeHealth, probeHealth, probeHubHealth } from '../../../cli/health';
 import {
   type LogTail,
@@ -534,6 +534,7 @@ function realEnvironment(): MachineEnvironment {
 
 function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
   const environment = deps.environment ?? realEnvironment;
+  const executable = deps.executable ?? (() => currentHubExecutable());
   return {
     manager: deps.manager ?? createHubServiceManager(),
     controller: deps.controller ?? createProcessController(),
@@ -564,7 +565,7 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
         });
       }),
     environment,
-    executable: deps.executable ?? (() => currentHubExecutable()),
+    executable,
     serviceLogFile: deps.serviceLogFile ?? hubServiceLogPath,
     secretPersisted: deps.secretPersisted ?? (() => isAuthSecretPersisted()),
     configFilePath: deps.configFilePath ?? (() => getConfig().configFilePath),
@@ -582,6 +583,7 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
       ((state) => {
         spawnServeChild(state.port, state.host, getServerLogPath(Date.now()), {
           waitForPid: state.pid,
+          ...restartExecutableOptions(executable()),
         });
       }),
     shutdown: deps.shutdown ?? requestShutdown,

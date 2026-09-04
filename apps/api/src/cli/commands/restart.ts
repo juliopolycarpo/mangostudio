@@ -6,9 +6,13 @@
 
 import type { UserServiceManager } from '@mangostudio/runtime';
 import { isStateLive, readState, removeState, type ServerState } from '../../lib/server-state';
-import { createHubServiceManager } from '../../modules/machine/application/hub-service';
+import {
+  createHubServiceManager,
+  currentHubExecutable,
+} from '../../modules/machine/application/hub-service';
+import type { HubExecutable } from '../../modules/machine/domain/hub-executable';
 import { hubLaunchMode, hubUrl } from '../../modules/machine/domain/hub-process';
-import { spawnDetached } from '../detach';
+import { restartExecutableOptions, spawnDetached } from '../detach';
 import { CliError } from '../errors';
 import { confirmsHealthy } from '../health';
 import { writeLine } from '../output';
@@ -30,6 +34,8 @@ export interface RestartDeps {
   log: (msg: string) => void;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
+  /** What a unit (or a respawned detached instance) would run right now. */
+  executable: () => HubExecutable;
 }
 
 const COMEBACK_TIMEOUT_MS = 20_000;
@@ -88,7 +94,15 @@ async function restartDetached(state: ServerState, d: Required<RestartDeps>): Pr
     state.pid,
     `MangoStudio (PID ${state.pid}) did not stop within 10s; try "mangostudio killserver" and then "mangostudio serve -d".`
   );
-  const result = await d.spawnDetached(state.port, state.host, {}, { waitForPid: state.pid });
+  const result = await d.spawnDetached(
+    state.port,
+    state.host,
+    {},
+    {
+      waitForPid: state.pid,
+      ...restartExecutableOptions(d.executable()),
+    }
+  );
   d.log(`MangoStudio restarted (PID ${result.pid}, ${hubUrl(state.host, result.port)}).`);
   d.log(`Logs: ${result.logFile}`);
 }
@@ -133,5 +147,6 @@ function resolveDeps(deps: Partial<RestartDeps>): Required<RestartDeps> {
     log: deps.log ?? writeLine,
     now: deps.now ?? Date.now,
     sleep: deps.sleep ?? sleep,
+    executable: deps.executable ?? (() => currentHubExecutable()),
   };
 }

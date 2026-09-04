@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { type DetachDeps, spawnDetached } from '../../../src/cli/detach';
+import { type DetachDeps, restartExecutableOptions, spawnDetached } from '../../../src/cli/detach';
 import type { ServerState } from '../../../src/lib/server-state';
 import { FakeProcessController } from '../../support/mocks/fake-process-controller';
 
@@ -62,5 +62,19 @@ describe('spawnDetached', () => {
     const deps = baseDeps({ confirmsHealthy: () => Promise.resolve(false) });
 
     await expect(spawnDetached(3001, 'localhost', deps)).rejects.toThrow(/did not become healthy/i);
+  });
+});
+
+describe('restartExecutableOptions', () => {
+  it('names the current pointer argv when the executable resolves to it', () => {
+    expect(
+      restartExecutableOptions({ pointer: 'current', argv: ['/mango/dist/current/mangostudio'] })
+    ).toEqual({ executable: ['/mango/dist/current/mangostudio'] });
+  });
+
+  it('re-execs today (no override) for every other pointer kind', () => {
+    for (const pointer of ['versioned', 'external', 'source'] as const) {
+      expect(restartExecutableOptions({ pointer, argv: ['/anything'] })).toEqual({});
+    }
   });
 });

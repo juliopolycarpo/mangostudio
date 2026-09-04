@@ -10,6 +10,7 @@ import { RUNTIME_CONFIG_ENV_KEYS } from '../lib/config';
 import { ensureRuntimeDirs, getServerLogPath } from '../lib/mango-paths';
 import { isStandaloneExecutable } from '../lib/runtime-paths';
 import { readState } from '../lib/server-state';
+import type { HubExecutable } from '../modules/machine/domain/hub-executable';
 import { CliError } from './errors';
 import { confirmsHealthy } from './health';
 import { createProcessController, type ProcessController } from './process-control';
@@ -28,6 +29,25 @@ export interface DetachOptions {
    * is spawned while the old server is still shutting down.
    */
   waitForPid?: number;
+  /**
+   * Run this argv instead of re-execing the current binary. A restart after
+   * an installer upgrade passes the `current` pointer here, so the successor
+   * launches the new version rather than the build that is restarting it.
+   */
+  executable?: readonly string[];
+}
+
+/**
+ * Spawn options that route a restart through the installer's `current`
+ * pointer, when this process resolves to it. Every other pointer kind keeps
+ * today's behaviour (re-exec this binary), so an upgrade never changes what a
+ * non-installer restart does.
+ * // Usage: spawnDetached(port, host, {}, { waitForPid, ...restartExecutableOptions(currentHubExecutable()) })
+ */
+export function restartExecutableOptions(
+  executable: Pick<HubExecutable, 'pointer' | 'argv'>
+): Pick<DetachOptions, 'executable'> {
+  return executable.pointer === 'current' ? { executable: executable.argv } : {};
 }
 
 export interface DetachDeps {
@@ -209,7 +229,7 @@ export function spawnServeChild(
   const logFd = openSync(logFile, 'a');
   try {
     const proc = Bun.spawn({
-      cmd: buildServeCommand(host, port),
+      cmd: buildServeCommand(host, port, options.executable),
       env: buildDetachedEnv(host, port, logFile, options),
       detached: true,
       stdin: 'ignore',
@@ -225,9 +245,16 @@ export function spawnServeChild(
   }
 }
 
-/** In a compiled binary, re-exec it directly; in dev, run the entry via bun. */
-function buildServeCommand(host: string, port: number): string[] {
+/**
+ * In a compiled binary, re-exec it directly; in dev, run the entry via bun.
+ * An explicit `executable` (the installer's `current` pointer) wins over
+ * either default.
+ */
+function buildServeCommand(host: string, port: number, executable?: readonly string[]): string[] {
   const target = `${host}:${port}`;
+  if (executable && executable.length > 0) {
+    return [...executable, '__serve', target];
+  }
   if (isStandaloneExecutable()) {
     return [process.execPath, '__serve', target];
   }
