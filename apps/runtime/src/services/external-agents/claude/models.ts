@@ -78,6 +78,6 @@ function reasoningEfforts(
 export function claudeEffortAccepted(
   effort: string | undefined,
   accepted: ReadonlySet<string> | undefined
-): boolean {
+): effort is string {
   return effort !== undefined && accepted?.has(effort) === true;
 }

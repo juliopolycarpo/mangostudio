@@ -811,7 +811,7 @@ function effortArguments(
   effort: string | undefined,
   accepted: ReadonlySet<string> | undefined
 ): string[] {
-  return claudeEffortAccepted(effort, accepted) ? ['--effort', effort as string] : [];
+  return claudeEffortAccepted(effort, accepted) ? ['--effort', effort] : [];
 }
 
 /** What to say about a process that ended without a `result` record. */
