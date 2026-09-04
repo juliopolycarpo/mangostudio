@@ -384,10 +384,12 @@ describe('release workflow binary gate', () => {
       }))
     );
 
-    // Eleven distribution bundles today; a twelfth must make the same decision
-    // deliberately, instead of quietly re-Deflating a payload whose compression
-    // `bundle-distribution.ts` already chose — or already chose to skip.
-    expect(uploads.filter((upload) => upload.archive)).toHaveLength(11);
+    // Eleven distribution bundles plus the dry-run's windows-x64 zip; a
+    // thirteenth must make the same decision deliberately, instead of quietly
+    // re-Deflating a payload whose compression `bundle-distribution.ts` (or,
+    // for the dry run, archive-assets.ts) already chose — or already chose to
+    // skip.
+    expect(uploads.filter((upload) => upload.archive)).toHaveLength(12);
     for (const { path, step, archive } of uploads) {
       // Anchored so a commented-out key can neither satisfy nor trip the policy.
       if (archive) expect(step, path).toMatch(/^\s*compression-level: 0$/m);
@@ -559,6 +561,63 @@ describe('release workflow binary gate', () => {
     expect(workflow).toContain(
       'scripts/release/smoke-docker-image.sh mangostudio:dryrun-bookworm-amd64 linux/amd64 13002'
     );
+  });
+
+  test('release dry run verifies the install layout and lifecycle', () => {
+    const workflow = readText('.github/workflows/release-dry-run.yml');
+    const installDirVar = '$' + '{MANGOSTUDIO_INSTALL_DIR}';
+
+    expect(workflow).toContain('name: Verify install layout');
+    expect(workflow).toContain(`readlink "${installDirVar}/current"`);
+    expect(workflow).toContain(`${installDirVar}/current/mangostudio`);
+    expect(workflow).toContain('name: Verify install lifecycle (--use, --prune, --uninstall)');
+    expect(workflow).toContain('bash scripts/install/install.sh --use "$DRY_RUN_VERSION"');
+    expect(workflow).toContain('bash scripts/install/install.sh --prune');
+    expect(workflow).toContain('bash scripts/install/install.sh --uninstall');
+  });
+
+  test('release dry run guards the embedded installers against drift from the committed scripts', () => {
+    const workflow = readText('.github/workflows/release-dry-run.yml');
+
+    // The `__installer <sh|ps1>` command prints the embedded script verbatim;
+    // this only proves out once that command lands, but the guard belongs on
+    // the branch either way.
+    expect(workflow).toContain('name: Verify the embedded installers match the committed scripts');
+    expect(workflow).toContain('__installer sh | diff - scripts/install/install.sh');
+    expect(workflow).toContain('__installer ps1 | diff - scripts/install/install.ps1');
+  });
+
+  test('release dry run builds and archives windows-x64 last, after the Linux archive is done with', () => {
+    const workflow = readText('.github/workflows/release-dry-run.yml');
+    const linuxBlock = extractJobBlock(workflow, 'dry-run-linux');
+
+    expect(linuxBlock).toContain('bun run build --binary --platform windows-x64');
+    expect(linuxBlock).toContain('bun ./scripts/release/archive-assets.ts --platform windows-x64');
+    expect(linuxBlock).toContain('name: Upload Windows release archive');
+
+    // archive-assets.ts rebuilds release-assets/ from scratch on every call
+    // (no --out flag), so running it any earlier would erase the Linux
+    // archive every step above it depends on.
+    const dockerHealthIndex = linuxBlock.indexOf('Verify Docker image serves health');
+    const windowsBuildIndex = linuxBlock.indexOf('Build Windows x64 binary');
+    expect(dockerHealthIndex).toBeGreaterThan(-1);
+    expect(windowsBuildIndex).toBeGreaterThan(dockerHealthIndex);
+  });
+
+  test('release dry run exercises install.ps1 on a real Windows runner', () => {
+    const workflow = readText('.github/workflows/release-dry-run.yml');
+    const windowsBlock = extractJobBlock(workflow, 'dry-run-windows');
+
+    expect(windowsBlock).toContain('runs-on: windows-latest');
+    // The mandatory Windows compat target is 5.1, not the runner's newer pwsh
+    // default.
+    expect(windowsBlock).toContain('shell: powershell');
+    expect(windowsBlock).toContain('actions/download-artifact@');
+    expect(windowsBlock).toContain('name: windows-x64-dry-run');
+    expect(windowsBlock).toContain('install.ps1 -Local');
+    expect(windowsBlock).toContain('install.ps1 -Use');
+    expect(windowsBlock).toContain('install.ps1 -Prune');
+    expect(windowsBlock).toContain('install.ps1 -Uninstall');
   });
 
   test('release dry run relevance pattern does not over-promise Alpine Docker coverage', () => {

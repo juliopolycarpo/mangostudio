@@ -130,8 +130,66 @@ jobs:
             exit 1
           fi
 
+      - name: Verify install layout
+        env:
+          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}/mango-bin
+          MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}/mango-dist
+        run: |
+          set -euo pipefail
+          current_target="$(readlink "${MANGOSTUDIO_INSTALL_DIR}/current")"
+          if [ "$current_target" != "$DRY_RUN_VERSION" ]; then
+            echo "Expected current -> ${DRY_RUN_VERSION}, got ${current_target}"
+            exit 1
+          fi
+          bin_target="$(readlink "${MANGOSTUDIO_BIN_DIR}/mangostudio")"
+          if [ "$bin_target" != "${MANGOSTUDIO_INSTALL_DIR}/current/mangostudio" ]; then
+            echo "Expected the bin link to go through current/, got ${bin_target}"
+            exit 1
+          fi
+
       - name: Verify local archive serves health
         run: scripts/release/smoke-binary.sh "${RUNNER_TEMP}/mango-bin/mangostudio" "$DRY_RUN_VERSION" 13003
+
+      # Drift guard: `mangostudio __installer <sh|ps1>` prints the script the
+      # hub binary embeds verbatim, so it must be byte-identical to what is
+      # committed here — the whole point of embedding is that an upgrade and a
+      # fresh install from the same release can never disagree about layout.
+      - name: Verify the embedded installers match the committed scripts
+        env:
+          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}/mango-bin
+        run: |
+          set -euo pipefail
+          "${MANGOSTUDIO_BIN_DIR}/mangostudio" __installer sh | diff - scripts/install/install.sh
+          "${MANGOSTUDIO_BIN_DIR}/mangostudio" __installer ps1 | diff - scripts/install/install.ps1
+
+      - name: Verify install lifecycle (--use, --prune, --uninstall)
+        env:
+          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}/mango-bin
+          MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}/mango-dist
+        run: |
+          set -euo pipefail
+          bash scripts/install/install.sh --use "$DRY_RUN_VERSION"
+          if [ "$(readlink "${MANGOSTUDIO_INSTALL_DIR}/current")" != "$DRY_RUN_VERSION" ]; then
+            echo "--use did not leave current pointing at ${DRY_RUN_VERSION}"
+            exit 1
+          fi
+
+          mkdir -p "${MANGOSTUDIO_INSTALL_DIR}/0.0.0-old"
+          bash scripts/install/install.sh --prune
+          if [ -d "${MANGOSTUDIO_INSTALL_DIR}/0.0.0-old" ]; then
+            echo "--prune left a stale version directory behind"
+            exit 1
+          fi
+          if [ ! -d "${MANGOSTUDIO_INSTALL_DIR}/${DRY_RUN_VERSION}" ]; then
+            echo "--prune removed the current version"
+            exit 1
+          fi
+
+          bash scripts/install/install.sh --uninstall
+          if [ -e "$MANGOSTUDIO_INSTALL_DIR" ]; then
+            echo "--uninstall left the install root behind"
+            exit 1
+          fi
 
       - name: Render distribution manifests
         run: |
@@ -184,6 +242,101 @@ jobs:
       - name: Verify Docker image serves health
         run: scripts/release/smoke-docker-image.sh mangostudio:dryrun-bookworm-amd64 linux/amd64 13002
 
+      # Last, because archive-assets.ts rebuilds release-assets/ from scratch
+      # on every invocation (no --out flag) — running this any earlier would
+      # wipe the Linux archive every step above depends on.
+      - name: Build Windows x64 binary
+        run: bun run build --binary --platform windows-x64
+        env:
+          VERSION: ${{ env.DRY_RUN_VERSION }}
+
+      - name: Archive Windows release assets
+        run: bun ./scripts/release/archive-assets.ts --platform windows-x64
+        env:
+          VERSION: ${{ env.DRY_RUN_VERSION }}
+
+      - name: Upload Windows release archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-x64-dry-run
+          path: release-assets/mangostudio-${{ env.DRY_RUN_VERSION }}-windows-x64.zip
+          retention-days: 1
+          compression-level: 0
+
+  dry-run-windows:
+    name: Windows release dry run
+    needs: [changes, dry-run-linux]
+    if: needs.changes.outputs.release == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        # The mandatory compat target: install.ps1 must work on Windows
+        # PowerShell 5.1, not just the runner's newer pwsh default.
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-x64-dry-run
+          path: release-assets
+
+      - name: Install local archive
+        env:
+          MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}\mango-dist
+          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}\mango-bin
+        run: |
+          $archive = "release-assets\mangostudio-$env:DRY_RUN_VERSION-windows-x64.zip"
+          & scripts\install\install.ps1 -Local $archive
+          $actual = & "$env:MANGOSTUDIO_BIN_DIR\mangostudio.cmd" --version
+          if ($actual -ne $env:DRY_RUN_VERSION) {
+            Write-Error "Expected $env:DRY_RUN_VERSION, got $actual"
+            exit 1
+          }
+
+      - name: Verify install layout
+        env:
+          MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}\mango-dist
+          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}\mango-bin
+        run: |
+          $expected = "$env:MANGOSTUDIO_INSTALL_DIR\$env:DRY_RUN_VERSION\mangostudio.exe"
+          $content = Get-Content -Raw "$env:MANGOSTUDIO_BIN_DIR\mangostudio.cmd"
+          if ($content -notmatch [regex]::Escape($expected)) {
+            Write-Error "mangostudio.cmd does not point at the installed version"
+            exit 1
+          }
+
+      - name: Verify install lifecycle (-Use, -Prune, -Uninstall)
+        env:
+          MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}\mango-dist
+          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}\mango-bin
+        run: |
+          # install.ps1 fails via `throw`, which — with $ErrorActionPreference
+          # = 'Stop' inside it — aborts this whole run block on its own;
+          # $LASTEXITCODE only ever reflects native .exe calls, never a
+          # PowerShell script invocation, so it is not a signal to check here.
+          & scripts\install\install.ps1 -Use $env:DRY_RUN_VERSION
+
+          New-Item -ItemType Directory -Force "$env:MANGOSTUDIO_INSTALL_DIR\0.0.0-old" | Out-Null
+          & scripts\install\install.ps1 -Prune
+          if (Test-Path "$env:MANGOSTUDIO_INSTALL_DIR\0.0.0-old") {
+            Write-Error "-Prune left a stale version directory behind"
+            exit 1
+          }
+          if (-not (Test-Path "$env:MANGOSTUDIO_INSTALL_DIR\$env:DRY_RUN_VERSION")) {
+            Write-Error "-Prune removed the current version"
+            exit 1
+          }
+
+          & scripts\install\install.ps1 -Uninstall
+          if (Test-Path $env:MANGOSTUDIO_INSTALL_DIR) {
+            Write-Error "-Uninstall left the install root behind"
+            exit 1
+          }
+
   dry-run-cargo:
     name: Cargo publish dry run
     needs: [changes]
@@ -209,7 +362,7 @@ jobs:
     # is accepted as skipped only when the `changes` job proved its relevance
     # predicate false for this run.
     name: Gate
-    needs: [changes, dry-run-linux, dry-run-cargo]
+    needs: [changes, dry-run-linux, dry-run-windows, dry-run-cargo]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -227,6 +380,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.cargo_shim == 'false' && 'dry-run-cargo' || '') }}
+          ALLOWED_SKIPS: ${{ format('{0} {1} {2}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.cargo_shim == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
