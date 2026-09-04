@@ -72,7 +72,46 @@ describe('nightly distribution health workflow', () => {
     const workflow = readText(WORKFLOW_PATH);
 
     expect(workflow).toMatch(
-      /health-summary:\n(?:.*\n)*?\s+needs: \[resolve, npm-install, release-archive\]\n\s+if: \$\{\{ always\(\) \}\}/
+      /health-summary:\n(?:.*\n)*?\s+needs: \[resolve, npm-install, release-archive, install-script\]\n\s+if: \$\{\{ always\(\) \}\}/
     );
+  });
+
+  describe('install-script lane', () => {
+    test('runs one lane per OS against the pinned identity, with no toolchain setup', () => {
+      const workflow = readText(WORKFLOW_PATH);
+
+      expect(workflow).toMatch(/install-script:\n(?:.*\n)*?\s+needs: resolve\n/);
+      expect(workflow).toContain('runner: ubuntu-latest');
+      expect(workflow).toContain('runner: macos-latest');
+      expect(workflow).toContain('runner: windows-latest');
+      expect(workflow).toContain('script: install.sh');
+      expect(workflow).toContain('script: install.ps1');
+    });
+
+    test('a missing script asset is a notice, not a failure', () => {
+      const workflow = readText(WORKFLOW_PATH);
+      const [, laneBody = ''] = workflow.split(/\n {2}install-script:\n/);
+      const [installScriptLane] = laneBody.split(/\n {2}health-summary:\n/);
+
+      // `if gh release download ...; then ... else ...; fi` keeps the step
+      // green on a 404 — the notice-and-continue branch never exits non-zero.
+      expect(installScriptLane).toMatch(
+        /if gh release download "\$RELEASE_TAG" --pattern "\$SCRIPT_NAME"[\s\S]*?else\n\s+echo "No[\s\S]*?GITHUB_STEP_SUMMARY[\s\S]*?SCRIPT_AVAILABLE=false[\s\S]*?fi/
+      );
+    });
+
+    test('verifies the script against the resolved identity on both shells', () => {
+      const workflow = readText(WORKFLOW_PATH);
+
+      expect(workflow).toContain("if: env.SCRIPT_AVAILABLE == 'true' && runner.os != 'Windows'");
+      expect(workflow).toContain('bash install-script/install.sh');
+      expect(workflow).toContain("if: env.SCRIPT_AVAILABLE == 'true' && runner.os == 'Windows'");
+      expect(workflow).toContain('shell: powershell');
+      expect(workflow).toContain('install-script\\install.ps1');
+      // Canary races the identity resolve pinned; both shells warn instead of
+      // failing when --canary/-Canary resolves a newer tag mid-run.
+      expect(workflow).toContain('::warning::install.sh resolved canary');
+      expect(workflow).toContain('::warning::install.ps1 resolved canary');
+    });
   });
 });
