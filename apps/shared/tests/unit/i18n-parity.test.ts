@@ -14,6 +14,7 @@ import {
   ExternalApprovalRoutingSchema,
   ExternalPermissionLevelSchema,
   ExternalPermissionPresetIdSchema,
+  ExternalTurnTerminalReasonSchema,
 } from '../../src/external-agents';
 import {
   GithubCheckBucketSchema,
@@ -143,6 +144,14 @@ const ENUM_COVERAGE = [
     path: 'externalAgents.unavailable',
     values: literalValues(ExternalAgentUnavailableReasonSchema),
     blocks: [en.externalAgents.unavailable, ptBR.externalAgents.unavailable],
+  },
+  {
+    // How a turn ended is the sentence a reader gets instead of the transcript
+    // they expected. A member with no copy renders as nothing at all, and this
+    // union had no coverage entry until `interrupted` was added to it.
+    path: 'externalAgents.turn.terminal',
+    values: literalValues(ExternalTurnTerminalReasonSchema),
+    blocks: [en.externalAgents.turn.terminal, ptBR.externalAgents.turn.terminal],
   },
   {
     path: 'externalAgents.permission.level',

@@ -439,6 +439,9 @@ describe('the neutral event contract', () => {
       // alone, so both halves of that disagreement are represented here.
       commands: [{ name: 'review', description: 'Read a diff' }, { name: 'compact' }],
     },
+    // Emitted immediately before `completed`, never instead of it, so a hub
+    // that predates it still ends the turn on the terminal it already knows.
+    { type: 'cancelled' },
     { type: 'completed' },
     { type: 'error', error: { code: 'stream_closed', message: 'The process exited.' } },
   ];

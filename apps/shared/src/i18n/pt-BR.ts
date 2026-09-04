@@ -3818,6 +3818,7 @@ export const messages = {
       terminal: {
         completed: 'Concluído.',
         'cancelled-by-user': 'Você interrompeu este turno.',
+        interrupted: 'O agente interrompeu este turno.',
         'vendor-error': 'O agente relatou uma falha.',
         'runtime-disconnected': 'A conexão com a máquina caiu no meio do turno.',
         'hub-restarted': 'O MangoStudio reiniciou enquanto este turno rodava.',

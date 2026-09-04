@@ -3824,6 +3824,7 @@ export const messages: Messages = {
       terminal: {
         completed: 'Finished.',
         'cancelled-by-user': 'You stopped this turn.',
+        interrupted: 'The agent stopped this turn.',
         'vendor-error': 'The agent reported a failure.',
         'runtime-disconnected': 'The connection to that machine dropped mid-turn.',
         'hub-restarted': 'MangoStudio restarted while this turn was running.',

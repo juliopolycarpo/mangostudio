@@ -802,6 +802,19 @@ export const ExternalAgentEventSchema = Type.Union([
     { type: Type.Literal('account_limits'), limits: ExternalAccountLimitsSchema },
     { additionalProperties: false }
   ),
+  /**
+   * The vendor stopped the turn of its own accord.
+   *
+   * A **marker, not a terminal**: it is emitted immediately before `completed`
+   * and never instead of it, and that ordering is the whole compatibility
+   * argument. The capability manifest travels runtime→hub only, so a runtime
+   * cannot know whether the hub in front of it understands a new event kind. A
+   * *terminal* kind an older hub does not recognize is consumed and dropped, so
+   * the turn never ends — exactly the failure #988 records. A non-terminal
+   * marker followed by the `completed` that hub already understands degrades to
+   * the pre-#810 rendering instead of hanging.
+   */
+  Type.Object({ type: Type.Literal('cancelled') }, { additionalProperties: false }),
   Type.Object({ type: Type.Literal('completed') }, { additionalProperties: false }),
   Type.Object(
     { type: Type.Literal('error'), error: ExternalAgentErrorSchema },
@@ -1247,6 +1260,15 @@ export type ExternalSessionAdoptionRequest = Static<typeof ExternalSessionAdopti
 export const ExternalTurnTerminalReasonSchema = Type.Union([
   Type.Literal('completed'),
   Type.Literal('cancelled-by-user'),
+  /**
+   * The **vendor** stopped the turn, not the user.
+   *
+   * Separate from `cancelled-by-user` because that one's copy is literally
+   * "You stopped this turn", which is a lie for a vendor-initiated interrupt.
+   * Before this, such a turn was reported as an error — a red failure for
+   * something that merely stopped early (#812).
+   */
+  Type.Literal('interrupted'),
   /** The vendor reported a failure; the structured error survives on the turn. */
   Type.Literal('vendor-error'),
   Type.Literal('runtime-disconnected'),
