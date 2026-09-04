@@ -25,7 +25,7 @@ import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
 import { formatMessage } from '@/lib/i18n-format';
 import type { ResolvedToolIdentity } from './identity/resolve';
-import type { InstallChainStep } from './install-chain';
+import { type InstallChainStep, resolveInstallChain } from './install-chain';
 
 /**
  * Params that name a runtime, agent, or version manager rather than a value,
@@ -436,11 +436,23 @@ function nodeRecipeInput(recipe: InstallRecipePreview): RecipeInput {
 export function nodeInstallStep(
   recipes: readonly InstallRecipePreview[]
 ): InstallChainStep | undefined {
-  for (const id of NODE_INSTALL_RECIPE_IDS) {
-    const recipe = recipes.find((candidate) => candidate.id === id && candidate.supported);
-    if (recipe) return { recipe, input: nodeRecipeInput(recipe) };
-  }
-  return undefined;
+  const supported = NODE_INSTALL_RECIPE_IDS.map((id) =>
+    recipes.find((candidate) => candidate.id === id && candidate.supported)
+  ).filter((recipe): recipe is InstallRecipePreview => recipe !== undefined);
+
+  // A candidate whose chain cannot resolve is a dead end, not a default:
+  // nothing in the catalog installs winget, so preferring it on a Windows
+  // machine without winget would block the button while an installed fnm
+  // could have done the job. A missing prerequisite the catalog *can* supply
+  // is fine — that is how nvm stays the POSIX default before it is installed.
+  const runnable = supported.find(
+    (recipe) => resolveInstallChain(recipes, recipe, nodeRecipeInput(recipe)).kind === 'ready'
+  );
+
+  // Nothing here is runnable, so the first supported entry still decides: the
+  // card needs a recipe to hang the missing-prerequisite remedy on.
+  const recipe = runnable ?? supported[0];
+  return recipe ? { recipe, input: nodeRecipeInput(recipe) } : undefined;
 }
 
 /**

@@ -428,6 +428,101 @@ describe('nodeInstallStep', () => {
     expect(step?.input).toEqual({ kind: 'none' });
   });
 
+  // Nothing in the catalog installs winget, so on a Windows machine without
+  // it the winget recipe is a dead end: preferring it would block the button
+  // while an installed fnm could have done the job.
+  it('skips winget when nothing here can supply its missing prerequisite', () => {
+    const recipes = [
+      installRecipe({
+        id: 'winget.node.install',
+        runtimeId: 'node',
+        action: 'install',
+        inputKind: 'none',
+        platforms: ['win32'],
+        supported: true,
+        requires: ['winget'],
+        missingRequirements: ['winget'],
+      }),
+      installRecipe({
+        id: 'fnm.node.install',
+        runtimeId: 'node',
+        action: 'use-version',
+        inputKind: 'node-version',
+        supported: true,
+        requires: ['fnm'],
+      }),
+    ];
+
+    const step = nodeInstallStep(recipes);
+
+    expect(step?.recipe.id).toBe('fnm.node.install');
+  });
+
+  // nvm is the documented POSIX default even when it is not installed yet,
+  // because the catalog can install nvm first. A missing prerequisite only
+  // disqualifies a candidate when nothing here supplies it.
+  it('keeps nvm first when its prerequisite is missing but installable', () => {
+    const recipes = [
+      installRecipe({
+        id: 'nvm.node.install',
+        runtimeId: 'node',
+        action: 'use-version',
+        inputKind: 'node-version',
+        supported: true,
+        requires: ['nvm'],
+        missingRequirements: ['nvm'],
+      }),
+      installRecipe({
+        id: 'nvm.install',
+        runtimeId: 'nvm',
+        action: 'install',
+        inputKind: 'none',
+        supported: true,
+      }),
+      installRecipe({
+        id: 'fnm.node.install',
+        runtimeId: 'node',
+        action: 'use-version',
+        inputKind: 'node-version',
+        supported: true,
+      }),
+    ];
+
+    const step = nodeInstallStep(recipes);
+
+    expect(step?.recipe.id).toBe('nvm.node.install');
+  });
+
+  // Nothing is runnable, so the order's first supported entry still decides —
+  // the card needs a recipe to hang the "winget is missing" remedy on.
+  it('falls back to the first supported entry when every chain is a dead end', () => {
+    const recipes = [
+      installRecipe({
+        id: 'winget.node.install',
+        runtimeId: 'node',
+        action: 'install',
+        inputKind: 'none',
+        platforms: ['win32'],
+        supported: true,
+        requires: ['winget'],
+        missingRequirements: ['winget'],
+      }),
+      installRecipe({
+        id: 'fnm.node.install',
+        runtimeId: 'node',
+        action: 'use-version',
+        inputKind: 'node-version',
+        supported: true,
+        requires: ['fnm'],
+        missingRequirements: ['fnm'],
+      }),
+    ];
+
+    const step = nodeInstallStep(recipes);
+
+    expect(step?.recipe.id).toBe('winget.node.install');
+  });
+
   // winget is Windows-only, so on a machine without it the fnm chain is what
   // is left — reordering must not cost the fallback.
   it('falls back to fnm when winget is not supported here', () => {
