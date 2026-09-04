@@ -2726,6 +2726,71 @@ export const messages: Messages = {
             'The service manager could not remove the unit here. Run the command below in a terminal instead.',
         },
       },
+      update: {
+        title: 'Update',
+        available: 'MangoStudio {latest} is available (you run {current})',
+        upgrade: 'Upgrade',
+        dismiss: 'Dismiss',
+        dismissAria: 'Dismiss the update notice',
+        details: 'Details',
+        installedVia: 'Installed via',
+        channel: 'Channel',
+        channelName: {
+          stable: 'Stable',
+          canary: 'Canary',
+        },
+        latest: 'Latest',
+        upToDate: 'Up to date ({version})',
+        checksDisabled: 'Checks disabled',
+        notCheckedYet: 'Not checked yet',
+        updateAvailable: '{version} available',
+        manager: {
+          'self-managed': 'Install script',
+          npm: 'npm',
+          bun: 'npm (bun global)',
+          pnpm: 'npm (pnpm global)',
+          homebrew: 'Homebrew',
+          scoop: 'Scoop',
+          cargo: 'Cargo',
+          docker: 'Docker image',
+          source: 'Source checkout',
+          unknown: 'Unknown',
+        },
+        refusalReasons: {
+          'source-checkout':
+            'This build runs from a source checkout. Rebuild it instead of upgrading it here.',
+          container: 'This hub runs inside a container. Pull the new image tag instead.',
+          'package-manager':
+            'A package manager owns this install. Run the command below to update it.',
+          'channel-unsupported':
+            'The package manager that owns this install has no build on this channel.',
+          'unknown-origin':
+            'MangoStudio could not tell how this build was installed, so it will not try to replace it.',
+          'unsupported-target':
+            'There is no published build for this platform on this channel yet.',
+          'windows-service':
+            'A Scheduled Task cannot replace its own binary from inside its own process. Use the command below.',
+        },
+        dialog: {
+          title: 'Upgrade to {latest}?',
+          description:
+            'The server restarts when the new version is in place; open terminals end with it.',
+          latestUnknown: 'the latest version',
+        },
+        stage: {
+          resolve: 'Resolving the release…',
+          download: 'Downloading…',
+          verify: 'Verifying…',
+          install: 'Installing…',
+          restart: 'Restarting…',
+        },
+        outcome: {
+          upgraded: 'Upgraded to {version}.',
+          alreadyCurrent: 'Already running the latest version.',
+          failedGeneric: 'The upgrade failed for an unknown reason.',
+        },
+        streamEnded: 'The connection ended before the upgrade finished.',
+      },
     },
     // Product names — identical in every locale, but centralized here so the UI
     // never renders a raw id such as `nvm` or `mangostudio`.

@@ -2729,6 +2729,71 @@ export const messages = {
             'O gerenciador de serviço não conseguiu remover a unidade aqui. Execute o comando abaixo em um terminal.',
         },
       },
+      update: {
+        title: 'Atualização',
+        available: 'O MangoStudio {latest} está disponível (você está na {current})',
+        upgrade: 'Atualizar',
+        dismiss: 'Dispensar',
+        dismissAria: 'Dispensar o aviso de atualização',
+        details: 'Detalhes',
+        installedVia: 'Instalado via',
+        channel: 'Canal',
+        channelName: {
+          stable: 'Estável',
+          canary: 'Canary',
+        },
+        latest: 'Mais recente',
+        upToDate: 'Atualizado ({version})',
+        checksDisabled: 'Verificações desativadas',
+        notCheckedYet: 'Ainda não verificado',
+        updateAvailable: '{version} disponível',
+        manager: {
+          'self-managed': 'Script de instalação',
+          npm: 'npm',
+          bun: 'npm (bun global)',
+          pnpm: 'npm (pnpm global)',
+          homebrew: 'Homebrew',
+          scoop: 'Scoop',
+          cargo: 'Cargo',
+          docker: 'Imagem Docker',
+          source: 'Checkout do código-fonte',
+          unknown: 'Desconhecido',
+        },
+        refusalReasons: {
+          'source-checkout':
+            'Este build roda a partir de um checkout do código-fonte. Recompile-o em vez de atualizar por aqui.',
+          container:
+            'Este hub roda dentro de um contêiner. Puxe a nova tag da imagem em vez disso.',
+          'package-manager':
+            'Um gerenciador de pacotes é o dono desta instalação. Execute o comando abaixo para atualizá-la.',
+          'channel-unsupported':
+            'O gerenciador de pacotes dono desta instalação não tem build neste canal.',
+          'unknown-origin':
+            'O MangoStudio não conseguiu saber como este build foi instalado, então não vai tentar substituí-lo.',
+          'unsupported-target': 'Ainda não há build publicado para esta plataforma neste canal.',
+          'windows-service':
+            'Uma Tarefa Agendada não consegue substituir o próprio binário de dentro do próprio processo. Use o comando abaixo.',
+        },
+        dialog: {
+          title: 'Atualizar para {latest}?',
+          description:
+            'O servidor reinicia assim que a nova versão estiver no lugar; terminais abertos caem junto.',
+          latestUnknown: 'a versão mais recente',
+        },
+        stage: {
+          resolve: 'Resolvendo o release…',
+          download: 'Baixando…',
+          verify: 'Verificando…',
+          install: 'Instalando…',
+          restart: 'Reiniciando…',
+        },
+        outcome: {
+          upgraded: 'Atualizado para {version}.',
+          alreadyCurrent: 'Já está na versão mais recente.',
+          failedGeneric: 'A atualização falhou por um motivo desconhecido.',
+        },
+        streamEnded: 'A conexão caiu antes da atualização terminar.',
+      },
     },
     // Nomes próprios de produtos — iguais em todos os idiomas, mas centralizados
     // aqui para que a UI nunca use um id cru como `nvm` ou `mangostudio`.
