@@ -14,11 +14,11 @@ import {
   ApiErrorResponseSchema,
   ERROR_CODES,
 } from '@mangostudio/shared/errors';
-import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 import { Elysia, t } from 'elysia';
 import type { GuardIpPolicy } from '../../../lib/client-ip';
 import { getConfig } from '../../../lib/config';
 import { ProfileMismatchError } from '../../../lib/profile-context';
+import { sseResponse } from '../../../lib/sse-stream';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { guardClientIp } from '../../../plugins/guard-client-ip';
 import {
@@ -33,7 +33,6 @@ import {
 import { RecipeInputError } from '../domain/recipe-input';
 import { InstallerDownloadError } from '../infrastructure/installer-download';
 
-const KEEPALIVE_INTERVAL_MS = 15_000;
 const runIdParams = t.Object({ runId: t.String({ minLength: 1 }) });
 
 function requestContext(input: {
@@ -96,12 +95,6 @@ function mapInstallError(
   }
   throw error;
 }
-
-function sseEvent(data: object): Uint8Array {
-  return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
-}
-
-const KEEPALIVE_BYTES = new TextEncoder().encode(': keepalive\n\n');
 
 export function createInstallRoutes(
   service: InstallService = installService,
@@ -220,56 +213,7 @@ export function createInstallRoutes(
           set.status = 404;
           return { error: 'Install run not found.', code: ERROR_CODES.NOT_FOUND };
         }
-
-        const iterator = source[Symbol.asyncIterator]();
-        let disconnected = false;
-        const stream = new ReadableStream({
-          async start(controller) {
-            const heartbeat = setInterval(() => {
-              try {
-                controller.enqueue(KEEPALIVE_BYTES);
-              } catch {
-                // The client may already have disconnected.
-              }
-            }, KEEPALIVE_INTERVAL_MS);
-            try {
-              while (!disconnected) {
-                const next = await iterator.next();
-                if (next.done) break;
-                controller.enqueue(sseEvent(next.value));
-              }
-            } catch (error) {
-              if (!disconnected) {
-                const event: SSEErrorEvent = {
-                  type: 'error',
-                  error: error instanceof Error ? error.message : 'Install log stream failed.',
-                  code: ERROR_CODES.INTERNAL,
-                  done: true,
-                };
-                controller.enqueue(sseEvent(event));
-              }
-            } finally {
-              clearInterval(heartbeat);
-              try {
-                controller.close();
-              } catch {
-                // The browser may have cancelled the stream.
-              }
-            }
-          },
-          async cancel() {
-            disconnected = true;
-            await iterator.return?.();
-          },
-        });
-
-        return new Response(stream, {
-          headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            Connection: 'keep-alive',
-          },
-        });
+        return sseResponse(source, 'Install log stream failed.');
       }
     );
 }
