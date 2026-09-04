@@ -15,9 +15,12 @@ import { homedir } from 'node:os';
 import { posix, win32 } from 'node:path';
 import type { ToolchainChoice, ToolchainSelection } from '@mangostudio/shared/environments';
 import {
+  compareVersionStrings,
   fnmDefaultAliasBinDir,
   fnmRootCandidates,
+  normalizedManagedPath,
   normalizeNodeVersion,
+  SAFE_NVM_ALIAS_PATTERN,
   wellKnownNodeDirectories,
 } from '@mangostudio/shared/environments/detection';
 
@@ -91,17 +94,17 @@ export function findPathKey(
 }
 
 /**
- * nvm alias names and the `lts/<codename>` pointers real nvm writes into its
- * alias cache. `.` and `/` are legal inside a name, but a `..` segment is not:
+ * `.` and `/` are legal inside an nvm alias name, but a `..` segment is not:
  * the value is joined onto `$NVM_DIR/alias`, and `../../..` would walk the
- * chain out of the alias directory and read arbitrary files instead.
+ * chain out of the alias directory and read arbitrary files instead. The
+ * character rule itself is the detector's — an alias its cache would skip is
+ * not one this should follow.
  */
-const SAFE_ALIAS_PATTERN = /^[a-zA-Z0-9_.*/-]+$/;
 const TRAVERSAL_SEGMENT_PATTERN = /(?:^|\/)\.\.(?:\/|$)/;
 
 /** Whether an alias value is safe to join onto the alias directory and read. */
 function isSafeAlias(alias: string): boolean {
-  return SAFE_ALIAS_PATTERN.test(alias) && !TRAVERSAL_SEGMENT_PATTERN.test(alias);
+  return SAFE_NVM_ALIAS_PATTERN.test(alias) && !TRAVERSAL_SEGMENT_PATTERN.test(alias);
 }
 
 /** Backstop against a cyclic alias file; the `seen` set is the real guard. */
@@ -112,15 +115,6 @@ const NEWEST_INSTALLED_ALIASES = new Set(['node', 'stable', 'unstable']);
 
 /** A bare major or major.minor (`22`, `22.1`) nvm resolves to the newest matching install. */
 const PARTIAL_VERSION_PATTERN = /^v?(\d+)(?:\.(\d+))?$/;
-
-function compareVersions(left: string, right: string): number {
-  const [l, r] = [left.split('.').map(Number), right.split('.').map(Number)];
-  for (let index = 0; index < 3; index += 1) {
-    const delta = (l[index] ?? 0) - (r[index] ?? 0);
-    if (delta !== 0) return delta;
-  }
-  return 0;
-}
 
 /**
  * The newest version under `versions/node` that a partial selector names —
@@ -144,7 +138,7 @@ function newestInstalledNvmVersion(
     if (!version) continue;
     const parts = version.split('.').map(Number);
     if (partial.some((component, index) => parts[index] !== component)) continue;
-    if (newest === undefined || compareVersions(version, newest) > 0) newest = version;
+    if (newest === undefined || compareVersionStrings(version, newest) > 0) newest = version;
   }
   return newest;
 }
@@ -203,15 +197,9 @@ function inheritedPathDirs(source: NodeJS.ProcessEnv, platform: string): Set<str
   if (!raw) return new Set();
   const entries = raw
     .split(platform === 'win32' ? ';' : ':')
-    .map((entry) => normalizedPathEntry(entry, platform))
+    .map((entry) => normalizedManagedPath(entry.trim(), platform))
     .filter((entry) => entry.length > 0);
   return new Set(entries);
-}
-
-/** Trailing separators and (on win32) case are noise when comparing two spellings of one directory. */
-function normalizedPathEntry(entry: string, platform: string): string {
-  const trimmed = entry.trim().replaceAll('\\', '/').replace(/\/+$/, '');
-  return platform === 'win32' ? trimmed.toLowerCase() : trimmed;
 }
 
 /**
@@ -278,7 +266,7 @@ function resolveAutoNodeDir(
     homeDir: host.homeDir,
     env: source,
   }).filter((dir) => host.fs.exists(pathApi.join(dir, binaryName)));
-  if (candidates.some((dir) => inherited.has(normalizedPathEntry(dir, host.platform)))) {
+  if (candidates.some((dir) => inherited.has(normalizedManagedPath(dir.trim(), host.platform)))) {
     return undefined;
   }
   const [firstCandidate] = candidates;

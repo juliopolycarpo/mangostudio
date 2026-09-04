@@ -36,7 +36,13 @@ interface NvmAliasCache {
   readonly latestByMajor: ReadonlyMap<number, string>;
 }
 
-const SAFE_ALIAS_PATTERN = /^[a-zA-Z0-9_.*/-]+$/;
+/**
+ * The characters an nvm alias name or value may use. Two callers rely on it:
+ * the alias cache skips anything else, and the runtime's spawn-env refuses to
+ * join a rejected value onto `$NVM_DIR/alias` — so the rule that decides which
+ * aliases exist and the rule that decides which are safe to read are one.
+ */
+export const SAFE_NVM_ALIAS_PATTERN = /^[a-zA-Z0-9_.*/-]+$/;
 
 async function readOptionalFile(fs: NvmFileSystem, path: string): Promise<string | undefined> {
   try {
@@ -74,12 +80,12 @@ async function readNvmAliasCache(root: string, fs: NvmFileSystem): Promise<NvmAl
   const latestByMajor = new Map<number, string>();
 
   for (const aliasName of await listOptionalDirectory(fs, aliasRoot)) {
-    if (!SAFE_ALIAS_PATTERN.test(aliasName)) continue;
+    if (!SAFE_NVM_ALIAS_PATTERN.test(aliasName)) continue;
     const value = (await readOptionalFile(fs, join(aliasRoot, aliasName)))?.trim();
     if (!value) continue;
     const version = normalizeNodeVersion(value);
     if (!version) {
-      if (SAFE_ALIAS_PATTERN.test(value))
+      if (SAFE_NVM_ALIAS_PATTERN.test(value))
         pointers.set(aliasName.toLowerCase(), value.toLowerCase());
       continue;
     }
