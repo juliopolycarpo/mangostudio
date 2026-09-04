@@ -44,6 +44,7 @@ function renderControls(
     routing: 'user' as const,
     onModelChange: jest.fn(),
     onEffortChange: jest.fn(),
+    onSelectionGone: jest.fn(),
     onPermissionsChange: jest.fn(),
     ...overrides,
   };
@@ -51,18 +52,33 @@ function renderControls(
 }
 
 describe('ExternalComposerControls model reconciliation', () => {
-  it('clears a model the refreshed catalog no longer offers, and its effort with it', () => {
+  it('reports a model the refreshed catalog no longer offers', () => {
     const { props } = renderControls({
       descriptor: descriptor([{ id: 'gpt-5-codex', displayName: 'GPT-5 Codex', isDefault: true }]),
       model: 'gpt-5',
       effort: 'high',
     });
 
-    expect(props.onModelChange).toHaveBeenCalledWith(null);
-    expect(props.onEffortChange).toHaveBeenCalledWith(null);
+    expect(props.onSelectionGone).toHaveBeenCalledTimes(1);
   });
 
-  it('clears a model the vendor has since marked hidden', () => {
+  /**
+   * The one that matters: nobody picked anything, so a catalog that disagrees
+   * for a render must not travel down the pick path — the caller persists a
+   * pick, and the chat would forget the model the user stored.
+   */
+  it('reports it as gone rather than as a pick of nothing', () => {
+    const { props } = renderControls({
+      descriptor: descriptor([{ id: 'gpt-5-codex', displayName: 'GPT-5 Codex', isDefault: true }]),
+      model: 'gpt-5',
+      effort: 'high',
+    });
+
+    expect(props.onModelChange).not.toHaveBeenCalled();
+    expect(props.onEffortChange).not.toHaveBeenCalled();
+  });
+
+  it('reports a model the vendor has since marked hidden', () => {
     const { props } = renderControls({
       descriptor: descriptor([
         { id: 'gpt-5-codex', displayName: 'GPT-5 Codex', isDefault: true },
@@ -71,26 +87,25 @@ describe('ExternalComposerControls model reconciliation', () => {
       model: 'gpt-5',
     });
 
-    expect(props.onModelChange).toHaveBeenCalledWith(null);
+    expect(props.onSelectionGone).toHaveBeenCalledTimes(1);
   });
 
   it('leaves a selection the catalog still offers alone', () => {
     const { props } = renderControls({ model: 'gpt-5', effort: 'high' });
 
-    expect(props.onModelChange).not.toHaveBeenCalled();
-    expect(props.onEffortChange).not.toHaveBeenCalled();
+    expect(props.onSelectionGone).not.toHaveBeenCalled();
   });
 
   it('treats an empty catalog as a refetch rather than a removal', () => {
     const { props } = renderControls({ descriptor: descriptor([]), model: 'gpt-5' });
 
-    expect(props.onModelChange).not.toHaveBeenCalled();
+    expect(props.onSelectionGone).not.toHaveBeenCalled();
   });
 
   it('treats a vendor with no catalog at all as nothing to reconcile against', () => {
     const { props } = renderControls({ descriptor: descriptor(undefined), model: 'gpt-5' });
 
-    expect(props.onModelChange).not.toHaveBeenCalled();
+    expect(props.onSelectionGone).not.toHaveBeenCalled();
   });
 });
 

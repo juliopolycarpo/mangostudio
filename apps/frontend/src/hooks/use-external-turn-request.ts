@@ -42,7 +42,10 @@
  * **Reading a default never writes one.** Persisting happens on an explicit
  * pick and nowhere else; if merely opening a chat wrote whatever the default
  * resolved to, every chat opened after setting one would silently adopt it, and
- * changing that default later would stop reaching them.
+ * changing that default later would stop reaching them. A reconcile — dropping
+ * a selection the refreshed catalog no longer offers — is a read under that
+ * rule and not a pick: it changes what the composer shows and what the next
+ * send carries, and leaves the stored pair alone.
  */
 
 import type { ChatRunnerModelSelection } from '@mangostudio/shared/chat';
@@ -64,6 +67,11 @@ interface ScopedExternalTurnRequest {
   readonly chatId: string | null;
   readonly touched: boolean;
   readonly request: ExternalTurnRequest;
+  /**
+   * Whether this pair is worth storing. False for a reconcile, which changes
+   * what the composer shows without the user having picked anything.
+   */
+  readonly persist: boolean;
 }
 
 export interface ExternalTurnRequestOptions {
@@ -87,6 +95,15 @@ export interface ExternalTurnRequestState {
     updater: (current: ExternalTurnRequest) => ExternalTurnRequest
   ) => void;
   /**
+   * The same update, made because the catalog changed rather than because the
+   * user picked something. Shown by the composer and carried by the next send,
+   * but never written to the chat: the stored pair is the user's, and a catalog
+   * this render happens to disagree with is not a reason to discard it.
+   */
+  readonly reconcileExternalTurnRequest: (
+    updater: (current: ExternalTurnRequest) => ExternalTurnRequest
+  ) => void;
+  /**
    * What the send path should put on the wire, or `undefined` for "the server
    * decides". Reads through a ref so it sees what is on screen now rather than
    * what was on screen when the callback was created.
@@ -107,6 +124,7 @@ export function useExternalTurnRequest(
     chatId: currentChatId,
     touched: false,
     request: NO_EXTERNAL_TURN_REQUEST,
+    persist: false,
   });
 
   const stored = options.stored ?? NO_EXTERNAL_TURN_REQUEST;
@@ -123,8 +141,8 @@ export function useExternalTurnRequest(
   // it is a render behind for every pick after the first one in an event.
   const scopedRef = useRef(scoped);
 
-  const setExternalTurnRequest = useCallback(
-    (updater: (current: ExternalTurnRequest) => ExternalTurnRequest) => {
+  const apply = useCallback(
+    (updater: (current: ExternalTurnRequest) => ExternalTurnRequest, persist: boolean) => {
       const chatId = currentChatIdRef.current;
       const current = scopedRef.current;
       // Seeded from the stored pair on the first pick, so a model change lands
@@ -133,18 +151,27 @@ export function useExternalTurnRequest(
       const base =
         current.chatId === chatId && current.touched ? current.request : storedRef.current;
       const next = onlyChosen(updater(base));
-      scopedRef.current = { chatId, touched: true, request: next };
+      scopedRef.current = { chatId, touched: true, request: next, persist };
       setScoped(scopedRef.current);
     },
     []
   );
 
+  const setExternalTurnRequest = useCallback(
+    (updater: (current: ExternalTurnRequest) => ExternalTurnRequest) => apply(updater, true),
+    [apply]
+  );
+
+  const reconcileExternalTurnRequest = useCallback(
+    (updater: (current: ExternalTurnRequest) => ExternalTurnRequest) => apply(updater, false),
+    [apply]
+  );
+
   // One write per pick, not one per field.
   //
   // The composer changes both fields in the same event — picking a model
-  // invalidates the effort that belonged to the old one, and the gone-selection
-  // effect clears both — so writing from the setter put two requests on the
-  // wire for a single pick. They are concurrent, and the first of them carries
+  // invalidates the effort that belonged to the old one — so writing from the
+  // setter put two requests on the wire for a single pick. They are concurrent, and the first of them carries
   // exactly the pair written as a pair to prevent: the new model with the
   // previous model's effort. Whichever answers last is what the chat keeps, so
   // a slow first response or a failed second one leaves that pair durable.
@@ -155,15 +182,25 @@ export function useExternalTurnRequest(
   useEffect(() => {
     if (scoped === persistedRef.current) return;
     persistedRef.current = scoped;
-    const { chatId, touched, request } = scoped;
-    if (!chatId || !touched) return;
+    const { chatId, touched, request, persist } = scoped;
+    // A reconcile is not a pick: it drops a selection the refreshed catalog no
+    // longer offers so the composer and the send agree about what will run, and
+    // the chat keeps storing what the user chose. Writing here would let a
+    // catalog that differs for one render — another account's, a vendor
+    // downgrade — permanently discard a stored model nobody asked to change.
+    if (!chatId || !touched || !persist) return;
     void persistRef.current?.(chatId, request).catch(() => {
       // Optimistic, so a rejected write has to take the pick back the way the
       // runner and permission writes do: a composer showing a model the chat
       // does not store would send the next turn under a model the user only
       // thinks they changed.
       if (scopedRef.current !== scoped) return;
-      scopedRef.current = { chatId, touched: false, request: NO_EXTERNAL_TURN_REQUEST };
+      scopedRef.current = {
+        chatId,
+        touched: false,
+        request: NO_EXTERNAL_TURN_REQUEST,
+        persist: false,
+      };
       setScoped(scopedRef.current);
     });
   }, [scoped]);
@@ -174,7 +211,12 @@ export function useExternalTurnRequest(
     return current.request;
   }, []);
 
-  return { externalTurnRequest, setExternalTurnRequest, getExternalTurnRequest };
+  return {
+    externalTurnRequest,
+    setExternalTurnRequest,
+    reconcileExternalTurnRequest,
+    getExternalTurnRequest,
+  };
 }
 
 /**

@@ -35,6 +35,12 @@ export interface ExternalComposerControlsProps {
   disabled?: boolean;
   onModelChange: (model: string | null) => void;
   onEffortChange: (effort: string | null) => void;
+  /**
+   * The selection went away with the catalog rather than with a pick, so this
+   * is separate from the two above: it is a display correction, and the caller
+   * is expected to reconcile without storing anything.
+   */
+  onSelectionGone: () => void;
   onPermissionsChange: (next: {
     level: ExternalPermissionLevel;
     routing: ExternalApprovalRouting;
@@ -50,6 +56,7 @@ export function ExternalComposerControls({
   disabled = false,
   onModelChange,
   onEffortChange,
+  onSelectionGone,
   onPermissionsChange,
 }: ExternalComposerControlsProps) {
   const { t } = useI18n();
@@ -73,18 +80,23 @@ export function ExternalComposerControls({
    *
    * A catalog that is momentarily empty is a refetch, not a removal, so it
    * reconciles nothing.
+   *
+   * Reported as its own event rather than as two clears, because nobody picked
+   * anything: a catalog this render happens to disagree with — another
+   * account's, a vendor downgrade — must not make the chat forget the model the
+   * user stored.
    */
   const selectionIsGone =
     model !== null && models.length > 0 && !models.some((candidate) => candidate.id === model);
-  // Held in a ref because the call sites are inline closures: depending on them
+  // Held in a ref because the call site is an inline closure: depending on it
   // directly would re-run this on every parent render.
-  const changeRef = useRef({ onModelChange, onEffortChange });
-  changeRef.current = { onModelChange, onEffortChange };
+  const goneRef = useRef(onSelectionGone);
+  goneRef.current = onSelectionGone;
   useEffect(() => {
     if (!selectionIsGone) return;
-    changeRef.current.onModelChange(null);
-    // The effort vocabulary belonged to the model that just went away.
-    changeRef.current.onEffortChange(null);
+    // Both halves at once: the effort vocabulary belonged to the model that
+    // just went away.
+    goneRef.current();
   }, [selectionIsGone]);
 
   if (!descriptor) return null;

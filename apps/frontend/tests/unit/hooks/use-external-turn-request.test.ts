@@ -155,6 +155,62 @@ describe('the durable selection behind the session one', () => {
     expect(result.current.getExternalTurnRequest()).toEqual({ model: 'sonnet', effort: 'high' });
   });
 
+  /**
+   * A reconcile is not a pick.
+   *
+   * The composer drops a selection the refreshed catalog no longer offers so
+   * that what it shows and what the next send carries agree. Storing that would
+   * let a catalog which differs for one render — another account's, a vendor
+   * downgrade, a descriptor mid-refresh — permanently discard the model the
+   * user chose for this repository.
+   */
+  it('shows and sends a reconcile without storing it', () => {
+    const persisted: unknown[] = [];
+    const { result } = renderHook(() =>
+      useExternalTurnRequest('chat-1', {
+        stored: { model: 'opus', effort: 'high' },
+        persist: (_chatId, selection) => {
+          persisted.push(selection);
+          return Promise.resolve();
+        },
+      })
+    );
+
+    act(() => {
+      result.current.reconcileExternalTurnRequest(() => ({}));
+    });
+
+    expect(persisted).toEqual([]);
+    // Present but empty, which is what tells a send that races the reconcile to
+    // run on the vendor's default rather than on the row's stale model.
+    expect(result.current.getExternalTurnRequest()).toEqual({});
+    expect(result.current.externalTurnRequest).toEqual({});
+  });
+
+  it('applies a later pick to what the reconcile left', () => {
+    const persisted: unknown[] = [];
+    const { result } = renderHook(() =>
+      useExternalTurnRequest('chat-1', {
+        stored: { model: 'opus', effort: 'high' },
+        persist: (_chatId, selection) => {
+          persisted.push(selection);
+          return Promise.resolve();
+        },
+      })
+    );
+
+    act(() => {
+      result.current.reconcileExternalTurnRequest(() => ({}));
+    });
+    act(() => {
+      result.current.setExternalTurnRequest((current) => ({ ...current, model: 'sonnet' }));
+    });
+
+    // The stored effort belonged to the model the reconcile dropped, so the
+    // pick starts from the reconciled pair rather than from the row.
+    expect(persisted).toEqual([{ model: 'sonnet' }]);
+  });
+
   it('does not persist into a chat that is no longer the active one', () => {
     const persisted: unknown[] = [];
     const { result, rerender } = renderHook(

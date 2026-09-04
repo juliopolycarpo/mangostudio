@@ -92,6 +92,12 @@ function ChatRoute() {
             ...current,
             ...(effort ? { effort } : { effort: undefined }),
           })),
+        // Reconciled, not picked: the catalog dropped the model, so the composer
+        // and the next send stop naming it — while the chat keeps storing what
+        // the user chose, in case the catalog that disagreed was the transient
+        // one.
+        onExternalSelectionGone: () =>
+          app.reconcileExternalTurnRequest(() => ({ model: undefined, effort: undefined })),
         onExternalPermissionsChange: app.setRunnerPermissions,
       }}
       workspaceSettings={app.settings.workspaceSettings}
