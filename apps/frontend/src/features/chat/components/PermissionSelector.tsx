@@ -73,6 +73,16 @@ export function PermissionSelector({
   const [showMatrix, setShowMatrix] = useState(externalPresetFor({ level, routing }) === undefined);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Re-opened when a *later* pair turns out to be custom, because this
+  // component instance outlives the chat it was mounted for: switching to a
+  // chat stored on `full-access × auto-review` would otherwise show three
+  // presets with none selected and no way to see what is actually set. Only
+  // ever opens — a user who expanded the matrix on a preset keeps it expanded.
+  const custom = externalPresetFor({ level, routing }) === undefined;
+  useEffect(() => {
+    if (custom) setShowMatrix(true);
+  }, [custom]);
+
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: MouseEvent) => {

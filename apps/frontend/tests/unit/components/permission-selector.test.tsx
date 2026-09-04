@@ -243,4 +243,38 @@ describe('permission presets', () => {
 
     expect(screen.getByText(/read-only sandbox/)).toBeInTheDocument();
   });
+
+  /**
+   * The same instance outlives the chat it was mounted for.
+   *
+   * The composer is not remounted when the active chat changes, so a matrix
+   * opened only by `useState`'s initializer would stay closed for every custom
+   * pair after the first render — three presets with none selected, and no way
+   * to see what is actually set.
+   */
+  it('opens the matrix when a later pair turns out to be custom', () => {
+    const configurations = [
+      ...FULL_MATRIX,
+      {
+        level: 'read-only' as const,
+        routing: 'auto-review' as const,
+        supported: true,
+        unattended: false,
+      },
+    ];
+    const { rerender } = open(configurations, { level: 'default', routing: 'user' });
+    expect(screen.queryByText('What it can do')).toBeNull();
+
+    rerender(
+      <PermissionSelector
+        configurations={configurations}
+        level="read-only"
+        routing="auto-review"
+        targetId="claude"
+        onChange={jest.fn()}
+      />
+    );
+
+    expect(screen.getByText('What it can do')).toBeInTheDocument();
+  });
 });
