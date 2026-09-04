@@ -56,8 +56,8 @@ Complete these once per fork or org before the first tag push:
 
 ## Release asset naming
 
-Every downstream channel (Homebrew, Scoop, Cargo launcher, the mangostudio.dev
-install scripts) hardcodes these public asset names. Do not rename them without
+Every downstream channel (Homebrew, Scoop, Cargo launcher, the install scripts
+themselves) hardcodes these public asset names. Do not rename them without
 updating every template and installer in the same release.
 
 | Asset                                            | Notes                                                                                                                      |
@@ -67,6 +67,7 @@ updating every template and installer in the same release.
 | `mangostudio-<version>-<platform>[.exe]`         | Raw hub binary (no archive) for direct download / one-liner installs                                                       |
 | `mangostudio-runtime-<version>-<platform>[.exe]` | Raw runtime binary for WSL/SSH provisioning and remote one-liners                                                          |
 | `mangostudio-<version>-frontend-dist.tar.gz`     | Frontend bundle only (`apps/frontend/dist`)                                                                                |
+| `install.sh` / `install.ps1`                     | Canonical installers, copied verbatim (see below)                                                                          |
 | `canary-manifest.json`                           | **Canary only.** Source commit, build time, and pair digests for the rolling build (see below)                             |
 | `SHA256SUMS`                                     | Checksums for every asset above                                                                                            |
 
@@ -153,10 +154,14 @@ the target's `runtime.json` next to the digest, and `runtime health` prints it,
 so a canary machine can say which commit it is running even though its runtime's
 filename cannot.
 
-Install scripts are **not** release assets. The canonical installers are hosted at
-[mangostudio.dev](https://mangostudio.dev) (`install.sh` / `install.ps1`) and download
-the platform archives above, verifying them against `SHA256SUMS`. The repo keeps
-`scripts/install/install.sh` only as a dry-run/test fixture (see below).
+Install scripts are release assets on both channels, copied verbatim into
+`release-assets/` and listed in `SHA256SUMS` alongside the archives they
+install. The canonical URLs are
+`https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh`
+and `.../install.ps1`; both download the platform archives above and verify
+them against `SHA256SUMS`. The hub binary also embeds the same bytes
+(`apps/api/src/modules/updates/infrastructure/embedded-installers.ts`) and runs
+them locally for `--use`, `--prune`, and `--uninstall`.
 
 ## Version source
 
