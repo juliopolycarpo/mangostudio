@@ -484,18 +484,17 @@ export function createEnvironmentProbingService(
   };
 
   /**
-   * Only a scan that covers every id this platform's recipes could name may
-   * enrich with `prerequisite-missing` findings — the same rule
-   * `seedsLocations` applies to the location cache below, for the same
-   * reason: "is `winget` installed" can only be answered by having `winget`'s
-   * own status in the same batch, and a single-id re-check never has it.
+   * `prerequisite-missing` findings, derived on the way out of
+   * {@link EnvironmentProbingService.listRuntimeStatuses} rather than written
+   * into the cache.
+   *
+   * "Is `winget` installed" can only be answered by having `winget`'s own
+   * status in the same batch, so only the full list can compute this. Enriching
+   * inside the cached fetch instead would make the finding a property of *how*
+   * the status was last fetched: a single-id re-check (the card's own probe
+   * button) writes the same cache entry without one, and the warning would
+   * silently disappear from the list until the whole batch was probed again.
    */
-  const isFullRuntimeScan = (
-    ids: readonly RuntimeId[],
-    manifest: RuntimeCapabilityManifest
-  ): boolean =>
-    manifest.features.toolchain === true && runtimeIdsFor(manifest).every((id) => ids.includes(id));
-
   const withPrerequisiteFindings = (
     statuses: readonly RuntimeStatus[],
     platform: string
@@ -529,9 +528,7 @@ export function createEnvironmentProbingService(
           },
           { timeoutMs: PROBE_REQUEST_TIMEOUT_MS }
         );
-        return isFullRuntimeScan(ids, client.manifest)
-          ? withPrerequisiteFindings(result.statuses, client.manifest.platform)
-          : result.statuses;
+        return result.statuses;
       }
     );
 
@@ -633,7 +630,17 @@ export function createEnvironmentProbingService(
       // the one caller that needs to know the platform before it can even
       // name what it is asking for.
       const client = await resolveClient(scope);
-      return probeRuntimes(scope, runtimeIdsFor(client.manifest), probeOptions?.force === true);
+      const statuses = await probeRuntimes(
+        scope,
+        runtimeIdsFor(client.manifest),
+        probeOptions?.force === true
+      );
+      // Only this caller has the whole batch, so only this caller can say a
+      // prerequisite is missing. Applied after the probe rather than inside it
+      // so a cache hit carries the finding too.
+      return client.manifest.features.toolchain === true
+        ? withPrerequisiteFindings(statuses, client.manifest.platform)
+        : statuses;
     },
 
     async getRuntimeStatus(scope, id, probeOptions) {

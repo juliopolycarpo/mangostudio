@@ -426,6 +426,33 @@ describe('platform-aware runtime ids', () => {
       severity: 'warn',
     });
   });
+
+  // Regression: the enrichment used to run inside the cached fetch, which made
+  // the finding a property of *how* a status was last fetched. A single-id
+  // re-check (the card's own probe button) wrote the same cache entry without
+  // one, and the warning silently vanished from the next list.
+  it('keeps the prerequisite finding after a single-runtime re-check overwrites the cache', async () => {
+    const remote = fakeClient('v1', 'win32');
+    const service = serviceFor(() => remote);
+
+    await service.listRuntimeStatuses(WSL);
+    await service.getRuntimeStatus(WSL, 'fnm', { force: true });
+    const statuses = await service.listRuntimeStatuses(WSL);
+
+    const fnm = statuses.find((status) => status.id === 'fnm');
+    expect(fnm?.findings.map((finding) => finding.code)).toContain('prerequisite-missing');
+  });
+
+  // A per-runtime re-check has no way to answer "is winget installed", so it
+  // must not invent the finding either.
+  it('never reports a prerequisite finding from a single-runtime probe', async () => {
+    const remote = fakeClient('v1', 'win32');
+    const service = serviceFor(() => remote);
+
+    const status = await service.getRuntimeStatus(WSL, 'fnm');
+
+    expect(status?.findings).toEqual([]);
+  });
 });
 
 describe('forced-probe admission', () => {
