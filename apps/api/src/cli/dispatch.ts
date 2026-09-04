@@ -11,6 +11,7 @@ import {
   parseServeArgs,
   parseServiceArgs,
   parseStatusArgs,
+  parseUpgradeArgs,
 } from './args';
 import { runDoctor } from './commands/doctor';
 import { runEnv, runEnvInstall, runEnvToolchain } from './commands/env';
@@ -25,6 +26,7 @@ import { runServeInternal } from './commands/serve-internal';
 import { runService } from './commands/service';
 import { runStatus } from './commands/status';
 import { runStop } from './commands/stop';
+import { runUpgrade } from './commands/upgrade';
 import { runVersion } from './commands/version';
 import { isOperatorError } from './errors';
 import { writeError } from './output';
@@ -107,6 +109,12 @@ async function route(command: string | undefined, rest: string[]): Promise<void>
     }
     case 'library':
       await runLibrary(parseLibraryArgs(rest));
+      return;
+    case 'upgrade':
+    case 'update':
+      // A refused or failed upgrade is an expected outcome, not an operator
+      // error — same convention as `env install`'s numeric exit code.
+      process.exitCode = await runUpgrade(parseUpgradeArgs(rest));
       return;
     case 'version':
     case '-v':

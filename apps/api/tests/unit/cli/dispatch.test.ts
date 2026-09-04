@@ -133,3 +133,36 @@ describe('dispatch env install/update', () => {
     }
   });
 });
+
+describe('dispatch upgrade/update', () => {
+  test('routes `upgrade` to the new command rather than "Unknown command"', async () => {
+    const exitSpy = spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const stderrSpy = spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    try {
+      // An unknown option throws inside parseUpgradeArgs before runUpgrade is
+      // even called — proof this is the new branch, not the old
+      // "Unknown command: upgrade" default one.
+      await dispatch(['upgrade', '--bogus']);
+      expect(stderrSpy).toHaveBeenCalledWith('Unknown option for upgrade: --bogus\n');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      exitSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+  });
+
+  test('routes the `update` alias the same way', async () => {
+    const exitSpy = spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const stderrSpy = spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    try {
+      await dispatch(['update', '--bogus']);
+      expect(stderrSpy).toHaveBeenCalledWith('Unknown option for upgrade: --bogus\n');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      exitSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+  });
+});

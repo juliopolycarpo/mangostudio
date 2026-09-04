@@ -7,6 +7,7 @@ import {
   parseServeArgs,
   parseServiceArgs,
   parseStatusArgs,
+  parseUpgradeArgs,
 } from '../../../src/cli/args';
 import { CliError } from '../../../src/cli/errors';
 
@@ -264,5 +265,80 @@ describe('parseLogsArgs', () => {
     expect(() => parseLogsArgs(['-n', 'ten'])).toThrow(/Expected a line count/);
     expect(() => parseLogsArgs(['-n', '0'])).toThrow(/out of range/);
     expect(() => parseLogsArgs(['--tail'])).toThrow(/Unknown option for logs/);
+  });
+});
+
+describe('parseUpgradeArgs', () => {
+  it('defaults to a plain upgrade with every flag off', () => {
+    expect(parseUpgradeArgs([])).toEqual({
+      check: false,
+      yes: false,
+      rollback: false,
+      noRestart: false,
+      json: false,
+    });
+  });
+
+  it('parses --check, --yes, --no-restart, and --json independently', () => {
+    expect(parseUpgradeArgs(['--check', '--yes', '--no-restart', '--json'])).toEqual({
+      check: true,
+      yes: true,
+      rollback: false,
+      noRestart: true,
+      json: true,
+    });
+  });
+
+  it('parses --rollback', () => {
+    expect(parseUpgradeArgs(['--rollback'])).toMatchObject({ rollback: true });
+  });
+
+  it('parses --canary with an optional trailing sha', () => {
+    expect(parseUpgradeArgs(['--canary'])).toMatchObject({ channel: 'canary' });
+    expect(parseUpgradeArgs(['--canary', 'abc1234'])).toMatchObject({
+      channel: 'canary',
+      sha: 'abc1234',
+    });
+  });
+
+  it('does not swallow the next flag as a sha when it is not hex', () => {
+    expect(parseUpgradeArgs(['--canary', '--json'])).toEqual({
+      check: false,
+      yes: false,
+      rollback: false,
+      noRestart: false,
+      json: true,
+      channel: 'canary',
+    });
+  });
+
+  it('lowercases a mixed-case sha', () => {
+    expect(parseUpgradeArgs(['--canary', 'ABC1234'])).toMatchObject({ sha: 'abc1234' });
+  });
+
+  it('parses --version, which implies the stable channel', () => {
+    expect(parseUpgradeArgs(['--version', '0.1.2'])).toMatchObject({
+      channel: 'stable',
+      version: '0.1.2',
+    });
+  });
+
+  it('rejects a missing value for --version', () => {
+    expect(() => parseUpgradeArgs(['--version'])).toThrow(/Missing value for upgrade --version/);
+    expect(() => parseUpgradeArgs(['--version', '--yes'])).toThrow(
+      /Missing value for upgrade --version/
+    );
+  });
+
+  it('rejects more than one channel selector', () => {
+    expect(() => parseUpgradeArgs(['--stable', '--canary'])).toThrow(CliError);
+    expect(() => parseUpgradeArgs(['--stable', '--canary'])).toThrow(/mutually exclusive/);
+    expect(() => parseUpgradeArgs(['--canary', '--version', '0.1.2'])).toThrow(
+      /mutually exclusive/
+    );
+  });
+
+  it('rejects an unknown option', () => {
+    expect(() => parseUpgradeArgs(['--bogus'])).toThrow(/Unknown option for upgrade: --bogus/);
   });
 });

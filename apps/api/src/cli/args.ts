@@ -9,6 +9,7 @@ import {
   type UserServiceAction,
 } from '@mangostudio/runtime';
 import type { ResourceKind } from '@mangostudio/shared/library';
+import type { UpdateChannel } from '@mangostudio/shared/updates';
 import { CliError } from './errors';
 
 export interface ServeArgs {
@@ -67,6 +68,21 @@ export interface ServiceArgs {
 export interface LogsArgs {
   follow: boolean;
   lines: number;
+}
+
+export interface UpgradeArgs {
+  /** Preview only: resolve and report, never download or run anything. */
+  check: boolean;
+  /** Skip every confirmation prompt. */
+  yes: boolean;
+  channel?: UpdateChannel;
+  /** Stable only: an exact version instead of the latest. */
+  version?: string;
+  /** Canary only: a pinned source commit instead of the rolling latest. */
+  sha?: string;
+  rollback: boolean;
+  noRestart: boolean;
+  json: boolean;
 }
 
 export const DEFAULT_LOG_LINES = 100;
@@ -242,6 +258,95 @@ export function parseLogsArgs(rest: string[]): LogsArgs {
   }
 
   return { follow, lines };
+}
+
+const CANARY_SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
+
+/**
+ * Parse `upgrade`/`update` args: --check, --yes, one of --stable/--canary
+ * [sha]/--version <x.y.z>, --rollback, --no-restart, --json.
+ * // Usage: parseUpgradeArgs(['--canary', 'abc1234', '--yes'])
+ */
+export function parseUpgradeArgs(rest: string[]): UpgradeArgs {
+  let check = false;
+  let yes = false;
+  let channel: UpdateChannel | undefined;
+  let version: string | undefined;
+  let sha: string | undefined;
+  let rollback = false;
+  let noRestart = false;
+  let json = false;
+  let channelFlags = 0;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === '--check') {
+      check = true;
+      continue;
+    }
+    if (arg === '--yes') {
+      yes = true;
+      continue;
+    }
+    if (arg === '--stable') {
+      channel = 'stable';
+      channelFlags += 1;
+      continue;
+    }
+    if (arg === '--canary') {
+      channel = 'canary';
+      channelFlags += 1;
+      const next = rest[index + 1];
+      if (next !== undefined && CANARY_SHA_PATTERN.test(next)) {
+        sha = next.toLowerCase();
+        index += 1;
+      }
+      continue;
+    }
+    if (arg === '--version') {
+      const value = rest[index + 1];
+      if (!value || value.startsWith('-')) {
+        throw new CliError('Missing value for upgrade --version.');
+      }
+      // --version names a stable release by definition; the rolling canary
+      // has no notion of an exact version to pin without a --canary <sha>.
+      channel = 'stable';
+      version = value;
+      channelFlags += 1;
+      index += 1;
+      continue;
+    }
+    if (arg === '--rollback') {
+      rollback = true;
+      continue;
+    }
+    if (arg === '--no-restart') {
+      noRestart = true;
+      continue;
+    }
+    if (arg === '--json') {
+      json = true;
+      continue;
+    }
+    throw new CliError(`Unknown option for upgrade: ${arg}`);
+  }
+
+  if (channelFlags > 1) {
+    throw new CliError(
+      'Choose one of --stable, --canary, or --version for upgrade — they are mutually exclusive.'
+    );
+  }
+
+  return {
+    check,
+    yes,
+    rollback,
+    noRestart,
+    json,
+    ...(channel !== undefined ? { channel } : {}),
+    ...(version !== undefined ? { version } : {}),
+    ...(sha !== undefined ? { sha } : {}),
+  };
 }
 
 /** `env` options that take the next argument as their value, and where it lands. */
