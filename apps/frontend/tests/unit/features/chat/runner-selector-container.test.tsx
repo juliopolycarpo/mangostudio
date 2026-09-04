@@ -64,6 +64,9 @@ const messagesQuery: { data: { pages: { messages: unknown[] }[] } | undefined } 
 
 const actualEnvironmentQueries = await import('@/features/environments/queries');
 const actualExternalAgentService = await import('@/services/external-agent-service');
+const actualUseExternalAgents = await import(
+  '../../../../src/features/external-agents/useExternalAgents'
+);
 
 mock.module('@/lib/app-context', () => ({ useApp: () => appState }));
 mock.module('@/features/chat/queries', () => ({ useMessagesQuery: () => messagesQuery }));
@@ -86,7 +89,11 @@ mock.module('@/services/external-agent-service', () => ({
   ...actualExternalAgentService,
   forkChatWithRunner: (chatId: string, runner: unknown) => forkChatWithRunner(chatId, runner),
 }));
+// Spread for the same reason as the service above: the container also imports
+// `externalUnavailableText` from here, and a factory listing only the hook
+// breaks that import rather than the assertion.
 mock.module('../../../../src/features/external-agents/useExternalAgents', () => ({
+  ...actualUseExternalAgents,
   useExternalAgents: () => ({
     agents: [descriptorState.current],
     isLoading: false,
