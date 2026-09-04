@@ -55,7 +55,7 @@ import { getLogsDir, getServerLogPath } from '../../../lib/mango-paths';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
 import { writeFileAtomic } from '../../../lib/safe-file';
 import { isStateLive, readState, type ServerState } from '../../../lib/server-state';
-import { readTomlDocument, setTomlSectionBoolean } from '../../../lib/toml';
+import { readTomlDocument, setTomlSectionValue } from '../../../lib/toml';
 import { requestShutdown } from '../../../server/shutdown-request';
 import type { HubExecutable } from '../domain/hub-executable';
 import { describeHubProcess, hubLaunchMode } from '../domain/hub-process';
@@ -370,12 +370,7 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
     // and written there too; the bounded reader refuses to follow links.
     const configFile = d.resolveConfigPath(d.configFilePath());
     const doc = d.readConfigDocument(configFile);
-    setTomlSectionBoolean(
-      doc,
-      'environments',
-      'installs_enabled',
-      body.environments.installsEnabled
-    );
+    setTomlSectionValue(doc, 'environments', 'installs_enabled', body.environments.installsEnabled);
     d.writeConfigFile(configFile, stringifyToml(doc));
 
     // The write always happens — even under an env override, the file is
