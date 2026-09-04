@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createTurboBuildCommand, selectBuildWorkspaces } from '../lib/build';
+import { binaryCompileDefines, createTurboBuildCommand, selectBuildWorkspaces } from '../lib/build';
 import { readText } from './support/read-text';
 
 describe('build script', () => {
@@ -63,6 +63,18 @@ describe('build script', () => {
     expect(rootConfig).toContain("'apps/api/turbo.json'");
     expect(rootConfig).toContain("'apps/frontend/turbo.json'");
     expect(rootConfig).toContain("'apps/runtime/turbo.json'");
+  });
+
+  test('bakes the release platform id into every standalone binary compile', () => {
+    const defines = binaryCompileDefines({
+      buildTime: '2026-01-01T00:00:00.000Z',
+      buildInfo: { builtAt: '2026-01-01T00:00:00.000Z', gitSha: 'abc123def456', gitDirty: false },
+      buildType: 'production',
+      version: '0.1.0',
+      platformId: 'linux-x64-musl',
+    });
+
+    expect(defines).toContain('process.env.BUILD_PLATFORM_ID="linux-x64-musl"');
   });
 
   test('uses the binary alias for standalone smoke builds', () => {
