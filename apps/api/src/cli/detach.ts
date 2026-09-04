@@ -182,6 +182,19 @@ const DETACH_ENV_ALLOWLIST = new Set<string>([
   'NUMBER_OF_PROCESSORS',
 ]);
 
+/** The subset of `source` whose keys are in `allowlist`, dropping anything unset. */
+function pickAllowedEnv(
+  source: NodeJS.ProcessEnv,
+  allowlist: ReadonlySet<string> | readonly string[]
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of allowlist) {
+    const value = source[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
+
 /**
  * Build a minimal env for a detached `__serve` child, forwarding only
  * runtime configuration variables from the parent's environment.
@@ -193,14 +206,7 @@ export function buildDetachedEnv(
   logFile: string,
   options: DetachOptions = {}
 ): Record<string, string> {
-  const env: Record<string, string> = {};
-
-  for (const key of DETACH_ENV_ALLOWLIST) {
-    const value = process.env[key];
-    if (value !== undefined) {
-      env[key] = value;
-    }
-  }
+  const env = pickAllowedEnv(process.env, DETACH_ENV_ALLOWLIST);
 
   // Always apply the explicit spawn parameters as overrides.
   env.API_HOST = host;
@@ -243,6 +249,57 @@ export function spawnServeChild(
     // The child holds its own copy of the descriptor; release ours.
     closeSync(logFd);
   }
+}
+
+export interface SpawnDetachedWaiterInput {
+  /** The package manager command to run once the wait is over, e.g. `['npm', 'install', '-g', 'mangostudio@latest']`. */
+  readonly argv: readonly string[];
+  /** The pid to wait on — this process, so the manager never races its own file lock. */
+  readonly waitForPid: number;
+  /** Where the manager's combined output is appended. */
+  readonly logFile: string;
+}
+
+/** Single-quotes a PowerShell string literal, doubling any embedded quote. */
+function powerShellQuote(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+/**
+ * The `-Command` script text a detached waiter runs: wait out this process,
+ * then invoke the package manager and append its output to the log.
+ * // Usage: buildWaiterCommand({ argv: ['npm', 'install', '-g', 'x'], waitForPid: 123, logFile: 'C:\\log.txt' })
+ */
+export function buildWaiterCommand(
+  input: Pick<SpawnDetachedWaiterInput, 'argv' | 'waitForPid' | 'logFile'>
+): string {
+  const [manager, ...args] = input.argv;
+  const invocation = ['&', powerShellQuote(manager ?? ''), ...args.map(powerShellQuote)].join(' ');
+  return (
+    `Wait-Process -Id ${input.waitForPid} -Timeout 60 -ErrorAction SilentlyContinue; ` +
+    `${invocation} *>> ${powerShellQuote(input.logFile)}`
+  );
+}
+
+/**
+ * Windows-only: spawn a detached PowerShell that waits for this process to
+ * exit, then runs a package-manager upgrade and logs its output — used when
+ * the manager that owns the binary would otherwise try to replace a file
+ * this process still holds open.
+ * // Usage: spawnDetachedWaiter({ argv: ['npm', 'install', '-g', 'mangostudio@latest'], waitForPid: process.pid, logFile })
+ */
+export function spawnDetachedWaiter(input: SpawnDetachedWaiterInput): number {
+  const proc = Bun.spawn({
+    cmd: ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', buildWaiterCommand(input)],
+    env: pickAllowedEnv(process.env, DETACH_ENV_ALLOWLIST),
+    detached: true,
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'ignore',
+    ...HIDDEN_WINDOW,
+  });
+  proc.unref();
+  return proc.pid;
 }
 
 /**

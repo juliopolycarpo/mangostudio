@@ -11,6 +11,7 @@ import {
   getRunDir,
   getServerLogPath,
   getUpdateCheckPath,
+  getUpgradeLogPath,
 } from '../../../src/lib/mango-paths';
 
 describe('mango-paths', () => {
@@ -30,6 +31,14 @@ describe('mango-paths', () => {
 
     expect(path.startsWith(join(getLogsDir(), 'server-'))).toBe(true);
     expect(path).toMatch(/server-\d{8}-\d{6}\.log$/);
+  });
+
+  it('builds an upgrade waiter log path next to the state file, with no colons', () => {
+    const path = getUpgradeLogPath(1_700_000_000_000);
+
+    expect(path.startsWith(join(getRunDir(), 'upgrade-'))).toBe(true);
+    expect(path).not.toContain(':');
+    expect(path).toMatch(/upgrade-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z\.log$/);
   });
 
   it('creates the logs and run directories idempotently', async () => {

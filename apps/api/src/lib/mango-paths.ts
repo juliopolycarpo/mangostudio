@@ -45,6 +45,17 @@ export function getServerLogPath(startedAt: number): string {
   return join(getLogsDir(), `server-${formatTimestamp(startedAt)}.log`);
 }
 
+/**
+ * Timestamped log file path for a detached Windows upgrade waiter, next to
+ * the state file it waits beside. Colons in an ISO timestamp are not valid in
+ * a Windows path, so they are replaced rather than used verbatim.
+ * // Usage: getUpgradeLogPath(Date.now())
+ */
+export function getUpgradeLogPath(now: number): string {
+  const stamp = new Date(now).toISOString().replaceAll(':', '-');
+  return join(getRunDir(), `upgrade-${stamp}.log`);
+}
+
 /** Create the logs and run directories if missing. // Usage: await ensureRuntimeDirs() */
 export async function ensureRuntimeDirs(): Promise<void> {
   await mkdir(getLogsDir(), { recursive: true });

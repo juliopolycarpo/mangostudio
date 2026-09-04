@@ -75,7 +75,7 @@ describe('runRestart', () => {
         controller.die(42);
         return Promise.resolve();
       },
-      spawnDetached: (port, host, _deps, options) => {
+      spawnDetached: (port, _host, _deps, options) => {
         spawned.push(options);
         return Promise.resolve({ pid: 43, port, logFile: '/x.log' });
       },

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { type DetachDeps, restartExecutableOptions, spawnDetached } from '../../../src/cli/detach';
+import {
+  buildWaiterCommand,
+  type DetachDeps,
+  restartExecutableOptions,
+  spawnDetached,
+} from '../../../src/cli/detach';
 import type { ServerState } from '../../../src/lib/server-state';
 import { FakeProcessController } from '../../support/mocks/fake-process-controller';
 
@@ -76,5 +81,30 @@ describe('restartExecutableOptions', () => {
     for (const pointer of ['versioned', 'external', 'source'] as const) {
       expect(restartExecutableOptions({ pointer, argv: ['/anything'] })).toEqual({});
     }
+  });
+});
+
+describe('buildWaiterCommand', () => {
+  it('waits on this process before invoking the manager and appending its output', () => {
+    const command = buildWaiterCommand({
+      argv: ['npm', 'install', '-g', 'mangostudio@latest'],
+      waitForPid: 4242,
+      logFile: 'C:\\Users\\j\\.mango\\run\\upgrade-1.log',
+    });
+
+    expect(command).toBe(
+      'Wait-Process -Id 4242 -Timeout 60 -ErrorAction SilentlyContinue; ' +
+        "& 'npm' 'install' '-g' 'mangostudio@latest' *>> 'C:\\Users\\j\\.mango\\run\\upgrade-1.log'"
+    );
+  });
+
+  it('doubles an embedded single quote so PowerShell reads it as one literal quote', () => {
+    const command = buildWaiterCommand({
+      argv: ['scoop', 'update', "it's-mango"],
+      waitForPid: 1,
+      logFile: 'C:\\log.txt',
+    });
+
+    expect(command).toContain("'it''s-mango'");
   });
 });
