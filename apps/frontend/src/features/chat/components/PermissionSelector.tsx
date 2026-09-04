@@ -29,6 +29,7 @@ import type {
   ExternalAgentTargetId,
   ExternalApprovalRouting,
   ExternalPermissionLevel,
+  ExternalPermissionPair,
   ExternalSupportedConfiguration,
 } from '@mangostudio/shared/external-agents';
 import {
@@ -174,11 +175,12 @@ export function PermissionSelector({
                   selected={selectedPreset === preset.id}
                   supported
                   unsupportedReason={null}
-                  warning={
-                    find(preset.pair.level, preset.pair.routing)?.unattended
-                      ? labels.unattendedLevelWarning
-                      : null
-                  }
+                  // Which warning depends on which axis this preset resolved
+                  // to, not on the preset. `autonomous` falling back to
+                  // `default × auto-review` cannot leave the workspace, so the
+                  // level warning would be false there — the true statement is
+                  // that its approvals are answered without the user.
+                  warning={unattendedWarning(preset.pair, find, labels)}
                   onSelect={() => onChange(preset.pair)}
                 />
               ))}
@@ -245,6 +247,28 @@ export function PermissionSelector({
       ) : null}
     </div>
   );
+}
+
+/**
+ * The warning an unattended pair earns, chosen by the axis that makes it so.
+ *
+ * Both axes mean "the agent proceeds without you" and they mean different
+ * things about *what* it may do: `full-access` can act outside the workspace,
+ * `auto-review` answers its own approvals inside it. Saying the wrong one is
+ * either overstating the risk or — worse — understating it.
+ */
+function unattendedWarning(
+  pair: ExternalPermissionPair,
+  find: (
+    level: ExternalPermissionLevel,
+    routing: ExternalApprovalRouting
+  ) => ExternalSupportedConfiguration | undefined,
+  labels: ReturnType<typeof useI18n>['t']['externalAgents']['permission']
+): string | null {
+  if (!find(pair.level, pair.routing)?.unattended) return null;
+  return pair.routing === 'auto-review'
+    ? labels.unattendedRoutingWarning
+    : labels.unattendedLevelWarning;
 }
 
 function Axis({ heading, children }: { heading: string; children: React.ReactNode }) {

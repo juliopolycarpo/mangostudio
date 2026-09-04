@@ -210,6 +210,12 @@ describe('permission presets', () => {
       { targetId: 'claude' }
     );
 
+    // The warning follows the axis the preset resolved to, not the preset. This
+    // pair cannot leave the workspace, so the level warning would be false
+    // here; what is true is that its approvals are answered without the user.
+    expect(screen.getByText(/answered without you/i)).toBeInTheDocument();
+    expect(screen.queryByText(/can edit and run anything/i)).toBeNull();
+
     fireEvent.click(screen.getByRole('button', { name: /Autonomous/ }));
 
     expect(props.onChange).toHaveBeenCalledWith({ level: 'default', routing: 'auto-review' });
