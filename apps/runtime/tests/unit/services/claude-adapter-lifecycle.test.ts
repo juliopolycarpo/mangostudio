@@ -29,7 +29,7 @@ import type {
 } from '../../../src/services/external-agents/adapter';
 import { ClaudeCodeAdapter } from '../../../src/services/external-agents/claude/adapter';
 import type { ExternalAgentManagedProcess } from '../../../src/services/external-agents/process';
-import { CLAUDE_HELP_LINES } from '../../support/claude-help';
+import { CLAUDE_HELP_LINES, CLAUDE_HELP_LINES_2_1_260 } from '../../support/claude-help';
 
 const RECORDED = readFileSync(
   join(import.meta.dir, '../../support/fixtures/claude-read-turn.jsonl'),
@@ -478,5 +478,49 @@ describe('discovery reads the binary rather than the pin', () => {
       unsupportedReasonKey: 'externalAgents.unsupported.claudeModeMissing',
     });
     expect(byPair.get('read-only/user')?.supported).toBe(true);
+  });
+
+  /**
+   * The catalog, which is a claim about what the user may pick — so it is built
+   * only from what the binary in front of us actually advertises.
+   */
+  describe('the model catalog', () => {
+    it('offers the aliases a build advertises, each with its effort levels', async () => {
+      const descriptor = await adapter().discover(
+        discoveryHarness({ version: '2.1.260 (Claude Code)', help: CLAUDE_HELP_LINES_2_1_260 })
+      );
+
+      expect(descriptor.capabilities.modelCatalog).toBe(true);
+      expect(descriptor.models?.map((model) => model.id)).toEqual(['fable', 'opus', 'sonnet']);
+      expect(descriptor.models?.[0]?.supportedReasoningEfforts?.map((effort) => effort.id)).toEqual(
+        ['low', 'medium', 'high', 'xhigh', 'max']
+      );
+    });
+
+    /**
+     * Nothing is marked default, and that is load-bearing rather than an
+     * omission: the help declares no default, and a catalog that named one
+     * would make `pickModel` resolve it for a chat that chose nothing, putting
+     * `--model` on every argv and overriding the account's own default.
+     */
+    it("names no default, so an unchosen model stays the vendor's", async () => {
+      const descriptor = await adapter().discover(
+        discoveryHarness({ version: '2.1.260 (Claude Code)', help: CLAUDE_HELP_LINES_2_1_260 })
+      );
+
+      expect(descriptor.models?.some((model) => model.isDefault)).toBe(false);
+      expect(descriptor.models?.some((model) => model.defaultReasoningEffort !== undefined)).toBe(
+        false
+      );
+    });
+
+    it('offers no catalog at all on a build that advertises no aliases', async () => {
+      const descriptor = await adapter().discover(
+        discoveryHarness({ version: '2.1.227 (Claude Code)', help: CLAUDE_HELP_LINES })
+      );
+
+      expect(descriptor.capabilities.modelCatalog).toBe(false);
+      expect(descriptor.models).toBeUndefined();
+    });
   });
 });

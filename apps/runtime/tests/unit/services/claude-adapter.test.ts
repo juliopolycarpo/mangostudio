@@ -138,6 +138,41 @@ describe('buildTurnArgv', () => {
     expect(hostile).not.toContain('--model');
     expect(hostile.join(' ')).not.toContain('dangerously-skip-permissions');
   });
+
+  /**
+   * `--effort` is admitted by membership in what the binary printed, not by
+   * pattern. The vendor publishes the complete list, so there is no reason to
+   * accept a shape and hope — and a stored per-chat effort outlives the install
+   * that produced it, which is exactly when a downgrade would otherwise put an
+   * unknown token on the command line.
+   */
+  it('passes an effort level this build declared', () => {
+    const withEffort = argv({
+      ...base,
+      session: { ...base.session, acceptedEfforts: new Set(['low', 'high']) },
+      configuration: { ...CONFIGURATION, effort: 'high' },
+    });
+
+    expect(withEffort[withEffort.indexOf('--effort') + 1]).toBe('high');
+  });
+
+  it('drops an effort level this build did not declare', () => {
+    expect(
+      argv({
+        ...base,
+        session: { ...base.session, acceptedEfforts: new Set(['low', 'high']) },
+        configuration: { ...CONFIGURATION, effort: 'ultracode' },
+      })
+    ).not.toContain('--effort');
+  });
+
+  it('passes no effort at all to a build that declared none', () => {
+    // Every build before 2.1.259. Absent is not empty, and it is the reason a
+    // chat that stored an effort keeps working after a downgrade.
+    expect(argv({ ...base, configuration: { ...CONFIGURATION, effort: 'high' } })).not.toContain(
+      '--effort'
+    );
+  });
 });
 
 describe('safeClaudeModel', () => {

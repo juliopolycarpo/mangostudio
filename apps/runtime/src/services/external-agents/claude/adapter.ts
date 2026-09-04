@@ -41,6 +41,7 @@ import type {
   ExternalAgentCapabilities,
   ExternalAgentConfiguration,
   ExternalAgentEvent,
+  ExternalAgentModel,
   ExternalAgentRuntimeDescriptor,
   ExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
@@ -67,6 +68,7 @@ import {
   missingClaudeCliFlags,
   parseClaudeCliSurface,
 } from './cli-surface';
+import { claudeEffortAccepted, claudeModelCatalog } from './models';
 import {
   buildSupportedConfigurations,
   CLAUDE_UNSUPPORTED_REASON_KEYS,
@@ -118,9 +120,6 @@ const MINIMUM_CLAUDE_VERSION_PARSED = requireClaudeVersion(MINIMUM_CLAUDE_VERSIO
  *   prompt tool makes MangoStudio part of the authorization path for an agent it
  *   does not own, which needs authenticated request ids, replay protection,
  *   expiry, owner binding and a threat model of its own.
- * - `modelCatalog` — `--model` accepts a value; that is not a catalog. No
- *   structured listing has been captured, so the selector hides the picker
- *   rather than offering a list MangoStudio invented.
  * - `steering` — `--input-format stream-json` accepts a second message, but it
  *   runs as **its own turn**, with its own result. That is a queued follow-up,
  *   not same-turn steering.
@@ -138,6 +137,26 @@ const CLAUDE_CAPABILITIES: ExternalAgentCapabilities = {
   usageReporting: true,
 };
 
+/**
+ * The same set, with the one flag that depends on the build in front of us.
+ *
+ * `modelCatalog` was a constant `false` while `--model` was only known to
+ * accept a value. The help now advertises which aliases it resolves, so the
+ * answer is per-install: a build that states them has a catalog, and one that
+ * does not keeps the picker hidden exactly as before.
+ *
+ * Derived in one place because **both** `discover` and `openSession` report
+ * capabilities, and a session that disagreed with the descriptor it was chosen
+ * from would offer a picker the hub never validated against — the same reason
+ * Cursor derives its four flags from the live handshake rather than from a
+ * constant.
+ */
+function claudeCapabilities(
+  models: readonly ExternalAgentModel[] | undefined
+): ExternalAgentCapabilities {
+  return { ...CLAUDE_CAPABILITIES, modelCatalog: models !== undefined };
+}
+
 interface ClaudeSession {
   /** The vendor session id. Stable across turns; `--resume` echoes it back. */
   sessionId: string;
@@ -146,6 +165,15 @@ interface ClaudeSession {
   established: boolean;
   configuration: ExternalAgentConfiguration;
   availability: ClaudeModeAvailability;
+  /**
+   * `--effort`'s levels as this build declared them, read once when the session
+   * opened rather than per turn.
+   *
+   * A sibling of `availability` rather than a field on it: that type answers
+   * which *permission modes* this account may run, and effort is neither a
+   * permission nor account-dependent.
+   */
+  readonly acceptedEfforts?: ReadonlySet<string>;
   activeTurn?: {
     readonly channel: TurnChannel<ExternalAgentEvent>;
     readonly reducer: ClaudeTurnReducer;
@@ -224,14 +252,16 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
       ...(acceptedModes ? { acceptedModes } : {}),
     };
 
+    const models = claudeModelCatalog(surface);
     return {
       targetId: this.targetId,
       installed: true,
       version,
       authState: authentication.authState,
       ...(authentication.authState === 'signed-in' ? {} : { loginCommand: CLAUDE_LOGIN_COMMAND }),
-      capabilities: CLAUDE_CAPABILITIES,
+      capabilities: claudeCapabilities(models),
       supportedConfigurations: buildSupportedConfigurations(availability),
+      ...(models ? { models } : {}),
       ...(authentication.account ? { account: authentication.account } : {}),
     };
   }
@@ -273,6 +303,7 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
       established: resumed,
       configuration: params.configuration,
       availability,
+      ...(surface?.effortLevels ? { acceptedEfforts: surface.effortLevels } : {}),
     };
     this.#sessions.set(params.sessionId, session);
 
@@ -280,7 +311,7 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
       nativeSessionId: session.sessionId,
       resumed,
       effectiveConfiguration: params.configuration,
-      capabilities: CLAUDE_CAPABILITIES,
+      capabilities: claudeCapabilities(claudeModelCatalog(surface)),
     };
   }
 
@@ -678,7 +709,7 @@ export function safeClaudeModel(model: string | undefined): string | undefined {
 /** The turn's argv. Everything that is not a flag comes from server-owned state. */
 export function buildTurnArgv(input: {
   readonly executable: string;
-  readonly session: Pick<ClaudeSession, 'sessionId' | 'established'>;
+  readonly session: Pick<ClaudeSession, 'sessionId' | 'established' | 'acceptedEfforts'>;
   readonly configuration: ExternalAgentConfiguration;
   readonly availability: ClaudeModeAvailability;
 }): [string, ...string[]] {
@@ -714,12 +745,29 @@ export function buildTurnArgv(input: {
       ? ['--resume', input.session.sessionId]
       : ['--session-id', input.session.sessionId]),
     ...modelArguments(input.configuration.model),
+    ...effortArguments(input.configuration.effort, input.session.acceptedEfforts),
   ];
 }
 
 function modelArguments(model: string | undefined): string[] {
   const safe = safeClaudeModel(model);
   return safe ? ['--model', safe] : [];
+}
+
+/**
+ * `--effort`, passed only for a level this build itself printed.
+ *
+ * Membership in the parsed set is the whole guard, and it is stricter than
+ * `safeClaudeModel`'s pattern because it can be: the vendor publishes the
+ * complete list, so there is no need to accept a shape and hope. A build that
+ * declared no levels — every build before 2.1.259 — therefore never sees the
+ * flag, which is what keeps a stored per-chat effort from breaking a downgrade.
+ */
+function effortArguments(
+  effort: string | undefined,
+  accepted: ReadonlySet<string> | undefined
+): string[] {
+  return claudeEffortAccepted(effort, accepted) ? ['--effort', effort as string] : [];
 }
 
 /** What to say about a process that ended without a `result` record. */

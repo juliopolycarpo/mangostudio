@@ -152,3 +152,6 @@ Commands:
   auth <subcommand>                     Manage authentication
   mcp                                   Configure and manage MCP servers
 `;
+
+/** The 2.1.260 excerpt as the line array a scripted process hands back. */
+export const CLAUDE_HELP_LINES_2_1_260: readonly string[] = CLAUDE_HELP_TEXT_2_1_260.split('\n');
