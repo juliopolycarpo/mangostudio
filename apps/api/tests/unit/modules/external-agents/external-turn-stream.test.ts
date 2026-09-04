@@ -11,7 +11,9 @@ import {
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
+import type { Kysely } from 'kysely';
 import { getDb } from '../../../../src/db/database';
+import type { Database } from '../../../../src/db/types';
 import type { OwnedChatRecord } from '../../../../src/modules/chats/infrastructure/chat-repository';
 import { createExternalApprovalRegistry } from '../../../../src/modules/external-agents/application/external-approval-registry';
 import { acknowledgeExternalDisclosure } from '../../../../src/modules/external-agents/application/external-disclosure-gate';
@@ -1090,4 +1092,72 @@ describe('attachments the vendor wire cannot carry', () => {
     expect(result.failure.kind).toBe('unsupported');
     expect(result.failure.message).toMatch(/only take image attachments/i);
   });
+
+  /**
+   * An id this chat does not own is the user's request being wrong, so it keeps
+   * the sentence about the upload.
+   */
+  it('blames the upload for an attachment this chat does not own', async () => {
+    const { stream } = imageHarness();
+
+    const result = await stream(sendWith([crypto.randomUUID()]), getDb());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.kind).toBe('validation');
+    expect(result.failure.message).toMatch(/could not be read/i);
+  });
+
+  /**
+   * A database that is down is not the file being wrong.
+   *
+   * Blaming it on the upload sends the user to re-attach a file that was never
+   * the problem, and says nothing to whoever has to find out why the machine
+   * stopped answering — so it follows `configuration_unresolved`: logged, and
+   * `unavailable`.
+   */
+  it('does not blame the upload for a failure that is not about one', async () => {
+    const { stream } = imageHarness();
+    const id = await insertAttachment();
+
+    const result = await stream(
+      sendWith([id]),
+      new UnreadableAttachmentsDb(getDb(), new Error('database is locked')).asDb()
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.kind).toBe('unavailable');
+    expect(result.failure.message).not.toMatch(/could not be read/i);
+  });
 });
+
+/**
+ * A database whose attachment read fails the way an unreachable disk or a
+ * dropped connection does: an ordinary error, not one of the two named
+ * refusals that are actually about an upload.
+ *
+ * Only `chat_attachments` fails, so everything the preflight does before
+ * reaching the attachments still runs against the real database.
+ */
+class UnreadableAttachmentsDb {
+  constructor(
+    private readonly inner: Kysely<Database>,
+    private readonly failure: Error
+  ) {}
+
+  asDb(): Kysely<Database> {
+    return new Proxy(this.inner, {
+      get: (target, property, receiver) => {
+        if (property === 'selectFrom') {
+          return (table: keyof Database) => {
+            if (table === 'chat_attachments') throw this.failure;
+            return target.selectFrom(table);
+          };
+        }
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    }) as Kysely<Database>;
+  }
+}

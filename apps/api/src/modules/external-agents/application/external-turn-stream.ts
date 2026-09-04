@@ -38,7 +38,11 @@ import type {
   ExternalAgentAttachmentRefusal,
   ExternalAgentAttachmentResolution,
 } from '../../attachments/application/runtime-attachment-resolver';
-import { resolveExternalAgentAttachments } from '../../attachments/application/runtime-attachment-resolver';
+import {
+  ChatAttachmentFileUnavailableError,
+  resolveExternalAgentAttachments,
+} from '../../attachments/application/runtime-attachment-resolver';
+import { ChatAttachmentNotFoundError } from '../../attachments/infrastructure/attachment-repository';
 import { getOwnedChat, type OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import { findActiveTurnByChat } from '../../generation/application/active-turn-registry';
 import { KEEPALIVE_INTERVAL_MS } from '../../generation/application/sse-keepalive';
@@ -270,10 +274,32 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
           },
           db
         );
-      } catch {
+      } catch (error) {
+        // "Could not be read" is a sentence about the upload, so only the two
+        // errors that are actually about one may say it. A database that is
+        // down or a disk that is gone is not the user's file being wrong, and
+        // blaming it on the upload sends them to re-attach a file that was
+        // never the problem — and, unlogged, leaves nothing behind saying
+        // otherwise.
+        if (
+          error instanceof ChatAttachmentNotFoundError ||
+          error instanceof ChatAttachmentFileUnavailableError
+        ) {
+          return {
+            ok: false,
+            failure: { kind: 'validation', message: 'One or more attachments could not be read.' },
+          };
+        }
+        logger.warn('attachments_unresolved', {
+          chatId: input.chatId,
+          error: error instanceof Error ? error.message : 'unknown error',
+        });
         return {
           ok: false,
-          failure: { kind: 'validation', message: 'One or more attachments could not be read.' },
+          failure: {
+            kind: 'unavailable',
+            message: 'Could not reach the machine this chat runs on.',
+          },
         };
       }
       if (!resolved.ok) {
