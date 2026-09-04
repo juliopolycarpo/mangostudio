@@ -186,6 +186,9 @@ describe('external turn boundaries', () => {
       'activity_updated',
       'approval_requested',
       'approval_resolved',
+      // Observational like the rest: the vendor saying it stopped the turn
+      // early. It asks the hub for nothing and has no payload to ask with.
+      'cancelled',
       // Names the user may type. It asks the hub to run nothing, and the hub
       // does not resolve one — the vendor expands it on the next prompt.
       'commands_available',

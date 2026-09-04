@@ -646,4 +646,45 @@ describe('stream state sealing', () => {
 
     expect(state.sealed).toBe(false);
   });
+
+  /**
+   * The turn header names the model the hub actually resolved (#816).
+   *
+   * Without this the client can only guess from what it *requested*, which is
+   * nothing when the user never opened the picker — so the live view said
+   * "Claude Code" and the same turn said a model id after a reload.
+   */
+  it('names the model the hub announced for an external turn', () => {
+    const state = reduceChunks([
+      {
+        type: 'external_session_started',
+        sessionId: 'hub-session-1',
+        targetId: 'claude',
+        resumed: false,
+        model: 'opus',
+        done: false,
+      },
+    ]);
+
+    // Asserted on the chunk that carries it: `aiMessageUpdate` is the patch for
+    // one chunk, not an accumulation, and the consumer applies each in turn.
+    expect(state.aiMessageUpdate?.patch.modelName).toBe('opus');
+  });
+
+  it('leaves the header alone when the hub announced no model', () => {
+    // The vendor's own default, which the hub does not name either. The header
+    // renders the bare target id as the vendor's localized name, so inventing
+    // one here would be worse than saying nothing.
+    const state = reduceChunks([
+      {
+        type: 'external_session_started',
+        sessionId: 'hub-session-1',
+        targetId: 'claude',
+        resumed: false,
+        done: false,
+      },
+    ]);
+
+    expect(state.aiMessageUpdate?.patch.modelName).toBeUndefined();
+  });
 });

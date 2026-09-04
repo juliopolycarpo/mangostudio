@@ -325,6 +325,31 @@ describe('ExternalTurnTranscript', () => {
   });
 
   /**
+   * A user pressing Stop must never read "The agent stopped this turn."
+   *
+   * That is the mirror of the lie `interrupted` exists to prevent, and it is
+   * reachable: the hub terminates on cancel, and the vendor's own
+   * `cancelled` + `completed` pair arrives immediately afterwards as the
+   * process winds down. First-terminal-writer-wins is what keeps the user's
+   * own action as the recorded reason, so it is asserted rather than assumed.
+   */
+  it('keeps a hub cancel as the reason when the vendor then reports its own', () => {
+    const target = transcript();
+    target.finalize('cancelled-by-user', 3_000);
+    feed(target, [{ type: 'cancelled' }, { type: 'completed' }]);
+
+    expect(target.turnPart.terminalReason).toBe('cancelled-by-user');
+  });
+
+  it('records a vendor-initiated stop as interrupted, not as the user stopping', () => {
+    const target = transcript();
+    feed(target, [{ type: 'cancelled' }, { type: 'completed' }]);
+
+    expect(target.turnPart.terminalReason).toBe('interrupted');
+    expect(target.turnPart.status).toBe('terminal');
+  });
+
+  /**
    * A cancel is a controller-driven `finalize`, not a vendor `completed`
    * event through `apply` — the empty-block drop has to be inside `finalize`
    * itself, not something only the `completed`/`error` cases in `apply` do.

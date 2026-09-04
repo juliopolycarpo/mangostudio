@@ -10,9 +10,12 @@ import {
   SshFailureReasonSchema,
 } from '../../src/environments';
 import {
+  ExternalAgentRemedyKindSchema,
   ExternalAgentUnavailableReasonSchema,
   ExternalApprovalRoutingSchema,
   ExternalPermissionLevelSchema,
+  ExternalPermissionPresetIdSchema,
+  ExternalTurnTerminalReasonSchema,
 } from '../../src/external-agents';
 import {
   GithubCheckBucketSchema,
@@ -144,6 +147,21 @@ const ENUM_COVERAGE = [
     blocks: [en.externalAgents.unavailable, ptBR.externalAgents.unavailable],
   },
   {
+    // How a turn ended is the sentence a reader gets instead of the transcript
+    // they expected. A member with no copy renders as nothing at all, and this
+    // union had no coverage entry until `interrupted` was added to it.
+    path: 'externalAgents.turn.terminal',
+    values: literalValues(ExternalTurnTerminalReasonSchema),
+    blocks: [en.externalAgents.turn.terminal, ptBR.externalAgents.turn.terminal],
+  },
+  {
+    // A remedy with no copy is a button with no label on the one row that has
+    // something actionable to say.
+    path: 'externalAgents.remedy',
+    values: literalValues(ExternalAgentRemedyKindSchema),
+    blocks: [en.externalAgents.remedy, ptBR.externalAgents.remedy],
+  },
+  {
     path: 'externalAgents.permission.level',
     values: literalValues(ExternalPermissionLevelSchema),
     blocks: [en.externalAgents.permission.level, ptBR.externalAgents.permission.level],
@@ -152,6 +170,23 @@ const ENUM_COVERAGE = [
     path: 'externalAgents.permission.routing',
     values: literalValues(ExternalApprovalRoutingSchema),
     blocks: [en.externalAgents.permission.routing, ptBR.externalAgents.permission.routing],
+  },
+  {
+    // A preset with no copy is an unlabelled row in the one control a
+    // non-expert is meant to use, so both blocks are pinned to the union.
+    path: 'externalAgents.permission.preset',
+    values: literalValues(ExternalPermissionPresetIdSchema),
+    blocks: [en.externalAgents.permission.preset, ptBR.externalAgents.permission.preset],
+  },
+  {
+    // The per-vendor one-liner, which is the whole reason a preset can be
+    // honest: `careful` is a sandbox for Codex and plan mode for Claude.
+    path: 'externalAgents.permission.presetVendor',
+    values: literalValues(ExternalPermissionPresetIdSchema),
+    blocks: [
+      en.externalAgents.permission.presetVendor,
+      ptBR.externalAgents.permission.presetVendor,
+    ],
   },
   {
     // The GitHub panel renders every one of gh's vocabularies as a chip or a

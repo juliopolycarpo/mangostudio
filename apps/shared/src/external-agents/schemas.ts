@@ -43,6 +43,23 @@ function VendorText(limit: ExternalTextLimit, options?: { minLength?: number }) 
 }
 
 /**
+ * One vendor-chosen identifier a client may send or a chat may store.
+ *
+ * A model id and an effort id are both this: opaque strings the vendor minted
+ * and will be handed back, never a MangoStudio enum. Exported so the wire shape
+ * (`ExternalTurnRequestSchema`), the persisted shape
+ * (`ChatRunnerModelSelectionSchema`) and the descriptor's catalog all bound the
+ * same value the same way — three spellings of one bound is how a value that
+ * fits in a request ends up rejected on its way to the row that must hold it.
+ *
+ * Bounding is all this does. It is deliberately **not** a claim that the value
+ * names anything: no catalog is reachable from here, so whether a vendor still
+ * offers this model is decided at send time, and whether it is safe to put on a
+ * command line is decided by the adapter that builds one.
+ */
+export const ExternalVendorIdSchema = VendorText('vendorId', { minLength: 1 });
+
+/**
  * Which external agent. Exactly `Exclude<LibraryTargetId, 'mangostudio'>`,
  * restated rather than derived so this context does not depend on `library`;
  * `tests/unit/external-agents.test.ts` holds both halves together with a
@@ -172,7 +189,7 @@ export const ExternalSupportedConfigurationSchema = Type.Object(
     /** i18n key explaining the refusal. Present only when `supported` is false. */
     unsupportedReasonKey: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     /** The vendor's own id for this combination, when discovered rather than declared. */
-    vendorId: Type.Optional(VendorText('vendorId', { minLength: 1 })),
+    vendorId: Type.Optional(ExternalVendorIdSchema),
     /** True when choosing this lets the agent act without asking. Drives the UI warning. */
     unattended: Type.Boolean(),
   },
@@ -205,7 +222,7 @@ export type ExternalIdentityIsolation = Static<typeof ExternalIdentityIsolationS
 /** One vendor-defined reasoning choice retained without flattening it to a MangoStudio enum. */
 export const ExternalAgentReasoningEffortSchema = Type.Object(
   {
-    id: VendorText('vendorId', { minLength: 1 }),
+    id: ExternalVendorIdSchema,
     displayName: Type.Optional(VendorText('title', { minLength: 1 })),
     description: Type.Optional(VendorText('detail')),
   },
@@ -217,7 +234,7 @@ export type ExternalAgentReasoningEffort = Static<typeof ExternalAgentReasoningE
 /** A model as the vendor advertised it, including the per-model reasoning catalog. */
 export const ExternalAgentModelSchema = Type.Object(
   {
-    id: VendorText('vendorId', { minLength: 1 }),
+    id: ExternalVendorIdSchema,
     displayName: Type.Optional(VendorText('title', { minLength: 1 })),
     description: Type.Optional(VendorText('detail')),
     isDefault: Type.Optional(Type.Boolean()),
@@ -234,7 +251,7 @@ export const ExternalAgentModelSchema = Type.Object(
         uniqueItems: true,
       })
     ),
-    defaultReasoningEffort: Type.Optional(VendorText('vendorId', { minLength: 1 })),
+    defaultReasoningEffort: Type.Optional(ExternalVendorIdSchema),
     serviceTiers: Type.Optional(
       ReadonlyArraySchema(Type.String({ minLength: 1, maxLength: 128 }), {
         maxItems: 32,
@@ -254,8 +271,8 @@ export const ExternalAgentModelCatalogSchema = ReadonlyArraySchema(ExternalAgent
 /** Settings that can be changed between turns without adopting a new session. */
 export const ExternalAgentConfigurationSchema = Type.Object(
   {
-    model: Type.Optional(VendorText('vendorId', { minLength: 1 })),
-    effort: Type.Optional(VendorText('vendorId', { minLength: 1 })),
+    model: Type.Optional(ExternalVendorIdSchema),
+    effort: Type.Optional(ExternalVendorIdSchema),
     level: ExternalPermissionLevelSchema,
     routing: ExternalApprovalRoutingSchema,
     workspaceRoots: ReadonlyArraySchema(Type.String({ minLength: 1, maxLength: 4_096 }), {
@@ -268,13 +285,29 @@ export const ExternalAgentConfigurationSchema = Type.Object(
 
 export type ExternalAgentConfiguration = Static<typeof ExternalAgentConfigurationSchema>;
 
+/**
+ * The largest attachment the vendor wire carries, and how many of them.
+ *
+ * Exported because the send path has to refuse an oversized or overlong set
+ * *before* the response is committed. A chat attachment may be far larger than
+ * this — the upload cap is 20 MB and a turn may name twenty of them — and the
+ * only thing standing between that and a stream that opens and then dies is a
+ * check on this side that measures against the same two numbers the runtime's
+ * own schema does.
+ */
+export const EXTERNAL_ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024;
+export const EXTERNAL_TURN_MAX_ATTACHMENTS = 4;
+
+/** Base64 is four characters per three bytes, rounded up to the padded block. */
+const EXTERNAL_ATTACHMENT_MAX_BASE64_LENGTH = 4 * Math.ceil(EXTERNAL_ATTACHMENT_MAX_BYTES / 3);
+
 /** Bytes for one hub-owned attachment crossing to the machine that runs the vendor. */
 export const ExternalAgentAttachmentSchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 256 }),
     originalName: Type.String({ minLength: 1, maxLength: 512 }),
     mimeType: Type.String({ minLength: 1, maxLength: 255 }),
-    sizeBytes: Type.Integer({ minimum: 1, maximum: 2 * 1024 * 1024 }),
+    sizeBytes: Type.Integer({ minimum: 1, maximum: EXTERNAL_ATTACHMENT_MAX_BYTES }),
     kind: Type.Union([
       Type.Literal('image'),
       Type.Literal('text'),
@@ -282,7 +315,10 @@ export const ExternalAgentAttachmentSchema = Type.Object(
       Type.Literal('data'),
       Type.Literal('unknown'),
     ]),
-    bytesBase64: Type.String({ minLength: 1, maxLength: 2_796_204 }),
+    bytesBase64: Type.String({
+      minLength: 1,
+      maxLength: EXTERNAL_ATTACHMENT_MAX_BASE64_LENGTH,
+    }),
   },
   { additionalProperties: false }
 );
@@ -785,6 +821,19 @@ export const ExternalAgentEventSchema = Type.Union([
     { type: Type.Literal('account_limits'), limits: ExternalAccountLimitsSchema },
     { additionalProperties: false }
   ),
+  /**
+   * The vendor stopped the turn of its own accord.
+   *
+   * A **marker, not a terminal**: it is emitted immediately before `completed`
+   * and never instead of it, and that ordering is the whole compatibility
+   * argument. The capability manifest travels runtime→hub only, so a runtime
+   * cannot know whether the hub in front of it understands a new event kind. A
+   * *terminal* kind an older hub does not recognize is consumed and dropped, so
+   * the turn never ends — exactly the failure #988 records. A non-terminal
+   * marker followed by the `completed` that hub already understands degrades to
+   * the pre-#810 rendering instead of hanging.
+   */
+  Type.Object({ type: Type.Literal('cancelled') }, { additionalProperties: false }),
   Type.Object({ type: Type.Literal('completed') }, { additionalProperties: false }),
   Type.Object(
     { type: Type.Literal('error'), error: ExternalAgentErrorSchema },
@@ -839,9 +888,64 @@ export const ExternalAgentUnavailableReasonSchema = Type.Union([
    * acknowledgement can be revoked while a stale one is still being rendered.
    */
   Type.Literal('disclosure-required'),
+  /**
+   * The agent is installed, signed in and answering — and supports none of the
+   * permission combinations MangoStudio offers.
+   *
+   * Inferred by the hub from the matrix the adapter returned, never reported by
+   * an adapter: each one already states, per cell, why that cell is refused,
+   * and this is what "every cell" adds up to. Without it such a target looks
+   * simply selectable until a send is refused, which is the shape #813
+   * describes.
+   */
+  Type.Literal('installed-but-unusable'),
 ]);
 
 export type ExternalAgentUnavailableReason = Static<typeof ExternalAgentUnavailableReasonSchema>;
+
+/**
+ * What MangoStudio can offer to fix an agent that cannot run.
+ *
+ * The shape lives here with the reason it answers; which reason maps to which
+ * remedy is policy and lives in `remedies.ts`. A greyed row that says *why* is
+ * already better than one that says nothing and is still a diagnosis — the
+ * person reading it wants the next step, named as something the interface can
+ * render as a control.
+ */
+export const ExternalAgentRemedyKindSchema = Type.Union([
+  /** The CLI is not on this machine; an install recipe exists for it. */
+  Type.Literal('install'),
+  /** It is installed but too old for the contract this runtime drives. */
+  Type.Literal('update'),
+  /** It is installed and current; the vendor account is not signed in. */
+  Type.Literal('sign-in'),
+  /** Nothing the user can do from here — the machine's owner decides. */
+  Type.Literal('contact-admin'),
+  /** MangoStudio is asking for something, and the dialog is already reachable. */
+  Type.Literal('accept-disclosure'),
+  /** Knowably unfixable from the interface, so no control is offered. */
+  Type.Literal('none'),
+]);
+
+export type ExternalAgentRemedyKind = Static<typeof ExternalAgentRemedyKindSchema>;
+
+export const ExternalAgentRemedySchema = Type.Object(
+  {
+    kind: ExternalAgentRemedyKindSchema,
+    /**
+     * A command to run, when the remedy has one and MangoStudio cannot run it.
+     *
+     * The vendor's own sign-in command is the case this exists for. An install
+     * or update is *not*: those resolve to a recipe the environments surface
+     * already owns, and a second copy of the command string here would be one
+     * more thing to keep in step with it.
+     */
+    command: Type.Optional(ExternalVendorIdSchema),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalAgentRemedy = Static<typeof ExternalAgentRemedySchema>;
 
 export const EXTERNAL_AGENT_UNAVAILABLE_REASONS: readonly ExternalAgentUnavailableReason[] =
   ExternalAgentUnavailableReasonSchema.anyOf.map((literal) => literal.const);
@@ -933,6 +1037,15 @@ export const ExternalAgentDescriptorSchema = Type.Object(
     models: Type.Optional(ExternalAgentModelCatalogSchema),
     account: Type.Optional(ExternalAgentAccountSchema),
     unavailableReason: Type.Optional(ExternalAgentUnavailableReasonSchema),
+    /**
+     * What would fix it, when it cannot run.
+     *
+     * Travels beside the reason rather than being derived by each renderer:
+     * three call sites each falling through to "no action" is how a newly added
+     * reason silently becomes a dead end. Absent exactly when
+     * `unavailableReason` is.
+     */
+    remedy: Type.Optional(ExternalAgentRemedySchema),
     discovery: Type.Optional(ExternalAgentDiscoveryReportSchema),
   },
   { additionalProperties: false }
@@ -1030,7 +1143,10 @@ export const ExternalAgentTurnParamsSchema = Type.Object(
     input: Type.String({ maxLength: 1024 * 1024 }),
     configuration: ExternalAgentConfigurationSchema,
     attachments: Type.Optional(
-      ReadonlyArraySchema(ExternalAgentAttachmentSchema, { maxItems: 4, uniqueItems: true })
+      ReadonlyArraySchema(ExternalAgentAttachmentSchema, {
+        maxItems: EXTERNAL_TURN_MAX_ATTACHMENTS,
+        uniqueItems: true,
+      })
     ),
   },
   { additionalProperties: false }
@@ -1230,6 +1346,15 @@ export type ExternalSessionAdoptionRequest = Static<typeof ExternalSessionAdopti
 export const ExternalTurnTerminalReasonSchema = Type.Union([
   Type.Literal('completed'),
   Type.Literal('cancelled-by-user'),
+  /**
+   * The **vendor** stopped the turn, not the user.
+   *
+   * Separate from `cancelled-by-user` because that one's copy is literally
+   * "You stopped this turn", which is a lie for a vendor-initiated interrupt.
+   * Before this, such a turn was reported as an error — a red failure for
+   * something that merely stopped early (#812).
+   */
+  Type.Literal('interrupted'),
   /** The vendor reported a failure; the structured error survives on the turn. */
   Type.Literal('vendor-error'),
   Type.Literal('runtime-disconnected'),

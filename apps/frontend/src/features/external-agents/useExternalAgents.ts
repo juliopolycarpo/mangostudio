@@ -9,7 +9,9 @@
 import type {
   ExternalAgentDescriptor,
   ExternalAgentTargetId,
+  ExternalAgentUnavailableReason,
 } from '@mangostudio/shared/external-agents';
+import type { Messages } from '@mangostudio/shared/i18n';
 import { ENVIRONMENTS_TOPIC, EXTERNAL_AGENTS_TOPIC } from '@mangostudio/shared/realtime';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
@@ -57,6 +59,29 @@ export function useExternalAgents(environmentId: string | null): ExternalAgentsV
  * disabling on it would make an installed, signed-in agent unusable. `signed-out`
  * is a verdict, and is not selectable.
  */
+/**
+ * The sentence for an unavailable reason, with `{version}` filled in.
+ *
+ * `version-unsupported` is the one reason whose copy names a build, and not
+ * every caller has one to name: the selector reads the adapter's pin off the
+ * descriptor, while a send refusal carries only the reason. Both go through
+ * here so a missing version degrades to the same readable fallback instead of
+ * printing a literal placeholder.
+ *
+ * @example
+ * externalUnavailableText('version-unsupported', t, descriptor.requiredVersion);
+ */
+export function externalUnavailableText(
+  reason: ExternalAgentUnavailableReason,
+  t: Messages,
+  requiredVersion?: string
+): string {
+  return t.externalAgents.unavailable[reason].replace(
+    '{version}',
+    requiredVersion ?? t.externalAgents.selector.unknownVersion
+  );
+}
+
 export function externalAgentSelectable(descriptor: ExternalAgentDescriptor): boolean {
   // `disclosure-required` is the one reason the user can clear from here, so it
   // must not disable the row: the notice is reached by picking the agent, and a

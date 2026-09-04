@@ -45,6 +45,8 @@ export interface ExternalStreamSession {
   readonly targetId: ExternalAgentTargetId;
   readonly resumed: boolean;
   readonly fallbackReason?: string;
+  /** The model the hub resolved, when it resolved one. */
+  readonly model?: string;
 }
 
 /**
@@ -67,6 +69,7 @@ export function externalSessionStartedChunk(session: ExternalStreamSession): Str
     targetId: session.targetId,
     resumed: session.resumed,
     ...(session.fallbackReason !== undefined ? { fallbackReason: session.fallbackReason } : {}),
+    ...(session.model !== undefined ? { model: session.model } : {}),
     done: false,
   };
 }
@@ -114,10 +117,13 @@ export function externalSteerChunk(
  *
  * - `session_started` carries the vendor's resumable handle and is announced
  *   instead through {@link externalSessionStartedChunk} with the hub's id.
- * - `completed` is one of nine ways a turn ends, and the hub decides seven of
+ * - `completed` is one of ten ways a turn ends, and the hub decides eight of
  *   them, so the terminal state is announced once through
  *   {@link externalTurnCompletedChunk} instead of twice with different
  *   vocabularies.
+ * - `cancelled` is dropped for the same reason and not a different one: it is
+ *   a *marker* the vendor stopped early, read by whoever decides the terminal
+ *   reason, and the `completed` right behind it is what announces the end.
  */
 export function externalAgentEventToStreamChunk(
   event: ExternalAgentEvent,
@@ -125,6 +131,7 @@ export function externalAgentEventToStreamChunk(
 ): StreamChunk | null {
   switch (event.type) {
     case 'session_started':
+    case 'cancelled':
     case 'completed':
       return null;
 

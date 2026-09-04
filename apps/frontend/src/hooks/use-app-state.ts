@@ -34,8 +34,22 @@ export function useAppState() {
     addRecentWorkdir: settings.addRecentWorkdir,
   });
 
-  const { externalTurnRequest, setExternalTurnRequest, getExternalTurnRequest } =
-    useExternalTurnRequest(chats.currentChatId);
+  // What the chat itself stored, so a model picked for this repository is back
+  // after a reload. The hub resolves the per-target default below this, so the
+  // composer shows the chat's own choice and nothing is written for merely
+  // opening one.
+  const {
+    externalTurnRequest,
+    setExternalTurnRequest,
+    reconcileExternalTurnRequest,
+    getExternalTurnRequest,
+  } = useExternalTurnRequest(chats.currentChatId, {
+    ...(currentChat?.runnerModelSelection ? { stored: currentChat.runnerModelSelection } : {}),
+    // Handed the chat the pick was made in, and allowed to reject: the hook
+    // coalesces a pick into one write and takes the selection back when that
+    // write fails.
+    persist: chats.updateChatRunnerModelSelection,
+  });
 
   // Read through a ref for the same reason the vendor options are: the send
   // path has to see the runner the composer shows now, not the one it showed
@@ -93,6 +107,7 @@ export function useAppState() {
     runnerPermissions: runnerSelection.runnerPermissions,
     externalTurnRequest,
     setExternalTurnRequest,
+    reconcileExternalTurnRequest,
     selectedAgentId: runnerSelection.selectedAgentId,
     agents: runnerSelection.agents,
     isAgentListLoading: runnerSelection.isAgentListLoading,

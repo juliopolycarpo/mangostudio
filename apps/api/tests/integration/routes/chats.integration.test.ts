@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Chat } from '@mangostudio/shared/chat';
 import { getDb } from '../../../src/db/database';
 import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
 import { createTurnCheckpointPart } from '../../../src/modules/generation/application/turn-checkpoint';
@@ -500,6 +501,92 @@ describe('PUT /chats/:id', () => {
         .where('id', '=', chatId)
         .executeTakeFirst()
     ).toEqual({ runnerPermissionLevel: 'read-only', runnerApprovalRouting: 'user' });
+  });
+
+  /**
+   * The model a chat runs on outlives the tab it was picked in.
+   *
+   * Until this, the choice lived only in the composer's in-memory state, so a
+   * reload silently reverted the chat to the vendor's default while the header
+   * kept naming what the user had chosen.
+   */
+  it('persists and reads back the external model and effort', async () => {
+    const db = getDb();
+    const chatId = `model-target-${Date.now()}`;
+    await db
+      .insertInto('chats')
+      .values({
+        id: chatId,
+        title: 'Model Chat',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        model: null,
+        runnerKind: 'external',
+        runnerAgentId: null,
+        runnerTargetId: 'claude',
+        userId: TEST_USER.id,
+      })
+      .execute();
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const updated = await app.handle(
+      new Request(`http://localhost/chats/${chatId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runnerModelSelection: { model: 'opus', effort: 'high' } }),
+      })
+    );
+
+    expect(updated.status).toBe(200);
+    expect(
+      await db
+        .selectFrom('chats')
+        .select(['runnerModel', 'runnerEffort'])
+        .where('id', '=', chatId)
+        .executeTakeFirst()
+    ).toEqual({ runnerModel: 'opus', runnerEffort: 'high' });
+
+    const listed = await app.handle(new Request('http://localhost/chats'));
+    const chats = (await listed.json()) as Chat[];
+
+    expect(chats.find((candidate) => candidate.id === chatId)?.runnerModelSelection).toEqual({
+      model: 'opus',
+      effort: 'high',
+    });
+  });
+
+  /**
+   * Absent is a value here, and a different one from empty.
+   *
+   * A chat that never chose has to keep resolving to the vendor's default, so
+   * the read path must not turn two NULL columns into `{ model: null }` — a
+   * shape the client would render as a choice nobody made.
+   */
+  it('reads a chat that chose no model as having chosen none', async () => {
+    const db = getDb();
+    const chatId = `model-unset-${Date.now()}`;
+    await db
+      .insertInto('chats')
+      .values({
+        id: chatId,
+        title: 'Unset Model Chat',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        model: null,
+        userId: TEST_USER.id,
+      })
+      .execute();
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(new Request('http://localhost/chats'));
+    const chats = (await response.json()) as Chat[];
+
+    expect(response.status).toBe(200);
+    expect(chats.find((candidate) => candidate.id === chatId)?.runnerModelSelection).toEqual({});
   });
 
   it('sets and clears a validated working directory', async () => {

@@ -33,6 +33,7 @@ import {
   getAppSettings,
   updateAppSettings,
 } from '../../app-settings/application/app-settings-service';
+import { getSavedAppSettings } from '../../app-settings/infrastructure/app-settings-repository';
 
 export interface ExternalWorkspaceTrustScope {
   readonly userId: string;
@@ -52,7 +53,14 @@ export async function requiresWorkspaceTrust(
   db: Kysely<Database>
 ): Promise<boolean> {
   if (!targetLoadsWorkspaceConfiguration(scope.targetId)) return false;
-  const settings = await getAppSettings(db, scope.userId);
+  // `getSavedAppSettings` rather than `getAppSettings`, for the reason the turn
+  // configuration resolver gives: the latter first awaits
+  // `libraryLocationDefaults()`, which probes every agent CLI on the machine
+  // when its cache is cold. This gate runs on the send path, in front of a user
+  // who is watching, and the only field read here is `workspaceTrust` — which
+  // the probe has nothing to say about. Reading the row directly keeps a cold
+  // cache from turning every Cursor send into a multi-second stall.
+  const settings = await getSavedAppSettings(db, scope.userId);
   return needsWorkspaceTrust(settings.externalAgentSettings.workspaceTrust, {
     targetId: scope.targetId,
     environmentId: scope.environmentId,
@@ -80,6 +88,11 @@ export async function grantWorkspaceTrust(
   now: () => number = Date.now
 ): Promise<void> {
   if (!targetLoadsWorkspaceConfiguration(scope.targetId)) return;
+  // The full `getAppSettings` here and not on the read above: this one writes
+  // the whole settings row back, so it has to read the same defaults the write
+  // path would otherwise discard — dropping the detection-derived library
+  // locations would turn a trust grant into a silent library reconfiguration.
+  // It is also a dialog rather than a send, so the probe is affordable.
   const settings = await getAppSettings(db, scope.userId);
   const workspaceTrust = withWorkspaceTrust(
     settings.externalAgentSettings.workspaceTrust,

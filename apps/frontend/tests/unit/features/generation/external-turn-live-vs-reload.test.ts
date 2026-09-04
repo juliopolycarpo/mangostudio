@@ -96,10 +96,17 @@ function streamedParts(events: readonly ExternalAgentEvent[]): MessagePart[] {
   const chunks: StreamChunk[] = [
     externalSessionStartedChunk({ sessionId: 'hub-session-1', targetId: 'codex', resumed: false }),
   ];
+  // The hub decides the terminal reason from the whole event stream, so the
+  // live path has to make the same decision the transcript does: a `cancelled`
+  // marker before the `completed` means the vendor stopped early.
+  let vendorInterrupted = false;
   for (const event of events) {
     const chunk = externalAgentEventToStreamChunk(event);
     if (chunk) chunks.push(chunk);
-    if (event.type === 'completed') chunks.push(externalTurnCompletedChunk('completed'));
+    if (event.type === 'cancelled') vendorInterrupted = true;
+    if (event.type === 'completed') {
+      chunks.push(externalTurnCompletedChunk(vendorInterrupted ? 'interrupted' : 'completed'));
+    }
   }
   const state = chunks.reduce(
     (current, chunk) => reduceTextGenerationStreamChunk(current, chunk, REDUCER_OPTIONS),
@@ -349,6 +356,30 @@ describe('external turn: live stream vs reloaded transcript', () => {
       .filter((part) => part.type === 'text')
       .at(-1);
     expect(text).not.toHaveProperty('incomplete');
+  });
+
+  /**
+   * A vendor-interrupted turn, which used to be reported as an error (#812).
+   *
+   * The sequence is what a real Codex interrupt now produces: a `cancelled`
+   * marker followed by the `completed` that ends the turn. Both paths have to
+   * reach `interrupted` — "You stopped this turn" would be a lie and
+   * "Finished." would be a different one.
+   */
+  it('agrees that a vendor-interrupted turn ended, and not in failure', () => {
+    const interrupted: ExternalAgentEvent[] = [
+      { type: 'text_delta', text: 'partial answer' },
+      { type: 'cancelled' },
+      { type: 'completed' },
+    ];
+
+    expect(comparable(streamedParts(interrupted))).toEqual(comparable(storedParts(interrupted)));
+    // No error part on either path: stopping early is not failing.
+    expect(streamedParts(interrupted).some((part) => part.type === 'error')).toBe(false);
+    expect(storedParts(interrupted).find((part) => part.type === 'external_turn')).toMatchObject({
+      status: 'terminal',
+      terminalReason: 'interrupted',
+    });
   });
 
   /**

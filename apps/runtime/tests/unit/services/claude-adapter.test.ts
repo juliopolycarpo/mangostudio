@@ -138,6 +138,65 @@ describe('buildTurnArgv', () => {
     expect(hostile).not.toContain('--model');
     expect(hostile.join(' ')).not.toContain('dangerously-skip-permissions');
   });
+
+  /**
+   * `--effort` is admitted by membership in what the binary printed, not by
+   * pattern. The vendor publishes the complete list, so there is no reason to
+   * accept a shape and hope — and a stored per-chat effort outlives the install
+   * that produced it, which is exactly when a downgrade would otherwise put an
+   * unknown token on the command line.
+   */
+  it('passes an effort level this build declared', () => {
+    const withEffort = argv({
+      ...base,
+      session: { ...base.session, acceptedEfforts: new Set(['low', 'high']) },
+      configuration: { ...CONFIGURATION, effort: 'high' },
+    });
+
+    expect(withEffort[withEffort.indexOf('--effort') + 1]).toBe('high');
+  });
+
+  it('drops an effort level this build did not declare', () => {
+    expect(
+      argv({
+        ...base,
+        session: { ...base.session, acceptedEfforts: new Set(['low', 'high']) },
+        configuration: { ...CONFIGURATION, effort: 'ultracode' },
+      })
+    ).not.toContain('--effort');
+  });
+
+  /**
+   * The flag is pinning, not a fix: 2.1.260 with the default `host` and stdin
+   * closed already denies immediately rather than parking. What it buys is that
+   * the property survives another default change.
+   */
+  it('tells a build that offers the flag that nobody answers prompts', () => {
+    const pinned = argv({ ...base, session: { ...base.session, declaresPermissionPrompts: true } });
+
+    expect(pinned[pinned.indexOf('--permission-prompts') + 1]).toBe('none');
+  });
+
+  it('never claims a host answers prompts, because none does', () => {
+    // `host` promises an answering SDK host. `interactiveApprovals` is false,
+    // so saying it would park every approval-needing turn until the timeout.
+    expect(
+      argv({ ...base, session: { ...base.session, declaresPermissionPrompts: true } })
+    ).not.toContain('host');
+  });
+
+  it('omits the flag on a build that does not declare it', () => {
+    // 2.1.211–2.1.258. An undeclared flag is a startup failure on every turn.
+    expect(argv(base)).not.toContain('--permission-prompts');
+  });
+
+  it('passes no effort at all to a build that declared none', () => {
+    // Every build before 2.1.259. Absent is not empty, and it is the reason a
+    // chat that stored an effort keeps working after a downgrade.
+    expect(argv({ ...base, configuration: { ...CONFIGURATION, effort: 'high' } })).not.toContain(
+      '--effort'
+    );
+  });
 });
 
 describe('safeClaudeModel', () => {

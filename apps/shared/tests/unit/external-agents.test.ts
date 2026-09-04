@@ -9,6 +9,7 @@ import {
   EXTERNAL_STEER_REJECTION_REASONS,
   EXTERNAL_TEXT_LIMITS,
   EXTERNAL_TURN_PAYLOAD_MAX_BYTES,
+  EXTERNAL_VENDOR_ID_MAX_LENGTH,
   ExternalAccountLimitsSchema,
   ExternalAgentAckResultSchema,
   ExternalAgentCancelParamsSchema,
@@ -34,9 +35,12 @@ import {
   ExternalAgentTurnResultSchema,
   ExternalIdentityIsolationSchema,
   ExternalSteerRejectionReasonSchema,
+  externalRemedyFor,
   NO_EXTERNAL_AGENT_CAPABILITIES,
   normalizeApprovalRouting,
   normalizePermissionLevel,
+  usableVendorId,
+  vendorSelection,
 } from '../../src/external-agents';
 import type { LibraryTargetId } from '../../src/library';
 import { LibraryTargetIdSchema } from '../../src/library';
@@ -116,6 +120,10 @@ describe('external agent descriptor', () => {
       'isolation-unproven',
       'version-unsupported',
       'disclosure-required',
+      // Inferred by the hub from a matrix an adapter answered with, never
+      // reported by one: each adapter knows why its own cells are refused, not
+      // that the result leaves nothing selectable.
+      'installed-but-unusable',
     ]);
   });
 
@@ -439,6 +447,9 @@ describe('the neutral event contract', () => {
       // alone, so both halves of that disagreement are represented here.
       commands: [{ name: 'review', description: 'Read a diff' }, { name: 'compact' }],
     },
+    // Emitted immediately before `completed`, never instead of it, so a hub
+    // that predates it still ends the turn on the terminal it already knows.
+    { type: 'cancelled' },
     { type: 'completed' },
     { type: 'error', error: { code: 'stream_closed', message: 'The process exited.' } },
   ];
@@ -637,5 +648,86 @@ describe('persisted permission values', () => {
       expect(normalizePermissionLevel(stored)).toEqual({ value: 'read-only', recognized: false });
       expect(normalizeApprovalRouting(stored)).toEqual({ value: 'user', recognized: false });
     }
+  });
+});
+
+/**
+ * A greyed row that says why is a diagnosis; the person reading it wants the
+ * next step. The mapping is data rather than a `switch` per render site
+ * precisely so a new reason cannot become a dead end at three of them.
+ */
+describe('what would fix an unavailable agent', () => {
+  it('has a remedy for every reason a target can be unavailable for', () => {
+    // `satisfies` already makes this a compile error. The runtime assertion is
+    // for the values: a mapping can be rewritten while still type-checking.
+    for (const reason of EXTERNAL_AGENT_UNAVAILABLE_REASONS) {
+      expect(externalRemedyFor(reason)).toBeDefined();
+    }
+  });
+
+  it('offers nothing for a target that is fine', () => {
+    expect(externalRemedyFor(undefined)).toBeUndefined();
+  });
+
+  it("carries the vendor's own command only where running one is the remedy", () => {
+    expect(externalRemedyFor('signed-out', { loginCommand: 'claude auth login' })).toEqual({
+      kind: 'sign-in',
+      command: 'claude auth login',
+    });
+    // An install or update resolves to a recipe the environments surface owns,
+    // so repeating a command string here would be a second copy to maintain.
+    expect(externalRemedyFor('not-installed', { loginCommand: 'claude auth login' })).toEqual({
+      kind: 'install',
+    });
+  });
+
+  it('sends a machine-level problem to whoever administers the machine', () => {
+    // Not `none`: both are properties of the machine rather than of the agent,
+    // and saying who can change them beats an empty space even though
+    // MangoStudio can offer no button.
+    expect(externalRemedyFor('environment-unreachable')?.kind).toBe('contact-admin');
+    expect(externalRemedyFor('isolation-unproven')?.kind).toBe('contact-admin');
+  });
+});
+
+/**
+ * One rule, shared by the settings normalizer, the chat repository's read and
+ * write paths, and the composer. They each used to answer it themselves, and
+ * disagreed about the length bound and about trimming.
+ */
+describe('usableVendorId', () => {
+  it('keeps a trimmed id', () => {
+    expect(usableVendorId('  opus  ')).toBe('opus');
+  });
+
+  it('treats blank and non-string as no choice at all', () => {
+    // A column holding `''` is not a pick anybody made, and passing it on would
+    // put `--model ''` within reach of an adapter.
+    expect(usableVendorId('   ')).toBeUndefined();
+    expect(usableVendorId('')).toBeUndefined();
+    expect(usableVendorId(undefined)).toBeUndefined();
+    expect(usableVendorId(42)).toBeUndefined();
+  });
+
+  it('drops an id longer than the schema would accept', () => {
+    // Storing one the schema rejects turns a later save into a failure no
+    // control on screen explains.
+    expect(usableVendorId('o'.repeat(EXTERNAL_VENDOR_ID_MAX_LENGTH))).toHaveLength(
+      EXTERNAL_VENDOR_ID_MAX_LENGTH
+    );
+    expect(usableVendorId('o'.repeat(EXTERNAL_VENDOR_ID_MAX_LENGTH + 1))).toBeUndefined();
+  });
+});
+
+describe('vendorSelection', () => {
+  it('omits an unusable half rather than carrying an undefined key', () => {
+    // A key holding `undefined` survives a spread and would reach the wire.
+    const selection = vendorSelection('opus', '  ');
+    expect(selection).toEqual({ model: 'opus' });
+    expect('effort' in selection).toBe(false);
+  });
+
+  it('is empty when neither half was chosen', () => {
+    expect(vendorSelection(null, undefined)).toEqual({});
   });
 });

@@ -105,6 +105,7 @@ type ComposerRunnerProps = Pick<
   | 'externalRouting'
   | 'onExternalModelChange'
   | 'onExternalEffortChange'
+  | 'onExternalSelectionGone'
   | 'onExternalPermissionsChange'
 >;
 

@@ -318,16 +318,21 @@ export class CodexTurnReducer {
       return { events: [{ type: 'completed' }], finished: true };
     }
     const error = params.turn.error;
-    const interrupted = params.turn.status === 'interrupted';
+    // An interrupted turn is not a failed one, and reporting it as an error put
+    // a red failure in the transcript for something that merely stopped early
+    // (#812). The pair below is deliberate and its order is load-bearing: the
+    // marker says *why*, and the `completed` behind it is the terminal a hub
+    // that predates the marker already knows how to end a turn on.
+    if (params.turn.status === 'interrupted') {
+      return { events: [{ type: 'cancelled' }, { type: 'completed' }], finished: true };
+    }
     return {
       events: [
         {
           type: 'error',
           error: {
-            code: interrupted ? 'vendor-turn-interrupted' : 'vendor-turn-failed',
-            message:
-              error?.message ??
-              (interrupted ? 'Codex interrupted the turn.' : 'The Codex turn failed.'),
+            code: 'vendor-turn-failed',
+            message: error?.message ?? 'The Codex turn failed.',
             ...(error?.codexErrorInfo ? { vendorCode: codexErrorCode(error.codexErrorInfo) } : {}),
           },
         },

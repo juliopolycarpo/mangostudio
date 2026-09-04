@@ -19,6 +19,7 @@ import {
   type ExternalAgentSettings,
   type ExternalWorkspaceTrust,
   isExternalAgentTargetId,
+  vendorSelection,
 } from '../external-agents';
 import {
   COMMIT_MESSAGE_MAX_DIFF_KB_DEFAULT,
@@ -706,15 +707,24 @@ export function normalizeExternalApiSettings(value: unknown): ExternalApiSetting
 function normalizeExternalAgentSettings(value: unknown): ExternalAgentSettings {
   if (!isRecord(value)) return DEFAULT_EXTERNAL_AGENT_SETTINGS;
 
-  // The two fields are independent records of two different questions, so a
-  // missing or malformed `disclosures` is not a reason to forget which
-  // workspaces the user trusted.
-  const workspaceTrust = normalizeWorkspaceTrust(value.workspaceTrust);
-  if (!isRecord(value.disclosures)) return { disclosures: {}, workspaceTrust };
+  // The three fields are independent records of three unrelated questions —
+  // what the user was told, which workspaces they trusted, what each vendor
+  // should run — so one being unreadable is never a reason to forget the
+  // others. Each is normalized on its own; there is deliberately no early
+  // return, which is how a malformed `disclosures` used to discard everything
+  // beside it.
+  return {
+    disclosures: normalizeDisclosures(value.disclosures),
+    workspaceTrust: normalizeWorkspaceTrust(value.workspaceTrust),
+    defaults: normalizeExternalAgentDefaults(value.defaults),
+  };
+}
 
+function normalizeDisclosures(value: unknown): ExternalAgentSettings['disclosures'] {
+  if (!isRecord(value)) return {};
   const disclosures: ExternalAgentSettings['disclosures'] = {};
   for (const targetId of EXTERNAL_AGENT_TARGET_IDS) {
-    const entry = value.disclosures[targetId];
+    const entry = value[targetId];
     if (!isRecord(entry)) continue;
     const { version, acceptedAt, capabilitiesFingerprint } = entry;
     if (!Number.isInteger(version) || (version as number) < 1) continue;
@@ -732,7 +742,32 @@ function normalizeExternalAgentSettings(value: unknown): ExternalAgentSettings {
       capabilitiesFingerprint,
     };
   }
-  return { disclosures, workspaceTrust };
+  return disclosures;
+}
+
+/**
+ * Keeps only per-target defaults that are usable vendor ids.
+ *
+ * Same rule as the disclosures above and for the same reason — a value the
+ * settings PUT would reject must not survive a read, or the next save fails for
+ * a reason no control on screen explains. What differs is what "unusable"
+ * costs: a dropped default falls through to the vendor's own, which is a
+ * working turn, so there is no restrictive substitute to reach for.
+ *
+ * An entry with neither field is omitted rather than stored empty, so "no
+ * default for this vendor" has one representation instead of two.
+ */
+function normalizeExternalAgentDefaults(value: unknown): ExternalAgentSettings['defaults'] {
+  if (!isRecord(value)) return {};
+  const defaults: NonNullable<ExternalAgentSettings['defaults']> = {};
+  for (const targetId of EXTERNAL_AGENT_TARGET_IDS) {
+    const entry = value[targetId];
+    if (!isRecord(entry)) continue;
+    const selection = vendorSelection(entry.model, entry.effort);
+    if (!selection.model && !selection.effort) continue;
+    defaults[targetId] = selection;
+  }
+  return defaults;
 }
 
 /**

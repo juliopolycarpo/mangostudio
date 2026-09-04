@@ -6,7 +6,13 @@ export {
   isExternalAccountLimitsStale,
   tightestExternalRateLimitWindow,
 } from './account-limits';
-export { parseVendorCliSurface, type VendorCliSurface } from './cli-surface';
+export {
+  parseVendorCliSurface,
+  type VendorCliSurface,
+  vendorCliBareChoiceList,
+  vendorCliOptionBlock,
+  vendorCliQuotedExamples,
+} from './cli-surface';
 export {
   DEFAULT_EXTERNAL_AGENT_SETTINGS,
   EXTERNAL_DISCLOSURE_FINGERPRINT_MAX_LENGTH,
@@ -18,6 +24,8 @@ export {
   ExternalAgentDisclosureSchema,
   type ExternalAgentSettings,
   ExternalAgentSettingsSchema,
+  type ExternalAgentTargetDefaults,
+  ExternalAgentTargetDefaultsSchema,
   type ExternalWorkspaceTrust,
   type ExternalWorkspaceTrustKey,
   ExternalWorkspaceTrustSchema,
@@ -36,15 +44,28 @@ export {
   RESTRICTIVE_PERMISSION_LEVEL,
 } from './permissions';
 export {
+  EXTERNAL_PERMISSION_PRESETS,
+  type ExternalPermissionPair,
+  type ExternalPermissionPreset,
+  type ExternalPermissionPresetId,
+  ExternalPermissionPresetIdSchema,
+  type ExternalPermissionSupport,
+  externalPresetFor,
+  externalPresetPair,
+} from './presets';
+export { EXTERNAL_AGENT_REMEDIES, externalRemedyFor } from './remedies';
+export {
   EXTERNAL_ACCOUNT_LIMITS_STALE_MS,
   EXTERNAL_ACTIVITY_KINDS,
   EXTERNAL_AGENT_TARGET_IDS,
   EXTERNAL_AGENT_UNAVAILABLE_REASONS,
   EXTERNAL_APPROVAL_ROUTINGS,
+  EXTERNAL_ATTACHMENT_MAX_BYTES,
   EXTERNAL_COMMAND_CATALOG_MAX_ITEMS,
   EXTERNAL_NATIVE_SESSION_PAGE_LIMIT,
   EXTERNAL_PERMISSION_LEVELS,
   EXTERNAL_STEER_REJECTION_REASONS,
+  EXTERNAL_TURN_MAX_ATTACHMENTS,
   EXTERNAL_TURN_TERMINAL_REASONS,
   type ExternalAccountLimits,
   ExternalAccountLimitsSchema,
@@ -113,6 +134,10 @@ export {
   ExternalAgentRefreshAccountUsageParamsSchema,
   type ExternalAgentRefreshAccountUsageResult,
   ExternalAgentRefreshAccountUsageResultSchema,
+  type ExternalAgentRemedy,
+  type ExternalAgentRemedyKind,
+  ExternalAgentRemedyKindSchema,
+  ExternalAgentRemedySchema,
   type ExternalAgentRespondParams,
   ExternalAgentRespondParamsSchema,
   type ExternalAgentResumeMode,
@@ -180,6 +205,7 @@ export {
   ExternalTurnTerminalReasonSchema,
   type ExternalUsage,
   ExternalUsageSchema,
+  ExternalVendorIdSchema,
   isExternalAgentTargetId,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from './schemas';
@@ -195,9 +221,12 @@ export {
   EXTERNAL_TEXT_LIMITS,
   EXTERNAL_TURN_MAX_EVENTS,
   EXTERNAL_TURN_PAYLOAD_MAX_BYTES,
+  EXTERNAL_VENDOR_ID_MAX_LENGTH,
   type ExternalTextLimit,
   sanitizeVendorText,
   schemaMaxLengthFor,
+  usableVendorId,
+  vendorSelection,
 } from './vendor-text';
 export {
   EXTERNAL_AGENT_VENDORS,

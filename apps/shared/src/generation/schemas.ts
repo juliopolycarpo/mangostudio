@@ -2,8 +2,7 @@ import Type, { type Static } from 'typebox';
 import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '../agentic-limits';
 import { AgentIdSchema } from '../agents/schemas';
 import { ContextSettingsSchema } from '../chat/schemas';
-import { ExternalAgentTargetIdSchema } from '../external-agents/schemas';
-import { schemaMaxLengthFor } from '../external-agents/vendor-text';
+import { ExternalAgentTargetIdSchema, ExternalVendorIdSchema } from '../external-agents/schemas';
 import { PromptSettingsSchema } from '../prompt-rules/schemas';
 import { ProviderTypeSchema, ReasoningEffortSchema } from '../provider-settings/schemas';
 import { ResumeInterruptedTurnSchema } from '../turn-recovery/schemas';
@@ -23,8 +22,6 @@ export const GENERATION_ATTACHMENT_ID_MAX_LENGTH = 256;
 export const GENERATION_REFERENCE_IMAGE_URL_MAX_LENGTH = 4_096;
 export const GENERATION_IMAGE_QUALITY_MAX_LENGTH = 64;
 export const GENERATION_THINKING_VISIBILITY_MAX_LENGTH = 32;
-/** Matches `vendorId` in `EXTERNAL_TEXT_LIMITS`, doubled for UTF-16 units. */
-const EXTERNAL_VENDOR_ID_MAX_LENGTH = schemaMaxLengthFor('vendorId');
 
 const ChatIdSchema = Type.String({ maxLength: GENERATION_CHAT_ID_MAX_LENGTH });
 const PromptSchema = Type.String({ maxLength: GENERATION_PROMPT_MAX_LENGTH });
@@ -72,8 +69,8 @@ export type GenerateTextBody = Static<typeof GenerateTextBodySchema>;
  * so a send cannot quietly widen what the agent may do.
  */
 export const ExternalTurnRequestSchema = Type.Object({
-  model: Type.Optional(Type.String({ minLength: 1, maxLength: EXTERNAL_VENDOR_ID_MAX_LENGTH })),
-  effort: Type.Optional(Type.String({ minLength: 1, maxLength: EXTERNAL_VENDOR_ID_MAX_LENGTH })),
+  model: Type.Optional(ExternalVendorIdSchema),
+  effort: Type.Optional(ExternalVendorIdSchema),
 });
 
 export type ExternalTurnRequest = Static<typeof ExternalTurnRequestSchema>;

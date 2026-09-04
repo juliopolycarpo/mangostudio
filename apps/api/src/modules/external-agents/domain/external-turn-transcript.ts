@@ -79,6 +79,15 @@ export class ExternalTurnTranscript {
    */
   #openThinking: ThinkingPart | undefined;
   #terminated = false;
+  /**
+   * Whether the vendor said it stopped the turn of its own accord.
+   *
+   * Set by the `cancelled` marker and read by the `completed` right behind it.
+   * A flag rather than a terminal event, because a runtime cannot know whether
+   * the hub in front of it understands a new terminal kind — one that is
+   * dropped leaves the turn never ending, which is the failure #988 records.
+   */
+  #vendorInterrupted = false;
 
   constructor(options: ExternalTurnTranscriptOptions) {
     this.#maxBytes = options.maxBytes ?? EXTERNAL_TURN_PAYLOAD_MAX_BYTES;
@@ -445,9 +454,22 @@ export class ExternalTurnTranscript {
         // Account quota is cached vendor state, not transcript.
         return { durable: false };
 
-      case 'completed':
-        this.finalize('completed', at);
-        return { durable: true, terminal: 'completed' };
+      case 'cancelled':
+        // A marker, not a terminal. The `completed` immediately behind it is
+        // what ends the turn; this only changes the reason that end is recorded
+        // under, so an older hub that drops this event still finalizes rather
+        // than hanging on a terminal kind it does not know.
+        this.#vendorInterrupted = true;
+        return { durable: false };
+
+      case 'completed': {
+        // The vendor said it stopped early, so "Finished." would be wrong — and
+        // "You stopped this turn." would be a different wrong, which is why
+        // `interrupted` exists rather than reusing `cancelled-by-user`.
+        const reason = this.#vendorInterrupted ? 'interrupted' : 'completed';
+        this.finalize(reason, at);
+        return { durable: true, terminal: reason };
+      }
 
       case 'error':
         this.recordError(event.error);

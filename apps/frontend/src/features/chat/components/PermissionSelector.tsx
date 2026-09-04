@@ -15,16 +15,29 @@
  * The unattended warning applies to `full-access` *and* to `auto-review`. Both
  * mean the agent proceeds without the user; softening either would be the one
  * place in this UI where understating the risk is actively dangerous.
+ *
+ * **Presets sit above the matrix, and the matrix moves behind a disclosure.**
+ * Two axes is an honest model and also two questions a non-expert did not ask;
+ * what they want to say is how much the agent should bother them. The matrix is
+ * not removed — it is what anyone who does want the axes reaches for, and it is
+ * what a stored custom pair is edited with. The disclosure lives inside this
+ * component's own panel because the design system has no popover to nest, and
+ * generalizing the hand-rolled one here is cheaper than adding one.
  */
 
 import type {
+  ExternalAgentTargetId,
   ExternalApprovalRouting,
   ExternalPermissionLevel,
+  ExternalPermissionPair,
   ExternalSupportedConfiguration,
 } from '@mangostudio/shared/external-agents';
 import {
   EXTERNAL_APPROVAL_ROUTINGS,
   EXTERNAL_PERMISSION_LEVELS,
+  EXTERNAL_PERMISSION_PRESETS,
+  externalPresetFor,
+  externalPresetPair,
 } from '@mangostudio/shared/external-agents';
 import { AlertTriangle, Check, ChevronDown, Lock } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -35,6 +48,8 @@ export interface PermissionSelectorProps {
   /** The effective pair once a session exists, not the requested one. */
   level: ExternalPermissionLevel;
   routing: ExternalApprovalRouting;
+  /** Needed for the per-vendor line: `careful` is a sandbox here and plan mode there. */
+  targetId: ExternalAgentTargetId;
   disabled?: boolean;
   onChange: (next: { level: ExternalPermissionLevel; routing: ExternalApprovalRouting }) => void;
 }
@@ -43,13 +58,32 @@ export function PermissionSelector({
   configurations,
   level,
   routing,
+  targetId,
   disabled = false,
   onChange,
 }: PermissionSelectorProps) {
   const { t } = useI18n();
   const labels = t.externalAgents.permission;
   const [open, setOpen] = useState(false);
+  // Read once, above the hooks: it is the selected row below, it seeds the
+  // matrix, and it is what the effect watches. `externalPresetFor` is a pure
+  // lookup, so it can sit here rather than beside the preset list — which is
+  // after this component's early return, where a hook may not go.
+  const selectedPreset = externalPresetFor({ level, routing });
+  // A pair no preset names is a deliberate custom choice, so the axes it was
+  // made with are what should be on screen — telling that user their setting
+  // vanished would be worse than showing one more control.
+  const [showMatrix, setShowMatrix] = useState(selectedPreset === undefined);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Re-opened when a *later* pair turns out to be custom, because this
+  // component instance outlives the chat it was mounted for: switching to a
+  // chat stored on `full-access × auto-review` would otherwise show three
+  // presets with none selected and no way to see what is actually set. Only
+  // ever opens — a user who expanded the matrix on a preset keeps it expanded.
+  useEffect(() => {
+    if (selectedPreset === undefined) setShowMatrix(true);
+  }, [selectedPreset]);
 
   useEffect(() => {
     if (!open) return;
@@ -105,6 +139,15 @@ export function PermissionSelector({
   const active = find(level, routing);
   const unattended = active?.unattended === true;
 
+  // Only presets this vendor can actually run. One with no supported candidate
+  // is absent rather than disabled: a control that cannot work reads as a
+  // MangoStudio fault, not as something this vendor does not do.
+  const presets = EXTERNAL_PERMISSION_PRESETS.flatMap((preset) => {
+    const pair = externalPresetPair(preset, configurations);
+    return pair ? [{ id: preset.id, pair }] : [];
+  });
+  const hasPresets = presets.length > 0;
+
   return (
     <div ref={containerRef} className="relative flex items-center">
       <button
@@ -132,45 +175,112 @@ export function PermissionSelector({
 
       {open ? (
         <div className="absolute bottom-full z-50 mb-2 w-80 space-y-3 rounded-2xl border border-outline-variant/15 bg-surface-container-low p-3 shadow-2xl">
-          <Axis heading={labels.whatItCanDo}>
-            {levels.map((candidate) => {
-              const configuration = find(candidate, routingFor(candidate));
-              return (
+          {hasPresets ? (
+            <Axis heading={labels.presetHeading}>
+              {presets.map((preset) => (
                 <Option
-                  key={candidate}
-                  name={labels.levelName[candidate]}
-                  description={labels.level[candidate]}
-                  selected={level === candidate}
-                  supported={configuration?.supported === true}
-                  unsupportedReason={reasonText(configuration, t)}
-                  warning={configuration?.unattended ? labels.unattendedLevelWarning : null}
-                  onSelect={() => onChange({ level: candidate, routing: routingFor(candidate) })}
+                  key={preset.id}
+                  name={labels.preset[preset.id].label}
+                  description={`${labels.preset[preset.id].description} ${
+                    labels.presetVendor[preset.id][targetId]
+                  }`}
+                  selected={selectedPreset === preset.id}
+                  supported
+                  unsupportedReason={null}
+                  // Which warning depends on which axis this preset resolved
+                  // to, not on the preset. `autonomous` falling back to
+                  // `default × auto-review` cannot leave the workspace, so the
+                  // level warning would be false there — the true statement is
+                  // that its approvals are answered without the user.
+                  warning={unattendedWarning(preset.pair, find, labels)}
+                  onSelect={() => onChange(preset.pair)}
                 />
-              );
-            })}
-          </Axis>
+              ))}
+            </Axis>
+          ) : null}
 
-          <Axis heading={labels.whoApproves}>
-            {routings.map((candidate) => {
-              const configuration = find(levelFor(candidate), candidate);
-              return (
-                <Option
-                  key={candidate}
-                  name={labels.routingName[candidate]}
-                  description={labels.routing[candidate]}
-                  selected={routing === candidate}
-                  supported={configuration?.supported === true}
-                  unsupportedReason={reasonText(configuration, t)}
-                  warning={candidate === 'auto-review' ? labels.unattendedRoutingWarning : null}
-                  onSelect={() => onChange({ level: levelFor(candidate), routing: candidate })}
-                />
-              );
-            })}
-          </Axis>
+          {hasPresets ? (
+            <button
+              type="button"
+              onClick={() => setShowMatrix((value) => !value)}
+              aria-expanded={showMatrix}
+              className="flex w-full items-center gap-1 px-1 text-[11px] text-on-surface-variant hover:text-on-surface"
+            >
+              <ChevronDown
+                size={11}
+                className={`shrink-0 transition-transform ${showMatrix ? '' : '-rotate-90'}`}
+              />
+              {labels.advanced}
+            </button>
+          ) : null}
+
+          {showMatrix || !hasPresets ? (
+            <>
+              <Axis heading={labels.whatItCanDo}>
+                {levels.map((candidate) => {
+                  const configuration = find(candidate, routingFor(candidate));
+                  return (
+                    <Option
+                      key={candidate}
+                      name={labels.levelName[candidate]}
+                      description={labels.level[candidate]}
+                      selected={level === candidate}
+                      supported={configuration?.supported === true}
+                      unsupportedReason={reasonText(configuration, t)}
+                      warning={configuration?.unattended ? labels.unattendedLevelWarning : null}
+                      onSelect={() =>
+                        onChange({ level: candidate, routing: routingFor(candidate) })
+                      }
+                    />
+                  );
+                })}
+              </Axis>
+
+              <Axis heading={labels.whoApproves}>
+                {routings.map((candidate) => {
+                  const configuration = find(levelFor(candidate), candidate);
+                  return (
+                    <Option
+                      key={candidate}
+                      name={labels.routingName[candidate]}
+                      description={labels.routing[candidate]}
+                      selected={routing === candidate}
+                      supported={configuration?.supported === true}
+                      unsupportedReason={reasonText(configuration, t)}
+                      warning={candidate === 'auto-review' ? labels.unattendedRoutingWarning : null}
+                      onSelect={() => onChange({ level: levelFor(candidate), routing: candidate })}
+                    />
+                  );
+                })}
+              </Axis>
+            </>
+          ) : null}
         </div>
       ) : null}
     </div>
   );
+}
+
+/**
+ * The warning an unattended pair earns, chosen by the axis that makes it so.
+ *
+ * Both axes mean "the agent proceeds without you" and they mean different
+ * things about *what* it may do: `full-access` can act outside the workspace,
+ * `auto-review` answers its own approvals inside it. Saying the wrong one is
+ * either overstating the risk or — worse — understating it.
+ */
+function unattendedWarning(
+  pair: ExternalPermissionPair,
+  find: (
+    level: ExternalPermissionLevel,
+    routing: ExternalApprovalRouting
+  ) => ExternalSupportedConfiguration | undefined,
+  labels: ReturnType<typeof useI18n>['t']['externalAgents']['permission']
+): string | null {
+  if (!find(pair.level, pair.routing)?.unattended) return null;
+  return pair.routing === 'auto-review'
+    ? labels.unattendedRoutingWarning
+    : labels.unattendedLevelWarning;
 }
 
 function Axis({ heading, children }: { heading: string; children: React.ReactNode }) {

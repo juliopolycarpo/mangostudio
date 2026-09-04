@@ -3660,6 +3660,17 @@ export const messages = {
       'version-unsupported':
         'Atualize este agente para a versão {version} ou mais recente nesta máquina',
       'disclosure-required': 'Leia e aceite o aviso de terceiros deste agente primeiro',
+      'installed-but-unusable':
+        'Instalado e conectado, mas não aceita nenhuma das permissões que o MangoStudio oferece',
+    },
+    /** O próximo passo, não só o diagnóstico. */
+    remedy: {
+      install: 'Instalar este agente',
+      update: 'Atualizar este agente',
+      'sign-in': 'Entrar neste agente',
+      'contact-admin': 'Fale com quem administra esta máquina',
+      'accept-disclosure': 'Ler o aviso',
+      none: 'Não há nada a fazer por aqui',
     },
     isolation: {
       title: 'Esta máquina não consegue separar os logins do fornecedor',
@@ -3705,6 +3716,41 @@ export const messages = {
       routing: {
         user: 'Você responde cada pedido.',
         'auto-review': 'O agente revisa os próprios pedidos.',
+      },
+      /** Escolhas nomeadas para quem não quer aprender a matriz. */
+      advanced: 'Ajuste fino',
+      presetHeading: 'Quanto ele deve te incomodar',
+      preset: {
+        careful: {
+          label: 'Cauteloso',
+          description: 'Só lê. Nada é alterado sem você pedir de novo.',
+        },
+        balanced: {
+          label: 'Equilibrado',
+          description: 'Altera o workspace e pergunta antes de qualquer coisa mais arriscada.',
+        },
+        autonomous: {
+          label: 'Autônomo',
+          description: 'Segue sozinho, sem parar para perguntar.',
+        },
+      },
+      /** O que cada preset significa para este fornecedor especificamente. */
+      presetVendor: {
+        careful: {
+          claude: 'O Claude entra em modo de planejamento e recusa alterações.',
+          codex: 'O Codex roda numa sandbox somente leitura.',
+          cursor: 'O Cursor fica no modo de planejamento.',
+        },
+        balanced: {
+          claude: 'O Claude pede permissão para cada alteração fora do combinado.',
+          codex: 'O Codex escreve no workspace e pede permissão para o resto.',
+          cursor: 'O Cursor escreve no workspace e pergunta antes do resto.',
+        },
+        autonomous: {
+          claude: 'O Claude age sem perguntar, inclusive fora do workspace.',
+          codex: 'O Codex age sem perguntar, inclusive fora da sandbox.',
+          cursor: 'O Cursor age sem perguntar, inclusive fora do workspace.',
+        },
       },
     },
     workspaceTrust: {
@@ -3783,6 +3829,7 @@ export const messages = {
       terminal: {
         completed: 'Concluído.',
         'cancelled-by-user': 'Você interrompeu este turno.',
+        interrupted: 'O agente interrompeu este turno.',
         'vendor-error': 'O agente relatou uma falha.',
         'runtime-disconnected': 'A conexão com a máquina caiu no meio do turno.',
         'hub-restarted': 'O MangoStudio reiniciou enquanto este turno rodava.',

@@ -25,6 +25,7 @@
 
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
 import type {
+  ExternalAgentAttachment,
   ExternalAgentCapabilities,
   ExternalAgentConfiguration,
   ExternalAgentEventEnvelope,
@@ -132,6 +133,7 @@ export interface ExternalSessionHandle {
     readonly clientMessageId: string;
     readonly input: string;
     readonly configuration: ExternalAgentConfiguration;
+    readonly attachments?: readonly ExternalAgentAttachment[];
   }): Promise<string>;
   respond(input: {
     readonly nativeTurnId: string;
@@ -300,6 +302,7 @@ export function createExternalSessionManager(
             clientMessageId: input.clientMessageId,
             input: input.input,
             configuration: input.configuration,
+            ...(input.attachments?.length ? { attachments: input.attachments } : {}),
           },
           { timeoutMs: callTimeoutMs }
         );

@@ -86,6 +86,7 @@ export interface ComposerChipRowProps {
   externalRouting: ExternalApprovalRouting;
   onExternalModelChange?: (model: string | null) => void;
   onExternalEffortChange?: (effort: string | null) => void;
+  onExternalSelectionGone?: () => void;
   onExternalPermissionsChange?: (next: {
     level: ExternalPermissionLevel;
     routing: ExternalApprovalRouting;
@@ -199,6 +200,7 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
     props.isExternalRunner &&
     props.onExternalModelChange &&
     props.onExternalEffortChange &&
+    props.onExternalSelectionGone &&
     props.onExternalPermissionsChange
   ) {
     chips.push({
@@ -217,6 +219,7 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
             disabled={props.disabled || props.isGenerating}
             onModelChange={props.onExternalModelChange}
             onEffortChange={props.onExternalEffortChange}
+            onSelectionGone={props.onExternalSelectionGone}
             onPermissionsChange={props.onExternalPermissionsChange}
           />
         </span>

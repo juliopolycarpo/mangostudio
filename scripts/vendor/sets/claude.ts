@@ -6,7 +6,7 @@
  *
  * | Artifact            | What the adapter reads off it                          |
  * | ------------------- | ------------------------------------------------------ |
- * | `cli-surface.json`  | the flags every turn's argv names, and `--permission-mode`'s choices |
+ * | `cli-surface.json`  | the flags every turn's argv names, `--permission-mode`'s choices, and the model aliases and effort levels the catalog is built from |
  * | `auth-status.json`  | the fields `parseClaudeAuthStatus` narrows to           |
  *
  * `cli-surface.json` keeps its **values**, because here the values *are* the
@@ -16,6 +16,12 @@
  * the ones in use — Claude adding options classifies as additive and is merely
  * noted, while an option disappearing is worth a maintainer's attention whether
  * or not this adapter passes it today.
+ *
+ * The two prose vocabularies are recorded for a different reason from the
+ * flags. A removed flag is a structural change the diff would show anyway; the
+ * aliases and effort levels are read out of an English sentence, so the failure
+ * worth catching is the vendor *rewording* one. That changes nothing structural
+ * and would otherwise surface only as a model picker that quietly went empty.
  *
  * `auth-status.json` keeps only its **shape**. The live payload carries an
  * email address, an organization id and an organization name, none of which
@@ -30,7 +36,11 @@
 
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { parseVendorCliSurface } from '@mangostudio/shared/external-agents';
+import {
+  parseVendorCliSurface,
+  vendorCliBareChoiceList,
+  vendorCliQuotedExamples,
+} from '@mangostudio/shared/external-agents';
 import { captureCommand } from '../../lib/exec';
 import type { VendorContractSet } from '../lib/contract-set';
 import { normalizeCapture, serializeCapture } from '../lib/normalize';
@@ -40,6 +50,10 @@ const CONTRACT_DIR = join(ROOT_DIR, 'apps/runtime/src/services/external-agents/c
 
 /** The option whose choice list the permission matrix maps onto. */
 const PERMISSION_MODE_FLAG = '--permission-mode';
+
+/** The two options whose vocabulary the CLI states in prose. */
+const MODEL_FLAG = '--model';
+const EFFORT_FLAG = '--effort';
 
 /** The one artifact that needs a signed-in account, and can be skipped without it. */
 const AUTH_ARTIFACT = 'auth-status.json';
@@ -71,11 +85,21 @@ export const claudeContractSet: VendorContractSet = {
     const help = await runClaude(['--help']);
     if (help === undefined) throw new Error('`claude --help` produced no output.');
     const surface = parseVendorCliSurface(help, PERMISSION_MODE_FLAG);
+    // The two vocabularies the CLI states in prose rather than as choices. They
+    // are recorded for a different reason from the flags: a flag going away is
+    // a removal the diff would show anyway, but these are read out of an
+    // English sentence, so the failure to catch is the vendor *rewording* one —
+    // which changes nothing structural and would otherwise surface as a model
+    // picker that quietly went empty.
+    const modelAliases = vendorCliQuotedExamples(help, MODEL_FLAG);
+    const effortLevels = vendorCliBareChoiceList(help, EFFORT_FLAG);
     await writeFile(
       join(destination, 'cli-surface.json'),
       serializeCapture({
         flags: [...surface.flags].sort(),
         permissionModes: [...surface.choices].sort(),
+        modelAliases: [...(modelAliases ?? [])].sort(),
+        effortLevels: [...(effortLevels ?? [])].sort(),
       })
     );
 

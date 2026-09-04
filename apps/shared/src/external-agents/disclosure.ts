@@ -22,7 +22,7 @@
 import Type, { type Static } from 'typebox';
 import { ReadonlyArraySchema } from '../schema-helpers';
 import type { ExternalAgentCapabilities, ExternalAgentTargetId } from './schemas';
-import { ExternalAgentTargetIdSchema } from './schemas';
+import { ExternalAgentTargetIdSchema, ExternalVendorIdSchema } from './schemas';
 
 /**
  * Bump when the disclosure text changes materially.
@@ -113,12 +113,34 @@ export const ExternalWorkspaceTrustSchema = Type.Object(
 export type ExternalWorkspaceTrust = Static<typeof ExternalWorkspaceTrustSchema>;
 
 /**
- * One acknowledgement per vendor, plus the workspaces they may load
- * configuration from.
+ * What a vendor should run when a chat has not said.
+ *
+ * The bottom of the resolution chain a chat's own choice sits above, so that
+ * picking a model once does not mean picking it again in every new chat. Same
+ * two vendor ids as the per-chat pair, bounded the same way and just as opaque:
+ * nothing here can know whether the value still names a model, because the
+ * catalog lives on the runtime.
+ */
+export const ExternalAgentTargetDefaultsSchema = Type.Object(
+  {
+    model: Type.Optional(ExternalVendorIdSchema),
+    effort: Type.Optional(ExternalVendorIdSchema),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalAgentTargetDefaults = Static<typeof ExternalAgentTargetDefaultsSchema>;
+
+/**
+ * One acknowledgement per vendor, the workspaces they may load configuration
+ * from, and what each should run by default.
  *
  * Absent means the user has not been asked — which is why every disclosure key
  * is optional and why the trust list starts empty. A missing entry can never
  * read as consent.
+ *
+ * `defaults` is optional so that every settings blob written before it existed
+ * still validates.
  */
 export const ExternalAgentSettingsSchema = Type.Object({
   disclosures: Type.Partial(
@@ -129,6 +151,13 @@ export const ExternalAgentSettingsSchema = Type.Object({
   workspaceTrust: ReadonlyArraySchema(ExternalWorkspaceTrustSchema, {
     maxItems: EXTERNAL_WORKSPACE_TRUST_MAX_ENTRIES,
   }),
+  defaults: Type.Optional(
+    Type.Partial(
+      Type.Record(ExternalAgentTargetIdSchema, ExternalAgentTargetDefaultsSchema, {
+        additionalProperties: false,
+      })
+    )
+  ),
 });
 
 export type ExternalAgentSettings = Static<typeof ExternalAgentSettingsSchema>;
@@ -136,6 +165,7 @@ export type ExternalAgentSettings = Static<typeof ExternalAgentSettingsSchema>;
 export const DEFAULT_EXTERNAL_AGENT_SETTINGS: ExternalAgentSettings = {
   disclosures: {},
   workspaceTrust: [],
+  defaults: {},
 };
 
 export interface ExternalWorkspaceTrustKey {

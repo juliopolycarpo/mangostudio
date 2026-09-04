@@ -106,6 +106,7 @@ export const chatRoutes = (app: Elysia) =>
                   imageModel: body.imageModel,
                   runner: body.runner,
                   runnerPermissions: body.runnerPermissions,
+                  runnerModelSelection: body.runnerModelSelection,
                   workdir: body.workdir,
                   environmentId: body.environmentId,
                   restrictToolsToWorkdir: body.restrictToolsToWorkdir,

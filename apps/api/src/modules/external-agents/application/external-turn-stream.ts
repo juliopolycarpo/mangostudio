@@ -14,8 +14,15 @@
  */
 
 import type {
+  ExternalAgentAttachment,
+  ExternalAgentDescriptor,
   ExternalAgentTargetId,
+  ExternalAgentUnavailableReason,
   ExternalReviewTarget,
+} from '@mangostudio/shared/external-agents';
+import {
+  EXTERNAL_ATTACHMENT_MAX_BYTES,
+  EXTERNAL_TURN_MAX_ATTACHMENTS,
 } from '@mangostudio/shared/external-agents';
 import type { ExternalTurnRequest } from '@mangostudio/shared/generation';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
@@ -28,6 +35,15 @@ import {
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
+import type {
+  ExternalAgentAttachmentRefusal,
+  ExternalAgentAttachmentResolution,
+} from '../../attachments/application/runtime-attachment-resolver';
+import {
+  ChatAttachmentFileUnavailableError,
+  resolveExternalAgentAttachments,
+} from '../../attachments/application/runtime-attachment-resolver';
+import { ChatAttachmentNotFoundError } from '../../attachments/infrastructure/attachment-repository';
 import { getOwnedChat, type OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import { findActiveTurnByChat } from '../../generation/application/active-turn-registry';
 import { KEEPALIVE_INTERVAL_MS } from '../../generation/application/sse-keepalive';
@@ -88,7 +104,12 @@ export interface ExternalTurnStreamDependencies {
  */
 export type ExternalTurnPreflightFailure =
   | { readonly kind: 'conflict'; readonly message: string }
-  | { readonly kind: 'unsupported'; readonly message: string }
+  | {
+      readonly kind: 'unsupported';
+      readonly message: string;
+      /** The descriptor's own reason, so the client can say it in the user's language. */
+      readonly unavailableReason?: ExternalAgentUnavailableReason;
+    }
   /**
    * The environment has not proved that vendor credentials belong to the user
    * whose turn this is. Refused here as well as in discovery because discovery
@@ -209,7 +230,14 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
         : resolution.notReady
           ? 'unavailable'
           : 'unsupported';
-      return { ok: false, failure: { kind, message: resolution.message } };
+      return {
+        ok: false,
+        failure: {
+          kind,
+          message: resolution.message,
+          ...(resolution.reason ? { unavailableReason: resolution.reason } : {}),
+        },
+      };
     }
 
     // The descriptor this machine actually answered with, before anything is
@@ -279,6 +307,27 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
       };
     }
 
+    // Attachments are resolved here: still before the 200 is committed, so a
+    // file that cannot be read — or that the vendor wire cannot carry — fails
+    // as a request error rather than as a stream that opens and then dies, but
+    // *after* the two gates that ask the user for something. Reading four
+    // uploads off disk and base64-encoding them is real work, and doing it in
+    // front of a disclosure or trust refusal spends it twice: once on the send
+    // that is refused, and again on the retry the dialog produces. It is also
+    // work done on behalf of a vendor the user has not agreed to yet.
+    //
+    // Every refusal is stated rather than worked around. A target that cannot
+    // take images refuses the send instead of stripping them; a kind no vendor
+    // maps refuses instead of being dropped; a set larger than
+    // `ExternalAgentTurnParamsSchema` accepts refuses here instead of being
+    // rejected by the runtime after the response is already a stream. Dropping
+    // any of them silently would let the user watch the agent answer
+    // confidently about a file it never received, which is the one outcome
+    // worse than not sending at all.
+    const preflight = await preflightAttachments(input, resolution.descriptor, db);
+    if (!preflight.ok) return { ok: false, failure: preflight.failure };
+    const attachments = preflight.attachments;
+
     // Last of the preflight, because it is the only step that spends a round
     // trip on another machine, and because it needs the canonical workspace
     // that machine spelled. Asked *through the runtime* rather than of the
@@ -331,8 +380,107 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
       };
     }
 
-    return { ok: true, response: openStream(input, resolution, db, controller) };
+    return { ok: true, response: openStream(input, resolution, attachments, db, controller) };
   };
+}
+
+/**
+ * The attachments a turn may carry, or the refusal that stops it.
+ *
+ * Lifted out of `streamExternalTurn` because it is a self-contained gate with
+ * four ways to say no, and inlining it put every one of them three levels deep
+ * inside the one function every external send passes through.
+ */
+async function preflightAttachments(
+  input: Pick<StreamExternalTurnInput, 'attachmentIds' | 'userId' | 'chatId'>,
+  descriptor: ExternalAgentDescriptor,
+  db: Kysely<Database>
+): Promise<
+  | { ok: true; attachments: readonly ExternalAgentAttachment[] }
+  | { ok: false; failure: ExternalTurnPreflightFailure }
+> {
+  if (input.attachmentIds.length === 0) return { ok: true, attachments: [] };
+
+  // First, and without touching the database: a target that reads no
+  // attachment at all needs no question answered about which ones.
+  if (!descriptor.capabilities.images) {
+    return {
+      ok: false,
+      failure: { kind: 'unsupported', message: 'This agent cannot read attachments.' },
+    };
+  }
+
+  let resolved: ExternalAgentAttachmentResolution;
+  try {
+    resolved = await resolveExternalAgentAttachments(
+      {
+        attachmentIds: [...input.attachmentIds],
+        userId: input.userId,
+        chatId: input.chatId,
+      },
+      db
+    );
+  } catch (error) {
+    // "Could not be read" is a sentence about the upload, so only the two
+    // errors that are actually about one may say it. A database that is down or
+    // a disk that is gone is not the user's file being wrong, and blaming it on
+    // the upload sends them to re-attach a file that was never the problem —
+    // and, unlogged, leaves nothing behind saying otherwise.
+    if (
+      error instanceof ChatAttachmentNotFoundError ||
+      error instanceof ChatAttachmentFileUnavailableError
+    ) {
+      return {
+        ok: false,
+        failure: { kind: 'validation', message: 'One or more attachments could not be read.' },
+      };
+    }
+    logger.warn('attachments_unresolved', {
+      chatId: input.chatId,
+      error: error instanceof Error ? error.message : 'unknown error',
+    });
+    return {
+      ok: false,
+      failure: { kind: 'unavailable', message: 'Could not reach the machine this chat runs on.' },
+    };
+  }
+
+  if (!resolved.ok) return { ok: false, failure: attachmentRefusal(resolved.refusal) };
+  return { ok: true, attachments: resolved.attachments };
+}
+
+/**
+ * How a resolver refusal reads as a preflight failure.
+ *
+ * `non-image` is `unsupported`, because no retry of the same request would
+ * change it — the vendor takes pictures and this is not one. The two bounds are
+ * `validation`, because what is wrong is the request's size and a smaller one
+ * would go through. Both name the limit rather than referring to it: a message
+ * that says "too many" without saying how many is a dead end.
+ */
+function attachmentRefusal(refusal: ExternalAgentAttachmentRefusal): ExternalTurnPreflightFailure {
+  // A `switch` with no `default`, so a refusal added to the union fails to
+  // compile here rather than silently rendering as the size message.
+  switch (refusal) {
+    case 'non-image':
+      return {
+        kind: 'unsupported',
+        message: 'This agent can only take image attachments.',
+      };
+    case 'too-many':
+      return {
+        kind: 'validation',
+        message: `An external agent turn takes at most ${EXTERNAL_TURN_MAX_ATTACHMENTS} attachments.`,
+      };
+    case 'too-large':
+      return {
+        kind: 'validation',
+        // "at most", not "under": `refusalFor` refuses a size *greater than*
+        // the bound, so a file of exactly that many bytes is accepted. Saying
+        // "under" would name a limit one byte tighter than the one enforced.
+        message: `Each attachment sent to an external agent must be at most ${EXTERNAL_ATTACHMENT_MAX_BYTES / (1024 * 1024)} MB.`,
+      };
+  }
 }
 
 function chatBindingChanged(left: OwnedChatRecord, right: OwnedChatRecord): boolean {
@@ -350,6 +498,8 @@ function chatBindingChanged(left: OwnedChatRecord, right: OwnedChatRecord): bool
 function openStream(
   input: StreamExternalTurnInput,
   resolution: Extract<ExternalTurnConfigurationResolution, { ok: true }>,
+  /** Resolved during preflight, so a file that cannot be read never reaches here. */
+  attachments: readonly ExternalAgentAttachment[],
   db: Kysely<Database>,
   controller: ExternalTurnController
 ): Response {
@@ -377,6 +527,7 @@ function openStream(
             chatId: input.chatId,
             prompt: input.prompt,
             ...(input.attachmentIds.length > 0 ? { attachmentIds: [...input.attachmentIds] } : {}),
+            ...(attachments.length > 0 ? { attachments } : {}),
             configuration: resolution.configuration,
             ...(input.review ? { review: input.review } : {}),
             canonicalWorkspacePath: resolution.canonicalWorkspacePath,
@@ -384,7 +535,19 @@ function openStream(
             credentialHomeFingerprint: resolution.credentialHomeFingerprint,
             observer: {
               onSession(session) {
-                send(externalSessionStartedChunk(session));
+                // The model the hub resolved, announced with the session so a
+                // live turn and a reloaded one name the same thing (#816). The
+                // client cannot derive it: `pickModel` ran server-side over a
+                // catalog the client may not have loaded, and the request
+                // frequently names no model at all.
+                send(
+                  externalSessionStartedChunk({
+                    ...session,
+                    ...(resolution.configuration.model !== undefined
+                      ? { model: resolution.configuration.model }
+                      : {}),
+                  })
+                );
               },
               onTurnPrepared(ids) {
                 send({ type: 'user_message_id', messageId: ids.userMessageId, done: false });

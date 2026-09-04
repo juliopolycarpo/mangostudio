@@ -41,6 +41,7 @@ import type {
   ExternalAgentCapabilities,
   ExternalAgentConfiguration,
   ExternalAgentEvent,
+  ExternalAgentModel,
   ExternalAgentRuntimeDescriptor,
   ExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
@@ -63,10 +64,12 @@ import { CLAUDE_AUTH_UNKNOWN, type ClaudeAuthentication, parseClaudeAuthStatus }
 import {
   type ClaudeCliSurface,
   claudeAcceptedModes,
+  claudeDeclaresPermissionPrompts,
   isUsableClaudeCliSurface,
   missingClaudeCliFlags,
   parseClaudeCliSurface,
 } from './cli-surface';
+import { claudeEffortAccepted, claudeModelCatalog } from './models';
 import {
   buildSupportedConfigurations,
   CLAUDE_UNSUPPORTED_REASON_KEYS,
@@ -105,22 +108,28 @@ const STREAM_IDLE_TIMEOUT_MS = 10 * 60_000;
 const MINIMUM_CLAUDE_VERSION_PARSED = requireClaudeVersion(MINIMUM_CLAUDE_VERSION);
 
 /**
- * What this adapter genuinely supports.
+ * What this adapter genuinely supports, before the build in front of it is
+ * known.
  *
- * Every opportunistic flag is false, and each one is a measured verdict rather
- * than an unimplemented stub:
+ * `modelCatalog` is the one flag decided per install — see
+ * `claudeCapabilities`. The rest are false here, and each is a measured verdict
+ * rather than an unimplemented stub:
  *
- * - `interactiveApprovals` — plain headless execution cannot deliver an
- *   answerable approval. An unmatched `Write` under the default mode produces a
- *   structured denial, a result listing it, exit 0 and no file; no stream
- *   control frame is offered to answer it. `--permission-prompt-tool` exists and
- *   could change that, and it is out of scope on purpose: hosting a permission
- *   prompt tool makes MangoStudio part of the authorization path for an agent it
- *   does not own, which needs authenticated request ids, replay protection,
- *   expiry, owner binding and a threat model of its own.
- * - `modelCatalog` — `--model` accepts a value; that is not a catalog. No
- *   structured listing has been captured, so the selector hides the picker
- *   rather than offering a list MangoStudio invented.
+ * - `interactiveApprovals` — the CLI has a real control channel, and it is not
+ *   reachable from a host like this one. Probed against 2.1.260 on 2026-09-04:
+ *   `can_use_tool` is routed to a host only when `--sdk-url` is set, and that
+ *   flag is allowlisted to Anthropic's own backend ("reserved for Remote
+ *   Control worker processes"). Sending `initialize` first — which the CLI
+ *   answers in full over plain stdio — does not unlock it either. So a turn
+ *   that needs permission is denied by the vendor and reported, which is what
+ *   `--permission-prompts none` now states outright.
+ *
+ *   The one remaining public route is `--permission-prompt-tool`, and it is out
+ *   of scope on purpose: it takes an **MCP tool**, so serving it would make
+ *   MangoStudio part of the authorization path for an agent it does not own,
+ *   needing authenticated request ids, replay protection, expiry, owner binding
+ *   and a threat model of its own. It is also absent from printed `--help`,
+ *   so no capability could honestly be derived from probing for it.
  * - `steering` — `--input-format stream-json` accepts a second message, but it
  *   runs as **its own turn**, with its own result. That is a queued follow-up,
  *   not same-turn steering.
@@ -138,6 +147,26 @@ const CLAUDE_CAPABILITIES: ExternalAgentCapabilities = {
   usageReporting: true,
 };
 
+/**
+ * The same set, with the one flag that depends on the build in front of us.
+ *
+ * `modelCatalog` was a constant `false` while `--model` was only known to
+ * accept a value. The help now advertises which aliases it resolves, so the
+ * answer is per-install: a build that states them has a catalog, and one that
+ * does not keeps the picker hidden exactly as before.
+ *
+ * Derived in one place because **both** `discover` and `openSession` report
+ * capabilities, and a session that disagreed with the descriptor it was chosen
+ * from would offer a picker the hub never validated against — the same reason
+ * Cursor derives its four flags from the live handshake rather than from a
+ * constant.
+ */
+function claudeCapabilities(
+  models: readonly ExternalAgentModel[] | undefined
+): ExternalAgentCapabilities {
+  return { ...CLAUDE_CAPABILITIES, modelCatalog: models !== undefined };
+}
+
 interface ClaudeSession {
   /** The vendor session id. Stable across turns; `--resume` echoes it back. */
   sessionId: string;
@@ -146,6 +175,20 @@ interface ClaudeSession {
   established: boolean;
   configuration: ExternalAgentConfiguration;
   availability: ClaudeModeAvailability;
+  /**
+   * `--effort`'s levels as this build declared them, read once when the session
+   * opened rather than per turn.
+   *
+   * A sibling of `availability` rather than a field on it: that type answers
+   * which *permission modes* this account may run, and effort is neither a
+   * permission nor account-dependent.
+   */
+  readonly acceptedEfforts?: ReadonlySet<string>;
+  /**
+   * Whether this build declares `--permission-prompts`, so the turn can say
+   * `none` instead of relying on a default that has already changed once.
+   */
+  readonly declaresPermissionPrompts?: boolean;
   activeTurn?: {
     readonly channel: TurnChannel<ExternalAgentEvent>;
     readonly reducer: ClaudeTurnReducer;
@@ -224,14 +267,16 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
       ...(acceptedModes ? { acceptedModes } : {}),
     };
 
+    const models = claudeModelCatalog(surface);
     return {
       targetId: this.targetId,
       installed: true,
       version,
       authState: authentication.authState,
       ...(authentication.authState === 'signed-in' ? {} : { loginCommand: CLAUDE_LOGIN_COMMAND }),
-      capabilities: CLAUDE_CAPABILITIES,
+      capabilities: claudeCapabilities(models),
       supportedConfigurations: buildSupportedConfigurations(availability),
+      ...(models ? { models } : {}),
       ...(authentication.account ? { account: authentication.account } : {}),
     };
   }
@@ -273,6 +318,8 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
       established: resumed,
       configuration: params.configuration,
       availability,
+      ...(surface?.effortLevels ? { acceptedEfforts: surface.effortLevels } : {}),
+      declaresPermissionPrompts: claudeDeclaresPermissionPrompts(surface),
     };
     this.#sessions.set(params.sessionId, session);
 
@@ -280,7 +327,7 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
       nativeSessionId: session.sessionId,
       resumed,
       effectiveConfiguration: params.configuration,
-      capabilities: CLAUDE_CAPABILITIES,
+      capabilities: claudeCapabilities(claudeModelCatalog(surface)),
     };
   }
 
@@ -675,10 +722,37 @@ export function safeClaudeModel(model: string | undefined): string | undefined {
     : undefined;
 }
 
+/**
+ * `--permission-prompts none`, stated rather than left to the default.
+ *
+ * This is **pinning, not a fix**. 2.1.259 added the flag with a default of
+ * `host`, and a probe against 2.1.260 confirms today's behaviour is already
+ * what we want: with stdin closed after the prompt, an unmatched `Write` under
+ * `--permission-mode default` produces `system/permission_denied`, a
+ * `tool_result` marked in error, exit 0 and no file. Nothing hangs.
+ *
+ * What the flag buys is that the property stays true. It is the vendor's own
+ * name for "nobody is listening, deny anything that would ask", and MangoStudio
+ * genuinely is that host — `interactiveApprovals` is false, so a prompt has
+ * nowhere to go. Leaving it implicit means a future default of `host` on a
+ * build that then *waits* for an answer would park every approval-needing turn
+ * until the idle timeout, and the first report would be "Claude hangs".
+ *
+ * Passed only when the build declared the flag, so 2.1.211–2.1.258 keep working
+ * untouched. Never `host`: that value promises an answering host this adapter
+ * does not have.
+ */
+function permissionPromptArguments(declared: boolean | undefined): string[] {
+  return declared ? ['--permission-prompts', 'none'] : [];
+}
+
 /** The turn's argv. Everything that is not a flag comes from server-owned state. */
 export function buildTurnArgv(input: {
   readonly executable: string;
-  readonly session: Pick<ClaudeSession, 'sessionId' | 'established'>;
+  readonly session: Pick<
+    ClaudeSession,
+    'sessionId' | 'established' | 'acceptedEfforts' | 'declaresPermissionPrompts'
+  >;
   readonly configuration: ExternalAgentConfiguration;
   readonly availability: ClaudeModeAvailability;
 }): [string, ...string[]] {
@@ -707,6 +781,7 @@ export function buildTurnArgv(input: {
     '--forward-subagent-text',
     '--permission-mode',
     mode,
+    ...permissionPromptArguments(input.session.declaresPermissionPrompts),
     // The session id is the whole continuity mechanism: minted on the first run,
     // resumed afterwards. The same `cwd` is passed either way, because below
     // 2.1.223 `--resume` only looks inside the directory the session was made in.
@@ -714,12 +789,29 @@ export function buildTurnArgv(input: {
       ? ['--resume', input.session.sessionId]
       : ['--session-id', input.session.sessionId]),
     ...modelArguments(input.configuration.model),
+    ...effortArguments(input.configuration.effort, input.session.acceptedEfforts),
   ];
 }
 
 function modelArguments(model: string | undefined): string[] {
   const safe = safeClaudeModel(model);
   return safe ? ['--model', safe] : [];
+}
+
+/**
+ * `--effort`, passed only for a level this build itself printed.
+ *
+ * Membership in the parsed set is the whole guard, and it is stricter than
+ * `safeClaudeModel`'s pattern because it can be: the vendor publishes the
+ * complete list, so there is no need to accept a shape and hope. A build that
+ * declared no levels — every build before 2.1.259 — therefore never sees the
+ * flag, which is what keeps a stored per-chat effort from breaking a downgrade.
+ */
+function effortArguments(
+  effort: string | undefined,
+  accepted: ReadonlySet<string> | undefined
+): string[] {
+  return claudeEffortAccepted(effort, accepted) ? ['--effort', effort] : [];
 }
 
 /** What to say about a process that ended without a `result` record. */

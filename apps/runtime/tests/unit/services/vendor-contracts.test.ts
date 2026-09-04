@@ -89,10 +89,12 @@ describe('the recorded Cursor handshake satisfies what the adapter requires', ()
 });
 
 describe('the recorded Claude surface satisfies what the adapter passes', () => {
-  const surface = contract<{ flags: string[]; permissionModes: string[] }>(
-    'claude',
-    'cli-surface.json'
-  );
+  const surface = contract<{
+    flags: string[];
+    permissionModes: string[];
+    modelAliases: string[];
+    effortLevels: string[];
+  }>('claude', 'cli-surface.json');
 
   it('declares every flag the required list names', () => {
     expect(CLAUDE_REQUIRED_CLI_FLAGS.filter((flag) => !surface.flags.includes(flag))).toEqual([]);
@@ -138,6 +140,20 @@ describe('the recorded Claude surface satisfies what the adapter passes', () => 
     for (const mode of ['manual', 'plan', 'bypassPermissions', 'auto']) {
       expect(surface.permissionModes).toContain(mode);
     }
+  });
+
+  /**
+   * The prose vocabularies, recorded so a *rewording* is visible.
+   *
+   * Nothing structural changes when the vendor rephrases "Provide an alias for
+   * the latest model (e.g. 'fable', …)". The catalog simply goes empty and the
+   * composer's picker disappears, which no other check would notice — so the
+   * recorded list is the alarm, and this asserts the alarm is armed rather
+   * than pinning the vendor's current spelling.
+   */
+  it('records the vocabularies the CLI states in prose', () => {
+    expect(surface.modelAliases.length).toBeGreaterThan(0);
+    expect(surface.effortLevels.length).toBeGreaterThan(0);
   });
 
   /** The parser and the capture must read the same text the same way. */

@@ -644,6 +644,40 @@ describe('external agent discovery — the authoritative pass', () => {
     expect(codex?.capabilities.steering).toBe(false);
   });
 
+  /**
+   * The #813 shape: nothing is wrong with the install, and it still cannot run.
+   *
+   * Inferred here rather than reported, because no adapter is in a position to
+   * say it — each one states why *its* cells are refused, not that the result
+   * leaves the user nothing to select. Without this the target looks selectable
+   * right up until a send is refused.
+   */
+  it('reports an agent that supports no combination as installed but unusable', async () => {
+    const signal = refreshSignal();
+    const service = createExternalAgentDiscoveryService({
+      probingService: fakeProbing([agentStatus({ targetId: 'codex', ...installed('codex') })]),
+      publishRefresh: signal.publishRefresh,
+      authoritative: authoritative([
+        {
+          targetId: 'codex',
+          authState: 'signed-in',
+          capabilities: ALL_CAPABLE,
+          supportedConfigurations: [
+            { level: 'read-only', routing: 'user', supported: false, unattended: false },
+            { level: 'default', routing: 'user', supported: false, unattended: false },
+          ],
+        },
+      ]),
+    });
+
+    await service.listExternalAgents(SCOPE);
+    await signal.untilPublished(1);
+    const [codex] = await service.listExternalAgents(SCOPE);
+
+    expect(codex?.unavailableReason).toBe('installed-but-unusable');
+    expect(codex?.remedy?.kind).toBe('contact-admin');
+  });
+
   describe('the background refresh', () => {
     it('answers a cold request without waiting for the authoritative pass', async () => {
       const probeStarted = Promise.withResolvers<void>();
@@ -1151,5 +1185,33 @@ describe('after the availability gate', () => {
     expect(byTarget.get('codex')?.unavailableReason).toBeUndefined();
     expect(byTarget.get('cursor')?.unavailableReason).toBe('not-installed');
     expect(byTarget.get('claude')?.unavailableReason).toBe('signed-out');
+  });
+
+  /**
+   * An empty matrix is a cold cache, not a finding. Reading it as one would
+   * grey out a working target on the first render after a restart, which is
+   * the opposite of what this reason is for.
+   */
+  it('does not read a cold cache as a target that supports nothing', async () => {
+    const service = createExternalAgentDiscoveryService({
+      probingService: fakeProbing([agentStatus({ targetId: 'codex', ...installed('codex') })]),
+    });
+
+    const [codex] = await service.listExternalAgents(SCOPE);
+
+    expect(codex?.supportedConfigurations).toEqual([]);
+    expect(codex?.unavailableReason).toBeUndefined();
+  });
+
+  it('carries the sign-in command on the remedy that needs one', async () => {
+    const service = createExternalAgentDiscoveryService({
+      probingService: fakeProbing([
+        agentStatus({ targetId: 'claude', ...installed('claude'), authenticated: false }),
+      ]),
+    });
+
+    const [claude] = await service.listExternalAgents(SCOPE);
+
+    expect(claude?.remedy).toEqual({ kind: 'sign-in', command: 'claude auth login' });
   });
 });

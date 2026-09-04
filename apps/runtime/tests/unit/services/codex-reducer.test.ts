@@ -394,15 +394,20 @@ describe('codex reducer — failures', () => {
     ]);
   });
 
-  it('reports an interrupted turn as a non-success terminal, not a completion', () => {
+  /**
+   * An interrupted turn is not a failed one (#812). It used to report as an
+   * `error`, which put a red failure in the transcript for something that
+   * merely stopped early.
+   *
+   * The order is load-bearing rather than cosmetic: `cancelled` says *why* and
+   * `completed` is the terminal a hub predating the marker already knows how to
+   * end a turn on. Emitting only the marker would leave such a hub waiting
+   * forever on a terminal kind it drops — the failure #988 records.
+   */
+  it('reports an interrupted turn as a cancellation marker and then a completion', () => {
     const events = replay([['turn/completed', turnCompleted('interrupted')]]);
 
-    expect(events).toEqual([
-      {
-        type: 'error',
-        error: { code: 'vendor-turn-interrupted', message: 'Codex interrupted the turn.' },
-      },
-    ]);
+    expect(events).toEqual([{ type: 'cancelled' }, { type: 'completed' }]);
   });
 
   it('drops an additive item with no id rather than failing the turn on it', () => {

@@ -23,12 +23,16 @@ import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { EnvironmentTransportKind } from '@mangostudio/shared/environments';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
+import { Link } from '@tanstack/react-router';
 import { Check, ChevronDown, Copy, CornerUpRight, History } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { ExternalAccountLimitsChip } from '@/features/external-agents/ExternalAccountLimitsChip';
 import { useExternalAccountLimits } from '@/features/external-agents/use-external-account-limits';
-import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
+import {
+  externalAgentSelectable,
+  externalUnavailableText,
+} from '@/features/external-agents/useExternalAgents';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 
@@ -364,13 +368,7 @@ function ExternalRow({
       ? labels.selector.notInstalledIn.replace('{environment}', environmentName)
       : // `version-unsupported` is the one reason whose copy names a build, and
         // the build is the adapter's pin rather than anything this bundle knows.
-        // The fallback keeps the sentence readable if a runtime ever reports the
-        // reason without the version — a greyed row with a vague reason still
-        // beats one showing a literal `{version}`.
-        labels.unavailable[reason].replace(
-          '{version}',
-          descriptor.requiredVersion ?? labels.selector.unknownVersion
-        )
+        externalUnavailableText(reason, t, descriptor.requiredVersion)
     : signedOut
       ? labels.unavailable['signed-out']
       : notInstalled
@@ -436,6 +434,23 @@ function ExternalRow({
           <p className="text-[10px] leading-relaxed text-on-surface-variant/70">
             {labels.isolation.next[isolationFixFor(transportKind)]}
           </p>
+        </div>
+      ) : null}
+
+      {/* The two remedies MangoStudio can act on. Both link into the surface
+          that already owns the install recipes rather than growing a second
+          install affordance here — `claude.install` and `claude.update` and
+          their Codex and Cursor equivalents live there, keyed by the same
+          target id. Every other remedy either has its own control below
+          (sign-in), its own panel above (isolation), or nothing to offer. */}
+      {descriptor.remedy?.kind === 'install' || descriptor.remedy?.kind === 'update' ? (
+        <div className="mb-2 px-2">
+          <Link
+            to="/environments/agents"
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-primary transition-colors hover:bg-surface-container-high"
+          >
+            {labels.remedy[descriptor.remedy.kind]}
+          </Link>
         </div>
       ) : null}
 

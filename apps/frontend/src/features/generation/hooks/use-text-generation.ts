@@ -11,8 +11,14 @@ import {
   isTimestampChatTitle,
 } from '@mangostudio/shared/chat';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
-import type { ExternalReviewTarget } from '@mangostudio/shared/external-agents';
-import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents';
+import type {
+  ExternalAgentUnavailableReason,
+  ExternalReviewTarget,
+} from '@mangostudio/shared/external-agents';
+import {
+  EXTERNAL_AGENT_UNAVAILABLE_REASONS,
+  isExternalAgentTargetId,
+} from '@mangostudio/shared/external-agents';
 import type {
   ExternalTurnRequest,
   ModelUnavailableDetails,
@@ -40,6 +46,7 @@ import {
   publishExternalAccountLimits,
   publishExternalCommandCatalog,
 } from '@/features/external-agents/queries';
+import { externalUnavailableText } from '@/features/external-agents/useExternalAgents';
 import { promptExternalWorkspaceTrust } from '@/features/external-agents/workspace-trust-prompt';
 import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import {
@@ -168,6 +175,34 @@ function untrustedWorkspaceScope(error: unknown):
   const { workspacePath, targetId, environmentId } = error.details ?? {};
   if (!workspacePath || !targetId || !environmentId) return undefined;
   return { workspacePath, targetId, environmentId };
+}
+
+/**
+ * The refusal's own reason, said in the user's language.
+ *
+ * The server sends `unavailableReason` as a field rather than interpolating it
+ * into its sentence, and this is the half that makes that worth doing: the wire
+ * token is developer vocabulary (`version-unsupported` is not something to show
+ * anyone) and the catalog that turns it into a sentence lives here. The English
+ * `message` beside it stays as the fallback for an External API consumer that
+ * renders nothing itself.
+ *
+ * `{version}` is the one reason whose copy names a build, and a send refusal
+ * does not carry one — the same fallback the selector uses keeps the sentence
+ * readable rather than printing a literal placeholder.
+ */
+function unavailableReasonText(
+  error: unknown,
+  t: ReturnType<typeof useI18n>['t']
+): string | undefined {
+  if (!(error instanceof ApiError)) return undefined;
+  const reason = error.details?.unavailableReason;
+  if (!reason || !isExternalAgentUnavailableReason(reason)) return undefined;
+  return externalUnavailableText(reason, t);
+}
+
+function isExternalAgentUnavailableReason(value: string): value is ExternalAgentUnavailableReason {
+  return (EXTERNAL_AGENT_UNAVAILABLE_REASONS as readonly string[]).includes(value);
 }
 
 interface UseTextGenerationOptions {
@@ -497,15 +532,11 @@ export function useTextGeneration({
       // the vendor itself is the only name available until the user picks a
       // model.
       //
-      // Approximate on purpose, and known to be: the hub persists
-      // `configuration.model ?? target`, where `configuration.model` is the
-      // catalog default the *adapter* resolved when the request named none. The
-      // bare target id agrees either way — the header renders it as the vendor's
-      // name — but a vendor that advertises a catalog makes this read as the
-      // vendor live and as a model id once the stored record replaces it.
-      // Closing that gap needs the effective model on the wire: the hub knows
-      // it, the `external_session_started` chunk does not carry it yet (see
-      // issue #816).
+      // Optimistic only, and corrected in place: `external_session_started`
+      // now carries the model the hub actually resolved, which is the one the
+      // stored record will name. Until that chunk arrives this is the best
+      // available guess, and the bare target id renders as the vendor's own
+      // localized name rather than as a model nobody chose.
       const displayModel = externalTargetId
         ? (externalTurnRequest?.model ?? externalTargetId)
         : model;
@@ -749,7 +780,9 @@ export function useTextGeneration({
           // transcript says what happened, the notice is where the way out is.
           const deprecated = deprecatedProviderRefusal(error);
           if (deprecated) setModelUnavailable({ chatId: activeChatId, details: deprecated });
-          const errorText = resolveApiErrorMessage(error, t.errors.textGenerationFailed);
+          const errorText =
+            unavailableReasonText(error, t) ??
+            resolveApiErrorMessage(error, t.errors.textGenerationFailed);
           const alreadyHasError = settledParts.some((part) => part.type === 'error');
           const nextParts: MessagePart[] = alreadyHasError
             ? settledParts

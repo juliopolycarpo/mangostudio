@@ -220,6 +220,26 @@ describe('external agent disclosure routes', () => {
     expect(agents[0]?.unavailableReason).toBe('disclosure-required');
   });
 
+  /**
+   * The remedy travels with the reason, always.
+   *
+   * `ExternalAgentDescriptor` says `remedy` is absent exactly when
+   * `unavailableReason` is, and this route stamps a reason onto a descriptor
+   * that was built without one — so it owes the matching remedy too. Without it
+   * the one row whose fix is a dialog this app already owns arrives with
+   * nothing to offer.
+   */
+  it('carries the remedy for the reason it stamps on', async () => {
+    const { app, discovery } = await signedInApp();
+
+    discovery.adapterAnswered = false;
+    const agents = await agentsIn(
+      await app.handle(new Request('http://localhost/external-agents'))
+    );
+
+    expect(agents[0]?.remedy).toEqual({ kind: 'accept-disclosure' });
+  });
+
   it('waits for the adapter before recording an acknowledgement', async () => {
     const { app, discovery } = await signedInApp();
 

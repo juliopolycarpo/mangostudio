@@ -11,6 +11,7 @@ import {
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
 } from '../../../src/hooks/use-global-settings';
+import { ApiError } from '../../../src/lib/utils';
 import type { respondTextStream } from '../../../src/services/generation-service';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
@@ -927,6 +928,46 @@ describe('useTextGeneration — failure surfaced as timeline item', () => {
     expect(errorParts).toHaveLength(1);
     expect(errorParts[0].type === 'error' && errorParts[0].text).toBe(
       'Failed to get a response. Please try again.'
+    );
+  });
+
+  /**
+   * The refusal's reason, said in the user's language.
+   *
+   * The server sends `unavailableReason` as a field rather than interpolating
+   * it into its sentence — `version-unsupported` is developer vocabulary, and
+   * the catalog that turns it into a sentence lives on this side. Without this
+   * the user reads the bare English fallback and learns nothing the old
+   * interpolated message did not already tell them.
+   */
+  it('renders a preflight refusal in the user’s language, from its reason', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(() =>
+      Promise.reject(
+        new ApiError({
+          error: 'This agent cannot run here right now.',
+          code: 'CONFLICT',
+          details: { unavailableReason: 'signed-out' },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('test prompt');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    const calls = props.updateOptimisticMessage.mock.calls as Array<
+      [string, string, Partial<{ parts: MessagePart[]; isGenerating: boolean }>]
+    >;
+    const finalCall = [...calls].reverse().find(([, , update]) => update.isGenerating === false);
+    if (!finalCall) throw new Error('expected a terminal update');
+    const errorParts = (finalCall[2].parts ?? []).filter((p) => p.type === 'error');
+    expect(errorParts[0]?.type === 'error' && errorParts[0].text).toBe(
+      en.externalAgents.unavailable['signed-out']
     );
   });
 

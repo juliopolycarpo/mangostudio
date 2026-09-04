@@ -33,7 +33,10 @@
 import type {
   ExternalAgentConfiguration,
   ExternalAgentDescriptor,
+  ExternalAgentModel,
+  ExternalAgentSettings,
   ExternalAgentTargetId,
+  ExternalAgentUnavailableReason,
   ExternalApprovalRouting,
   ExternalPermissionLevel,
 } from '@mangostudio/shared/external-agents';
@@ -42,7 +45,9 @@ import {
   normalizePermissionLevel,
 } from '@mangostudio/shared/external-agents';
 import type { ExternalTurnRequest } from '@mangostudio/shared/generation';
+import { getDb } from '../../../db/database';
 import { getRuntimeClient } from '../../../services/runtime-client';
+import { getSavedAppSettings } from '../../app-settings/infrastructure/app-settings-repository';
 import type { OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import {
   type ExternalAgentDiscoveryService,
@@ -66,6 +71,14 @@ export type ExternalTurnConfigurationResolution =
   | {
       readonly ok: false;
       readonly message: string;
+      /**
+       * Which of the descriptor's own reasons refused this, when one did.
+       *
+       * The client translates it and pairs it with the remedy; the English
+       * `message` stays as the developer-facing fallback an External API
+       * consumer sees when it renders nothing itself.
+       */
+      readonly reason?: ExternalAgentUnavailableReason;
       /**
        * Set when the refusal is the isolation gate rather than a configuration
        * one. The two read very differently to a user — one is "change a
@@ -95,6 +108,26 @@ export interface ExternalTurnConfigurationDependencies {
   readonly discovery?: Pick<ExternalAgentDiscoveryService, 'describeExternalAgents'>;
   readonly resolveRuntimeClient?: typeof getRuntimeClient;
   readonly isolationRegistry?: ExternalIdentityIsolationRegistry;
+  /** The per-target defaults, injected so this resolver never reaches for a db handle. */
+  readonly readExternalAgentSettings?: (userId: string) => Promise<ExternalAgentSettings>;
+}
+
+/**
+ * The stored settings, read straight off the row.
+ *
+ * The default only; a caller that already has a handle injects its own. This
+ * resolver reads settings for exactly one thing — the per-target model default
+ * — so the port is that narrow rather than a whole db.
+ *
+ * `getSavedAppSettings` rather than `getAppSettings`: the latter first awaits
+ * `libraryLocationDefaults()`, which probes every agent CLI on a cold cache.
+ * That seeds which library locations default to enabled and has nothing to say
+ * about a model default, so on this path it is a multi-second stall in front of
+ * a send. `plugins/api-key-guard.ts` reads the row directly for the same reason.
+ */
+async function readStoredExternalAgentSettings(userId: string): Promise<ExternalAgentSettings> {
+  const settings = await getSavedAppSettings(getDb(), userId);
+  return settings.externalAgentSettings;
 }
 
 export function createExternalTurnConfigurationResolver(
@@ -103,6 +136,7 @@ export function createExternalTurnConfigurationResolver(
   const discovery = dependencies.discovery ?? externalAgentDiscoveryService;
   const resolveRuntimeClient = dependencies.resolveRuntimeClient ?? getRuntimeClient;
   const isolationRegistry = dependencies.isolationRegistry ?? externalIdentityIsolationRegistry;
+  const readSettings = dependencies.readExternalAgentSettings ?? readStoredExternalAgentSettings;
 
   return async function resolveExternalTurnConfiguration(
     input: ResolveExternalTurnConfigurationInput
@@ -145,9 +179,15 @@ export function createExternalTurnConfigurationResolver(
     }
     const descriptor = found.descriptor;
     if (descriptor.unavailableReason) {
+      // The reason travels as a field, not interpolated into the sentence
+      // (#823). The wire token is developer vocabulary — `version-unsupported`
+      // is not something to show a user — and the client already has the
+      // catalog that turns it into a sentence in their own language, plus the
+      // remedy that says what to do about it.
       return {
         ok: false,
-        message: `This agent cannot run here right now (${descriptor.unavailableReason}).`,
+        reason: descriptor.unavailableReason,
+        message: 'This agent cannot run here right now.',
       };
     }
 
@@ -171,8 +211,34 @@ export function createExternalTurnConfigurationResolver(
       };
     }
 
-    const model = pickModel(descriptor, input.request?.model);
-    const effort = pickEffort(descriptor, model, input.request?.effort);
+    // The chain, most specific first. A per-send choice beats a stored one, a
+    // stored one survives a reload, and a per-target default saves picking the
+    // same model again in every new chat. Only the winner is vetted against the
+    // catalog, so a stale stored value falls through to the vendor's default
+    // rather than being refused.
+    //
+    // The send and the row are each a *pair*, so whichever wins, wins whole. An
+    // effort belongs to the model it was chosen for, and the composer clears it
+    // in the same event that changes the model — so a send that names a model
+    // and no effort means "no effort for this model", not "read the effort the
+    // previous model had". Merging those two per field would reconstruct on the
+    // read path exactly the combination the row is written as a pair to
+    // prevent. Only the target default, which is not a pair anyone picked
+    // together, still fills in per field underneath.
+    const selection = input.chat.runnerModelSelection;
+    const chosen = input.request ?? selection;
+    const chosenModel = chosen.model;
+    const chosenEffort = chosen.effort;
+    // Read only when something above it is still unanswered. The settings row
+    // is a database round trip plus a full normalization, on the one path a
+    // user is watching, and the chain discards it outright whenever the request
+    // or the chat already decided both halves.
+    const targetDefaults =
+      chosenModel === undefined || chosenEffort === undefined
+        ? (await readSettings(input.userId)).defaults?.[input.targetId]
+        : undefined;
+    const model = pickModel(descriptor, chosenModel ?? targetDefaults?.model);
+    const effort = pickEffort(descriptor, model, chosenEffort ?? targetDefaults?.effort);
 
     return {
       ok: true,
@@ -227,9 +293,22 @@ function pickModel(
  * Same rule for effort, scoped to the model actually chosen.
  *
  * When the vendor advertised a catalog but no model resolved out of it — a
- * request naming something unlisted, and no visible default to fall back to —
- * the requested effort was never vetted against anything, so nothing is sent.
- * Forwarding it would be this function claiming a scope it does not have.
+ * request naming something unlisted, or a catalog that names no default at all
+ * — the effort has no single model to be vetted against. It is still forwarded
+ * when *every* entry in the catalog accepts it, because then whichever model
+ * the vendor falls back to accepts it too, and no claim is being made about a
+ * scope this function cannot see. Claude is the catalog that shape describes:
+ * `--effort` is session-scoped there, so the levels ride on every entry, and
+ * nothing is marked default on purpose — without this an `{ effort: 'max' }`
+ * with no model picked would be dropped in silence.
+ *
+ * Only an asked-for effort travels that path. A per-model
+ * `defaultReasoningEffort` still needs its model, since picking one of those
+ * without knowing which model runs would be inventing the pair.
+ *
+ * Hidden entries count here, unlike in `pickModel`: the vendor's own fallback
+ * may well be one of them, so an effort the catalog only mostly accepts is not
+ * safe to send.
  */
 function pickEffort(
   descriptor: ExternalAgentDescriptor,
@@ -240,11 +319,22 @@ function pickEffort(
   // No catalog at all: the request is the only signal there is.
   if (!models || models.length === 0) return requested;
   const model = models.find((candidate) => candidate.id === modelId);
-  if (!model) return undefined;
+  if (!model) return acceptedByEveryModel(models, requested) ? requested : undefined;
   const efforts = model.supportedReasoningEfforts;
   if (!efforts || efforts.length === 0) return undefined;
   if (requested && efforts.some((effort) => effort.id === requested)) return requested;
   return model.defaultReasoningEffort;
+}
+
+/** Whether the catalog offers this effort under every model it lists. */
+function acceptedByEveryModel(
+  models: readonly ExternalAgentModel[],
+  requested: string | undefined
+): boolean {
+  if (requested === undefined) return false;
+  return models.every((model) =>
+    (model.supportedReasoningEfforts ?? []).some((effort) => effort.id === requested)
+  );
 }
 
 export const resolveExternalTurnConfiguration = createExternalTurnConfigurationResolver();

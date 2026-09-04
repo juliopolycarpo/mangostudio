@@ -1,9 +1,11 @@
 {
+  "analyticsDisabled": "<boolean>",
   "apiProvider": "<string>",
   "authMethod": "<string>",
   "email": "<string>",
   "loggedIn": "<boolean>",
   "orgId": "<string>",
   "orgName": "<string>",
+  "projectsDirectory": "<string>",
   "subscriptionType": "<string>"
 }
