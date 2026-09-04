@@ -1133,7 +1133,9 @@ describe('attachments the vendor wire cannot carry', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.failure.kind).toBe('validation');
-    expect(result.failure.message).toMatch(/under 2 MB/i);
+    // "at most", because the bound is inclusive: only a size greater than
+    // `EXTERNAL_ATTACHMENT_MAX_BYTES` is refused.
+    expect(result.failure.message).toMatch(/at most 2 MB/i);
   });
 
   /**

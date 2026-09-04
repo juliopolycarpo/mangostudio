@@ -475,7 +475,10 @@ function attachmentRefusal(refusal: ExternalAgentAttachmentRefusal): ExternalTur
     case 'too-large':
       return {
         kind: 'validation',
-        message: `Each attachment sent to an external agent must be under ${EXTERNAL_ATTACHMENT_MAX_BYTES / (1024 * 1024)} MB.`,
+        // "at most", not "under": `refusalFor` refuses a size *greater than*
+        // the bound, so a file of exactly that many bytes is accepted. Saying
+        // "under" would name a limit one byte tighter than the one enforced.
+        message: `Each attachment sent to an external agent must be at most ${EXTERNAL_ATTACHMENT_MAX_BYTES / (1024 * 1024)} MB.`,
       };
   }
 }
