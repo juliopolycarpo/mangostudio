@@ -65,12 +65,15 @@ export function PermissionSelector({
   const { t } = useI18n();
   const labels = t.externalAgents.permission;
   const [open, setOpen] = useState(false);
+  // Read once, above the hooks: it is the selected row below, it seeds the
+  // matrix, and it is what the effect watches. `externalPresetFor` is a pure
+  // lookup, so it can sit here rather than beside the preset list — which is
+  // after this component's early return, where a hook may not go.
+  const selectedPreset = externalPresetFor({ level, routing });
   // A pair no preset names is a deliberate custom choice, so the axes it was
   // made with are what should be on screen — telling that user their setting
-  // vanished would be worse than showing one more control. Initialized here
-  // rather than beside the preset list below, because that sits after the
-  // component's early return and a hook may not.
-  const [showMatrix, setShowMatrix] = useState(externalPresetFor({ level, routing }) === undefined);
+  // vanished would be worse than showing one more control.
+  const [showMatrix, setShowMatrix] = useState(selectedPreset === undefined);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Re-opened when a *later* pair turns out to be custom, because this
@@ -78,10 +81,9 @@ export function PermissionSelector({
   // chat stored on `full-access × auto-review` would otherwise show three
   // presets with none selected and no way to see what is actually set. Only
   // ever opens — a user who expanded the matrix on a preset keeps it expanded.
-  const custom = externalPresetFor({ level, routing }) === undefined;
   useEffect(() => {
-    if (custom) setShowMatrix(true);
-  }, [custom]);
+    if (selectedPreset === undefined) setShowMatrix(true);
+  }, [selectedPreset]);
 
   useEffect(() => {
     if (!open) return;
@@ -144,7 +146,7 @@ export function PermissionSelector({
     const pair = externalPresetPair(preset, configurations);
     return pair ? [{ id: preset.id, pair }] : [];
   });
-  const selectedPreset = externalPresetFor({ level, routing });
+  const hasPresets = presets.length > 0;
 
   return (
     <div ref={containerRef} className="relative flex items-center">
@@ -173,7 +175,7 @@ export function PermissionSelector({
 
       {open ? (
         <div className="absolute bottom-full z-50 mb-2 w-80 space-y-3 rounded-2xl border border-outline-variant/15 bg-surface-container-low p-3 shadow-2xl">
-          {presets.length > 0 ? (
+          {hasPresets ? (
             <Axis heading={labels.presetHeading}>
               {presets.map((preset) => (
                 <Option
@@ -197,7 +199,7 @@ export function PermissionSelector({
             </Axis>
           ) : null}
 
-          {presets.length > 0 ? (
+          {hasPresets ? (
             <button
               type="button"
               onClick={() => setShowMatrix((value) => !value)}
@@ -212,7 +214,7 @@ export function PermissionSelector({
             </button>
           ) : null}
 
-          {showMatrix || presets.length === 0 ? (
+          {showMatrix || !hasPresets ? (
             <>
               <Axis heading={labels.whatItCanDo}>
                 {levels.map((candidate) => {
