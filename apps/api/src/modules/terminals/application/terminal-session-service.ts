@@ -31,7 +31,10 @@ import {
 } from '../../../services/runtime-client/runtime-connection-manager';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
 import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
-import { toolchainService } from '../../environments/application/toolchain-service';
+import {
+  resolveToolchainParams,
+  toolchainService,
+} from '../../environments/application/toolchain-service';
 import {
   TerminalDisabledError,
   TerminalLimitError,
@@ -253,7 +256,9 @@ export function createTerminalSessionService(
       const sessionId = d.randomId();
       const cols = body.cols ?? TERMINAL_DEFAULT_COLS;
       const rows = body.rows ?? TERMINAL_DEFAULT_ROWS;
-      const toolchain = await d.resolveToolchain(userId, body.environmentId);
+      const toolchain = await resolveToolchainParams(client.manifest, () =>
+        d.resolveToolchain(userId, body.environmentId)
+      );
       const openResult = await client.terminal.open({
         sessionId,
         cols,
@@ -262,7 +267,7 @@ export function createTerminalSessionService(
         ...(body.shell ? { shell: body.shell } : {}),
         ...(cwd ? { cwd } : {}),
         ...(chatId ? { env: { MANGOSTUDIO_CHAT_ID: chatId } } : {}),
-        ...(client.manifest.features.toolchain === true ? { toolchain } : {}),
+        ...toolchain,
       });
 
       const now = d.now();

@@ -39,7 +39,10 @@ import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getRuntimeClient, type RuntimeClient } from '../../../services/runtime-client';
 import { generateId } from '../../../utils/id';
-import { toolchainService } from '../../environments/application/toolchain-service';
+import {
+  resolveToolchainParams,
+  toolchainService,
+} from '../../environments/application/toolchain-service';
 import {
   type ExternalEnvelopeVerdict,
   ExternalEventSequencer,
@@ -416,7 +419,9 @@ export function createExternalSessionManager(
     }
 
     const client = await resolveRuntimeClient(input.userId, input.environmentId);
-    const toolchain = await resolveToolchain(input.userId, input.environmentId);
+    const toolchain = await resolveToolchainParams(client.manifest, () =>
+      resolveToolchain(input.userId, input.environmentId)
+    );
     const sessionId = newSessionId();
     const opened = await client.externalAgents.open(
       {
@@ -432,9 +437,7 @@ export function createExternalSessionManager(
         // after the vendor confirms the resume is an ordinary turn again.
         resumeMode: resumable?.pendingAdoption ? 'strict' : 'fallback',
         timeoutMs: openTimeoutMs,
-        // `external-agent.open` refuses unknown fields, so a peer that predates
-        // the selection must not be sent one; it keeps its own PATH.
-        ...(client.manifest.features.toolchain === true ? { toolchain } : {}),
+        ...toolchain,
       },
       { timeoutMs: openTimeoutMs }
     );

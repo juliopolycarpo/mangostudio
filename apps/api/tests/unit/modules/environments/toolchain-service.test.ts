@@ -9,12 +9,17 @@ import type {
 } from '@mangostudio/shared/environments';
 import { DEFAULT_TOOLCHAIN_SELECTION } from '@mangostudio/shared/environments';
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import type {
   EnvironmentProbingService,
   ProbeOptions,
   ProbeScope,
 } from '../../../../src/modules/environments/application/probing-service';
-import { createToolchainService } from '../../../../src/modules/environments/application/toolchain-service';
+import {
+  createToolchainService,
+  resolveToolchainParams,
+  toolchainParams,
+} from '../../../../src/modules/environments/application/toolchain-service';
 import { EnvironmentServiceError } from '../../../../src/modules/environments/domain/environment-error';
 import type { EnvironmentToolchainRepository } from '../../../../src/modules/environments/infrastructure/environment-toolchain-repository';
 
@@ -370,5 +375,49 @@ describe('toolchain service', () => {
     await service.update(USER_ID, ENVIRONMENT_ID, { node: '/nowhere/node' }).catch(() => undefined);
 
     expect(published).toEqual([]);
+  });
+});
+
+/** Only `features.toolchain` matters here; the rest of a manifest is noise. */
+function manifestWithToolchain(toolchain: boolean): RuntimeCapabilityManifest {
+  return { features: { toolchain } } as RuntimeCapabilityManifest;
+}
+
+describe('toolchainParams', () => {
+  const selection: ToolchainSelection = { node: '/opt/node/bin/node', bun: 'auto' };
+
+  it('carries the selection for a peer that advertises the feature', () => {
+    expect(toolchainParams(manifestWithToolchain(true), selection)).toEqual({
+      toolchain: selection,
+    });
+  });
+
+  it('omits the field entirely for a peer that predates it', () => {
+    // Not `{ toolchain: undefined }` — every spawn method validates strictly,
+    // so an unknown key present at all is refused outright.
+    expect(toolchainParams(manifestWithToolchain(false), selection)).toEqual({});
+    expect('toolchain' in toolchainParams(manifestWithToolchain(false), selection)).toBe(false);
+  });
+
+  it('omits the field when there is no selection to send', () => {
+    expect(toolchainParams(manifestWithToolchain(true), undefined)).toEqual({});
+  });
+});
+
+describe('resolveToolchainParams', () => {
+  it('resolves the selection only for a peer that can accept one', async () => {
+    let resolveCalls = 0;
+    const resolve = () => {
+      resolveCalls += 1;
+      return Promise.resolve(DEFAULT_TOOLCHAIN_SELECTION);
+    };
+
+    expect(await resolveToolchainParams(manifestWithToolchain(false), resolve)).toEqual({});
+    expect(resolveCalls).toBe(0);
+
+    expect(await resolveToolchainParams(manifestWithToolchain(true), resolve)).toEqual({
+      toolchain: DEFAULT_TOOLCHAIN_SELECTION,
+    });
+    expect(resolveCalls).toBe(1);
   });
 });

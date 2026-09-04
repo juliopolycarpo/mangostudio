@@ -5,7 +5,10 @@
  */
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import { toolchainService } from '../../../modules/environments/application/toolchain-service';
+import {
+  resolveToolchainParams,
+  toolchainService,
+} from '../../../modules/environments/application/toolchain-service';
 import { getRuntimeClient } from '../../runtime-client';
 import { clampIntegerSetting, getOptionalString, getRequiredString } from '../arg-parsing';
 import {
@@ -93,9 +96,8 @@ async function execute(
   const requestedCwd = getOptionalString(args.cwd, 'cwd') ?? context.workdir;
   const settings = normalizeShellToolSettings(context.parameters);
   const runtime = await getRuntimeClient(context.userId, context.environmentId);
-  const toolchain = await toolchainService.resolve(
-    context.userId,
-    context.environmentId ?? LOCAL_ENVIRONMENT_ID
+  const toolchain = await resolveToolchainParams(runtime.manifest, () =>
+    toolchainService.resolve(context.userId, context.environmentId ?? LOCAL_ENVIRONMENT_ID)
   );
   const resolution = { ...context, paths: runtime.paths };
   // Spawn with the same resolved path that was validated, so `~` and relative
@@ -113,9 +115,7 @@ async function execute(
       timeoutMs: settings.timeoutSeconds * 1000,
       maxOutputBytes: settings.maxOutputBytes,
       envPolicy: { allow: settings.allowedEnvVars, deny: settings.deniedEnvVars },
-      // Only a peer that advertises the selection is sent one; older runtimes
-      // keep their own PATH exactly as before.
-      ...(runtime.manifest.features.toolchain === true ? { toolchain } : {}),
+      ...toolchain,
     },
     context.signal ? { signal: context.signal } : undefined
   );

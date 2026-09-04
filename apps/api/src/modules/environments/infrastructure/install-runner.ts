@@ -22,6 +22,7 @@ import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { getInstallLogPath } from '../../../lib/mango-paths';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
+import { toolchainParams } from '../application/toolchain-service';
 
 type InstallOutputStream = RuntimeInstallOutputEvent['stream'];
 
@@ -149,8 +150,7 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
             ...(command.env && { env: command.env }),
             timeoutMs: command.timeoutMs,
             logPath: deps.logPathFor(command.runId, command.environmentId),
-            ...(command.toolchain &&
-              client.manifest.features.toolchain === true && { toolchain: command.toolchain }),
+            ...toolchainParams(client.manifest, command.toolchain),
             ...(options.outputLimitBytes !== undefined && {
               outputLimitBytes: options.outputLimitBytes,
             }),

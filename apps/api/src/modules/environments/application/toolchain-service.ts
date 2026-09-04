@@ -15,6 +15,7 @@ import type {
   ToolchainUpdateBody,
 } from '@mangostudio/shared/environments';
 import { DEFAULT_TOOLCHAIN_SELECTION } from '@mangostudio/shared/environments';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { publishEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation';
 import { EnvironmentServiceError } from '../domain/environment-error';
 import {
@@ -30,6 +31,37 @@ export interface ToolchainService {
     environmentId: string,
     body: ToolchainUpdateBody
   ): Promise<ToolchainSelection>;
+}
+
+/**
+ * The `toolchain` field a spawn request may carry, or nothing at all.
+ *
+ * Every spawn method validates its params strictly, so a peer that predates
+ * the selection refuses a request naming it outright — the field must be
+ * omitted, not sent empty. Spelling that rule at each spawn site is how a
+ * fifth one comes to forget it, so it lives here instead.
+ * // Usage: { ...toolchainParams(client.manifest, command.toolchain) }
+ */
+export function toolchainParams(
+  manifest: RuntimeCapabilityManifest,
+  selection: ToolchainSelection | undefined
+): { toolchain?: ToolchainSelection } {
+  if (manifest.features.toolchain !== true || !selection) return {};
+  return { toolchain: selection };
+}
+
+/**
+ * {@link toolchainParams} for a caller that has not read the selection yet:
+ * a peer that cannot accept one is never asked to resolve it, so a legacy
+ * runtime costs no lookup per spawn.
+ * // Usage: await resolveToolchainParams(client.manifest, () => toolchainService.resolve(userId, environmentId))
+ */
+export async function resolveToolchainParams(
+  manifest: RuntimeCapabilityManifest,
+  resolve: () => Promise<ToolchainSelection | undefined>
+): Promise<{ toolchain?: ToolchainSelection }> {
+  if (manifest.features.toolchain !== true) return {};
+  return toolchainParams(manifest, await resolve());
 }
 
 async function assertKnownPath(
