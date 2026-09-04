@@ -405,8 +405,10 @@ export async function updateChat(
     // Also a pair, for a different reason: an effort belongs to the model it
     // was chosen for, so keeping a stale one alongside a new model would send
     // the vendor a combination nobody picked.
-    dbUpdates.runnerModel = data.runnerModelSelection.model ?? null;
-    dbUpdates.runnerEffort = data.runnerModelSelection.effort ?? null;
+    // Trimmed on the way in as well as on the way out, so the row never holds
+    // a value the read path would reject as blank.
+    dbUpdates.runnerModel = data.runnerModelSelection.model?.trim() || null;
+    dbUpdates.runnerEffort = data.runnerModelSelection.effort?.trim() || null;
   }
   if (data.workdir !== undefined) dbUpdates.workdir = data.workdir;
   if (data.environmentId !== undefined) dbUpdates.environmentId = data.environmentId;

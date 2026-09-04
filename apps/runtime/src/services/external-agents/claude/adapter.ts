@@ -188,7 +188,7 @@ interface ClaudeSession {
    * Whether this build declares `--permission-prompts`, so the turn can say
    * `none` instead of relying on a default that has already changed once.
    */
-  readonly answersPermissionPrompts?: boolean;
+  readonly declaresPermissionPrompts?: boolean;
   activeTurn?: {
     readonly channel: TurnChannel<ExternalAgentEvent>;
     readonly reducer: ClaudeTurnReducer;
@@ -319,7 +319,7 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
       configuration: params.configuration,
       availability,
       ...(surface?.effortLevels ? { acceptedEfforts: surface.effortLevels } : {}),
-      answersPermissionPrompts: claudeDeclaresPermissionPrompts(surface),
+      declaresPermissionPrompts: claudeDeclaresPermissionPrompts(surface),
     };
     this.#sessions.set(params.sessionId, session);
 
@@ -751,7 +751,7 @@ export function buildTurnArgv(input: {
   readonly executable: string;
   readonly session: Pick<
     ClaudeSession,
-    'sessionId' | 'established' | 'acceptedEfforts' | 'answersPermissionPrompts'
+    'sessionId' | 'established' | 'acceptedEfforts' | 'declaresPermissionPrompts'
   >;
   readonly configuration: ExternalAgentConfiguration;
   readonly availability: ClaudeModeAvailability;
@@ -781,7 +781,7 @@ export function buildTurnArgv(input: {
     '--forward-subagent-text',
     '--permission-mode',
     mode,
-    ...permissionPromptArguments(input.session.answersPermissionPrompts),
+    ...permissionPromptArguments(input.session.declaresPermissionPrompts),
     // The session id is the whole continuity mechanism: minted on the first run,
     // resumed afterwards. The same `cwd` is passed either way, because below
     // 2.1.223 `--resume` only looks inside the directory the session was made in.

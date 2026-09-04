@@ -172,7 +172,7 @@ describe('buildTurnArgv', () => {
    * the property survives another default change.
    */
   it('tells a build that offers the flag that nobody answers prompts', () => {
-    const pinned = argv({ ...base, session: { ...base.session, answersPermissionPrompts: true } });
+    const pinned = argv({ ...base, session: { ...base.session, declaresPermissionPrompts: true } });
 
     expect(pinned[pinned.indexOf('--permission-prompts') + 1]).toBe('none');
   });
@@ -181,7 +181,7 @@ describe('buildTurnArgv', () => {
     // `host` promises an answering SDK host. `interactiveApprovals` is false,
     // so saying it would park every approval-needing turn until the timeout.
     expect(
-      argv({ ...base, session: { ...base.session, answersPermissionPrompts: true } })
+      argv({ ...base, session: { ...base.session, declaresPermissionPrompts: true } })
     ).not.toContain('host');
   });
 
