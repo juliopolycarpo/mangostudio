@@ -35,10 +35,19 @@
  * eventually disagree about the same help text.
  */
 
-import { parseVendorCliSurface, type VendorCliSurface } from '@mangostudio/shared/external-agents';
+import {
+  parseVendorCliSurface,
+  type VendorCliSurface,
+  vendorCliBareChoiceList,
+  vendorCliQuotedExamples,
+} from '@mangostudio/shared/external-agents';
 
 /** The option whose choice list is Claude's permission vocabulary. */
 const CLAUDE_PERMISSION_MODE_FLAG = '--permission-mode';
+
+/** The two options whose vocabulary is stated in prose rather than as choices. */
+const CLAUDE_MODEL_FLAG = '--model';
+const CLAUDE_EFFORT_FLAG = '--effort';
 
 /**
  * Long flags `buildTurnArgv` puts on the wire.
@@ -64,17 +73,41 @@ export const CLAUDE_REQUIRED_CLI_FLAGS: readonly string[] = [
   '--model',
 ];
 
-/** The parsed surface, reduced to the two things this adapter reads off it. */
+/** The parsed surface, reduced to the things this adapter reads off it. */
 export interface ClaudeCliSurface {
   readonly flags: ReadonlySet<string>;
   /** `--permission-mode`'s own choice list, verbatim. */
   readonly permissionModes: ReadonlySet<string>;
+  /**
+   * The model aliases `--model`'s description advertises, or absent when it
+   * advertises none. Absent is not empty — see `claudeAcceptedModes`.
+   */
+  readonly modelAliases?: ReadonlySet<string>;
+  /** `--effort`'s levels, from the same prose, with the same absent-vs-empty rule. */
+  readonly effortLevels?: ReadonlySet<string>;
 }
 
-/** Reads `claude --help` into the surface this adapter depends on. */
+/**
+ * Reads `claude --help` into the surface this adapter depends on.
+ *
+ * Three vocabularies, three shapes the vendor happens to print them in, and
+ * none of the shape-reading here: `(choices: …)` for the permission modes, a
+ * bare list for the effort levels, a first `(e.g. …)` group for the model
+ * aliases. Which flag carries which vocabulary is this adapter's knowledge;
+ * how each shape is read is the shared parser's, for the reason its own
+ * docblock gives — the vendor-contract capture reads the same help text, and
+ * two implementations of prose parsing would eventually disagree about it.
+ */
 export function parseClaudeCliSurface(help: string): ClaudeCliSurface {
   const surface: VendorCliSurface = parseVendorCliSurface(help, CLAUDE_PERMISSION_MODE_FLAG);
-  return { flags: surface.flags, permissionModes: surface.choices };
+  const modelAliases = vendorCliQuotedExamples(help, CLAUDE_MODEL_FLAG);
+  const effortLevels = vendorCliBareChoiceList(help, CLAUDE_EFFORT_FLAG);
+  return {
+    flags: surface.flags,
+    permissionModes: surface.choices,
+    ...(modelAliases ? { modelAliases } : {}),
+    ...(effortLevels ? { effortLevels } : {}),
+  };
 }
 
 /**

@@ -3,9 +3,9 @@
   "command": "claude --help; claude auth status",
   "capturedFrom": "2.1.260 (Claude Code)",
   "capturedAt": "2026-09-04",
-  "checksum": "sha256:d9337237ac9fd38c5225314e2db577ee11799b5e4bfe8c9bbe941364fb079533",
+  "checksum": "sha256:1560937e70e3624e3ed751f4b7c3dd246ac656cb9371ffcd68abe48443e77c24",
   "files": {
     "auth-status.json": "sha256:41927c5461d57f7b5ec7498e989baa7c910bd2a9c3bfcc1b271336bef0e58dc7",
-    "cli-surface.json": "sha256:b7b2da496dc25f59ca313118c2866ff573a9def82326612d488498aac4df8015"
+    "cli-surface.json": "sha256:ae2d38f51e973f0dc60618b276aa3f6532abbe01ff27e6bffe6f86f0b0f64a64"
   }
 }

@@ -76,5 +76,17 @@
     "dontAsk",
     "manual",
     "plan"
+  ],
+  "modelAliases": [
+    "fable",
+    "opus",
+    "sonnet"
+  ],
+  "effortLevels": [
+    "high",
+    "low",
+    "max",
+    "medium",
+    "xhigh"
   ]
 }
