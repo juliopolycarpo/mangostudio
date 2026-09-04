@@ -9,6 +9,7 @@ import {
   EXTERNAL_STEER_REJECTION_REASONS,
   EXTERNAL_TEXT_LIMITS,
   EXTERNAL_TURN_PAYLOAD_MAX_BYTES,
+  EXTERNAL_VENDOR_ID_MAX_LENGTH,
   ExternalAccountLimitsSchema,
   ExternalAgentAckResultSchema,
   ExternalAgentCancelParamsSchema,
@@ -38,6 +39,8 @@ import {
   NO_EXTERNAL_AGENT_CAPABILITIES,
   normalizeApprovalRouting,
   normalizePermissionLevel,
+  usableVendorId,
+  vendorSelection,
 } from '../../src/external-agents';
 import type { LibraryTargetId } from '../../src/library';
 import { LibraryTargetIdSchema } from '../../src/library';
@@ -684,5 +687,47 @@ describe('what would fix an unavailable agent', () => {
     // MangoStudio can offer no button.
     expect(externalRemedyFor('environment-unreachable')?.kind).toBe('contact-admin');
     expect(externalRemedyFor('isolation-unproven')?.kind).toBe('contact-admin');
+  });
+});
+
+/**
+ * One rule, shared by the settings normalizer, the chat repository's read and
+ * write paths, and the composer. They each used to answer it themselves, and
+ * disagreed about the length bound and about trimming.
+ */
+describe('usableVendorId', () => {
+  it('keeps a trimmed id', () => {
+    expect(usableVendorId('  opus  ')).toBe('opus');
+  });
+
+  it('treats blank and non-string as no choice at all', () => {
+    // A column holding `''` is not a pick anybody made, and passing it on would
+    // put `--model ''` within reach of an adapter.
+    expect(usableVendorId('   ')).toBeUndefined();
+    expect(usableVendorId('')).toBeUndefined();
+    expect(usableVendorId(undefined)).toBeUndefined();
+    expect(usableVendorId(42)).toBeUndefined();
+  });
+
+  it('drops an id longer than the schema would accept', () => {
+    // Storing one the schema rejects turns a later save into a failure no
+    // control on screen explains.
+    expect(usableVendorId('o'.repeat(EXTERNAL_VENDOR_ID_MAX_LENGTH))).toHaveLength(
+      EXTERNAL_VENDOR_ID_MAX_LENGTH
+    );
+    expect(usableVendorId('o'.repeat(EXTERNAL_VENDOR_ID_MAX_LENGTH + 1))).toBeUndefined();
+  });
+});
+
+describe('vendorSelection', () => {
+  it('omits an unusable half rather than carrying an undefined key', () => {
+    // A key holding `undefined` survives a spread and would reach the wire.
+    const selection = vendorSelection('opus', '  ');
+    expect(selection).toEqual({ model: 'opus' });
+    expect('effort' in selection).toBe(false);
+  });
+
+  it('is empty when neither half was chosen', () => {
+    expect(vendorSelection(null, undefined)).toEqual({});
   });
 });
