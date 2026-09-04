@@ -68,7 +68,14 @@ export const BUN_RUNTIME_DEFINITION: RuntimeDefinition = {
   wellKnownDirs: wellKnownBunDirectories,
 };
 
-/** `raw` is searched rather than anchored: fnm and git prefix their version with their own name. */
+/**
+ * `raw` is searched rather than anchored: fnm and git prefix their version
+ * with their own name. That makes every position in `raw` its own match
+ * attempt, so each component is capped at `{1,9}` rather than left as `\d+` —
+ * unbounded, rejecting a long digit run costs quadratic time, and `raw` is a
+ * probed binary's stdout rather than a shape this process controls. No real
+ * version component is nine digits wide.
+ */
 function parseSemVerAnywhere(raw: string, pattern: RegExp): SemVer | null {
   const match = raw.match(pattern);
   if (!match) return null;
@@ -81,12 +88,12 @@ function parseSemVerAnywhere(raw: string, pattern: RegExp): SemVer | null {
 
 /** `fnm --version` prints `fnm 1.38.1`. */
 export function parseFnmVersion(raw: string): SemVer | null {
-  return parseSemVerAnywhere(raw, /(\d+)\.(\d+)\.(\d+)/);
+  return parseSemVerAnywhere(raw, /(\d{1,9})\.(\d{1,9})\.(\d{1,9})/);
 }
 
 /** `git --version` prints `git version 2.43.0`, or `2.43.0.windows.1` on win32; the suffix is dropped. */
 export function parseGitVersion(raw: string): SemVer | null {
-  return parseSemVerAnywhere(raw, /git version\s+(\d+)\.(\d+)\.(\d+)/i);
+  return parseSemVerAnywhere(raw, /git version\s+(\d{1,9})\.(\d{1,9})\.(\d{1,9})/i);
 }
 
 /** `winget --version` prints `v1.29.290`. */

@@ -482,6 +482,20 @@ describe('runtime version parsing', () => {
     expect(parseWingetVersion('v1.29.290')).toEqual({ major: 1, minor: 29, patch: 290 });
     expect(parseWingetVersion('not a version')).toBeNull();
   });
+
+  // Both parsers search rather than anchor, so every start position is a match
+  // attempt. With unbounded `\d+` a long digit run makes that quadratic: this
+  // input took ~1.2s to reject before each component was capped, and ~0.5ms
+  // after. The budget sits far below the first and far above the second, so it
+  // fails on the shape (a stalled probe), not on a slow machine.
+  it('rejects a long digit run in linear time, on stdout no one controls', () => {
+    const digits = '0'.repeat(30_000);
+
+    const started = performance.now();
+    expect(parseFnmVersion(digits)).toBeNull();
+    expect(parseGitVersion(`git version ${digits}`)).toBeNull();
+    expect(performance.now() - started).toBeLessThan(250);
+  });
 });
 
 describe('win32-only prerequisite definitions', () => {
