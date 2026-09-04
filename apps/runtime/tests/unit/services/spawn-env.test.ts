@@ -114,6 +114,26 @@ describe('buildSpawnEnv', () => {
     expect(result.PATH).toBe(`${nodeDir}:/usr/bin`);
   });
 
+  it('refuses an alias value that walks out of the alias directory', () => {
+    const nvmDir = posix.join(HOME, '.nvm');
+    const nodeDir = posix.join(nvmDir, 'versions', 'node', 'v22.13.0', 'bin');
+    const fs = new FakeSpawnEnvFs({
+      [posix.join(nvmDir, 'alias', 'default')]: '../../../../etc/mangostudio-version',
+      '/etc/mangostudio-version': 'v22.13.0',
+      [posix.join(nodeDir, 'node')]: 'binary',
+    });
+
+    const result = buildSpawnEnv({
+      source: { PATH: '/usr/bin' },
+      toolchain: { node: 'auto', bun: 'auto' },
+      platform: 'linux',
+      homeDir: HOME,
+      fs,
+    });
+
+    expect(result.PATH).toBe('/usr/bin');
+  });
+
   it('resolves the `node` alias to the newest installed version', () => {
     const nvmDir = posix.join(HOME, '.nvm');
     const versions = posix.join(nvmDir, 'versions', 'node');

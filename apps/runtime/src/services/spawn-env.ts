@@ -90,8 +90,19 @@ export function findPathKey(
   return existing ?? fallback;
 }
 
-/** nvm alias names and the `lts/<codename>` pointers real nvm writes into its alias cache. */
+/**
+ * nvm alias names and the `lts/<codename>` pointers real nvm writes into its
+ * alias cache. `.` and `/` are legal inside a name, but a `..` segment is not:
+ * the value is joined onto `$NVM_DIR/alias`, and `../../..` would walk the
+ * chain out of the alias directory and read arbitrary files instead.
+ */
 const SAFE_ALIAS_PATTERN = /^[a-zA-Z0-9_.*/-]+$/;
+const TRAVERSAL_SEGMENT_PATTERN = /(?:^|\/)\.\.(?:\/|$)/;
+
+/** Whether an alias value is safe to join onto the alias directory and read. */
+function isSafeAlias(alias: string): boolean {
+  return SAFE_ALIAS_PATTERN.test(alias) && !TRAVERSAL_SEGMENT_PATTERN.test(alias);
+}
 
 /** Backstop against a cyclic alias file; the `seen` set is the real guard. */
 const MAX_ALIAS_CHAIN = 8;
@@ -153,7 +164,7 @@ function resolveNvmDefaultVersion(fs: SpawnEnvFs, nvmDir: string): string | unde
     if (version) return version;
     const newest = newestInstalledNvmVersion(fs, nvmDir, current);
     if (newest) return newest;
-    if (!SAFE_ALIAS_PATTERN.test(current) || seen.has(current)) return undefined;
+    if (!isSafeAlias(current) || seen.has(current)) return undefined;
     seen.add(current);
     const aliasPath = current.startsWith('lts/')
       ? posix.join(nvmDir, 'alias', 'lts', current.slice('lts/'.length))
