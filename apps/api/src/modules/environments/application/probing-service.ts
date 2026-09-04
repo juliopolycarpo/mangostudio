@@ -673,12 +673,11 @@ export function createEnvironmentProbingService(
         if (!cached) return status;
         batch.push(cached);
       }
-      const extra = computePrerequisiteMissingFindings(
-        batch,
-        client.manifest.platform,
-        INSTALL_RECIPES
-      ).get(status.id);
-      return extra ? { ...status, findings: [...status.findings, ...extra] } : status;
+      return (
+        withPrerequisiteFindings(batch, client.manifest.platform).find(
+          (enriched) => enriched.id === id
+        ) ?? status
+      );
     },
 
     async listVersionManagerStatuses(scope, probeOptions) {
