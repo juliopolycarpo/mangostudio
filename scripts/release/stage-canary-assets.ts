@@ -93,6 +93,9 @@ export function stageCanaryAssets(options: StageCanaryAssetsOptions): readonly s
   for (const assetName of [...selection.archives, ...selection.rawBinaries]) {
     staged.push(stageOne(assetName, { version, cargoVersion, inDir, outDir }));
   }
+  for (const assetName of selection.scripts) {
+    staged.push(stageScript(assetName, { inDir, outDir }));
+  }
 
   const manifest = buildManifest({
     plan,
@@ -126,6 +129,17 @@ function stageOne(
   const target = rollingAssetName(assetName, context.version, context.cargoVersion);
   copyFileSync(source, join(context.outDir, target));
   return target;
+}
+
+/** Install scripts carry no version in their name, so they stage as-is. */
+function stageScript(
+  assetName: string,
+  context: { readonly inDir: string; readonly outDir: string }
+): string {
+  const source = join(context.inDir, assetName);
+  assertFile(source, assetName);
+  copyFileSync(source, join(context.outDir, assetName));
+  return assetName;
 }
 
 /**

@@ -120,6 +120,9 @@ const createMuslReleasePlan = (options: {
     platformArchives,
     rawBinaries,
     frontendArchive,
+    // This plan's own focus is muslPlatforms/checksums; leaving this empty
+    // means copyInstallerScripts has nothing to do and no fixture is needed.
+    installerScripts: [],
     checksummedAssetPaths: [
       ...platformArchives.map((archive) => archive.archivePath),
       ...rawBinaries.map((asset) => asset.assetPath),
@@ -187,6 +190,37 @@ describe.serial('archiveReleaseAssets', () => {
         checksumLines.some((line) => line.endsWith(`  ${asset.assetName}`))
       )
     ).toBe(true);
+  });
+
+  test('copies the install scripts verbatim and checksums them', async () => {
+    const rootDir = makeTempDir();
+    const arches = ['linux-x64-musl'] as const;
+    stageMuslPlatforms(join(rootDir, 'out'), arches);
+    stageFrontendDist(rootDir);
+    mkdirSync(join(rootDir, 'scripts', 'install'), { recursive: true });
+    writeFileSync(
+      join(rootDir, 'scripts', 'install', 'install.sh'),
+      '#!/usr/bin/env bash\necho fixture\n'
+    );
+    writeFileSync(join(rootDir, 'scripts', 'install', 'install.ps1'), '# fixture\n');
+
+    const plan = createReleaseAssetPlan({
+      version: '1.2.3',
+      rootDir,
+      outDir: join(rootDir, 'out'),
+      assetsDir: join(rootDir, 'release-assets'),
+      onlyPlatform: 'linux-x64-musl',
+    });
+
+    await archiveReleaseAssets(plan);
+
+    for (const script of plan.installerScripts) {
+      expect(existsSync(script.assetPath)).toBe(true);
+      expect(readFileSync(script.assetPath, 'utf8')).toBe(readFileSync(script.sourcePath, 'utf8'));
+    }
+    const checksumLines = readFileSync(plan.checksumPath, 'utf8').trimEnd().split('\n');
+    expect(checksumLines.some((line) => line.endsWith('  install.sh'))).toBe(true);
+    expect(checksumLines.some((line) => line.endsWith('  install.ps1'))).toBe(true);
   });
 
   test('produces identical SHA256SUMS for serial and parallel archiving', async () => {

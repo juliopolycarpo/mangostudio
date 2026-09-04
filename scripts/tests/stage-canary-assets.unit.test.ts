@@ -21,7 +21,7 @@ let outDir: string;
 function seedBuiltAssets(): void {
   const plan = createReleaseAssetPlan({ version: VERSION, assetsDir: inDir });
   const selection = selectCanaryAssets(plan);
-  for (const assetName of [...selection.archives, ...selection.rawBinaries]) {
+  for (const assetName of [...selection.archives, ...selection.rawBinaries, ...selection.scripts]) {
     writeFileSync(join(inDir, assetName), `contents of ${assetName}`);
   }
 }
@@ -81,6 +81,16 @@ describe('stageCanaryAssets', () => {
     expect(staged).not.toContain('mangostudio-runtime-1.2.3-canary-linux-arm64');
     expect(staged).not.toContain('mangostudio-1.2.3-canary-linux-arm64');
     expect(staged.every((name) => !name.includes('abcdef0'))).toBe(true);
+  });
+
+  test('stages the install scripts under their own names, never renamed', () => {
+    const staged = stage();
+
+    expect(staged).toContain('install.sh');
+    expect(staged).toContain('install.ps1');
+    expect(readFileSync(join(outDir, 'install.sh'), 'utf8')).toBe(
+      readFileSync(join(inDir, 'install.sh'), 'utf8')
+    );
   });
 
   test('records the source commit and each pair digest in the manifest', () => {

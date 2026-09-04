@@ -13,6 +13,7 @@ import { assertDirectory, assertFile, assertSafeToDelete } from '../lib/fs-asser
 import {
   createReleaseAssetPlan,
   type FrontendArchivePlan,
+  type InstallerScriptPlan,
   type PlatformArchivePlan,
   platformArchiveMembers,
   type ReleaseAssetPlan,
@@ -42,8 +43,21 @@ export async function archiveReleaseAssets(plan: ReleaseAssetPlan): Promise<void
     archivePlatform(archive, plan.assetsDir)
   );
   copyRawAssets(plan);
+  copyInstallerScripts(plan);
   await archiveFrontend(plan.frontendArchive);
   writeChecksumManifest(plan);
+}
+
+/** Copy install.sh and install.ps1 verbatim: they ship byte for byte, not rebuilt. */
+function copyInstallerScripts(plan: ReleaseAssetPlan): void {
+  for (const script of plan.installerScripts) {
+    copyInstallerScript(script);
+  }
+}
+
+function copyInstallerScript(script: InstallerScriptPlan): void {
+  assertFile(script.sourcePath, script.assetName);
+  cpSync(script.sourcePath, script.assetPath);
 }
 
 /**
