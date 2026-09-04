@@ -84,6 +84,17 @@ function optionBlock(lines: readonly string[], startIndex: number): string {
   return block.join(' ');
 }
 
+/** Every option the text declares, in order, with the flags on its own line. */
+function* declaredOptions(
+  lines: readonly string[]
+): Generator<{ readonly index: number; readonly declared: readonly string[] }> {
+  for (const [index, line] of lines.entries()) {
+    const option = OPTION_LINE.exec(line);
+    if (!option) continue;
+    yield { index, declared: flagsOnLine(option[1] ?? '') };
+  }
+}
+
 /**
  * Parses help text into its declared long flags, plus the choice list of
  * `choicesFor` when that option declares one.
@@ -97,10 +108,7 @@ export function parseVendorCliSurface(help: string, choicesFor?: string): Vendor
   const flags = new Set<string>();
   const choices = new Set<string>();
 
-  for (const [index, line] of lines.entries()) {
-    const option = OPTION_LINE.exec(line);
-    if (!option) continue;
-    const declared = flagsOnLine(option[1] ?? '');
+  for (const { index, declared } of declaredOptions(lines)) {
     for (const flag of declared) flags.add(flag);
     if (choicesFor === undefined || !declared.includes(choicesFor)) continue;
     const list = choiceListIn(optionBlock(lines, index));
@@ -111,4 +119,34 @@ export function parseVendorCliSurface(help: string, choicesFor?: string): Vendor
   }
 
   return { flags, choices };
+}
+
+/**
+ * One declared option's own text — its line plus the continuations beneath it.
+ *
+ * `(choices: …)` is the only machine-readable thing commander prints, and a
+ * vendor that documents a vocabulary in prose instead leaves a caller nothing
+ * to read but the sentence. This hands back that sentence, assembled the same
+ * way `parseVendorCliSurface` assembles the one it scans for choices, so the
+ * two can never disagree about where an option's text ends.
+ *
+ * Deliberately no parsing beyond that. What a particular vendor's prose means
+ * is that vendor's problem, and encoding one CLI's phrasing here would make
+ * every other CLI's rewording look like a bug in this module.
+ *
+ * `undefined` means the option is not declared. Crucially that is *not* the
+ * same as "the text never mentions it": a flag named inside a neighbour's
+ * description is not declared, and answering with the neighbour's block would
+ * invent a surface the binary does not have.
+ *
+ * @example
+ * vendorCliOptionBlock(help, '--effort');
+ * // '  --effort <level>   Effort level for the current session (low, medium, high)'
+ */
+export function vendorCliOptionBlock(help: string, flag: string): string | undefined {
+  const lines = help.split(/\r?\n/);
+  for (const { index, declared } of declaredOptions(lines)) {
+    if (declared.includes(flag)) return optionBlock(lines, index);
+  }
+  return undefined;
 }
