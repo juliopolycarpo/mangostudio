@@ -14,6 +14,7 @@ import {
 } from './args';
 import { runDoctor } from './commands/doctor';
 import { runEnv, runEnvInstall, runEnvToolchain } from './commands/env';
+import { runInstaller } from './commands/installer';
 import { runKillServer } from './commands/killserver';
 import { runLibrary } from './commands/library';
 import { runLogs } from './commands/logs';
@@ -58,6 +59,11 @@ async function route(command: string | undefined, rest: string[]): Promise<void>
     // Hidden: re-exec target used by `serve -d`. Not shown in help.
     case '__serve':
       await runServeInternal(parseServeArgs(rest));
+      return;
+    // Hidden: prints the install script this build embeds. Not shown in
+    // help; the release dry-run's drift guard is the only intended caller.
+    case '__installer':
+      runInstaller(rest);
       return;
     case 'status':
       await runStatus(parseStatusArgs(rest));
