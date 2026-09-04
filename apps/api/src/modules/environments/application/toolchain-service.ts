@@ -75,12 +75,6 @@ export function createToolchainService(
     },
 
     async update(userId, environmentId, body) {
-      const current = (await repository.get(userId, environmentId)) ?? DEFAULT_TOOLCHAIN_SELECTION;
-      const merged: ToolchainSelection = {
-        node: body.node ?? current.node,
-        bun: body.bun ?? current.bun,
-      };
-
       if (body.node !== undefined) {
         await assertKnownPath(probing, userId, environmentId, 'node', body.node);
       }
@@ -88,8 +82,12 @@ export function createToolchainService(
         await assertKnownPath(probing, userId, environmentId, 'bun', body.bun);
       }
 
-      await repository.upsert(userId, environmentId, merged, now());
-      return merged;
+      // The body is already the patch: the repository merges it into the
+      // stored row in one statement and answers with what it committed. Doing
+      // that here instead — read, merge, write the whole selection — would let
+      // a concurrent update of the other runtime revert this one, since the
+      // Node and Bun cards autosave through independent mutations.
+      return repository.upsert(userId, environmentId, body, now());
     },
   };
 }

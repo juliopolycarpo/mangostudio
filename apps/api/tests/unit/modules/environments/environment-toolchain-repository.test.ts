@@ -100,6 +100,46 @@ describe('environment toolchain repository', () => {
     });
   });
 
+  it('writes only the runtimes named in the patch, and answers with the committed row', async () => {
+    const repository = createEnvironmentToolchainRepository();
+    keys.push({ userId: 'toolchain-repo-user-9', environmentId: 'dev-box' });
+
+    await repository.upsert(
+      'toolchain-repo-user-9',
+      'dev-box',
+      { node: '/opt/node/bin/node', bun: '/opt/bun/bin/bun' },
+      1_700_000_000_000
+    );
+    // The statement merges: the node column is not in the patch, so nothing
+    // above this line has to carry it forward for it to survive.
+    const committed = await repository.upsert(
+      'toolchain-repo-user-9',
+      'dev-box',
+      { bun: '/opt/other-bun/bin/bun' },
+      1_700_000_001_000
+    );
+
+    expect(committed).toEqual({
+      node: '/opt/node/bin/node',
+      bun: '/opt/other-bun/bin/bun',
+    });
+    expect(await repository.get('toolchain-repo-user-9', 'dev-box')).toEqual(committed);
+  });
+
+  it('fills the runtimes a first patch omits with the default selection', async () => {
+    const repository = createEnvironmentToolchainRepository();
+    keys.push({ userId: 'toolchain-repo-user-10', environmentId: 'dev-box' });
+
+    const committed = await repository.upsert(
+      'toolchain-repo-user-10',
+      'dev-box',
+      { bun: '/opt/bun/bin/bun' },
+      1_700_000_000_000
+    );
+
+    expect(committed).toEqual({ node: 'auto', bun: '/opt/bun/bin/bun' });
+  });
+
   it('removes a stored selection', async () => {
     const repository = createEnvironmentToolchainRepository();
     keys.push({ userId: 'toolchain-repo-user-7', environmentId: 'dev-box' });

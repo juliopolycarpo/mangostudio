@@ -7,6 +7,7 @@
  */
 
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
+import { DEFAULT_TOOLCHAIN_SELECTION } from '@mangostudio/shared/environments';
 import type { Kysely } from 'kysely';
 import { getDb } from '../../../db/database';
 import type {
@@ -18,12 +19,23 @@ import type {
 
 export interface EnvironmentToolchainRepository {
   get(userId: string, environmentId: string): Promise<ToolchainSelection | null>;
+  /**
+   * Writes only the runtimes named in `patch`, leaving every other column as
+   * it was found, and answers with the row as committed.
+   *
+   * The merge belongs here rather than in a caller because the Node and Bun
+   * cards autosave independently: a read-modify-write above this line lets two
+   * requests read the same row and each write back its own field, and the
+   * later one silently reverts the earlier.
+   *
+   * @example await repository.upsert(userId, 'local', { bun: '/opt/bun/bin/bun' }, Date.now())
+   */
   upsert(
     userId: string,
     environmentId: string,
-    selection: ToolchainSelection,
+    patch: Partial<ToolchainSelection>,
     updatedAt: number
-  ): Promise<void>;
+  ): Promise<ToolchainSelection>;
   remove(userId: string, environmentId: string): Promise<void>;
 }
 
@@ -53,24 +65,32 @@ export function createEnvironmentToolchainRepository(
       return row ? toToolchainSelection(row) : null;
     },
 
-    async upsert(userId, environmentId, selection, updatedAt) {
+    async upsert(userId, environmentId, patch, updatedAt) {
+      // A row that does not exist yet has no other field to preserve, so the
+      // insert fills the absent runtimes with the same default `resolve`
+      // reports for a missing row.
       const values: EnvironmentToolchainInsert = {
         userId,
         environmentId,
-        nodeSelection: selection.node,
-        bunSelection: selection.bun,
+        nodeSelection: patch.node ?? DEFAULT_TOOLCHAIN_SELECTION.node,
+        bunSelection: patch.bun ?? DEFAULT_TOOLCHAIN_SELECTION.bun,
         updatedAt,
       };
+      // Only the named runtimes are assigned on conflict, so the statement
+      // reads and writes the row once and never carries a stale value for the
+      // runtime this request did not touch.
       const update: EnvironmentToolchainUpdate = {
-        nodeSelection: selection.node,
-        bunSelection: selection.bun,
+        ...(patch.node !== undefined && { nodeSelection: patch.node }),
+        ...(patch.bun !== undefined && { bunSelection: patch.bun }),
         updatedAt,
       };
-      await db()
+      const row = await db()
         .insertInto('environment_toolchains')
         .values(values)
         .onConflict((oc) => oc.columns(['userId', 'environmentId']).doUpdateSet(update))
-        .execute();
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      return toToolchainSelection(row);
     },
 
     async remove(userId, environmentId) {

@@ -18,27 +18,60 @@ import { createToolchainService } from '../../../../src/modules/environments/app
 import { EnvironmentServiceError } from '../../../../src/modules/environments/domain/environment-error';
 import type { EnvironmentToolchainRepository } from '../../../../src/modules/environments/infrastructure/environment-toolchain-repository';
 
-/** In-memory (userId, environmentId) -> selection store; no DB, no network. */
+/**
+ * In-memory (userId, environmentId) -> selection store; no DB, no network.
+ *
+ * `upsert` merges the patch into the stored row the way the SQL statement
+ * does, so a caller that hands it a whole selection overwrites both runtimes
+ * here exactly as it would in SQLite.
+ */
 class FakeEnvironmentToolchainRepository implements EnvironmentToolchainRepository {
   readonly #rows = new Map<string, ToolchainSelection>();
   readonly upserts: Array<{
     userId: string;
     environmentId: string;
-    selection: ToolchainSelection;
+    patch: Partial<ToolchainSelection>;
   }> = [];
+  /** Set while a test needs every read to land before the first write. */
+  #readGate: Promise<void> | null = null;
+  #openGate: (() => void) | null = null;
+
+  /** Holds every `get` until {@link releaseReads}, to stage two racing updates. */
+  holdReads(): void {
+    this.#readGate = new Promise<void>((resolve) => {
+      this.#openGate = resolve;
+    });
+  }
+
+  releaseReads(): void {
+    this.#openGate?.();
+    this.#readGate = null;
+    this.#openGate = null;
+  }
 
   #key(userId: string, environmentId: string): string {
     return `${userId}\u0000${environmentId}`;
   }
 
-  get(userId: string, environmentId: string): Promise<ToolchainSelection | null> {
-    return Promise.resolve(this.#rows.get(this.#key(userId, environmentId)) ?? null);
+  async get(userId: string, environmentId: string): Promise<ToolchainSelection | null> {
+    await this.#readGate;
+    return this.#rows.get(this.#key(userId, environmentId)) ?? null;
   }
 
-  upsert(userId: string, environmentId: string, selection: ToolchainSelection): Promise<void> {
-    this.#rows.set(this.#key(userId, environmentId), selection);
-    this.upserts.push({ userId, environmentId, selection });
-    return Promise.resolve();
+  upsert(
+    userId: string,
+    environmentId: string,
+    patch: Partial<ToolchainSelection>
+  ): Promise<ToolchainSelection> {
+    const key = this.#key(userId, environmentId);
+    const merged: ToolchainSelection = {
+      ...DEFAULT_TOOLCHAIN_SELECTION,
+      ...this.#rows.get(key),
+      ...patch,
+    };
+    this.#rows.set(key, merged);
+    this.upserts.push({ userId, environmentId, patch });
+    return Promise.resolve(merged);
   }
 
   remove(userId: string, environmentId: string): Promise<void> {
@@ -240,6 +273,50 @@ describe('toolchain service', () => {
       node: '/opt/node/bin/node',
       bun: 'auto',
     });
+  });
+
+  // The Node and Bun cards each autosave on their own mutation, so two updates
+  // for one environment overlap whenever a person picks both. A service that
+  // reads the row, merges its own field and writes the whole selection back
+  // lets the later write revert the earlier one; the write has to name only
+  // the runtime it was asked to change.
+  it('a concurrent update of the other runtime does not revert this one', async () => {
+    const repository = new FakeEnvironmentToolchainRepository();
+    const service = createToolchainService(
+      repository,
+      new FakeEnvironmentProbingService({
+        node: ['/opt/node/bin/node'],
+        bun: ['/opt/bun/bin/bun'],
+      })
+    );
+
+    // Both requests observe the row as it was before either of them wrote.
+    repository.holdReads();
+    const both = Promise.all([
+      service.update(USER_ID, ENVIRONMENT_ID, { node: '/opt/node/bin/node' }),
+      service.update(USER_ID, ENVIRONMENT_ID, { bun: '/opt/bun/bin/bun' }),
+    ]);
+    repository.releaseReads();
+    await both;
+
+    expect(await repository.get(USER_ID, ENVIRONMENT_ID)).toEqual({
+      node: '/opt/node/bin/node',
+      bun: '/opt/bun/bin/bun',
+    });
+  });
+
+  it('writes only the runtime it was asked to change', async () => {
+    const repository = new FakeEnvironmentToolchainRepository();
+    const service = createToolchainService(
+      repository,
+      new FakeEnvironmentProbingService({ bun: ['/opt/bun/bin/bun'] })
+    );
+
+    await service.update(USER_ID, ENVIRONMENT_ID, { bun: '/opt/bun/bin/bun' });
+
+    expect(repository.upserts).toEqual([
+      { userId: USER_ID, environmentId: ENVIRONMENT_ID, patch: { bun: '/opt/bun/bin/bun' } },
+    ]);
   });
 
   it('reports an unreachable environment as 503, not as an invalid path', async () => {
