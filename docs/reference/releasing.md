@@ -112,7 +112,7 @@ resolves an archive for whatever host it was built for, so narrowing them would
 strand canary launchers. Raw pairs are curated: `linux-arm64` is deliberately
 absent from canary — ARM Linux users are on stable, and the pair costs roughly
 190 MB per green commit to serve nobody. Stable publishes the full matrix and is
-one `mangostudio update` away.
+one `mangostudio upgrade` away.
 
 The canary set is chosen **by name** in `selectCanaryAssets`
 (`scripts/lib/release-assets.ts`) and staged by
@@ -162,6 +162,29 @@ and `.../install.ps1`; both download the platform archives above and verify
 them against `SHA256SUMS`. The hub binary also embeds the same bytes
 (`apps/api/src/modules/updates/infrastructure/embedded-installers.ts`) and runs
 them locally for `--use`, `--prune`, and `--uninstall`.
+
+### How the binary upgrades itself
+
+`mangostudio upgrade` never reimplements the install layout and never downloads
+executable code. It resolves a target, downloads and verifies an archive, then
+runs the install script embedded in its own binary against that archive:
+
+| Channel          | Source                                                                        | Verified against                         |
+| ---------------- | ----------------------------------------------------------------------------- | ---------------------------------------- |
+| stable           | `mangostudio-<v>-<platform>.tar.gz\|.zip` from tag `v<v>`                     | that tag's `SHA256SUMS` (SHA-256)        |
+| canary, latest   | the rolling `v<root>-canary` archive; `canary-manifest.json` names the commit | the rolling tag's `SHA256SUMS`           |
+| canary, `<sha7>` | the `@mangostudio/cli-<os>-<cpu>` npm tarball whose version ends in `.<sha7>` | the registry's `dist.integrity` (sha512) |
+
+The platform id is baked into the binary at build time
+(`BUILD_PLATFORM_ID`, `scripts/build.ts`), so a musl build never fetches a glibc
+archive. musl has no npm package and therefore no per-commit canary; `upgrade
+--canary` (rolling) still works there. Package-manager installs are not
+upgraded in place: `upgrade` prints (or, with `--yes`, runs) the manager's own
+command. `docs/reference/cli.md` has the per-origin table and exit codes.
+
+The embedded scripts are the same bytes the release ships: the dry run diffs
+`mangostudio __installer sh` against `scripts/install/install.sh` so the two
+cannot drift.
 
 ## Version source
 
@@ -264,6 +287,10 @@ gh release download v0.1.0-canary --repo juliopolycarpo/mangostudio
 
 # Cargo — existing fixed prerelease launcher backed by the rolling assets
 cargo install mangostudio --version 0.1.0-canary
+
+# An installed hub — rolling latest, or one commit
+mangostudio upgrade --canary
+mangostudio upgrade --canary 1234abc
 ```
 
 | Channel         | Job                     | What it publishes                                                                                                                      |
@@ -361,6 +388,14 @@ Release and canary publish jobs opt into `verify-attestation` on
 **before** extraction. That makes build provenance load-bearing on every path
 that publishes to npm, GitHub Releases, Homebrew, or Scoop. Manifest checksum
 validation still runs after extract.
+
+The public assets carry provenance too: `github-release` (stable) and
+`github-release-canary` attest `SHA256SUMS`, `install.sh` and `install.ps1`
+with `actions/attest-build-provenance` right before uploading them. `SHA256SUMS`
+names every archive and raw binary, so one record covers the asset set
+transitively. Anyone can check a download with
+`gh attestation verify SHA256SUMS --repo juliopolycarpo/mangostudio`; the hub's
+own `upgrade` verifies checksums today and does not yet verify the attestation.
 
 Caveats:
 

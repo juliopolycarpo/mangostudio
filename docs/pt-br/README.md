@@ -20,9 +20,9 @@ downloads contra `SHA256SUMS` quando aplicável.
 | Canal                  | Comando                                                                                                                |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | npm / bun              | `npm i -g mangostudio` / `bun add -g mangostudio`                                                                      |
-| PowerShell (Windows)   | `irm https://mangostudio.dev/install.ps1 \| iex`                                                                       |
+| PowerShell (Windows)   | `irm https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.ps1 \| iex`                        |
 | Homebrew (macOS/Linux) | `brew install juliopolycarpo/tap/mangostudio`                                                                          |
-| Instalador shell       | `curl -fsSL https://mangostudio.dev/install.sh \| bash`                                                                |
+| Instalador shell       | `curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh \| bash`                 |
 | Scoop (Windows)        | `scoop bucket add juliopolycarpo https://github.com/juliopolycarpo/scoop-bucket` e depois `scoop install mangostudio`  |
 | Cargo                  | `cargo install mangostudio` (app completo) ou `cargo binstall mangostudio` (pré-compilado)                             |
 | Docker                 | `docker run -p 3001:3001 -v mango-data:/data ghcr.io/juliopolycarpo/mangostudio`                                       |
@@ -31,20 +31,46 @@ downloads contra `SHA256SUMS` quando aplicável.
 Início rápido com o instalador shell:
 
 ```bash
-curl -fsSL https://mangostudio.dev/install.sh | bash
+curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh | bash
 mangostudio serve           # inicia em http://localhost:3001
 mangostudio service install # ou entrega ao gerenciador de serviços do usuário
 ```
 
-No Windows, execute o instalador PowerShell hospedado:
+No Windows, execute o instalador PowerShell:
 
 ```powershell
-irm https://mangostudio.dev/install.ps1 | iex
+irm https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.ps1 | iex
 ```
 
 ou use Scoop (veja a tabela acima). O canal Cargo instala um
 [launcher pequeno](../../packages/cargo-shim/README.md) que baixa o mesmo
 arquivo verificado por checksum na primeira execução.
+
+Os dois scripts de instalação vivem neste repositório (`scripts/install/`), são
+publicados como assets de release ao lado dos arquivos que instalam e constam
+em `SHA256SUMS`; as cópias em `https://mangostudio.dev/install.sh` e
+`install.ps1` são espelhos. Use `--canary` (`-Canary`) para o pre-release
+rolante ou `--version x.y.z` (`-Version`) para fixar uma versão.
+
+### Atualizar
+
+`mangostudio upgrade` (alias `update`) descobre como o binário foi instalado e
+atualiza no lugar ou entrega a tarefa à ferramenta que é dona dele:
+
+| Instalado via                 | Atualização                                                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Instalador shell / PowerShell | `mangostudio upgrade` — também `--canary`, `--canary <sha7>`, `--version x.y.z`, `--rollback`, `--check`           |
+| npm / bun / pnpm              | `npm i -g mangostudio@latest` (`bun add -g` / `pnpm add -g`); `mangostudio upgrade --yes` executa no macOS e Linux |
+| Homebrew                      | `brew upgrade mangostudio` (somente stable)                                                                        |
+| Scoop                         | `scoop update mangostudio` (somente stable)                                                                        |
+| Cargo                         | `cargo install mangostudio --locked`                                                                               |
+| Docker                        | `docker pull ghcr.io/juliopolycarpo/mangostudio:<versão>` e recrie o container                                     |
+
+O hub verifica uma vez por dia se há release mais nova; `mangostudio status`,
+`mangostudio doctor` e a página "Esta máquina" avisam quando existe uma, e a
+página consegue aplicá-la na própria máquina do hub. `[updates] check = false`
+no `config.toml`, `MANGO_UPDATES_CHECK=false`, `NO_UPDATE_NOTIFIER`,
+`DO_NOT_TRACK` ou `CI` desligam a verificação.
 
 `mangostudio` é um CLI de binário único que gerencia um servidor local:
 

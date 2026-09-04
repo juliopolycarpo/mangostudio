@@ -970,6 +970,29 @@ mutating actions — lives in one module, shared by the CLI and the API:
   systemd user units, launchd agents, per-user Scheduled Tasks — used by both binaries)
 - `apps/shared/src/machine/schemas.ts` (single source of truth for every shape)
 
+Self-update — who installed the binary, whether a newer release exists, and
+`mangostudio upgrade` — is its own module; the machine module and the CLI only
+render what it decides:
+
+- `scripts/install/install.sh`, `scripts/install/install.ps1` (the only writers of the
+  install layout: `<root>/<version>/`, `current`, the bin link or `.cmd` shim,
+  `install-origin.json`; `--local`, `--use`, `--rollback`, `--prune`, `--uninstall`)
+- `apps/api/src/modules/updates/domain/` (`install-origin.ts` launcher marker → origin
+  record → path heuristics, `upgrade-plan.ts` the per-owner table: self, delegate or
+  refuse, `resolve-target.ts` channel × platform → archive or npm tarball,
+  `platform-id.ts` the baked `BUILD_PLATFORM_ID`)
+- `apps/api/src/modules/updates/infrastructure/` (`embedded-installers.ts` the text-imported
+  scripts, `release-index.ts`, `npm-registry.ts`, `release-download.ts` download + digest)
+- `apps/api/src/modules/updates/application/` (`install-status.ts` the one derivation of
+  origin → channel → plan → command, `update-check.ts` the 24 h cached check and its
+  opt-outs, `upgrade-service.ts` stage → verify → run the embedded script → restart)
+- `apps/api/src/cli/commands/upgrade.ts`, `apps/api/src/cli/commands/installer.ts`
+- `GET /api/machine/update`, `POST /api/machine/upgrade` in `machine-routes.ts`;
+  `apps/frontend/src/features/environments/machine/components/UpdateBanner.tsx`
+- `apps/shared/src/updates/schemas.ts` (single source of truth for every shape)
+- Reference: `docs/reference/cli.md` (the `upgrade` command and origin table),
+  `docs/reference/releasing.md` ("How the binary upgrades itself")
+
 ## Changelog And Release
 
 Open these first:
