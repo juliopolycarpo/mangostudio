@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import {
+  DEFAULT_TOOLCHAIN_SELECTION,
+  LOCAL_ENVIRONMENT_ID,
+  type ToolchainSelection,
+} from '@mangostudio/shared/environments';
 import { ChatNotFoundError } from '../../../../src/modules/chats/domain/chat-ownership';
 import {
   createTerminalSessionService,
@@ -53,6 +57,10 @@ interface HarnessOptions {
   readonly client?: FakeTerminalRuntimeClient;
   readonly identityAttested?: boolean;
   readonly resolveChat?: (chatId: string, userId: string) => Promise<TerminalChatResolution>;
+  readonly resolveToolchain?: (
+    userId: string,
+    environmentId: string
+  ) => Promise<ToolchainSelection>;
 }
 
 interface Harness {
@@ -73,6 +81,8 @@ function createHarness(options: HarnessOptions = {}): Harness {
     getRuntimeClient: () => Promise.resolve(client),
     isIdentityAttested: () => identityAttested,
     resolveChat: options.resolveChat ?? (() => Promise.resolve({ ok: false, reason: 'not-found' })),
+    resolveToolchain:
+      options.resolveToolchain ?? (() => Promise.resolve(DEFAULT_TOOLCHAIN_SELECTION)),
     now: () => now.value,
     randomId: () => `session-${++idCounter}`,
   });
@@ -142,6 +152,17 @@ describe('terminalSessionService.open', () => {
     });
 
     expect(client.calls.open[0]).toMatchObject({ cwd: '/explicit' });
+  });
+
+  test('forwards the environment toolchain the resolver returns', async () => {
+    const toolchain: ToolchainSelection = { node: '/opt/custom/node/bin/node', bun: 'auto' };
+    const { service, client } = createHarness({
+      resolveToolchain: () => Promise.resolve(toolchain),
+    });
+
+    await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+
+    expect(client.calls.open[0]).toMatchObject({ toolchain });
   });
 
   test('rejects an unknown chat as not found', async () => {

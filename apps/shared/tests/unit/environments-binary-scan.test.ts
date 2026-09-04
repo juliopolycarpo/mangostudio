@@ -2,11 +2,19 @@ import { describe, expect, it } from 'bun:test';
 import {
   type BinaryScanDeps,
   BUN_RUNTIME_DEFINITION,
+  CURSOR_AGENT_CLI_DEFINITION,
+  FNM_RUNTIME_DEFINITION,
+  GIT_RUNTIME_DEFINITION,
   NODE_RUNTIME_DEFINITION,
   parseBunVersion,
+  parseFnmVersion,
+  parseGitVersion,
   parseNodeVersion,
+  parseWingetVersion,
   scanRuntime,
+  WINGET_RUNTIME_DEFINITION,
 } from '@mangostudio/shared/environments/detection';
+import type { PathEnv } from '@mangostudio/shared/runtime-env';
 
 function fakeDeps(overrides: Partial<BinaryScanDeps> = {}): BinaryScanDeps {
   return {
@@ -44,6 +52,7 @@ describe('scanRuntime', () => {
         origin: 'path',
         pathIndex: 0,
         effective: true,
+        pathSource: 'system',
       },
       {
         path: '/second/bin/node',
@@ -52,6 +61,7 @@ describe('scanRuntime', () => {
         origin: 'path',
         pathIndex: 1,
         effective: false,
+        pathSource: 'system',
       },
     ]);
   });
@@ -159,6 +169,72 @@ describe('scanRuntime', () => {
       managedBy: 'volta',
       pathIndex: 0,
       effective: true,
+      pathSource: 'volta',
+    });
+  });
+
+  it('classifies a win32 fnm Node under the default %APPDATA%\\fnm alias with no FNM_DIR set', async () => {
+    const nodePath = 'C:\\Users\\x\\AppData\\Roaming\\fnm\\aliases\\default\\node.exe';
+
+    const result = await scanRuntime(
+      NODE_RUNTIME_DEFINITION,
+      fakeDeps({
+        platform: 'win32',
+        homeDir: 'C:\\Users\\x',
+        env: { PATH: '', APPDATA: 'C:\\Users\\x\\AppData\\Roaming' },
+        pathExists: (path) => path === nodePath,
+        probeVersion: (path) => Promise.resolve(path === nodePath ? 'v24.9.0' : null),
+      })
+    );
+
+    expect(result.installations[0]).toMatchObject({
+      rawPath: nodePath,
+      managedBy: 'fnm',
+      pathSource: 'fnm',
+    });
+  });
+
+  it('still classifies fnm on win32 when FNM_DIR points somewhere else', async () => {
+    const nodePath = 'D:\\tools\\fnm\\aliases\\default\\node.exe';
+
+    const result = await scanRuntime(
+      NODE_RUNTIME_DEFINITION,
+      fakeDeps({
+        platform: 'win32',
+        homeDir: 'C:\\Users\\x',
+        env: { PATH: '', FNM_DIR: 'D:\\tools\\fnm' },
+        pathExists: (path) => path === nodePath,
+        probeVersion: (path) => Promise.resolve(path === nodePath ? 'v24.9.0' : null),
+      })
+    );
+
+    expect(result.installations[0]).toMatchObject({
+      rawPath: nodePath,
+      managedBy: 'fnm',
+      pathSource: 'fnm',
+    });
+  });
+
+  it('classifies fnm at its macOS default root with no FNM_DIR set', async () => {
+    const fnmBinDir =
+      '/Users/x/Library/Application Support/fnm/node-versions/v24.9.0/installation/bin';
+    const nodePath = `${fnmBinDir}/node`;
+
+    const result = await scanRuntime(
+      NODE_RUNTIME_DEFINITION,
+      fakeDeps({
+        platform: 'darwin',
+        homeDir: '/Users/x',
+        env: { PATH: fnmBinDir },
+        pathExists: (path) => path === nodePath,
+        probeVersion: (path) => Promise.resolve(path === nodePath ? 'v24.9.0' : null),
+      })
+    );
+
+    expect(result.installations[0]).toMatchObject({
+      rawPath: nodePath,
+      managedBy: 'fnm',
+      pathSource: 'fnm',
     });
   });
 
@@ -181,7 +257,25 @@ describe('scanRuntime', () => {
       rawPath: nodePath,
       origin: 'version-manager',
       managedBy: 'nvm',
+      pathSource: 'nvm',
     });
+  });
+
+  it('attributes a plain system install to no version manager or Bun install', async () => {
+    const result = await scanRuntime(
+      NODE_RUNTIME_DEFINITION,
+      fakeDeps({
+        env: { PATH: '/usr/bin' },
+        pathExists: (path) => path === '/usr/bin/node',
+        probeVersion: (path) => Promise.resolve(path === '/usr/bin/node' ? 'v22.13.0' : null),
+      })
+    );
+
+    expect(result.installations[0]).toMatchObject({
+      rawPath: '/usr/bin/node',
+      pathSource: 'system',
+    });
+    expect(result.installations[0]).not.toHaveProperty('managedBy');
   });
 
   it('treats an authoritative configured binary as the only candidate', async () => {
@@ -203,6 +297,7 @@ describe('scanRuntime', () => {
         version: 'v22.13.0',
         origin: 'configured',
         effective: false,
+        pathSource: 'system',
       },
     ]);
   });
@@ -240,7 +335,22 @@ describe('scanRuntime', () => {
       version: '1.2.3',
       origin: 'well-known',
       effective: false,
+      pathSource: 'bun',
     });
+  });
+
+  it('attributes a Bun install under a custom BUN_INSTALL to bun', async () => {
+    const bunPath = '/opt/bun-custom/bin/bun';
+    const result = await scanRuntime(
+      BUN_RUNTIME_DEFINITION,
+      fakeDeps({
+        env: { PATH: '', BUN_INSTALL: '/opt/bun-custom' },
+        pathExists: (path) => path === bunPath,
+        probeVersion: (path) => Promise.resolve(path === bunPath ? '1.2.3' : null),
+      })
+    );
+
+    expect(result.installations[0]).toMatchObject({ rawPath: bunPath, pathSource: 'bun' });
   });
 
   it('honors Windows PATHEXT order when locating command shims', async () => {
@@ -287,6 +397,38 @@ describe('scanRuntime', () => {
     expect(result.installations[0]?.effective).toBe(true);
   });
 
+  it('finds Cursor under its renamed `agent` binary before the legacy `cursor-agent`', async () => {
+    const result = await scanRuntime(
+      CURSOR_AGENT_CLI_DEFINITION.runtime,
+      fakeDeps({
+        env: { PATH: '/usr/local/bin' },
+        pathExists: (path) => path === '/usr/local/bin/agent',
+        probeVersion: (path) =>
+          Promise.resolve(path === '/usr/local/bin/agent' ? '2026.07.16-899851b' : null),
+      })
+    );
+
+    expect(result.installations.map((installation) => installation.rawPath)).toEqual([
+      '/usr/local/bin/agent',
+    ]);
+  });
+
+  it('still finds a pre-rename Cursor install under the legacy `cursor-agent` name', async () => {
+    const result = await scanRuntime(
+      CURSOR_AGENT_CLI_DEFINITION.runtime,
+      fakeDeps({
+        env: { PATH: '/usr/local/bin' },
+        pathExists: (path) => path === '/usr/local/bin/cursor-agent',
+        probeVersion: (path) =>
+          Promise.resolve(path === '/usr/local/bin/cursor-agent' ? '2026.07.16-899851b' : null),
+      })
+    );
+
+    expect(result.installations.map((installation) => installation.rawPath)).toEqual([
+      '/usr/local/bin/cursor-agent',
+    ]);
+  });
+
   it('keeps scanning every candidate when stopWhen is absent', async () => {
     const versions: Record<string, string> = {
       '/a/bin/node': 'v20.11.0',
@@ -319,6 +461,113 @@ describe('runtime version parsing', () => {
     expect(parseBunVersion('1.2.3')).toEqual({ major: 1, minor: 2, patch: 3 });
     expect(parseNodeVersion('not a version')).toBeNull();
     expect(parseBunVersion('v1.2.3')).toBeNull();
+  });
+
+  it('parses `fnm --version`', () => {
+    expect(parseFnmVersion('fnm 1.38.1')).toEqual({ major: 1, minor: 38, patch: 1 });
+    expect(parseFnmVersion('not a version')).toBeNull();
+  });
+
+  it('parses `git --version`, dropping a win32 `.windows.N` suffix', () => {
+    expect(parseGitVersion('git version 2.43.0')).toEqual({ major: 2, minor: 43, patch: 0 });
+    expect(parseGitVersion('git version 2.43.0.windows.1')).toEqual({
+      major: 2,
+      minor: 43,
+      patch: 0,
+    });
+    expect(parseGitVersion('not a version')).toBeNull();
+  });
+
+  it('parses `winget --version`', () => {
+    expect(parseWingetVersion('v1.29.290')).toEqual({ major: 1, minor: 29, patch: 290 });
+    expect(parseWingetVersion('not a version')).toBeNull();
+  });
+
+  // Both parsers search rather than anchor, so every start position is a match
+  // attempt. With unbounded `\d+` a long digit run makes that quadratic: this
+  // input took ~1.2s to reject before each component was capped, and ~0.5ms
+  // after. The budget sits far below the first and far above the second, so it
+  // fails on the shape (a stalled probe), not on a slow machine.
+  it('rejects a long digit run in linear time, on stdout no one controls', () => {
+    const digits = '0'.repeat(30_000);
+
+    const started = performance.now();
+    expect(parseFnmVersion(digits)).toBeNull();
+    expect(parseGitVersion(`git version ${digits}`)).toBeNull();
+    expect(performance.now() - started).toBeLessThan(250);
+  });
+});
+
+describe('win32-only prerequisite definitions', () => {
+  const win32Env: PathEnv = {
+    platform: 'win32',
+    homeDir: 'C:\\Users\\tester',
+    env: {
+      LOCALAPPDATA: 'C:\\Users\\tester\\AppData\\Local',
+      APPDATA: 'C:\\Users\\tester\\AppData\\Roaming',
+      ProgramFiles: 'C:\\Program Files',
+    },
+  };
+  const posixEnv: PathEnv = {
+    platform: 'linux',
+    homeDir: '/home/tester',
+    env: {},
+  };
+
+  it('resolves fnm well-known directories: the winget link, then FNM_DIR, then its default', () => {
+    expect(FNM_RUNTIME_DEFINITION.wellKnownDirs(win32Env)).toEqual([
+      'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WinGet\\Links',
+      'C:\\Users\\tester\\AppData\\Roaming\\fnm',
+    ]);
+    expect(
+      FNM_RUNTIME_DEFINITION.wellKnownDirs({
+        ...win32Env,
+        env: { ...win32Env.env, FNM_DIR: 'C:\\custom\\fnm' },
+      })
+    ).toEqual([
+      'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WinGet\\Links',
+      'C:\\custom\\fnm',
+      'C:\\Users\\tester\\AppData\\Roaming\\fnm',
+    ]);
+    expect(FNM_RUNTIME_DEFINITION.wellKnownDirs(posixEnv)).toEqual([
+      '/home/tester/.local/share/fnm',
+      '/home/tester/.fnm',
+    ]);
+  });
+
+  it('walks the same fnm root ladder the detector does, on every platform', () => {
+    expect(
+      FNM_RUNTIME_DEFINITION.wellKnownDirs({
+        platform: 'darwin',
+        homeDir: '/Users/tester',
+        env: {},
+      })
+    ).toEqual(['/Users/tester/Library/Application Support/fnm', '/Users/tester/.fnm']);
+
+    expect(
+      FNM_RUNTIME_DEFINITION.wellKnownDirs({ ...posixEnv, env: { FNM_DIR: '/opt/fnm' } })
+    ).toEqual(['/opt/fnm', '/home/tester/.local/share/fnm', '/home/tester/.fnm']);
+
+    // A configured root is a candidate, never a replacement: one that points
+    // nowhere must not hide a real install at the platform default.
+    expect(
+      FNM_RUNTIME_DEFINITION.wellKnownDirs({
+        ...win32Env,
+        env: { ...win32Env.env, FNM_DIR: 'C:\\custom\\fnm' },
+      })
+    ).toContain('C:\\Users\\tester\\AppData\\Roaming\\fnm');
+  });
+
+  it('resolves git well-known directories on win32 only', () => {
+    expect(GIT_RUNTIME_DEFINITION.wellKnownDirs(win32Env)).toEqual(['C:\\Program Files\\Git\\cmd']);
+    expect(GIT_RUNTIME_DEFINITION.wellKnownDirs(posixEnv)).toEqual([]);
+  });
+
+  it('resolves winget well-known directories on win32 only', () => {
+    expect(WINGET_RUNTIME_DEFINITION.wellKnownDirs(win32Env)).toEqual([
+      'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps',
+    ]);
+    expect(WINGET_RUNTIME_DEFINITION.wellKnownDirs(posixEnv)).toEqual([]);
   });
 });
 

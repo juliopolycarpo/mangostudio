@@ -40,7 +40,22 @@ Commands:
                       JSON.
   env [runtimes|agents] [--json]
                       Report runtimes, version managers, and agent CLIs
-                      (read-only; no install).
+                      (read-only).
+  env install <recipe> [--environment <id>] [--version <spec>] [--user <email>] [--json]
+                      Run an install recipe on this machine. --environment
+                      is accepted but always refused for now (no session
+                      to check a paired environment against). --version
+                      sets a Node spec for a node-version recipe. Requires
+                      installs to be enabled (config.toml [environments]
+                      installs_enabled = true). Exits 0 on success, 1 on
+                      failure, 2 when the recipe never started.
+  env update <recipe> [--environment <id>] [--json]
+                      Same as env install, restricted to update recipes.
+  env toolchain [node|bun <path|auto>] [--environment <id>] [--user <email>]
+                      Show or set which Node and Bun spawned processes run
+                      with on an environment. A path must be one the probe
+                      reported; --user picks the account when the hub has
+                      more than one.
   library [locations] [--kind <kind>] [--divergent] [--json]
                       Library coverage matrix and location health (read-only).
   version, --version  Print the MangoStudio version.

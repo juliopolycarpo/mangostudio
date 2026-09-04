@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
+import type { ToolchainSelection } from '@mangostudio/shared/environments';
 import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-agents';
 import { getDb } from '../../../../src/db/database';
 import {
@@ -62,10 +63,15 @@ function baseInput(overrides: Partial<EnsureExternalSessionInput> = {}) {
   } satisfies EnsureExternalSessionInput;
 }
 
-function managerFor(runtime: FakeExternalRuntime, sessionIds: readonly string[] = []) {
+function managerFor(
+  runtime: FakeExternalRuntime,
+  sessionIds: readonly string[] = [],
+  resolveToolchain?: (userId: string, environmentId: string) => Promise<ToolchainSelection>
+) {
   let index = 0;
   return createExternalSessionManager({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
+    ...(resolveToolchain && { resolveToolchain }),
     newSessionId: () => sessionIds[index++] ?? `session-${index}`,
     now: () => 1_000,
   });
@@ -108,6 +114,33 @@ describe('external session manager', () => {
       runtimeSessionId: first?.sessionId,
       nativeSessionId: 'native-session-1',
     });
+  });
+
+  it('resolves the environment toolchain and forwards it on open', async () => {
+    const runtime = createFakeExternalRuntime();
+    const toolchain: ToolchainSelection = { node: '/opt/custom/node/bin/node', bun: 'auto' };
+    const seen: Array<{ userId: string; environmentId: string }> = [];
+    const manager = managerFor(runtime, [], (resolvedUserId, environmentId) => {
+      seen.push({ userId: resolvedUserId, environmentId });
+      return Promise.resolve(toolchain);
+    });
+
+    await manager.ensureSession(baseInput());
+
+    expect(runtime.calls.open[0]).toMatchObject({ toolchain });
+    expect(seen).toEqual([{ userId, environmentId: 'local' }]);
+  });
+
+  it('omits the toolchain when the peer does not advertise support for it', async () => {
+    const runtime = createFakeExternalRuntime();
+    (runtime.client.manifest.features as { toolchain?: boolean }).toolchain = undefined;
+    const manager = managerFor(runtime, [], () =>
+      Promise.resolve({ node: '/opt/custom/node/bin/node', bun: 'auto' })
+    );
+
+    await manager.ensureSession(baseInput());
+
+    expect(runtime.calls.open[0]).not.toHaveProperty('toolchain');
   });
 
   it('reuses the live session for a later send with the same binding', async () => {

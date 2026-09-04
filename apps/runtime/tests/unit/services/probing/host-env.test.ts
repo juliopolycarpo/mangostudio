@@ -13,7 +13,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { createRuntimePathEnv } from '../../../../src/services/probing/host-env';
+import {
+  createFnmDetectionDeps,
+  createRuntimePathEnv,
+} from '../../../../src/services/probing/host-env';
 
 /** Runs `body` with `process.env` replaced, restoring it afterwards. */
 function withEnv(entries: Record<string, string | undefined>, body: () => void): void {
@@ -64,5 +67,14 @@ describe('createRuntimePathEnv', () => {
     const env = createRuntimePathEnv({ env: { MANGO_LIBRARY_HOME: '/pinned' } }).env;
     expect(env.MANGO_LIBRARY_HOME).toBe('/pinned');
     expect(env.PATH).toBeDefined();
+  });
+});
+
+describe('createFnmDetectionDeps', () => {
+  it('wires the platform env into the same real filesystem seam nvm detection uses', () => {
+    const deps = createFnmDetectionDeps(createRuntimePathEnv());
+
+    expect(deps.platform).toBe(process.platform);
+    expect(deps.fs.pathExists(process.cwd())).toBe(true);
   });
 });

@@ -21,6 +21,7 @@ import type {
 } from '../methods';
 import { RUNTIME_INSTALL_OUTPUT_TOPIC } from '../methods';
 import { HIDDEN_WINDOW } from './process-window';
+import { buildSpawnEnv, findPathKey, nodeSpawnEnvHost, type SpawnEnvFs } from './spawn-env';
 
 const INSTALL_OUTPUT_LIMIT_BYTES = 1024 * 1024;
 
@@ -42,6 +43,7 @@ const INSTALL_ENV_KEYS = [
   'XDG_STATE_HOME',
   'XDG_RUNTIME_DIR',
   'NVM_DIR',
+  'FNM_DIR',
   'BUN_INSTALL',
   'HTTP_PROXY',
   'HTTPS_PROXY',
@@ -51,7 +53,27 @@ const INSTALL_ENV_KEYS = [
   'no_proxy',
 ] as const;
 
-const RECIPE_ENV_KEYS = ['NVM_DIR', 'PROFILE'] as const;
+/**
+ * win32-only. `SystemRoot`/`WINDIR`/`ComSpec`/`PATHEXT` are what lets
+ * PowerShell start at all; the rest are what the win32 installers themselves
+ * read (winget, the vendor `.ps1` scripts). Kept out of the POSIX set because
+ * none of it means anything there.
+ */
+const WIN32_INSTALL_ENV_KEYS = [
+  'SystemRoot',
+  'WINDIR',
+  'ComSpec',
+  'PATHEXT',
+  'SystemDrive',
+  'USERPROFILE',
+  'LOCALAPPDATA',
+  'APPDATA',
+  'ProgramFiles',
+  'ProgramFiles(x86)',
+  'ProgramData',
+] as const;
+
+const RECIPE_ENV_KEYS = ['NVM_DIR', 'PROFILE', 'CODEX_NON_INTERACTIVE', 'FNM_DIR'] as const;
 
 interface InstallSubprocess {
   readonly stdout: ReadableStream<Uint8Array>;
@@ -69,6 +91,10 @@ interface InstallHostDeps {
   readonly sourceEnv: () => Readonly<Record<string, string | undefined>>;
   /** Root used to resolve relative log paths from the hub. */
   readonly runtimeHome?: () => string;
+  /** Host facts `buildSpawnEnv` resolves the environment's toolchain against. */
+  readonly platform: string;
+  readonly homeDir: string;
+  readonly spawnEnvFs: SpawnEnvFs;
 }
 
 function defaultRuntimeHome(env: NodeJS.ProcessEnv = process.env): string {
@@ -110,15 +136,25 @@ const DEFAULT_DEPS: InstallHostDeps = {
   appendLog: (path, bytes) => appendFile(path, bytes),
   sourceEnv: () => process.env,
   runtimeHome: () => defaultRuntimeHome(),
+  platform: nodeSpawnEnvHost.platform,
+  homeDir: nodeSpawnEnvHost.homeDir,
+  spawnEnvFs: nodeSpawnEnvHost.fs,
 };
 
 export function buildInstallEnvironment(
   source: Readonly<Record<string, string | undefined>>,
-  recipeEnv: Readonly<Record<string, string>> = {}
+  recipeEnv: Readonly<Record<string, string>> = {},
+  platform: string = process.platform
 ): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const key of INSTALL_ENV_KEYS) {
-    const value = source[key];
+  const keys =
+    platform === 'win32' ? [...INSTALL_ENV_KEYS, ...WIN32_INSTALL_ENV_KEYS] : INSTALL_ENV_KEYS;
+  // `buildSpawnEnv` may hand back the toolchain-adjusted PATH under `Path`
+  // (Windows) rather than `PATH`; the allowlist only knows the latter, so
+  // this key is resolved case-insensitively instead of by exact match.
+  const pathKey = findPathKey(source, 'PATH');
+  for (const key of keys) {
+    const value = key === 'PATH' ? source[pathKey] : source[key];
     if (value !== undefined) env[key] = value;
   }
   for (const key of RECIPE_ENV_KEYS) {
@@ -126,6 +162,18 @@ export function buildInstallEnvironment(
     if (value !== undefined) env[key] = value;
   }
   return env;
+}
+
+/**
+ * Whether a non-zero exit code is one the recipe accepts as success anyway
+ * (winget's "no applicable update found"). Compared modulo 2^32 rather than
+ * with strict equality: a recipe pins the code as a signed HRESULT, but a
+ * spawned process's exit code can surface as that same bit pattern's unsigned
+ * form depending on the platform, and this makes either reading match.
+ */
+function isAcceptedExitCode(code: number | null, accepted: readonly number[] | undefined): boolean {
+  if (code === null || !accepted || accepted.length === 0) return false;
+  return accepted.some((candidate) => candidate >>> 0 === code >>> 0);
 }
 
 export interface InstallService {
@@ -199,7 +247,22 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
 
       let child: InstallSubprocess;
       try {
-        child = deps.spawn(params.argv, buildInstallEnvironment(deps.sourceEnv(), params.env));
+        child = deps.spawn(
+          params.argv,
+          buildInstallEnvironment(
+            buildSpawnEnv({
+              source: deps.sourceEnv(),
+              toolchain: params.toolchain,
+              platform: deps.platform,
+              homeDir: deps.homeDir,
+              fs: deps.spawnEnvFs,
+            }),
+            params.env,
+            // The host's platform, injected — not `process.platform`, which
+            // would leave the win32 env allowlist unreachable from a test.
+            deps.platform
+          )
+        );
       } catch (error) {
         active.delete(params.runId);
         const detail = error instanceof Error ? error.message : 'Unable to start installer.';
@@ -316,9 +379,10 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
       }
 
       const finishedAt = deps.now();
+      const succeeded = exitCode === 0 || isAcceptedExitCode(exitCode, params.acceptedExitCodes);
       const status = streamFailed
         ? ('failed' as const)
-        : (termination ?? (exitCode === 0 ? ('succeeded' as const) : ('failed' as const)));
+        : (termination ?? (succeeded ? ('succeeded' as const) : ('failed' as const)));
       // Ends the stream so the hub stops waiting on frames that cannot arrive,
       // even though the terminal status also travels on the response.
       endStream();

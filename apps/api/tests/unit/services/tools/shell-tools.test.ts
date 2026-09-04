@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { environmentToolchainRepository } from '../../../../src/modules/environments/infrastructure/environment-toolchain-repository';
 import {
   isShellAvailable,
   type ShellKind,
@@ -166,6 +168,29 @@ describe('shell tool registration and execution', () => {
     expect(result.stdout.trim()).toBe('from-registry');
     expect(result.exitCode).toBe(0);
   });
+
+  it.skipIf(!hasBash)(
+    'prepends the environment toolchain node dir the resolver stored',
+    async () => {
+      const context = makeContext();
+      await environmentToolchainRepository.upsert(
+        context.userId,
+        LOCAL_ENVIRONMENT_ID,
+        { node: '/opt/custom/node/bin/node', bun: 'auto' },
+        Date.now()
+      );
+      try {
+        const result = (await executeTool('bash', { command: 'echo "$PATH"' }, context, {
+          enabled: true,
+          parameters: {},
+        })) as { stdout: string };
+
+        expect(result.stdout.trim().startsWith('/opt/custom/node/bin:')).toBe(true);
+      } finally {
+        await environmentToolchainRepository.remove(context.userId, LOCAL_ENVIRONMENT_ID);
+      }
+    }
+  );
 
   it.skipIf(!hasBash)('defaults command execution to the chat workdir', async () => {
     const result = (await executeTool(

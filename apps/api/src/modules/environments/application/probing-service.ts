@@ -24,12 +24,14 @@ import {
 } from '@mangostudio/shared/environments/detection';
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
 import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { getConfig, getHomeMangoDir, getVersion } from '../../../lib/config';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 import { LibraryFeatureUnavailableError } from '../../library/domain/library-feature-error';
 import { hubLibraryEnvFor } from '../../library/infrastructure/location-probe';
-import { hasInstallRecipeForRuntime } from '../domain/install-recipes';
+import { hasInstallRecipeForRuntime, INSTALL_RECIPES } from '../domain/install-recipes';
+import { computePrerequisiteMissingFindings } from '../domain/prerequisite-findings';
 import {
   loadNodeReleaseMetadata,
   type NodeReleaseMetadata,
@@ -63,8 +65,93 @@ const PROBE_REQUEST_TIMEOUT_MS = 15_000;
  */
 const LOCATION_REQUEST_TIMEOUT_MS = 60_000;
 
-const RUNTIME_IDS: readonly RuntimeId[] = ['bun', 'node'];
-const VERSION_MANAGER_IDS: readonly VersionManagerId[] = ['nvm'];
+/**
+ * Every runtime id this service ever probes, on any platform. `getRuntimeStatus`
+ * validates a single-id request against this set regardless of target platform,
+ * so `winget` stays askable by name — install-service's requirement resolver
+ * calls it on whatever platform the recipe that named it applies to, and a
+ * platform-scoped id list would turn that into a silent `null` instead of the
+ * "not found" answer a probe of an absent binary already gives honestly.
+ */
+const ALL_RUNTIME_IDS = [
+  'bun',
+  'node',
+  'fnm',
+  'winget',
+  'git',
+] as const satisfies readonly RuntimeId[];
+type ProbedRuntimeId = (typeof ALL_RUNTIME_IDS)[number];
+
+/**
+ * When an id may be asked for.
+ *
+ * `sinceToolchain` marks one a peer built before `features.toolchain` has no
+ * definition for — such a peer refuses the whole call on an unknown id, so the
+ * flag doubles as "this peer knows the extended list". `platforms` narrows an
+ * id to the hosts it can exist on: probing `winget` from a Linux hub can only
+ * ever report "not found", and surfacing a finding about a tool that machine
+ * will never need is worse than omitting it.
+ *
+ * A `Record` over the probed set rather than a second, parallel array of
+ * "legacy" ids: adding an id to {@link ALL_RUNTIME_IDS} fails to compile until
+ * it is classified here, so the gate cannot be forgotten. Getting it wrong is
+ * a silent performance bug — an old peer asked for an id it refuses turns
+ * every list into a permanent cache miss.
+ */
+interface ProbeAvailability {
+  readonly sinceToolchain: boolean;
+  readonly platforms: 'all' | readonly string[];
+}
+
+const RUNTIME_AVAILABILITY: Record<ProbedRuntimeId, ProbeAvailability> = {
+  bun: { sinceToolchain: false, platforms: 'all' },
+  node: { sinceToolchain: false, platforms: 'all' },
+  fnm: { sinceToolchain: true, platforms: 'all' },
+  winget: { sinceToolchain: true, platforms: ['win32'] },
+  git: { sinceToolchain: true, platforms: 'all' },
+};
+
+const VERSION_MANAGER_IDS = ['nvm', 'fnm'] as const satisfies readonly VersionManagerId[];
+type ProbedVersionManagerId = (typeof VERSION_MANAGER_IDS)[number];
+
+const VERSION_MANAGER_AVAILABILITY: Record<ProbedVersionManagerId, ProbeAvailability> = {
+  nvm: { sinceToolchain: false, platforms: 'all' },
+  fnm: { sinceToolchain: true, platforms: 'all' },
+};
+
+/** `RuntimeId` also names the vendor CLIs and version managers this never probes. */
+function isProbedRuntimeId(id: RuntimeId): id is ProbedRuntimeId {
+  return (ALL_RUNTIME_IDS as readonly RuntimeId[]).includes(id);
+}
+
+function isProbedVersionManagerId(id: VersionManagerId): id is ProbedVersionManagerId {
+  return (VERSION_MANAGER_IDS as readonly VersionManagerId[]).includes(id);
+}
+
+function isAskable(availability: ProbeAvailability, manifest: RuntimeCapabilityManifest): boolean {
+  if (availability.sinceToolchain && manifest.features.toolchain !== true) return false;
+  return availability.platforms === 'all' || availability.platforms.includes(manifest.platform);
+}
+
+/**
+ * Which runtime ids to ask this peer about.
+ * // Usage: runtimeIdsFor(client.manifest)
+ */
+function runtimeIdsFor(manifest: RuntimeCapabilityManifest): readonly RuntimeId[] {
+  return ALL_RUNTIME_IDS.filter((id) => isAskable(RUNTIME_AVAILABILITY[id], manifest));
+}
+
+/**
+ * Which managers to ask this peer about. A peer that predates fnm detection
+ * answers a request for `['nvm', 'fnm']` with nvm's status alone, and the probe
+ * cache only reads back as fresh when *every* requested id is present — so
+ * asking an old peer for fnm would turn every list into a cache miss and
+ * re-probe nvm on each poll.
+ * // Usage: versionManagerIdsFor(client.manifest)
+ */
+function versionManagerIdsFor(manifest: RuntimeCapabilityManifest): readonly VersionManagerId[] {
+  return VERSION_MANAGER_IDS.filter((id) => isAskable(VERSION_MANAGER_AVAILABILITY[id], manifest));
+}
 const AGENT_TARGET_IDS: readonly LibraryTargetId[] = AGENT_CLI_DEFINITIONS.map(
   (definition) => definition.targetId
 );
@@ -440,6 +527,32 @@ export function createEnvironmentProbingService(
     return (await promise) as T[];
   };
 
+  /**
+   * `prerequisite-missing` findings, derived on the way out of
+   * {@link EnvironmentProbingService.listRuntimeStatuses} rather than written
+   * into the cache.
+   *
+   * "Is `winget` installed" can only be answered by having `winget`'s own
+   * status in hand — a sibling missing from `statuses` reads as "not
+   * installed" here, so a caller with an incomplete batch would risk
+   * inventing a finding about a requirement it never actually checked.
+   * {@link EnvironmentProbingService.getRuntimeStatus} reuses this against
+   * whatever siblings are already cached, and only when every one of them is:
+   * that is what keeps a single-id re-check (the card's own probe button)
+   * from either dropping the finding or making one up.
+   */
+  const withPrerequisiteFindings = (
+    statuses: readonly RuntimeStatus[],
+    platform: string
+  ): RuntimeStatus[] => {
+    const findingsById = computePrerequisiteMissingFindings(statuses, platform, INSTALL_RECIPES);
+    if (findingsById.size === 0) return [...statuses];
+    return statuses.map((status) => {
+      const extra = findingsById.get(status.id);
+      return extra ? { ...status, findings: [...status.findings, ...extra] } : status;
+    });
+  };
+
   const probeRuntimes = (
     scope: ProbeScope,
     ids: readonly RuntimeId[],
@@ -557,20 +670,73 @@ export function createEnvironmentProbingService(
     );
 
   return {
-    listRuntimeStatuses: (scope, probeOptions) =>
-      probeRuntimes(scope, RUNTIME_IDS, probeOptions?.force === true),
-
-    async getRuntimeStatus(scope, id, probeOptions) {
-      if (!RUNTIME_IDS.includes(id)) return null;
-      const [status] = await probeRuntimes(scope, [id], probeOptions?.force === true);
-      return status ?? null;
+    async listRuntimeStatuses(scope, probeOptions) {
+      // The id list depends on the target's platform, so the client is
+      // resolved here rather than left to `probe`'s own resolution — this is
+      // the one caller that needs to know the platform before it can even
+      // name what it is asking for.
+      const client = await resolveClient(scope);
+      const statuses = await probeRuntimes(
+        scope,
+        runtimeIdsFor(client.manifest),
+        probeOptions?.force === true
+      );
+      // Only this caller has the whole batch, so only this caller can say a
+      // prerequisite is missing. Applied after the probe rather than inside it
+      // so a cache hit carries the finding too.
+      return client.manifest.features.toolchain === true
+        ? withPrerequisiteFindings(statuses, client.manifest.platform)
+        : statuses;
     },
 
-    listVersionManagerStatuses: (scope, probeOptions) =>
-      probeVersionManagers(scope, VERSION_MANAGER_IDS, probeOptions?.force === true),
+    async getRuntimeStatus(scope, id, probeOptions) {
+      if (!isProbedRuntimeId(id)) return null;
+      // An id the peer has no definition for is `null` here, never a request
+      // it would refuse outright.
+      const client = await resolveClient(scope);
+      const runtimeIds = runtimeIdsFor(client.manifest);
+      if (!runtimeIds.includes(id)) return null;
+      const [status] = await probeRuntimes(scope, [id], probeOptions?.force === true);
+      if (!status || client.manifest.features.toolchain !== true) return status ?? null;
+      // Reads whatever siblings the last list fetch already cached instead of
+      // probing them again — a card's re-check button must not turn into a
+      // full re-scan. `computePrerequisiteMissingFindings` reads a sibling
+      // absent from its batch as "not installed", so a *partial* batch could
+      // invent a finding about a requirement this call never actually checked;
+      // bailing out to the unenriched status the moment one sibling is missing
+      // keeps every finding this returns as true as a full scan's.
+      const batch: RuntimeStatus[] = [];
+      for (const runtimeId of runtimeIds) {
+        if (runtimeId === id) {
+          batch.push(status);
+          continue;
+        }
+        const cached = cache.get(entryKey(scope, 'runtime', runtimeId))?.status as
+          | RuntimeStatus
+          | undefined;
+        if (!cached) return status;
+        batch.push(cached);
+      }
+      return (
+        withPrerequisiteFindings(batch, client.manifest.platform).find(
+          (enriched) => enriched.id === id
+        ) ?? status
+      );
+    },
+
+    async listVersionManagerStatuses(scope, probeOptions) {
+      const client = await resolveClient(scope);
+      return probeVersionManagers(
+        scope,
+        versionManagerIdsFor(client.manifest),
+        probeOptions?.force === true
+      );
+    },
 
     async getVersionManagerStatus(scope, id, probeOptions) {
-      if (!VERSION_MANAGER_IDS.includes(id)) return null;
+      if (!isProbedVersionManagerId(id)) return null;
+      const client = await resolveClient(scope);
+      if (!versionManagerIdsFor(client.manifest).includes(id)) return null;
       const [status] = await probeVersionManagers(scope, [id], probeOptions?.force === true);
       return status ?? null;
     },

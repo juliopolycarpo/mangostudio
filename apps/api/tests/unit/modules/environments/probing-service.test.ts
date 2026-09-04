@@ -13,7 +13,10 @@ const WSL: ProbeScope = { userId: 'ada', environmentId: 'ubuntu' };
 
 // `features.library` is real here because the location probe guards on it:
 // a fake without it would make every location test throw inside the guard.
-const MANIFEST = { platform: 'linux', features: { library: true } } as RuntimeCapabilityManifest;
+const MANIFEST = {
+  platform: 'linux',
+  features: { library: true, toolchain: true },
+} as RuntimeCapabilityManifest;
 
 interface FakeClient {
   client: RuntimeClient;
@@ -23,6 +26,9 @@ interface FakeClient {
   version: string;
   selfParams: unknown;
   pathEnvParams: unknown;
+  /** The `ids` the last `probing.runtimes` call was asked for. */
+  lastRuntimeIds: readonly string[];
+  lastVersionManagerIds: readonly string[];
   /** Leaves `probing.runtimes` pending so a second caller can race it. */
   holdRuntime: boolean;
   settleRuntime: () => void;
@@ -39,9 +45,15 @@ interface FakeClient {
 /**
  * Stands in for one runtime connection. A second instance is a reconnect: the
  * hub cache keys on identity, so handing out a new one is exactly what a
- * restarted machine looks like from up here.
+ * restarted machine looks like from up here. `platform` defaults to the
+ * shared `MANIFEST`'s `linux`; passing `win32` is how the platform-aware
+ * runtime-id tests get a manifest that asks for `winget` too.
  */
-function fakeClient(version = 'v1'): FakeClient {
+function fakeClient(
+  version = 'v1',
+  platform = MANIFEST.platform,
+  features = MANIFEST.features
+): FakeClient {
   const state: FakeClient = {
     client: null as unknown as RuntimeClient,
     runtimeCalls: 0,
@@ -50,6 +62,8 @@ function fakeClient(version = 'v1'): FakeClient {
     version,
     selfParams: null,
     pathEnvParams: null,
+    lastRuntimeIds: [],
+    lastVersionManagerIds: [],
     holdRuntime: false,
     settleRuntime: () => undefined,
     holdAgent: false,
@@ -60,21 +74,38 @@ function fakeClient(version = 'v1'): FakeClient {
   const pendingAgent: Array<(value: unknown) => void> = [];
 
   const client = {
-    manifest: MANIFEST,
+    manifest: { ...MANIFEST, platform, features },
     runtimeVersion: '2.0.0-remote',
     probing: {
-      runtimes: (params: { pathEnv?: unknown }) => {
+      runtimes: (params: { ids?: readonly string[]; pathEnv?: unknown }) => {
         state.runtimeCalls += 1;
+        state.lastRuntimeIds = params.ids ?? [];
         state.pathEnvParams = params.pathEnv ?? null;
         return new Promise((resolve) => {
           pendingRuntime.push(resolve);
           if (!state.holdRuntime) settleRuntime();
         });
       },
-      versionManagers: () =>
-        Promise.resolve({
-          statuses: [{ id: 'nvm', installed: false, versions: [], findings: [] }],
-        }),
+      // Answers exactly the ids it was asked for, the way a real runtime does:
+      // `getVersionManagerStatus` destructures the first entry it gets back, so
+      // a fake that always returned the same fixed list regardless of `ids`
+      // would hand a `fnm` caller an `nvm` status wearing the wrong label.
+      versionManagers: (params: { ids?: readonly string[] }) => {
+        state.lastVersionManagerIds = params.ids ?? [];
+        const known: Record<
+          string,
+          { id: string; installed: boolean; versions: never[]; findings: never[] }
+        > = {
+          nvm: { id: 'nvm', installed: false, versions: [], findings: [] },
+          fnm: { id: 'fnm', installed: false, versions: [], findings: [] },
+        };
+        // A peer that predates fnm detection answers only for nvm, whatever it
+        // was asked — the shape this fake reproduces by filtering `known`.
+        const wanted = params.ids ?? ['nvm', 'fnm'];
+        return Promise.resolve({
+          statuses: wanted.map((id) => known[id]).filter((status) => status !== undefined),
+        });
+      },
       agentClis: (params: { self?: unknown; pathEnv?: unknown }) => {
         state.agentCalls += 1;
         state.selfParams = params.self ?? null;
@@ -105,10 +136,52 @@ function fakeClient(version = 'v1'): FakeClient {
   }
 
   function settleRuntime() {
-    const statuses = [
-      { id: 'bun', effective: { version: state.version } },
-      { id: 'node', effective: { version: state.version } },
+    // One status per id the requested platform's runtime list asks for — a
+    // real runtime answers every requested id (reporting `missing` health for
+    // a tool it does not have), and the cache only serves a lazy read once
+    // every requested id has an entry. Leaving one out here would force a
+    // re-probe on every read. `installations` is non-empty for bun/node —
+    // matching their `effective` entry — so the prerequisite-findings pass
+    // that reads every status in the batch sees a real "installed" shape
+    // rather than a fixture-only gap.
+    //
+    // Filtered to `state.lastRuntimeIds` because a real runtime answers only
+    // what it was asked for: a single-id re-check must get back that one
+    // status, not the batch's first entry by coincidence.
+    const known = [
+      {
+        id: 'bun',
+        effective: { version: state.version },
+        installations: [
+          {
+            path: '/bun',
+            rawPath: '/bun',
+            version: state.version,
+            origin: 'path',
+            effective: true,
+          },
+        ],
+        findings: [],
+      },
+      {
+        id: 'node',
+        effective: { version: state.version },
+        installations: [
+          {
+            path: '/node',
+            rawPath: '/node',
+            version: state.version,
+            origin: 'path',
+            effective: true,
+          },
+        ],
+        findings: [],
+      },
+      { id: 'fnm', health: 'missing', installations: [], findings: [] },
+      { id: 'winget', health: 'missing', installations: [], findings: [] },
+      { id: 'git', health: 'missing', installations: [], findings: [] },
     ];
+    const statuses = known.filter((status) => state.lastRuntimeIds.includes(status.id));
     for (const resolve of pendingRuntime.splice(0)) resolve({ statuses });
   }
 
@@ -250,9 +323,15 @@ describe('environment probing cache', () => {
     const local = fakeClient();
     const service = serviceFor(() => local);
 
-    expect(await service.getVersionManagerStatus(LOCAL, 'fnm')).toBeNull();
     expect(await service.getVersionManagerStatus(LOCAL, 'volta')).toBeNull();
     expect(local.runtimeCalls).toBe(0);
+  });
+
+  it('resolves fnm now that this release detects it too', async () => {
+    const local = fakeClient();
+    const service = serviceFor(() => local);
+
+    expect(await service.getVersionManagerStatus(LOCAL, 'fnm')).toMatchObject({ id: 'fnm' });
   });
 });
 
@@ -278,6 +357,137 @@ describe('what the hub sends down with a probe', () => {
     // not the hub release that would be wrong on every peer.
     expect(remote.selfParams).toEqual({ version: '2.0.0-remote' });
     expect(remote.pathEnvParams).toBeNull();
+  });
+});
+
+describe('platform-aware runtime ids', () => {
+  it('asks a peer that predates the extended definitions for bun and node only', async () => {
+    const legacy = fakeClient('v1', 'linux', { ...MANIFEST.features, toolchain: undefined });
+    const service = serviceFor(() => legacy);
+
+    await service.listRuntimeStatuses(LOCAL);
+
+    // The fake answers every id it knows; what matters is what was asked.
+    expect(legacy.lastRuntimeIds).toEqual(['bun', 'node']);
+    await expect(service.getRuntimeStatus(LOCAL, 'fnm')).resolves.toBeNull();
+  });
+
+  // Regression: the version-manager list was sent unnarrowed. A peer that
+  // predates fnm answers a request for both with nvm's status alone, and the
+  // probe cache only reads back as fresh once *every* requested id has an
+  // entry — so every list stayed a cache miss and re-probed nvm on each poll.
+  it('asks a peer that predates fnm detection for nvm only, and caches that answer', async () => {
+    const legacy = fakeClient('v1', 'linux', { ...MANIFEST.features, toolchain: undefined });
+    const service = serviceFor(() => legacy);
+
+    const first = await service.listVersionManagerStatuses(LOCAL);
+    legacy.lastVersionManagerIds = [];
+    const second = await service.listVersionManagerStatuses(LOCAL);
+
+    expect(first.map((status) => status.id)).toEqual(['nvm']);
+    expect(second.map((status) => status.id)).toEqual(['nvm']);
+    // Empty because the second read never reached the peer at all.
+    expect(legacy.lastVersionManagerIds).toEqual([]);
+    await expect(service.getVersionManagerStatus(LOCAL, 'fnm')).resolves.toBeNull();
+  });
+
+  it('still asks a current peer for both managers', async () => {
+    const current = fakeClient();
+    const service = serviceFor(() => current);
+
+    await service.listVersionManagerStatuses(LOCAL);
+
+    expect(current.lastVersionManagerIds).toEqual(['nvm', 'fnm']);
+  });
+
+  it('omits winget on a non-Windows target', async () => {
+    const local = fakeClient('v1', 'linux');
+    const service = serviceFor(() => local);
+
+    await service.listRuntimeStatuses(LOCAL);
+
+    expect(local.lastRuntimeIds).toEqual(['bun', 'node', 'fnm', 'git']);
+  });
+
+  it('asks for winget on a Windows target, and enriches the full scan with a prerequisite-missing finding', async () => {
+    const remote = fakeClient('v1', 'win32');
+    const service = serviceFor(() => remote);
+
+    const statuses = await service.listRuntimeStatuses(WSL);
+
+    expect(remote.lastRuntimeIds).toEqual(['bun', 'node', 'fnm', 'winget', 'git']);
+
+    // fnm's only install recipe on win32 requires winget, and this fixture
+    // reports winget as not installed with no recipe of its own to fix
+    // that — the exact shape `computePrerequisiteMissingFindings` reports.
+    const fnm = statuses.find((status) => status.id === 'fnm');
+    expect(fnm?.findings).toContainEqual({
+      code: 'prerequisite-missing',
+      params: {
+        recipe: 'fnm.install',
+        requirement: 'winget',
+        remedy: expect.stringContaining('apps.microsoft.com'),
+      },
+      severity: 'warn',
+    });
+  });
+
+  // Regression: `getRuntimeStatus` used to skip this enrichment outright, so
+  // its own answer carried no `prerequisite-missing` finding even once a
+  // prior list fetch had winget's status cached — and that bare answer is
+  // exactly what the card's re-check button splices straight into the
+  // frontend's list cache, so the warning vanished from the card until the
+  // next full list fetch.
+  it('carries the prerequisite finding on a single-runtime re-check once siblings are cached', async () => {
+    const remote = fakeClient('v1', 'win32');
+    const service = serviceFor(() => remote);
+
+    await service.listRuntimeStatuses(WSL);
+    const status = await service.getRuntimeStatus(WSL, 'fnm', { force: true });
+
+    expect(status?.findings.map((finding) => finding.code)).toContain('prerequisite-missing');
+  });
+
+  // `computePrerequisiteMissingFindings` reads a sibling absent from its batch
+  // as "not installed" — correct for a full list scan, wrong for a re-check
+  // that only warmed *some* of the cache. Priming just node leaves winget
+  // uncached, so this must answer like the cold-cache case: no finding,
+  // rather than assume winget missing from silence alone.
+  it('does not invent a finding from a single-runtime re-check when only some siblings are cached', async () => {
+    const remote = fakeClient('v1', 'win32');
+    const service = serviceFor(() => remote);
+
+    await service.getRuntimeStatus(WSL, 'node');
+    const status = await service.getRuntimeStatus(WSL, 'fnm', { force: true });
+
+    expect(status?.findings).toEqual([]);
+  });
+
+  // Regression: the enrichment used to run inside the cached fetch, which made
+  // the finding a property of *how* a status was last fetched. A single-id
+  // re-check (the card's own probe button) wrote the same cache entry without
+  // one, and the warning silently vanished from the next list.
+  it('keeps the prerequisite finding after a single-runtime re-check overwrites the cache', async () => {
+    const remote = fakeClient('v1', 'win32');
+    const service = serviceFor(() => remote);
+
+    await service.listRuntimeStatuses(WSL);
+    await service.getRuntimeStatus(WSL, 'fnm', { force: true });
+    const statuses = await service.listRuntimeStatuses(WSL);
+
+    const fnm = statuses.find((status) => status.id === 'fnm');
+    expect(fnm?.findings.map((finding) => finding.code)).toContain('prerequisite-missing');
+  });
+
+  // A per-runtime re-check has no way to answer "is winget installed", so it
+  // must not invent the finding either.
+  it('never reports a prerequisite finding from a single-runtime probe', async () => {
+    const remote = fakeClient('v1', 'win32');
+    const service = serviceFor(() => remote);
+
+    const status = await service.getRuntimeStatus(WSL, 'fnm');
+
+    expect(status?.findings).toEqual([]);
   });
 });
 
@@ -349,16 +559,35 @@ describe('forced-probe admission', () => {
     await Promise.resolve();
 
     expect(resolvers).toHaveLength(2);
+    // Every requested id needs an entry, or the later lazy read below finds
+    // one uncached and starts a third scan nothing here ever resolves.
+    const otherRuntimeStatuses = [
+      { id: 'fnm', health: 'missing', installations: [], findings: [] },
+      { id: 'winget', health: 'missing', installations: [], findings: [] },
+      { id: 'git', health: 'missing', installations: [], findings: [] },
+    ];
+    // `installations` non-empty so the prerequisite-findings pass, which
+    // reads every status in the batch, sees a real "installed" shape.
+    const installedEntry = (id: string, version: string) => ({
+      id,
+      effective: { version },
+      installations: [
+        { path: `/${id}`, rawPath: `/${id}`, version, origin: 'path', effective: true },
+      ],
+      findings: [],
+    });
     resolvers[0]?.({
       statuses: [
-        { id: 'bun', effective: { version: callVersions[0] } },
-        { id: 'node', effective: { version: callVersions[0] } },
+        installedEntry('bun', callVersions[0] as string),
+        installedEntry('node', callVersions[0] as string),
+        ...otherRuntimeStatuses,
       ],
     });
     resolvers[1]?.({
       statuses: [
-        { id: 'bun', effective: { version: callVersions[1] } },
-        { id: 'node', effective: { version: callVersions[1] } },
+        installedEntry('bun', callVersions[1] as string),
+        installedEntry('node', callVersions[1] as string),
+        ...otherRuntimeStatuses,
       ],
     });
 

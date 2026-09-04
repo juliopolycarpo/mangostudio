@@ -3,14 +3,13 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib/safe-fetch';
+import type { DownloadedInstaller } from '../domain/install-recipes';
 
 const MAX_INSTALLER_REDIRECTS = 5;
+const INSPECTION_WINDOW_BYTES = 4096;
 
-interface InstallerDownloadRequest {
-  readonly url: string;
-  readonly minBytes: number;
-  readonly maxBytes: number;
-}
+/** Same shape a recipe declares per platform — the request is a `DownloadedInstaller` as-is. */
+type InstallerDownloadRequest = DownloadedInstaller;
 
 export interface InstallerArtifact {
   readonly path: string;
@@ -63,8 +62,8 @@ function assertSizeBounds(request: InstallerDownloadRequest): void {
  * hijacked host redirecting into an internal service is the threat that matters
  * here. `safeFetchBytes` owns that: HTTPS only, every hop re-checked against the
  * address policy, and a cap enforced while the body streams. What stays here is
- * what only an installer knows — that the payload has to look like a shell
- * script rather than a login page.
+ * what only an installer knows — that the payload has to look like the script
+ * kind the recipe declared rather than a login page.
  */
 async function fetchInstallerBytes(
   deps: InstallerDownloadDeps,
@@ -96,16 +95,61 @@ async function fetchInstallerBytes(
   }
 }
 
-function assertShellScript(bytes: Uint8Array, minBytes: number): void {
+/**
+ * A recipe with an immutable source URL pins the digest it expects ahead of
+ * time; checked before any content inspection because a digest mismatch is
+ * the stronger signal — it is wrong regardless of what the bytes look like.
+ */
+function assertPinnedDigest(bytes: Uint8Array, expected: string | undefined): void {
+  if (!expected) return;
+  const actual = createHash('sha256').update(bytes).digest('hex');
+  if (actual !== expected) {
+    throw new InstallerDownloadError(
+      `installer digest mismatch: expected ${expected} | received ${actual}`
+    );
+  }
+}
+
+function isHtmlResponse(normalized: string): boolean {
+  return /^(?:<!doctype\s+html|<html)\b/i.test(normalized);
+}
+
+/** A shebang is on the first line, so a shell script needs a far smaller window than a `.ps1`. */
+const SHELL_INSPECTION_WINDOW_BYTES = 1024;
+
+/**
+ * The decoded head of a downloaded installer, ready to recognize by content:
+ * long enough to be a script at all, BOM stripped, and not the HTML a CDN or
+ * captive portal serves when it means to refuse. What counts as the right
+ * *kind* of script is each caller's own check.
+ */
+function inspectionPrefix(
+  bytes: Uint8Array,
+  minBytes: number,
+  windowBytes: number,
+  kind: 'shell script' | 'PowerShell script'
+): string {
   if (bytes.byteLength < minBytes) {
     throw new InstallerDownloadError(`Installer is smaller than the ${minBytes}-byte minimum.`);
   }
 
-  const prefix = new TextDecoder().decode(bytes.subarray(0, Math.min(bytes.byteLength, 1024)));
-  const normalized = prefix.replace(/^\uFEFF/, '').trimStart();
-  if (/^(?:<!doctype\s+html|<html)\b/i.test(normalized)) {
-    throw new InstallerDownloadError('Installer response was HTML, not a shell script.');
+  const prefix = new TextDecoder().decode(
+    bytes.subarray(0, Math.min(bytes.byteLength, windowBytes))
+  );
+  const normalized = prefix.replace(/^\uFEFF/, '');
+  if (isHtmlResponse(normalized.trimStart())) {
+    throw new InstallerDownloadError(`Installer response was HTML, not a ${kind}.`);
   }
+  return normalized;
+}
+
+function assertShellScript(bytes: Uint8Array, minBytes: number): void {
+  const normalized = inspectionPrefix(
+    bytes,
+    minBytes,
+    SHELL_INSPECTION_WINDOW_BYTES,
+    'shell script'
+  ).trimStart();
   const firstLine = normalized.split(/\r?\n/, 1)[0] ?? '';
   if (
     !/^#!\s*(?:\/usr\/bin\/env\s+(?:ba|z|k)?sh|\/(?:usr\/)?bin\/(?:ba|z|k)?sh)(?:\s|$)/.test(
@@ -114,6 +158,31 @@ function assertShellScript(bytes: Uint8Array, minBytes: number): void {
   ) {
     throw new InstallerDownloadError('Installer response does not have a shell shebang.');
   }
+}
+
+/**
+ * PowerShell has no shebang convention, so a `.ps1` body is recognized by
+ * content instead: not HTML, and at least one token that only shows up in a
+ * PowerShell script within the first 4 KiB.
+ */
+const POWERSHELL_TOKEN_PATTERN =
+  /\bparam\s*\(|\bfunction\s+\S|\$env:\w|Invoke-WebRequest|Write-Host|#Requires|\$[A-Za-z_]\w*\s*=/;
+
+function assertPowerShellScript(bytes: Uint8Array, minBytes: number): void {
+  const normalized = inspectionPrefix(
+    bytes,
+    minBytes,
+    INSPECTION_WINDOW_BYTES,
+    'PowerShell script'
+  );
+  if (!POWERSHELL_TOKEN_PATTERN.test(normalized)) {
+    throw new InstallerDownloadError('Installer response does not look like a PowerShell script.');
+  }
+}
+
+/** `powershell -File` refuses to run a script whose extension is not `.ps1`. */
+function installerFileName(interpreter: DownloadedInstaller['interpreter']): string {
+  return interpreter === 'powershell' ? 'installer.ps1' : 'installer.sh';
 }
 
 export function createInstallerDownloader(
@@ -125,10 +194,15 @@ export function createInstallerDownloader(
     async download(request, options = {}) {
       assertSizeBounds(request);
       const { bytes, url } = await fetchInstallerBytes(deps, request, options.signal);
-      assertShellScript(bytes, request.minBytes);
+      assertPinnedDigest(bytes, request.sha256);
+      if (request.interpreter === 'powershell') {
+        assertPowerShellScript(bytes, request.minBytes);
+      } else {
+        assertShellScript(bytes, request.minBytes);
+      }
 
       const tempDir = await deps.createTempDir();
-      const path = join(tempDir, 'installer.sh');
+      const path = join(tempDir, installerFileName(request.interpreter));
       try {
         await deps.writeFile(path, bytes);
       } catch (error) {

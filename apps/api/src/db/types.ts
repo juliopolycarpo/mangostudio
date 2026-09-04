@@ -504,6 +504,23 @@ interface ActivityEventsTable {
   payloadJson: string;
 }
 
+/**
+ * Which Node and Bun every process spawned on one environment runs with.
+ *
+ * No foreign key on `environmentId`: the Local environment is virtual
+ * (`LOCAL_ENVIRONMENT_ID`) and never has a row in `environments`, exactly as
+ * `external_account_limits_cache` and `external_agent_disclosures` already
+ * key on `userId`/`environmentId` pairs without one.
+ */
+interface EnvironmentToolchainsTable {
+  userId: string;
+  environmentId: string;
+  /** A `ToolchainChoice`: `'auto'` or an installation path. */
+  nodeSelection: string;
+  bunSelection: string;
+  updatedAt: number;
+}
+
 /** Root Kysely Database interface. */
 export interface Database {
   chats: ChatsTable;
@@ -538,6 +555,7 @@ export interface Database {
   external_agent_disclosures: ExternalAgentDisclosuresTable;
   external_account_limits_cache: ExternalAccountLimitsCacheTable;
   activity_events: ActivityEventsTable;
+  environment_toolchains: EnvironmentToolchainsTable;
 }
 
 export type GeneratedImageSelect = Selectable<GeneratedImagesTable>;
@@ -584,3 +602,7 @@ export type ToolIdentitySelect = Selectable<UserToolIdentitiesTable>;
 
 export type ActivityEventSelect = Selectable<ActivityEventsTable>;
 export type ActivityEventInsert = Insertable<ActivityEventsTable>;
+
+export type EnvironmentToolchainSelect = Selectable<EnvironmentToolchainsTable>;
+export type EnvironmentToolchainInsert = Insertable<EnvironmentToolchainsTable>;
+export type EnvironmentToolchainUpdate = Updateable<EnvironmentToolchainsTable>;

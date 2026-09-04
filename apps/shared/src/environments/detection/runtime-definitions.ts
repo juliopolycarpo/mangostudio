@@ -1,6 +1,7 @@
 import { posix, win32 } from 'node:path';
 import type { PathEnv } from '../../runtime-env';
-import type { RuntimeDefinition, SemVer } from './binary-scan';
+import { type RuntimeDefinition, type SemVer, windowsDefaultFnmDir } from './binary-scan';
+import { fnmDefaultAliasBinDir, fnmRootCandidates } from './fnm';
 
 function parseSemVer(raw: string, prefix: 'optional-v' | 'none'): SemVer | null {
   const pattern = prefix === 'optional-v' ? /^v?(\d+)\.(\d+)\.(\d+)/ : /^(\d+)\.(\d+)\.(\d+)/;
@@ -23,7 +24,8 @@ export function parseBunVersion(raw: string): SemVer | null {
 
 export function wellKnownNodeDirectories(env: PathEnv): string[] {
   if (env.platform === 'win32') {
-    const { ProgramFiles, LOCALAPPDATA, NVM_SYMLINK, VOLTA_HOME } = env.env;
+    const { ProgramFiles, LOCALAPPDATA, NVM_SYMLINK, VOLTA_HOME, FNM_DIR } = env.env;
+    const fnmDir = FNM_DIR?.trim() || windowsDefaultFnmDir(env);
     return [
       NVM_SYMLINK,
       ProgramFiles ? win32.join(ProgramFiles, 'nodejs') : undefined,
@@ -31,6 +33,7 @@ export function wellKnownNodeDirectories(env: PathEnv): string[] {
         ? win32.join(env.env['ProgramFiles(x86)'] as string, 'nodejs')
         : undefined,
       LOCALAPPDATA ? win32.join(LOCALAPPDATA, 'Programs', 'nodejs') : undefined,
+      fnmDir ? win32.join(fnmDir, 'aliases', 'default') : undefined,
       VOLTA_HOME ? win32.join(VOLTA_HOME, 'bin') : undefined,
     ].filter((directory): directory is string => Boolean(directory?.trim()));
   }
@@ -39,7 +42,7 @@ export function wellKnownNodeDirectories(env: PathEnv): string[] {
     '/usr/local/bin',
     '/opt/homebrew/bin',
     posix.join(env.homeDir, '.volta', 'bin'),
-    posix.join(env.homeDir, '.local', 'share', 'fnm', 'aliases', 'default', 'bin'),
+    ...fnmRootCandidates(env).map((root) => fnmDefaultAliasBinDir(env.platform, root)),
   ];
 }
 
@@ -63,4 +66,93 @@ export const BUN_RUNTIME_DEFINITION: RuntimeDefinition = {
   versionArgs: ['--version'],
   parseVersion: parseBunVersion,
   wellKnownDirs: wellKnownBunDirectories,
+};
+
+/**
+ * `raw` is searched rather than anchored: fnm and git prefix their version
+ * with their own name. That makes every position in `raw` its own match
+ * attempt, so each component is capped at `{1,9}` rather than left as `\d+` —
+ * unbounded, rejecting a long digit run costs quadratic time, and `raw` is a
+ * probed binary's stdout rather than a shape this process controls. No real
+ * version component is nine digits wide.
+ */
+function parseSemVerAnywhere(raw: string, pattern: RegExp): SemVer | null {
+  const match = raw.match(pattern);
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  };
+}
+
+/** `fnm --version` prints `fnm 1.38.1`. */
+export function parseFnmVersion(raw: string): SemVer | null {
+  return parseSemVerAnywhere(raw, /(\d{1,9})\.(\d{1,9})\.(\d{1,9})/);
+}
+
+/** `git --version` prints `git version 2.43.0`, or `2.43.0.windows.1` on win32; the suffix is dropped. */
+export function parseGitVersion(raw: string): SemVer | null {
+  return parseSemVerAnywhere(raw, /git version\s+(\d{1,9})\.(\d{1,9})\.(\d{1,9})/i);
+}
+
+/** `winget --version` prints `v1.29.290`. */
+export function parseWingetVersion(raw: string): SemVer | null {
+  return parseSemVer(raw, 'optional-v');
+}
+
+/**
+ * fnm installs its binary into its own root, so the search list is the root
+ * ladder itself — `fnmRootCandidates`, never a second spelling of it. On win32
+ * winget links the executable elsewhere, which is the one directory the ladder
+ * does not own.
+ */
+function wellKnownFnmDirectories(env: PathEnv): string[] {
+  const { LOCALAPPDATA } = env.env;
+  const wingetLinks =
+    env.platform === 'win32' && LOCALAPPDATA
+      ? // winget's fnm manifest links here — see the comment on `fnm.install`.
+        [win32.join(LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links')]
+      : [];
+
+  return [...wingetLinks, ...fnmRootCandidates(env)];
+}
+
+function wellKnownGitDirectories(env: PathEnv): string[] {
+  if (env.platform !== 'win32') return [];
+  const { ProgramFiles } = env.env;
+  return ProgramFiles ? [win32.join(ProgramFiles, 'Git', 'cmd')] : [];
+}
+
+function wellKnownWingetDirectories(env: PathEnv): string[] {
+  if (env.platform !== 'win32') return [];
+  const { LOCALAPPDATA } = env.env;
+  return LOCALAPPDATA ? [win32.join(LOCALAPPDATA, 'Microsoft', 'WindowsApps')] : [];
+}
+
+/** Second helper-managed Node manager; win32-installable, unlike nvm. */
+export const FNM_RUNTIME_DEFINITION: RuntimeDefinition = {
+  id: 'fnm',
+  binaryNames: ['fnm'],
+  versionArgs: ['--version'],
+  parseVersion: parseFnmVersion,
+  wellKnownDirs: wellKnownFnmDirectories,
+};
+
+/** Probed as a prerequisite for the Windows recipes; never installed by MangoStudio. */
+export const GIT_RUNTIME_DEFINITION: RuntimeDefinition = {
+  id: 'git',
+  binaryNames: ['git'],
+  versionArgs: ['--version'],
+  parseVersion: parseGitVersion,
+  wellKnownDirs: wellKnownGitDirectories,
+};
+
+/** Probed as a prerequisite for the Windows recipes; never installed by MangoStudio. */
+export const WINGET_RUNTIME_DEFINITION: RuntimeDefinition = {
+  id: 'winget',
+  binaryNames: ['winget'],
+  versionArgs: ['--version'],
+  parseVersion: parseWingetVersion,
+  wellKnownDirs: wellKnownWingetDirectories,
 };

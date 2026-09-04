@@ -5,17 +5,21 @@
 
 import type { AgentCliStatus, InstallRecipePreview } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
-import { Download } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { findInstallRecipe, prefixedVersionLabel } from '../format';
+import {
+  findInstallRecipe,
+  prefixedVersionLabel,
+  runtimeUninstallRecipe,
+  stepFor,
+} from '../format';
 import { useProbeAgentCli } from '../hooks/use-runtime-status';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import { AgentAuthState } from './AgentAuthState';
 import { FindingList } from './FindingList';
 import { HealthBadge } from './HealthBadge';
-import { InstallAction } from './InstallAction';
 import { ProbeButton } from './ProbeButton';
+import { RecipeAction } from './RecipeAction';
 import { CardSectionLabel, ToolCard } from './ToolCard';
 
 interface AgentCliCardProps {
@@ -31,7 +35,9 @@ export function AgentCliCard({ status, recipes, environmentId }: AgentCliCardPro
   const probe = useProbeAgentCli(environmentId);
   const { resolve } = useToolIdentities();
   const name = resolve('agent', status.targetId).name;
-  const installRecipe = findInstallRecipe(recipes, status.id, 'install');
+  const installStep = stepFor(findInstallRecipe(recipes, status.id, 'install'));
+  const updateStep = stepFor(findInstallRecipe(recipes, status.id, 'update'));
+  const uninstallStep = stepFor(runtimeUninstallRecipe(status, recipes));
 
   return (
     <ToolCard
@@ -56,17 +62,38 @@ export function AgentCliCard({ status, recipes, environmentId }: AgentCliCardPro
           />
         </>
       }
+      // Install when nothing runs yet; update and/or uninstall once it does.
+      // Decided on the steps, never on the rendered nodes: a `RecipeAction`
+      // with no step renders nothing but is still a truthy element, so
+      // handing one to `footer` would open a footer with a gap and no button.
       footer={
-        !status.effective && installRecipe ? (
-          <InstallAction
-            recipe={installRecipe}
-            catalog={recipes}
-            input={{ kind: 'none' }}
-            label={formatMessage(e.runtimes.install, { runtime: name })}
-            variant="primary"
-            icon={<Download size={14} />}
-            environmentId={environmentId}
-          />
+        !status.effective ? (
+          installStep ? (
+            <RecipeAction
+              step={installStep}
+              action="install"
+              catalog={recipes}
+              name={name}
+              environmentId={environmentId}
+            />
+          ) : null
+        ) : updateStep || uninstallStep ? (
+          <>
+            <RecipeAction
+              step={updateStep}
+              action="update"
+              catalog={recipes}
+              name={name}
+              environmentId={environmentId}
+            />
+            <RecipeAction
+              step={uninstallStep}
+              action="uninstall"
+              catalog={recipes}
+              name={name}
+              environmentId={environmentId}
+            />
+          </>
         ) : null
       }
     >

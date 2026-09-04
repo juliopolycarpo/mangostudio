@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import type { ToolchainSelection } from '@mangostudio/shared/environments';
 import { schemaErrorPointer } from '@mangostudio/shared/errors';
 import type {
   ExternalAgentAckResult,
@@ -59,6 +60,7 @@ import { RuntimeToolArgumentError } from '../../errors';
 import type { RuntimeEventInput } from '../../host';
 import { RUNTIME_EXTERNAL_AGENT_TOPIC } from '../../methods';
 import { probingService } from '../probing/service';
+import { buildSpawnEnv, nodeSpawnEnvHost, type SpawnEnvFs } from '../spawn-env';
 import type {
   ExternalAgentAdapter,
   ExternalAgentAdapterContext,
@@ -134,6 +136,8 @@ interface LiveSession {
    * each message and let a session change binaries halfway through.
    */
   readonly executablePath: string;
+  /** What `open` was sent; kept for every later turn/review/refresh on this session. */
+  readonly toolchain?: ToolchainSelection;
   readonly openedAtMs: number;
   readonly openResult: ExternalAgentOpenResult;
   readonly turns: Map<string, TurnReceipt>;
@@ -160,6 +164,10 @@ export interface ExternalAgentSupervisorOptions {
   readonly emit: (event: RuntimeEventInput) => void;
   readonly consent: RuntimeConsentSource;
   readonly env?: NodeJS.ProcessEnv;
+  /** Host facts `buildSpawnEnv` resolves a session's toolchain selection against. */
+  readonly platform?: string;
+  readonly homeDir?: string;
+  readonly spawnEnvFs?: SpawnEnvFs;
   readonly sessionCap?: number;
   readonly idleTimeoutMs?: number;
   readonly hardTurnTimeoutMs?: number;
@@ -187,6 +195,9 @@ export class ExternalAgentSessionSupervisor {
   readonly #emit: (event: RuntimeEventInput) => void;
   readonly #consent: RuntimeConsentSource;
   readonly #env: NodeJS.ProcessEnv;
+  readonly #platform: string;
+  readonly #homeDir: string;
+  readonly #spawnEnvFs: SpawnEnvFs;
   readonly #sessionCap: number;
   readonly #idleTimeoutMs: number;
   readonly #hardTurnTimeoutMs: number;
@@ -216,6 +227,9 @@ export class ExternalAgentSessionSupervisor {
     this.#emit = options.emit;
     this.#consent = options.consent;
     this.#env = options.env ?? process.env;
+    this.#platform = options.platform ?? nodeSpawnEnvHost.platform;
+    this.#homeDir = options.homeDir ?? nodeSpawnEnvHost.homeDir;
+    this.#spawnEnvFs = options.spawnEnvFs ?? nodeSpawnEnvHost.fs;
     this.#sessionCap = options.sessionCap ?? DEFAULT_SESSION_CAP;
     this.#idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
     this.#hardTurnTimeoutMs = options.hardTurnTimeoutMs ?? DEFAULT_HARD_TURN_TIMEOUT_MS;
@@ -567,7 +581,8 @@ export class ExternalAgentSessionSupervisor {
             controller.signal,
             executable.path,
             live?.workspacePath,
-            processes
+            processes,
+            live?.toolchain
           ),
           ...(live
             ? { sessionId: live.sessionId }
@@ -659,7 +674,8 @@ export class ExternalAgentSessionSupervisor {
             controller.signal,
             executable.path,
             workspacePath ?? live?.workspacePath,
-            processes
+            processes,
+            live?.toolchain
           ),
           ...(params.cursor === undefined ? {} : { cursor: params.cursor }),
           ...(params.limit === undefined ? {} : { limit: params.limit }),
@@ -799,7 +815,8 @@ export class ExternalAgentSessionSupervisor {
           controller.signal,
           executablePath,
           workspacePath,
-          processes
+          processes,
+          params.toolchain
         ),
       });
       let rawResult: ExternalAgentOpenResult;
@@ -849,6 +866,7 @@ export class ExternalAgentSessionSupervisor {
         workspacePath,
         authorizedWorkspaceRoots,
         executablePath,
+        ...(params.toolchain !== undefined && { toolchain: params.toolchain }),
         openedAtMs: this.#now(),
         openResult,
         turns: new Map(),
@@ -887,7 +905,8 @@ export class ExternalAgentSessionSupervisor {
         controller.signal,
         session.executablePath,
         session.workspacePath,
-        session.processes
+        session.processes,
+        session.toolchain
       ),
     });
     const nativeTurnId = this.#registerTurn(session, controller, stream);
@@ -935,7 +954,8 @@ export class ExternalAgentSessionSupervisor {
         controller.signal,
         session.executablePath,
         session.workspacePath,
-        session.processes
+        session.processes,
+        session.toolchain
       ),
     });
     let stream: ExternalAgentReviewStream;
@@ -1182,9 +1202,17 @@ export class ExternalAgentSessionSupervisor {
     signal: AbortSignal,
     executablePath?: string,
     cwd?: string,
-    ownedProcesses?: Set<ExternalAgentManagedProcess>
+    ownedProcesses?: Set<ExternalAgentManagedProcess>,
+    toolchain?: ToolchainSelection
   ): ExternalAgentAdapterContext {
-    const environment = buildExternalAgentEnvironment(this.#env, adapter.vendorEnvironmentKeys);
+    const spawnEnv = buildSpawnEnv({
+      source: this.#env,
+      toolchain,
+      platform: this.#platform,
+      homeDir: this.#homeDir,
+      fs: this.#spawnEnvFs,
+    });
+    const environment = buildExternalAgentEnvironment(spawnEnv, adapter.vendorEnvironmentKeys);
     const effectiveCwd = cwd ?? process.cwd();
     return {
       signal,

@@ -9,18 +9,26 @@
 import type {
   InstallAction,
   InstallGuardReason,
+  InstallRecipeId,
   InstallRecipePreview,
   LtsStatus,
+  PathSource,
+  RecipeInput,
   RuntimeFinding,
   RuntimeHealth,
   RuntimeInstallation,
   RuntimeStatus,
+  ToolchainChoice,
+  ToolchainRuntimeId,
+  VersionManagerStatus,
 } from '@mangostudio/shared/environments';
+import { TOOLCHAIN_RUNTIME_IDS } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
 import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
 import { formatMessage } from '@/lib/i18n-format';
 import type { ResolvedToolIdentity } from './identity/resolve';
+import { type InstallChainStep, resolveInstallChain } from './install-chain';
 
 /**
  * Params that name a runtime, agent, or version manager rather than a value,
@@ -288,13 +296,95 @@ export function effectiveInstallation(status: RuntimeStatus): EffectiveInstallat
  * The catalog entry that performs one action for one runtime. Undefined means
  * the action is not offered here, which every caller renders as "no button"
  * rather than as a disabled one.
+ *
+ * The catalog can list more than one recipe for the same runtime and action —
+ * a POSIX entry and a Windows entry for the same Node install, for instance —
+ * so a `supported` match (one whose platforms include this machine) always
+ * wins over one that would only ever render as "unsupported on this platform".
  */
 export function findInstallRecipe(
   recipes: readonly InstallRecipePreview[],
   runtimeId: string,
   action: InstallAction
 ): InstallRecipePreview | undefined {
-  return recipes.find((recipe) => recipe.runtimeId === runtimeId && recipe.action === action);
+  let unsupportedMatch: InstallRecipePreview | undefined;
+  for (const recipe of recipes) {
+    if (recipe.runtimeId !== runtimeId || recipe.action !== action) continue;
+    if (recipe.supported) return recipe;
+    unsupportedMatch ??= recipe;
+  }
+  return unsupportedMatch;
+}
+
+/** `$HOME/` and `%USERPROFILE%\` both stand for "this account's home", wherever it is. */
+const HOME_PLACEHOLDER = /^(?:\$HOME|%USERPROFILE%)[/\\]/;
+
+/**
+ * A declared write path reduced to the part that identifies it below the home
+ * directory, in one separator style. Compared case-insensitively because the
+ * same path is spelled either way on Windows.
+ */
+function ownedLocation(write: string): string {
+  return write.replace(HOME_PLACEHOLDER, '').replaceAll('\\', '/').toLowerCase();
+}
+
+/** Whether one path is the file this recipe deletes, or sits inside a directory it deletes. */
+function writesCover(recipe: InstallRecipePreview, path: string): boolean {
+  const target = path.replaceAll('\\', '/').toLowerCase();
+  return recipe.writes.some((write) => {
+    const location = ownedLocation(write);
+    // A `writes` entry that is nothing but the placeholder would own the whole
+    // home directory; no recipe declares that, and matching it would be worse
+    // than offering nothing.
+    if (!location) return false;
+    return target.endsWith(`/${location}`) || target.includes(`/${location}/`);
+  });
+}
+
+/**
+ * Whether this recipe removes the given installation.
+ *
+ * Both spellings are checked, as `resolvePathSource` checks both: `path` is
+ * the realpath and `rawPath` is where the scanner found it, and a vendor
+ * installer that symlinks its entry point — Claude Code links
+ * `~/.local/bin/claude` at a versioned directory — matches only on the link.
+ */
+function removesInstallation(
+  recipe: InstallRecipePreview,
+  installation: RuntimeInstallation
+): boolean {
+  return writesCover(recipe, installation.path) || writesCover(recipe, installation.rawPath);
+}
+
+/**
+ * The uninstall step to offer for this tool — undefined when the catalog has
+ * none here, or when the binary that actually runs is not one this recipe
+ * removes.
+ *
+ * Offering it regardless is worse than offering nothing: against a Homebrew
+ * Bun or a package-managed `claude`, the recipe deletes a different
+ * installation (or none), leaves the effective binary in place, and still
+ * reports success. Ownership is read from the recipe's own `writes` rather
+ * than from `pathSource`, which cannot tell a vendor-installed CLI from a
+ * system one, and which reports a custom `$BUN_INSTALL` prefix as Bun-managed
+ * even though the recipe only removes the default root.
+ *
+ * A copy-only recipe is exempt: it deletes nothing on its own, and the command
+ * it discloses is the user's to judge.
+ *
+ * @example runtimeUninstallRecipe(bunStatus, recipes)?.id // 'bun.uninstall'
+ */
+export function runtimeUninstallRecipe(
+  status: RuntimeStatus,
+  recipes: readonly InstallRecipePreview[]
+): InstallRecipePreview | undefined {
+  const recipe = findInstallRecipe(recipes, status.id, 'uninstall');
+  if (!recipe) return undefined;
+  if (!recipe.runnable) return recipe;
+
+  const { installation } = effectiveInstallation(status);
+  if (!installation) return undefined;
+  return removesInstallation(recipe, installation) ? recipe : undefined;
 }
 
 /** Human-readable byte count for the installer download disclosure. */
@@ -318,7 +408,7 @@ export function formatDuration(durationMs: number): string {
  * `useToolIdentities().resolve`, named structurally so this module keeps its
  * React-free imports.
  */
-type IdentityResolver = (
+export type IdentityResolver = (
   kind: ToolIdentityKind,
   id: string,
   fallbackName?: string
@@ -347,4 +437,291 @@ export function chainStepLabel(t: Messages, index: number, count: number, name: 
     count: String(count),
     name,
   });
+}
+
+/** Where an installation's binary came from, read straight off `pathSource`. */
+export function pathSourceLabel(t: Messages, source: PathSource | undefined): string {
+  return t.environments.pathSources[source ?? 'system'];
+}
+
+/**
+ * The recipe ids that install a fresh Node, in the order this machine's
+ * catalog is tried. nvm is POSIX-only and winget is Windows-only, so those two
+ * never compete: each is its platform's documented default. fnm runs
+ * everywhere and is the fallback behind both — a preview's `supported` is
+ * decided by platform alone, so on a fresh Windows machine fnm looks available
+ * whether or not it is installed, and preferring it there would replace the
+ * one-step winget default with the three-step fnm chain.
+ */
+const NODE_INSTALL_RECIPE_IDS: readonly InstallRecipeId[] = [
+  'nvm.node.install',
+  'winget.node.install',
+  'fnm.node.install',
+];
+
+/** The `RecipeInput` a Node recipe needs, derived from its own declared shape. */
+function nodeRecipeInput(recipe: InstallRecipePreview): RecipeInput {
+  return recipe.inputKind === 'node-version'
+    ? { kind: 'node-version', version: 'lts' }
+    : { kind: 'none' };
+}
+
+/**
+ * The version managers whose Node table is worth showing on this machine:
+ * the ones actually installed, plus any absent one whose Node chain could
+ * still run here.
+ *
+ * The probe answers for every manager this release detects, on every platform.
+ * Rendering all of them puts a "{manager} is not installed" block — and an
+ * affordance that resolves to "nothing here installs {manager}" — inside the
+ * Node card for a manager this machine has no path to: fnm on POSIX, whose
+ * only install recipe is winget's. A manager with nothing installed and no way
+ * to get there is not a row a reader can act on.
+ *
+ * An empty catalog is "unknown", not "unreachable": the page passes
+ * `recipes.data ?? []` while the catalog loads, and narrowing on that would
+ * hide a reachable manager's table on first paint and flash it in.
+ *
+ * @example renderableVersionManagers(managers, recipes).map((m) => m.id) // ['nvm']
+ */
+export function renderableVersionManagers(
+  managers: readonly VersionManagerStatus[],
+  recipes: readonly InstallRecipePreview[]
+): VersionManagerStatus[] {
+  if (recipes.length === 0) return [...managers];
+  return managers.filter((manager) => {
+    if (manager.installed) return true;
+    const nodeRecipe = recipes.find(
+      (recipe) => recipe.id === `${manager.id}.node.install` && recipe.supported
+    );
+    if (!nodeRecipe) return false;
+    return resolveInstallChain(recipes, nodeRecipe, nodeRecipeInput(nodeRecipe)).kind === 'ready';
+  });
+}
+
+/**
+ * The step that installs a first Node on this machine, or undefined when the
+ * catalog offers none here — a disconnected environment, or a platform this
+ * hub has no recipe for at all.
+ */
+export function nodeInstallStep(
+  recipes: readonly InstallRecipePreview[]
+): InstallChainStep | undefined {
+  const supported = NODE_INSTALL_RECIPE_IDS.map((id) =>
+    recipes.find((candidate) => candidate.id === id && candidate.supported)
+  ).filter((recipe): recipe is InstallRecipePreview => recipe !== undefined);
+
+  // A candidate whose chain cannot resolve is a dead end, not a default:
+  // nothing in the catalog installs winget, so preferring it on a Windows
+  // machine without winget would block the button while an installed fnm
+  // could have done the job. A missing prerequisite the catalog *can* supply
+  // is fine — that is how nvm stays the POSIX default before it is installed.
+  const runnable = supported.find(
+    (recipe) => resolveInstallChain(recipes, recipe, nodeRecipeInput(recipe)).kind === 'ready'
+  );
+
+  // Nothing here is runnable, so the first supported entry still decides: the
+  // card needs a recipe to hang the missing-prerequisite remedy on.
+  const recipe = runnable ?? supported[0];
+  return recipe ? { recipe, input: nodeRecipeInput(recipe) } : undefined;
+}
+
+/**
+ * The step that installs `runtimeId` on this machine, or undefined when the
+ * catalog offers none. Node is the one runtime whose install is a choice
+ * between managers rather than a single recipe, so it keeps its own rule —
+ * but which runtime that is stays here, not in a card's JSX.
+ * // Usage: installStep(recipes, 'bun')
+ */
+export function installStep(
+  recipes: readonly InstallRecipePreview[],
+  runtimeId: string
+): InstallChainStep | undefined {
+  if (runtimeId === 'node') return nodeInstallStep(recipes);
+  const recipe = findInstallRecipe(recipes, runtimeId, 'install');
+  return recipe ? { recipe, input: { kind: 'none' } } : undefined;
+}
+
+/** Wraps an already-chosen recipe as a no-input step, for callers holding one. */
+export function stepFor(recipe: InstallRecipePreview | undefined): InstallChainStep | undefined {
+  return recipe ? { recipe, input: { kind: 'none' } } : undefined;
+}
+
+/**
+ * The recipe chain that moves an nvm- or fnm-managed Node to a newer LTS *and*
+ * makes it the one that actually runs. Installing a new version alone is not
+ * enough for either manager: nvm's `nvm install` does not touch the `default`
+ * alias, and fnm's `fnm install` only writes the `lts-latest` alias that
+ * `fnm.node.set-default` still has to be pointed at — so the install step
+ * always carries its set-default step as a follow-up, never on its own.
+ */
+const NODE_UPDATE_CHAIN_BY_SOURCE: Partial<
+  Record<PathSource, readonly [InstallRecipeId, InstallRecipeId] | readonly [InstallRecipeId]>
+> = {
+  nvm: ['nvm.node.install', 'nvm.node.set-default'],
+  fnm: ['fnm.node.install', 'fnm.node.set-default'],
+  winget: ['winget.node.update'],
+};
+
+export type NodeUpdateAffordance =
+  /** The install step runs first; `followUp` completes it (making the version effective). */
+  | {
+      readonly kind: 'steps';
+      readonly primary: InstallChainStep;
+      readonly followUp: readonly InstallChainStep[];
+    }
+  /** A manager MangoStudio does not drive owns this Node; nothing here can update it. */
+  | { readonly kind: 'managed-elsewhere'; readonly source: PathSource }
+  /** No effective installation to update, or nothing in the catalog reaches it. */
+  | { readonly kind: 'none' };
+
+/**
+ * Which "Update Node" affordance applies, decided once here so the card, the
+ * setup checklist, and their tests never re-derive it from `pathSource` on
+ * their own.
+ */
+export function nodeUpdateAffordance(
+  status: RuntimeStatus,
+  recipes: readonly InstallRecipePreview[]
+): NodeUpdateAffordance {
+  const { installation } = effectiveInstallation(status);
+  if (!installation) return { kind: 'none' };
+
+  const source: PathSource = installation.pathSource ?? 'system';
+  const chainIds = NODE_UPDATE_CHAIN_BY_SOURCE[source];
+  if (!chainIds) return { kind: 'managed-elsewhere', source };
+
+  const steps: InstallChainStep[] = [];
+  for (const id of chainIds) {
+    const listed = recipes.filter((candidate) => candidate.id === id);
+    const recipe = listed.find((candidate) => candidate.supported);
+    if (recipe) {
+      steps.push({ recipe, input: nodeRecipeInput(recipe) });
+      continue;
+    }
+    // Listed but not runnable here. The catalog carries off-platform recipes
+    // with `supported: false`, and nvm-windows is attributed `nvm` while the
+    // nvm recipes are POSIX-only — building that chain would offer an update
+    // the install flow then refuses. A manager MangoStudio cannot drive is
+    // exactly `managed-elsewhere`, so the card explains rather than going
+    // blank.
+    if (listed.length > 0) return { kind: 'managed-elsewhere', source };
+    // Not in the catalog at all: a list still loading, or a stale one. Saying
+    // "managed elsewhere" here would libel a manager this build does drive.
+    return { kind: 'none' };
+  }
+
+  const [primary, ...followUp] = steps;
+  if (!primary) return { kind: 'none' };
+  return { kind: 'steps', primary, followUp };
+}
+
+/**
+ * The product name to print for "Managed by {manager}, not by MangoStudio."
+ * `volta` resolves through the same identity registry every other version
+ * manager does; the rest are not version managers at all, so they read their
+ * name from the product dictionary instead.
+ *
+ * Never called for `'system'`: "Managed by {manager}" cannot carry a bare
+ * "the system" without an article ("por o sistema" is not Portuguese), so
+ * that source gets its own full sentence — `runtimes.managedBySystem` —
+ * chosen at the call site before this function is reached.
+ */
+export function pathSourceManagerName(
+  t: Messages,
+  resolve: IdentityResolver,
+  source: PathSource
+): string {
+  if (source === 'volta') return resolve('version-manager', 'volta').name;
+  if (source === 'bun') return displayName(t, 'bun');
+  if (source === 'mangostudio-managed') return displayName(t, 'mangostudio');
+  return displayName(t, source);
+}
+
+/** Whether `id` is one this card offers a toolchain pin for. Never fnm, nvm, winget, or an agent. */
+export function toolchainRuntimeId(id: RuntimeStatus['id']): ToolchainRuntimeId | undefined {
+  return (TOOLCHAIN_RUNTIME_IDS as readonly string[]).includes(id)
+    ? (id as ToolchainRuntimeId)
+    : undefined;
+}
+
+/**
+ * "Processes run …" — what a spawned shell, terminal, vendor agent, or
+ * installer actually gets on PATH, as opposed to the "Effective" section
+ * above it, which is what this machine's own shell resolves right now. On
+ * `auto` the two agree, so this reads the same effective installation; on a
+ * pin, it reads whichever installation the choice names, wherever that sits
+ * on PATH.
+ *
+ * `undefined` when there is nothing to say: `auto` with no effective binary
+ * at all.
+ */
+export function toolchainProcessLine(
+  t: Messages,
+  resolve: IdentityResolver,
+  status: RuntimeStatus,
+  selection: ToolchainChoice
+): string | undefined {
+  if (selection === 'auto') {
+    const { installation } = effectiveInstallation(status);
+    if (!installation) return undefined;
+    const source = installation.pathSource ?? 'system';
+    return source === 'system'
+      ? formatMessage(t.environments.runtimes.toolchainAutoSystem, {
+          version: versionLabel(t, installation.version),
+        })
+      : formatMessage(t.environments.runtimes.toolchainAuto, {
+          version: versionLabel(t, installation.version),
+          source: pathSourceManagerName(t, resolve, source),
+        });
+  }
+
+  // Aliases share `canonical.path`, so the pin's own path resolves to the
+  // group's canonical entry — the same one "Use this version" wrote when it
+  // read `installation.path` off this same group.
+  const canonical = groupInstallations(status.installations).find(
+    (group) => group.canonical.path === selection
+  )?.canonical;
+  return formatMessage(t.environments.runtimes.toolchainPinned, {
+    version: versionLabel(t, canonical?.version ?? null),
+    path: canonical?.rawPath ?? selection,
+  });
+}
+
+/**
+ * "Node {version} ({source}) · Bun {version}" for the entities overview: what
+ * this machine's shell resolves for each runtime, at a glance.
+ *
+ * `undefined` while runtime statuses have not loaded yet — the line waits
+ * rather than guessing at a machine it has not heard from. Once loaded, a
+ * runtime with no effective installation reads as not installed instead of
+ * disappearing, so the line never silently drops one half of the pair.
+ */
+export function toolchainSummary(
+  t: Messages,
+  statuses: readonly RuntimeStatus[] | undefined
+): string | undefined {
+  if (statuses === undefined) return undefined;
+
+  const node = statuses.find((status) => status.id === 'node');
+  const bun = statuses.find((status) => status.id === 'bun');
+  const nodeInstallation = node && effectiveInstallation(node).installation;
+  const bunInstallation = bun && effectiveInstallation(bun).installation;
+
+  // The compact form ("Node", not the `names` dictionary's "Node.js") to
+  // match the installed branch's own template below.
+  const nodePart = nodeInstallation
+    ? formatMessage(t.environments.entities.toolchainSummaryNode, {
+        version: versionLabel(t, nodeInstallation.version),
+        source: pathSourceLabel(t, nodeInstallation.pathSource),
+      })
+    : formatMessage(t.environments.entities.toolchainSummaryMissing, { runtime: 'Node' });
+
+  const bunPart = bunInstallation
+    ? formatMessage(t.environments.entities.toolchainSummaryBun, {
+        version: versionLabel(t, bunInstallation.version),
+      })
+    : formatMessage(t.environments.entities.toolchainSummaryMissing, { runtime: 'Bun' });
+
+  return `${nodePart} · ${bunPart}`;
 }

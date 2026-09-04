@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
+  type MachineConfigWriteBody,
+  type MachineConfigWriteResponse,
+  MachineConfigWriteResponseSchema,
   type MachineDoctorReport,
   MachineDoctorReportSchema,
   type MachineLogTail,
@@ -108,6 +111,18 @@ class FakeMachineService implements MachineService {
         ? { accepted: true, outcome: 'service-installed' as const, unit: 'mangostudio.service' }
         : { accepted: true, outcome: 'service-removed' as const }
     );
+  }
+
+  readonly configWrites: MachineConfigWriteBody[] = [];
+
+  writeConfig(body: MachineConfigWriteBody): Promise<MachineConfigWriteResponse> {
+    this.configWrites.push(body);
+    if (this.refuseWith) return Promise.reject(this.refuseWith);
+    return Promise.resolve({
+      applied: true,
+      configFile: '/home/j/.mango/config.toml',
+      installsEnabled: true,
+    });
   }
 }
 
@@ -282,6 +297,45 @@ describe('machine routes', () => {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ action: 'enable' }),
+      })
+    );
+    expect(bogus.status).toBe(422);
+  });
+
+  it('writes the config and refuses off-machine', async () => {
+    const service = new FakeMachineService();
+    const app = mount(service);
+    const body = { environments: { installsEnabled: true as const } };
+    const ok = await app.handle(
+      new Request('http://localhost/machine/config', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    );
+    expect(ok.status).toBe(200);
+    expect(Value.Check(MachineConfigWriteResponseSchema, await ok.json())).toBe(true);
+    expect(service.configWrites).toEqual([body]);
+
+    service.refuseWith = new MachineActionBlockedError({
+      allowed: false,
+      reasons: ['client-not-loopback'],
+    });
+    const refused = await app.handle(
+      new Request('http://localhost/machine/config', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    );
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ code: 'PERMISSION_DENIED' });
+
+    const bogus = await app.handle(
+      new Request('http://localhost/machine/config', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ environments: { installsEnabled: false } }),
       })
     );
     expect(bogus.status).toBe(422);

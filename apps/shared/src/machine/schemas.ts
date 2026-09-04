@@ -237,3 +237,40 @@ export const MachineActionResponseSchema = Type.Object({
   unit: Type.Optional(Type.String({ maxLength: 256 })),
 });
 export type MachineActionResponse = Static<typeof MachineActionResponseSchema>;
+
+/**
+ * The one writable key today: turning on guarded local installs from the page
+ * rather than by hand-editing `config.toml`. Nested under `environments`
+ * rather than flat because this endpoint is meant to grow other
+ * machine-scoped settings without a second top-level shape, and `Literal(true)`
+ * rather than `Boolean()` because there is no page affordance to turn installs
+ * back off here — that is already deleting the line or the `.env` override,
+ * and a write endpoint that could disable would be a second, redundant path
+ * to the same guarded state.
+ */
+export const MachineConfigWriteBodySchema = Type.Object(
+  {
+    environments: Type.Object(
+      { installsEnabled: Type.Literal(true) },
+      { additionalProperties: false }
+    ),
+  },
+  { additionalProperties: false }
+);
+export type MachineConfigWriteBody = Static<typeof MachineConfigWriteBodySchema>;
+
+/**
+ * What the write actually did. `applied` and `installsEnabled` can diverge:
+ * `.env` beside `config.toml` overrides it (`MANGO_ENV_INSTALLS_ENABLED`), so
+ * the TOML write can succeed while the effective value stays whatever the
+ * override says. Reporting `applied: true` there would tell the page a switch
+ * moved when it did not.
+ */
+export const MachineConfigWriteResponseSchema = Type.Object({
+  applied: Type.Boolean(),
+  configFile: Type.String({ minLength: 1, maxLength: 4_096 }),
+  installsEnabled: Type.Boolean(),
+  /** Set when `applied` is false because an env override held the old value. */
+  reason: Type.Optional(Type.Literal('env-override')),
+});
+export type MachineConfigWriteResponse = Static<typeof MachineConfigWriteResponseSchema>;

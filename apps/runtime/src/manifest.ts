@@ -72,6 +72,7 @@ export function createLocalRuntimeManifest(
       shell: allow.shell,
       update: allow.update,
       externalAgents: allow.externalAgents === true,
+      toolchain: true,
     },
     ...(externalAgents.targetIds && externalAgents.targetIds.length > 0
       ? { externalAgents: [...externalAgents.targetIds] }

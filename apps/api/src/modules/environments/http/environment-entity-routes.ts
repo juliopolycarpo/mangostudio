@@ -11,6 +11,8 @@ import {
   RuntimePairingIssueSchema,
   RuntimePairingStatusSchema,
   RuntimeSetupBodySchema,
+  ToolchainSelectionSchema,
+  ToolchainUpdateBodySchema,
   UpdateEnvironmentBodySchema,
 } from '@mangostudio/shared/environments';
 import {
@@ -32,6 +34,7 @@ import {
   type RuntimePairingService,
   runtimePairingService,
 } from '../application/runtime-pairing-service';
+import { type ToolchainService, toolchainService } from '../application/toolchain-service';
 import { EnvironmentServiceError } from '../domain/environment-error';
 
 const environmentParams = t.Object({ id: EnvironmentIdSchema });
@@ -84,7 +87,8 @@ function environmentError(error: unknown, set: { status?: number | string }): Ap
 export function createEnvironmentEntityRoutes(
   service: EnvironmentService,
   pairing: RuntimePairingService = runtimePairingService,
-  lifecycle: RuntimeLifecycleService = runtimeLifecycleService
+  lifecycle: RuntimeLifecycleService = runtimeLifecycleService,
+  toolchain: ToolchainService = toolchainService
 ) {
   return (
     new Elysia()
@@ -151,6 +155,28 @@ export function createEnvironmentEntityRoutes(
         async ({ params, body, user, set }) => {
           try {
             return await service.update(user?.id ?? '', params.id, body);
+          } catch (error) {
+            return environmentError(error, set);
+          }
+        }
+      )
+      // `local` is a valid `:id` — the virtual environment has its own
+      // toolchain row exactly as install runs key on it as a sentinel.
+      .put(
+        '/environments/:id/toolchain',
+        {
+          params: environmentParams,
+          body: ToolchainUpdateBodySchema,
+          response: {
+            200: ToolchainSelectionSchema,
+            400: ApiErrorResponseSchema,
+            422: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
+          },
+        },
+        async ({ params, body, user, set }) => {
+          try {
+            return await toolchain.update(user?.id ?? '', params.id, body);
           } catch (error) {
             return environmentError(error, set);
           }

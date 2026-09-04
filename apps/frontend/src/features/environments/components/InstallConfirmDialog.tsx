@@ -57,6 +57,21 @@ export function InstallConfirmDialog({
     index === 0 ? preparation.recipe : step.recipe
   );
   const isChain = recipes.length > 1;
+  // Uninstall is never a chain — nothing on offer removes a prerequisite —
+  // so a single step whose action is `uninstall` is the whole signal.
+  const primaryRecipe = !isChain ? recipes[0] : undefined;
+  const isUninstall = primaryRecipe?.action === 'uninstall';
+  const title =
+    isUninstall && primaryRecipe
+      ? formatMessage(s.confirmUninstallTitle, {
+          target: resolve('runtime', primaryRecipe.runtimeId).name,
+        })
+      : s.confirmTitle;
+  const description = isChain
+    ? formatMessage(s.chainDescription, { count: String(recipes.length) })
+    : isUninstall && primaryRecipe
+      ? formatMessage(s.confirmUninstallDescription, { paths: primaryRecipe.writes.join(', ') })
+      : s.confirmDescription;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-3 backdrop-blur-sm sm:p-6">
@@ -69,13 +84,9 @@ export function InstallConfirmDialog({
         <header className="flex items-start justify-between gap-4 border-b border-outline-variant/15 px-5 py-4 sm:px-6">
           <div className="min-w-0 space-y-1">
             <h2 id="install-confirm-title" className="text-xl font-bold text-on-surface">
-              {s.confirmTitle}
+              {title}
             </h2>
-            <p className="text-sm text-on-surface-variant/65">
-              {isChain
-                ? formatMessage(s.chainDescription, { count: String(recipes.length) })
-                : s.confirmDescription}
-            </p>
+            <p className="text-sm text-on-surface-variant/65">{description}</p>
           </div>
           <button
             type="button"
@@ -116,7 +127,7 @@ export function InstallConfirmDialog({
             {s.cancel}
           </Button>
           <Button onClick={onConfirm} loading={isStarting}>
-            {s.run}
+            {isUninstall ? s.runUninstall : s.run}
           </Button>
         </footer>
       </div>

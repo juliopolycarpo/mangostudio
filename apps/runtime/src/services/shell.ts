@@ -5,12 +5,14 @@
 
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
+import type { ToolchainSelection } from '@mangostudio/shared/environments';
 import { RuntimeServiceError } from '../errors';
 import type { RuntimeShellResult } from '../methods';
 import { readStreamCapped } from './child-output';
 import { killProcessTree, OWN_PROCESS_GROUP } from './process-tree';
 import { HIDDEN_WINDOW } from './process-window';
 import { type ShellEnvPolicy, sanitizeShellEnv } from './shell-env';
+import { buildSpawnEnv, nodeSpawnEnvHost } from './spawn-env';
 
 /** Shell interpreters exposed as tools. */
 export type ShellKind = RuntimeShellResult['shell'];
@@ -40,6 +42,8 @@ export interface RunShellCommandInput {
   maxOutputBytes: number;
   /** Operator overrides for which env vars reach the child (secrets stripped by default). */
   envPolicy?: ShellEnvPolicy;
+  /** Absent: inherit the runtime's own PATH; the hub always sends the environment's selection. */
+  toolchain?: ToolchainSelection;
   /** When aborted, the child process is killed immediately. */
   signal?: AbortSignal;
 }
@@ -249,8 +253,12 @@ function spawnShell(spawn: typeof Bun.spawn, executable: string, input: RunShell
   try {
     return spawn(buildInvocation(input.kind, executable, input.command), {
       ...(cwd ? { cwd } : {}),
-      // Withhold connector API keys and the auth secret from AI-run commands.
-      env: sanitizeShellEnv(input.envPolicy),
+      // Withhold connector API keys and the auth secret from AI-run commands, on
+      // top of the environment's chosen Node/Bun landing first on PATH.
+      env: sanitizeShellEnv(
+        input.envPolicy,
+        buildSpawnEnv({ source: process.env, toolchain: input.toolchain, ...nodeSpawnEnvHost })
+      ),
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',

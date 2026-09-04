@@ -147,6 +147,7 @@ const INSTALL_BLOCKED: InstallBlockedResponse = {
     supported: true,
     missingRequirements: [],
     guard: { allowed: false, reasons: [] },
+    runnable: true,
   },
 };
 

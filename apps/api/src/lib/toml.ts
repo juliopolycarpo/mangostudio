@@ -63,14 +63,15 @@ export function parseTomlDocument(content: string): Record<string, unknown> {
 }
 
 /**
- * Set a string `key` in `section` of `doc`, preserving the rest of the document.
+ * Set `key` in `section` of `doc`, preserving the rest of the document.
  * Mutates `doc` in place so a read-modify-write keeps unrelated config intact.
+ * // Usage: setTomlSectionValue(doc, 'machine', 'installs_enabled', true)
  */
 export function setTomlSectionValue(
   doc: Record<string, unknown>,
   section: string,
   key: string,
-  value: string
+  value: string | boolean
 ): void {
   const current = isRecord(doc[section]) ? { ...(doc[section] as Record<string, unknown>) } : {};
   current[key] = value;

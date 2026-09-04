@@ -8,7 +8,7 @@
  * connection, and a restarted hub has none.
  */
 
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID, type ToolchainSelection } from '@mangostudio/shared/environments';
 import {
   TERMINAL_DEFAULT_COLS,
   TERMINAL_DEFAULT_ROWS,
@@ -31,6 +31,10 @@ import {
 } from '../../../services/runtime-client/runtime-connection-manager';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
 import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
+import {
+  resolveToolchainParams,
+  toolchainService,
+} from '../../environments/application/toolchain-service';
 import {
   TerminalDisabledError,
   TerminalLimitError,
@@ -74,6 +78,7 @@ export interface TerminalSessionServiceDeps {
   ) => Promise<TerminalRuntimeClient>;
   readonly isIdentityAttested: (userId: string, environmentId: string) => boolean;
   readonly resolveChat: (chatId: string, userId: string) => Promise<TerminalChatResolution>;
+  readonly resolveToolchain: (userId: string, environmentId: string) => Promise<ToolchainSelection>;
   readonly now: () => number;
   readonly randomId: () => string;
 }
@@ -143,6 +148,7 @@ function defaultDeps(): TerminalSessionServiceDeps {
     isIdentityAttested: (userId, environmentId) =>
       getRuntimeConnectionManager().isIdentityAttested(userId, environmentId),
     resolveChat: defaultResolveChat,
+    resolveToolchain: (userId, environmentId) => toolchainService.resolve(userId, environmentId),
     now: Date.now,
     randomId: () => crypto.randomUUID(),
   };
@@ -250,6 +256,9 @@ export function createTerminalSessionService(
       const sessionId = d.randomId();
       const cols = body.cols ?? TERMINAL_DEFAULT_COLS;
       const rows = body.rows ?? TERMINAL_DEFAULT_ROWS;
+      const toolchain = await resolveToolchainParams(client.manifest, () =>
+        d.resolveToolchain(userId, body.environmentId)
+      );
       const openResult = await client.terminal.open({
         sessionId,
         cols,
@@ -258,6 +267,7 @@ export function createTerminalSessionService(
         ...(body.shell ? { shell: body.shell } : {}),
         ...(cwd ? { cwd } : {}),
         ...(chatId ? { env: { MANGOSTUDIO_CHAT_ID: chatId } } : {}),
+        ...toolchain,
       });
 
       const now = d.now();

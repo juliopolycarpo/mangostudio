@@ -112,6 +112,7 @@ describe('environment install schemas', () => {
         supported: true,
         missingRequirements: [],
         guard: { allowed: true, reasons: [] },
+        runnable: true,
         download: {
           url: 'https://bun.com/install',
           sizeBytes: 12_345,

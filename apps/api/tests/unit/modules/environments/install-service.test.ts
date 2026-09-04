@@ -5,14 +5,17 @@ import type {
   InstallRun,
   RecipeInput,
   RuntimeStatus,
+  ToolchainSelection,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
+import { DEFAULT_TOOLCHAIN_SELECTION } from '@mangostudio/shared/environments';
 import {
   createInstallService,
   InstallBlockedError,
   InstallPreparationError,
 } from '../../../../src/modules/environments/application/install-service';
 import type { EnvironmentProbingService } from '../../../../src/modules/environments/application/probing-service';
+import type { ToolchainService } from '../../../../src/modules/environments/application/toolchain-service';
 import {
   getInstallRecipe,
   INSTALL_RECIPES,
@@ -25,6 +28,17 @@ import type {
   InstallerArtifact,
   InstallerDownloader,
 } from '../../../../src/modules/environments/infrastructure/installer-download';
+
+/** Always answers the default selection; no run in this file exercises a stored override. */
+class FakeToolchainService implements ToolchainService {
+  resolve(): Promise<ToolchainSelection> {
+    return Promise.resolve(DEFAULT_TOOLCHAIN_SELECTION);
+  }
+  update(): Promise<ToolchainSelection> {
+    return Promise.resolve(DEFAULT_TOOLCHAIN_SELECTION);
+  }
+}
+const NO_OP_TOOLCHAIN = new FakeToolchainService();
 
 const ALLOWED_GUARD: InstallGuard = { allowed: true, reasons: [] };
 const BLOCKED_GUARD: InstallGuard = { allowed: false, reasons: ['disabled'] };
@@ -244,6 +258,7 @@ describe('install service', () => {
     const controlled = deferredRunner();
     let nextId = 0;
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository: memory.repository,
@@ -297,11 +312,39 @@ describe('install service', () => {
   // Table-driven over the registry itself so a ninth recipe joins without
   // anyone remembering to extend this file — which is the failure #699 is about.
   for (const recipe of INSTALL_RECIPES) {
+    // A copy-only recipe has no automated run at all: `start` always refuses
+    // it, so what this table asserts for it is the refusal, not a probe.
+    if (!recipe.argv) {
+      it(`refuses to start ${recipe.id}, which has no automated run`, async () => {
+        const detection = createRecordingProbingService();
+        const memory = createMemoryRepository();
+        const service = createInstallService({
+          recipes: [recipe],
+          probingService: detection.probingService,
+          repository: memory.repository,
+          runner: succeedingRunner(),
+          resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+          now: () => 1_700_000_000_000,
+          platform: recipe.platforms[0],
+        });
+
+        const input: RecipeInput =
+          recipe.inputKind === 'node-version' ? { kind: 'node-version', version: 'lts' } : NO_INPUT;
+
+        await expect(
+          service.start({ recipeId: recipe.id, input }, REQUEST_CONTEXT)
+        ).rejects.toThrow('has no automated run');
+        expect(detection.forced).toEqual([]);
+      });
+      continue;
+    }
+
     it(`re-probes exactly what ${recipe.id} declares`, async () => {
       const detection = createRecordingProbingService();
       const memory = createMemoryRepository();
       let nextId = 0;
       const service = createInstallService({
+        toolchain: NO_OP_TOOLCHAIN,
         recipes: [recipe],
         probingService: detection.probingService,
         repository: memory.repository,
@@ -313,7 +356,7 @@ describe('install service', () => {
           return `${recipe.id}-${nextId}`;
         },
         now: () => 1_700_000_000_000,
-        platform: 'linux',
+        platform: recipe.platforms[0],
       });
 
       const input: RecipeInput =
@@ -354,6 +397,7 @@ describe('install service', () => {
       ],
     };
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [recipe],
       probingService: detection.probingService,
       repository: memory.repository,
@@ -389,6 +433,7 @@ describe('install service', () => {
     const recipe = getInstallRecipe('nvm.node.install');
     const memory = createMemoryRepository();
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [recipe],
       probingService: detection.probingService,
       repository: memory.repository,
@@ -454,6 +499,7 @@ describe('install service', () => {
     };
     let nextId = 0;
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository,
@@ -485,6 +531,7 @@ describe('install service', () => {
     const detection = createDetectionServices();
     const memory = createMemoryRepository();
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository: memory.repository,
@@ -495,7 +542,10 @@ describe('install service', () => {
     const [preview] = await service.listRecipes(REQUEST_CONTEXT);
 
     expect(preview?.guard).toEqual(BLOCKED_GUARD);
-    expect(preview?.argv).toEqual(['bun', 'upgrade']);
+    // The runner spawns the resolved absolute path — a service-launched
+    // runtime's own PATH is exactly what this sidesteps — while the copy
+    // command still shows the plain name for the user's own shell.
+    expect(preview?.argv).toEqual(['/home/tester/.bun/bin/bun', 'upgrade']);
     expect(preview?.copyCommand).toBe('bun upgrade');
     await expect(
       service.start({ recipeId: 'bun.update', input: NO_INPUT }, REQUEST_CONTEXT)
@@ -507,6 +557,7 @@ describe('install service', () => {
     const detection = createDetectionServices();
     const memory = createMemoryRepository();
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.install.official')],
       ...detection,
       repository: memory.repository,
@@ -527,6 +578,91 @@ describe('install service', () => {
       present: true,
       detectedIn: ['/home/tester/.zshrc'],
     });
+  });
+
+  // Regression: `profileLines` are POSIX `export` lines, so inspecting a
+  // Windows target's shell profiles for them reported a setup step that has no
+  // meaning there — and disclosed bash syntax beside a PowerShell installer.
+  it('never inspects shell profiles on a win32 target', async () => {
+    const detection = createDetectionServices();
+    const memory = createMemoryRepository();
+    let inspected = 0;
+    const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
+      recipes: [getInstallRecipe('bun.install.official')],
+      ...detection,
+      repository: memory.repository,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+      inspectProfileSetup: (lines) => {
+        inspected += 1;
+        return Promise.resolve({ lines: [...lines], present: false, detectedIn: [] });
+      },
+      platform: 'win32',
+    });
+
+    const [preview] = await service.listRecipes(REQUEST_CONTEXT);
+
+    expect(inspected).toBe(0);
+    expect(preview?.profileSetup).toBeUndefined();
+  });
+
+  // Regression: `writes` is one flat cross-platform list, and the uninstall
+  // confirmation reads it back verbatim as "this removes …".
+  it('discloses only this platform’s spelling of the paths a recipe writes', async () => {
+    const detection = createDetectionServices();
+    const memory = createMemoryRepository();
+    const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
+      recipes: [getInstallRecipe('claude.uninstall')],
+      ...detection,
+      repository: memory.repository,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+      platform: 'linux',
+    });
+
+    const [preview] = await service.listRecipes(REQUEST_CONTEXT);
+
+    expect(preview?.writes).toEqual(['$HOME/.local/bin/claude', '$HOME/.local/share/claude']);
+  });
+
+  it("reports nvm.install's pinned digest before anything has been downloaded", async () => {
+    const detection = createDetectionServices();
+    const memory = createMemoryRepository();
+    const service = createInstallService({
+      recipes: [getInstallRecipe('nvm.install')],
+      ...detection,
+      repository: memory.repository,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+      platform: 'linux',
+    });
+
+    const [preview] = await service.listRecipes(REQUEST_CONTEXT);
+
+    expect(preview?.download).toMatchObject({
+      url: 'https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.7/install.sh',
+      pinnedSha256: '066ce4eaf4d78eaa6410433bc9ba58faaba646157cbbed6109153e6c24c5f8a5',
+    });
+    // Not fetched yet — no verified digest of the actual bytes exists.
+    expect(preview?.download?.sha256).toBeUndefined();
+  });
+
+  it('offers a copy-only recipe with an empty argv and runnable: false', async () => {
+    const detection = createDetectionServices();
+    const memory = createMemoryRepository();
+    const service = createInstallService({
+      recipes: [getInstallRecipe('cursor.uninstall')],
+      ...detection,
+      repository: memory.repository,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+      platform: 'linux',
+    });
+
+    const [preview] = await service.listRecipes(REQUEST_CONTEXT);
+
+    expect(preview?.runnable).toBe(false);
+    expect(preview?.unrunnableReason).toBe('vendor-undocumented');
+    expect(preview?.argv).toEqual([]);
+    expect(preview?.copyCommand).toBe('rm -rf ~/.local/bin/agent ~/.cursor');
   });
 
   it('binds downloaded artifacts to one preparation and cleans replaced artifacts', async () => {
@@ -564,6 +700,7 @@ describe('install service', () => {
     };
     let nextId = 0;
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.install.official')],
       ...detection,
       repository: memory.repository,
@@ -605,6 +742,7 @@ describe('install service', () => {
     const memory = createMemoryRepository();
     const controlled = deferredRunner();
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository: memory.repository,
@@ -648,6 +786,7 @@ describe('install service', () => {
       },
     };
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository: memory.repository,
@@ -693,6 +832,7 @@ describe('install service', () => {
       truncated: false,
     });
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository: memory.repository,
@@ -733,6 +873,7 @@ describe('install service', () => {
       run: () => Promise.reject(new Error('runner exploded')),
     };
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository: memory.repository,
@@ -779,6 +920,7 @@ describe('install service', () => {
         }),
     };
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository,
@@ -812,6 +954,7 @@ describe('install service', () => {
     const scopes: string[] = [];
     const guardEnvironments: (string | undefined)[] = [];
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       probingService: {
         ...detection.probingService,
@@ -847,6 +990,7 @@ describe('install service', () => {
     const detection = createDetectionServices();
     const memory = createMemoryRepository();
     const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository: memory.repository,

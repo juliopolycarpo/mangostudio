@@ -35,6 +35,7 @@ import {
 import { client } from '@/lib/api-client';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
+import { enableInstalls } from './api';
 
 const STALE_TIME_MS = 30_000;
 
@@ -430,6 +431,23 @@ export function installRecipesQueryOptions(environmentId: string = LOCAL_ENVIRON
       });
       if (error) throw new ApiError(error.value);
       return data as InstallRecipePreview[];
+    },
+  });
+}
+
+/**
+ * Turns on guarded local installs. Only meaningful for the hub's own machine
+ * — the local install recipe catalog is what a flipped `installsEnabled`
+ * changes the answer for, so that is the one query this invalidates.
+ */
+export function useEnableInstallsMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: enableInstalls,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: environmentKeys.installRecipes(LOCAL_ENVIRONMENT_ID),
+      });
     },
   });
 }

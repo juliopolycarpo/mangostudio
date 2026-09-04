@@ -10,6 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { Environment } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
+import type { MachineStatus } from '@mangostudio/shared/machine';
 import userEvent from '@testing-library/user-event';
 import { OverviewPage } from '../../../../src/features/environments/components/OverviewPage';
 import { screen, waitFor, within } from '../../../support/harness/render';
@@ -125,9 +126,61 @@ const RESOURCES = [
   }),
 ];
 
+/** Enough for the Setup checklist's "hub as a service" row; its own rules live in setup-checklist.test.ts. */
+const MACHINE_STATUS: MachineStatus = {
+  hub: {
+    running: true,
+    pid: 42,
+    port: 3001,
+    host: '127.0.0.1',
+    url: 'http://127.0.0.1:3001',
+    startedAt: 1_000,
+    uptimeMs: 65_000,
+    logFile: '/home/dev/.mango/logs/server-1.log',
+    version: '0.1.1',
+    buildSha: 'abc1234def',
+    health: 'ok',
+    launch: 'detached',
+  },
+  service: {
+    schemaVersion: 1,
+    platform: 'linux',
+    unitName: 'mangostudio.service',
+    installed: true,
+    enabled: true,
+    running: true,
+  },
+  runtimeBinary: {
+    path: '/home/dev/.mango/dist/current/mangostudio-runtime',
+    present: true,
+    version: '0.1.1',
+    versionMatches: true,
+    error: null,
+  },
+  hostSlot: {
+    present: false,
+    profile: 'full',
+    directory: '/home/dev/.mango/runtime/host',
+    error: null,
+  },
+  platform: 'linux',
+  standalone: true,
+  container: false,
+  homeDir: '/home/dev/.mango',
+  logsDir: '/home/dev/.mango/logs',
+  configFile: '/home/dev/.mango/config.toml',
+  actions: {
+    guard: { allowed: true, reasons: [] },
+    restart: { available: true, command: 'mangostudio restart' },
+    installService: { available: true, command: 'mangostudio service install' },
+    uninstallService: { available: true, command: 'mangostudio service uninstall' },
+  },
+};
+
 function installOverviewScenario() {
   scenario
     .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+    .respondWithJson('GET', '/api/machine/status', { body: MACHINE_STATUS })
     .respondWithJson('GET', '/api/environments', { body: ENVIRONMENTS })
     .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
     .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
@@ -148,6 +201,22 @@ afterEach(() => {
 });
 
 describe('OverviewPage', () => {
+  it('leads with the setup checklist, ahead of the entity and diagnostic sections', async () => {
+    installOverviewScenario();
+
+    await renderWithRouter(<OverviewPage />);
+
+    const checklist = await screen.findByTestId('setup-checklist');
+    expect(within(checklist).getByText(en.environments.overview.setup.title)).toBeInTheDocument();
+    // One row per checklist item, whatever each one's status turns out to be.
+    expect(within(checklist).getAllByTestId('setup-row')).toHaveLength(5);
+
+    const environments = await screen.findByTestId('overview-environments');
+    expect(
+      checklist.compareDocumentPosition(environments) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
   it('surfaces execution targets alongside the diagnostic summaries', async () => {
     installOverviewScenario();
 
@@ -167,6 +236,15 @@ describe('OverviewPage', () => {
     expect(within(local).getByText('Connected')).toBeInTheDocument();
     expect(within(local).getByText('Git 2.47.0')).toBeInTheDocument();
     expect(within(local).getByText('Checkpoints')).toBeInTheDocument();
+    // RUNTIMES' node is found but not effective (the 002 shadowing case), so
+    // the summary line names it as not installed rather than dropping it —
+    // Bun is effective and reads its version normally.
+    expect(await within(local).findByTestId('environment-toolchain-summary')).toHaveTextContent(
+      'Node not installed · Bun 1.3.14'
+    );
+    // remote-dev is disconnected, so its toolchain summary never fetches —
+    // a sleeping machine must not wake just because its card is on screen.
+    expect(within(remote).queryByTestId('environment-toolchain-summary')).not.toBeInTheDocument();
     expect(within(remote).getByRole('button', { name: 'Connect' })).toBeInTheDocument();
     expect(within(remote).getByRole('button', { name: 'Edit name' })).toBeInTheDocument();
     expect(within(remote).getByRole('button', { name: 'Remove' })).toBeInTheDocument();
@@ -196,6 +274,53 @@ describe('OverviewPage', () => {
     ).toHaveAttribute('href', '/environments/agents');
   });
 
+  it('names both the source and the version once Node itself is the effective binary', async () => {
+    const BOTH_EFFECTIVE_RUNTIMES = [
+      runtimeStatus({
+        id: 'node',
+        health: 'ok',
+        installations: [
+          installation({
+            path: '/home/dev/.nvm/versions/node/v20/bin/node',
+            version: '20.11.0',
+            effective: true,
+            pathSource: 'nvm',
+          }),
+        ],
+      }),
+      runtimeStatus({
+        id: 'bun',
+        health: 'ok',
+        installations: [
+          installation({ path: '/home/dev/.bun/bin/bun', version: '1.3.14', effective: true }),
+        ],
+      }),
+    ];
+    scenario
+      .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+      .respondWithJson('GET', '/api/machine/status', { body: MACHINE_STATUS })
+      .respondWithJson('GET', '/api/environments', { body: ENVIRONMENTS })
+      .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
+      .respondWithJson('GET', '/api/environments/runtimes', { body: BOTH_EFFECTIVE_RUNTIMES })
+      .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
+      .respondWithJson('GET', '/api/library/resources', {
+        body: { resources: RESOURCES, unreadableEntries: [] },
+      })
+      .respondWithJson('GET', '/api/library/targets', { body: TARGETS })
+      .install();
+
+    await renderWithRouter(<OverviewPage />);
+
+    const environments = await screen.findByTestId('overview-environments');
+    const local = within(environments)
+      .getAllByTestId('environment-entity-card')
+      .find((card) => card.getAttribute('data-environment-id') === 'local') as HTMLElement;
+
+    expect(await within(local).findByTestId('environment-toolchain-summary')).toHaveTextContent(
+      'Node 20.11.0 (from nvm) · Bun 1.3.14'
+    );
+  });
+
   // A live self-update ends with a deliberate disconnect. Reporting that as an
   // outage would train an operator to treat the working case as a failure.
   it('reads a binary handoff as updating rather than as a dropped connection', async () => {
@@ -207,6 +332,7 @@ describe('OverviewPage', () => {
     };
     scenario
       .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+      .respondWithJson('GET', '/api/machine/status', { body: MACHINE_STATUS })
       .respondWithJson('GET', '/api/environments', { body: [ENVIRONMENTS[0], updating] })
       .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
       .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
@@ -265,6 +391,7 @@ describe('OverviewPage', () => {
     };
     scenario
       .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+      .respondWithJson('GET', '/api/machine/status', { body: MACHINE_STATUS })
       .respondWithJson('GET', '/api/environments', { body: [readonlyLocal, ENVIRONMENTS[1]] })
       .respondWithJson('GET', '/api/environments/local/runtime', {
         body: {
@@ -369,6 +496,7 @@ describe('OverviewPage', () => {
     };
     scenario
       .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+      .respondWithJson('GET', '/api/machine/status', { body: MACHINE_STATUS })
       .respondWithJson('GET', '/api/environments', { body: [gitlessLocal, ENVIRONMENTS[1]] })
       .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
       .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
@@ -503,6 +631,7 @@ describe('OverviewPage', () => {
     // fine by never having asked.
     scenario
       .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+      .respondWithJson('GET', '/api/machine/status', { body: MACHINE_STATUS })
       .respondWithJson('GET', '/api/environments', { body: ENVIRONMENTS })
       .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
       .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
@@ -532,6 +661,7 @@ describe('OverviewPage', () => {
     // Every request but the library's resource scan, which is left unhandled.
     scenario
       .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+      .respondWithJson('GET', '/api/machine/status', { body: MACHINE_STATUS })
       .respondWithJson('GET', '/api/environments', { body: ENVIRONMENTS })
       .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
       .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })

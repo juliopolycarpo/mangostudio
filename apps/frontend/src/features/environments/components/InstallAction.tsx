@@ -14,7 +14,7 @@
 
 import type { InstallRecipePreview, RecipeInput } from '@mangostudio/shared/environments';
 import type { ReactNode } from 'react';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
@@ -22,6 +22,7 @@ import { chainStepLabel, runtimeNameList } from '../format';
 import { chainStopped, useInstallFlow } from '../hooks/use-install-flow';
 import { useInstallStream } from '../hooks/use-install-stream';
 import { useToolIdentities } from '../identity/use-tool-identities';
+import type { InstallChainStep } from '../install-chain';
 import { resolveInstallChain } from '../install-chain';
 import { CopyCommandBlock } from './CopyCommandBlock';
 import { InstallConfirmDialog } from './InstallConfirmDialog';
@@ -42,6 +43,14 @@ interface InstallActionProps {
   icon?: ReactNode;
   /** Which machine to install on; omitted means the hub's own. */
   environmentId?: string;
+  /**
+   * Steps appended after `recipe`'s own resolved chain, run in the same
+   * confirmation and console — a "make it the default" step that only means
+   * anything once the install before it has landed. Kept out of the button's
+   * own chain-prerequisite wording: these finish what `label` already
+   * promised rather than naming a second visible milestone.
+   */
+  followUpSteps?: readonly InstallChainStep[];
 }
 
 export function InstallAction({
@@ -53,11 +62,21 @@ export function InstallAction({
   size = 'sm',
   icon,
   environmentId,
+  followUpSteps,
 }: InstallActionProps) {
   const { t } = useI18n();
   const s = t.environments.install;
   const { resolve } = useToolIdentities();
   const flow = useInstallFlow(environmentId);
+  const { dismiss } = flow;
+  const refusedByGuard = flow.state.step === 'refused' && !flow.state.recipe.guard.allowed;
+  const guardAllowedNow = recipe?.guard.allowed === true;
+  // A refusal that was the guard's alone ends when the guard flips — the
+  // one-click enable re-fetches the catalog, and the card must offer the
+  // install again instead of keeping the stale copy block on screen.
+  useEffect(() => {
+    if (refusedByGuard && guardAllowedNow) dismiss();
+  }, [refusedByGuard, guardAllowedNow, dismiss]);
   // The console must survive the run that produced it: `finished` keeps the same
   // runId as `running`, so the stream hook is not torn down (and its buffer
   // reset to idle) the instant the exit event moves the flow forward.
@@ -84,6 +103,20 @@ export function InstallAction({
 
   const runtimeName = (id: InstallRecipePreview['runtimeId']) => resolve('runtime', id).name;
 
+  // No vendor-documented unattended shape exists: the copyable command is the
+  // whole offer, and a "Run" button that could never fire would only invite a
+  // click that goes nowhere.
+  if (!recipe.runnable) {
+    return (
+      <div className="space-y-2" data-testid="install-unrunnable">
+        <p className="text-sm text-on-surface-variant/70">
+          {s.unrunnable[recipe.unrunnableReason ?? 'vendor-undocumented']}
+        </p>
+        <CopyCommandBlock recipe={recipe} environmentId={environmentId} />
+      </div>
+    );
+  }
+
   if (chain.kind === 'unresolved') {
     return (
       <p className="text-sm text-on-surface-variant/70" data-testid="install-unresolved">
@@ -95,8 +128,12 @@ export function InstallAction({
     );
   }
 
-  const { steps } = chain;
-  const prerequisites = steps.slice(0, -1);
+  // Prerequisites (for the button's "Install X, then Y" wording) come only
+  // from `recipe`'s own missing-requirement chain — a follow-up step is not a
+  // second milestone the button announces, just how the promised one finishes.
+  const prerequisites = chain.steps.slice(0, -1);
+  const steps: readonly InstallChainStep[] =
+    followUpSteps && followUpSteps.length > 0 ? [...chain.steps, ...followUpSteps] : chain.steps;
   const isBusy = flow.state.step === 'preparing' || flow.state.step === 'starting';
   const showConsole = progress?.runId != null;
   const currentStep = progress ? progress.steps[progress.index] : undefined;
@@ -137,7 +174,11 @@ export function InstallAction({
       )}
 
       {flow.state.step === 'refused' && (
-        <CopyCommandBlock recipe={flow.state.recipe} message={flow.state.message} />
+        <CopyCommandBlock
+          recipe={flow.state.recipe}
+          message={flow.state.message}
+          environmentId={environmentId}
+        />
       )}
 
       {(flow.state.step === 'confirming' ||

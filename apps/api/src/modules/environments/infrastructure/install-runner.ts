@@ -17,11 +17,12 @@ import {
   type RuntimeInstallOutputEvent,
   type RuntimeInstallRunResult,
 } from '@mangostudio/runtime';
-import type { InstallRunStatus } from '@mangostudio/shared/environments';
+import type { InstallRunStatus, ToolchainSelection } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { getInstallLogPath } from '../../../lib/mango-paths';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
+import { toolchainParams } from '../application/toolchain-service';
 
 type InstallOutputStream = RuntimeInstallOutputEvent['stream'];
 
@@ -37,6 +38,10 @@ interface RunInstallCommand {
   readonly argv: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
   readonly timeoutMs: number;
+  /** Exit codes besides 0 that still count as `succeeded` (winget's "already current"). */
+  readonly acceptedExitCodes?: readonly number[];
+  /** Absent: the runtime's own PATH. The service resolves this per environment. */
+  readonly toolchain?: ToolchainSelection;
 }
 
 interface RunInstallOptions {
@@ -145,9 +150,11 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
             ...(command.env && { env: command.env }),
             timeoutMs: command.timeoutMs,
             logPath: deps.logPathFor(command.runId, command.environmentId),
+            ...toolchainParams(client.manifest, command.toolchain),
             ...(options.outputLimitBytes !== undefined && {
               outputLimitBytes: options.outputLimitBytes,
             }),
+            ...(command.acceptedExitCodes && { acceptedExitCodes: command.acceptedExitCodes }),
           },
           // Above the recipe's own timeout: the runtime kills the child on
           // time, and this deadline only catches a link that stopped answering.

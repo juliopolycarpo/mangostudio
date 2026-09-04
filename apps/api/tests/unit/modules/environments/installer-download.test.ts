@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   createInstallerDownloader,
   InstallerDownloadError,
@@ -8,6 +9,20 @@ const SCRIPT = `#!/usr/bin/env bash
 set -eu
 echo installing
 `;
+
+const PS1_SCRIPT = `#Requires -Version 5.1
+param(
+  [string]$Channel = "stable"
+)
+Write-Host "Installing $Channel"
+`;
+
+/** Long enough to clear any `minBytes` bound, but with no PowerShell token in it. */
+const PS1_WITHOUT_TOKENS = `echo installing\n${'x'.repeat(64)}\n`;
+
+function sha256Hex(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
 
 /**
  * Exercises the real address policy without touching DNS: every host resolves to
@@ -23,13 +38,15 @@ function resolveHostname(hostname: string) {
 
 function createDownloaderWithFetch(fetchImpl: typeof fetch) {
   let written: Uint8Array | null = null;
+  let writtenPath: string | null = null;
   let removed = false;
   const downloader = createInstallerDownloader({
     fetch: fetchImpl,
     resolveHostname,
     createTempDir: () => Promise.resolve('/tmp/mangostudio-installer-test'),
-    writeFile: (_path, data) => {
+    writeFile: (path, data) => {
       written = data;
+      writtenPath = path;
       return Promise.resolve();
     },
     removeDir: () => {
@@ -40,6 +57,7 @@ function createDownloaderWithFetch(fetchImpl: typeof fetch) {
   return {
     downloader,
     getWritten: () => written,
+    getWrittenPath: () => writtenPath,
     wasRemoved: () => removed,
   };
 }
@@ -54,6 +72,7 @@ describe('installer download', () => {
 
     const artifact = await fixture.downloader.download({
       url: 'https://example.test/install.sh',
+      interpreter: 'bash',
       minBytes: 16,
       maxBytes: 1024,
     });
@@ -95,6 +114,7 @@ describe('installer download', () => {
       await expect(
         fixture.downloader.download({
           url: 'https://example.test/install.sh',
+          interpreter: 'bash',
           minBytes: testCase.minBytes,
           maxBytes: testCase.maxBytes,
         })
@@ -109,6 +129,7 @@ describe('installer download', () => {
     await expect(
       fixture.downloader.download({
         url: 'http://example.test/install.sh',
+        interpreter: 'bash',
         minBytes: 1,
         maxBytes: 1024,
       })
@@ -117,6 +138,7 @@ describe('installer download', () => {
     await expect(
       fixture.downloader.download({
         url: 'https://example.test/install.sh',
+        interpreter: 'bash',
         minBytes: 1,
         maxBytes: 1024,
       })
@@ -141,6 +163,7 @@ describe('installer download', () => {
 
     const artifact = await redirected.downloader.download({
       url: 'https://example.test/install.sh',
+      interpreter: 'bash',
       minBytes: 16,
       maxBytes: 1024,
     });
@@ -165,6 +188,7 @@ describe('installer download', () => {
     await expect(
       downgraded.downloader.download({
         url: 'https://example.test/install.sh',
+        interpreter: 'bash',
         minBytes: 16,
         maxBytes: 1024,
       })
@@ -192,6 +216,7 @@ describe('installer download', () => {
       await expect(
         fixture.downloader.download({
           url: 'https://example.test/install.sh',
+          interpreter: 'bash',
           minBytes: 16,
           maxBytes: 1024,
         })
@@ -200,5 +225,77 @@ describe('installer download', () => {
       expect(calls).toEqual(['https://example.test/install.sh']);
       expect(fixture.getWritten()).toBeNull();
     }
+  });
+
+  it('accepts a pinned digest that matches the fetched bytes', async () => {
+    const fixture = createDownloader(new Response(SCRIPT, { status: 200 }));
+
+    const artifact = await fixture.downloader.download({
+      url: 'https://example.test/install.sh',
+      interpreter: 'bash',
+      minBytes: 16,
+      maxBytes: 1024,
+      sha256: sha256Hex(SCRIPT),
+    });
+
+    expect(artifact.sha256).toBe(sha256Hex(SCRIPT));
+  });
+
+  it('refuses a pinned digest that does not match the fetched bytes, naming both', async () => {
+    const fixture = createDownloader(new Response(SCRIPT, { status: 200 }));
+    const wrongDigest = 'b'.repeat(64);
+
+    await expect(
+      fixture.downloader.download({
+        url: 'https://example.test/install.sh',
+        interpreter: 'bash',
+        minBytes: 16,
+        maxBytes: 1024,
+        sha256: wrongDigest,
+      })
+    ).rejects.toThrow(
+      `installer digest mismatch: expected ${wrongDigest} | received ${sha256Hex(SCRIPT)}`
+    );
+    expect(fixture.getWritten()).toBeNull();
+  });
+
+  it('refuses an HTML response declared as a PowerShell installer', async () => {
+    const fixture = createDownloader(new Response('<!doctype html><html>login</html>'));
+
+    await expect(
+      fixture.downloader.download({
+        url: 'https://example.test/install.ps1',
+        interpreter: 'powershell',
+        minBytes: 1,
+        maxBytes: 1024,
+      })
+    ).rejects.toThrow('HTML');
+  });
+
+  it('refuses a PowerShell installer whose body has no PowerShell token', async () => {
+    const fixture = createDownloader(new Response(PS1_WITHOUT_TOKENS, { status: 200 }));
+
+    await expect(
+      fixture.downloader.download({
+        url: 'https://example.test/install.ps1',
+        interpreter: 'powershell',
+        minBytes: 16,
+        maxBytes: 1024,
+      })
+    ).rejects.toThrow('does not look like a PowerShell script');
+  });
+
+  it('accepts a PowerShell installer and writes it as installer.ps1', async () => {
+    const fixture = createDownloader(new Response(PS1_SCRIPT, { status: 200 }));
+
+    const artifact = await fixture.downloader.download({
+      url: 'https://example.test/install.ps1',
+      interpreter: 'powershell',
+      minBytes: 16,
+      maxBytes: 1024,
+    });
+
+    expect(artifact.path).toBe('/tmp/mangostudio-installer-test/installer.ps1');
+    expect(fixture.getWrittenPath()).toBe('/tmp/mangostudio-installer-test/installer.ps1');
   });
 });

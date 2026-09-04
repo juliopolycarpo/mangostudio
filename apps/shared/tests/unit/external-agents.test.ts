@@ -190,6 +190,33 @@ describe('runtime external-agent protocol payloads', () => {
         timeoutMs: 30_000,
       })
     ).toBe(true);
+    // Guards a real cycle risk: ToolchainSelectionSchema is imported from
+    // `environments/toolchain-schemas` specifically to avoid a loop through
+    // `runtime-protocol/schemas` and `runtime-home/schemas`, both of which
+    // import this module. A regression there does not fail `tsc` — it makes
+    // this optional resolve to `undefined` at eval time instead.
+    expect(
+      Value.Check(ExternalAgentOpenParamsSchema, {
+        sessionId: 'session-1',
+        targetId: 'codex',
+        workspacePath: '/workspace',
+        configuration,
+        resumeMode: 'fallback',
+        timeoutMs: 30_000,
+        toolchain: { node: 'auto', bun: '/opt/bun/bin/bun' },
+      })
+    ).toBe(true);
+    expect(
+      Value.Check(ExternalAgentOpenParamsSchema, {
+        sessionId: 'session-1',
+        targetId: 'codex',
+        workspacePath: '/workspace',
+        configuration,
+        resumeMode: 'fallback',
+        timeoutMs: 30_000,
+        toolchain: { node: 'auto' },
+      })
+    ).toBe(false);
     expect(
       Value.Check(ExternalAgentOpenResultSchema, {
         nativeSessionId: 'thread-1',

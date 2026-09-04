@@ -94,6 +94,7 @@ describe('runtime install execution', () => {
         HTTPS_PROXY: 'https://proxy.test',
         ANTHROPIC_API_KEY: 'secret',
         GITHUB_TOKEN: 'secret',
+        FNM_DIR: '/home/tester/.local/share/fnm',
       },
       {
         PROFILE: '/dev/null',
@@ -107,9 +108,51 @@ describe('runtime install execution', () => {
       HOME: '/home/tester',
       XDG_CONFIG_HOME: '/home/tester/.config',
       HTTPS_PROXY: 'https://proxy.test',
+      FNM_DIR: '/home/tester/.local/share/fnm',
       PROFILE: '/dev/null',
       NVM_DIR: '/home/tester/.nvm',
     });
+  });
+
+  it('accepts CODEX_NON_INTERACTIVE and FNM_DIR as constant recipe overrides', () => {
+    const env = buildInstallEnvironment(
+      { PATH: '/bin' },
+      { CODEX_NON_INTERACTIVE: '1', FNM_DIR: '/home/tester/.fnm', ANTHROPIC_API_KEY: 'secret' }
+    );
+
+    expect(env).toEqual({ PATH: '/bin', CODEX_NON_INTERACTIVE: '1', FNM_DIR: '/home/tester/.fnm' });
+  });
+
+  it('forwards the win32-only keys PowerShell and its installers need, only on win32', () => {
+    const source = {
+      PATH: 'C:\\bin',
+      SystemRoot: 'C:\\Windows',
+      WINDIR: 'C:\\Windows',
+      ComSpec: 'C:\\Windows\\System32\\cmd.exe',
+      PATHEXT: '.EXE;.BAT',
+      SystemDrive: 'C:',
+      USERPROFILE: 'C:\\Users\\tester',
+      LOCALAPPDATA: 'C:\\Users\\tester\\AppData\\Local',
+      APPDATA: 'C:\\Users\\tester\\AppData\\Roaming',
+      ProgramFiles: 'C:\\Program Files',
+      'ProgramFiles(x86)': 'C:\\Program Files (x86)',
+      ProgramData: 'C:\\ProgramData',
+    };
+
+    const win32Env = buildInstallEnvironment(source, {}, 'win32');
+    expect(win32Env).toEqual(source);
+
+    const posixEnv = buildInstallEnvironment(source, {}, 'linux');
+    expect(posixEnv).toEqual({ PATH: 'C:\\bin' });
+  });
+
+  it('reads a differently-cased PATH key and normalizes it to PATH', () => {
+    // buildSpawnEnv hands back a Windows PATH under the key it found in the
+    // source env (`Path`), not the literal `PATH` this allowlist declares.
+    const env = buildInstallEnvironment({ Path: 'C:\\nodejs', HOME: 'C:\\Users\\tester' });
+
+    expect(env).toEqual({ PATH: 'C:\\nodejs', HOME: 'C:\\Users\\tester' });
+    expect(env.Path).toBeUndefined();
   });
 
   it('streams lines, writes a bounded raw log, and records success', async () => {
@@ -131,6 +174,42 @@ describe('runtime install execution', () => {
     expect(
       new TextDecoder().decode(Uint8Array.from(captured.log.flatMap((chunk) => [...chunk])))
     ).toBe('hello\nworld\nwarning\n');
+  });
+
+  it('treats an accepted non-zero exit code as success', async () => {
+    // winget's own "no applicable update found" — a package already at the
+    // version it would install exits with this instead of 0.
+    const WINGET_NO_APPLICABLE_UPGRADE = -1978335189;
+    const process = new FakeInstallProcess('', '', WINGET_NO_APPLICABLE_UPGRADE);
+    const runner = createRunner(process, { log: [] });
+
+    const result = await runner.run({
+      ...COMMAND,
+      acceptedExitCodes: [WINGET_NO_APPLICABLE_UPGRADE],
+    });
+
+    expect(result.status).toBe('succeeded');
+    expect(result.exitCode).toBe(WINGET_NO_APPLICABLE_UPGRADE);
+  });
+
+  it('still fails a non-zero exit code the recipe did not accept', async () => {
+    const process = new FakeInstallProcess('', '', 1);
+    const runner = createRunner(process, { log: [] });
+
+    const result = await runner.run({ ...COMMAND, acceptedExitCodes: [-1978335189] });
+
+    expect(result.status).toBe('failed');
+  });
+
+  it("matches an accepted exit code by bit pattern, not sign — a platform that reports the process's exit code unsigned still matches a recipe's signed constant", async () => {
+    // -1978335189 and 2316632107 are the same 32-bit pattern (0x8A15002B).
+    const process = new FakeInstallProcess('', '', 2316632107);
+    const runner = createRunner(process, { log: [] });
+
+    const result = await runner.run({ ...COMMAND, acceptedExitCodes: [-1978335189] });
+
+    expect(result.status).toBe('succeeded');
+    expect(result.exitCode).toBe(2316632107);
   });
 
   it('caps captured output while continuing to a terminal result', async () => {
@@ -206,5 +285,83 @@ describe('runtime install execution', () => {
     expect(result.status).toBe('spawn-failed');
     expect(result.exitCode).toBeNull();
     expect(events).toEqual([{ stream: 'system', line: 'binary missing' }]);
+  });
+
+  it('prepends the resolved toolchain node dir to the spawned PATH', async () => {
+    const process = new FakeInstallProcess('', '', 0);
+    let capturedEnv: Record<string, string> | undefined;
+    const runner = createInstallService({
+      emit: () => undefined,
+      deps: {
+        spawn: (_argv, env) => {
+          capturedEnv = env;
+          return process;
+        },
+        prepareLog: () => Promise.resolve(),
+        sourceEnv: () => ({ PATH: '/usr/bin' }),
+        platform: 'linux',
+        homeDir: '/home/tester',
+        spawnEnvFs: { exists: () => false, readFile: () => null, readDirectory: () => null },
+      },
+    });
+
+    await runner.run({
+      ...COMMAND,
+      toolchain: { node: '/opt/custom/node/bin/node', bun: 'auto' },
+    });
+
+    expect(capturedEnv?.PATH).toBe('/opt/custom/node/bin:/usr/bin');
+  });
+
+  // Regression: the win32 allowlist was selected from `process.platform`
+  // rather than the injected host platform, so `SystemRoot` and friends — what
+  // lets PowerShell start at all — were unreachable from anything but a real
+  // Windows host.
+  it('selects the win32 environment allowlist from the injected platform', async () => {
+    const process = new FakeInstallProcess('', '', 0);
+    let capturedEnv: Record<string, string> | undefined;
+    const runner = createInstallService({
+      emit: () => undefined,
+      deps: {
+        spawn: (_argv, env) => {
+          capturedEnv = env;
+          return process;
+        },
+        prepareLog: () => Promise.resolve(),
+        sourceEnv: () => ({
+          Path: 'C:\\Windows',
+          SystemRoot: 'C:\\Windows',
+          ComSpec: 'C:\\Windows\\system32\\cmd.exe',
+        }),
+        platform: 'win32',
+        homeDir: 'C:\\Users\\tester',
+        spawnEnvFs: { exists: () => false, readFile: () => null, readDirectory: () => null },
+      },
+    });
+
+    await runner.run(COMMAND);
+
+    expect(capturedEnv?.SystemRoot).toBe('C:\\Windows');
+    expect(capturedEnv?.ComSpec).toBe('C:\\Windows\\system32\\cmd.exe');
+  });
+
+  it('leaves PATH untouched when the run carries no toolchain', async () => {
+    const process = new FakeInstallProcess('', '', 0);
+    let capturedEnv: Record<string, string> | undefined;
+    const runner = createInstallService({
+      emit: () => undefined,
+      deps: {
+        spawn: (_argv, env) => {
+          capturedEnv = env;
+          return process;
+        },
+        prepareLog: () => Promise.resolve(),
+        sourceEnv: () => ({ PATH: '/usr/bin' }),
+      },
+    });
+
+    await runner.run(COMMAND);
+
+    expect(capturedEnv?.PATH).toBe('/usr/bin');
   });
 });

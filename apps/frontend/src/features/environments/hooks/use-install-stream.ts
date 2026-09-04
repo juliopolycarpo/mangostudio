@@ -12,7 +12,7 @@ import type {
   InstallProbeEvent,
   InstallStreamEvent,
 } from '@mangostudio/shared/environments';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useState } from 'react';
 import { getApiBaseUrl } from '@/lib/api-base-url';
 
 /**
@@ -89,11 +89,12 @@ export function useInstallStream({
   onExit,
 }: UseInstallStreamOptions): InstallStreamState {
   const [state, setState] = useState<InstallStreamState>(IDLE_STATE);
-  const onProbeRef = useRef(onProbe);
-  const onExitRef = useRef(onExit);
-
-  onProbeRef.current = onProbe;
-  onExitRef.current = onExit;
+  // Effect events rather than refs assigned during render: the stream fires
+  // from inside the effect below, and React hands these the callbacks of the
+  // render that actually committed — no render-time write a discarded render
+  // could leave behind, and no commit-order gap an effect-synced ref would open.
+  const emitProbe = useEffectEvent((event: InstallProbeEvent) => onProbe?.(event));
+  const emitExit = useEffectEvent((event: InstallExitEvent) => onExit?.(event));
 
   useEffect(() => {
     if (!runId) {
@@ -177,11 +178,11 @@ export function useInstallStream({
             if (event.type === 'log') {
               appendLine(event);
             } else if (event.type === 'probe') {
-              onProbeRef.current?.(event);
+              emitProbe(event);
             } else if (event.type === 'exit') {
               exit = event;
               dirty = true;
-              onExitRef.current?.(event);
+              emitExit(event);
             } else {
               // An `error` event ends the run just as an exit does, but the
               // server sends no exit code with it. Retrying would only replay

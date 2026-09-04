@@ -23,12 +23,17 @@ import {
 import { readdir, readFile, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
-import type {
-  AuthSignalFs,
-  BinaryScanDeps,
-  NvmDetectionDeps,
-  NvmFileSystem,
-  RuntimeDefinition,
+import {
+  type AuthSignalFs,
+  type BinaryScanDeps,
+  type FnmDetectionDeps,
+  type ManagedVersionFileSystem,
+  type NvmDetectionDeps,
+  type NvmFileSystem,
+  parseWingetListOutput,
+  type RuntimeDefinition,
+  WINGET_LIST_ARGV,
+  type WingetOwnership,
 } from '@mangostudio/shared/environments/detection';
 import type { LocationFsProbe } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
@@ -147,19 +152,71 @@ export function createBinaryScanDeps(
   };
 }
 
-export function createNvmDetectionDeps(env: PathEnv): NvmDetectionDeps {
-  return { platform: env.platform, homeDir: env.homeDir, env: env.env, fs: NODE_NVM_FILE_SYSTEM };
-}
-
-const NODE_NVM_FILE_SYSTEM: NvmFileSystem = {
+/** The filesystem seam nvm's and fnm's detectors share; nvm adds `readFile` on top of it. */
+const NODE_MANAGED_VERSION_FILE_SYSTEM: ManagedVersionFileSystem = {
   pathExists: existsSync,
-  readFile: (path) => readFile(path, 'utf8'),
   readDirectory: async (path) => {
     const entries = await readdir(path, { withFileTypes: true });
     return entries.map((entry) => entry.name);
   },
   realpath,
 };
+
+export function createNvmDetectionDeps(env: PathEnv): NvmDetectionDeps {
+  return { platform: env.platform, homeDir: env.homeDir, env: env.env, fs: NODE_NVM_FILE_SYSTEM };
+}
+
+const NODE_NVM_FILE_SYSTEM: NvmFileSystem = {
+  ...NODE_MANAGED_VERSION_FILE_SYSTEM,
+  readFile: (path) => readFile(path, 'utf8'),
+};
+
+export function createFnmDetectionDeps(env: PathEnv): FnmDetectionDeps {
+  return {
+    platform: env.platform,
+    homeDir: env.homeDir,
+    env: env.env,
+    fs: NODE_MANAGED_VERSION_FILE_SYSTEM,
+  };
+}
+
+/**
+ * Above the caller's 5s scan budget on purpose: `winget list` is slow, this
+ * runs once per `probeRuntimes` call rather than once per candidate, and a
+ * cancelled probe answers `unknown` instead of hanging the scan. Kept well
+ * under the hub's 15s deadline for the whole `probing.runtimes` request,
+ * because `unknown` (Node reads as `system`) is a far better outcome than the
+ * entire toolchain probe timing out.
+ */
+const WINGET_OWNERSHIP_TIMEOUT_MS = 8_000;
+
+/**
+ * Asks winget whether it owns `packageId`, mapping every failure — the binary
+ * missing, a timeout, an unrecognized exit code — to `unknown` rather than
+ * throwing: this is one signal among several the card can render without,
+ * and it must never be the thing that fails a runtime scan.
+ */
+export async function probeWingetOwnership(
+  packageId: string,
+  signal?: AbortSignal
+): Promise<WingetOwnership> {
+  try {
+    const { stdout } = await execFileAsync('winget', WINGET_LIST_ARGV(packageId), {
+      timeout: WINGET_OWNERSHIP_TIMEOUT_MS,
+      ...HIDDEN_WINDOW,
+      ...(signal ? { signal } : {}),
+    });
+    return parseWingetListOutput(stdout, 0, packageId);
+  } catch (error) {
+    // A killed-by-timeout or spawn-failed child reports `code` as `null` or a
+    // string errno (`ENOENT`), never the exit code the parser needs — both
+    // read as `unknown`. Only a child that actually exited non-zero, which
+    // `execFile` also surfaces as a rejection, carries a numeric `code`.
+    const execError = error as { readonly code?: unknown; readonly stdout?: string };
+    if (typeof execError.code !== 'number') return 'unknown';
+    return parseWingetListOutput(execError.stdout ?? '', execError.code, packageId);
+  }
+}
 
 /**
  * Reads at most `maxBytes` from a regular file, validating the descriptor after

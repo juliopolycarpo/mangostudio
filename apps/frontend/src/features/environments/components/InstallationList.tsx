@@ -6,10 +6,19 @@
  * both as separate rows would undo that.
  */
 
+import type { ToolchainChoice } from '@mangostudio/shared/environments';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { type InstallationGroup, pathPosition, versionLabel } from '../format';
 import { useToolIdentities } from '../identity/use-tool-identities';
+import { ToolchainAction } from './ToolchainAction';
+
+/** Present only for the node/bun cards, which can pin one of these rows. */
+interface InstallationListToolchain {
+  readonly selection: ToolchainChoice;
+  readonly isPending: boolean;
+  readonly onSelect: (path: string) => void;
+}
 
 interface InstallationListProps {
   /**
@@ -17,9 +26,10 @@ interface InstallationListProps {
    * needs the effective group for its header does not pay for it twice.
    */
   groups: readonly InstallationGroup[];
+  toolchain?: InstallationListToolchain;
 }
 
-export function InstallationList({ groups }: InstallationListProps) {
+export function InstallationList({ groups, toolchain }: InstallationListProps) {
   const { t } = useI18n();
   const e = t.environments;
   const { resolve } = useToolIdentities();
@@ -58,6 +68,14 @@ export function InstallationList({ groups }: InstallationListProps) {
               <span className="text-xs text-on-surface-variant/60" data-testid="alias-affordance">
                 {formatMessage(e.runtimes.aliasReachable, { count: String(aliasCount) })}
               </span>
+            )}
+            {toolchain && (
+              <ToolchainAction
+                path={canonical.path}
+                selected={toolchain.selection === canonical.path}
+                isPending={toolchain.isPending}
+                onSelect={toolchain.onSelect}
+              />
             )}
           </li>
         );

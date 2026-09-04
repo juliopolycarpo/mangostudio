@@ -1,6 +1,12 @@
 import { posix, win32 } from 'node:path';
 import type { PathEnv } from '../../runtime-env';
-import type { RuntimeId, RuntimeInstallation, RuntimeOrigin, VersionManagerId } from '../schemas';
+import type {
+  PathSource,
+  RuntimeId,
+  RuntimeInstallation,
+  RuntimeOrigin,
+  VersionManagerId,
+} from '../schemas';
 
 export interface SemVer {
   readonly major: number;
@@ -233,13 +239,26 @@ function probeWithTimeout(
   });
 }
 
-function normalizedPath(path: string): string {
+export function normalizedPath(path: string): string {
   return path.replaceAll('\\', '/').toLowerCase();
 }
 
 /** Version-manager roots are compared as prefixes, so trailing separators must go. */
 function normalizedRoot(path: string): string {
   return normalizedPath(path.trim()).replace(/\/+$/, '');
+}
+
+/**
+ * fnm's root on Windows when `FNM_DIR` is unset, mirroring the POSIX
+ * `~/.local/share/fnm` fallback below: fnm's own Windows installer sets
+ * neither an environment variable nor a registry key for its default,
+ * `%APPDATA%\fnm`, so an install left at that default reads as `system`
+ * without this.
+ */
+export function windowsDefaultFnmDir(env: Pick<PathEnv, 'platform' | 'env'>): string | undefined {
+  if (env.platform !== 'win32') return undefined;
+  const appData = env.env.APPDATA?.trim();
+  return appData ? win32.join(appData, 'fnm') : undefined;
 }
 
 function detectVersionManager(
@@ -250,7 +269,7 @@ function detectVersionManager(
   const paths = [rawPath, realpath].map(normalizedPath);
   const configuredRoots = [
     ['nvm', deps.env.NVM_DIR, deps.env.NVM_HOME, deps.env.NVM_SYMLINK],
-    ['fnm', deps.env.FNM_DIR],
+    ['fnm', deps.env.FNM_DIR, windowsDefaultFnmDir(deps)],
     ['volta', deps.env.VOLTA_HOME],
   ] as const;
 
@@ -272,6 +291,8 @@ function detectVersionManager(
       (path) =>
         path.includes('/.fnm/') ||
         path.includes('/.local/share/fnm/') ||
+        // macOS default root; `normalizedPath` lowercases but keeps spaces.
+        path.includes('/library/application support/fnm/') ||
         path.includes('/fnm_multishells/')
     )
   ) {
@@ -281,6 +302,32 @@ function detectVersionManager(
     return 'volta';
   }
   return undefined;
+}
+
+/** Whether `path` resolves under `BUN_INSTALL`, or Bun's own `~/.bun` default. */
+function isBunManagedPath(path: string, deps: BinaryScanDeps): boolean {
+  const normalizedTarget = normalizedPath(path);
+  const roots = [deps.env.BUN_INSTALL, `${deps.homeDir}/.bun`]
+    .filter((root): root is string => Boolean(root?.trim()))
+    .map(normalizedRoot);
+  return roots.some((root) => normalizedTarget.startsWith(`${root}/`));
+}
+
+/**
+ * Who put an installation where it is, as far as the scanner can tell.
+ * `winget` is never assigned here — winget's own MSI is indistinguishable by
+ * path from the nodejs.org MSI, so only a live winget probe can attribute it,
+ * and that happens after the scan, on the host adapter that ran it.
+ */
+function resolvePathSource(
+  rawPath: string,
+  resolvedPath: string,
+  managedBy: VersionManagerId | undefined,
+  deps: BinaryScanDeps
+): PathSource {
+  if (managedBy) return managedBy;
+  if (isBunManagedPath(rawPath, deps) || isBunManagedPath(resolvedPath, deps)) return 'bun';
+  return 'system';
 }
 
 export async function scanRuntime(
@@ -380,6 +427,7 @@ export async function scanRuntime(
     // Version-manager binaries retain that provenance through `pathIndex`.
     const effective: boolean = candidate.origin === 'path' && !hasEffectiveInstallation;
     hasEffectiveInstallation ||= effective;
+    const pathSource = resolvePathSource(candidate.path, path, managedBy, deps);
 
     installations.push({
       path,
@@ -390,6 +438,7 @@ export async function scanRuntime(
       effective,
       ...(aliasOf !== undefined && { aliasOf }),
       ...(managedBy !== undefined && { managedBy }),
+      pathSource,
     });
   }
 

@@ -3,6 +3,8 @@ import {
   assertNodeVersionSpec,
   parseNodeVersionSpec,
   RecipeInputError,
+  toFnmDefaultArgument,
+  toFnmVersionArgument,
 } from '../../../../src/modules/environments/domain/recipe-input';
 
 describe('NodeVersionSpec', () => {
@@ -39,5 +41,19 @@ describe('NodeVersionSpec', () => {
       expect(parsed).not.toBeNull();
       expect(parsed).not.toMatch(metacharacters);
     }
+  });
+});
+
+describe('fnm arguments', () => {
+  it('renders --lts / --latest / the version as-is for install', () => {
+    expect(toFnmVersionArgument('lts')).toBe('--lts');
+    expect(toFnmVersionArgument('latest')).toBe('--latest');
+    expect(toFnmVersionArgument('22.13.0')).toBe('22.13.0');
+  });
+
+  it('renders lts-latest / latest / the version as-is for the default alias', () => {
+    expect(toFnmDefaultArgument('lts')).toBe('lts-latest');
+    expect(toFnmDefaultArgument('latest')).toBe('latest');
+    expect(toFnmDefaultArgument('22.13.0')).toBe('22.13.0');
   });
 });

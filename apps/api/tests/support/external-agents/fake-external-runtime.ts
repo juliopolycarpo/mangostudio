@@ -189,6 +189,7 @@ export function createFakeExternalRuntime(
     // second test that uses a different user id silently contest the first and
     // fail on a refusal it never asked for.
     manifest: {
+      features: { toolchain: true },
       identityIsolation: {
         method: 'single-user-host' as const,
         credentialHomeFingerprint: `sha256:fake-runtime-${crypto.randomUUID()}`,

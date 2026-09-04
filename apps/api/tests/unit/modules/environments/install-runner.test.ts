@@ -30,6 +30,8 @@ const SUCCESS: RuntimeInstallRunResult = {
 };
 
 interface FakeClientOptions {
+  /** Whether the peer's manifest advertises `features.toolchain`; older peers do not. */
+  readonly toolchainSupported?: boolean;
   readonly result?: RuntimeInstallRunResult | (() => Promise<RuntimeInstallRunResult>);
   /** Frames the runtime publishes once `install.run` has been called. */
   readonly frames?: readonly Partial<RuntimeEventFrame>[];
@@ -41,6 +43,7 @@ function fakeClient(options: FakeClientOptions = {}) {
   const runParams: unknown[] = [];
 
   const client = {
+    manifest: { features: { toolchain: options.toolchainSupported ?? true } },
     onEvent: (listener: (event: RuntimeEventFrame) => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -113,6 +116,22 @@ describe('install relay', () => {
       { stream: 'stdout', line: 'hello' },
       { stream: 'stderr', line: 'warning' },
     ]);
+  });
+
+  it("forwards the recipe's accepted exit codes to the runtime", async () => {
+    const fake = fakeClient();
+
+    await runnerFor(fake.client).run({ ...COMMAND, acceptedExitCodes: [-1978335189] });
+
+    expect(fake.runParams).toEqual([expect.objectContaining({ acceptedExitCodes: [-1978335189] })]);
+  });
+
+  it('omits acceptedExitCodes entirely when the recipe declares none', async () => {
+    const fake = fakeClient();
+
+    await runnerFor(fake.client).run(COMMAND);
+
+    expect(fake.runParams[0]).not.toHaveProperty('acceptedExitCodes');
   });
 
   it('ignores frames belonging to another run or another topic', async () => {
@@ -196,5 +215,19 @@ describe('install relay', () => {
     // make once the request was accepted.
     expect(result.status).toBe('failed');
     expect(events).toEqual([{ stream: 'system', line: 'Runtime went away.' }]);
+  });
+
+  it('omits the toolchain for a peer that does not advertise it', async () => {
+    const { client, runParams } = fakeClient({ toolchainSupported: false });
+    await runnerFor(client).run({
+      runId: 'run-legacy',
+      userId: 'user-1',
+      environmentId: 'ubuntu',
+      argv: ['bun', 'upgrade'],
+      timeoutMs: 1_000,
+      toolchain: { node: '/opt/node/bin/node', bun: 'auto' },
+    });
+
+    expect(runParams[0]).not.toHaveProperty('toolchain');
   });
 });

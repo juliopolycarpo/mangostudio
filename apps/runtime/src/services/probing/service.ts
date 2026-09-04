@@ -16,6 +16,7 @@ import type {
   RuntimeHealth,
   RuntimeStatus,
   VersionManagerId,
+  VersionManagerStatus,
 } from '@mangostudio/shared/environments';
 import {
   AGENT_CLI_DEFINITIONS,
@@ -24,16 +25,25 @@ import {
   analyzeRuntimeScan,
   type BinaryScanDeps,
   BUN_RUNTIME_DEFINITION,
+  detectFnm,
   detectNvm,
   directoryExists,
   type ExternalAgentCliDefinition,
+  FNM_RUNTIME_DEFINITION,
+  type FnmDetectionDeps,
+  GIT_RUNTIME_DEFINITION,
+  markWingetOwnedNodeInstallations,
+  NODE_LTS_WINGET_PACKAGE_ID,
   NODE_RELEASE_SCHEDULE,
   NODE_RUNTIME_DEFINITION,
   type NvmDetectionDeps,
   probeAuthFile,
   probeConfigKey,
   type RuntimeDefinition,
+  type RuntimeScanResult,
   scanRuntime,
+  WINGET_RUNTIME_DEFINITION,
+  type WingetOwnership,
 } from '@mangostudio/shared/environments/detection';
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
 import { describeTargetLocations, getLibraryTarget } from '@mangostudio/shared/library/host';
@@ -51,10 +61,12 @@ import type {
 import { throwIfAborted } from '../cancellation';
 import {
   createBinaryScanDeps,
+  createFnmDetectionDeps,
   createNvmDetectionDeps,
   createRuntimePathEnv,
   NODE_AUTH_SIGNAL_FS,
   NODE_LOCATION_FS_PROBE,
+  probeWingetOwnership,
 } from './host-env';
 
 /**
@@ -73,25 +85,42 @@ export interface ProbingHostAdapters {
     signal?: AbortSignal
   ) => BinaryScanDeps;
   readonly createNvmDeps: (env: PathEnv) => NvmDetectionDeps;
+  readonly createFnmDeps: (env: PathEnv) => FnmDetectionDeps;
   readonly authFs: AuthSignalFs;
   readonly describeLocations: (targetId: LibraryTargetId, env: PathEnv) => LibraryLocationStatus[];
   readonly runtimeDefinitions: readonly RuntimeDefinition[];
   readonly agentDefinitions: readonly AgentCliDefinition[];
   readonly now: () => number;
   readonly selfExecutablePath: () => string;
+  /**
+   * Whether winget owns a package id, asked once per `probeRuntimes` call on
+   * win32 when Node is among the ids probed. Optional because every other
+   * platform has nothing to bind it to; {@link DEFAULT_ADAPTERS} always
+   * provides one, so only a test overriding the whole adapter set needs to
+   * think about its absence.
+   */
+  readonly wingetOwnership?: (packageId: string, signal?: AbortSignal) => Promise<WingetOwnership>;
 }
 
 const DEFAULT_ADAPTERS: ProbingHostAdapters = {
   createPathEnv: createRuntimePathEnv,
   createScanDeps: createBinaryScanDeps,
   createNvmDeps: createNvmDetectionDeps,
+  createFnmDeps: createFnmDetectionDeps,
   authFs: NODE_AUTH_SIGNAL_FS,
   describeLocations: (targetId, env) =>
     describeTargetLocations(targetId, env, NODE_LOCATION_FS_PROBE),
-  runtimeDefinitions: [BUN_RUNTIME_DEFINITION, NODE_RUNTIME_DEFINITION],
+  runtimeDefinitions: [
+    BUN_RUNTIME_DEFINITION,
+    NODE_RUNTIME_DEFINITION,
+    FNM_RUNTIME_DEFINITION,
+    GIT_RUNTIME_DEFINITION,
+    WINGET_RUNTIME_DEFINITION,
+  ],
   agentDefinitions: AGENT_CLI_DEFINITIONS,
   now: Date.now,
   selfExecutablePath: () => process.execPath,
+  wingetOwnership: probeWingetOwnership,
 };
 
 export interface ProbingService {
@@ -130,13 +159,13 @@ function selectById<T, Id extends string>(
   return definitions.filter((definition) => wanted.has(idOf(definition)));
 }
 
-async function probeRuntimeDefinition(
+async function scanRuntimeDefinition(
   adapters: ProbingHostAdapters,
   definition: RuntimeDefinition,
   env: PathEnv,
   params: RuntimeProbeRuntimesParams,
   signal?: AbortSignal
-): Promise<RuntimeStatus> {
+): Promise<RuntimeScanResult> {
   throwIfAborted(signal);
   const scan = await scanRuntime(
     definition,
@@ -146,14 +175,86 @@ async function probeRuntimeDefinition(
   // AbortError from the forwarded signal, so a cancelled call would otherwise
   // come back as a normal missing/ok status.
   throwIfAborted(signal);
+  return scan;
+}
+
+/**
+ * Turns a completed scan into the status the hub reads. Split from
+ * {@link scanRuntimeDefinition} so `probeRuntimes` can run every definition's
+ * scan alongside the one winget ownership probe it needs, instead of paying
+ * for winget sequentially after each scan finishes.
+ */
+function analyzeScannedRuntime(
+  definition: RuntimeDefinition,
+  scan: RuntimeScanResult,
+  env: PathEnv,
+  params: RuntimeProbeRuntimesParams,
+  probedAtMs: number,
+  wingetOwnership?: WingetOwnership
+): RuntimeStatus {
+  // Only Node needs this: winget's own MSI and the nodejs.org MSI are
+  // indistinguishable by path, so `system` there is ambiguous in a way no
+  // other runtime's `system` is.
+  const installations =
+    definition.id === 'node' && wingetOwnership === 'owned'
+      ? markWingetOwnedNodeInstallations(scan.installations, env.env.ProgramFiles)
+      : scan.installations;
   const minimumVersion = params.minimumVersions?.[definition.id];
   const consumerRequirements = params.consumerMinimumVersions?.[definition.id];
-  return analyzeRuntimeScan(definition, scan, {
-    probedAtMs: adapters.now(),
-    installable: params.installable?.[definition.id] ?? false,
-    ...(minimumVersion !== undefined && { minimumVersion }),
-    ...(consumerRequirements !== undefined && { consumerRequirements }),
-  });
+  return analyzeRuntimeScan(
+    definition,
+    { ...scan, installations },
+    {
+      probedAtMs,
+      installable: params.installable?.[definition.id] ?? false,
+      ...(minimumVersion !== undefined && { minimumVersion }),
+      ...(consumerRequirements !== undefined && { consumerRequirements }),
+    }
+  );
+}
+
+async function probeRuntimeDefinition(
+  adapters: ProbingHostAdapters,
+  definition: RuntimeDefinition,
+  env: PathEnv,
+  params: RuntimeProbeRuntimesParams,
+  signal?: AbortSignal
+): Promise<RuntimeStatus> {
+  const scan = await scanRuntimeDefinition(adapters, definition, env, params, signal);
+  return analyzeScannedRuntime(definition, scan, env, params, adapters.now());
+}
+
+/** Every manager `probeVersionManagers` can answer; both are asked unless the caller narrows it. */
+const SUPPORTED_VERSION_MANAGER_IDS: readonly VersionManagerId[] = ['nvm', 'fnm'];
+
+/**
+ * `fnm --version` (and any future manager scanned the same way) prints
+ * vendor-prefixed text (`fnm 1.38.1`); `RuntimeInstallation.version` stores
+ * that raw stdout, so this reparses it through the definition's own
+ * `parseVersion` to get the plain `major.minor.patch` a version-manager
+ * status publishes.
+ */
+function formattedManagerVersion(
+  status: RuntimeStatus | null,
+  definition: RuntimeDefinition | undefined
+): string | undefined {
+  const raw = status?.effective?.version;
+  if (!raw || !definition) return undefined;
+  const parsed = definition.parseVersion(raw);
+  return parsed ? `${parsed.major}.${parsed.minor}.${parsed.patch}` : undefined;
+}
+
+/** Whether this `probeRuntimes` call should ask winget about Node at all. */
+function needsWingetOwnership(
+  adapters: ProbingHostAdapters,
+  definitions: readonly RuntimeDefinition[],
+  env: PathEnv
+): boolean {
+  return (
+    env.platform === 'win32' &&
+    adapters.wingetOwnership !== undefined &&
+    definitions.some((definition) => definition.id === 'node')
+  );
 }
 
 function mapRuntimeFindings(status: RuntimeStatus, targetId: LibraryTargetId): RuntimeFinding[] {
@@ -321,9 +422,35 @@ export function createProbingService(overrides: Partial<ProbingHostAdapters> = {
         params.ids,
         'runtime id'
       );
-      const statuses = await Promise.all(
-        definitions.map((definition) =>
-          probeRuntimeDefinition(adapters, definition, env, params, signal)
+
+      // The winget probe runs alongside every scan rather than after it: on a
+      // Windows host that already pays `probeTimeoutMs` per candidate, adding
+      // winget's own 15s sequentially would nearly triple a plain Node probe.
+      const wingetOwnershipPromise = needsWingetOwnership(adapters, definitions, env)
+        ? adapters.wingetOwnership?.(NODE_LTS_WINGET_PACKAGE_ID, signal)
+        : undefined;
+      const [scans, wingetOwnership] = await Promise.all([
+        Promise.all(
+          definitions.map((definition) =>
+            scanRuntimeDefinition(adapters, definition, env, params, signal)
+          )
+        ),
+        wingetOwnershipPromise,
+      ]);
+      // The default winget adapter maps an abort to `unknown` rather than
+      // rejecting, so a cancellation that lands while every scan has already
+      // settled would otherwise resolve here unnoticed.
+      throwIfAborted(signal);
+
+      const probedAtMs = adapters.now();
+      const statuses = definitions.map((definition, index) =>
+        analyzeScannedRuntime(
+          definition,
+          scans[index] as RuntimeScanResult,
+          env,
+          params,
+          probedAtMs,
+          wingetOwnership
         )
       );
       return { statuses };
@@ -331,46 +458,75 @@ export function createProbingService(overrides: Partial<ProbingHostAdapters> = {
 
     async probeVersionManagers(params, signal) {
       throwIfAborted(signal);
-      // Only nvm is detected today; asking for another manager is answered with
-      // an empty list rather than an error, the way the hub's registry already
-      // does for an id it holds no definition for.
-      const wanted: readonly VersionManagerId[] = params.ids ?? ['nvm'];
-      if (!wanted.includes('nvm')) return { statuses: [] };
+      // nvm and fnm are both detected today, and both are asked for unless the
+      // caller narrows it; any other id is answered with an empty list rather
+      // than an error, the way the hub's registry already does for an id it
+      // holds no definition for.
+      const wanted = (params.ids ?? SUPPORTED_VERSION_MANAGER_IDS).filter((id) =>
+        SUPPORTED_VERSION_MANAGER_IDS.includes(id)
+      );
+      if (wanted.length === 0) return { statuses: [] };
 
       const env = adapters.createPathEnv(params.pathEnv);
+      const runtimeParams: RuntimeProbeRuntimesParams = {
+        ...(params.budget && { budget: params.budget }),
+      };
       const nodeDefinition = adapters.runtimeDefinitions.find(
         (definition) => definition.id === 'node'
       );
-      // Which Node nvm considers current is read from the same scan the
-      // toolchain tab shows, so the two can never disagree about it.
-      const nodeStatus = nodeDefinition
-        ? await probeRuntimeDefinition(
-            adapters,
-            nodeDefinition,
-            env,
-            {
-              ...(params.budget && { budget: params.budget }),
-            },
-            signal
-          )
-        : null;
+      const fnmDefinition = adapters.runtimeDefinitions.find(
+        (definition) => definition.id === 'fnm'
+      );
+      // Two independent runtime scans: which Node each manager considers
+      // current — read from the one scan the toolchain tab shows, so no
+      // manager can disagree with it — and fnm's own version, taken from the
+      // same scan `probeRuntimes` already runs for it rather than spawning
+      // `fnm --version` a second time. Each carries the full probe budget, so
+      // they go out together: serialized, the pair alone could spend the hub's
+      // whole `probing.runtimes` deadline.
+      const [nodeStatus, fnmRuntimeStatus] = await Promise.all([
+        nodeDefinition
+          ? probeRuntimeDefinition(adapters, nodeDefinition, env, runtimeParams, signal)
+          : null,
+        fnmDefinition && wanted.includes('fnm')
+          ? probeRuntimeDefinition(adapters, fnmDefinition, env, runtimeParams, signal)
+          : null,
+      ]);
       throwIfAborted(signal);
-      const currentNodePath =
-        nodeStatus?.effective?.managedBy === 'nvm' ? nodeStatus.effective.path : undefined;
+      const currentNodePathFor = (managerId: VersionManagerId): string | undefined =>
+        nodeStatus?.effective?.managedBy === managerId ? nodeStatus.effective.path : undefined;
+
       const latestByMajor = params.latestByMajor
         ? new Map(
             Object.entries(params.latestByMajor).map(([major, version]) => [Number(major), version])
           )
         : undefined;
-
-      const status = await detectNvm(adapters.createNvmDeps(env), {
+      const scheduleOptions = {
         now: new Date(adapters.now()),
         schedule: NODE_RELEASE_SCHEDULE,
-        ...(currentNodePath !== undefined && { currentNodePath }),
         ...(latestByMajor !== undefined && { latestByMajor, liveDataAvailable: true }),
-      });
+      };
+
+      const statuses = await Promise.all(
+        wanted.map((id): Promise<VersionManagerStatus> => {
+          const currentNodePath = currentNodePathFor(id);
+          if (id === 'nvm') {
+            return detectNvm(adapters.createNvmDeps(env), {
+              ...scheduleOptions,
+              ...(currentNodePath !== undefined && { currentNodePath }),
+            });
+          }
+
+          const managerVersion = formattedManagerVersion(fnmRuntimeStatus, fnmDefinition);
+          return detectFnm(adapters.createFnmDeps(env), {
+            ...scheduleOptions,
+            ...(currentNodePath !== undefined && { currentNodePath }),
+            ...(managerVersion !== undefined && { managerVersion }),
+          });
+        })
+      );
       throwIfAborted(signal);
-      return { statuses: [status] };
+      return { statuses };
     },
 
     async probeAgentClis(params, signal) {

@@ -1,6 +1,7 @@
 /**
- * Runtimes screen: one card per runtime, plus the nvm-managed Node versions
- * folded into the Node card where they belong.
+ * Runtimes screen: one card per runtime, plus every version manager's
+ * managed Node versions (nvm, fnm, …) folded into the Node card where they
+ * belong.
  *
  * Everything here is about one machine, named by the scope picker. Switching
  * machines switches the dataset outright rather than merging — "which node
@@ -9,12 +10,14 @@
  */
 
 import { useI18n } from '@/hooks/use-i18n';
+import { renderableVersionManagers } from '../format';
 import { useRuntimesScreenData } from '../hooks/use-runtime-status';
 import { useEnvironmentScope } from '../use-environment-scope';
 import { EnvironmentPageState } from './EnvironmentPageState';
 import { EnvironmentScopeHeader } from './EnvironmentScopeHeader';
 import { EnvironmentScopeNotice } from './EnvironmentScopeNotice';
 import { NodeVersionTable } from './NodeVersionTable';
+import { PrerequisiteCard } from './PrerequisiteCard';
 import { RuntimeCard } from './RuntimeCard';
 
 export function RuntimesPage() {
@@ -24,6 +27,8 @@ export function RuntimesPage() {
   const { runtimes, versionManagers, recipes, isPending, error, refetch } = useRuntimesScreenData(
     scope.environmentId
   );
+
+  const managerTables = renderableVersionManagers(versionManagers, recipes);
 
   const header = (
     <EnvironmentScopeHeader
@@ -64,8 +69,6 @@ export function RuntimesPage() {
     );
   }
 
-  const nvm = versionManagers.find((manager) => manager.id === 'nvm');
-
   return (
     <div className="space-y-4">
       {header}
@@ -78,22 +81,40 @@ export function RuntimesPage() {
         />
       ) : (
         <div className="space-y-4">
-          {runtimes.map((runtime) => (
-            <RuntimeCard
-              key={runtime.id}
-              status={runtime}
-              recipes={recipes}
-              environmentId={scope.environmentId}
-            >
-              {runtime.id === 'node' && nvm ? (
-                <NodeVersionTable
-                  status={nvm}
-                  recipes={recipes}
-                  environmentId={scope.environmentId}
-                />
-              ) : null}
-            </RuntimeCard>
-          ))}
+          {runtimes.map((runtime) =>
+            // winget is never installed or updated by MangoStudio — it only
+            // ever appears as something the other Windows recipes need, so it
+            // renders as the compact prerequisite card rather than a runtime
+            // with its own lifecycle.
+            runtime.id === 'winget' ? (
+              <PrerequisiteCard
+                key={runtime.id}
+                status={runtime}
+                environmentId={scope.environmentId}
+              />
+            ) : (
+              <RuntimeCard
+                key={runtime.id}
+                status={runtime}
+                recipes={recipes}
+                environmentId={scope.environmentId}
+              >
+                {/* Every version manager gets its own table here, not only nvm —
+                    but only the ones this machine can actually act on, so an
+                    absent manager with no install path here (fnm on POSIX)
+                    does not add a dead row inside the Node card. */}
+                {runtime.id === 'node' &&
+                  managerTables.map((manager) => (
+                    <NodeVersionTable
+                      key={manager.id}
+                      status={manager}
+                      recipes={recipes}
+                      environmentId={scope.environmentId}
+                    />
+                  ))}
+              </RuntimeCard>
+            )
+          )}
         </div>
       )}
     </div>

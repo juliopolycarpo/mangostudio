@@ -21,6 +21,7 @@ import type {
 } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 import { getConfig } from '../../../lib/config';
 import { getInstallLogPath } from '../../../lib/mango-paths';
 import { assertRequestedProfileId, resolveActiveProfileId } from '../../../lib/profile-context';
@@ -31,7 +32,12 @@ import {
 } from '../../../services/runtime-client/runtime-connection-manager';
 import { generateId } from '../../../utils/id';
 import { evaluateInstallGuard, evaluateRemoteInstallGuard } from '../domain/install-guards';
-import { INSTALL_RECIPES, type InstallRecipe } from '../domain/install-recipes';
+import {
+  INSTALL_RECIPES,
+  type InstallRecipe,
+  type InstallRecipeBuildContext,
+  writesForPlatform,
+} from '../domain/install-recipes';
 import { assertRecipeInput } from '../domain/recipe-input';
 import { environmentRepository } from '../infrastructure/environment-repository';
 import {
@@ -51,6 +57,7 @@ import {
   environmentProbingService,
   type ProbeScope,
 } from './probing-service';
+import { type ToolchainService, toolchainService } from './toolchain-service';
 
 const PREPARATION_TTL_MS = 10 * 60 * 1000;
 const MAX_RECENT_STREAMS = 20;
@@ -152,11 +159,14 @@ interface StartingInstall {
 interface RecipeRequirements {
   readonly missing: RuntimeId[];
   readonly nvmDir?: string;
+  /** Absolute path of every resolved requirement, keyed by runtime id. */
+  readonly binaryPaths: Partial<Record<RuntimeId, string>>;
 }
 
 interface InstallServiceDeps {
   readonly recipes: readonly InstallRecipe[];
   readonly probingService: EnvironmentProbingService;
+  readonly toolchain: ToolchainService;
   readonly repository: InstallRunRepository;
   readonly downloader: InstallerDownloader;
   readonly runner: InstallRunner;
@@ -328,7 +338,7 @@ function terminalDuration(run: InstallRun): number {
 }
 
 function isInstallPlatform(platform: string): platform is InstallPlatform {
-  return platform === 'darwin' || platform === 'linux';
+  return platform === 'darwin' || platform === 'linux' || platform === 'win32';
 }
 
 async function defaultResolvePlatform(scope: ProbeScope, fallback: string): Promise<string> {
@@ -345,6 +355,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
   const deps: InstallServiceDeps = {
     recipes: INSTALL_RECIPES,
     probingService: environmentProbingService,
+    toolchain: toolchainService,
     repository: createInstallRunRepository(),
     downloader: installerDownloader,
     runner: installRunner,
@@ -377,7 +388,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
   const resolveRequirement = async (
     scope: ProbeScope,
     requirement: RuntimeId
-  ): Promise<{ available: boolean; nvmDir?: string }> => {
+  ): Promise<{ available: boolean; path?: string; nvmDir?: string }> => {
     if (requirement === 'nvm') {
       const status = await deps.probingService.getVersionManagerStatus(scope, 'nvm');
       return {
@@ -385,8 +396,17 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         ...(status?.root && { nvmDir: status.root }),
       };
     }
-    const status = await deps.probingService.getRuntimeStatus(scope, requirement);
-    return { available: Boolean(status && status.installations.length > 0) };
+    // A vendor CLI is probed by the library rather than the runtime detector,
+    // but what a resolved requirement *is* — installed, and where — does not
+    // depend on which service answered.
+    const status = isExternalAgentTargetId(requirement)
+      ? await deps.probingService.getAgentCliStatus(scope, requirement)
+      : await deps.probingService.getRuntimeStatus(scope, requirement);
+    const path = status?.effective?.path ?? status?.installations[0]?.path;
+    return {
+      available: Boolean(status && status.installations.length > 0),
+      ...(path && { path }),
+    };
   };
 
   const inspectRequirements = async (
@@ -395,17 +415,20 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
   ): Promise<RecipeRequirements> => {
     const missing: RuntimeId[] = [];
     let nvmDir: string | undefined;
+    const binaryPaths: Partial<Record<RuntimeId, string>> = {};
     for (const requirement of recipe.requires) {
       const result = await resolveRequirement(scope, requirement);
       if (!result.available) missing.push(requirement);
       if (result.nvmDir) nvmDir = result.nvmDir;
+      if (result.path) binaryPaths[requirement] = result.path;
     }
-    return { missing, ...(nvmDir && { nvmDir }) };
+    return { missing, binaryPaths, ...(nvmDir && { nvmDir }) };
   };
 
   /**
-   * Builds a preview and returns the requirement inspection that produced it so
-   * callers that also need the resolved `nvmDir` do not re-run detection.
+   * Builds a preview and returns the requirement inspection (and the platform
+   * it was built against) that produced it, so callers that also need the
+   * resolved `nvmDir`/`binaryPaths` do not re-run detection.
    */
   const buildPreviewDetail = async (
     scope: ProbeScope,
@@ -413,26 +436,52 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     input: RecipeInput,
     guard: InstallGuard,
     artifact?: InstallerArtifact
-  ): Promise<{ preview: InstallRecipePreview; requirements: RecipeRequirements }> => {
+  ): Promise<{
+    preview: InstallRecipePreview;
+    requirements: RecipeRequirements;
+    platform: InstallPlatform;
+  }> => {
     assertRecipeInput(input, recipe.inputKind);
     const requirements = await inspectRequirements(scope, recipe);
+    const resolvedPlatform = await resolvePlatform(scope);
+    const supported =
+      isInstallPlatform(resolvedPlatform) && recipe.platforms.includes(resolvedPlatform);
+    // A preview is built for every recipe on the host's actual platform, even
+    // one this recipe does not support — `supported` already reports that
+    // separately. A display argv still needs some concrete `InstallPlatform`
+    // to build against, so an unrecognized host platform falls back to one.
+    const platform: InstallPlatform = isInstallPlatform(resolvedPlatform)
+      ? resolvedPlatform
+      : 'linux';
     // Profile files live on the target machine. Inspecting the hub's own home
-    // for a remote install would report a lie, so remote previews omit it.
+    // for a remote install would report a lie, so remote previews omit it —
+    // and `profileLines` are shell `export` lines, so a win32 target has no
+    // profile for them to be missing from either.
     const profileSetup: InstallProfileSetup | undefined =
-      recipe.profileLines && scope.environmentId === LOCAL_ENVIRONMENT_ID
+      recipe.profileLines && scope.environmentId === LOCAL_ENVIRONMENT_ID && platform !== 'win32'
         ? await deps.inspectProfileSetup(recipe.profileLines)
         : undefined;
-    const platform = await resolvePlatform(scope);
-    const supported = isInstallPlatform(platform) && recipe.platforms.includes(platform);
-    const argv = recipe.argv(input, {
+    // Display-only fallback: a requirement this preview could not resolve
+    // still gets its own bare binary name so the argv never throws mid-list —
+    // `missingRequirements` is what tells the caller it will not run.
+    const displayBinaryPaths: Partial<Record<RuntimeId, string>> = { ...requirements.binaryPaths };
+    for (const requirement of recipe.requires) {
+      if (!displayBinaryPaths[requirement]) displayBinaryPaths[requirement] = requirement;
+    }
+    const context: InstallRecipeBuildContext = {
       ...(recipe.download && {
         installerPath: artifact?.path ?? '<downloaded-installer>',
       }),
       ...(requirements.nvmDir && { nvmDir: requirements.nvmDir }),
       ...(!requirements.nvmDir && recipe.requires.includes('nvm') && { nvmDir: '$NVM_DIR' }),
-    });
+      platform,
+      binaryPaths: displayBinaryPaths,
+    };
+    const argv = recipe.argv ? recipe.argv(input, context) : [];
+    const download = recipe.download?.[platform];
 
     return {
+      platform,
       requirements,
       preview: {
         id: recipe.id,
@@ -441,17 +490,25 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         inputKind: recipe.inputKind,
         platforms: [...recipe.platforms],
         argv: [...argv],
-        copyCommand: recipe.copyCommand(input),
+        copyCommand: recipe.copyCommand(input, platform),
         requires: [...recipe.requires],
-        writes: [...recipe.writes],
+        // Narrowed to this machine's spelling: the uninstall confirmation
+        // reads these back as "this will remove …", and a Windows path in a
+        // Linux dialog names a file that does not exist.
+        writes: [...writesForPlatform(recipe.writes, platform)],
         networkAccess: recipe.networkAccess,
         timeoutMs: recipe.timeoutMs,
         supported,
         missingRequirements: requirements.missing,
         guard,
-        ...(recipe.download && {
+        // False is a property of the recipe, not of the machine: no argv
+        // builder means no vendor-documented unattended shape exists.
+        runnable: recipe.argv !== undefined,
+        ...(recipe.unrunnableReason && { unrunnableReason: recipe.unrunnableReason }),
+        ...(download && {
           download: {
-            url: artifact?.url ?? recipe.download.url,
+            url: artifact?.url ?? download.url,
+            ...(download.sha256 && { pinnedSha256: download.sha256 }),
             ...(artifact && {
               sizeBytes: artifact.sizeBytes,
               sha256: artifact.sha256,
@@ -485,6 +542,12 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
       throw new InstallUnavailableError(
         preview,
         `Recipe ${preview.id} is not supported on this platform.`
+      );
+    }
+    if (!preview.runnable) {
+      throw new InstallUnavailableError(
+        preview,
+        `Recipe ${preview.id} has no automated run (${preview.unrunnableReason ?? 'unrunnable'}).`
       );
     }
     if (preview.missingRequirements.length > 0) {
@@ -612,6 +675,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     artifact: InstallerArtifact | undefined
   ): Promise<void> => {
     try {
+      const toolchain = await deps.toolchain.resolve(scope.userId, scope.environmentId);
       const result = await deps.runner.run(
         {
           runId: active.runId,
@@ -620,6 +684,8 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
           argv,
           env: recipeEnv,
           timeoutMs: recipe.timeoutMs,
+          ...(recipe.acceptedExitCodes && { acceptedExitCodes: recipe.acceptedExitCodes }),
+          toolchain,
         },
         {
           signal: active.abortController.signal,
@@ -746,27 +812,40 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
       assertRequestedProfileId(body.profileId, context);
       await cleanupExpiredPreparations();
       const recipe = resolveRecipe(body.recipeId);
-      const preview = await buildPreview(recipe, body.input, context);
-      assertAvailable(preview);
+      const scope = probeScopeFor(context);
+      const initial = await buildPreviewDetail(
+        scope,
+        recipe,
+        body.input,
+        await deps.resolveGuard(context)
+      );
+      assertAvailable(initial.preview);
 
-      if (!recipe.download) {
+      const download = recipe.download?.[initial.platform];
+      if (!download) {
         return {
           preparationId: null,
           expiresAt: null,
-          recipe: preview,
+          recipe: initial.preview,
         };
       }
 
       const artifact = await deps.downloader.download(
-        recipe.download,
+        download,
         context.signal ? { signal: context.signal } : undefined
       );
       try {
         if (context.signal?.aborted) {
           throw new InstallPreparationError('Installer preparation was cancelled.');
         }
-        const preparedPreview = await buildPreview(recipe, body.input, context, artifact);
-        assertAvailable(preparedPreview);
+        const prepared = await buildPreviewDetail(
+          scope,
+          recipe,
+          body.input,
+          await deps.resolveGuard(context),
+          artifact
+        );
+        assertAvailable(prepared.preview);
         const matchingPreparations = [...preparations.values()].filter(
           (candidate) =>
             candidate.userId === context.userId &&
@@ -787,7 +866,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         return {
           preparationId: preparation.id,
           expiresAt: preparation.expiresAt,
-          recipe: preparedPreview,
+          recipe: prepared.preview,
         };
       } catch (error) {
         await artifact.cleanup().catch(() => undefined);
@@ -849,11 +928,17 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
             artifact
           );
           assertAvailable(execution.preview);
-          const { requirements } = execution;
-          const argv = recipe.argv(body.input, {
-            ...(artifact && { installerPath: artifact.path }),
-            ...(requirements.nvmDir && { nvmDir: requirements.nvmDir }),
-          });
+          const { requirements, platform } = execution;
+          // `runnable` was just asserted above, so `recipe.argv` is defined;
+          // the fallback keeps this a type-safe read rather than a cast.
+          const argv = recipe.argv
+            ? recipe.argv(body.input, {
+                ...(artifact && { installerPath: artifact.path }),
+                ...(requirements.nvmDir && { nvmDir: requirements.nvmDir }),
+                platform,
+                binaryPaths: requirements.binaryPaths,
+              })
+            : [];
           const recipeEnv = {
             ...recipe.env,
             ...(requirements.nvmDir && { NVM_DIR: requirements.nvmDir }),

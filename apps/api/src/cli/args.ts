@@ -31,8 +31,20 @@ export interface DoctorArgs {
 }
 
 export interface EnvArgs {
-  subcommand: 'runtimes' | 'agents' | null;
+  subcommand: 'runtimes' | 'agents' | 'install' | 'update' | 'toolchain' | null;
   json: boolean;
+  /** `toolchain` only: which runtime to pin; omitted means show the selection. */
+  runtime?: 'node' | 'bun';
+  /** `toolchain` only: `auto` or the path of a probed installation. */
+  choice?: string;
+  /** `install`/`update`/`toolchain`: the account to act as, by email; omitted means the sole account. */
+  user?: string;
+  /** `install`/`update` only: the recipe to run. */
+  recipeId?: string;
+  /** `install`/`update` only: which machine to run it on; omitted means the hub's own. */
+  environmentId?: string;
+  /** `install`/`update` only: a Node version spec, for a `node-version` recipe. */
+  version?: string;
 }
 
 export interface StatusArgs {
@@ -232,34 +244,114 @@ export function parseLogsArgs(rest: string[]): LogsArgs {
   return { follow, lines };
 }
 
-/** Parse `env` args: optional subcommand and --json. */
+/** `env` options that take the next argument as their value, and where it lands. */
+const ENV_VALUE_FLAGS = {
+  '--environment': 'environmentId',
+  '--version': 'version',
+  '--user': 'user',
+} as const;
+
+type EnvValueFlag = keyof typeof ENV_VALUE_FLAGS;
+
+function isEnvValueFlag(arg: string | undefined): arg is EnvValueFlag {
+  return arg !== undefined && arg in ENV_VALUE_FLAGS;
+}
+
+/**
+ * Parse `env` args: optional subcommand and --json, plus `install`/`update`'s
+ * own `<recipe>`, `--environment <id>`, and `--version <spec>`.
+ * // Usage: parseEnvArgs(['install', 'bun.install.official'])
+ */
 export function parseEnvArgs(rest: string[]): EnvArgs {
   let json = false;
+  const values: Partial<Record<(typeof ENV_VALUE_FLAGS)[EnvValueFlag], string>> = {};
   const positionals: string[] = [];
 
-  for (const arg of rest) {
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
     if (arg === '--json') {
       json = true;
       continue;
     }
-    if (arg.startsWith('-')) {
+    const field = isEnvValueFlag(arg) ? ENV_VALUE_FLAGS[arg] : undefined;
+    if (field) {
+      const value = rest[index + 1];
+      if (!value || value.startsWith('-')) {
+        throw new CliError(`Missing value for env ${arg}`);
+      }
+      values[field] = value;
+      index += 1;
+      continue;
+    }
+    if (arg?.startsWith('-')) {
       throw new CliError(`Unknown option for env: ${arg}`);
     }
-    positionals.push(arg);
+    if (arg !== undefined) positionals.push(arg);
   }
 
-  if (positionals.length > 1) {
-    throw new CliError(`Unexpected extra arguments for env: ${positionals.slice(1).join(' ')}`);
-  }
-
+  const { environmentId, version, user } = values;
   const subcommand = positionals[0];
   if (subcommand === undefined) {
     return { subcommand: null, json };
   }
   if (subcommand === 'runtimes' || subcommand === 'agents') {
+    if (positionals.length > 1) {
+      throw new CliError(`Unexpected extra arguments for env: ${positionals.slice(1).join(' ')}`);
+    }
     return { subcommand, json };
   }
+  if (subcommand === 'install' || subcommand === 'update') {
+    const recipeId = positionals[1];
+    if (recipeId === undefined) {
+      throw new CliError(
+        `Missing recipe id for env ${subcommand}. Usage: env ${subcommand} <recipe> [--environment <id>] [--version <spec>]`
+      );
+    }
+    if (positionals.length > 2) {
+      throw new CliError(
+        `Unexpected extra arguments for env ${subcommand}: ${positionals.slice(2).join(' ')}`
+      );
+    }
+    return {
+      subcommand,
+      recipeId,
+      json,
+      ...(environmentId !== undefined && { environmentId }),
+      ...(version !== undefined && { version }),
+      ...(user !== undefined && { user }),
+    };
+  }
+  if (subcommand === 'toolchain') {
+    return parseEnvToolchainArgs(positionals.slice(1), { json, environmentId, user });
+  }
   throw new CliError(`Unknown env subcommand: ${subcommand}`);
+}
+
+const TOOLCHAIN_USAGE =
+  'Usage: env toolchain [node|bun <path|auto>] [--environment <id>] [--user <email>]';
+
+function parseEnvToolchainArgs(
+  positionals: readonly string[],
+  flags: { json: boolean; environmentId?: string; user?: string }
+): EnvArgs {
+  const base: EnvArgs = {
+    subcommand: 'toolchain',
+    json: flags.json,
+    ...(flags.environmentId !== undefined && { environmentId: flags.environmentId }),
+    ...(flags.user !== undefined && { user: flags.user }),
+  };
+  if (positionals.length === 0) return base;
+  const [runtime, choice, ...extra] = positionals;
+  if (runtime !== 'node' && runtime !== 'bun') {
+    throw new CliError(`Unknown toolchain runtime: ${runtime}. ${TOOLCHAIN_USAGE}`);
+  }
+  if (choice === undefined) {
+    throw new CliError(`Missing selection for env toolchain ${runtime}. ${TOOLCHAIN_USAGE}`);
+  }
+  if (extra.length > 0) {
+    throw new CliError(`Unexpected extra arguments for env toolchain: ${extra.join(' ')}`);
+  }
+  return { ...base, runtime, choice };
 }
 
 const LIBRARY_KINDS = new Set<ResourceKind>([

@@ -42,6 +42,7 @@ const PREVIEW: InstallRecipePreview = {
   supported: true,
   missingRequirements: [],
   guard: { allowed: true, reasons: [] },
+  runnable: true,
 };
 const RUN: InstallRun = {
   id: 'install-run-1',

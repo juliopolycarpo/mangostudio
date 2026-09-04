@@ -6,19 +6,43 @@
  * not the headline.
  */
 
-import type { InstallRecipePreview, RuntimeStatus } from '@mangostudio/shared/environments';
-import { Download } from 'lucide-react';
+import type {
+  InstallRecipePreview,
+  PathSource,
+  RuntimeStatus,
+} from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import type { Messages } from '@mangostudio/shared/i18n';
+import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { effectiveInstallation, findInstallRecipe, pathPosition, versionLabel } from '../format';
+import { resolveApiErrorMessage } from '@/lib/utils';
+import {
+  effectiveInstallation,
+  findInstallRecipe,
+  type IdentityResolver,
+  installStep,
+  nodeUpdateAffordance,
+  pathPosition,
+  pathSourceLabel,
+  pathSourceManagerName,
+  runtimeUninstallRecipe,
+  stepFor,
+  toolchainProcessLine,
+  toolchainRuntimeId,
+  versionLabel,
+} from '../format';
 import { useProbeRuntime } from '../hooks/use-runtime-status';
+import { useUpdateToolchainMutation } from '../hooks/use-toolchain';
 import { useToolIdentities } from '../identity/use-tool-identities';
+import { useEnvironmentEntitiesQuery } from '../queries';
 import { FindingList } from './FindingList';
 import { HealthBadge } from './HealthBadge';
-import { InstallAction } from './InstallAction';
 import { InstallationList } from './InstallationList';
 import { ProbeButton } from './ProbeButton';
+import { RecipeAction } from './RecipeAction';
 import { CardSectionLabel, ToolCard } from './ToolCard';
+import { ToolchainAction } from './ToolchainAction';
 
 interface RuntimeCardProps {
   status: RuntimeStatus;
@@ -34,11 +58,49 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
   const probe = useProbeRuntime(environmentId);
   const { resolve } = useToolIdentities();
   const name = resolve('runtime', status.id).name;
+  const isNode = status.id === 'node';
 
   const { groups, group: effectiveGroup, installation: effective } = effectiveInstallation(status);
 
-  const installRecipe = findInstallRecipe(recipes, status.id, 'install');
-  const updateRecipe = findInstallRecipe(recipes, status.id, 'update');
+  // Only node and bun carry a toolchain pin — `ToolchainSelectionSchema` has
+  // no field for fnm, nvm, or winget, so every lookup below reads as "no
+  // action here" for those cards rather than guessing at a shape that does
+  // not exist on the wire.
+  const runtimeId = toolchainRuntimeId(status.id);
+  const scopedEnvironmentId = environmentId ?? LOCAL_ENVIRONMENT_ID;
+  const environments = useEnvironmentEntitiesQuery();
+  const environment = environments.data?.find((candidate) => candidate.id === scopedEnvironmentId);
+  const toolchainSelection = runtimeId ? (environment?.toolchain?.[runtimeId] ?? 'auto') : 'auto';
+  const toolchain = useUpdateToolchainMutation(scopedEnvironmentId);
+  const processLine = runtimeId
+    ? toolchainProcessLine(t, resolve, status, toolchainSelection)
+    : undefined;
+
+  const selectToolchain = (path: string) => {
+    if (runtimeId) toolchain.mutate({ runtimeId, choice: path });
+  };
+  const resetToolchain = () => {
+    if (runtimeId) toolchain.mutate({ runtimeId, choice: 'auto' });
+  };
+
+  // Node's update is not one recipe: which chain runs — or whether nothing
+  // here can touch it at all — depends on which manager put the effective
+  // binary on PATH. Every other runtime updates through a single recipe.
+  const nodeAffordance = isNode ? nodeUpdateAffordance(status, recipes) : undefined;
+  const updateStep = isNode
+    ? nodeAffordance?.kind === 'steps'
+      ? nodeAffordance.primary
+      : undefined
+    : stepFor(findInstallRecipe(recipes, status.id, 'update'));
+  const managedElsewhere =
+    nodeAffordance?.kind === 'managed-elsewhere'
+      ? renderManagedElsewhere(nodeAffordance.source, t, resolve)
+      : null;
+  const uninstallStep = stepFor(runtimeUninstallRecipe(status, recipes));
+
+  const hasInstalledFooter =
+    Boolean(updateStep) || Boolean(managedElsewhere) || Boolean(uninstallStep);
+  const installStepValue = installStep(recipes, status.id);
 
   return (
     <ToolCard
@@ -46,16 +108,7 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
       id={status.id}
       testId="runtime-card"
       dataAttributes={{ 'data-runtime-id': status.id }}
-      subtitle={
-        // Nothing installed is not "0 versions": the body already says so.
-        groups.length > 0 ? (
-          <p className="text-xs text-on-surface-variant/60">
-            {groups.length === 1
-              ? e.runtimes.singleVersion
-              : formatMessage(e.runtimes.versionCount, { count: String(groups.length) })}
-          </p>
-        ) : undefined
-      }
+      subtitle={runtimeSubtitle(status, groups, e)}
       actions={
         <>
           <HealthBadge health={status.health} />
@@ -66,31 +119,40 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
           />
         </>
       }
-      // Install or update, never both — and nothing at all when the registry
-      // has no recipe for this runtime. A fragment would always be truthy, so
-      // the card would close on an empty footer and the gap above it.
+      // Install, or update/uninstall, never both — and nothing at all when the
+      // registry offers neither. A fragment would always be truthy, so the card
+      // would close on an empty footer and the gap above it.
       footer={
-        status.installations.length === 0
-          ? installRecipe && (
-              <InstallAction
-                recipe={installRecipe}
-                catalog={recipes}
-                input={{ kind: 'none' }}
-                label={formatMessage(e.runtimes.install, { runtime: name })}
-                variant="primary"
-                icon={<Download size={14} />}
-                environmentId={environmentId}
-              />
-            )
-          : updateRecipe && (
-              <InstallAction
-                recipe={updateRecipe}
-                catalog={recipes}
-                input={{ kind: 'none' }}
-                label={formatMessage(e.runtimes.update, { runtime: name })}
-                environmentId={environmentId}
-              />
-            )
+        status.installations.length === 0 ? (
+          installStepValue ? (
+            <RecipeAction
+              step={installStepValue}
+              action="install"
+              catalog={recipes}
+              name={name}
+              environmentId={environmentId}
+            />
+          ) : null
+        ) : hasInstalledFooter ? (
+          <>
+            {managedElsewhere}
+            <RecipeAction
+              step={updateStep}
+              action="update"
+              catalog={recipes}
+              name={name}
+              environmentId={environmentId}
+              {...(nodeAffordance?.kind === 'steps' && { followUpSteps: nodeAffordance.followUp })}
+            />
+            <RecipeAction
+              step={uninstallStep}
+              action="uninstall"
+              catalog={recipes}
+              name={name}
+              environmentId={environmentId}
+            />
+          </>
+        ) : null
       }
     >
       {effective ? (
@@ -103,6 +165,14 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
             <span className="min-w-0 break-all font-mono text-xs text-on-surface-variant/70">
               {effective.rawPath}
             </span>
+            {runtimeId && (
+              <ToolchainAction
+                path={effective.path}
+                selected={toolchainSelection === effective.path}
+                isPending={toolchain.isPending}
+                onSelect={selectToolchain}
+              />
+            )}
           </div>
           <p className="text-xs text-on-surface-variant/60">
             {[
@@ -111,11 +181,7 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
                     position: String(pathPosition(effective.pathIndex)),
                   })
                 : e.origins[effective.origin],
-              effective.managedBy
-                ? formatMessage(e.runtimes.managedByLabel, {
-                    manager: resolve('version-manager', effective.managedBy).name,
-                  })
-                : null,
+              pathSourceLabel(t, effective.pathSource),
               // A symlink chain is one row; the paths that reach it are an
               // affordance on that row, never extra rows.
               effectiveGroup && effectiveGroup.aliasCount > 1
@@ -136,16 +202,97 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
         </p>
       )}
 
+      {runtimeId && (processLine || toolchainSelection !== 'auto' || toolchain.isError) && (
+        <section className="space-y-1.5" data-testid="toolchain-status">
+          {processLine && <p className="text-xs text-on-surface-variant/60">{processLine}</p>}
+          {toolchainSelection !== 'auto' && (
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={toolchain.isPending}
+              onClick={resetToolchain}
+            >
+              {e.runtimes.backToAutomatic}
+            </Button>
+          )}
+          {toolchain.isError && (
+            <p className="text-xs text-error" role="alert">
+              {resolveApiErrorMessage(toolchain.error, e.runtimes.toolchainUpdateFailed)}
+            </p>
+          )}
+        </section>
+      )}
+
       <FindingList findings={status.findings} />
 
       {groups.length > 1 && (
         <section className="space-y-2">
           <CardSectionLabel>{e.runtimes.otherInstallations}</CardSectionLabel>
-          <InstallationList groups={groups.filter((group) => !group.effective)} />
+          <InstallationList
+            groups={groups.filter((group) => !group.effective)}
+            toolchain={
+              runtimeId
+                ? {
+                    selection: toolchainSelection,
+                    isPending: toolchain.isPending,
+                    onSelect: selectToolchain,
+                  }
+                : undefined
+            }
+          />
         </section>
       )}
 
       {children}
     </ToolCard>
+  );
+}
+
+/** fnm gets an extra line saying what it is; every runtime keeps its version count. */
+function runtimeSubtitle(
+  status: RuntimeStatus,
+  groups: ReturnType<typeof effectiveInstallation>['groups'],
+  e: Messages['environments']
+): React.ReactNode {
+  if (status.id !== 'fnm' && groups.length === 0) return undefined;
+  return (
+    <div className="space-y-0.5">
+      {status.id === 'fnm' && (
+        <p className="text-xs text-on-surface-variant/60">{e.runtimes.nodeVersionManager}</p>
+      )}
+      {groups.length > 0 && (
+        <p className="text-xs text-on-surface-variant/60">
+          {groups.length === 1
+            ? e.runtimes.singleVersion
+            : formatMessage(e.runtimes.versionCount, { count: String(groups.length) })}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Node whose effective binary came from a manager MangoStudio does not drive
+ * (Volta, a plain system install): stating that is the honest affordance,
+ * since no button here could change it.
+ */
+function renderManagedElsewhere(
+  source: PathSource,
+  t: Messages,
+  resolve: IdentityResolver
+): React.ReactNode {
+  // "Managed by {manager}" cannot carry a bare "the system" grammatically in
+  // every locale, so a plain system install gets its own full sentence
+  // instead of a name plugged into the template.
+  const text =
+    source === 'system'
+      ? t.environments.runtimes.managedBySystem
+      : formatMessage(t.environments.runtimes.managedElsewhere, {
+          manager: pathSourceManagerName(t, resolve, source),
+        });
+  return (
+    <p className="text-sm text-on-surface-variant/70" data-testid="node-managed-elsewhere">
+      {text}
+    </p>
   );
 }

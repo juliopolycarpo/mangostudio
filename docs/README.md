@@ -39,6 +39,7 @@ right depth quickly instead of scanning a flat list of files.
 - [`features/attachments.md`](./features/attachments.md)
 - [`features/image-generation.md`](./features/image-generation.md)
 - [`features/terminal.md`](./features/terminal.md)
+- [`features/environments.md`](./features/environments.md)
 
 ### Provider-specific notes
 

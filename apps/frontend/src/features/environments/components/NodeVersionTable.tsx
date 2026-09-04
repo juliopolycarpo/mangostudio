@@ -1,5 +1,6 @@
 /**
- * nvm-managed Node versions with their LTS standing.
+ * Managed Node versions with their LTS standing, for whichever version
+ * manager (nvm, fnm) the status belongs to.
  *
  * Colour follows one rule: yellow means an action exists next to it. A
  * superseded LTS is yellow because there is an install button; `current-release`
@@ -59,8 +60,11 @@ export function NodeVersionTable({ status, recipes, environmentId }: NodeVersion
   const managerInstallRecipe = recipes.find(
     (recipe) => recipe.runtimeId === status.id && recipe.action === 'install'
   );
-  const nodeInstallRecipe = recipes.find((recipe) => recipe.id === 'nvm.node.install');
-  const setDefaultRecipe = recipes.find((recipe) => recipe.id === 'nvm.node.set-default');
+  // Every manager names its Node recipes `<manager>.node.<action>` — read off
+  // `status.id` rather than hard-coding `nvm` so an fnm row offers fnm's own
+  // recipes instead of nvm's.
+  const nodeInstallRecipe = recipes.find((recipe) => recipe.id === `${status.id}.node.install`);
+  const setDefaultRecipe = recipes.find((recipe) => recipe.id === `${status.id}.node.set-default`);
 
   if (!status.installed) {
     return (

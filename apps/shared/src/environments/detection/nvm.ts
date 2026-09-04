@@ -1,19 +1,20 @@
 import { join } from 'node:path';
 import type { PathEnv } from '../../runtime-env';
-import type { ManagedVersion, RuntimeFinding, VersionManagerStatus } from '../schemas';
+import type { ManagedVersion, VersionManagerStatus } from '../schemas';
+import { type NodeReleaseSchedule, normalizeNodeVersion } from './lts-policy';
 import {
-  classifyNodeLtsStatus,
-  findNodeReleaseLine,
-  type NodeReleaseSchedule,
-  normalizeNodeVersion,
-  parseExactNodeVersion,
-} from './lts-policy';
+  compareVersionStrings,
+  createManagedVersionFindings,
+  findCurrentVersion,
+  listOptionalDirectory,
+  type ManagedVersionFileSystem,
+  preferNewerVersion,
+  readManagedVersions,
+  toManagedVersions,
+} from './version-manager-support';
 
-export interface NvmFileSystem {
-  readonly pathExists: (path: string) => boolean | Promise<boolean>;
+export interface NvmFileSystem extends ManagedVersionFileSystem {
   readonly readFile: (path: string) => Promise<string>;
-  readonly readDirectory: (path: string) => Promise<readonly string[]>;
-  readonly realpath: (path: string) => Promise<string>;
 }
 
 export interface NvmDetectionOptions {
@@ -35,45 +36,19 @@ interface NvmAliasCache {
   readonly latestByMajor: ReadonlyMap<number, string>;
 }
 
-const VERSION_DIRECTORY_PATTERN = /^v?(\d+\.\d+\.\d+)$/;
-const SAFE_ALIAS_PATTERN = /^[a-zA-Z0-9_.*/-]+$/;
+/**
+ * The characters an nvm alias name or value may use. Two callers rely on it:
+ * the alias cache skips anything else, and the runtime's spawn-env refuses to
+ * join a rejected value onto `$NVM_DIR/alias` — so the rule that decides which
+ * aliases exist and the rule that decides which are safe to read are one.
+ */
+export const SAFE_NVM_ALIAS_PATTERN = /^[a-zA-Z0-9_.*/-]+$/;
 
 async function readOptionalFile(fs: NvmFileSystem, path: string): Promise<string | undefined> {
   try {
     return await fs.readFile(path);
   } catch {
     return undefined;
-  }
-}
-
-async function listOptionalDirectory(fs: NvmFileSystem, path: string): Promise<readonly string[]> {
-  try {
-    return await fs.readDirectory(path);
-  } catch {
-    return [];
-  }
-}
-
-function normalizedPath(path: string, platform: string): string {
-  const normalized = path.replaceAll('\\', '/').replace(/\/+$/, '');
-  return platform === 'win32' ? normalized.toLowerCase() : normalized;
-}
-
-function compareVersionStrings(left: string, right: string): number {
-  const leftVersion = parseExactNodeVersion(left);
-  const rightVersion = parseExactNodeVersion(right);
-  if (!leftVersion || !rightVersion) return left.localeCompare(right);
-  if (leftVersion.major !== rightVersion.major) return leftVersion.major - rightVersion.major;
-  if (leftVersion.minor !== rightVersion.minor) return leftVersion.minor - rightVersion.minor;
-  return leftVersion.patch - rightVersion.patch;
-}
-
-function preferNewerVersion(latestByMajor: Map<number, string>, versionValue: string): void {
-  const version = parseExactNodeVersion(versionValue);
-  if (!version) return;
-  const existing = latestByMajor.get(version.major);
-  if (!existing || compareVersionStrings(versionValue, existing) > 0) {
-    latestByMajor.set(version.major, versionValue);
   }
 }
 
@@ -105,12 +80,12 @@ async function readNvmAliasCache(root: string, fs: NvmFileSystem): Promise<NvmAl
   const latestByMajor = new Map<number, string>();
 
   for (const aliasName of await listOptionalDirectory(fs, aliasRoot)) {
-    if (!SAFE_ALIAS_PATTERN.test(aliasName)) continue;
+    if (!SAFE_NVM_ALIAS_PATTERN.test(aliasName)) continue;
     const value = (await readOptionalFile(fs, join(aliasRoot, aliasName)))?.trim();
     if (!value) continue;
     const version = normalizeNodeVersion(value);
     if (!version) {
-      if (SAFE_ALIAS_PATTERN.test(value))
+      if (SAFE_NVM_ALIAS_PATTERN.test(value))
         pointers.set(aliasName.toLowerCase(), value.toLowerCase());
       continue;
     }
@@ -121,29 +96,14 @@ async function readNvmAliasCache(root: string, fs: NvmFileSystem): Promise<NvmAl
   return { aliases, pointers, latestByMajor };
 }
 
-async function readInstalledVersions(
+function readInstalledVersions(
   root: string,
   deps: NvmDetectionDeps
 ): Promise<Array<{ version: string; path: string }>> {
   const versionsRoot = join(root, 'versions', 'node');
-  const versions: Array<{ version: string; path: string }> = [];
-
-  for (const entry of await listOptionalDirectory(deps.fs, versionsRoot)) {
-    const match = VERSION_DIRECTORY_PATTERN.exec(entry);
-    if (!match) continue;
-    const nodePath = join(versionsRoot, entry, 'bin', 'node');
-    if (!(await deps.fs.pathExists(nodePath))) continue;
-
-    let resolvedPath = nodePath;
-    try {
-      resolvedPath = await deps.fs.realpath(nodePath);
-    } catch {
-      // The binary exists, so retain its stable layout path when realpath fails.
-    }
-    versions.push({ version: match[1] as string, path: resolvedPath });
-  }
-
-  return versions.sort((left, right) => compareVersionStrings(right.version, left.version));
+  return readManagedVersions(deps.fs, versionsRoot, (entry) =>
+    join(versionsRoot, entry, 'bin', 'node')
+  );
 }
 
 function highestVersion(versions: readonly { version: string }[]): string | undefined {
@@ -200,36 +160,6 @@ function mergeLatestVersions(
   return latestByMajor;
 }
 
-function createFindings(
-  defaultAlias: string | undefined,
-  defaultVersion: string | undefined,
-  currentVersion: string | undefined,
-  versions: readonly ManagedVersion[]
-): RuntimeFinding[] {
-  const findings: RuntimeFinding[] = [];
-  if (defaultAlias && !currentVersion) {
-    findings.push({
-      code: 'managed-but-not-on-path',
-      params: {
-        manager: 'nvm',
-        defaultAlias,
-        ...(defaultVersion !== undefined && { defaultVersion }),
-      },
-    });
-  }
-
-  for (const version of versions) {
-    if (version.ltsStatus !== 'lts-outdated-patch' && version.ltsStatus !== 'lts-superseded') {
-      continue;
-    }
-    findings.push({
-      code: 'outdated-lts',
-      params: { version: version.version, ltsStatus: version.ltsStatus },
-    });
-  }
-  return findings;
-}
-
 export async function detectNvm(
   deps: NvmDetectionDeps,
   options: NvmDetectionOptions
@@ -254,26 +184,18 @@ export async function detectNvm(
   const defaultVersion = resolveDefaultAlias(defaultAlias, aliasCache, installedVersions);
   const managerVersion = nvmScript ? parseNvmVersion(nvmScript) : undefined;
   const latestByMajor = mergeLatestVersions(aliasCache, options.latestByMajor);
-  const currentPath = options.currentNodePath
-    ? normalizedPath(options.currentNodePath, deps.platform)
-    : undefined;
-  const currentVersion = installedVersions.find(
-    (version) => normalizedPath(version.path, deps.platform) === currentPath
-  )?.version;
-  const versions: ManagedVersion[] = installedVersions.map((version) => {
-    const releaseLine = findNodeReleaseLine(options.schedule, version.version);
-    return {
-      version: version.version,
-      path: version.path,
-      isDefault: version.version === defaultVersion,
-      isCurrent: version.version === currentVersion,
-      ltsStatus: classifyNodeLtsStatus(version.version, options.schedule, {
-        now: options.now,
-        latestByMajor,
-        liveDataAvailable: options.liveDataAvailable,
-      }),
-      ...(releaseLine?.codename !== undefined && { ltsCodename: releaseLine.codename }),
-    };
+  const currentVersion = findCurrentVersion(
+    installedVersions,
+    options.currentNodePath,
+    deps.platform
+  );
+  const versions: ManagedVersion[] = toManagedVersions(installedVersions, {
+    schedule: options.schedule,
+    now: options.now,
+    latestByMajor,
+    liveDataAvailable: options.liveDataAvailable,
+    defaultVersion,
+    currentVersion,
   });
 
   return {
@@ -285,6 +207,12 @@ export async function detectNvm(
     ...(defaultAlias !== undefined && { defaultAlias }),
     ...(defaultVersion !== undefined && { defaultVersion }),
     ...(currentVersion !== undefined && { currentVersion }),
-    findings: createFindings(defaultAlias, defaultVersion, currentVersion, versions),
+    findings: createManagedVersionFindings(
+      'nvm',
+      defaultAlias,
+      defaultVersion,
+      currentVersion,
+      versions
+    ),
   };
 }

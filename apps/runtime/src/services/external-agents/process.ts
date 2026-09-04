@@ -21,6 +21,12 @@ const BASE_ENVIRONMENT_KEYS = new Set([
   'LC_ALL',
   'LC_CTYPE',
   'NO_COLOR',
+  // Version-manager roots the spawn-env builder records beside the PATH prefix
+  // it chose. Locations, not credentials: a vendor CLI that shells out to
+  // `nvm`/`fnm` needs them to agree with the Node it was started with.
+  'NVM_DIR',
+  'FNM_DIR',
+  'BUN_INSTALL',
   // Required for ordinary process creation on Windows. These are operating
   // system paths and command metadata, not application configuration.
   'SystemRoot',

@@ -2734,6 +2734,8 @@ export const messages: Messages = {
       node: 'Node.js',
       nvm: 'nvm',
       fnm: 'fnm',
+      winget: 'winget',
+      git: 'Git',
       volta: 'Volta',
       mangostudio: 'MangoStudio',
       claude: 'Claude Code',
@@ -2852,6 +2854,42 @@ export const messages: Messages = {
       libraryPresent: '{count} present',
       libraryDivergent: '{count} divergent',
       libraryNone: 'Reads nothing yet',
+      // The overview's "before you start" checklist. Every row reads state the
+      // Toolchains, Agents, and This machine tabs already fetch — there is no
+      // dedicated endpoint behind this section.
+      setup: {
+        title: 'Setup',
+        description: 'What a new machine needs before agents can run on it.',
+        status: {
+          done: 'Done',
+          todo: 'To do',
+          optional: 'Optional',
+        },
+        git: {
+          label: 'Git',
+          explanation: 'Agents use Git to inspect history and commit their own changes.',
+        },
+        node: {
+          label: 'A current Node.js',
+          explanation: 'Some agent CLIs and MCP servers need a supported Node.js LTS to run.',
+        },
+        bun: {
+          label: 'Bun',
+          explanation:
+            'MangoStudio itself runs on Bun. Optional here unless one of your agents needs it too.',
+        },
+        agent: {
+          label: 'An agent CLI, signed in',
+          explanation:
+            'At least one agent CLI must be installed and signed in before you can chat.',
+        },
+        hubService: {
+          label: 'MangoStudio running as a service',
+          explanation: 'A per-user service keeps MangoStudio running after you close its window.',
+        },
+        gitDarwinRemedy: 'Run this in a terminal:',
+        gitLinuxRemedy: "Install it with your Linux distribution's package manager.",
+      },
     },
     entities: {
       title: 'Execution environments',
@@ -2900,6 +2938,11 @@ export const messages: Messages = {
       platform: '{platform} · {arch}',
       runtimeVersionDrift:
         'This machine runs runtime {version}, which is not the release this MangoStudio ships. It still connects; update the runtime there when you can.',
+      // The toolchain summary line: what this machine's shell resolves for
+      // Node and Bun, at a glance.
+      toolchainSummaryNode: 'Node {version} ({source})',
+      toolchainSummaryBun: 'Bun {version}',
+      toolchainSummaryMissing: '{runtime} not installed',
       permissions: {
         title: 'Permissions',
         profile: {
@@ -3281,8 +3324,39 @@ export const messages: Messages = {
       notInstalled: '{runtime} is not installed yet.',
       install: 'Install {runtime}',
       update: 'Update {runtime}',
+      uninstall: 'Uninstall {runtime}',
       empty: 'No runtimes were detected on this machine.',
       emptyHint: 'MangoStudio can set up whatever is missing for you.',
+      // For a manager MangoStudio can name: Volta, Bun, itself.
+      managedElsewhere: 'Managed by {manager}, not by MangoStudio.',
+      // For a plain system install, which has no name to plug into the
+      // template above ("Managed by the system" reads fine in English, but
+      // the equivalent does not hold in every locale — this is its own
+      // sentence rather than a {manager} value).
+      managedBySystem: 'A system install, not managed by MangoStudio.',
+      nodeVersionManager: 'Node version manager',
+      prerequisiteHint:
+        'A Windows package manager MangoStudio uses to run other install recipes, not something it installs itself.',
+      useThisVersion: 'Use this version',
+      selected: 'Selected',
+      backToAutomatic: 'Back to automatic',
+      toolchainAuto: 'Processes run the automatic choice: {version} from {source}.',
+      // For a plain system install, which has no name to plug into the
+      // template above — same reasoning as `managedBySystem`.
+      toolchainAutoSystem: 'Processes run the automatic choice: {version}, a system install.',
+      toolchainPinned: 'Processes run {version} from {path}.',
+      toolchainUpdateFailed: 'The toolchain selection could not be updated.',
+    },
+    // Where an installation's binary was found to come from, appended to the
+    // effective-installation line. Every `PathSource` literal has an entry.
+    pathSources: {
+      system: 'system install',
+      nvm: 'from nvm',
+      fnm: 'from fnm',
+      volta: 'from Volta',
+      winget: 'from winget',
+      bun: "from Bun's installer",
+      'mangostudio-managed': 'managed by MangoStudio',
     },
     versions: {
       title: 'Managed by {manager}',
@@ -3330,6 +3404,8 @@ export const messages: Messages = {
         '{path} reported a version that was not recognized, so compatibility checks are skipped.',
       'location-unwritable':
         '{path} is not writable, so MangoStudio cannot publish resources to {locationId}.',
+      'prerequisite-missing':
+        '{recipe} needs {requirement}, which is not installed on this machine. {remedy}',
     },
     agents: {
       description: 'Each agent CLI, the configuration it reads, and where the Library can write.',
@@ -3363,6 +3439,16 @@ export const messages: Messages = {
     install: {
       confirmTitle: 'Run install',
       confirmDescription: 'This runs a command on this machine. Review it before continuing.',
+      confirmUninstallTitle: 'Remove {target}?',
+      confirmUninstallDescription:
+        'This removes {paths} from this machine. Review it before continuing.',
+      runUninstall: 'Remove',
+      // Shown instead of a run button when a recipe has no vendor-documented
+      // unattended shape — the copyable command is the whole offer.
+      unrunnable: {
+        'vendor-undocumented':
+          'The vendor does not document this step, so MangoStudio only shows the command.',
+      },
       commandLabel: 'Command',
       willWrite: 'Writes to',
       requiresNetwork: 'Requires network access',
@@ -3419,6 +3505,19 @@ export const messages: Messages = {
           'This environment has not been trusted with installs. Turn it on for that machine, on its card in Environments.',
         'runtime-denied':
           'That machine refuses shell, which every install needs. Run mangostudio-runtime setup there and grant shell, or install by hand.',
+      },
+      enableInstalls: {
+        button: 'Enable installs on this machine',
+        title: 'Enable installs on this machine?',
+        description:
+          'MangoStudio will accept guarded install and update commands sent from a browser on this machine.',
+        threatModel:
+          'Enable this only for a MangoStudio process running on the same machine as its user. The setting does not override the local-surface checks that still apply.',
+        confirm: 'Enable',
+        success: 'Installs are enabled on this machine now. Try again.',
+        envOverride:
+          'An environment variable still overrides this setting, so installs stay off. Unset MANGO_ENV_INSTALLS_ENABLED, or set it to true, then try again.',
+        failed: 'The setting could not be saved.',
       },
     },
   },

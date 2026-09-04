@@ -2737,6 +2737,8 @@ export const messages = {
       node: 'Node.js',
       nvm: 'nvm',
       fnm: 'fnm',
+      winget: 'winget',
+      git: 'Git',
       volta: 'Volta',
       mangostudio: 'MangoStudio',
       claude: 'Claude Code',
@@ -2855,6 +2857,44 @@ export const messages = {
       libraryPresent: '{count} presentes',
       libraryDivergent: '{count} divergentes',
       libraryNone: 'Ainda não lê nada',
+      // A checklist "antes de começar" da visão geral. Cada linha lê o estado
+      // que as abas Toolchains, Agentes e Esta máquina já buscam — não há um
+      // endpoint dedicado por trás desta seção.
+      setup: {
+        title: 'Configuração',
+        description: 'O que uma máquina nova precisa antes de rodar agentes nela.',
+        status: {
+          done: 'Concluído',
+          todo: 'Pendente',
+          optional: 'Opcional',
+        },
+        git: {
+          label: 'Git',
+          explanation: 'Os agentes usam o Git para inspecionar o histórico e fazer seus commits.',
+        },
+        node: {
+          label: 'Um Node.js atual',
+          explanation:
+            'Algumas CLIs de agente e servidores MCP precisam de um LTS suportado do Node.js.',
+        },
+        bun: {
+          label: 'Bun',
+          explanation:
+            'O próprio MangoStudio roda em Bun. Opcional aqui, a menos que um dos seus agentes também precise dele.',
+        },
+        agent: {
+          label: 'Uma CLI de agente, autenticada',
+          explanation:
+            'Pelo menos uma CLI de agente precisa estar instalada e autenticada antes de você conversar.',
+        },
+        hubService: {
+          label: 'MangoStudio rodando como serviço',
+          explanation:
+            'Um serviço por usuário mantém o MangoStudio rodando depois que você fecha a janela dele.',
+        },
+        gitDarwinRemedy: 'Rode isto em um terminal:',
+        gitLinuxRemedy: 'Instale com o gerenciador de pacotes da sua distribuição Linux.',
+      },
     },
     entities: {
       title: 'Ambientes de execução',
@@ -2903,6 +2943,11 @@ export const messages = {
       platform: '{platform} · {arch}',
       runtimeVersionDrift:
         'Esta máquina roda o runtime {version}, que não é a versão distribuída por este MangoStudio. A conexão continua funcionando; atualize o runtime lá quando possível.',
+      // A linha-resumo do toolchain: o que o shell desta máquina resolve
+      // para Node e Bun, em um relance.
+      toolchainSummaryNode: 'Node {version} ({source})',
+      toolchainSummaryBun: 'Bun {version}',
+      toolchainSummaryMissing: '{runtime} não instalado',
       permissions: {
         title: 'Permissões',
         profile: {
@@ -3286,8 +3331,38 @@ export const messages = {
       notInstalled: '{runtime} ainda não está instalado.',
       install: 'Instalar {runtime}',
       update: 'Atualizar {runtime}',
+      uninstall: 'Desinstalar {runtime}',
       empty: 'Nenhum runtime foi detectado nesta máquina.',
       emptyHint: 'O MangoStudio pode instalar o que estiver faltando por você.',
+      managedElsewhere: 'Gerenciado por {manager}, não pelo MangoStudio.',
+      // Para uma instalação simples do sistema, que não tem um nome para
+      // encaixar no modelo acima — é a sua própria frase, não um valor de
+      // {manager} (evita a concordância "por o sistema").
+      managedBySystem: 'Uma instalação do sistema, não gerenciada pelo MangoStudio.',
+      nodeVersionManager: 'Gerenciador de versões do Node',
+      prerequisiteHint:
+        'Um gerenciador de pacotes do Windows que o MangoStudio usa para rodar outras receitas de instalação, não algo que ele instala sozinho.',
+      useThisVersion: 'Usar esta versão',
+      selected: 'Selecionado',
+      backToAutomatic: 'Voltar ao automático',
+      toolchainAuto: 'Os processos rodam a escolha automática: {version} via {source}.',
+      // Para uma instalação simples do sistema, que não tem um nome para
+      // encaixar no modelo acima — mesmo motivo de `managedBySystem`.
+      toolchainAutoSystem:
+        'Os processos rodam a escolha automática: {version}, uma instalação do sistema.',
+      toolchainPinned: 'Os processos rodam {version} a partir de {path}.',
+      toolchainUpdateFailed: 'A seleção de toolchain não pôde ser atualizada.',
+    },
+    // De onde o binário de uma instalação veio, anexado à linha da instalação
+    // efetiva. Toda literal de `PathSource` tem uma entrada.
+    pathSources: {
+      system: 'instalação do sistema',
+      nvm: 'via nvm',
+      fnm: 'via fnm',
+      volta: 'via Volta',
+      winget: 'via winget',
+      bun: 'via instalador do Bun',
+      'mangostudio-managed': 'gerenciado pelo MangoStudio',
     },
     versions: {
       title: 'Gerenciado por {manager}',
@@ -3337,6 +3412,8 @@ export const messages = {
         '{path} respondeu com uma versão que não foi reconhecida; as checagens de compatibilidade ficam de fora.',
       'location-unwritable':
         '{path} não é gravável, então o MangoStudio não consegue publicar recursos em {locationId}.',
+      'prerequisite-missing':
+        '{recipe} precisa de {requirement}, que não está instalado nesta máquina. {remedy}',
     },
     agents: {
       description:
@@ -3371,6 +3448,16 @@ export const messages = {
     install: {
       confirmTitle: 'Executar instalação',
       confirmDescription: 'Isto roda um comando nesta máquina. Confira antes de continuar.',
+      confirmUninstallTitle: 'Remover {target}?',
+      confirmUninstallDescription: 'Isto remove {paths} desta máquina. Confira antes de continuar.',
+      runUninstall: 'Remover',
+      // Mostrado no lugar do botão de executar quando a receita não tem uma
+      // forma documentada pelo fabricante para rodar sem interação — o comando
+      // copiável é a única oferta.
+      unrunnable: {
+        'vendor-undocumented':
+          'O fabricante não documenta esta etapa, então o MangoStudio só mostra o comando.',
+      },
       commandLabel: 'Comando',
       willWrite: 'Vai escrever em',
       requiresNetwork: 'Requer acesso à rede',
@@ -3427,6 +3514,19 @@ export const messages = {
           'Este ambiente não foi autorizado a instalar. Ative essa opção para a máquina em questão, no cartão dela em Ambientes.',
         'runtime-denied':
           'Essa máquina recusa shell, e toda instalação precisa dele. Execute mangostudio-runtime setup lá e conceda shell, ou instale manualmente.',
+      },
+      enableInstalls: {
+        button: 'Ativar instalações nesta máquina',
+        title: 'Ativar instalações nesta máquina?',
+        description:
+          'O MangoStudio vai aceitar comandos protegidos de instalação e atualização enviados por um navegador nesta máquina.',
+        threatModel:
+          'Ative isto apenas para um processo do MangoStudio rodando na mesma máquina do seu usuário. A configuração não substitui as verificações de superfície local que continuam valendo.',
+        confirm: 'Ativar',
+        success: 'As instalações estão ativadas nesta máquina agora. Tente de novo.',
+        envOverride:
+          'Uma variável de ambiente ainda substitui essa configuração, então as instalações continuam desativadas. Remova MANGO_ENV_INSTALLS_ENABLED, ou defina como true, e tente de novo.',
+        failed: 'Não foi possível salvar a configuração.',
       },
     },
   },
