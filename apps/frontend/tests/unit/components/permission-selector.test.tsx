@@ -18,12 +18,31 @@ function open(
     configurations,
     level: 'default' as const,
     routing: 'user' as const,
+    targetId: 'claude' as const,
     onChange: jest.fn(),
     ...overrides,
   };
   const result = render(<PermissionSelector {...props} />);
   fireEvent.click(screen.getByRole('button', { name: /permissions/i }));
   return { ...result, props };
+}
+
+/**
+ * The panel with the two axes revealed.
+ *
+ * Presets are what the panel opens on now, so a test about the matrix has to
+ * say so. Expanding here rather than weakening the assertions keeps these tests
+ * about what they were always about — that two free controls can never compose
+ * a pair no vendor offers.
+ */
+function openMatrix(
+  configurations: readonly ExternalSupportedConfiguration[],
+  overrides: Partial<React.ComponentProps<typeof PermissionSelector>> = {}
+) {
+  const opened = open(configurations, overrides);
+  const advanced = screen.queryByRole('button', { name: /Fine-tune/ });
+  if (advanced) fireEvent.click(advanced);
+  return opened;
 }
 
 const FULL_MATRIX: ExternalSupportedConfiguration[] = [
@@ -35,7 +54,7 @@ const FULL_MATRIX: ExternalSupportedConfiguration[] = [
 
 describe('permission selector', () => {
   it('renders only the levels and routings the adapter returned', () => {
-    open([
+    openMatrix([
       { level: 'read-only', routing: 'user', supported: true, unattended: false },
       { level: 'default', routing: 'user', supported: true, unattended: false },
     ]);
@@ -52,6 +71,7 @@ describe('permission selector', () => {
         configurations={[]}
         level="read-only"
         routing="user"
+        targetId="claude"
         onChange={jest.fn()}
       />
     );
@@ -59,7 +79,7 @@ describe('permission selector', () => {
   });
 
   it('disables an unsupported pair and shows it as a policy refusal', () => {
-    open([
+    openMatrix([
       { level: 'default', routing: 'user', supported: true, unattended: false },
       {
         level: 'full-access',
@@ -77,7 +97,7 @@ describe('permission selector', () => {
   });
 
   it('falls back to a generic refusal for a reason key it does not know', () => {
-    open([
+    openMatrix([
       { level: 'default', routing: 'user', supported: true, unattended: false },
       {
         level: 'full-access',
@@ -91,14 +111,21 @@ describe('permission selector', () => {
   });
 
   it('warns on full access and on auto-review, and nowhere else', () => {
-    open(FULL_MATRIX);
-    expect(screen.getByText(/can edit and run anything/i)).toBeInTheDocument();
+    openMatrix(FULL_MATRIX);
     expect(screen.getByText(/answered without you/i)).toBeInTheDocument();
-    expect(screen.queryAllByText(/can edit and run anything/i)).toHaveLength(1);
+    // Twice, and both are wanted: the `Autonomous` preset resolves to an
+    // unattended pair, so it carries the same warning the axis row does.
+    // Understating it in the control most people will actually use is the one
+    // place in this UI where softening the language is dangerous.
+    expect(screen.queryAllByText(/can edit and run anything/i)).toHaveLength(2);
+    // Still nowhere near the levels that do stop and ask.
+    expect(screen.queryAllByText(/can edit and run anything/i).length).toBeLessThan(
+      screen.getAllByRole('button').length
+    );
   });
 
   it('moves the other axis to something composable rather than to an unsupported pair', () => {
-    const { props } = open([
+    const { props } = openMatrix([
       { level: 'read-only', routing: 'user', supported: true, unattended: false },
       { level: 'full-access', routing: 'auto-review', supported: true, unattended: true },
       { level: 'full-access', routing: 'user', supported: false, unattended: true },
@@ -111,7 +138,7 @@ describe('permission selector', () => {
   });
 
   it('marks the pair the chat is actually on', () => {
-    open(FULL_MATRIX, { level: 'full-access', routing: 'user' });
+    openMatrix(FULL_MATRIX, { level: 'full-access', routing: 'user' });
     expect(screen.getByRole('button', { name: /Allow everything/ })).toHaveAttribute(
       'aria-pressed',
       'true'
@@ -120,5 +147,94 @@ describe('permission selector', () => {
       'aria-pressed',
       'false'
     );
+  });
+});
+
+/**
+ * Presets are the control a non-expert actually uses; the matrix underneath is
+ * for everyone else. What is tested here is that a preset never offers a pair
+ * the vendor cannot run, and that picking one writes the same thing the matrix
+ * would have.
+ */
+describe('permission presets', () => {
+  it('offers a named choice instead of two axes', () => {
+    open(FULL_MATRIX, { targetId: 'claude' });
+
+    expect(screen.getByRole('button', { name: /Careful/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Balanced/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Autonomous/ })).toBeInTheDocument();
+    // The matrix is still there, behind a disclosure rather than removed.
+    expect(screen.queryByText('What it can do')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Fine-tune/ }));
+    expect(screen.getByText('What it can do')).toBeInTheDocument();
+  });
+
+  it('writes the pair the matrix would have written', () => {
+    const { props } = open(FULL_MATRIX, { targetId: 'claude' });
+
+    fireEvent.click(screen.getByRole('button', { name: /Careful/ }));
+
+    expect(props.onChange).toHaveBeenCalledWith({ level: 'read-only', routing: 'user' });
+  });
+
+  /**
+   * A preset with no supported candidate is not offered at all. A control that
+   * cannot work is worse than one that is not there — it reads as a MangoStudio
+   * fault rather than as something this vendor does not do.
+   */
+  it('hides a preset this vendor supports no pair for', () => {
+    open(
+      [
+        { level: 'default', routing: 'user', supported: true, unattended: false },
+        { level: 'full-access', routing: 'user', supported: false, unattended: true },
+      ],
+      { targetId: 'claude' }
+    );
+
+    expect(screen.getByRole('button', { name: /Balanced/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Autonomous/ })).toBeNull();
+  });
+
+  /**
+   * The same preset is a different pair on different vendors, so the fallback
+   * candidate has to be reachable: Claude's `auto-review` is an account-gated
+   * classifier, and a vendor offering only that must still get `Autonomous`.
+   */
+  it('falls back to the next candidate pair a vendor does support', () => {
+    const { props } = open(
+      [
+        { level: 'default', routing: 'user', supported: true, unattended: false },
+        { level: 'full-access', routing: 'user', supported: false, unattended: true },
+        { level: 'default', routing: 'auto-review', supported: true, unattended: true },
+      ],
+      { targetId: 'claude' }
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Autonomous/ }));
+
+    expect(props.onChange).toHaveBeenCalledWith({ level: 'default', routing: 'auto-review' });
+  });
+
+  /** A pair no preset names is a deliberate custom choice, so the matrix opens. */
+  it('opens the matrix for a pair no preset covers', () => {
+    open(
+      [
+        ...FULL_MATRIX,
+        { level: 'read-only', routing: 'auto-review', supported: true, unattended: false },
+      ],
+      {
+        targetId: 'claude',
+        level: 'read-only',
+        routing: 'auto-review',
+      }
+    );
+
+    expect(screen.getByText('What it can do')).toBeInTheDocument();
+  });
+
+  it('says what the preset means for this vendor', () => {
+    open(FULL_MATRIX, { targetId: 'codex' });
+
+    expect(screen.getByText(/read-only sandbox/)).toBeInTheDocument();
   });
 });

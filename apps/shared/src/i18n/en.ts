@@ -3710,6 +3710,41 @@ export const messages: Messages = {
         user: 'You answer each request.',
         'auto-review': 'The agent reviews its own requests.',
       },
+      /** Named choices, for people who should not have to learn the matrix. */
+      advanced: 'Fine-tune',
+      presetHeading: 'How much should it bother you',
+      preset: {
+        careful: {
+          label: 'Careful',
+          description: 'Reads only. Nothing changes unless you ask again.',
+        },
+        balanced: {
+          label: 'Balanced',
+          description: 'Changes the workspace and asks before anything riskier.',
+        },
+        autonomous: {
+          label: 'Autonomous',
+          description: 'Keeps going on its own, without stopping to ask.',
+        },
+      },
+      /** What each preset means for this vendor specifically. */
+      presetVendor: {
+        careful: {
+          claude: 'Claude enters plan mode and refuses changes.',
+          codex: 'Codex runs in a read-only sandbox.',
+          cursor: 'Cursor stays in plan mode.',
+        },
+        balanced: {
+          claude: 'Claude asks permission for every change outside what was agreed.',
+          codex: 'Codex writes in the workspace and asks permission for the rest.',
+          cursor: 'Cursor writes in the workspace and asks before the rest.',
+        },
+        autonomous: {
+          claude: 'Claude acts without asking, including outside the workspace.',
+          codex: 'Codex acts without asking, including outside the sandbox.',
+          cursor: 'Cursor acts without asking, including outside the workspace.',
+        },
+      },
     },
     workspaceTrust: {
       title: 'Let this agent read this folder\u2019s own setup?',

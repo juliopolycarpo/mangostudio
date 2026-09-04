@@ -3706,6 +3706,41 @@ export const messages = {
         user: 'Você responde cada pedido.',
         'auto-review': 'O agente revisa os próprios pedidos.',
       },
+      /** Escolhas nomeadas para quem não quer aprender a matriz. */
+      advanced: 'Ajuste fino',
+      presetHeading: 'Quanto ele deve te incomodar',
+      preset: {
+        careful: {
+          label: 'Cauteloso',
+          description: 'Só lê. Nada é alterado sem você pedir de novo.',
+        },
+        balanced: {
+          label: 'Equilibrado',
+          description: 'Altera o workspace e pergunta antes de qualquer coisa mais arriscada.',
+        },
+        autonomous: {
+          label: 'Autônomo',
+          description: 'Segue sozinho, sem parar para perguntar.',
+        },
+      },
+      /** O que cada preset significa para este fornecedor especificamente. */
+      presetVendor: {
+        careful: {
+          claude: 'O Claude entra em modo de planejamento e recusa alterações.',
+          codex: 'O Codex roda numa sandbox somente leitura.',
+          cursor: 'O Cursor fica no modo de planejamento.',
+        },
+        balanced: {
+          claude: 'O Claude pede permissão para cada alteração fora do combinado.',
+          codex: 'O Codex escreve no workspace e pede permissão para o resto.',
+          cursor: 'O Cursor escreve no workspace e pergunta antes do resto.',
+        },
+        autonomous: {
+          claude: 'O Claude age sem perguntar, inclusive fora do workspace.',
+          codex: 'O Codex age sem perguntar, inclusive fora da sandbox.',
+          cursor: 'O Cursor age sem perguntar, inclusive fora do workspace.',
+        },
+      },
     },
     workspaceTrust: {
       title: 'Permitir que este agente leia a configura\u00e7\u00e3o desta pasta?',

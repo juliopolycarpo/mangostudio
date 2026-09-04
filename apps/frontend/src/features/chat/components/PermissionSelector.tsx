@@ -15,9 +15,18 @@
  * The unattended warning applies to `full-access` *and* to `auto-review`. Both
  * mean the agent proceeds without the user; softening either would be the one
  * place in this UI where understating the risk is actively dangerous.
+ *
+ * **Presets sit above the matrix, and the matrix moves behind a disclosure.**
+ * Two axes is an honest model and also two questions a non-expert did not ask;
+ * what they want to say is how much the agent should bother them. The matrix is
+ * not removed — it is what anyone who does want the axes reaches for, and it is
+ * what a stored custom pair is edited with. The disclosure lives inside this
+ * component's own panel because the design system has no popover to nest, and
+ * generalizing the hand-rolled one here is cheaper than adding one.
  */
 
 import type {
+  ExternalAgentTargetId,
   ExternalApprovalRouting,
   ExternalPermissionLevel,
   ExternalSupportedConfiguration,
@@ -25,6 +34,9 @@ import type {
 import {
   EXTERNAL_APPROVAL_ROUTINGS,
   EXTERNAL_PERMISSION_LEVELS,
+  EXTERNAL_PERMISSION_PRESETS,
+  externalPresetFor,
+  externalPresetPair,
 } from '@mangostudio/shared/external-agents';
 import { AlertTriangle, Check, ChevronDown, Lock } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -35,6 +47,8 @@ export interface PermissionSelectorProps {
   /** The effective pair once a session exists, not the requested one. */
   level: ExternalPermissionLevel;
   routing: ExternalApprovalRouting;
+  /** Needed for the per-vendor line: `careful` is a sandbox here and plan mode there. */
+  targetId: ExternalAgentTargetId;
   disabled?: boolean;
   onChange: (next: { level: ExternalPermissionLevel; routing: ExternalApprovalRouting }) => void;
 }
@@ -43,12 +57,19 @@ export function PermissionSelector({
   configurations,
   level,
   routing,
+  targetId,
   disabled = false,
   onChange,
 }: PermissionSelectorProps) {
   const { t } = useI18n();
   const labels = t.externalAgents.permission;
   const [open, setOpen] = useState(false);
+  // A pair no preset names is a deliberate custom choice, so the axes it was
+  // made with are what should be on screen — telling that user their setting
+  // vanished would be worse than showing one more control. Initialized here
+  // rather than beside the preset list below, because that sits after the
+  // component's early return and a hook may not.
+  const [showMatrix, setShowMatrix] = useState(externalPresetFor({ level, routing }) === undefined);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -105,6 +126,15 @@ export function PermissionSelector({
   const active = find(level, routing);
   const unattended = active?.unattended === true;
 
+  // Only presets this vendor can actually run. One with no supported candidate
+  // is absent rather than disabled: a control that cannot work reads as a
+  // MangoStudio fault, not as something this vendor does not do.
+  const presets = EXTERNAL_PERMISSION_PRESETS.flatMap((preset) => {
+    const pair = externalPresetPair(preset, configurations);
+    return pair ? [{ id: preset.id, pair }] : [];
+  });
+  const selectedPreset = externalPresetFor({ level, routing });
+
   return (
     <div ref={containerRef} className="relative flex items-center">
       <button
@@ -132,41 +162,85 @@ export function PermissionSelector({
 
       {open ? (
         <div className="absolute bottom-full z-50 mb-2 w-80 space-y-3 rounded-2xl border border-outline-variant/15 bg-surface-container-low p-3 shadow-2xl">
-          <Axis heading={labels.whatItCanDo}>
-            {levels.map((candidate) => {
-              const configuration = find(candidate, routingFor(candidate));
-              return (
+          {presets.length > 0 ? (
+            <Axis heading={labels.presetHeading}>
+              {presets.map((preset) => (
                 <Option
-                  key={candidate}
-                  name={labels.levelName[candidate]}
-                  description={labels.level[candidate]}
-                  selected={level === candidate}
-                  supported={configuration?.supported === true}
-                  unsupportedReason={reasonText(configuration, t)}
-                  warning={configuration?.unattended ? labels.unattendedLevelWarning : null}
-                  onSelect={() => onChange({ level: candidate, routing: routingFor(candidate) })}
+                  key={preset.id}
+                  name={labels.preset[preset.id].label}
+                  description={`${labels.preset[preset.id].description} ${
+                    labels.presetVendor[preset.id][targetId]
+                  }`}
+                  selected={selectedPreset === preset.id}
+                  supported
+                  unsupportedReason={null}
+                  warning={
+                    find(preset.pair.level, preset.pair.routing)?.unattended
+                      ? labels.unattendedLevelWarning
+                      : null
+                  }
+                  onSelect={() => onChange(preset.pair)}
                 />
-              );
-            })}
-          </Axis>
+              ))}
+            </Axis>
+          ) : null}
 
-          <Axis heading={labels.whoApproves}>
-            {routings.map((candidate) => {
-              const configuration = find(levelFor(candidate), candidate);
-              return (
-                <Option
-                  key={candidate}
-                  name={labels.routingName[candidate]}
-                  description={labels.routing[candidate]}
-                  selected={routing === candidate}
-                  supported={configuration?.supported === true}
-                  unsupportedReason={reasonText(configuration, t)}
-                  warning={candidate === 'auto-review' ? labels.unattendedRoutingWarning : null}
-                  onSelect={() => onChange({ level: levelFor(candidate), routing: candidate })}
-                />
-              );
-            })}
-          </Axis>
+          {presets.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setShowMatrix((value) => !value)}
+              aria-expanded={showMatrix}
+              className="flex w-full items-center gap-1 px-1 text-[11px] text-on-surface-variant hover:text-on-surface"
+            >
+              <ChevronDown
+                size={11}
+                className={`shrink-0 transition-transform ${showMatrix ? '' : '-rotate-90'}`}
+              />
+              {labels.advanced}
+            </button>
+          ) : null}
+
+          {showMatrix || presets.length === 0 ? (
+            <>
+              <Axis heading={labels.whatItCanDo}>
+                {levels.map((candidate) => {
+                  const configuration = find(candidate, routingFor(candidate));
+                  return (
+                    <Option
+                      key={candidate}
+                      name={labels.levelName[candidate]}
+                      description={labels.level[candidate]}
+                      selected={level === candidate}
+                      supported={configuration?.supported === true}
+                      unsupportedReason={reasonText(configuration, t)}
+                      warning={configuration?.unattended ? labels.unattendedLevelWarning : null}
+                      onSelect={() =>
+                        onChange({ level: candidate, routing: routingFor(candidate) })
+                      }
+                    />
+                  );
+                })}
+              </Axis>
+
+              <Axis heading={labels.whoApproves}>
+                {routings.map((candidate) => {
+                  const configuration = find(levelFor(candidate), candidate);
+                  return (
+                    <Option
+                      key={candidate}
+                      name={labels.routingName[candidate]}
+                      description={labels.routing[candidate]}
+                      selected={routing === candidate}
+                      supported={configuration?.supported === true}
+                      unsupportedReason={reasonText(configuration, t)}
+                      warning={candidate === 'auto-review' ? labels.unattendedRoutingWarning : null}
+                      onSelect={() => onChange({ level: levelFor(candidate), routing: candidate })}
+                    />
+                  );
+                })}
+              </Axis>
+            </>
+          ) : null}
         </div>
       ) : null}
     </div>

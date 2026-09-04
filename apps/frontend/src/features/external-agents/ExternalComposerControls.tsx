@@ -133,6 +133,7 @@ export function ExternalComposerControls({
         configurations={descriptor.supportedConfigurations}
         level={level}
         routing={routing}
+        targetId={descriptor.targetId}
         disabled={disabled}
         onChange={onPermissionsChange}
       />

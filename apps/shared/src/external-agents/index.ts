@@ -44,6 +44,17 @@ export {
   RESTRICTIVE_PERMISSION_LEVEL,
 } from './permissions';
 export {
+  EXTERNAL_PERMISSION_PRESET_IDS,
+  EXTERNAL_PERMISSION_PRESETS,
+  type ExternalPermissionPair,
+  type ExternalPermissionPreset,
+  type ExternalPermissionPresetId,
+  ExternalPermissionPresetIdSchema,
+  type ExternalPermissionSupport,
+  externalPresetFor,
+  externalPresetPair,
+} from './presets';
+export {
   EXTERNAL_ACCOUNT_LIMITS_STALE_MS,
   EXTERNAL_ACTIVITY_KINDS,
   EXTERNAL_AGENT_TARGET_IDS,

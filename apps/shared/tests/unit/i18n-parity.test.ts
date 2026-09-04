@@ -13,6 +13,7 @@ import {
   ExternalAgentUnavailableReasonSchema,
   ExternalApprovalRoutingSchema,
   ExternalPermissionLevelSchema,
+  ExternalPermissionPresetIdSchema,
 } from '../../src/external-agents';
 import {
   GithubCheckBucketSchema,
@@ -152,6 +153,23 @@ const ENUM_COVERAGE = [
     path: 'externalAgents.permission.routing',
     values: literalValues(ExternalApprovalRoutingSchema),
     blocks: [en.externalAgents.permission.routing, ptBR.externalAgents.permission.routing],
+  },
+  {
+    // A preset with no copy is an unlabelled row in the one control a
+    // non-expert is meant to use, so both blocks are pinned to the union.
+    path: 'externalAgents.permission.preset',
+    values: literalValues(ExternalPermissionPresetIdSchema),
+    blocks: [en.externalAgents.permission.preset, ptBR.externalAgents.permission.preset],
+  },
+  {
+    // The per-vendor one-liner, which is the whole reason a preset can be
+    // honest: `careful` is a sandbox for Codex and plan mode for Claude.
+    path: 'externalAgents.permission.presetVendor',
+    values: literalValues(ExternalPermissionPresetIdSchema),
+    blocks: [
+      en.externalAgents.permission.presetVendor,
+      ptBR.externalAgents.permission.presetVendor,
+    ],
   },
   {
     // The GitHub panel renders every one of gh's vocabularies as a chip or a
