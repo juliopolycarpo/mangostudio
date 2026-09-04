@@ -325,11 +325,8 @@ function ownedLocation(write: string): string {
   return write.replace(HOME_PLACEHOLDER, '').replaceAll('\\', '/').toLowerCase();
 }
 
-/**
- * Whether `path` is the installation this recipe removes: the exact file it
- * deletes, or a file inside a directory it deletes.
- */
-function removesInstallationAt(recipe: InstallRecipePreview, path: string): boolean {
+/** Whether one path is the file this recipe deletes, or sits inside a directory it deletes. */
+function writesCover(recipe: InstallRecipePreview, path: string): boolean {
   const target = path.replaceAll('\\', '/').toLowerCase();
   return recipe.writes.some((write) => {
     const location = ownedLocation(write);
@@ -339,6 +336,21 @@ function removesInstallationAt(recipe: InstallRecipePreview, path: string): bool
     if (!location) return false;
     return target.endsWith(`/${location}`) || target.includes(`/${location}/`);
   });
+}
+
+/**
+ * Whether this recipe removes the given installation.
+ *
+ * Both spellings are checked, as `resolvePathSource` checks both: `path` is
+ * the realpath and `rawPath` is where the scanner found it, and a vendor
+ * installer that symlinks its entry point — Claude Code links
+ * `~/.local/bin/claude` at a versioned directory — matches only on the link.
+ */
+function removesInstallation(
+  recipe: InstallRecipePreview,
+  installation: RuntimeInstallation
+): boolean {
+  return writesCover(recipe, installation.path) || writesCover(recipe, installation.rawPath);
 }
 
 /**
@@ -369,7 +381,7 @@ export function runtimeUninstallRecipe(
 
   const { installation } = effectiveInstallation(status);
   if (!installation) return undefined;
-  return removesInstallationAt(recipe, installation.path) ? recipe : undefined;
+  return removesInstallation(recipe, installation) ? recipe : undefined;
 }
 
 /** Human-readable byte count for the installer download disclosure. */
@@ -524,15 +536,22 @@ export function nodeUpdateAffordance(
 
   const steps: InstallChainStep[] = [];
   for (const id of chainIds) {
-    const recipe = recipes.find((candidate) => candidate.id === id && candidate.supported);
-    // The catalog lists off-platform recipes with `supported: false`, so the
-    // id matching is not enough: nvm-windows is attributed `nvm` while the nvm
-    // recipes are POSIX-only, and building that chain would offer an update
-    // the install flow then refuses. A manager MangoStudio cannot drive here
-    // is exactly `managed-elsewhere` — the card explains rather than going
+    const listed = recipes.filter((candidate) => candidate.id === id);
+    const recipe = listed.find((candidate) => candidate.supported);
+    if (recipe) {
+      steps.push({ recipe, input: nodeRecipeInput(recipe) });
+      continue;
+    }
+    // Listed but not runnable here. The catalog carries off-platform recipes
+    // with `supported: false`, and nvm-windows is attributed `nvm` while the
+    // nvm recipes are POSIX-only — building that chain would offer an update
+    // the install flow then refuses. A manager MangoStudio cannot drive is
+    // exactly `managed-elsewhere`, so the card explains rather than going
     // blank.
-    if (!recipe) return { kind: 'managed-elsewhere', source };
-    steps.push({ recipe, input: nodeRecipeInput(recipe) });
+    if (listed.length > 0) return { kind: 'managed-elsewhere', source };
+    // Not in the catalog at all: a list still loading, or a stale one. Saying
+    // "managed elsewhere" here would libel a manager this build does drive.
+    return { kind: 'none' };
   }
 
   const [primary, ...followUp] = steps;

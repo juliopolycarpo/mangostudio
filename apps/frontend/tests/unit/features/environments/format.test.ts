@@ -352,6 +352,26 @@ describe('runtimeUninstallRecipe', () => {
     ).toBeUndefined();
   });
 
+  // Claude Code's own installer symlinks `~/.local/bin/claude` at a versioned
+  // directory, and the scanner stores the realpath as `path` with the link it
+  // found as `rawPath`. Reading only `path` would withhold the button from the
+  // one installation the recipe owns.
+  it('matches through a symlink, on the path the scanner actually found', () => {
+    const status = runtimeStatus({
+      id: 'claude',
+      installations: [
+        installation({
+          path: '/home/dev/.local/share/claude/versions/2.1.260/claude',
+          rawPath: '/home/dev/.local/bin/claude',
+          version: '2.1.260',
+          effective: true,
+        }),
+      ],
+    });
+
+    expect(runtimeUninstallRecipe(status, [claudeUninstall])).toBe(claudeUninstall);
+  });
+
   it('matches a Windows path against the same declared location', () => {
     const status = claudeStatus('C:\\Users\\Dev\\.local\\bin\\Claude.exe');
 
@@ -714,6 +734,12 @@ describe('nodeUpdateAffordance', () => {
   // POSIX-only. Building the POSIX chain there would offer an update the
   // install flow then refuses, printing `nvm install --lts` for a manager
   // that is not the one on this machine.
+  // The pages pass `recipes.data ?? []` while the catalog loads. Calling that
+  // "managed elsewhere" would libel a manager this build does drive.
+  it('is none, not managed-elsewhere, when the catalog has not arrived yet', () => {
+    expect(nodeUpdateAffordance(effectiveNode('nvm'), [])).toEqual({ kind: 'none' });
+  });
+
   it('reports managed-elsewhere when the manager chain is not supported here', () => {
     const windowsCatalog = [
       installRecipe({
