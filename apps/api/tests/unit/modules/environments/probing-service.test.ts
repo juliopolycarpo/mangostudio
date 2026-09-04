@@ -144,7 +144,11 @@ function fakeClient(
     // matching their `effective` entry — so the prerequisite-findings pass
     // that reads every status in the batch sees a real "installed" shape
     // rather than a fixture-only gap.
-    const statuses = [
+    //
+    // Filtered to `state.lastRuntimeIds` because a real runtime answers only
+    // what it was asked for: a single-id re-check must get back that one
+    // status, not the batch's first entry by coincidence.
+    const known = [
       {
         id: 'bun',
         effective: { version: state.version },
@@ -177,6 +181,7 @@ function fakeClient(
       { id: 'winget', health: 'missing', installations: [], findings: [] },
       { id: 'git', health: 'missing', installations: [], findings: [] },
     ];
+    const statuses = known.filter((status) => state.lastRuntimeIds.includes(status.id));
     for (const resolve of pendingRuntime.splice(0)) resolve({ statuses });
   }
 
@@ -425,6 +430,37 @@ describe('platform-aware runtime ids', () => {
       },
       severity: 'warn',
     });
+  });
+
+  // Regression: `getRuntimeStatus` used to skip this enrichment outright, so
+  // its own answer carried no `prerequisite-missing` finding even once a
+  // prior list fetch had winget's status cached — and that bare answer is
+  // exactly what the card's re-check button splices straight into the
+  // frontend's list cache, so the warning vanished from the card until the
+  // next full list fetch.
+  it('carries the prerequisite finding on a single-runtime re-check once siblings are cached', async () => {
+    const remote = fakeClient('v1', 'win32');
+    const service = serviceFor(() => remote);
+
+    await service.listRuntimeStatuses(WSL);
+    const status = await service.getRuntimeStatus(WSL, 'fnm', { force: true });
+
+    expect(status?.findings.map((finding) => finding.code)).toContain('prerequisite-missing');
+  });
+
+  // `computePrerequisiteMissingFindings` reads a sibling absent from its batch
+  // as "not installed" — correct for a full list scan, wrong for a re-check
+  // that only warmed *some* of the cache. Priming just node leaves winget
+  // uncached, so this must answer like the cold-cache case: no finding,
+  // rather than assume winget missing from silence alone.
+  it('does not invent a finding from a single-runtime re-check when only some siblings are cached', async () => {
+    const remote = fakeClient('v1', 'win32');
+    const service = serviceFor(() => remote);
+
+    await service.getRuntimeStatus(WSL, 'node');
+    const status = await service.getRuntimeStatus(WSL, 'fnm', { force: true });
+
+    expect(status?.findings).toEqual([]);
   });
 
   // Regression: the enrichment used to run inside the cached fetch, which made

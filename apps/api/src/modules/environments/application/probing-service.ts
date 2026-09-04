@@ -489,11 +489,13 @@ export function createEnvironmentProbingService(
    * into the cache.
    *
    * "Is `winget` installed" can only be answered by having `winget`'s own
-   * status in the same batch, so only the full list can compute this. Enriching
-   * inside the cached fetch instead would make the finding a property of *how*
-   * the status was last fetched: a single-id re-check (the card's own probe
-   * button) writes the same cache entry without one, and the warning would
-   * silently disappear from the list until the whole batch was probed again.
+   * status in hand — a sibling missing from `statuses` reads as "not
+   * installed" here, so a caller with an incomplete batch would risk
+   * inventing a finding about a requirement it never actually checked.
+   * {@link EnvironmentProbingService.getRuntimeStatus} reuses this against
+   * whatever siblings are already cached, and only when every one of them is:
+   * that is what keeps a single-id re-check (the card's own probe button)
+   * from either dropping the finding or making one up.
    */
   const withPrerequisiteFindings = (
     statuses: readonly RuntimeStatus[],
@@ -648,9 +650,35 @@ export function createEnvironmentProbingService(
       // An id the peer has no definition for is `null` here, never a request
       // it would refuse outright.
       const client = await resolveClient(scope);
-      if (!runtimeIdsFor(client.manifest).includes(id)) return null;
+      const runtimeIds = runtimeIdsFor(client.manifest);
+      if (!runtimeIds.includes(id)) return null;
       const [status] = await probeRuntimes(scope, [id], probeOptions?.force === true);
-      return status ?? null;
+      if (!status || client.manifest.features.toolchain !== true) return status ?? null;
+      // Reads whatever siblings the last list fetch already cached instead of
+      // probing them again — a card's re-check button must not turn into a
+      // full re-scan. `computePrerequisiteMissingFindings` reads a sibling
+      // absent from its batch as "not installed", so a *partial* batch could
+      // invent a finding about a requirement this call never actually checked;
+      // bailing out to the unenriched status the moment one sibling is missing
+      // keeps every finding this returns as true as a full scan's.
+      const batch: RuntimeStatus[] = [];
+      for (const runtimeId of runtimeIds) {
+        if (runtimeId === id) {
+          batch.push(status);
+          continue;
+        }
+        const cached = cache.get(entryKey(scope, 'runtime', runtimeId))?.status as
+          | RuntimeStatus
+          | undefined;
+        if (!cached) return status;
+        batch.push(cached);
+      }
+      const extra = computePrerequisiteMissingFindings(
+        batch,
+        client.manifest.platform,
+        INSTALL_RECIPES
+      ).get(status.id);
+      return extra ? { ...status, findings: [...status.findings, ...extra] } : status;
     },
 
     async listVersionManagerStatuses(scope, probeOptions) {
