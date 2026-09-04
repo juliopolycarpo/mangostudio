@@ -20,15 +20,17 @@ const publicResolver = resolverFor({});
 
 function respondWith(...responses: Response[]) {
   const calls: string[] = [];
+  const inits: (RequestInit | undefined)[] = [];
   const queue = [...responses];
-  const fetchImpl = ((input: Parameters<typeof fetch>[0]) => {
+  const fetchImpl = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     calls.push(String(input));
+    inits.push(init);
     const next = queue.shift();
     if (!next) throw new Error('Unexpected fetch.');
     return Promise.resolve(next);
   }) as unknown as typeof fetch;
 
-  return { calls, fetch: fetchImpl };
+  return { calls, inits, fetch: fetchImpl };
 }
 
 const limits = { maxBytes: 1024, maxRedirects: 3 };
@@ -47,6 +49,24 @@ describe('safeFetchBytes', () => {
     expect(new TextDecoder().decode(result.bytes)).toBe('hello');
     expect(result.contentType).toBe('text/plain');
     expect(result.url).toBe('https://example.test/file');
+  });
+
+  it('sends extra headers on the request, for content negotiation', async () => {
+    const stub = respondWith(new Response('{}', { status: 200 }));
+
+    await safeFetchBytes(
+      'https://example.test/file',
+      {
+        ...limits,
+        headers: { Accept: 'application/vnd.npm.install-v1+json' },
+      },
+      {
+        fetch: stub.fetch,
+        resolveHostname: publicResolver,
+      }
+    );
+
+    expect(stub.inits[0]?.headers).toEqual({ Accept: 'application/vnd.npm.install-v1+json' });
   });
 
   it('refuses anything that is not HTTPS before making a request', async () => {
