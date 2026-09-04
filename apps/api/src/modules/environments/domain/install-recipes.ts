@@ -260,6 +260,61 @@ function wingetCopyCommand(action: 'install' | 'upgrade', packageId: string): st
   return literalCommand(['winget', action, '--id', packageId, ...WINGET_FLAGS]);
 }
 
+/**
+ * A recipe that hands one package to winget. Every one of them is win32-only,
+ * needs the network, requires winget itself, and must accept winget's
+ * "already current" exit code — so those are stated here rather than per
+ * recipe, where the next one could omit `acceptedExitCodes` and report an
+ * already-current tool as a failed install.
+ * // Usage: wingetRecipe({ id: 'git.install.windows', runtimeId: 'git', action: 'install', packageId: 'Git.Git', writes: ['%ProgramFiles%\\Git'], probe: [{ kind: 'runtime', runtimeId: 'git' }] })
+ */
+function wingetRecipe(descriptor: {
+  readonly id: InstallRecipeId;
+  readonly runtimeId: RuntimeId;
+  readonly action: InstallAction;
+  readonly packageId: string;
+  readonly writes: readonly string[];
+  readonly probe: readonly [InstallRecipeProbe, ...InstallRecipeProbe[]];
+  /** Beyond winget itself — `winget.node.update` also needs the Node it upgrades. */
+  readonly alsoRequires?: readonly RuntimeId[];
+}): InstallRecipe {
+  const packageAction = descriptor.action === 'update' ? 'upgrade' : 'install';
+  return {
+    id: descriptor.id,
+    runtimeId: descriptor.runtimeId,
+    action: descriptor.action,
+    inputKind: 'none',
+    platforms: ['win32'],
+    requires: ['winget', ...(descriptor.alsoRequires ?? [])],
+    writes: descriptor.writes,
+    networkAccess: true,
+    timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
+    acceptedExitCodes: [WINGET_NO_APPLICABLE_UPGRADE],
+    probe: descriptor.probe,
+    argv: wingetArgv(packageAction, descriptor.packageId),
+    copyCommand: () => wingetCopyCommand(packageAction, descriptor.packageId),
+  };
+}
+
+/**
+ * A vendor CLI that updates itself in place: run by the absolute path the
+ * probe resolved, but copied as a bare name, since that is what a user would
+ * type.
+ * // Usage: { id: 'bun.update', ...selfUpdateCommand('bun', 'upgrade') }
+ */
+function selfUpdateCommand(
+  id: RuntimeId,
+  verb: string
+): Pick<InstallRecipe, 'argv' | 'copyCommand'> {
+  return {
+    argv: (input, context) => {
+      assertRecipeInput(input, 'none');
+      return [requireBinaryPath(context, id), verb];
+    },
+    copyCommand: () => literalCommand([id, verb]),
+  };
+}
+
 function nvmNodeArgv(
   operation: 'install' | 'set-default',
   input: RecipeInput,
@@ -419,11 +474,7 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     networkAccess: true,
     timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
     probe: [{ kind: 'runtime', runtimeId: 'bun' }],
-    argv: (input, context) => {
-      assertRecipeInput(input, 'none');
-      return [requireBinaryPath(context, 'bun'), 'upgrade'];
-    },
-    copyCommand: () => literalCommand(['bun', 'upgrade']),
+    ...selfUpdateCommand('bun', 'upgrade'),
   },
   {
     id: 'bun.uninstall',
@@ -517,27 +568,20 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
       return `nvm alias default ${shellQuote(toNvmDefaultArgument(validated.version))}`;
     },
   },
-  {
+  // winget's fnm manifest ships zip+portable: without Developer Mode there
+  // is no stable symlink for it, which is why the node recipes below call
+  // fnm by the absolute path the probe resolved rather than by name.
+  wingetRecipe({
     id: 'fnm.install',
     runtimeId: 'fnm',
     action: 'install',
-    inputKind: 'none',
-    // winget's fnm manifest ships zip+portable: without Developer Mode there
-    // is no stable symlink for it, which is why the node recipes below call
-    // fnm by the absolute path the probe resolved rather than by name.
-    platforms: ['win32'],
-    requires: ['winget'],
+    packageId: 'Schniz.fnm',
     writes: [
       '%LOCALAPPDATA%\\Microsoft\\WinGet\\Packages\\Schniz.fnm*',
       '%LOCALAPPDATA%\\Microsoft\\WinGet\\Links',
     ],
-    networkAccess: true,
-    timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
-    acceptedExitCodes: [WINGET_NO_APPLICABLE_UPGRADE],
     probe: [{ kind: 'runtime', runtimeId: 'fnm' }],
-    argv: wingetArgv('install', 'Schniz.fnm'),
-    copyCommand: () => wingetCopyCommand('install', 'Schniz.fnm'),
-  },
+  }),
   {
     id: 'fnm.node.install',
     runtimeId: 'node',
@@ -581,57 +625,37 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
       return literalCommand(['fnm', 'default', toFnmDefaultArgument(validated.version)]);
     },
   },
-  {
+  // The per-machine MSI declares `elevatesSelf`, so a UAC prompt shows
+  // regardless of `--silent`; over an existing nodejs.org MSI winget takes
+  // its "found existing package, trying to upgrade" path instead of failing.
+  wingetRecipe({
     id: 'winget.node.install',
     runtimeId: 'node',
     action: 'install',
-    inputKind: 'none',
-    // The per-machine MSI declares `elevatesSelf`, so a UAC prompt shows
-    // regardless of `--silent`; over an existing nodejs.org MSI winget takes
-    // its "found existing package, trying to upgrade" path instead of failing.
-    platforms: ['win32'],
-    requires: ['winget'],
+    packageId: 'OpenJS.NodeJS.LTS',
     writes: ['%ProgramFiles%\\nodejs'],
-    networkAccess: true,
-    timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
-    acceptedExitCodes: [WINGET_NO_APPLICABLE_UPGRADE],
     probe: [{ kind: 'runtime', runtimeId: 'node' }],
-    argv: wingetArgv('install', 'OpenJS.NodeJS.LTS'),
-    copyCommand: () => wingetCopyCommand('install', 'OpenJS.NodeJS.LTS'),
-  },
-  {
+  }),
+  // The `.LTS` package tracks the current LTS line, so this crosses majors
+  // rather than only patching within one.
+  wingetRecipe({
     id: 'winget.node.update',
     runtimeId: 'node',
     action: 'update',
-    inputKind: 'none',
-    // The `.LTS` package tracks the current LTS line, so this crosses majors
-    // rather than only patching within one.
-    platforms: ['win32'],
-    requires: ['winget', 'node'],
+    packageId: 'OpenJS.NodeJS.LTS',
     writes: ['%ProgramFiles%\\nodejs'],
-    networkAccess: true,
-    timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
-    acceptedExitCodes: [WINGET_NO_APPLICABLE_UPGRADE],
     probe: [{ kind: 'runtime', runtimeId: 'node' }],
-    argv: wingetArgv('upgrade', 'OpenJS.NodeJS.LTS'),
-    copyCommand: () => wingetCopyCommand('upgrade', 'OpenJS.NodeJS.LTS'),
-  },
-  {
+    alsoRequires: ['node'],
+  }),
+  // The Inno Setup installer self-elevates for an admin account.
+  wingetRecipe({
     id: 'git.install.windows',
     runtimeId: 'git',
     action: 'install',
-    inputKind: 'none',
-    // The Inno Setup installer self-elevates for an admin account.
-    platforms: ['win32'],
-    requires: ['winget'],
+    packageId: 'Git.Git',
     writes: ['%ProgramFiles%\\Git'],
-    networkAccess: true,
-    timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
-    acceptedExitCodes: [WINGET_NO_APPLICABLE_UPGRADE],
     probe: [{ kind: 'runtime', runtimeId: 'git' }],
-    argv: wingetArgv('install', 'Git.Git'),
-    copyCommand: () => wingetCopyCommand('install', 'Git.Git'),
-  },
+  }),
   {
     id: 'claude.install',
     runtimeId: 'claude',
@@ -662,11 +686,7 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     networkAccess: true,
     timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
     probe: [{ kind: 'agent', targetId: 'claude' }],
-    argv: (input, context) => {
-      assertRecipeInput(input, 'none');
-      return [requireBinaryPath(context, 'claude'), 'update'];
-    },
-    copyCommand: () => literalCommand(['claude', 'update']),
+    ...selfUpdateCommand('claude', 'update'),
   },
   {
     id: 'claude.uninstall',
@@ -728,11 +748,7 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     // this is what makes that unattended instead of prompting.
     env: { CODEX_NON_INTERACTIVE: '1' },
     probe: [{ kind: 'agent', targetId: 'codex' }],
-    argv: (input, context) => {
-      assertRecipeInput(input, 'none');
-      return [requireBinaryPath(context, 'codex'), 'update'];
-    },
-    copyCommand: () => literalCommand(['codex', 'update']),
+    ...selfUpdateCommand('codex', 'update'),
   },
   {
     id: 'codex.uninstall',
@@ -789,11 +805,7 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     networkAccess: true,
     timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
     probe: [{ kind: 'agent', targetId: 'cursor' }],
-    argv: (input, context) => {
-      assertRecipeInput(input, 'none');
-      return [requireBinaryPath(context, 'cursor'), 'update'];
-    },
-    copyCommand: () => literalCommand(['cursor', 'update']),
+    ...selfUpdateCommand('cursor', 'update'),
   },
   {
     id: 'cursor.uninstall',
