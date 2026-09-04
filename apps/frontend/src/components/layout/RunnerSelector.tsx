@@ -29,7 +29,10 @@ import { useEffect, useRef, useState } from 'react';
 import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { ExternalAccountLimitsChip } from '@/features/external-agents/ExternalAccountLimitsChip';
 import { useExternalAccountLimits } from '@/features/external-agents/use-external-account-limits';
-import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
+import {
+  externalAgentSelectable,
+  externalUnavailableText,
+} from '@/features/external-agents/useExternalAgents';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 
@@ -365,13 +368,7 @@ function ExternalRow({
       ? labels.selector.notInstalledIn.replace('{environment}', environmentName)
       : // `version-unsupported` is the one reason whose copy names a build, and
         // the build is the adapter's pin rather than anything this bundle knows.
-        // The fallback keeps the sentence readable if a runtime ever reports the
-        // reason without the version — a greyed row with a vague reason still
-        // beats one showing a literal `{version}`.
-        labels.unavailable[reason].replace(
-          '{version}',
-          descriptor.requiredVersion ?? labels.selector.unknownVersion
-        )
+        externalUnavailableText(reason, t, descriptor.requiredVersion)
     : signedOut
       ? labels.unavailable['signed-out']
       : notInstalled

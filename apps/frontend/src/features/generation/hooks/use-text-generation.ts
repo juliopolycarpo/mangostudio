@@ -46,6 +46,7 @@ import {
   publishExternalAccountLimits,
   publishExternalCommandCatalog,
 } from '@/features/external-agents/queries';
+import { externalUnavailableText } from '@/features/external-agents/useExternalAgents';
 import { promptExternalWorkspaceTrust } from '@/features/external-agents/workspace-trust-prompt';
 import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import {
@@ -197,10 +198,7 @@ function unavailableReasonText(
   if (!(error instanceof ApiError)) return undefined;
   const reason = error.details?.unavailableReason;
   if (!reason || !isExternalAgentUnavailableReason(reason)) return undefined;
-  return t.externalAgents.unavailable[reason].replace(
-    '{version}',
-    t.externalAgents.selector.unknownVersion
-  );
+  return externalUnavailableText(reason, t);
 }
 
 function isExternalAgentUnavailableReason(value: string): value is ExternalAgentUnavailableReason {
