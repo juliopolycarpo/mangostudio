@@ -243,9 +243,6 @@ function nvmNodeArgv(
   context: InstallRecipeBuildContext
 ): readonly string[] {
   const validated = assertRecipeInput(input, 'node-version');
-  if (validated.kind !== 'node-version') {
-    throw new Error('Node version input is required.');
-  }
   if (!context.nvmDir) {
     throw new Error('NVM directory is required.');
   }
@@ -272,9 +269,6 @@ function fnmNodeArgv(
   context: InstallRecipeBuildContext
 ): readonly string[] {
   const validated = assertRecipeInput(input, 'node-version');
-  if (validated.kind !== 'node-version') {
-    throw new Error('Node version input is required.');
-  }
   const fnmPath = requireBinaryPath(context, 'fnm');
   const argument =
     operation === 'install'
@@ -515,7 +509,6 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     argv: (input, context) => nvmNodeArgv('install', input, context),
     copyCommand: (input) => {
       const validated = assertRecipeInput(input, 'node-version');
-      if (validated.kind !== 'node-version') throw new Error('Node version input is required.');
       return `nvm install ${shellQuote(toNvmVersionArgument(validated.version))}`;
     },
   },
@@ -536,7 +529,6 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     argv: (input, context) => nvmNodeArgv('set-default', input, context),
     copyCommand: (input) => {
       const validated = assertRecipeInput(input, 'node-version');
-      if (validated.kind !== 'node-version') throw new Error('Node version input is required.');
       return `nvm alias default ${shellQuote(toNvmDefaultArgument(validated.version))}`;
     },
   },
@@ -581,7 +573,6 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     argv: (input, context) => fnmNodeArgv('install', input, context),
     copyCommand: (input) => {
       const validated = assertRecipeInput(input, 'node-version');
-      if (validated.kind !== 'node-version') throw new Error('Node version input is required.');
       return literalCommand(['fnm', 'install', toFnmVersionArgument(validated.version)]);
     },
   },
@@ -602,7 +593,6 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     argv: (input, context) => fnmNodeArgv('set-default', input, context),
     copyCommand: (input) => {
       const validated = assertRecipeInput(input, 'node-version');
-      if (validated.kind !== 'node-version') throw new Error('Node version input is required.');
       return literalCommand(['fnm', 'default', toFnmDefaultArgument(validated.version)]);
     },
   },

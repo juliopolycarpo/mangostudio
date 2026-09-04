@@ -25,17 +25,22 @@ export function assertNodeVersionSpec(value: string): NodeVersionSpec {
   return parsed;
 }
 
-export function assertRecipeInput(
+/**
+ * Narrows a recipe's input to the kind it declares, so a caller that has
+ * asserted `node-version` can read `.version` without a second guard.
+ * // Usage: assertRecipeInput(input, 'node-version').version
+ */
+export function assertRecipeInput<K extends RecipeInput['kind']>(
   input: RecipeInput,
-  expectedKind: RecipeInput['kind']
-): RecipeInput {
+  expectedKind: K
+): Extract<RecipeInput, { kind: K }> {
   if (input.kind !== expectedKind) {
     throw new RecipeInputError(`Recipe requires ${expectedKind} input.`);
   }
   if (input.kind === 'node-version') {
     assertNodeVersionSpec(input.version);
   }
-  return input;
+  return input as Extract<RecipeInput, { kind: K }>;
 }
 
 export function toNvmVersionArgument(version: NodeVersionSpec): string {
