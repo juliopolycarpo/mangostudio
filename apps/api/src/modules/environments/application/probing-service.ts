@@ -73,29 +73,73 @@ const LOCATION_REQUEST_TIMEOUT_MS = 60_000;
  * platform-scoped id list would turn that into a silent `null` instead of the
  * "not found" answer a probe of an absent binary already gives honestly.
  */
-const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['bun', 'node', 'fnm', 'winget', 'git'];
+const ALL_RUNTIME_IDS = [
+  'bun',
+  'node',
+  'fnm',
+  'winget',
+  'git',
+] as const satisfies readonly RuntimeId[];
+type ProbedRuntimeId = (typeof ALL_RUNTIME_IDS)[number];
+
 /**
- * `winget` is a Windows-only prerequisite: probing it from a Linux hub can
- * only ever report "not found", so a Linux hub's own runtime list omits it
- * rather than surfacing a finding about a tool this machine will never need.
+ * When an id may be asked for.
+ *
+ * `sinceToolchain` marks one a peer built before `features.toolchain` has no
+ * definition for — such a peer refuses the whole call on an unknown id, so the
+ * flag doubles as "this peer knows the extended list". `platforms` narrows an
+ * id to the hosts it can exist on: probing `winget` from a Linux hub can only
+ * ever report "not found", and surfacing a finding about a tool that machine
+ * will never need is worse than omitting it.
+ *
+ * A `Record` over the probed set rather than a second, parallel array of
+ * "legacy" ids: adding an id to {@link ALL_RUNTIME_IDS} fails to compile until
+ * it is classified here, so the gate cannot be forgotten. Getting it wrong is
+ * a silent performance bug — an old peer asked for an id it refuses turns
+ * every list into a permanent cache miss.
+ */
+interface ProbeAvailability {
+  readonly sinceToolchain: boolean;
+  readonly platforms: 'all' | readonly string[];
+}
+
+const RUNTIME_AVAILABILITY: Record<ProbedRuntimeId, ProbeAvailability> = {
+  bun: { sinceToolchain: false, platforms: 'all' },
+  node: { sinceToolchain: false, platforms: 'all' },
+  fnm: { sinceToolchain: true, platforms: 'all' },
+  winget: { sinceToolchain: true, platforms: ['win32'] },
+  git: { sinceToolchain: true, platforms: 'all' },
+};
+
+const VERSION_MANAGER_IDS = ['nvm', 'fnm'] as const satisfies readonly VersionManagerId[];
+type ProbedVersionManagerId = (typeof VERSION_MANAGER_IDS)[number];
+
+const VERSION_MANAGER_AVAILABILITY: Record<ProbedVersionManagerId, ProbeAvailability> = {
+  nvm: { sinceToolchain: false, platforms: 'all' },
+  fnm: { sinceToolchain: true, platforms: 'all' },
+};
+
+/** `RuntimeId` also names the vendor CLIs and version managers this never probes. */
+function isProbedRuntimeId(id: RuntimeId): id is ProbedRuntimeId {
+  return (ALL_RUNTIME_IDS as readonly RuntimeId[]).includes(id);
+}
+
+function isProbedVersionManagerId(id: VersionManagerId): id is ProbedVersionManagerId {
+  return (VERSION_MANAGER_IDS as readonly VersionManagerId[]).includes(id);
+}
+
+function isAskable(availability: ProbeAvailability, manifest: RuntimeCapabilityManifest): boolean {
+  if (availability.sinceToolchain && manifest.features.toolchain !== true) return false;
+  return availability.platforms === 'all' || availability.platforms.includes(manifest.platform);
+}
+
+/**
+ * Which runtime ids to ask this peer about.
  * // Usage: runtimeIdsFor(client.manifest)
  */
 function runtimeIdsFor(manifest: RuntimeCapabilityManifest): readonly RuntimeId[] {
-  // A peer built before `fnm`/`git`/`winget` had definitions refuses the whole
-  // call on an unknown id, and `features.toolchain` is the manifest flag that
-  // shipped with them — so it doubles as "this peer knows the extended list".
-  if (manifest.features.toolchain !== true) return LEGACY_RUNTIME_IDS;
-  return manifest.platform === 'win32'
-    ? ALL_RUNTIME_IDS
-    : ALL_RUNTIME_IDS.filter((id) => id !== 'winget');
+  return ALL_RUNTIME_IDS.filter((id) => isAskable(RUNTIME_AVAILABILITY[id], manifest));
 }
-
-/** What every runtime answered for before the extended definitions existed. */
-const LEGACY_RUNTIME_IDS: readonly RuntimeId[] = ['bun', 'node'];
-
-const VERSION_MANAGER_IDS: readonly VersionManagerId[] = ['nvm', 'fnm'];
-/** The only manager a peer built before `features.toolchain` ever answers for. */
-const LEGACY_VERSION_MANAGER_IDS: readonly VersionManagerId[] = ['nvm'];
 
 /**
  * Which managers to ask this peer about. A peer that predates fnm detection
@@ -106,7 +150,7 @@ const LEGACY_VERSION_MANAGER_IDS: readonly VersionManagerId[] = ['nvm'];
  * // Usage: versionManagerIdsFor(client.manifest)
  */
 function versionManagerIdsFor(manifest: RuntimeCapabilityManifest): readonly VersionManagerId[] {
-  return manifest.features.toolchain === true ? VERSION_MANAGER_IDS : LEGACY_VERSION_MANAGER_IDS;
+  return VERSION_MANAGER_IDS.filter((id) => isAskable(VERSION_MANAGER_AVAILABILITY[id], manifest));
 }
 const AGENT_TARGET_IDS: readonly LibraryTargetId[] = AGENT_CLI_DEFINITIONS.map(
   (definition) => definition.targetId
@@ -646,7 +690,7 @@ export function createEnvironmentProbingService(
     },
 
     async getRuntimeStatus(scope, id, probeOptions) {
-      if (!ALL_RUNTIME_IDS.includes(id)) return null;
+      if (!isProbedRuntimeId(id)) return null;
       // An id the peer has no definition for is `null` here, never a request
       // it would refuse outright.
       const client = await resolveClient(scope);
@@ -690,7 +734,7 @@ export function createEnvironmentProbingService(
     },
 
     async getVersionManagerStatus(scope, id, probeOptions) {
-      if (!VERSION_MANAGER_IDS.includes(id)) return null;
+      if (!isProbedVersionManagerId(id)) return null;
       const client = await resolveClient(scope);
       if (!versionManagerIdsFor(client.manifest).includes(id)) return null;
       const [status] = await probeVersionManagers(scope, [id], probeOptions?.force === true);
