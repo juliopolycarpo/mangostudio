@@ -166,6 +166,30 @@ describe('buildTurnArgv', () => {
     ).not.toContain('--effort');
   });
 
+  /**
+   * The flag is pinning, not a fix: 2.1.260 with the default `host` and stdin
+   * closed already denies immediately rather than parking. What it buys is that
+   * the property survives another default change.
+   */
+  it('tells a build that offers the flag that nobody answers prompts', () => {
+    const pinned = argv({ ...base, session: { ...base.session, answersPermissionPrompts: true } });
+
+    expect(pinned[pinned.indexOf('--permission-prompts') + 1]).toBe('none');
+  });
+
+  it('never claims a host answers prompts, because none does', () => {
+    // `host` promises an answering SDK host. `interactiveApprovals` is false,
+    // so saying it would park every approval-needing turn until the timeout.
+    expect(
+      argv({ ...base, session: { ...base.session, answersPermissionPrompts: true } })
+    ).not.toContain('host');
+  });
+
+  it('omits the flag on a build that does not declare it', () => {
+    // 2.1.211–2.1.258. An undeclared flag is a startup failure on every turn.
+    expect(argv(base)).not.toContain('--permission-prompts');
+  });
+
   it('passes no effort at all to a build that declared none', () => {
     // Every build before 2.1.259. Absent is not empty, and it is the reason a
     // chat that stored an effort keeps working after a downgrade.

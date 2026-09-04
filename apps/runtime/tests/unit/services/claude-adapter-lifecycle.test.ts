@@ -437,6 +437,16 @@ describe('session state folded back from a run', () => {
       expect(argumentAfter(turnArgv[0] ?? [], '--effort')).toBe('high');
     });
 
+    it('states that nobody answers prompts once the build offers the flag', async () => {
+      const { adapter, context, turnArgv } = await openSession([{ lines: RECORDED }], {
+        help: CLAUDE_HELP_LINES_2_1_260,
+      });
+
+      await collect(startTurn(adapter, context));
+
+      expect(argumentAfter(turnArgv[0] ?? [], '--permission-prompts')).toBe('none');
+    });
+
     it('passes no effort on a build whose probe declared none', async () => {
       const { adapter, context, turnArgv } = await openSession([{ lines: RECORDED }]);
 

@@ -49,6 +49,9 @@ const CLAUDE_PERMISSION_MODE_FLAG = '--permission-mode';
 const CLAUDE_MODEL_FLAG = '--model';
 const CLAUDE_EFFORT_FLAG = '--effort';
 
+/** Who answers a permission prompt. Declared from 2.1.259; absent before it. */
+const CLAUDE_PERMISSION_PROMPTS_FLAG = '--permission-prompts';
+
 /**
  * Long flags `buildTurnArgv` puts on the wire.
  *
@@ -152,4 +155,18 @@ export function claudeAcceptedModes(
   surface: ClaudeCliSurface | undefined
 ): ReadonlySet<string> | undefined {
   return surface && surface.permissionModes.size > 0 ? surface.permissionModes : undefined;
+}
+
+/**
+ * Whether this build lets the caller say who answers permission prompts.
+ *
+ * `false` for an unreadable surface, which is the **opposite** default from
+ * `claudeModeAccepted`'s, and deliberately so — the two answer different
+ * questions. A probe that failed may not *narrow* what the matrix offers, so
+ * that one fails open; it also may not *promise* an option exists, so this one
+ * fails closed. Passing an undeclared flag is a startup failure on every turn,
+ * which is the one outcome worth being pessimistic to avoid.
+ */
+export function claudeDeclaresPermissionPrompts(surface: ClaudeCliSurface | undefined): boolean {
+  return surface?.flags.has(CLAUDE_PERMISSION_PROMPTS_FLAG) ?? false;
 }

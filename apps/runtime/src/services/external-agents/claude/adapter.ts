@@ -64,6 +64,7 @@ import { CLAUDE_AUTH_UNKNOWN, type ClaudeAuthentication, parseClaudeAuthStatus }
 import {
   type ClaudeCliSurface,
   claudeAcceptedModes,
+  claudeDeclaresPermissionPrompts,
   isUsableClaudeCliSurface,
   missingClaudeCliFlags,
   parseClaudeCliSurface,
@@ -107,19 +108,28 @@ const STREAM_IDLE_TIMEOUT_MS = 10 * 60_000;
 const MINIMUM_CLAUDE_VERSION_PARSED = requireClaudeVersion(MINIMUM_CLAUDE_VERSION);
 
 /**
- * What this adapter genuinely supports.
+ * What this adapter genuinely supports, before the build in front of it is
+ * known.
  *
- * Every opportunistic flag is false, and each one is a measured verdict rather
- * than an unimplemented stub:
+ * `modelCatalog` is the one flag decided per install — see
+ * `claudeCapabilities`. The rest are false here, and each is a measured verdict
+ * rather than an unimplemented stub:
  *
- * - `interactiveApprovals` — plain headless execution cannot deliver an
- *   answerable approval. An unmatched `Write` under the default mode produces a
- *   structured denial, a result listing it, exit 0 and no file; no stream
- *   control frame is offered to answer it. `--permission-prompt-tool` exists and
- *   could change that, and it is out of scope on purpose: hosting a permission
- *   prompt tool makes MangoStudio part of the authorization path for an agent it
- *   does not own, which needs authenticated request ids, replay protection,
- *   expiry, owner binding and a threat model of its own.
+ * - `interactiveApprovals` — the CLI has a real control channel, and it is not
+ *   reachable from a host like this one. Probed against 2.1.260 on 2026-09-04:
+ *   `can_use_tool` is routed to a host only when `--sdk-url` is set, and that
+ *   flag is allowlisted to Anthropic's own backend ("reserved for Remote
+ *   Control worker processes"). Sending `initialize` first — which the CLI
+ *   answers in full over plain stdio — does not unlock it either. So a turn
+ *   that needs permission is denied by the vendor and reported, which is what
+ *   `--permission-prompts none` now states outright.
+ *
+ *   The one remaining public route is `--permission-prompt-tool`, and it is out
+ *   of scope on purpose: it takes an **MCP tool**, so serving it would make
+ *   MangoStudio part of the authorization path for an agent it does not own,
+ *   needing authenticated request ids, replay protection, expiry, owner binding
+ *   and a threat model of its own. It is also absent from printed `--help`,
+ *   so no capability could honestly be derived from probing for it.
  * - `steering` — `--input-format stream-json` accepts a second message, but it
  *   runs as **its own turn**, with its own result. That is a queued follow-up,
  *   not same-turn steering.
@@ -174,6 +184,11 @@ interface ClaudeSession {
    * permission nor account-dependent.
    */
   readonly acceptedEfforts?: ReadonlySet<string>;
+  /**
+   * Whether this build declares `--permission-prompts`, so the turn can say
+   * `none` instead of relying on a default that has already changed once.
+   */
+  readonly answersPermissionPrompts?: boolean;
   activeTurn?: {
     readonly channel: TurnChannel<ExternalAgentEvent>;
     readonly reducer: ClaudeTurnReducer;
@@ -304,6 +319,7 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
       configuration: params.configuration,
       availability,
       ...(surface?.effortLevels ? { acceptedEfforts: surface.effortLevels } : {}),
+      answersPermissionPrompts: claudeDeclaresPermissionPrompts(surface),
     };
     this.#sessions.set(params.sessionId, session);
 
@@ -706,10 +722,37 @@ export function safeClaudeModel(model: string | undefined): string | undefined {
     : undefined;
 }
 
+/**
+ * `--permission-prompts none`, stated rather than left to the default.
+ *
+ * This is **pinning, not a fix**. 2.1.259 added the flag with a default of
+ * `host`, and a probe against 2.1.260 confirms today's behaviour is already
+ * what we want: with stdin closed after the prompt, an unmatched `Write` under
+ * `--permission-mode default` produces `system/permission_denied`, a
+ * `tool_result` marked in error, exit 0 and no file. Nothing hangs.
+ *
+ * What the flag buys is that the property stays true. It is the vendor's own
+ * name for "nobody is listening, deny anything that would ask", and MangoStudio
+ * genuinely is that host — `interactiveApprovals` is false, so a prompt has
+ * nowhere to go. Leaving it implicit means a future default of `host` on a
+ * build that then *waits* for an answer would park every approval-needing turn
+ * until the idle timeout, and the first report would be "Claude hangs".
+ *
+ * Passed only when the build declared the flag, so 2.1.211–2.1.258 keep working
+ * untouched. Never `host`: that value promises an answering host this adapter
+ * does not have.
+ */
+function permissionPromptArguments(declared: boolean | undefined): string[] {
+  return declared ? ['--permission-prompts', 'none'] : [];
+}
+
 /** The turn's argv. Everything that is not a flag comes from server-owned state. */
 export function buildTurnArgv(input: {
   readonly executable: string;
-  readonly session: Pick<ClaudeSession, 'sessionId' | 'established' | 'acceptedEfforts'>;
+  readonly session: Pick<
+    ClaudeSession,
+    'sessionId' | 'established' | 'acceptedEfforts' | 'answersPermissionPrompts'
+  >;
   readonly configuration: ExternalAgentConfiguration;
   readonly availability: ClaudeModeAvailability;
 }): [string, ...string[]] {
@@ -738,6 +781,7 @@ export function buildTurnArgv(input: {
     '--forward-subagent-text',
     '--permission-mode',
     mode,
+    ...permissionPromptArguments(input.session.answersPermissionPrompts),
     // The session id is the whole continuity mechanism: minted on the first run,
     // resumed afterwards. The same `cwd` is passed either way, because below
     // 2.1.223 `--resume` only looks inside the directory the session was made in.
