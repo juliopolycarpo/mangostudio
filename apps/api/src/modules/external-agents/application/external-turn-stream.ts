@@ -15,6 +15,7 @@
 
 import type {
   ExternalAgentTargetId,
+  ExternalAgentUnavailableReason,
   ExternalReviewTarget,
 } from '@mangostudio/shared/external-agents';
 import type { ExternalTurnRequest } from '@mangostudio/shared/generation';
@@ -88,7 +89,12 @@ export interface ExternalTurnStreamDependencies {
  */
 export type ExternalTurnPreflightFailure =
   | { readonly kind: 'conflict'; readonly message: string }
-  | { readonly kind: 'unsupported'; readonly message: string }
+  | {
+      readonly kind: 'unsupported';
+      readonly message: string;
+      /** The descriptor's own reason, so the client can say it in the user's language. */
+      readonly unavailableReason?: ExternalAgentUnavailableReason;
+    }
   /**
    * The environment has not proved that vendor credentials belong to the user
    * whose turn this is. Refused here as well as in discovery because discovery
@@ -209,7 +215,14 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
         : resolution.notReady
           ? 'unavailable'
           : 'unsupported';
-      return { ok: false, failure: { kind, message: resolution.message } };
+      return {
+        ok: false,
+        failure: {
+          kind,
+          message: resolution.message,
+          ...(resolution.reason ? { unavailableReason: resolution.reason } : {}),
+        },
+      };
     }
 
     // The descriptor this machine actually answered with, before anything is

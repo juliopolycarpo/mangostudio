@@ -7,7 +7,13 @@
  * with nothing to try. So each is asserted for both disabled-ness and reason.
  */
 
-import { describe, expect, it, jest } from 'bun:test';
+import { describe, expect, it, jest, mock } from 'bun:test';
+import { routerWithLinkStub } from '../../support/mocks/router';
+
+// The remedy for a missing or outdated agent is a link into the surface that
+// owns the install recipes, so this file now renders a router `Link`.
+mock.module('@tanstack/react-router', await routerWithLinkStub());
+
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { EnvironmentTransportKind } from '@mangostudio/shared/environments';
 import type {
@@ -126,6 +132,43 @@ describe('external availability states', () => {
     });
     expect(codexOption()).toBeDisabled();
     expect(screen.getByText(copy)).toBeInTheDocument();
+  });
+
+  /**
+   * A reason is a diagnosis; a remedy is the next step. The two that MangoStudio
+   * can actually do something about link into the surface that already owns the
+   * install recipes, rather than growing a second install affordance here.
+   */
+  it.each([
+    ['not-installed', /Install this agent/i],
+    ['version-unsupported', /Update this agent/i],
+  ] as const)('offers what would fix %s', (reason, action) => {
+    renderSelector({
+      externalAgents: [
+        descriptor({
+          unavailableReason: reason as ExternalAgentUnavailableReason,
+          remedy: { kind: reason === 'not-installed' ? 'install' : 'update' },
+          ...(reason === 'version-unsupported' ? { requiredVersion: '2.1.211' } : {}),
+        }),
+      ],
+    });
+
+    const link = screen.getByRole('link', { name: action });
+    expect(link).toHaveAttribute('href', expect.stringContaining('/environments/agents'));
+  });
+
+  it('offers no action for a refusal nothing on this screen fixes', () => {
+    // `runtime-unsupported` is the runtime lacking an adapter, so updating the
+    // *agent* would not help. A button that does nothing is worse than none.
+    renderSelector({
+      externalAgents: [
+        descriptor({ unavailableReason: 'runtime-unsupported', remedy: { kind: 'none' } }),
+      ],
+    });
+
+    expect(
+      screen.queryByRole('link', { name: /Install this agent|Update this agent/i })
+    ).toBeNull();
   });
 
   it('never renders an executable path', () => {

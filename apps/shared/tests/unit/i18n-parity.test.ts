@@ -10,6 +10,7 @@ import {
   SshFailureReasonSchema,
 } from '../../src/environments';
 import {
+  ExternalAgentRemedyKindSchema,
   ExternalAgentUnavailableReasonSchema,
   ExternalApprovalRoutingSchema,
   ExternalPermissionLevelSchema,
@@ -152,6 +153,13 @@ const ENUM_COVERAGE = [
     path: 'externalAgents.turn.terminal',
     values: literalValues(ExternalTurnTerminalReasonSchema),
     blocks: [en.externalAgents.turn.terminal, ptBR.externalAgents.turn.terminal],
+  },
+  {
+    // A remedy with no copy is a button with no label on the one row that has
+    // something actionable to say.
+    path: 'externalAgents.remedy',
+    values: literalValues(ExternalAgentRemedyKindSchema),
+    blocks: [en.externalAgents.remedy, ptBR.externalAgents.remedy],
   },
   {
     path: 'externalAgents.permission.level',

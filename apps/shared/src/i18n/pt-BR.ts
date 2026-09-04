@@ -3660,6 +3660,17 @@ export const messages = {
       'version-unsupported':
         'Atualize este agente para a versão {version} ou mais recente nesta máquina',
       'disclosure-required': 'Leia e aceite o aviso de terceiros deste agente primeiro',
+      'installed-but-unusable':
+        'Instalado e conectado, mas não aceita nenhuma das permissões que o MangoStudio oferece',
+    },
+    /** O próximo passo, não só o diagnóstico. */
+    remedy: {
+      install: 'Instalar este agente',
+      update: 'Atualizar este agente',
+      'sign-in': 'Entrar neste agente',
+      'contact-admin': 'Fale com quem administra esta máquina',
+      'accept-disclosure': 'Ler o aviso',
+      none: 'Não há nada a fazer por aqui',
     },
     isolation: {
       title: 'Esta máquina não consegue separar os logins do fornecedor',

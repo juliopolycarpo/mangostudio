@@ -869,9 +869,64 @@ export const ExternalAgentUnavailableReasonSchema = Type.Union([
    * acknowledgement can be revoked while a stale one is still being rendered.
    */
   Type.Literal('disclosure-required'),
+  /**
+   * The agent is installed, signed in and answering — and supports none of the
+   * permission combinations MangoStudio offers.
+   *
+   * Inferred by the hub from the matrix the adapter returned, never reported by
+   * an adapter: each one already states, per cell, why that cell is refused,
+   * and this is what "every cell" adds up to. Without it such a target looks
+   * simply selectable until a send is refused, which is the shape #813
+   * describes.
+   */
+  Type.Literal('installed-but-unusable'),
 ]);
 
 export type ExternalAgentUnavailableReason = Static<typeof ExternalAgentUnavailableReasonSchema>;
+
+/**
+ * What MangoStudio can offer to fix an agent that cannot run.
+ *
+ * The shape lives here with the reason it answers; which reason maps to which
+ * remedy is policy and lives in `remedies.ts`. A greyed row that says *why* is
+ * already better than one that says nothing and is still a diagnosis — the
+ * person reading it wants the next step, named as something the interface can
+ * render as a control.
+ */
+export const ExternalAgentRemedyKindSchema = Type.Union([
+  /** The CLI is not on this machine; an install recipe exists for it. */
+  Type.Literal('install'),
+  /** It is installed but too old for the contract this runtime drives. */
+  Type.Literal('update'),
+  /** It is installed and current; the vendor account is not signed in. */
+  Type.Literal('sign-in'),
+  /** Nothing the user can do from here — the machine's owner decides. */
+  Type.Literal('contact-admin'),
+  /** MangoStudio is asking for something, and the dialog is already reachable. */
+  Type.Literal('accept-disclosure'),
+  /** Knowably unfixable from the interface, so no control is offered. */
+  Type.Literal('none'),
+]);
+
+export type ExternalAgentRemedyKind = Static<typeof ExternalAgentRemedyKindSchema>;
+
+export const ExternalAgentRemedySchema = Type.Object(
+  {
+    kind: ExternalAgentRemedyKindSchema,
+    /**
+     * A command to run, when the remedy has one and MangoStudio cannot run it.
+     *
+     * The vendor's own sign-in command is the case this exists for. An install
+     * or update is *not*: those resolve to a recipe the environments surface
+     * already owns, and a second copy of the command string here would be one
+     * more thing to keep in step with it.
+     */
+    command: Type.Optional(ExternalVendorIdSchema),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalAgentRemedy = Static<typeof ExternalAgentRemedySchema>;
 
 export const EXTERNAL_AGENT_UNAVAILABLE_REASONS: readonly ExternalAgentUnavailableReason[] =
   ExternalAgentUnavailableReasonSchema.anyOf.map((literal) => literal.const);
@@ -963,6 +1018,15 @@ export const ExternalAgentDescriptorSchema = Type.Object(
     models: Type.Optional(ExternalAgentModelCatalogSchema),
     account: Type.Optional(ExternalAgentAccountSchema),
     unavailableReason: Type.Optional(ExternalAgentUnavailableReasonSchema),
+    /**
+     * What would fix it, when it cannot run.
+     *
+     * Travels beside the reason rather than being derived by each renderer:
+     * three call sites each falling through to "no action" is how a newly added
+     * reason silently becomes a dead end. Absent exactly when
+     * `unavailableReason` is.
+     */
+    remedy: Type.Optional(ExternalAgentRemedySchema),
     discovery: Type.Optional(ExternalAgentDiscoveryReportSchema),
   },
   { additionalProperties: false }

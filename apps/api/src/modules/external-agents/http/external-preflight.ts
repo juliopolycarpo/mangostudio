@@ -69,5 +69,11 @@ export function externalPreflightDetails(
   if (failure.kind === 'disclosure-required') {
     return { details: { targetId: failure.targetId, environmentId: failure.environmentId } };
   }
+  if (failure.kind === 'unsupported' && failure.unavailableReason) {
+    // Structured so the client renders its own sentence and the matching
+    // remedy. The `message` beside it stays English on purpose: it is what an
+    // External API consumer that renders nothing itself falls back to.
+    return { details: { unavailableReason: failure.unavailableReason } };
+  }
   return {};
 }

@@ -3667,6 +3667,17 @@ export const messages: Messages = {
       // `{version}` is filled from the descriptor's `requiredVersion`.
       'version-unsupported': 'Update this agent to {version} or later on this machine',
       'disclosure-required': 'Read and accept this agent\u2019s third-party notice first',
+      'installed-but-unusable':
+        'Installed and signed in, but it accepts none of the permissions MangoStudio offers',
+    },
+    /** The next step, not just the diagnosis. */
+    remedy: {
+      install: 'Install this agent',
+      update: 'Update this agent',
+      'sign-in': 'Sign in to this agent',
+      'contact-admin': 'Ask whoever administers this machine',
+      'accept-disclosure': 'Read the notice',
+      none: 'There is nothing to do from here',
     },
     isolation: {
       title: 'This machine cannot keep vendor logins separate',

@@ -35,6 +35,7 @@ import type {
   ExternalAgentDescriptor,
   ExternalAgentSettings,
   ExternalAgentTargetId,
+  ExternalAgentUnavailableReason,
   ExternalApprovalRouting,
   ExternalPermissionLevel,
 } from '@mangostudio/shared/external-agents';
@@ -69,6 +70,14 @@ export type ExternalTurnConfigurationResolution =
   | {
       readonly ok: false;
       readonly message: string;
+      /**
+       * Which of the descriptor's own reasons refused this, when one did.
+       *
+       * The client translates it and pairs it with the remedy; the English
+       * `message` stays as the developer-facing fallback an External API
+       * consumer sees when it renders nothing itself.
+       */
+      readonly reason?: ExternalAgentUnavailableReason;
       /**
        * Set when the refusal is the isolation gate rather than a configuration
        * one. The two read very differently to a user — one is "change a
@@ -163,9 +172,15 @@ export function createExternalTurnConfigurationResolver(
     }
     const descriptor = found.descriptor;
     if (descriptor.unavailableReason) {
+      // The reason travels as a field, not interpolated into the sentence
+      // (#823). The wire token is developer vocabulary — `version-unsupported`
+      // is not something to show a user — and the client already has the
+      // catalog that turns it into a sentence in their own language, plus the
+      // remedy that says what to do about it.
       return {
         ok: false,
-        message: `This agent cannot run here right now (${descriptor.unavailableReason}).`,
+        reason: descriptor.unavailableReason,
+        message: 'This agent cannot run here right now.',
       };
     }
 

@@ -52,6 +52,7 @@ import type {
 } from '@mangostudio/shared/external-agents';
 import {
   EXTERNAL_AGENT_TARGET_IDS,
+  externalRemedyFor,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
 import { onEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation-hooks';
@@ -339,11 +340,23 @@ function isExternalTarget(targetId: string): targetId is ExternalAgentTargetId {
 function unavailableReasonFor(
   installed: boolean,
   authState: ExternalAgentAuthState,
-  fromAdapter: ExternalAgentUnavailableReason | undefined
+  fromAdapter: ExternalAgentUnavailableReason | undefined,
+  supportedConfigurations: readonly ExternalSupportedConfiguration[]
 ): ExternalAgentUnavailableReason | undefined {
   if (fromAdapter) return fromAdapter;
   if (!installed) return 'not-installed';
   if (authState === 'signed-out') return 'signed-out';
+  // Last, and only over a matrix an adapter actually answered with. Each cell
+  // already carries its own refusal; this is what "every cell" adds up to, and
+  // it is inferred here rather than reported because no adapter is in a
+  // position to say it — each one knows why *its* cells are refused, not that
+  // the result leaves nothing selectable.
+  //
+  // An empty list is a cold cache rather than a finding, and reading it as one
+  // would grey out a working target on the first render after a restart.
+  if (supportedConfigurations.length > 0 && supportedConfigurations.every((c) => !c.supported)) {
+    return 'installed-but-unusable';
+  }
   return undefined;
 }
 
@@ -378,7 +391,13 @@ const MAX_VERSION_LENGTH = 128;
 /** One place where a descriptor is assembled, whichever tier supplied the facts. */
 function buildDescriptor(input: DescriptorInput): ExternalAgentDescriptor {
   const loginCommand = productDescriptorFor(input.targetId)?.loginCommand;
-  const reason = unavailableReasonFor(input.installed, input.authState, input.adapterReason);
+  const reason = unavailableReasonFor(
+    input.installed,
+    input.authState,
+    input.adapterReason,
+    input.supportedConfigurations
+  );
+  const remedy = externalRemedyFor(reason, loginCommand ? { loginCommand } : {});
   const version = input.version?.slice(0, MAX_VERSION_LENGTH);
   // Bound to the one reason whose copy interpolates it. A required version on
   // any other row would read as a floor this runtime enforces, and it does not:
@@ -404,6 +423,7 @@ function buildDescriptor(input: DescriptorInput): ExternalAgentDescriptor {
     // never persisted past this response.
     ...(input.account && { account: input.account }),
     ...(reason && { unavailableReason: reason }),
+    ...(remedy && { remedy }),
     // Diagnostics only. The selector renders none of this; the Logs page does.
     ...(input.discovery && { discovery: input.discovery }),
   };

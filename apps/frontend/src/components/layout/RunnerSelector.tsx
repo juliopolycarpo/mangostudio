@@ -23,6 +23,7 @@ import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { EnvironmentTransportKind } from '@mangostudio/shared/environments';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
+import { Link } from '@tanstack/react-router';
 import { Check, ChevronDown, Copy, CornerUpRight, History } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
@@ -436,6 +437,23 @@ function ExternalRow({
           <p className="text-[10px] leading-relaxed text-on-surface-variant/70">
             {labels.isolation.next[isolationFixFor(transportKind)]}
           </p>
+        </div>
+      ) : null}
+
+      {/* The two remedies MangoStudio can act on. Both link into the surface
+          that already owns the install recipes rather than growing a second
+          install affordance here — `claude.install` and `claude.update` and
+          their Codex and Cursor equivalents live there, keyed by the same
+          target id. Every other remedy either has its own control below
+          (sign-in), its own panel above (isolation), or nothing to offer. */}
+      {descriptor.remedy?.kind === 'install' || descriptor.remedy?.kind === 'update' ? (
+        <div className="mb-2 px-2">
+          <Link
+            to="/environments/agents"
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-primary transition-colors hover:bg-surface-container-high"
+          >
+            {labels.remedy[descriptor.remedy.kind]}
+          </Link>
         </div>
       ) : null}
 

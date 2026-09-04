@@ -54,6 +54,7 @@ export {
   externalPresetFor,
   externalPresetPair,
 } from './presets';
+export { EXTERNAL_AGENT_REMEDIES, externalRemedyFor } from './remedies';
 export {
   EXTERNAL_ACCOUNT_LIMITS_STALE_MS,
   EXTERNAL_ACTIVITY_KINDS,
@@ -132,6 +133,10 @@ export {
   ExternalAgentRefreshAccountUsageParamsSchema,
   type ExternalAgentRefreshAccountUsageResult,
   ExternalAgentRefreshAccountUsageResultSchema,
+  type ExternalAgentRemedy,
+  type ExternalAgentRemedyKind,
+  ExternalAgentRemedyKindSchema,
+  ExternalAgentRemedySchema,
   type ExternalAgentRespondParams,
   ExternalAgentRespondParamsSchema,
   type ExternalAgentResumeMode,
