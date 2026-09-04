@@ -15,6 +15,7 @@ import type {
   ToolchainUpdateBody,
 } from '@mangostudio/shared/environments';
 import { DEFAULT_TOOLCHAIN_SELECTION } from '@mangostudio/shared/environments';
+import { publishEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation';
 import { EnvironmentServiceError } from '../domain/environment-error';
 import {
   type EnvironmentToolchainRepository,
@@ -66,7 +67,8 @@ async function assertKnownPath(
 export function createToolchainService(
   repository: EnvironmentToolchainRepository = environmentToolchainRepository,
   probing: EnvironmentProbingService = environmentProbingService,
-  now: () => number = Date.now
+  now: () => number = Date.now,
+  publish: (userId: string) => void = publishEnvironmentInvalidation
 ): ToolchainService {
   return {
     async resolve(userId, environmentId) {
@@ -87,7 +89,12 @@ export function createToolchainService(
       // that here instead — read, merge, write the whole selection — would let
       // a concurrent update of the other runtime revert this one, since the
       // Node and Bun cards autosave through independent mutations.
-      return repository.upsert(userId, environmentId, body, now());
+      const selection = await repository.upsert(userId, environmentId, body, now());
+      // The selection is a field of `Environment`, so every other session
+      // holding the environments list is now showing a stale pin. Same signal
+      // `environment-service` publishes for any other change to that shape.
+      publish(userId);
+      return selection;
     },
   };
 }

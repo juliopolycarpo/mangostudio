@@ -337,4 +337,38 @@ describe('toolchain service', () => {
     expect((failure as EnvironmentServiceError).message).toContain('runtime unavailable');
     expect(repository.upserts).toHaveLength(0);
   });
+
+  // Regression: the selection is a field of `Environment`, so a write left
+  // every other session holding the environments list showing a stale pin —
+  // the same signal `environment-service` publishes for any other change to
+  // that shape was never sent from here.
+  it('publishes an environments invalidation once a selection is committed', async () => {
+    const published: string[] = [];
+    const service = createToolchainService(
+      new FakeEnvironmentToolchainRepository(),
+      new FakeEnvironmentProbingService({ node: ['/opt/node/bin/node'] }),
+      () => 1_000,
+      (userId) => published.push(userId)
+    );
+
+    await service.resolve(USER_ID, ENVIRONMENT_ID);
+    expect(published).toEqual([]);
+
+    await service.update(USER_ID, ENVIRONMENT_ID, { node: '/opt/node/bin/node' });
+    expect(published).toEqual([USER_ID]);
+  });
+
+  it('publishes nothing when the update is refused', async () => {
+    const published: string[] = [];
+    const service = createToolchainService(
+      new FakeEnvironmentToolchainRepository(),
+      new FakeEnvironmentProbingService({ node: ['/opt/node/bin/node'] }),
+      () => 1_000,
+      (userId) => published.push(userId)
+    );
+
+    await service.update(USER_ID, ENVIRONMENT_ID, { node: '/nowhere/node' }).catch(() => undefined);
+
+    expect(published).toEqual([]);
+  });
 });
