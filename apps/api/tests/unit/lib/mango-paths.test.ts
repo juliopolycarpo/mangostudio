@@ -10,6 +10,7 @@ import {
   getPidFilePath,
   getRunDir,
   getServerLogPath,
+  getUpdateCheckPath,
 } from '../../../src/lib/mango-paths';
 
 describe('mango-paths', () => {
@@ -21,6 +22,7 @@ describe('mango-paths', () => {
     expect(getPidFilePath()).toBe(join(home, 'run', 'server.json'));
     expect(getInstallLogsDir()).toBe(join(home, 'logs', 'installs'));
     expect(getInstallLogPath('run-1')).toBe(join(home, 'logs', 'installs', 'run-1.log'));
+    expect(getUpdateCheckPath()).toBe(join(home, 'run', 'update-check.json'));
   });
 
   it('builds a timestamped log filename under the logs dir', () => {

@@ -35,6 +35,11 @@ export function getPidFilePath(): string {
   return join(getRunDir(), 'server.json');
 }
 
+/** Path to the cached answer from the last release-check. // Usage: getUpdateCheckPath() */
+export function getUpdateCheckPath(): string {
+  return join(getRunDir(), 'update-check.json');
+}
+
 /** Timestamped log file path for a background server start. // Usage: getServerLogPath(Date.now()) */
 export function getServerLogPath(startedAt: number): string {
   return join(getLogsDir(), `server-${formatTimestamp(startedAt)}.log`);
