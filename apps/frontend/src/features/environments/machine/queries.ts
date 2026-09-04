@@ -12,13 +12,20 @@ import type {
   MachineStatus,
 } from '@mangostudio/shared/machine';
 import { MACHINE_LOG_TAIL_DEFAULT } from '@mangostudio/shared/machine';
-import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  type QueryClient,
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   changeMachineService,
   fetchMachineDoctor,
   fetchMachineLogs,
   fetchMachineStatus,
+  fetchMachineUpdate,
   restartMachine,
 } from './api';
 
@@ -34,7 +41,10 @@ const machineKeys = {
   doctor: (sections: readonly MachineDoctorSection[]) =>
     [...machineKeys.all, 'doctor', [...sections].sort().join(',')] as const,
   logs: (tail: number) => [...machineKeys.all, 'logs', tail] as const,
+  update: () => [...machineKeys.all, 'update'] as const,
 };
+
+const UPDATE_STALE_MS = 5 * 60_000;
 
 export function machineStatusQueryOptions() {
   return queryOptions({
@@ -46,6 +56,33 @@ export function machineStatusQueryOptions() {
     // state, not a reason to stop.
     retry: false,
   });
+}
+
+/**
+ * The self-update banner's whole input. Polled far more loosely than status:
+ * a release check runs on the hub's own schedule, so refetching this on every
+ * window focus is enough to catch it without a background poll.
+ */
+export function machineUpdateQueryOptions() {
+  return queryOptions({
+    queryKey: machineKeys.update(),
+    queryFn: fetchMachineUpdate,
+    staleTime: UPDATE_STALE_MS,
+    refetchOnWindowFocus: true,
+    retry: false,
+  });
+}
+
+/**
+ * Invalidates the update query from outside a component that holds
+ * `machineKeys` — `UpgradeDialog` calls this once an upgrade attempt ends, so
+ * the banner and card read the hub's post-upgrade answer instead of the one
+ * fetched before it ran.
+ *
+ * // Usage: invalidateMachineUpdate(queryClient)
+ */
+export function invalidateMachineUpdate(queryClient: QueryClient): Promise<void> {
+  return queryClient.invalidateQueries({ queryKey: machineKeys.update() });
 }
 
 export function machineDoctorQueryOptions(sections: readonly MachineDoctorSection[] = []) {
@@ -137,6 +174,10 @@ export function useMachineDoctor(sections: readonly MachineDoctorSection[] = [])
 
 export function useMachineLogs(tail: number = MACHINE_LOG_TAIL_DEFAULT) {
   return useQuery(machineLogsQueryOptions(tail));
+}
+
+export function useMachineUpdate() {
+  return useQuery(machineUpdateQueryOptions());
 }
 
 export function useRestartMachineMutation() {

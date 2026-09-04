@@ -13,6 +13,12 @@ import type {
   MachineStatus,
 } from '@mangostudio/shared/machine';
 import type { UserServicePlatform } from '@mangostudio/shared/runtime-home';
+import type {
+  InstallManager,
+  MachineUpdateStatus,
+  UpgradeRefusalReason,
+} from '@mangostudio/shared/updates';
+import { formatMessage } from '@/lib/i18n-format';
 import { guardReasonLabel } from '../format';
 
 export function launchModeLabel(t: Messages, launch: HubLaunchMode): string {
@@ -108,4 +114,34 @@ export function actionRefusalLines(
   const entry = status.actions[action];
   if (entry.available || !entry.reason) return [];
   return refusalLines(t, entry.reason, status.actions.guard.reasons);
+}
+
+/** Which tool owns the running binary, worded for a reader rather than a wire id. */
+export function installedViaManagerLabel(t: Messages, manager: InstallManager): string {
+  return t.environments.machine.update.manager[manager];
+}
+
+/** Why the hub refuses to upgrade itself, for a `POST /machine/upgrade` 409 or a `refused` report. */
+export function upgradeRefusalReasonLabel(t: Messages, reason: UpgradeRefusalReason): string {
+  return t.environments.machine.update.refusalReasons[reason];
+}
+
+/**
+ * The "Latest" row on the update card: checks disabled, never checked, the
+ * check's own error, or the version comparison — in that order, so a check
+ * that failed reads as "we tried and this is why" rather than "not checked".
+ */
+export function updateLatestLabel(
+  t: Messages,
+  status: Pick<MachineUpdateStatus, 'checksEnabled' | 'check'>
+): string {
+  const m = t.environments.machine.update;
+  if (!status.checksEnabled) return m.checksDisabled;
+  const check = status.check;
+  if (!check) return m.notCheckedYet;
+  if (check.error) return check.error;
+  if (check.updateAvailable) {
+    return formatMessage(m.updateAvailable, { version: check.latestVersion ?? '' });
+  }
+  return formatMessage(m.upToDate, { version: check.currentVersion });
 }

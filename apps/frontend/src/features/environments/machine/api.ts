@@ -18,13 +18,20 @@ import type {
   MachineServiceAction,
   MachineStatus,
 } from '@mangostudio/shared/machine';
+import type { MachineUpdateStatus } from '@mangostudio/shared/updates';
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 
-interface MachineActionRefusal {
+/**
+ * A refused mutation, generic over the reason code: `MachineActionReason` for
+ * the actions below, `UpgradeRefusalReason` for the raw-`fetch` upgrade stream
+ * in `use-upgrade-stream.ts`, which gets no Eden type and reads its 403/409
+ * body through the same {@link toRefusal}.
+ */
+export interface MachineActionRefusal<R extends string = MachineActionReason> {
   readonly outcome: 'refused';
   readonly reasons: readonly InstallGuardReason[];
-  readonly reason: MachineActionReason | null;
+  readonly reason: R | null;
   readonly command: string | null;
 }
 
@@ -32,35 +39,42 @@ export type MachineActionResult =
   | { readonly outcome: 'accepted'; readonly response: MachineActionResponse }
   | MachineActionRefusal;
 
-interface EdenErrorLike {
+export interface EdenErrorLike {
   readonly status?: number;
   readonly value?: unknown;
 }
 
 /**
- * Reads a refusal out of an Eden error; anything else stays a real failure.
+ * Reads a refusal out of an Eden error, or out of a raw-`fetch` 403/409 body
+ * shaped as `{ status, value }`; anything else stays a real failure.
  *
  * The body is read through `ApiError` rather than by hand: the client asks for
  * `application/problem+json`, so a refusal arrives as a problem document, and
  * `normalizeApiErrorBody` behind `ApiError` is the one place that reads both
  * that and the legacy shape. Parsing `details` here again would be a second
  * path that happens to work only while the two shapes agree on the key.
+ *
+ * // Usage: refusalOrThrow<UpgradeRefusalReason>({ status: response.status, value })
  */
-function toRefusal(error: EdenErrorLike): MachineActionRefusal | null {
+function toRefusal<R extends string = MachineActionReason>(
+  error: EdenErrorLike
+): MachineActionRefusal<R> | null {
   if (error.status !== 403 && error.status !== 409) return null;
   const { details } = new ApiError(error.value);
   const reasons = details?.reasons;
   return {
     outcome: 'refused',
     reasons: reasons ? (reasons.split(',') as InstallGuardReason[]) : [],
-    reason: (details?.reason as MachineActionReason | undefined) || null,
+    reason: (details?.reason as R | undefined) || null,
     command: details?.command || null,
   };
 }
 
 /** A guard refusal is a result the page renders; anything else is a failure. */
-function refusalOrThrow(error: EdenErrorLike): MachineActionRefusal {
-  const refusal = toRefusal(error);
+export function refusalOrThrow<R extends string = MachineActionReason>(
+  error: EdenErrorLike
+): MachineActionRefusal<R> {
+  const refusal = toRefusal<R>(error);
   if (refusal) return refusal;
   throw new ApiError(error.value);
 }
@@ -69,6 +83,12 @@ export async function fetchMachineStatus(): Promise<MachineStatus> {
   const { data, error } = await client.api.machine.status.get();
   if (error) throw new ApiError(error.value);
   return data as MachineStatus;
+}
+
+export async function fetchMachineUpdate(): Promise<MachineUpdateStatus> {
+  const { data, error } = await client.api.machine.update.get();
+  if (error) throw new ApiError(error.value);
+  return data as MachineUpdateStatus;
 }
 
 export async function fetchMachineDoctor(
