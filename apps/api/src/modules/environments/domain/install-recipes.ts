@@ -369,9 +369,18 @@ const CURSOR_DOWNLOADS: Partial<Record<InstallPlatform, DownloadedInstaller>> = 
   },
 };
 
+/**
+ * Bun's root is `$BUN_INSTALL` when set and `~/.bun` otherwise — the same
+ * ladder `isBunManagedPath` walks to decide an installation is Bun-managed.
+ * Resolving it here rather than hardcoding `~/.bun` keeps removal pointed at
+ * the installation detection actually attributed to Bun.
+ */
 const BUN_UNINSTALL_ARGV = platformArgv(
-  posixShellArgv('rm -rf "$HOME/.bun"'),
-  powershellCommandArgv('& "$env:USERPROFILE\\.bun\\uninstall.ps1"')
+  posixShellArgv('rm -rf "${BUN_INSTALL:-$HOME/.bun}"'),
+  powershellCommandArgv(
+    '$root = if ($env:BUN_INSTALL) { $env:BUN_INSTALL } else { "$env:USERPROFILE\\.bun" }; ' +
+      '& "$root\\uninstall.ps1"'
+  )
 );
 
 const CLAUDE_UNINSTALL_ARGV = platformArgv(
@@ -427,7 +436,7 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     inputKind: 'none',
     platforms: ALL_PLATFORMS,
     requires: [],
-    writes: ['$HOME/.bun', '%USERPROFILE%\\.bun'],
+    writes: ['$BUN_INSTALL', '$HOME/.bun', '%USERPROFILE%\\.bun'],
     networkAccess: false,
     timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
     probe: [{ kind: 'runtime', runtimeId: 'bun' }],

@@ -92,7 +92,10 @@ What matters for this page:
   it with its source and its update action is copy-only.
 - **Update and uninstall** exist for Bun, Claude Code, Codex and Cursor. A recipe MangoStudio runs
   must have a vendor-documented shape; Codex and Cursor do not document an uninstall, so those two
-  are listed as copy-only commands with the reason beside them.
+  are listed as copy-only commands with the reason beside them. Bun's uninstall removes Bun's own
+  root — `$BUN_INSTALL`, or `~/.bun` when it is unset, the same ladder detection walks — so the card
+  offers it only when the effective Bun carries `pathSource: bun`. A Homebrew or system Bun is
+  detected and updated, never uninstalled from here.
 - **Chains**: "Install Node" on a POSIX machine without nvm runs nvm first, then Node, then sets
   the default, with one confirmation listing every step and one console per step. On Windows the
   default chain is one step; the fnm alternative is three.
