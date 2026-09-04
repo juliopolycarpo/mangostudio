@@ -111,6 +111,7 @@
   "/api/library/settings/compare": ["get"],
   "/api/library/settings/{targetId}": ["get"],
   "/api/library/targets": ["get"],
+  "/api/machine/config": ["post"],
   "/api/machine/doctor": ["get"],
   "/api/machine/logs": ["get"],
   "/api/machine/restart": ["post"],
