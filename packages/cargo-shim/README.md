@@ -15,9 +15,10 @@ prebuilt platform archive matching the crate version (the Bun-compiled
 verifies it against the release `SHA256SUMS`, and unpacks it into
 `~/.mango/dist/<version>/` — the same shared layout the shell installer uses.
 Every later run execs the real binary directly with your arguments and
-environment untouched. Canary launcher versions (`*-canary`) refresh that
-versioned install before every run so they track the rolling canary release
-assets.
+environment untouched, except for two markers — `MANGOSTUDIO_LAUNCHER` and
+`MANGOSTUDIO_LAUNCHER_PATH` — that let the binary tell a cargo install apart
+from any other. Canary launcher versions (`*-canary`) refresh that versioned
+install before every run so they track the rolling canary release assets.
 
 `cargo binstall mangostudio` installs the prebuilt app binary directly from the
 matching GitHub release archive instead of building the launcher. The installed
