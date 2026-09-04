@@ -19,6 +19,13 @@ updates:
       prefix: chore(ci)
     labels:
       - "type: dependencies"
+    groups:
+      # `init` and `analyze` are two directories of one released action pinned
+      # to the same SHA. Ungrouped, they arrive as two PRs and whichever lands
+      # first leaves the workflow on a mismatched pair of CodeQL bundles.
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
 
   - package-ecosystem: bun
     directory: /
