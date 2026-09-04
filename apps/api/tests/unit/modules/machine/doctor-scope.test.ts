@@ -114,6 +114,19 @@ function recordingDeps() {
       },
       collectEnvironmentChecks: () => Promise.resolve([]),
       collectLibraryChecks: () => Promise.resolve([]),
+      installOriginProbe: () => ({
+        platform: 'linux' as const,
+        env: {},
+        execPath: '/home/j/.mango/dist/current/mangostudio',
+        version: '0.1.1',
+        standalone: true,
+        container: false,
+        home: '/home/j',
+        readFile: () => null,
+      }),
+      checker: { readCached: () => null, check: () => Promise.resolve(null) },
+      isTty: () => false,
+      now: () => 0,
     },
   };
 }

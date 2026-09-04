@@ -24,7 +24,13 @@ export async function runDoctor(
   deps: Partial<DoctorDeps> = {}
 ): Promise<void> {
   const { log = writeLine, exit = (code: number) => process.exit(code), ...collect } = deps;
-  const results = await collectDoctorChecks(options, collect);
+  // `collectDoctorChecks`'s own default is false — right for the API route and
+  // every test that does not care — so only the actual CLI command asks a real
+  // terminal, and only when the caller left it unset.
+  const results = await collectDoctorChecks(options, {
+    isTty: () => Boolean(process.stdout.isTTY),
+    ...collect,
+  });
   render(results, options, { log, exit });
 }
 
