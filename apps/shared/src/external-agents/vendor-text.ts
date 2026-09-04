@@ -186,3 +186,13 @@ export function boundVendorText(raw: string, limit: ExternalTextLimit): BoundedV
 export function schemaMaxLengthFor(limit: ExternalTextLimit): number {
   return EXTERNAL_TEXT_LIMITS[limit] * 2;
 }
+
+/**
+ * The schema bound for one vendor-minted identifier.
+ *
+ * Exported so the wire shape, the persisted per-chat shape and the settings
+ * normalizer all measure the same value against the same number. A normalizer
+ * that admitted a longer id than the schema accepts turns a stored value into a
+ * settings save that fails for a reason no control on screen explains.
+ */
+export const EXTERNAL_VENDOR_ID_MAX_LENGTH = schemaMaxLengthFor('vendorId');

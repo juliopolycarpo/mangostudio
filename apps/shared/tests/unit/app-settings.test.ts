@@ -607,6 +607,44 @@ describe('normalizeAppSettings', () => {
     ).toEqual(DEFAULT_EXTERNAL_AGENT_SETTINGS);
   });
 
+  it('keeps a per-target model default', () => {
+    const normalized = normalizeAppSettings({
+      externalAgentSettings: { defaults: { claude: { model: 'opus', effort: 'high' } } },
+    });
+
+    expect(normalized.externalAgentSettings.defaults?.claude).toEqual({
+      model: 'opus',
+      effort: 'high',
+    });
+    expect(Value.Check(AppSettingsPutBodySchema, normalized)).toBe(true);
+  });
+
+  /**
+   * The three fields answer three unrelated questions, so one being unreadable
+   * is never a reason to forget the others. Before the defaults existed the
+   * normaliser could return early on a malformed `disclosures`; doing that now
+   * would silently discard a model the user chose.
+   */
+  it('keeps the defaults when a neighbouring field is malformed', () => {
+    const normalized = normalizeAppSettings({
+      externalAgentSettings: { disclosures: 7, defaults: { codex: { model: 'gpt-5-codex' } } },
+    });
+
+    expect(normalized.externalAgentSettings.disclosures).toEqual({});
+    expect(normalized.externalAgentSettings.defaults?.codex).toEqual({ model: 'gpt-5-codex' });
+  });
+
+  it('drops a default that is not a usable vendor id', () => {
+    const normalized = normalizeAppSettings({
+      externalAgentSettings: {
+        defaults: { claude: { model: '   ', effort: 42 }, cursor: { model: 'auto' } },
+      },
+    });
+
+    expect(normalized.externalAgentSettings.defaults?.claude).toBeUndefined();
+    expect(normalized.externalAgentSettings.defaults?.cursor).toEqual({ model: 'auto' });
+  });
+
   it('merges dynamic library defaults while keeping MangoStudio native locations enabled', () => {
     expect(
       normalizeLibraryLocationSettings(

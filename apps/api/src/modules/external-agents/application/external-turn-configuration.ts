@@ -33,6 +33,7 @@
 import type {
   ExternalAgentConfiguration,
   ExternalAgentDescriptor,
+  ExternalAgentSettings,
   ExternalAgentTargetId,
   ExternalApprovalRouting,
   ExternalPermissionLevel,
@@ -42,7 +43,9 @@ import {
   normalizePermissionLevel,
 } from '@mangostudio/shared/external-agents';
 import type { ExternalTurnRequest } from '@mangostudio/shared/generation';
+import { getDb } from '../../../db/database';
 import { getRuntimeClient } from '../../../services/runtime-client';
+import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import type { OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import {
   type ExternalAgentDiscoveryService,
@@ -95,6 +98,20 @@ export interface ExternalTurnConfigurationDependencies {
   readonly discovery?: Pick<ExternalAgentDiscoveryService, 'describeExternalAgents'>;
   readonly resolveRuntimeClient?: typeof getRuntimeClient;
   readonly isolationRegistry?: ExternalIdentityIsolationRegistry;
+  /** The per-target defaults, injected so this resolver never reaches for a db handle. */
+  readonly readExternalAgentSettings?: (userId: string) => Promise<ExternalAgentSettings>;
+}
+
+/**
+ * The stored settings, read through the app-settings service.
+ *
+ * The default only; a caller that already has a handle injects its own. This
+ * resolver reads settings for exactly one thing — the per-target model default
+ * — so the port is that narrow rather than a whole db.
+ */
+async function readStoredExternalAgentSettings(userId: string): Promise<ExternalAgentSettings> {
+  const settings = await getAppSettings(getDb(), userId);
+  return settings.externalAgentSettings;
 }
 
 export function createExternalTurnConfigurationResolver(
@@ -103,6 +120,7 @@ export function createExternalTurnConfigurationResolver(
   const discovery = dependencies.discovery ?? externalAgentDiscoveryService;
   const resolveRuntimeClient = dependencies.resolveRuntimeClient ?? getRuntimeClient;
   const isolationRegistry = dependencies.isolationRegistry ?? externalIdentityIsolationRegistry;
+  const readSettings = dependencies.readExternalAgentSettings ?? readStoredExternalAgentSettings;
 
   return async function resolveExternalTurnConfiguration(
     input: ResolveExternalTurnConfigurationInput
@@ -171,8 +189,22 @@ export function createExternalTurnConfigurationResolver(
       };
     }
 
-    const model = pickModel(descriptor, input.request?.model);
-    const effort = pickEffort(descriptor, model, input.request?.effort);
+    // The chain, most specific first. A per-send choice beats a stored one, a
+    // stored one survives a reload, and a per-target default saves picking the
+    // same model again in every new chat. Only the winner is vetted against the
+    // catalog, so a stale stored value falls through to the vendor's default
+    // rather than being refused.
+    const selection = input.chat.runnerModelSelection;
+    const targetDefaults = (await readSettings(input.userId)).defaults?.[input.targetId];
+    const model = pickModel(
+      descriptor,
+      input.request?.model ?? selection.model ?? targetDefaults?.model
+    );
+    const effort = pickEffort(
+      descriptor,
+      model,
+      input.request?.effort ?? selection.effort ?? targetDefaults?.effort
+    );
 
     return {
       ok: true,

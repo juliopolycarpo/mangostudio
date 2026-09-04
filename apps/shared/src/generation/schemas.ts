@@ -3,7 +3,7 @@ import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '../agentic-lim
 import { AgentIdSchema } from '../agents/schemas';
 import { ContextSettingsSchema } from '../chat/schemas';
 import { ExternalAgentTargetIdSchema } from '../external-agents/schemas';
-import { schemaMaxLengthFor } from '../external-agents/vendor-text';
+import { EXTERNAL_VENDOR_ID_MAX_LENGTH } from '../external-agents/vendor-text';
 import { PromptSettingsSchema } from '../prompt-rules/schemas';
 import { ProviderTypeSchema, ReasoningEffortSchema } from '../provider-settings/schemas';
 import { ResumeInterruptedTurnSchema } from '../turn-recovery/schemas';
@@ -24,7 +24,6 @@ export const GENERATION_REFERENCE_IMAGE_URL_MAX_LENGTH = 4_096;
 export const GENERATION_IMAGE_QUALITY_MAX_LENGTH = 64;
 export const GENERATION_THINKING_VISIBILITY_MAX_LENGTH = 32;
 /** Matches `vendorId` in `EXTERNAL_TEXT_LIMITS`, doubled for UTF-16 units. */
-const EXTERNAL_VENDOR_ID_MAX_LENGTH = schemaMaxLengthFor('vendorId');
 
 const ChatIdSchema = Type.String({ maxLength: GENERATION_CHAT_ID_MAX_LENGTH });
 const PromptSchema = Type.String({ maxLength: GENERATION_PROMPT_MAX_LENGTH });
