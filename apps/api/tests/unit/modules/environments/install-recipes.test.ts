@@ -253,6 +253,16 @@ describe('install recipes', () => {
     const win32 = recipe.argv?.({ kind: 'none' }, { platform: 'win32', binaryPaths: {} });
     expect(win32?.at(-1)).toContain('Test-Path -LiteralPath "$root\\uninstall.ps1"');
     expect(win32?.at(-1)).toContain('exit 1');
+    // PowerShell reads a bare `$name:` as a drive-qualified variable and
+    // refuses to compile the whole script, so an ordinary variable followed by
+    // a colon has to be written `${name}:`. The real scopes (`$env:` and
+    // friends) are the only legitimate spelling. Verified against a real 5.1
+    // host: undelimited, this recipe is a parser error on every Windows
+    // machine, not just on the refusal path — and a substring assertion alone
+    // never sees it.
+    expect(win32?.at(-1)).not.toMatch(
+      /\$(?!(?:env|script|global|local|using|private):)[A-Za-z_][A-Za-z0-9_]*:/
+    );
   });
 
   it('offers uninstall and update recipes as copy-only when no vendor shape exists', () => {

@@ -391,8 +391,10 @@ const BUN_UNINSTALL_ARGV = platformArgv(
   powershellCommandArgv(
     [
       '$root = "$env:USERPROFILE\\.bun"',
+      // `${root}` is delimited deliberately: PowerShell parses a bare `$root:`
+      // as a drive-qualified variable and refuses to compile the script.
       'if (-not (Test-Path -LiteralPath "$root\\uninstall.ps1")) { ' +
-        'Write-Error "refusing to remove $root: no uninstall.ps1 inside it"; exit 1 }',
+        'Write-Error "refusing to remove ${root}: no uninstall.ps1 inside it"; exit 1 }',
       '& "$root\\uninstall.ps1"',
     ].join('; ')
   )
