@@ -85,3 +85,83 @@ describe('useExternalTurnRequest', () => {
     expect(result.current.externalTurnRequest).toEqual({});
   });
 });
+
+describe('the durable selection behind the session one', () => {
+  it('shows what the chat stored when this session has chosen nothing', () => {
+    const { result } = renderHook(() =>
+      useExternalTurnRequest('chat-1', { stored: { model: 'opus', effort: 'high' } })
+    );
+
+    expect(result.current.externalTurnRequest).toEqual({ model: 'opus', effort: 'high' });
+  });
+
+  /**
+   * The stored value is for the composer to *show*, never for a send to carry.
+   *
+   * The hub already resolves chat → settings default on its own, so putting a
+   * value nobody picked this session on the wire would only create a second
+   * source of truth — and would pin a model the settings default was later
+   * changed away from.
+   */
+  it('sends nothing when the session made no choice of its own', () => {
+    const { result } = renderHook(() =>
+      useExternalTurnRequest('chat-1', { stored: { model: 'opus' } })
+    );
+
+    expect(result.current.getExternalTurnRequest()).toBeUndefined();
+  });
+
+  /**
+   * The trap this pins: reading a default must not write one.
+   *
+   * If merely opening a chat persisted whatever the settings default resolved
+   * to, every chat opened after setting a default would silently adopt it, and
+   * changing that default later would stop reaching those chats.
+   */
+  it('persists nothing until the user picks something', () => {
+    const persisted: unknown[] = [];
+    renderHook(() =>
+      useExternalTurnRequest('chat-1', {
+        stored: { model: 'opus' },
+        persist: (selection) => persisted.push(selection),
+      })
+    );
+
+    expect(persisted).toEqual([]);
+  });
+
+  it('persists the pair on an explicit pick', () => {
+    const persisted: unknown[] = [];
+    const { result } = renderHook(() =>
+      useExternalTurnRequest('chat-1', {
+        stored: { model: 'opus', effort: 'high' },
+        persist: (selection) => persisted.push(selection),
+      })
+    );
+
+    act(() => {
+      result.current.setExternalTurnRequest((current) => ({ ...current, model: 'sonnet' }));
+    });
+
+    // Written as a pair, matching the repository: an effort belongs to the
+    // model it was chosen for, so a model change must not leave the old one.
+    expect(persisted).toEqual([{ model: 'sonnet', effort: 'high' }]);
+    expect(result.current.getExternalTurnRequest()).toEqual({ model: 'sonnet', effort: 'high' });
+  });
+
+  it('does not persist into a chat that is no longer the active one', () => {
+    const persisted: unknown[] = [];
+    const { result, rerender } = renderHook(
+      ({ chatId }: { chatId: string | null }) =>
+        useExternalTurnRequest(chatId, { persist: (selection) => persisted.push(selection) }),
+      { initialProps: { chatId: 'chat-1' as string | null } }
+    );
+
+    rerender({ chatId: null });
+    act(() => {
+      result.current.setExternalTurnRequest((current) => ({ ...current, model: 'sonnet' }));
+    });
+
+    expect(persisted).toEqual([]);
+  });
+});
