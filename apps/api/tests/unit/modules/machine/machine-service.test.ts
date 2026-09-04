@@ -10,6 +10,7 @@ import {
   MachineStatusSchema,
 } from '@mangostudio/shared/machine';
 import { USER_SERVICE_ERROR_MAX } from '@mangostudio/shared/runtime-home';
+import { MachineUpdateStatusSchema, type UpdateCheck } from '@mangostudio/shared/updates';
 import Value from 'typebox/value';
 import { tailLines } from '../../../../src/cli/log-tail';
 import type { ServerState } from '../../../../src/lib/server-state';
@@ -20,6 +21,7 @@ import {
   MachineActionUnavailableError,
   type MachineServiceDeps,
 } from '../../../../src/modules/machine/application/machine-service';
+import type { InstallOriginProbe } from '../../../../src/modules/updates/domain/install-origin';
 import { FakeProcessController } from '../../../support/mocks/fake-process-controller';
 import {
   FakeServiceManager,
@@ -456,5 +458,105 @@ describe('machineService.writeConfig', () => {
       MachineActionBlockedError
     );
     expect(fake.writes).toHaveLength(0);
+  });
+});
+
+/** Stands in for the release checker: no network, an answer scripted per test. */
+class FakeUpdateChecker {
+  checkCalls = 0;
+
+  constructor(private readonly cached: UpdateCheck | null) {}
+
+  readCached = (): UpdateCheck | null => this.cached;
+
+  check = (): Promise<UpdateCheck | null> => {
+    this.checkCalls += 1;
+    return Promise.resolve(this.cached);
+  };
+}
+
+function installOriginProbe(overrides: Partial<InstallOriginProbe> = {}): InstallOriginProbe {
+  return {
+    platform: 'linux',
+    env: {},
+    execPath: '/home/j/.mango/dist/current/mangostudio',
+    version: '0.1.1',
+    standalone: true,
+    container: false,
+    home: '/home/j',
+    readFile: () => null,
+    ...overrides,
+  };
+}
+
+describe('machineService.update', () => {
+  it('reports a delegate plan and does not offer to upgrade for a bun-launched hub', async () => {
+    const checker = new FakeUpdateChecker({
+      channel: 'stable',
+      currentVersion: '0.1.1',
+      latestVersion: '0.1.1',
+      updateAvailable: false,
+      checkedAt: 6_000,
+    });
+    const { service } = makeService({
+      installOriginProbe: () =>
+        installOriginProbe({
+          execPath: '/home/j/.bun/install/global/node_modules/mangostudio/bin/mangostudio',
+        }),
+      updatesConfig: () => ({ check: true, channel: null }),
+      checker,
+    });
+
+    const status = await service.update();
+
+    expect(Value.Check(MachineUpdateStatusSchema, status)).toBe(true);
+    expect(status.installedVia.manager).toBe('bun');
+    expect(status.canUpgrade).toBe(false);
+    expect(status.reason).toBe('package-manager');
+    expect(status.command).toBe('bun add -g mangostudio@latest');
+    expect(checker.checkCalls).toBe(1);
+  });
+
+  it('reports an available update for a self-managed hub', async () => {
+    const checker = new FakeUpdateChecker({
+      channel: 'stable',
+      currentVersion: '0.1.1',
+      latestVersion: '0.2.0',
+      updateAvailable: true,
+      checkedAt: 6_000,
+    });
+    const { service } = makeService({
+      installOriginProbe: () => installOriginProbe(),
+      updatesConfig: () => ({ check: true, channel: null }),
+      checker,
+    });
+
+    const status = await service.update();
+
+    expect(status.installedVia.manager).toBe('self-managed');
+    expect(status.canUpgrade).toBe(true);
+    expect(status.reason).toBeUndefined();
+    expect(status.command).toBe('mangostudio upgrade');
+    expect(status.check).toMatchObject({ latestVersion: '0.2.0', updateAvailable: true });
+  });
+
+  it('reports checks disabled without reading or refreshing the cache', async () => {
+    const checker = new FakeUpdateChecker({
+      channel: 'stable',
+      currentVersion: '0.1.1',
+      updateAvailable: false,
+      checkedAt: 6_000,
+    });
+    const { service } = makeService({
+      installOriginProbe: () => installOriginProbe(),
+      updatesConfig: () => ({ check: false, channel: null }),
+      checker,
+    });
+
+    const status = await service.update();
+
+    expect(status.checksEnabled).toBe(false);
+    expect(status.check).toBeNull();
+    expect(checker.checkCalls).toBe(0);
   });
 });

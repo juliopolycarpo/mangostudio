@@ -31,6 +31,16 @@ import {
   USER_SERVICE_ERROR_MAX,
   type UserServiceStatus,
 } from '@mangostudio/shared/runtime-home';
+import {
+  INSTALLED_VIA_PATH_MAX,
+  type InstalledVia,
+  type MachineUpdateStatus,
+  UPDATE_ERROR_MAX,
+  UPDATE_VERSION_MAX,
+  UPGRADE_COMMAND_MAX,
+  type UpdateChannel,
+  type UpdateCheck,
+} from '@mangostudio/shared/updates';
 import { stringify as stringifyToml } from 'smol-toml';
 import { spawnServeChild } from '../../../cli/detach';
 import { canProbeHealth, probeHealth, probeHubHealth } from '../../../cli/health';
@@ -57,6 +67,12 @@ import { writeFileAtomic } from '../../../lib/safe-file';
 import { isStateLive, readState, type ServerState } from '../../../lib/server-state';
 import { readTomlDocument, setTomlSectionValue } from '../../../lib/toml';
 import { requestShutdown } from '../../../server/shutdown-request';
+import {
+  resolveInstallStatus,
+  upgradeRefusalReason,
+} from '../../updates/application/install-status';
+import { type UpdateChecker, updateChecker } from '../../updates/application/update-check';
+import type { InstallOriginProbe } from '../../updates/domain/install-origin';
 import type { HubExecutable } from '../domain/hub-executable';
 import { describeHubProcess, hubLaunchMode } from '../domain/hub-process';
 import { hubServiceUnitName } from '../domain/hub-service-identity';
@@ -77,6 +93,7 @@ import {
   buildHubServiceDefinition,
   createHubServiceManager,
   currentHubExecutable,
+  currentInstallOriginProbe,
   hubServiceLogPath,
   hubServiceTargetFor,
   isAuthSecretPersisted,
@@ -164,6 +181,11 @@ export interface MachineServiceDeps {
   readonly schedule: (work: () => Promise<void> | void) => void;
   readonly now: () => number;
   readonly env: NodeJS.ProcessEnv;
+  /** How this binary was installed, freshly probed each call. */
+  readonly installOriginProbe: () => InstallOriginProbe;
+  /** `config.updates`, re-read each call so a reload takes effect immediately. */
+  readonly updatesConfig: () => { readonly check: boolean; readonly channel: UpdateChannel | null };
+  readonly checker: Pick<UpdateChecker, 'readCached' | 'check'>;
 }
 
 export interface MachineService {
@@ -179,6 +201,7 @@ export interface MachineService {
     body: MachineConfigWriteBody,
     context: MachineRequestContext
   ): Promise<MachineConfigWriteResponse>;
+  update(): Promise<MachineUpdateStatus>;
 }
 
 const AFTER_RESPONSE_MS = 50;
@@ -353,6 +376,33 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       } catch (error) {
         return Promise.reject(error);
       }
+    },
+
+    // Every read here is synchronous; `check()` below is deliberately not
+    // awaited, so nothing in this method actually suspends. `Promise`-returning
+    // for the same reason `writeConfig` is: callers never have to know that.
+    update() {
+      const { check: checksEnabled, channel: configuredChannel } = d.updatesConfig();
+      const status = resolveInstallStatus(
+        d.installOriginProbe(),
+        configuredChannel,
+        d.environment().version
+      );
+      if (checksEnabled) {
+        // The cache the response reads below; the checker itself decides
+        // whether it is still fresh enough to skip the network.
+        void d.checker.check().catch(() => undefined);
+      }
+      const check = checksEnabled ? d.checker.readCached() : null;
+      const reason = upgradeRefusalReason(status.plan);
+      return Promise.resolve({
+        installedVia: fitInstalledVia(status.installedVia),
+        check: check ? fitUpdateCheck(check) : null,
+        checksEnabled,
+        canUpgrade: status.plan.kind === 'self',
+        ...(reason !== undefined ? { reason } : {}),
+        command: fitToLimit(status.command, UPGRADE_COMMAND_MAX),
+      });
     },
   };
 
@@ -553,6 +603,42 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
       }),
     now: deps.now ?? Date.now,
     env: deps.env ?? process.env,
+    installOriginProbe: deps.installOriginProbe ?? currentInstallOriginProbe,
+    updatesConfig: deps.updatesConfig ?? (() => getConfig().updates),
+    checker: deps.checker ?? updateChecker,
+  };
+}
+
+/** `InstalledVia` cut to the wire caps — a launcher path or dist root can be arbitrarily long. */
+function fitInstalledVia(via: InstalledVia): InstalledVia {
+  return {
+    manager: via.manager,
+    channel: via.channel,
+    executable: fitToLimit(via.executable, INSTALLED_VIA_PATH_MAX),
+    ...(via.distRoot !== undefined
+      ? { distRoot: fitToLimit(via.distRoot, INSTALLED_VIA_PATH_MAX) }
+      : {}),
+    ...(via.legacy !== undefined ? { legacy: via.legacy } : {}),
+    ...(via.launcherPath !== undefined
+      ? { launcherPath: fitToLimit(via.launcherPath, INSTALLED_VIA_PATH_MAX) }
+      : {}),
+  };
+}
+
+/** `UpdateCheck` cut to the wire caps — the release host's own answer is untrusted length. */
+function fitUpdateCheck(check: UpdateCheck): UpdateCheck {
+  return {
+    channel: check.channel,
+    currentVersion: fitToLimit(check.currentVersion, UPDATE_VERSION_MAX),
+    ...(check.latestVersion !== undefined
+      ? { latestVersion: fitToLimit(check.latestVersion, UPDATE_VERSION_MAX) }
+      : {}),
+    ...(check.latestSourceSha !== undefined
+      ? { latestSourceSha: fitToLimit(check.latestSourceSha, 64) }
+      : {}),
+    updateAvailable: check.updateAvailable,
+    checkedAt: check.checkedAt,
+    ...(check.error !== undefined ? { error: fitToLimit(check.error, UPDATE_ERROR_MAX) } : {}),
   };
 }
 

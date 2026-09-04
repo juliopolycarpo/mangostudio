@@ -15,6 +15,7 @@ import {
   MachineServiceBodySchema,
   MachineStatusSchema,
 } from '@mangostudio/shared/machine';
+import { MachineUpdateStatusSchema } from '@mangostudio/shared/updates';
 import { Elysia, t } from 'elysia';
 import Value from 'typebox/value';
 import type { GuardIpPolicy } from '../../../lib/client-ip';
@@ -70,6 +71,9 @@ export function createMachineRoutes(
     .use(guardClientIp(policy))
     .get('/machine/status', { response: { 200: MachineStatusSchema } }, ({ guardClientIp }) =>
       service.status({ clientIp: guardClientIp })
+    )
+    .get('/machine/update', { response: { 200: MachineUpdateStatusSchema } }, () =>
+      service.update()
     )
     .get(
       '/machine/doctor',

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { loadConfigForTest, resetConfig } from '../../../../src/lib/config';
 import {
   buildHubServiceDefinition,
+  currentInstallOriginProbe,
   isAuthSecretPersisted,
   withoutUserinfo,
 } from '../../../../src/modules/machine/application/hub-service';
@@ -208,6 +209,40 @@ describe('withoutUserinfo', () => {
     expect(withoutUserinfo('http://alice:hunter2@proxy:3128')).toBe('http://proxy:3128/');
     expect(withoutUserinfo('http://proxy:3128')).toBe('http://proxy:3128');
     expect(withoutUserinfo('not a url')).toBe('not a url');
+  });
+});
+
+describe('currentInstallOriginProbe', () => {
+  it('shares platform, execPath, home and localAppData with the executable probe', () => {
+    const probe = currentInstallOriginProbe();
+
+    expect(probe.platform).toBe(process.platform);
+    expect(probe.execPath.length).toBeGreaterThan(0);
+    expect(probe.home.length).toBeGreaterThan(0);
+    expect(probe.version.length).toBeGreaterThan(0);
+    expect(typeof probe.standalone).toBe('boolean');
+    expect(typeof probe.container).toBe('boolean');
+    expect(probe.env).toBe(process.env);
+  });
+
+  it('reads a file that exists and returns null for one that does not', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mango-install-origin-probe-'));
+    const file = join(dir, 'present.txt');
+    writeFileSync(file, 'hello');
+
+    const probe = currentInstallOriginProbe();
+
+    expect(probe.readFile(file)).toBe('hello');
+    expect(probe.readFile(join(dir, 'absent.txt'))).toBeNull();
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('accepts overrides for the fields a caller wants to fix', () => {
+    const probe = currentInstallOriginProbe({ execPath: '/fixed/path', version: '9.9.9' });
+
+    expect(probe.execPath).toBe('/fixed/path');
+    expect(probe.version).toBe('9.9.9');
   });
 });
 

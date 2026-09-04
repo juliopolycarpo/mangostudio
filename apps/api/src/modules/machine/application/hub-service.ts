@@ -3,7 +3,7 @@
  * it. The CLI `service` command and the machine API both come through here.
  */
 
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -16,12 +16,14 @@ import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import {
   getConfig,
   getConfigEnvFilePath,
+  getVersion,
   type MangoConfig,
   RUNTIME_CONFIG_ENV_KEYS,
 } from '../../../lib/config';
 import { getLogsDir } from '../../../lib/mango-paths';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
 import { readTomlDocument } from '../../../lib/toml';
+import type { InstallOriginProbe } from '../../updates/domain/install-origin';
 import {
   type HubExecutable,
   type HubExecutableProbe,
@@ -204,6 +206,37 @@ export function realPathOrSelf(path: string): string {
   } catch {
     return path;
   }
+}
+
+/**
+ * The install-origin probe for this process, sharing the platform/execPath/
+ * home/localAppData facts {@link currentHubExecutableProbe} already gathers —
+ * `detectInstallOrigin` and `resolveHubExecutable` answer different questions
+ * about the same binary, and re-deriving those facts a second way would risk
+ * the two disagreeing about where this process actually runs from.
+ */
+export function currentInstallOriginProbe(
+  overrides: Partial<InstallOriginProbe> = {}
+): InstallOriginProbe {
+  const base = currentHubExecutableProbe();
+  return {
+    platform: base.platform,
+    env: process.env,
+    execPath: base.execPath,
+    version: getVersion(),
+    standalone: base.standalone,
+    container: getConfig().environments.container,
+    home: base.home,
+    localAppData: base.localAppData,
+    readFile: (path) => {
+      try {
+        return readFileSync(path, 'utf8');
+      } catch {
+        return null;
+      }
+    },
+    ...overrides,
+  };
 }
 
 /**

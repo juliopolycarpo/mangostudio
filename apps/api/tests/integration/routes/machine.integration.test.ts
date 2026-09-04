@@ -10,6 +10,7 @@ import {
   type MachineStatus,
   MachineStatusSchema,
 } from '@mangostudio/shared/machine';
+import { type MachineUpdateStatus, MachineUpdateStatusSchema } from '@mangostudio/shared/updates';
 import Value from 'typebox/value';
 import type { GuardIpPolicy } from '../../../src/lib/client-ip';
 import {
@@ -67,6 +68,24 @@ const STATUS: MachineStatus = {
   },
 };
 
+const UPDATE_STATUS: MachineUpdateStatus = {
+  installedVia: {
+    manager: 'self-managed',
+    channel: 'stable',
+    executable: '/home/j/.mango/dist/current/mangostudio',
+  },
+  check: {
+    channel: 'stable',
+    currentVersion: '0.1.1',
+    latestVersion: '0.2.0',
+    updateAvailable: true,
+    checkedAt: 0,
+  },
+  checksEnabled: true,
+  canUpgrade: true,
+  command: 'mangostudio upgrade',
+};
+
 /** Records what the routes asked for and answers from fixtures. */
 class FakeMachineService implements MachineService {
   readonly clientIps: Array<string | undefined> = [];
@@ -79,6 +98,10 @@ class FakeMachineService implements MachineService {
   status(context: { clientIp: string | undefined }): Promise<MachineStatus> {
     this.clientIps.push(context.clientIp);
     return Promise.resolve(STATUS);
+  }
+
+  update(): Promise<MachineUpdateStatus> {
+    return Promise.resolve(UPDATE_STATUS);
   }
 
   doctor(sections: readonly string[], userId?: string): Promise<MachineDoctorReport> {
@@ -155,6 +178,19 @@ describe('machine routes', () => {
     // `app.handle` has no socket, so the peer is unknown — which is exactly
     // what the guard must treat as not local.
     expect(service.clientIps).toEqual(['unknown']);
+  });
+
+  it('serves the update status document to a signed-in user', async () => {
+    const service = new FakeMachineService();
+    const response = await mount(service).handle(new Request('http://localhost/machine/update'));
+    expect(response.status).toBe(200);
+    expect(Value.Check(MachineUpdateStatusSchema, await response.json())).toBe(true);
+  });
+
+  it('refuses /machine/update without a session', async () => {
+    const app = createApiTestApp(createMachineRoutes(new FakeMachineService()));
+    const response = await app.handle(new Request('http://localhost/machine/update'));
+    expect(response.status).toBe(401);
   });
 
   it('ignores a forged forwarded client when no proxy is trusted', async () => {
