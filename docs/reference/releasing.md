@@ -223,9 +223,15 @@ The dry-run is read-only: it verifies lockstep versions, builds one Linux binary
 with a synthetic prerelease version, assembles and validates the matching npm
 distribution, runs the npm publisher in `--dry-run` mode, archives the binary,
 verifies `SHA256SUMS`, installs the local tarball through `install.sh --local`,
-and renders Homebrew and Scoop manifests into the runner temp directory. PRs
-that touch `packages/cargo-shim/**` also run `cargo publish --dry-run --locked`;
-scheduled and manual dry-run runs include that cargo check as well.
+and exercises `--use` / `--prune` / `--uninstall` and the install layout
+(`current`, the bin link) against that install. It also diffs the hub binary's
+embedded installer scripts against the committed ones, then builds and archives
+a windows-x64 binary and hands it to a second job that runs the same
+`install.ps1 --local` / `-Use` / `-Prune` / `-Uninstall` sequence on a real
+Windows PowerShell 5.1 runner. Finally it renders Homebrew and Scoop manifests
+into the runner temp directory. PRs that touch `packages/cargo-shim/**` also run
+`cargo publish --dry-run --locked`; scheduled and manual dry-run runs include
+that cargo check as well.
 
 Only a real signed tag exercises registry and repository side effects: npm
 publication, GHCR push, GitHub Release upload, Homebrew tap push, Scoop bucket
