@@ -240,22 +240,6 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
       };
     }
 
-    // Attachments are resolved here, before the 200 is committed, so a file
-    // that cannot be read — or that the vendor wire cannot carry — fails as a
-    // request error rather than as a stream that opens and then dies.
-    //
-    // Every refusal is stated rather than worked around. A target that cannot
-    // take images refuses the send instead of stripping them; a kind no vendor
-    // maps refuses instead of being dropped; a set larger than
-    // `ExternalAgentTurnParamsSchema` accepts refuses here instead of being
-    // rejected by the runtime after the response is already a stream. Dropping
-    // any of them silently would let the user watch the agent answer
-    // confidently about a file it never received, which is the one outcome
-    // worse than not sending at all.
-    const preflight = await preflightAttachments(input, resolution.descriptor, db);
-    if (!preflight.ok) return { ok: false, failure: preflight.failure };
-    const attachments = preflight.attachments;
-
     // The descriptor this machine actually answered with, before anything is
     // spent on the review: the session's own capabilities are checked again at
     // start, which is what catches a descriptor that has gone stale.
@@ -322,6 +306,27 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
         },
       };
     }
+
+    // Attachments are resolved here: still before the 200 is committed, so a
+    // file that cannot be read — or that the vendor wire cannot carry — fails
+    // as a request error rather than as a stream that opens and then dies, but
+    // *after* the two gates that ask the user for something. Reading four
+    // uploads off disk and base64-encoding them is real work, and doing it in
+    // front of a disclosure or trust refusal spends it twice: once on the send
+    // that is refused, and again on the retry the dialog produces. It is also
+    // work done on behalf of a vendor the user has not agreed to yet.
+    //
+    // Every refusal is stated rather than worked around. A target that cannot
+    // take images refuses the send instead of stripping them; a kind no vendor
+    // maps refuses instead of being dropped; a set larger than
+    // `ExternalAgentTurnParamsSchema` accepts refuses here instead of being
+    // rejected by the runtime after the response is already a stream. Dropping
+    // any of them silently would let the user watch the agent answer
+    // confidently about a file it never received, which is the one outcome
+    // worse than not sending at all.
+    const preflight = await preflightAttachments(input, resolution.descriptor, db);
+    if (!preflight.ok) return { ok: false, failure: preflight.failure };
+    const attachments = preflight.attachments;
 
     // Last of the preflight, because it is the only step that spends a round
     // trip on another machine, and because it needs the canonical workspace

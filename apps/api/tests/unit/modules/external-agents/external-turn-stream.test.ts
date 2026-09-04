@@ -754,6 +754,59 @@ describe('workspace trust', () => {
     });
   });
 
+  /**
+   * The gate runs before the uploads are read, not after.
+   *
+   * Resolving attachments reads up to four files off disk and base64-encodes
+   * them. Doing that in front of a refusal the user has to answer spends the
+   * work twice — once on the send that is refused and again on the retry the
+   * dialog produces — and spends it on behalf of a vendor they have not agreed
+   * to let read the folder yet. Asserted through an id nobody owns, because
+   * that is the one refusal only the resolver can raise: seeing `validation`
+   * here means the resolver ran before the gate did.
+   */
+  it('refuses an untrusted workspace before it reads the attachments', async () => {
+    const cursorChatId = await insertExternalChat();
+    await getDb()
+      .updateTable('chats')
+      .set({ runnerTargetId: 'cursor' })
+      .where('id', '=', cursorChatId)
+      .execute();
+    const imageCapable: ExternalAgentCapabilities = {
+      ...NO_EXTERNAL_AGENT_CAPABILITIES,
+      structuredStreaming: true,
+      images: true,
+    };
+    // The disclosure runs ahead of this gate and is fingerprinted over what the
+    // user was shown, so the image-capable descriptor needs its own — otherwise
+    // this asserts the disclosure refusal rather than the trust one.
+    await acknowledgeExternalDisclosure(
+      { userId, targetId: 'cursor' },
+      { capabilities: imageCapable, supportedConfigurations: EVERY_PAIR },
+      getDb()
+    );
+    const { stream } = harness({
+      agents: [descriptor({ targetId: 'cursor', capabilities: imageCapable })],
+      sessionCapabilities: imageCapable,
+    });
+
+    const result = await stream(
+      {
+        userId,
+        chat: chatRecord({ runner: { kind: 'external', targetId: 'cursor' } }),
+        chatId: cursorChatId,
+        prompt: 'what is in this picture',
+        attachmentIds: [crypto.randomUUID()],
+        externalTurn: undefined,
+      },
+      getDb()
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.kind).toBe('workspace-trust');
+  });
+
   it('lets the same turn through once the workspace is trusted', async () => {
     const cursorChatId = await insertExternalChat();
     await getDb()
@@ -907,36 +960,6 @@ describe('the native review action', () => {
     expect(result.failure.kind).toBe('unavailable');
   });
 
-  /**
-   * A target that cannot read an image refuses the send rather than stripping
-   * it. Dropping it silently would let the user watch the agent answer
-   * confidently about a picture it never received — the one outcome worse than
-   * not sending at all.
-   *
-   * Refused in preflight, so it is a request error rather than a stream that
-   * opens and then dies.
-   */
-  it('refuses an attachment for a target that cannot read one', async () => {
-    const { stream } = harness();
-
-    const result = await stream(
-      {
-        userId,
-        chat: chatRecord(),
-        chatId,
-        prompt: 'what is in this picture',
-        attachmentIds: ['attachment-1'],
-        externalTurn: undefined,
-      },
-      getDb()
-    );
-
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.failure.kind).toBe('unsupported');
-    expect(result.failure.message).toMatch(/cannot read attachments/i);
-  });
-
   it('refuses a runner whose descriptor reports no nativeReview', async () => {
     const { stream, repoRootCalls } = harness();
 
@@ -1014,6 +1037,22 @@ describe('attachments the vendor wire cannot carry', () => {
     });
   }
 
+  /**
+   * The acknowledgement is fingerprinted over the capability set the user was
+   * shown, and the disclosure gate runs *before* the attachments are read — so
+   * a case here that does not acknowledge the exact descriptor it sends against
+   * asserts the disclosure refusal instead of the attachment one.
+   */
+  function acknowledge(capabilities: ExternalAgentCapabilities): Promise<unknown> {
+    return acknowledgeExternalDisclosure(
+      { userId, targetId: 'codex' },
+      { capabilities, supportedConfigurations: EVERY_PAIR },
+      getDb()
+    );
+  }
+
+  beforeEach(() => acknowledge(IMAGE_CAPABILITIES));
+
   async function insertAttachment(
     overrides: { kind?: ChatAttachmentKind; sizeBytes?: number } = {}
   ): Promise<string> {
@@ -1049,6 +1088,29 @@ describe('attachments the vendor wire cannot carry', () => {
       externalTurn: undefined,
     };
   }
+
+  /**
+   * A target that cannot read an image refuses the send rather than stripping
+   * it. Dropping it silently would let the user watch the agent answer
+   * confidently about a picture it never received — the one outcome worse than
+   * not sending at all.
+   *
+   * Refused in preflight, so it is a request error rather than a stream that
+   * opens and then dies.
+   */
+  it('refuses an attachment for a target that cannot read one', async () => {
+    // The plain descriptor, so this is the only case here that acknowledges a
+    // capability set without `images`.
+    await acknowledge(descriptor().capabilities);
+    const { stream } = harness();
+
+    const result = await stream(sendWith(['attachment-1']), getDb());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.kind).toBe('unsupported');
+    expect(result.failure.message).toMatch(/cannot read attachments/i);
+  });
 
   it('refuses more attachments than the turn schema accepts', async () => {
     const { stream } = imageHarness();
