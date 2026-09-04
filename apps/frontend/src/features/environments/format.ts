@@ -501,10 +501,14 @@ export function nodeUpdateAffordance(
 
   const steps: InstallChainStep[] = [];
   for (const id of chainIds) {
-    const recipe = recipes.find((candidate) => candidate.id === id);
-    // The catalog does not offer this step here (an off-platform recipe id,
-    // or a stale list) — nothing this rule can build is trustworthy.
-    if (!recipe) return { kind: 'none' };
+    const recipe = recipes.find((candidate) => candidate.id === id && candidate.supported);
+    // The catalog lists off-platform recipes with `supported: false`, so the
+    // id matching is not enough: nvm-windows is attributed `nvm` while the nvm
+    // recipes are POSIX-only, and building that chain would offer an update
+    // the install flow then refuses. A manager MangoStudio cannot drive here
+    // is exactly `managed-elsewhere` — the card explains rather than going
+    // blank.
+    if (!recipe) return { kind: 'managed-elsewhere', source };
     steps.push({ recipe, input: nodeRecipeInput(recipe) });
   }
 

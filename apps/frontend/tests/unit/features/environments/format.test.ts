@@ -645,6 +645,37 @@ describe('nodeUpdateAffordance', () => {
     const status = runtimeStatus({ id: 'node', installations: [] });
     expect(nodeUpdateAffordance(status, CATALOG)).toEqual({ kind: 'none' });
   });
+
+  // The catalog carries off-platform recipes with `supported: false`, and
+  // nvm-windows is attributed `pathSource: 'nvm'` while the nvm recipes are
+  // POSIX-only. Building the POSIX chain there would offer an update the
+  // install flow then refuses, printing `nvm install --lts` for a manager
+  // that is not the one on this machine.
+  it('reports managed-elsewhere when the manager chain is not supported here', () => {
+    const windowsCatalog = [
+      installRecipe({
+        id: 'nvm.node.install',
+        runtimeId: 'node',
+        action: 'use-version',
+        inputKind: 'node-version',
+        platforms: ['darwin', 'linux'],
+        supported: false,
+      }),
+      installRecipe({
+        id: 'nvm.node.set-default',
+        runtimeId: 'node',
+        action: 'set-default',
+        inputKind: 'node-version',
+        platforms: ['darwin', 'linux'],
+        supported: false,
+      }),
+    ];
+
+    expect(nodeUpdateAffordance(effectiveNode('nvm'), windowsCatalog)).toEqual({
+      kind: 'managed-elsewhere',
+      source: 'nvm',
+    });
+  });
 });
 
 describe('pathSourceLabel', () => {
