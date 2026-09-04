@@ -527,6 +527,27 @@ export function nodeInstallStep(
 }
 
 /**
+ * The step that installs `runtimeId` on this machine, or undefined when the
+ * catalog offers none. Node is the one runtime whose install is a choice
+ * between managers rather than a single recipe, so it keeps its own rule —
+ * but which runtime that is stays here, not in a card's JSX.
+ * // Usage: installStep(recipes, 'bun')
+ */
+export function installStep(
+  recipes: readonly InstallRecipePreview[],
+  runtimeId: string
+): InstallChainStep | undefined {
+  if (runtimeId === 'node') return nodeInstallStep(recipes);
+  const recipe = findInstallRecipe(recipes, runtimeId, 'install');
+  return recipe ? { recipe, input: { kind: 'none' } } : undefined;
+}
+
+/** Wraps an already-chosen recipe as a no-input step, for callers holding one. */
+export function stepFor(recipe: InstallRecipePreview | undefined): InstallChainStep | undefined {
+  return recipe ? { recipe, input: { kind: 'none' } } : undefined;
+}
+
+/**
  * The recipe chain that moves an nvm- or fnm-managed Node to a newer LTS *and*
  * makes it the one that actually runs. Installing a new version alone is not
  * enough for either manager: nvm's `nvm install` does not touch the `default`

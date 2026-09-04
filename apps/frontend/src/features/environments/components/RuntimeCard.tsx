@@ -6,10 +6,13 @@
  * not the headline.
  */
 
-import type { InstallRecipePreview, RuntimeStatus } from '@mangostudio/shared/environments';
+import type {
+  InstallRecipePreview,
+  PathSource,
+  RuntimeStatus,
+} from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
-import { Download } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
@@ -18,13 +21,13 @@ import {
   effectiveInstallation,
   findInstallRecipe,
   type IdentityResolver,
-  type NodeUpdateAffordance,
-  nodeInstallStep,
+  installStep,
   nodeUpdateAffordance,
   pathPosition,
   pathSourceLabel,
   pathSourceManagerName,
   runtimeUninstallRecipe,
+  stepFor,
   toolchainProcessLine,
   toolchainRuntimeId,
   versionLabel,
@@ -35,9 +38,9 @@ import { useToolIdentities } from '../identity/use-tool-identities';
 import { useEnvironmentEntitiesQuery } from '../queries';
 import { FindingList } from './FindingList';
 import { HealthBadge } from './HealthBadge';
-import { InstallAction } from './InstallAction';
 import { InstallationList } from './InstallationList';
 import { ProbeButton } from './ProbeButton';
+import { RecipeAction } from './RecipeAction';
 import { CardSectionLabel, ToolCard } from './ToolCard';
 import { ToolchainAction } from './ToolchainAction';
 
@@ -80,34 +83,24 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
     if (runtimeId) toolchain.mutate({ runtimeId, choice: 'auto' });
   };
 
-  const installAction = isNode
-    ? renderNodeInstall(recipes, name, environmentId, e)
-    : renderGenericInstall(recipes, status.id, name, environmentId, e);
+  // Node's update is not one recipe: which chain runs — or whether nothing
+  // here can touch it at all — depends on which manager put the effective
+  // binary on PATH. Every other runtime updates through a single recipe.
+  const nodeAffordance = isNode ? nodeUpdateAffordance(status, recipes) : undefined;
+  const updateStep = isNode
+    ? nodeAffordance?.kind === 'steps'
+      ? nodeAffordance.primary
+      : undefined
+    : stepFor(findInstallRecipe(recipes, status.id, 'update'));
+  const managedElsewhere =
+    nodeAffordance?.kind === 'managed-elsewhere'
+      ? renderManagedElsewhere(nodeAffordance.source, t, resolve)
+      : null;
+  const uninstallStep = stepFor(runtimeUninstallRecipe(status, recipes));
 
-  const updateAffordance = isNode
-    ? renderNodeUpdate(
-        nodeUpdateAffordance(status, recipes),
-        recipes,
-        name,
-        environmentId,
-        t,
-        resolve
-      )
-    : renderGenericUpdate(recipes, status.id, name, environmentId, e);
-
-  const uninstallRecipe = runtimeUninstallRecipe(status, recipes);
-  const uninstallAction = uninstallRecipe && (
-    <InstallAction
-      recipe={uninstallRecipe}
-      catalog={recipes}
-      input={{ kind: 'none' }}
-      label={formatMessage(e.runtimes.uninstall, { runtime: name })}
-      variant="ghost"
-      environmentId={environmentId}
-    />
-  );
-
-  const hasInstalledFooter = Boolean(updateAffordance) || Boolean(uninstallAction);
+  const hasInstalledFooter =
+    Boolean(updateStep) || Boolean(managedElsewhere) || Boolean(uninstallStep);
+  const installStepValue = installStep(recipes, status.id);
 
   return (
     <ToolCard
@@ -131,11 +124,33 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
       // would close on an empty footer and the gap above it.
       footer={
         status.installations.length === 0 ? (
-          installAction
+          installStepValue ? (
+            <RecipeAction
+              step={installStepValue}
+              action="install"
+              catalog={recipes}
+              name={name}
+              environmentId={environmentId}
+            />
+          ) : null
         ) : hasInstalledFooter ? (
           <>
-            {updateAffordance}
-            {uninstallAction}
+            {managedElsewhere}
+            <RecipeAction
+              step={updateStep}
+              action="update"
+              catalog={recipes}
+              name={name}
+              environmentId={environmentId}
+              {...(nodeAffordance?.kind === 'steps' && { followUpSteps: nodeAffordance.followUp })}
+            />
+            <RecipeAction
+              step={uninstallStep}
+              action="uninstall"
+              catalog={recipes}
+              name={name}
+              environmentId={environmentId}
+            />
           </>
         ) : null
       }
@@ -256,110 +271,28 @@ function runtimeSubtitle(
   );
 }
 
-function renderGenericInstall(
-  recipes: readonly InstallRecipePreview[],
-  runtimeId: string,
-  name: string,
-  environmentId: string | undefined,
-  e: Messages['environments']
-): React.ReactNode {
-  const recipe = findInstallRecipe(recipes, runtimeId, 'install');
-  if (!recipe) return null;
-  return (
-    <InstallAction
-      recipe={recipe}
-      catalog={recipes}
-      input={{ kind: 'none' }}
-      label={formatMessage(e.runtimes.install, { runtime: name })}
-      variant="primary"
-      icon={<Download size={14} />}
-      environmentId={environmentId}
-    />
-  );
-}
-
-function renderNodeInstall(
-  recipes: readonly InstallRecipePreview[],
-  name: string,
-  environmentId: string | undefined,
-  e: Messages['environments']
-): React.ReactNode {
-  const step = nodeInstallStep(recipes);
-  if (!step) return null;
-  return (
-    <InstallAction
-      recipe={step.recipe}
-      input={step.input}
-      catalog={recipes}
-      label={formatMessage(e.runtimes.install, { runtime: name })}
-      variant="primary"
-      icon={<Download size={14} />}
-      environmentId={environmentId}
-    />
-  );
-}
-
-function renderGenericUpdate(
-  recipes: readonly InstallRecipePreview[],
-  runtimeId: string,
-  name: string,
-  environmentId: string | undefined,
-  e: Messages['environments']
-): React.ReactNode {
-  const recipe = findInstallRecipe(recipes, runtimeId, 'update');
-  if (!recipe) return null;
-  return (
-    <InstallAction
-      recipe={recipe}
-      catalog={recipes}
-      input={{ kind: 'none' }}
-      label={formatMessage(e.runtimes.update, { runtime: name })}
-      environmentId={environmentId}
-    />
-  );
-}
-
 /**
- * Node's "Update" affordance is not one recipe: which chain runs — or whether
- * nothing here can touch it at all — depends on which manager put the
- * effective binary on PATH. `nodeUpdateAffordance` (format.ts) decides which
- * case this is; this only turns that decision into markup.
+ * Node whose effective binary came from a manager MangoStudio does not drive
+ * (Volta, a plain system install): stating that is the honest affordance,
+ * since no button here could change it.
  */
-function renderNodeUpdate(
-  affordance: NodeUpdateAffordance,
-  recipes: readonly InstallRecipePreview[],
-  name: string,
-  environmentId: string | undefined,
+function renderManagedElsewhere(
+  source: PathSource,
   t: Messages,
   resolve: IdentityResolver
 ): React.ReactNode {
-  if (affordance.kind === 'none') return null;
-
-  if (affordance.kind === 'managed-elsewhere') {
-    // "Managed by {manager}" cannot carry a bare "the system" grammatically in
-    // every locale, so a plain system install gets its own full sentence
-    // instead of a name plugged into the template.
-    const text =
-      affordance.source === 'system'
-        ? t.environments.runtimes.managedBySystem
-        : formatMessage(t.environments.runtimes.managedElsewhere, {
-            manager: pathSourceManagerName(t, resolve, affordance.source),
-          });
-    return (
-      <p className="text-sm text-on-surface-variant/70" data-testid="node-managed-elsewhere">
-        {text}
-      </p>
-    );
-  }
-
+  // "Managed by {manager}" cannot carry a bare "the system" grammatically in
+  // every locale, so a plain system install gets its own full sentence
+  // instead of a name plugged into the template.
+  const text =
+    source === 'system'
+      ? t.environments.runtimes.managedBySystem
+      : formatMessage(t.environments.runtimes.managedElsewhere, {
+          manager: pathSourceManagerName(t, resolve, source),
+        });
   return (
-    <InstallAction
-      recipe={affordance.primary.recipe}
-      input={affordance.primary.input}
-      followUpSteps={affordance.followUp}
-      catalog={recipes}
-      label={formatMessage(t.environments.runtimes.update, { runtime: name })}
-      environmentId={environmentId}
-    />
+    <p className="text-sm text-on-surface-variant/70" data-testid="node-managed-elsewhere">
+      {text}
+    </p>
   );
 }

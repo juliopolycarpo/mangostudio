@@ -3,7 +3,11 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import type { RuntimeFinding, RuntimeInstallation } from '@mangostudio/shared/environments';
+import type {
+  InstallRecipePreview,
+  RuntimeFinding,
+  RuntimeInstallation,
+} from '@mangostudio/shared/environments';
 import { en, ptBR } from '@mangostudio/shared/i18n';
 import {
   describeFinding,
@@ -14,6 +18,7 @@ import {
   groupInstallations,
   healthRollup,
   type IdentityResolver,
+  installStep,
   keyedFindings,
   nodeInstallStep,
   nodeUpdateAffordance,
@@ -22,6 +27,7 @@ import {
   prefixedVersionLabel,
   renderableVersionManagers,
   runtimeUninstallRecipe,
+  stepFor,
   toolchainProcessLine,
   toolchainSummary,
   versionLabel,
@@ -984,5 +990,49 @@ describe('toolchainSummary', () => {
     ];
 
     expect(toolchainSummary(en, statuses)).toBe('Node not installed · Bun 1.3.14');
+  });
+});
+
+describe('installStep', () => {
+  it('routes node through the manager-choosing rule rather than a single recipe', () => {
+    const recipes = [
+      installRecipe({
+        id: 'nvm.node.install',
+        runtimeId: 'node',
+        action: 'use-version',
+        inputKind: 'node-version',
+        supported: true,
+      }),
+    ];
+
+    expect(installStep(recipes, 'node')).toEqual(nodeInstallStep(recipes));
+  });
+
+  it('takes the single install recipe for every other runtime, with no input', () => {
+    const recipes = [
+      installRecipe({ id: 'bun.install.official', runtimeId: 'bun', action: 'install' }),
+    ];
+
+    expect(installStep(recipes, 'bun')).toEqual({
+      recipe: recipes[0] as InstallRecipePreview,
+      input: { kind: 'none' },
+    });
+  });
+
+  it('offers nothing when the catalog has no install for the runtime', () => {
+    expect(installStep([], 'bun')).toBeUndefined();
+    expect(installStep([], 'node')).toBeUndefined();
+  });
+});
+
+describe('stepFor', () => {
+  it('wraps a chosen recipe as a no-input step', () => {
+    const recipe = installRecipe({ id: 'bun.update', runtimeId: 'bun', action: 'update' });
+
+    expect(stepFor(recipe)).toEqual({ recipe, input: { kind: 'none' } });
+  });
+
+  it('passes an absent recipe through, so a card renders no button', () => {
+    expect(stepFor(undefined)).toBeUndefined();
   });
 });

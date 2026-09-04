@@ -169,3 +169,31 @@ describe('AgentCliCard', () => {
     expect(location.textContent).toContain('4 entries');
   });
 });
+
+describe('AgentCliCard footer', () => {
+  it('closes on no footer at all when nothing installs the CLI here', () => {
+    // The catalog is empty while it loads, and on a disconnected environment.
+    // A `RecipeAction` that renders nothing is still a truthy element, so the
+    // card has to decide on the step rather than on the rendered node — or it
+    // opens a footer with a gap and no button in it.
+    const status = agentCliStatus({ targetId: 'codex', id: 'codex' });
+
+    const { container } = render(<AgentCliCard status={status} recipes={[]} />);
+
+    expect(status.effective).toBeUndefined();
+    expect(container.querySelector('footer')).toBeNull();
+  });
+
+  it('opens a footer once the catalog offers an install', () => {
+    const status = agentCliStatus({ targetId: 'codex', id: 'codex' });
+
+    const { container } = render(
+      <AgentCliCard
+        status={status}
+        recipes={[installRecipe({ id: 'codex.install', runtimeId: 'codex', action: 'install' })]}
+      />
+    );
+
+    expect(container.querySelector('footer')).not.toBeNull();
+  });
+});
