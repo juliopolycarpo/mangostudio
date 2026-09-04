@@ -12,6 +12,7 @@
 import type {
   AgentCliStatus,
   InstallRecipePreview,
+  RuntimeId,
   RuntimeStatus,
 } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
@@ -94,14 +95,26 @@ function gitRemedy(
   return { kind: 'text', text: t.environments.overview.setup.gitLinuxRemedy };
 }
 
+/**
+ * One runtime's row inputs: the probed status, and whether this machine has
+ * an effective installation of it. Every row asks the same two questions, and
+ * "installed" means the same thing in all of them.
+ */
+function effectiveRuntime(
+  runtimes: readonly RuntimeStatus[],
+  id: RuntimeId
+): { status: RuntimeStatus | undefined; installed: boolean } {
+  const status = runtimes.find((runtime) => runtime.id === id);
+  return { status, installed: Boolean(status && effectiveInstallation(status).installation) };
+}
+
 function gitRow(
   t: Messages,
   runtimes: readonly RuntimeStatus[],
   recipes: readonly InstallRecipePreview[],
   platform: string
 ): SetupRow {
-  const status = runtimes.find((runtime) => runtime.id === 'git');
-  const installed = Boolean(status && effectiveInstallation(status).installation);
+  const { installed } = effectiveRuntime(runtimes, 'git');
   return {
     id: 'git',
     status: installed ? 'done' : 'todo',
@@ -150,8 +163,7 @@ function nodeRow(
   runtimes: readonly RuntimeStatus[],
   recipes: readonly InstallRecipePreview[]
 ): SetupRow {
-  const status = runtimes.find((runtime) => runtime.id === 'node');
-  const installed = Boolean(status && effectiveInstallation(status).installation);
+  const { status, installed } = effectiveRuntime(runtimes, 'node');
   const done = installed && !isNodeOutdated(status);
   return {
     id: 'node',
@@ -163,8 +175,7 @@ function nodeRow(
 }
 
 function bunRow(t: Messages, runtimes: readonly RuntimeStatus[]): SetupRow {
-  const status = runtimes.find((runtime) => runtime.id === 'bun');
-  const installed = Boolean(status && effectiveInstallation(status).installation);
+  const { installed } = effectiveRuntime(runtimes, 'bun');
   return {
     id: 'bun',
     // Optional either way: Bun never blocks the checklist, it only reports
