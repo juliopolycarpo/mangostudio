@@ -360,33 +360,31 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
     body: MachineConfigWriteBody,
     context: MachineRequestContext
   ): MachineConfigWriteResponse {
-    {
-      // The same loopback-only surface every mutating machine action shares —
-      // no `installsEnabled` reason has meaning here, since this is the very
-      // switch that turns it on.
-      const guard = d.evaluateGuard(context.clientIp);
-      if (!guard.allowed) throw new MachineActionBlockedError(guard);
+    // The same loopback-only surface every mutating machine action shares —
+    // no `installsEnabled` reason has meaning here, since this is the very
+    // switch that turns it on.
+    const guard = d.evaluateGuard(context.clientIp);
+    if (!guard.allowed) throw new MachineActionBlockedError(guard);
 
-      // A symlinked config.toml (dotfiles) is read through the link's target
-      // and written there too; the bounded reader refuses to follow links.
-      const configFile = d.resolveConfigPath(d.configFilePath());
-      const doc = d.readConfigDocument(configFile);
-      setTomlSectionBoolean(
-        doc,
-        'environments',
-        'installs_enabled',
-        body.environments.installsEnabled
-      );
-      d.writeConfigFile(configFile, stringifyToml(doc));
+    // A symlinked config.toml (dotfiles) is read through the link's target
+    // and written there too; the bounded reader refuses to follow links.
+    const configFile = d.resolveConfigPath(d.configFilePath());
+    const doc = d.readConfigDocument(configFile);
+    setTomlSectionBoolean(
+      doc,
+      'environments',
+      'installs_enabled',
+      body.environments.installsEnabled
+    );
+    d.writeConfigFile(configFile, stringifyToml(doc));
 
-      // The write always happens — even under an env override, the file is
-      // meant to say `true` from now on — but the response never claims
-      // success for a switch that did not actually move.
-      const installsEnabled = d.reloadEffectiveInstallsEnabled();
-      return installsEnabled
-        ? { applied: true, configFile, installsEnabled }
-        : { applied: false, configFile, installsEnabled, reason: 'env-override' };
-    }
+    // The write always happens — even under an env override, the file is
+    // meant to say `true` from now on — but the response never claims
+    // success for a switch that did not actually move.
+    const installsEnabled = d.reloadEffectiveInstallsEnabled();
+    return installsEnabled
+      ? { applied: true, configFile, installsEnabled }
+      : { applied: false, configFile, installsEnabled, reason: 'env-override' };
   }
 
   /**
