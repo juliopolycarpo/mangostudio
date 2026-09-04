@@ -55,6 +55,19 @@ describe('CopyCommandBlock enable-installs affordance', () => {
     expect(screen.queryByTestId('enable-installs-button')).not.toBeInTheDocument();
   });
 
+  // Regression: a copy-only recipe (`codex.uninstall`) is never executed by
+  // MangoStudio at all, so flipping the global switch changes nothing for it —
+  // the button offered a fix that fixes nothing.
+  it('hides the button for a recipe MangoStudio never runs', () => {
+    const recipe = installRecipe({
+      guard: { allowed: false, reasons: ['disabled'] },
+      runnable: false,
+      unrunnableReason: 'vendor-undocumented',
+    });
+    render(<CopyCommandBlock recipe={recipe} />);
+    expect(screen.queryByTestId('enable-installs-button')).not.toBeInTheDocument();
+  });
+
   it('hides the button for a remote environment', () => {
     const recipe = installRecipe({ guard: { allowed: false, reasons: ['disabled'] } });
     render(<CopyCommandBlock recipe={recipe} environmentId="dev-box" />);

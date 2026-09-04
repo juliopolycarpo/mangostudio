@@ -57,11 +57,13 @@ export function CopyCommandBlock({ recipe, message, environmentId }: CopyCommand
 
   const isLocal = environmentId === undefined || environmentId === LOCAL_ENVIRONMENT_ID;
   // Offered only when the global switch is the *entire* problem: any other
-  // guard reason, an unsupported platform, or a missing requirement would
-  // still refuse this recipe after the switch flips, and offering a fix that
-  // does not fix anything is worse than not offering one.
+  // guard reason, an unsupported platform, a missing requirement, or a recipe
+  // MangoStudio never runs at all would still refuse this after the switch
+  // flips, and offering a fix that does not fix anything is worse than not
+  // offering one.
   const canEnableInstalls =
     isLocal &&
+    recipe.runnable &&
     recipe.supported &&
     recipe.missingRequirements.length === 0 &&
     recipe.guard.reasons.length === 1 &&
