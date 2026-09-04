@@ -14,6 +14,7 @@
  */
 
 import type {
+  ExternalAgentAttachment,
   ExternalAgentTargetId,
   ExternalAgentUnavailableReason,
   ExternalReviewTarget,
@@ -29,6 +30,7 @@ import {
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
+import { resolveExternalAgentAttachments } from '../../attachments/application/runtime-attachment-resolver';
 import { getOwnedChat, type OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import { findActiveTurnByChat } from '../../generation/application/active-turn-registry';
 import { KEEPALIVE_INTERVAL_MS } from '../../generation/application/sse-keepalive';
@@ -225,6 +227,42 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
       };
     }
 
+    // Attachments are resolved here, before the 200 is committed, so a file
+    // that cannot be read fails as a request error rather than as a stream that
+    // opens and then dies.
+    //
+    // A target that cannot take images **refuses the send** rather than
+    // stripping them. Dropping them silently would let the user watch the agent
+    // answer confidently about a picture it never received, which is the one
+    // outcome worse than not sending at all.
+    let attachments: readonly ExternalAgentAttachment[] = [];
+    if (input.attachmentIds.length > 0) {
+      if (!resolution.descriptor.capabilities.images) {
+        return {
+          ok: false,
+          failure: {
+            kind: 'unsupported',
+            message: 'This agent cannot read attachments.',
+          },
+        };
+      }
+      try {
+        attachments = await resolveExternalAgentAttachments(
+          {
+            attachmentIds: [...input.attachmentIds],
+            userId: input.userId,
+            chatId: input.chatId,
+          },
+          db
+        );
+      } catch {
+        return {
+          ok: false,
+          failure: { kind: 'validation', message: 'One or more attachments could not be read.' },
+        };
+      }
+    }
+
     // The descriptor this machine actually answered with, before anything is
     // spent on the review: the session's own capabilities are checked again at
     // start, which is what catches a descriptor that has gone stale.
@@ -344,7 +382,7 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
       };
     }
 
-    return { ok: true, response: openStream(input, resolution, db, controller) };
+    return { ok: true, response: openStream(input, resolution, attachments, db, controller) };
   };
 }
 
@@ -363,6 +401,8 @@ function chatBindingChanged(left: OwnedChatRecord, right: OwnedChatRecord): bool
 function openStream(
   input: StreamExternalTurnInput,
   resolution: Extract<ExternalTurnConfigurationResolution, { ok: true }>,
+  /** Resolved during preflight, so a file that cannot be read never reaches here. */
+  attachments: readonly ExternalAgentAttachment[],
   db: Kysely<Database>,
   controller: ExternalTurnController
 ): Response {
@@ -390,6 +430,7 @@ function openStream(
             chatId: input.chatId,
             prompt: input.prompt,
             ...(input.attachmentIds.length > 0 ? { attachmentIds: [...input.attachmentIds] } : {}),
+            ...(attachments.length > 0 ? { attachments } : {}),
             configuration: resolution.configuration,
             ...(input.review ? { review: input.review } : {}),
             canonicalWorkspacePath: resolution.canonicalWorkspacePath,

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import type {
+  ExternalAgentAttachment,
   ExternalAgentConfiguration,
   ExternalAgentSteerResult,
 } from '@mangostudio/shared/external-agents';
@@ -124,7 +125,10 @@ async function realHarness() {
 
 function startTurn(
   controller: ReturnType<typeof harness>['controller'],
-  overrides: { readonly chatId?: string } = {}
+  overrides: {
+    readonly chatId?: string;
+    readonly attachments?: readonly ExternalAgentAttachment[];
+  } = {}
 ): Promise<ExternalTurnResult> {
   return controller.start(
     {
@@ -135,6 +139,7 @@ function startTurn(
       canonicalWorkspacePath: '/work/repo',
       vendorAccountFingerprint: 'account-a',
       credentialHomeFingerprint: 'sha256:home-a',
+      ...(overrides.attachments ? { attachments: overrides.attachments } : {}),
     },
     getDb()
   );
@@ -567,6 +572,40 @@ describe('external turn controller', () => {
     );
     expect(approval).toMatchObject({ decisionSource: 'expired' });
     expect(approval?.decision).toBeUndefined();
+  });
+
+  /**
+   * Both adapters that take images already map them; nothing was ever handing
+   * them any. A stored `attachmentIds` reached the message row and stopped
+   * there, so the agent answered questions about a picture it never received.
+   */
+  it('puts a resolved attachment on the wire', async () => {
+    const { runtime, controller } = harness();
+    const image: ExternalAgentAttachment = {
+      id: 'attachment-1',
+      originalName: 'screenshot.png',
+      mimeType: 'image/png',
+      sizeBytes: 4,
+      kind: 'image',
+      bytesBase64: 'AAAA',
+    };
+
+    const running = startTurn(controller, { attachments: [image] });
+    await waitForTurnStart(runtime);
+    runtime.emit({ type: 'completed' });
+    await running;
+
+    expect(runtime.calls.turn.at(-1)?.attachments).toEqual([image]);
+  });
+
+  it('sends no attachments key at all when the turn carries none', async () => {
+    const { runtime, controller } = harness();
+    const running = startTurn(controller);
+    await waitForTurnStart(runtime);
+    runtime.emit({ type: 'completed' });
+    await running;
+
+    expect(runtime.calls.turn.at(-1)?.attachments).toBeUndefined();
   });
 
   it('terminates when the runtime refuses the turn call', async () => {

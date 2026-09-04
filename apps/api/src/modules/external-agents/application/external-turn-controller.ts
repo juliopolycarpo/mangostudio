@@ -34,6 +34,7 @@
 import { RuntimeConsentDeniedError } from '@mangostudio/runtime';
 import type { InteractionMode } from '@mangostudio/shared';
 import {
+  type ExternalAgentAttachment,
   type ExternalAgentConfiguration,
   type ExternalAgentError,
   type ExternalAgentEvent,
@@ -191,6 +192,16 @@ interface StartExternalTurnInput {
   readonly chatId: string;
   readonly prompt: string;
   readonly attachmentIds?: readonly string[];
+  /**
+   * The same attachments, with their bytes, for the vendor.
+   *
+   * Resolved by the preflight rather than here: a file that cannot be read has
+   * to fail before the 200 is committed, or the user watches a stream open and
+   * then die. `attachmentIds` beside it is what the *message row* records, and
+   * the two are separate because one is a durable reference and the other is a
+   * payload that never touches the database.
+   */
+  readonly attachments?: readonly ExternalAgentAttachment[];
   readonly configuration: ExternalAgentConfiguration;
   /**
    * The workspace as the runtime canonicalized it. Server-resolved: a
@@ -847,6 +858,7 @@ export function createExternalTurnController(
               clientMessageId: userMessageId,
               input: input.prompt,
               configuration: input.configuration,
+              ...(input.attachments?.length ? { attachments: input.attachments } : {}),
             });
         external.nativeTurnId = nativeTurnId;
         transcript.bindNativeTurn(nativeTurnId);

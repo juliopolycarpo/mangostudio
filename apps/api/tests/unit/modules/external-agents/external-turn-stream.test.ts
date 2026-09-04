@@ -900,6 +900,36 @@ describe('the native review action', () => {
     expect(result.failure.kind).toBe('unavailable');
   });
 
+  /**
+   * A target that cannot read an image refuses the send rather than stripping
+   * it. Dropping it silently would let the user watch the agent answer
+   * confidently about a picture it never received — the one outcome worse than
+   * not sending at all.
+   *
+   * Refused in preflight, so it is a request error rather than a stream that
+   * opens and then dies.
+   */
+  it('refuses an attachment for a target that cannot read one', async () => {
+    const { stream } = harness();
+
+    const result = await stream(
+      {
+        userId,
+        chat: chatRecord(),
+        chatId,
+        prompt: 'what is in this picture',
+        attachmentIds: ['attachment-1'],
+        externalTurn: undefined,
+      },
+      getDb()
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.kind).toBe('unsupported');
+    expect(result.failure.message).toMatch(/cannot read attachments/i);
+  });
+
   it('refuses a runner whose descriptor reports no nativeReview', async () => {
     const { stream, repoRootCalls } = harness();
 
