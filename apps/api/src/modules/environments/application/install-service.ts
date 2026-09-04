@@ -451,12 +451,6 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
   }> => {
     assertRecipeInput(input, recipe.inputKind);
     const requirements = await inspectRequirements(scope, recipe);
-    // Profile files live on the target machine. Inspecting the hub's own home
-    // for a remote install would report a lie, so remote previews omit it.
-    const profileSetup: InstallProfileSetup | undefined =
-      recipe.profileLines && scope.environmentId === LOCAL_ENVIRONMENT_ID
-        ? await deps.inspectProfileSetup(recipe.profileLines)
-        : undefined;
     const resolvedPlatform = await resolvePlatform(scope);
     const supported =
       isInstallPlatform(resolvedPlatform) && recipe.platforms.includes(resolvedPlatform);
@@ -467,6 +461,14 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     const platform: InstallPlatform = isInstallPlatform(resolvedPlatform)
       ? resolvedPlatform
       : 'linux';
+    // Profile files live on the target machine. Inspecting the hub's own home
+    // for a remote install would report a lie, so remote previews omit it —
+    // and `profileLines` are shell `export` lines, so a win32 target has no
+    // profile for them to be missing from either.
+    const profileSetup: InstallProfileSetup | undefined =
+      recipe.profileLines && scope.environmentId === LOCAL_ENVIRONMENT_ID && platform !== 'win32'
+        ? await deps.inspectProfileSetup(recipe.profileLines)
+        : undefined;
     // Display-only fallback: a requirement this preview could not resolve
     // still gets its own bare binary name so the argv never throws mid-list —
     // `missingRequirements` is what tells the caller it will not run.

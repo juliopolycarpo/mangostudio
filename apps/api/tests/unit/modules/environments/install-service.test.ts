@@ -580,6 +580,32 @@ describe('install service', () => {
     });
   });
 
+  // Regression: `profileLines` are POSIX `export` lines, so inspecting a
+  // Windows target's shell profiles for them reported a setup step that has no
+  // meaning there — and disclosed bash syntax beside a PowerShell installer.
+  it('never inspects shell profiles on a win32 target', async () => {
+    const detection = createDetectionServices();
+    const memory = createMemoryRepository();
+    let inspected = 0;
+    const service = createInstallService({
+      toolchain: NO_OP_TOOLCHAIN,
+      recipes: [getInstallRecipe('bun.install.official')],
+      ...detection,
+      repository: memory.repository,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+      inspectProfileSetup: (lines) => {
+        inspected += 1;
+        return Promise.resolve({ lines: [...lines], present: false, detectedIn: [] });
+      },
+      platform: 'win32',
+    });
+
+    const [preview] = await service.listRecipes(REQUEST_CONTEXT);
+
+    expect(inspected).toBe(0);
+    expect(preview?.profileSetup).toBeUndefined();
+  });
+
   it("reports nvm.install's pinned digest before anything has been downloaded", async () => {
     const detection = createDetectionServices();
     const memory = createMemoryRepository();
