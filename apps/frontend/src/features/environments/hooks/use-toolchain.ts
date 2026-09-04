@@ -34,8 +34,15 @@ export function useUpdateToolchainMutation(environmentId: string = LOCAL_ENVIRON
     mutationFn: (input: ToolchainSelectionInput) =>
       updateToolchain(environmentId, toolchainBody(input)),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: environmentKeys.entities() });
-      await queryClient.invalidateQueries({ queryKey: environmentKeys.runtimes(environmentId) });
+      // Both refetches are independent, and `invalidateQueries` resolves only
+      // once the matching active queries have settled — the runtimes one is a
+      // `probing.runtimes` round trip with a 15s hub deadline. Awaited in
+      // series it would not even start until the entities refetch finished,
+      // and the user is watching the card that fired this.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: environmentKeys.entities() }),
+        queryClient.invalidateQueries({ queryKey: environmentKeys.runtimes(environmentId) }),
+      ]);
     },
   });
 }
