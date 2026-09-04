@@ -354,6 +354,32 @@ describe('createUpdateChecker', () => {
       expect(fake.calls).toHaveLength(1);
     });
 
+    it('does not reuse a fresh cache from a different channel', async () => {
+      const fake = new FakeFetch({
+        'https://github.com/juliopolycarpo/mangostudio/releases/download/v0.1.1-canary/canary-manifest.json':
+          () => CANARY_MANIFEST_RESPONSE({ sourceSha: 'cafebabe00' }),
+      });
+      const store = new FakeUpdateCheckStore();
+      store.set({
+        channel: 'stable',
+        currentVersion: '0.1.1',
+        latestVersion: '0.1.1',
+        updateAvailable: false,
+        checkedAt: 0,
+      });
+      const { deps } = harness({
+        fetch: fake.fetch,
+        readCacheFile: store.read,
+        writeCacheFile: store.write,
+        getConfig: () => configWith(true, 'canary'),
+      });
+
+      const result = await createUpdateChecker(deps).check();
+
+      expect(fake.calls).toHaveLength(1);
+      expect(result?.channel).toBe('canary');
+    });
+
     it('re-fetches once the 24h TTL elapses', async () => {
       const fake = new FakeFetch({
         'https://api.github.com/repos/juliopolycarpo/mangostudio/releases/latest': () =>
@@ -412,7 +438,7 @@ describe('createUpdateChecker', () => {
         'https://api.github.com/repos/juliopolycarpo/mangostudio/releases/latest': () =>
           STABLE_TAG_RESPONSE('v0.2.0'),
       });
-      const { deps, timers } = harness({ fetch: fake.fetch });
+      const { deps, timers, clock } = harness({ fetch: fake.fetch });
       const checker = createUpdateChecker(deps);
 
       const stop = checker.schedule();
@@ -426,6 +452,14 @@ describe('createUpdateChecker', () => {
       // guessing how many `Promise.resolve()` hops that takes.
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(fake.calls).toHaveLength(1);
+
+      // The interval tick is a second, independent call: the cache from the
+      // first is still fresh, so it only counts once the clock has moved past
+      // the 24h TTL.
+      clock.now = 24 * 60 * 60 * 1000 + 1;
+      timers.fireIntervals();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(fake.calls).toHaveLength(2);
 
       stop();
     });

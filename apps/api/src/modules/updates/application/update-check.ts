@@ -17,6 +17,7 @@ import { dirname } from 'node:path';
 import {
   UPDATE_ERROR_MAX,
   UPDATE_VERSION_MAX,
+  type UpdateChannel,
   type UpdateCheck,
 } from '@mangostudio/shared/updates';
 import { type BuildInfo, getBuildInfo } from '../../../lib/build-info';
@@ -122,7 +123,14 @@ export function createUpdateChecker(deps: Partial<UpdateCheckerDeps> = {}): Upda
     return d.readCacheFile(d.cachePath());
   }
 
-  function isFresh(check: UpdateCheck): boolean {
+  /**
+   * Fresh enough to reuse without a fetch: within its TTL (shorter for an
+   * errored answer) and for the channel this call would otherwise check.
+   * Without the channel guard, flipping `updates.channel` in config would
+   * keep answering from the old channel's cache for up to 24h.
+   */
+  function isFresh(check: UpdateCheck, effectiveChannel: UpdateChannel): boolean {
+    if (check.channel !== effectiveChannel) return false;
     const ttl = check.error === undefined ? CHECK_TTL_MS : ERROR_TTL_MS;
     return d.now() - check.checkedAt < ttl;
   }
@@ -131,8 +139,12 @@ export function createUpdateChecker(deps: Partial<UpdateCheckerDeps> = {}): Upda
     if (skipReason() !== null) return Promise.resolve(null);
     if (inFlight) return inFlight;
 
+    const effectiveChannel =
+      d.getConfig().updates.channel ?? versionChannelOf(d.getCurrentVersion());
     const existing = d.readCacheFile(d.cachePath());
-    if (!options.force && existing && isFresh(existing)) return Promise.resolve(existing);
+    if (!options.force && existing && isFresh(existing, effectiveChannel)) {
+      return Promise.resolve(existing);
+    }
 
     inFlight = performCheck().finally(() => {
       inFlight = null;
