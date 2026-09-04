@@ -2,8 +2,7 @@ import Type, { type Static } from 'typebox';
 import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '../agentic-limits';
 import { AgentIdSchema } from '../agents/schemas';
 import { ContextSettingsSchema } from '../chat/schemas';
-import { ExternalAgentTargetIdSchema } from '../external-agents/schemas';
-import { EXTERNAL_VENDOR_ID_MAX_LENGTH } from '../external-agents/vendor-text';
+import { ExternalAgentTargetIdSchema, ExternalVendorIdSchema } from '../external-agents/schemas';
 import { PromptSettingsSchema } from '../prompt-rules/schemas';
 import { ProviderTypeSchema, ReasoningEffortSchema } from '../provider-settings/schemas';
 import { ResumeInterruptedTurnSchema } from '../turn-recovery/schemas';
@@ -70,8 +69,8 @@ export type GenerateTextBody = Static<typeof GenerateTextBodySchema>;
  * so a send cannot quietly widen what the agent may do.
  */
 export const ExternalTurnRequestSchema = Type.Object({
-  model: Type.Optional(Type.String({ minLength: 1, maxLength: EXTERNAL_VENDOR_ID_MAX_LENGTH })),
-  effort: Type.Optional(Type.String({ minLength: 1, maxLength: EXTERNAL_VENDOR_ID_MAX_LENGTH })),
+  model: Type.Optional(ExternalVendorIdSchema),
+  effort: Type.Optional(ExternalVendorIdSchema),
 });
 
 export type ExternalTurnRequest = Static<typeof ExternalTurnRequestSchema>;

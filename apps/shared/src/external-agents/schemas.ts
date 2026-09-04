@@ -189,7 +189,7 @@ export const ExternalSupportedConfigurationSchema = Type.Object(
     /** i18n key explaining the refusal. Present only when `supported` is false. */
     unsupportedReasonKey: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     /** The vendor's own id for this combination, when discovered rather than declared. */
-    vendorId: Type.Optional(VendorText('vendorId', { minLength: 1 })),
+    vendorId: Type.Optional(ExternalVendorIdSchema),
     /** True when choosing this lets the agent act without asking. Drives the UI warning. */
     unattended: Type.Boolean(),
   },
@@ -222,7 +222,7 @@ export type ExternalIdentityIsolation = Static<typeof ExternalIdentityIsolationS
 /** One vendor-defined reasoning choice retained without flattening it to a MangoStudio enum. */
 export const ExternalAgentReasoningEffortSchema = Type.Object(
   {
-    id: VendorText('vendorId', { minLength: 1 }),
+    id: ExternalVendorIdSchema,
     displayName: Type.Optional(VendorText('title', { minLength: 1 })),
     description: Type.Optional(VendorText('detail')),
   },
@@ -234,7 +234,7 @@ export type ExternalAgentReasoningEffort = Static<typeof ExternalAgentReasoningE
 /** A model as the vendor advertised it, including the per-model reasoning catalog. */
 export const ExternalAgentModelSchema = Type.Object(
   {
-    id: VendorText('vendorId', { minLength: 1 }),
+    id: ExternalVendorIdSchema,
     displayName: Type.Optional(VendorText('title', { minLength: 1 })),
     description: Type.Optional(VendorText('detail')),
     isDefault: Type.Optional(Type.Boolean()),
@@ -251,7 +251,7 @@ export const ExternalAgentModelSchema = Type.Object(
         uniqueItems: true,
       })
     ),
-    defaultReasoningEffort: Type.Optional(VendorText('vendorId', { minLength: 1 })),
+    defaultReasoningEffort: Type.Optional(ExternalVendorIdSchema),
     serviceTiers: Type.Optional(
       ReadonlyArraySchema(Type.String({ minLength: 1, maxLength: 128 }), {
         maxItems: 32,
@@ -271,8 +271,8 @@ export const ExternalAgentModelCatalogSchema = ReadonlyArraySchema(ExternalAgent
 /** Settings that can be changed between turns without adopting a new session. */
 export const ExternalAgentConfigurationSchema = Type.Object(
   {
-    model: Type.Optional(VendorText('vendorId', { minLength: 1 })),
-    effort: Type.Optional(VendorText('vendorId', { minLength: 1 })),
+    model: Type.Optional(ExternalVendorIdSchema),
+    effort: Type.Optional(ExternalVendorIdSchema),
     level: ExternalPermissionLevelSchema,
     routing: ExternalApprovalRoutingSchema,
     workspaceRoots: ReadonlyArraySchema(Type.String({ minLength: 1, maxLength: 4_096 }), {
