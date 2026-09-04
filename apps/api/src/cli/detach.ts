@@ -4,7 +4,8 @@
  * file, and confirming it actually came up before reporting success.
  */
 
-import { closeSync, openSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import { RUNTIME_CONFIG_ENV_KEYS } from '../lib/config';
 import { ensureRuntimeDirs, getServerLogPath } from '../lib/mango-paths';
@@ -282,6 +283,16 @@ export function buildWaiterCommand(
 }
 
 /**
+ * PowerShell's `*>>` redirect does not create a missing parent directory, and
+ * nothing guarantees the run dir exists before an upgrade that never started
+ * a hub in this session (`ensureRuntimeDirs` is otherwise `serve`'s job).
+ * // Usage: ensureLogDir('/home/j/.mango/run/upgrade-1.log')
+ */
+export function ensureLogDir(logFile: string): void {
+  mkdirSync(dirname(logFile), { recursive: true });
+}
+
+/**
  * Windows-only: spawn a detached PowerShell that waits for this process to
  * exit, then runs a package-manager upgrade and logs its output — used when
  * the manager that owns the binary would otherwise try to replace a file
@@ -289,6 +300,7 @@ export function buildWaiterCommand(
  * // Usage: spawnDetachedWaiter({ argv: ['npm', 'install', '-g', 'mangostudio@latest'], waitForPid: process.pid, logFile })
  */
 export function spawnDetachedWaiter(input: SpawnDetachedWaiterInput): number {
+  ensureLogDir(input.logFile);
   const proc = Bun.spawn({
     cmd: ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', buildWaiterCommand(input)],
     env: pickAllowedEnv(process.env, DETACH_ENV_ALLOWLIST),

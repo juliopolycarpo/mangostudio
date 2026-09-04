@@ -381,6 +381,22 @@ describe('upgrade-service self-managed', () => {
     expect(report.message).toContain('Scheduled Task');
     expect(restarted).toBe(false);
   });
+
+  it('still reports the upgrade as successful when the restart effect itself fails', async () => {
+    const service = createUpgradeService(
+      baseDeps({
+        restartHub: () => Promise.reject(new Error('did not stop within 10s')),
+      })
+    );
+
+    const { report } = await collect(service);
+
+    expect(report.outcome).toBe('upgraded');
+    expect(report.exitCode).toBe(0);
+    expect(report.restart).toBe('manual');
+    expect(report.message).toContain('did not stop within 10s');
+    expect(report.message).toContain('mangostudio restart');
+  });
 });
 
 describe('upgrade-service delegate plans', () => {
@@ -504,6 +520,24 @@ describe('upgrade-service rollback', () => {
     expect(restartCalls).toHaveLength(1);
   });
 
+  it('honors restart: false, skipping the restart effect', async () => {
+    let restarted = false;
+    const service = createUpgradeService(
+      baseDeps({
+        restartHub: () => {
+          restarted = true;
+          return Promise.resolve();
+        },
+      })
+    );
+
+    const report = await service.rollback(() => undefined, { restart: false });
+
+    expect(report.outcome).toBe('upgraded');
+    expect(report.restart).toBe('skipped');
+    expect(restarted).toBe(false);
+  });
+
   it('refuses when no previous version is recorded', async () => {
     const service = createUpgradeService(
       baseDeps({
@@ -525,7 +559,9 @@ describe('upgrade-service rollback', () => {
     const report = await service.rollback((event) => events.push(event));
 
     expect(report.outcome).toBe('refused');
-    expect(report.reason).toBe('unknown-origin');
+    expect(report.reason).toBeUndefined();
+    expect(report.command).toBeUndefined();
+    expect(report.message).toContain('No previous version recorded');
     expect(report.exitCode).toBe(1);
   });
 

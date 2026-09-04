@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'bun:test';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   buildWaiterCommand,
   type DetachDeps,
+  ensureLogDir,
   restartExecutableOptions,
   spawnDetached,
 } from '../../../src/cli/detach';
@@ -106,5 +110,33 @@ describe('buildWaiterCommand', () => {
     });
 
     expect(command).toContain("'it''s-mango'");
+  });
+});
+
+describe('ensureLogDir', () => {
+  // spawnDetachedWaiter itself is Windows-only and cannot be exercised end to
+  // end here (this host's `powershell.exe`, reachable through WSL interop,
+  // would spawn a real Windows process) — this covers the directory-creation
+  // guard it calls before spawning, in isolation.
+  it('creates a missing log directory, so PowerShell’s redirect never targets one that does not exist', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mango-waiter-'));
+    const nested = join(root, 'run', 'nested');
+    const logFile = join(nested, 'upgrade-1.log');
+    try {
+      expect(existsSync(nested)).toBe(false);
+      ensureLogDir(logFile);
+      expect(existsSync(nested)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('is a no-op when the directory already exists', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mango-waiter-'));
+    try {
+      expect(() => ensureLogDir(join(root, 'upgrade-1.log'))).not.toThrow();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

@@ -90,9 +90,14 @@ export interface UpgradeRunRequest {
 
 export type EmitUpgradeEvent = (event: UpgradeStreamEvent) => void;
 
+export interface RollbackOptions {
+  /** Whether to restart the hub once the rollback's pointer swap succeeds. Defaults to true. */
+  readonly restart?: boolean;
+}
+
 export interface UpgradeService {
   run(request: UpgradeRunRequest, emit: EmitUpgradeEvent): Promise<UpgradeReport>;
-  rollback(emit: EmitUpgradeEvent): Promise<UpgradeReport>;
+  rollback(emit: EmitUpgradeEvent, options?: RollbackOptions): Promise<UpgradeReport>;
 }
 
 export interface UpgradeServiceDeps {
@@ -133,6 +138,10 @@ const SCRIPT_ENV_PASSTHROUGH: readonly string[] = [
   'LOCALAPPDATA',
   'TEMP',
   'TMP',
+  // install.sh's mktemp -d reads TMPDIR (POSIX); not in the brief's list, but
+  // without it a HOME override in a test or a sandboxed run cannot steer
+  // where the script stages its own extraction.
+  'TMPDIR',
   'SystemRoot',
 ];
 
@@ -315,22 +324,33 @@ async function withRestart(
   const launch: HubLaunchMode | null = state ? hubLaunchMode(state) : null;
   const decision = decideRestart({ launch, platform: d.platform, restart: wantsRestart });
 
+  // The install already succeeded and the pointer already moved: a restart
+  // that fails to come back (a slow detached stop, a supervisor refusal) is
+  // reported as a manual restart to run by hand, not as a failed upgrade.
+  let restart = decision.restart;
+  let restartFailure: string | undefined;
   if (decision.restart === 'scheduled' && state && launch) {
-    await d.restartHub({ state, launch });
+    try {
+      await d.restartHub({ state, launch });
+    } catch (error) {
+      restart = 'manual';
+      const reason = error instanceof Error ? error.message : String(error);
+      restartFailure = `Restart failed: ${reason}. Run "mangostudio restart".`;
+    }
   }
 
   // A legacy self-managed root migrates its `current` pointer as part of this
   // same install; re-probe rather than trust a value captured before it ran.
   const executable = d.currentExecutable();
   const versionedNote = executable.pointer === 'versioned' ? executable.note : undefined;
-  const message = joinMessages(decision.message, versionedNote);
+  const message = joinMessages(decision.message, restartFailure, versionedNote);
 
   return {
     outcome: 'upgraded',
     installedVia: fitInstalledVia(installedVia),
     currentVersion,
     ...(target ? { target: toWireTarget(target) } : {}),
-    restart: decision.restart,
+    restart,
     ...(message ? { message: fitToLimit(message, UPDATE_ERROR_MAX) } : {}),
     exitCode: 0,
   };
@@ -536,7 +556,8 @@ async function runInner(
 async function rollbackInner(
   emit: EmitUpgradeEvent,
   d: UpgradeServiceDeps,
-  installedViaRef: { current: InstallOrigin }
+  installedViaRef: { current: InstallOrigin },
+  restart: boolean
 ): Promise<UpgradeReport> {
   emit(stageEvent('resolve'));
   const installedVia = detectInstallOrigin(d.probe());
@@ -563,12 +584,13 @@ async function rollbackInner(
 
   const previousVersion = installedVia.record?.previousVersion;
   if (!previousVersion) {
+    // Neither a package-manager reason nor a plan command applies here —
+    // both fields are optional, and inventing one would misdirect the CLI's
+    // "Run: <command>" line toward something that does not fix this.
     return {
       outcome: 'refused',
       installedVia: fitInstalledVia(installedVia),
       currentVersion: d.getVersion(),
-      reason: 'unknown-origin',
-      command: 'mangostudio upgrade',
       message: fitToLimit('No previous version recorded to roll back to.', UPDATE_ERROR_MAX),
       exitCode: 1,
     };
@@ -594,7 +616,7 @@ async function rollbackInner(
     const exitCode = await relayLines(run, emit);
     if (exitCode !== 0) return scriptFailedReport(installedVia, d.getVersion(), exitCode);
 
-    return await withRestart(installedVia, d.getVersion(), undefined, true, d, emit);
+    return await withRestart(installedVia, d.getVersion(), undefined, restart, d, emit);
   } finally {
     await d.removeDir(stagingDir);
   }
@@ -677,10 +699,10 @@ export function createUpgradeService(deps: Partial<UpgradeServiceDeps> = {}): Up
         runInner(request, emit, d, installedViaRef)
       );
     },
-    rollback: (emit) => {
+    rollback: (emit, options = {}) => {
       const installedViaRef = { current: UNKNOWN_INSTALLED_VIA };
       return neverRejects(installedViaRef, d.getVersion(), () =>
-        rollbackInner(emit, d, installedViaRef)
+        rollbackInner(emit, d, installedViaRef, options.restart ?? true)
       );
     },
   };
