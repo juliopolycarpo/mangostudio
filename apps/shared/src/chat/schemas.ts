@@ -4,6 +4,7 @@ import {
   ExternalAgentTargetIdSchema,
   ExternalApprovalRoutingSchema,
   ExternalPermissionLevelSchema,
+  ExternalVendorIdSchema,
 } from '../external-agents/schemas';
 
 const InteractionModeSchema = Type.Union([
@@ -54,6 +55,31 @@ export const ChatRunnerPermissionsSchema = Type.Object({
 });
 
 export type ChatRunnerPermissions = Static<typeof ChatRunnerPermissionsSchema>;
+
+/**
+ * The model and effort a chat carries into every external turn.
+ *
+ * A sibling of {@link ChatRunnerPermissionsSchema} rather than a field on it,
+ * because the two are not the same kind of choice and must not be read the same
+ * way. A permission is a *privilege*, so an unrecognized stored value resolves
+ * to the restrictive end of its axis — there is always a safe answer. A model
+ * is not a privilege and has no restrictive end: the only sane fallback is the
+ * vendor's own default, which is what absence already means.
+ *
+ * So an unrecognized value here is **dropped, never substituted**. Both fields
+ * carry vendor ids, opaque to MangoStudio and validated only for shape — the
+ * API has no catalog to check them against, because a catalog is per runtime.
+ * Whether a value still names a model the vendor offers is decided at send
+ * time by `pickModel`, and whether it is safe on a command line is decided by
+ * the adapter that builds one. Neither question can be answered here, and
+ * answering one of them badly is how a stored string reaches argv.
+ */
+export const ChatRunnerModelSelectionSchema = Type.Object({
+  model: Type.Optional(ExternalVendorIdSchema),
+  effort: Type.Optional(ExternalVendorIdSchema),
+});
+
+export type ChatRunnerModelSelection = Static<typeof ChatRunnerModelSelectionSchema>;
 
 export const ChatAttachmentKindSchema = Type.Union([
   Type.Literal('image'),
@@ -108,6 +134,7 @@ export const ChatSchema = Type.Object({
   imageModel: Type.Union([Type.String(), Type.Null()]),
   runner: ChatRunnerConfigurationSchema,
   runnerPermissions: ChatRunnerPermissionsSchema,
+  runnerModelSelection: ChatRunnerModelSelectionSchema,
   workdir: Type.Union([Type.String(), Type.Null()]),
   environmentId: Type.String({ minLength: 1 }),
   restrictToolsToWorkdir: Type.Union([Type.Boolean(), Type.Null()]),
@@ -176,6 +203,7 @@ export const UpdateChatBodySchema = Type.Object({
   imageModel: Type.Optional(Type.String()),
   runner: Type.Optional(ChatRunnerConfigurationSchema),
   runnerPermissions: Type.Optional(ChatRunnerPermissionsSchema),
+  runnerModelSelection: Type.Optional(ChatRunnerModelSelectionSchema),
   workdir: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   environmentId: Type.Optional(Type.String({ minLength: 1 })),
   restrictToolsToWorkdir: Type.Optional(Type.Union([Type.Boolean(), Type.Null()])),

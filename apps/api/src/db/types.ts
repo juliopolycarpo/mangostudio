@@ -20,6 +20,9 @@ interface ChatsTable {
   /** External permission axes. NULL means unchosen; the read path resolves it restrictively. */
   runnerPermissionLevel: string | null;
   runnerApprovalRouting: string | null;
+  /** External model choice. NULL means unchosen; the read path drops it rather than substituting. */
+  runnerModel: string | null;
+  runnerEffort: string | null;
   workdir: string | null;
   environmentId: Generated<string>;
   /** null = inherit workspace default; 0/1 stored as boolean override */

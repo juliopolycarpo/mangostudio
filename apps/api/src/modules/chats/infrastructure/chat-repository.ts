@@ -1,5 +1,9 @@
 import { isAgentId } from '@mangostudio/shared/agents';
-import type { ChatRunnerConfiguration, ChatRunnerPermissions } from '@mangostudio/shared/chat';
+import type {
+  ChatRunnerConfiguration,
+  ChatRunnerModelSelection,
+  ChatRunnerPermissions,
+} from '@mangostudio/shared/chat';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   isExternalAgentTargetId,
@@ -59,6 +63,32 @@ function toRunnerPermissions(row: RunnerPermissionColumns): ChatRunnerPermission
   };
 }
 
+/** Exactly what {@link toRunnerModelSelection} reads. */
+type RunnerModelColumns = Pick<Selectable<Database['chats']>, 'runnerModel' | 'runnerEffort'>;
+
+/**
+ * Maps the two model columns to the contract shape.
+ *
+ * NULL stays absent for the same reason it does above — the selector has to
+ * distinguish "nothing chosen" from a choice — but there is no union to check a
+ * present value against, and deliberately so: the catalog lives on the runtime,
+ * so the API cannot know whether `opus` is still a model this vendor offers.
+ * Reading it back unchanged is correct; `pickModel` is where a value the
+ * catalog no longer lists is dropped, and the adapter is where one that is
+ * unsafe on a command line is.
+ *
+ * Empty strings are treated as absent. A column holding one is not a choice
+ * anybody made, and passing it on would put `--model ''` within reach.
+ */
+function toRunnerModelSelection(row: RunnerModelColumns): ChatRunnerModelSelection {
+  const model = row.runnerModel?.trim();
+  const effort = row.runnerEffort?.trim();
+  return {
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
+  };
+}
+
 /**
  * Maps the flat `runnerKind`/`runnerAgentId`/`runnerTargetId` columns to the
  * typed union at this boundary; nothing above the repository sees the flat
@@ -112,6 +142,7 @@ function mapChatRow(row: Selectable<Database['chats']>): ChatRecord {
     imageModel: row.imageModel,
     runner: toRunnerConfiguration(row),
     runnerPermissions: toRunnerPermissions(row),
+    runnerModelSelection: toRunnerModelSelection(row),
     workdir: row.workdir,
     environmentId: row.environmentId,
     restrictToolsToWorkdir: toOverrideFlag(row.restrictToolsToWorkdir),
@@ -135,6 +166,7 @@ export interface UpdateChatData {
   imageModel?: string;
   runner?: ChatRunnerConfiguration;
   runnerPermissions?: ChatRunnerPermissions;
+  runnerModelSelection?: ChatRunnerModelSelection;
   workdir?: string | null;
   environmentId?: string;
   restrictToolsToWorkdir?: boolean | null;
@@ -150,6 +182,7 @@ export interface ChatRecord {
   imageModel: string | null;
   runner: ChatRunnerConfiguration;
   runnerPermissions: ChatRunnerPermissions;
+  runnerModelSelection: ChatRunnerModelSelection;
   workdir: string | null;
   environmentId: string;
   restrictToolsToWorkdir: boolean | null;
@@ -285,6 +318,7 @@ export async function createChat(data: CreateChatData, db: Kysely<Database>): Pr
     imageModel: null,
     runner: { kind: 'mangostudio', agentId: 'default' },
     runnerPermissions: {},
+    runnerModelSelection: {},
     workdir: null,
     environmentId: data.environmentId ?? LOCAL_ENVIRONMENT_ID,
     restrictToolsToWorkdir: null,
@@ -304,6 +338,8 @@ export async function createChat(data: CreateChatData, db: Kysely<Database>): Pr
       imageModel: chat.imageModel,
       ...runnerColumns(chat.runner),
       runnerPermissionLevel: null,
+      runnerModel: null,
+      runnerEffort: null,
       runnerApprovalRouting: null,
       workdir: chat.workdir,
       environmentId: chat.environmentId,
@@ -364,6 +400,13 @@ export async function updateChat(
     // unsupported combination reaches a vendor.
     dbUpdates.runnerPermissionLevel = data.runnerPermissions.level ?? null;
     dbUpdates.runnerApprovalRouting = data.runnerPermissions.routing ?? null;
+  }
+  if (data.runnerModelSelection !== undefined) {
+    // Also a pair, for a different reason: an effort belongs to the model it
+    // was chosen for, so keeping a stale one alongside a new model would send
+    // the vendor a combination nobody picked.
+    dbUpdates.runnerModel = data.runnerModelSelection.model ?? null;
+    dbUpdates.runnerEffort = data.runnerModelSelection.effort ?? null;
   }
   if (data.workdir !== undefined) dbUpdates.workdir = data.workdir;
   if (data.environmentId !== undefined) dbUpdates.environmentId = data.environmentId;
@@ -431,6 +474,7 @@ export async function verifyChatOwnership(
 export interface OwnedChatRecord {
   runner: ChatRunnerConfiguration;
   runnerPermissions: ChatRunnerPermissions;
+  runnerModelSelection: ChatRunnerModelSelection;
   workdir: string | null;
   environmentId: string;
   restrictToolsToWorkdir: boolean | null;
@@ -450,6 +494,8 @@ export async function getOwnedChat(
       'runnerTargetId',
       'runnerPermissionLevel',
       'runnerApprovalRouting',
+      'runnerModel',
+      'runnerEffort',
       'workdir',
       'environmentId',
       'restrictToolsToWorkdir',
@@ -461,6 +507,7 @@ export async function getOwnedChat(
   return {
     runner: toRunnerConfiguration(row),
     runnerPermissions: toRunnerPermissions(row),
+    runnerModelSelection: toRunnerModelSelection(row),
     workdir: row.workdir,
     environmentId: row.environmentId,
     restrictToolsToWorkdir: toOverrideFlag(row.restrictToolsToWorkdir),

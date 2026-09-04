@@ -53,6 +53,7 @@ export function createMockChat(overrides: Partial<Chat> = {}): Chat {
     imageModel: MOCK_MODELS.image.id,
     runner: { kind: 'mangostudio', agentId: 'default' },
     runnerPermissions: {},
+    runnerModelSelection: {},
     workdir: null,
     environmentId: 'local',
     restrictToolsToWorkdir: null,

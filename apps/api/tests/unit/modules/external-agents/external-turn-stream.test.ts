@@ -82,6 +82,7 @@ function chatRecord(overrides: Partial<OwnedChatRecord> = {}): OwnedChatRecord {
   return {
     runner: { kind: 'external', targetId: 'codex' },
     runnerPermissions: { level: 'default', routing: 'user' },
+    runnerModelSelection: {},
     workdir: '/work/repo',
     environmentId: 'local',
     restrictToolsToWorkdir: null,

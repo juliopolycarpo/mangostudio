@@ -43,6 +43,23 @@ function VendorText(limit: ExternalTextLimit, options?: { minLength?: number }) 
 }
 
 /**
+ * One vendor-chosen identifier a client may send or a chat may store.
+ *
+ * A model id and an effort id are both this: opaque strings the vendor minted
+ * and will be handed back, never a MangoStudio enum. Exported so the wire shape
+ * (`ExternalTurnRequestSchema`), the persisted shape
+ * (`ChatRunnerModelSelectionSchema`) and the descriptor's catalog all bound the
+ * same value the same way — three spellings of one bound is how a value that
+ * fits in a request ends up rejected on its way to the row that must hold it.
+ *
+ * Bounding is all this does. It is deliberately **not** a claim that the value
+ * names anything: no catalog is reachable from here, so whether a vendor still
+ * offers this model is decided at send time, and whether it is safe to put on a
+ * command line is decided by the adapter that builds one.
+ */
+export const ExternalVendorIdSchema = VendorText('vendorId', { minLength: 1 });
+
+/**
  * Which external agent. Exactly `Exclude<LibraryTargetId, 'mangostudio'>`,
  * restated rather than derived so this context does not depend on `library`;
  * `tests/unit/external-agents.test.ts` holds both halves together with a

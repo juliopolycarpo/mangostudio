@@ -9,6 +9,8 @@ export {
   ChatListSchema,
   type ChatRunnerConfiguration,
   ChatRunnerConfigurationSchema,
+  type ChatRunnerModelSelection,
+  ChatRunnerModelSelectionSchema,
   type ChatRunnerPermissions,
   ChatRunnerPermissionsSchema,
   ChatSchema,
