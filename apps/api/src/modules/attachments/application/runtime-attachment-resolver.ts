@@ -7,6 +7,7 @@ import {
 import type { Kysely } from 'kysely';
 import type { ChatAttachmentSelect, Database } from '../../../db/types';
 import { getConfig } from '../../../lib/config';
+import { attachmentToBase64 } from '../../../services/providers/core/attachment-content';
 import type { ProviderRuntimeAttachment } from '../../../services/providers/types';
 import { assertChatAttachmentIdsAvailable } from '../infrastructure/attachment-repository';
 
@@ -36,7 +37,7 @@ export async function resolveProviderRuntimeAttachments(
   const attachmentIds = uniqueAttachmentIds(input.attachmentIds);
   if (attachmentIds.length === 0) return [];
 
-  const attachments = await assertChatAttachmentIdsAvailable(
+  const rows = await assertChatAttachmentIdsAvailable(
     {
       attachmentIds,
       userId: input.userId,
@@ -46,7 +47,21 @@ export async function resolveProviderRuntimeAttachments(
     db
   );
 
-  const rowsById = new Map(attachments.map((attachment) => [attachment.id, attachment]));
+  return loadAttachmentBytes(attachmentIds, rows);
+}
+
+/**
+ * Reads the bytes for rows an ownership check has already returned.
+ *
+ * Split out so a caller that must inspect the rows first — the external-agent
+ * path, which refuses a set before loading any of it — can do so without
+ * running the same ownership query a second time.
+ */
+function loadAttachmentBytes(
+  attachmentIds: readonly string[],
+  rows: readonly ChatAttachmentSelect[]
+): Promise<ProviderRuntimeAttachment[]> {
+  const rowsById = new Map(rows.map((attachment) => [attachment.id, attachment]));
   const uploadsRoot = resolve(getConfig().uploads.dir);
 
   return Promise.all(
@@ -151,9 +166,10 @@ export async function resolveExternalAgentAttachments(
   },
   db: Kysely<Database>
 ): Promise<ExternalAgentAttachmentResolution> {
+  const attachmentIds = uniqueAttachmentIds(input.attachmentIds);
   const rows = await assertChatAttachmentIdsAvailable(
     {
-      attachmentIds: uniqueAttachmentIds(input.attachmentIds),
+      attachmentIds,
       userId: input.userId,
       chatId: input.chatId,
       ...(input.messageId ? { messageId: input.messageId } : {}),
@@ -163,7 +179,7 @@ export async function resolveExternalAgentAttachments(
   const refusal = refusalFor(rows);
   if (refusal) return { ok: false, refusal };
 
-  const resolved = await resolveProviderRuntimeAttachments(input, db);
+  const resolved = await loadAttachmentBytes(attachmentIds, rows);
   return {
     ok: true,
     attachments: resolved.map((attachment) => ({
@@ -172,7 +188,7 @@ export async function resolveExternalAgentAttachments(
       mimeType: attachment.mimeType,
       sizeBytes: attachment.sizeBytes,
       kind: 'image' as const,
-      bytesBase64: Buffer.from(attachment.bytes).toString('base64'),
+      bytesBase64: attachmentToBase64(attachment),
     })),
   };
 }
