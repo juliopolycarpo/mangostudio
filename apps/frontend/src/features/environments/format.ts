@@ -313,6 +313,42 @@ export function findInstallRecipe(
   return unsupportedMatch;
 }
 
+/**
+ * The installation source each runtime's uninstall recipe is able to remove.
+ * `bun.uninstall` deletes Bun's own install root, so it is the right button
+ * only for a Bun the official installer put there. A runtime absent here has
+ * no source to match and is offered whenever the catalog lists a recipe.
+ */
+const UNINSTALL_SOURCE_BY_RUNTIME: Partial<Record<string, PathSource>> = {
+  bun: 'bun',
+};
+
+/**
+ * The uninstall step to offer for this runtime — undefined when the catalog
+ * has none here, or when the binary that actually runs is not the one the
+ * recipe knows how to remove.
+ *
+ * Offering it regardless is worse than offering nothing: against a Homebrew or
+ * system Bun, `bun.uninstall` deletes a different installation (or none),
+ * leaves the effective binary in place, and still reports success.
+ *
+ * @example runtimeUninstallRecipe(bunStatus, recipes)?.id // 'bun.uninstall'
+ */
+export function runtimeUninstallRecipe(
+  status: RuntimeStatus,
+  recipes: readonly InstallRecipePreview[]
+): InstallRecipePreview | undefined {
+  const recipe = findInstallRecipe(recipes, status.id, 'uninstall');
+  if (!recipe) return undefined;
+
+  const managedSource = UNINSTALL_SOURCE_BY_RUNTIME[status.id];
+  if (!managedSource) return recipe;
+
+  const { installation } = effectiveInstallation(status);
+  if (!installation) return undefined;
+  return (installation.pathSource ?? 'system') === managedSource ? recipe : undefined;
+}
+
 /** Human-readable byte count for the installer download disclosure. */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

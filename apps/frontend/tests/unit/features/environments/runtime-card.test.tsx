@@ -163,7 +163,14 @@ describe('RuntimeCard', () => {
   it('offers Uninstall after Update when the registry has a recipe and the tool is installed', () => {
     const status = runtimeStatus({
       id: 'bun',
-      installations: [installation({ path: '/home/dev/.bun/bin/bun', version: '1.3.14' })],
+      installations: [
+        installation({
+          path: '/home/dev/.bun/bin/bun',
+          version: '1.3.14',
+          effective: true,
+          pathSource: 'bun',
+        }),
+      ],
     });
 
     render(
@@ -189,6 +196,36 @@ describe('RuntimeCard', () => {
     expect(
       footer.compareDocumentPosition(uninstall) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
+  });
+
+  // `bun.uninstall` removes Bun's own install root. Against a Homebrew or
+  // system Bun it would delete a different installation — or nothing at all —
+  // leave the effective binary running, and still report success.
+  it('offers no Uninstall when the effective Bun is not the one the recipe manages', () => {
+    const status = runtimeStatus({
+      id: 'bun',
+      installations: [
+        installation({
+          path: '/opt/homebrew/bin/bun',
+          version: '1.3.14',
+          effective: true,
+          pathSource: 'system',
+        }),
+      ],
+    });
+
+    render(
+      <RuntimeCard
+        status={status}
+        recipes={[installRecipe({ id: 'bun.uninstall', runtimeId: 'bun', action: 'uninstall' })]}
+      />
+    );
+
+    expect(
+      screen.queryByRole('button', {
+        name: en.environments.runtimes.uninstall.replace('{runtime}', 'Bun'),
+      })
+    ).not.toBeInTheDocument();
   });
 
   it('offers no Uninstall when the registry has no recipe for the runtime', () => {

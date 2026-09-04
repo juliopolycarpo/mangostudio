@@ -24,6 +24,7 @@ import {
   pathPosition,
   pathSourceLabel,
   pathSourceManagerName,
+  runtimeUninstallRecipe,
   toolchainProcessLine,
   toolchainRuntimeId,
   versionLabel,
@@ -94,7 +95,7 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
       )
     : renderGenericUpdate(recipes, status.id, name, environmentId, e);
 
-  const uninstallRecipe = findInstallRecipe(recipes, status.id, 'uninstall');
+  const uninstallRecipe = runtimeUninstallRecipe(status, recipes);
   const uninstallAction = uninstallRecipe && (
     <InstallAction
       recipe={uninstallRecipe}

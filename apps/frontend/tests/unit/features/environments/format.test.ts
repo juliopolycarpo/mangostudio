@@ -20,6 +20,7 @@ import {
   pathPosition,
   pathSourceLabel,
   prefixedVersionLabel,
+  runtimeUninstallRecipe,
   toolchainProcessLine,
   toolchainSummary,
   versionLabel,
@@ -283,6 +284,59 @@ describe('findInstallRecipe', () => {
 
   it('is undefined when the catalog offers nothing for this runtime and action', () => {
     expect(findInstallRecipe([], 'node', 'install')).toBeUndefined();
+  });
+});
+
+describe('runtimeUninstallRecipe', () => {
+  const bunUninstall = installRecipe({
+    id: 'bun.uninstall',
+    runtimeId: 'bun',
+    action: 'uninstall',
+  });
+
+  function bunStatus(pathSource: RuntimeInstallation['pathSource'], path: string) {
+    return runtimeStatus({
+      id: 'bun',
+      installations: [installation({ path, version: '1.3.14', effective: true, pathSource })],
+    });
+  }
+
+  it('offers the recipe for a Bun the official installer put in its own root', () => {
+    const status = bunStatus('bun', '/home/dev/.bun/bin/bun');
+
+    expect(runtimeUninstallRecipe(status, [bunUninstall])?.id).toBe('bun.uninstall');
+  });
+
+  it('withholds it from a Bun another packager owns', () => {
+    const status = bunStatus('system', '/opt/homebrew/bin/bun');
+
+    expect(runtimeUninstallRecipe(status, [bunUninstall])).toBeUndefined();
+  });
+
+  // An installation list with nothing effective has no binary to remove, so
+  // there is no source to match the recipe against either.
+  it('withholds it when nothing on the machine is effective', () => {
+    const status = runtimeStatus({
+      id: 'bun',
+      installations: [installation({ path: '/home/dev/.bun/bin/bun', version: '1.3.14' })],
+    });
+
+    expect(runtimeUninstallRecipe(status, [bunUninstall])).toBeUndefined();
+  });
+
+  it('offers a runtime with no source rule whatever the catalog lists', () => {
+    const recipe = installRecipe({
+      id: 'claude.uninstall',
+      runtimeId: 'claude',
+      action: 'uninstall',
+    });
+    const status = runtimeStatus({ id: 'claude', installations: [] });
+
+    expect(runtimeUninstallRecipe(status, [recipe])?.id).toBe('claude.uninstall');
+  });
+
+  it('is undefined when the catalog has no uninstall for the runtime', () => {
+    expect(runtimeUninstallRecipe(bunStatus('bun', '/home/dev/.bun/bin/bun'), [])).toBeUndefined();
   });
 });
 
