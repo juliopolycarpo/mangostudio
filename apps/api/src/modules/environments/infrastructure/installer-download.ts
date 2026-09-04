@@ -114,16 +114,42 @@ function isHtmlResponse(normalized: string): boolean {
   return /^(?:<!doctype\s+html|<html)\b/i.test(normalized);
 }
 
-function assertShellScript(bytes: Uint8Array, minBytes: number): void {
+/** A shebang is on the first line, so a shell script needs a far smaller window than a `.ps1`. */
+const SHELL_INSPECTION_WINDOW_BYTES = 1024;
+
+/**
+ * The decoded head of a downloaded installer, ready to recognize by content:
+ * long enough to be a script at all, BOM stripped, and not the HTML a CDN or
+ * captive portal serves when it means to refuse. What counts as the right
+ * *kind* of script is each caller's own check.
+ */
+function inspectionPrefix(
+  bytes: Uint8Array,
+  minBytes: number,
+  windowBytes: number,
+  kind: 'shell script' | 'PowerShell script'
+): string {
   if (bytes.byteLength < minBytes) {
     throw new InstallerDownloadError(`Installer is smaller than the ${minBytes}-byte minimum.`);
   }
 
-  const prefix = new TextDecoder().decode(bytes.subarray(0, Math.min(bytes.byteLength, 1024)));
-  const normalized = prefix.replace(/^\uFEFF/, '').trimStart();
-  if (isHtmlResponse(normalized)) {
-    throw new InstallerDownloadError('Installer response was HTML, not a shell script.');
+  const prefix = new TextDecoder().decode(
+    bytes.subarray(0, Math.min(bytes.byteLength, windowBytes))
+  );
+  const normalized = prefix.replace(/^\uFEFF/, '');
+  if (isHtmlResponse(normalized.trimStart())) {
+    throw new InstallerDownloadError(`Installer response was HTML, not a ${kind}.`);
   }
+  return normalized;
+}
+
+function assertShellScript(bytes: Uint8Array, minBytes: number): void {
+  const normalized = inspectionPrefix(
+    bytes,
+    minBytes,
+    SHELL_INSPECTION_WINDOW_BYTES,
+    'shell script'
+  ).trimStart();
   const firstLine = normalized.split(/\r?\n/, 1)[0] ?? '';
   if (
     !/^#!\s*(?:\/usr\/bin\/env\s+(?:ba|z|k)?sh|\/(?:usr\/)?bin\/(?:ba|z|k)?sh)(?:\s|$)/.test(
@@ -143,17 +169,12 @@ const POWERSHELL_TOKEN_PATTERN =
   /\bparam\s*\(|\bfunction\s+\S|\$env:\w|Invoke-WebRequest|Write-Host|#Requires|\$[A-Za-z_]\w*\s*=/;
 
 function assertPowerShellScript(bytes: Uint8Array, minBytes: number): void {
-  if (bytes.byteLength < minBytes) {
-    throw new InstallerDownloadError(`Installer is smaller than the ${minBytes}-byte minimum.`);
-  }
-
-  const prefix = new TextDecoder().decode(
-    bytes.subarray(0, Math.min(bytes.byteLength, INSPECTION_WINDOW_BYTES))
+  const normalized = inspectionPrefix(
+    bytes,
+    minBytes,
+    INSPECTION_WINDOW_BYTES,
+    'PowerShell script'
   );
-  const normalized = prefix.replace(/^\uFEFF/, '');
-  if (isHtmlResponse(normalized.trimStart())) {
-    throw new InstallerDownloadError('Installer response was HTML, not a PowerShell script.');
-  }
   if (!POWERSHELL_TOKEN_PATTERN.test(normalized)) {
     throw new InstallerDownloadError('Installer response does not look like a PowerShell script.');
   }
