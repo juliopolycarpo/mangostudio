@@ -40,6 +40,44 @@ export async function listOptionalDirectory(
   }
 }
 
+/** How both managers name a version directory: `24.18.0`, optionally `v`-prefixed. */
+const VERSION_DIRECTORY_PATTERN = /^v?(\d+\.\d+\.\d+)$/;
+
+/**
+ * The versions a manager has installed under `versionsRoot`, newest first.
+ *
+ * Only the binary's location differs between the two managers — nvm keeps it
+ * at `<version>/bin/node`, fnm at `<version>/installation/bin/node` — so that
+ * is the whole callback, and everything around it (which directory names
+ * count as a version, that the binary must exist, that a failed realpath
+ * keeps the layout path) is one rule rather than two.
+ * // Usage: readManagedVersions(fs, '/home/a/.nvm/versions/node', (dir) => `/home/a/.nvm/versions/node/${dir}/bin/node`)
+ */
+export async function readManagedVersions(
+  fs: Pick<ManagedVersionFileSystem, 'readDirectory' | 'pathExists' | 'realpath'>,
+  versionsRoot: string,
+  nodeBinaryPathFor: (versionDirectory: string) => string
+): Promise<Array<{ version: string; path: string }>> {
+  const versions: Array<{ version: string; path: string }> = [];
+
+  for (const entry of await listOptionalDirectory(fs, versionsRoot)) {
+    const match = VERSION_DIRECTORY_PATTERN.exec(entry);
+    if (!match) continue;
+    const nodePath = nodeBinaryPathFor(entry);
+    if (!(await fs.pathExists(nodePath))) continue;
+
+    let resolvedPath = nodePath;
+    try {
+      resolvedPath = await fs.realpath(nodePath);
+    } catch {
+      // The binary exists, so retain its stable layout path when realpath fails.
+    }
+    versions.push({ version: match[1] as string, path: resolvedPath });
+  }
+
+  return sortVersionsDescending(versions);
+}
+
 /**
  * Ascending exact-semver comparison for the version strings nvm and fnm both
  * write as directory names (`24.18.0`, optionally `v`-prefixed on disk).

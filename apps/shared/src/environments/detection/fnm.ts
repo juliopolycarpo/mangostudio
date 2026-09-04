@@ -6,10 +6,9 @@ import type { NodeReleaseSchedule } from './lts-policy';
 import {
   createManagedVersionFindings,
   findCurrentVersion,
-  listOptionalDirectory,
   type ManagedVersionFileSystem,
   preferNewerVersion,
-  sortVersionsDescending,
+  readManagedVersions,
   toManagedVersions,
 } from './version-manager-support';
 
@@ -33,8 +32,6 @@ export interface FnmDetectionOptions {
 export interface FnmDetectionDeps extends Pick<PathEnv, 'platform' | 'homeDir' | 'env'> {
   readonly fs: FnmFileSystem;
 }
-
-const VERSION_DIRECTORY_PATTERN = /^v?(\d+\.\d+\.\d+)$/;
 
 /**
  * The version segment fnm encodes in an alias's resolved target, e.g.
@@ -102,29 +99,14 @@ export function fnmDefaultAliasBinDir(platform: string, root: string): string {
     : posix.join(root, 'aliases', 'default', 'bin');
 }
 
-async function readInstalledVersions(
+function readInstalledVersions(
   root: string,
   deps: FnmDetectionDeps
 ): Promise<Array<{ version: string; path: string }>> {
   const versionsRoot = pathApi(deps.platform).join(root, 'node-versions');
-  const versions: Array<{ version: string; path: string }> = [];
-
-  for (const entry of await listOptionalDirectory(deps.fs, versionsRoot)) {
-    const match = VERSION_DIRECTORY_PATTERN.exec(entry);
-    if (!match) continue;
-    const nodePath = nodeBinaryPath(root, entry, deps.platform);
-    if (!(await deps.fs.pathExists(nodePath))) continue;
-
-    let resolvedPath = nodePath;
-    try {
-      resolvedPath = await deps.fs.realpath(nodePath);
-    } catch {
-      // The binary exists, so retain its stable layout path when realpath fails.
-    }
-    versions.push({ version: match[1] as string, path: resolvedPath });
-  }
-
-  return sortVersionsDescending(versions);
+  return readManagedVersions(deps.fs, versionsRoot, (entry) =>
+    nodeBinaryPath(root, entry, deps.platform)
+  );
 }
 
 /**

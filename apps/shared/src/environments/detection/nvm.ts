@@ -9,7 +9,7 @@ import {
   listOptionalDirectory,
   type ManagedVersionFileSystem,
   preferNewerVersion,
-  sortVersionsDescending,
+  readManagedVersions,
   toManagedVersions,
 } from './version-manager-support';
 
@@ -36,7 +36,6 @@ interface NvmAliasCache {
   readonly latestByMajor: ReadonlyMap<number, string>;
 }
 
-const VERSION_DIRECTORY_PATTERN = /^v?(\d+\.\d+\.\d+)$/;
 const SAFE_ALIAS_PATTERN = /^[a-zA-Z0-9_.*/-]+$/;
 
 async function readOptionalFile(fs: NvmFileSystem, path: string): Promise<string | undefined> {
@@ -91,29 +90,14 @@ async function readNvmAliasCache(root: string, fs: NvmFileSystem): Promise<NvmAl
   return { aliases, pointers, latestByMajor };
 }
 
-async function readInstalledVersions(
+function readInstalledVersions(
   root: string,
   deps: NvmDetectionDeps
 ): Promise<Array<{ version: string; path: string }>> {
   const versionsRoot = join(root, 'versions', 'node');
-  const versions: Array<{ version: string; path: string }> = [];
-
-  for (const entry of await listOptionalDirectory(deps.fs, versionsRoot)) {
-    const match = VERSION_DIRECTORY_PATTERN.exec(entry);
-    if (!match) continue;
-    const nodePath = join(versionsRoot, entry, 'bin', 'node');
-    if (!(await deps.fs.pathExists(nodePath))) continue;
-
-    let resolvedPath = nodePath;
-    try {
-      resolvedPath = await deps.fs.realpath(nodePath);
-    } catch {
-      // The binary exists, so retain its stable layout path when realpath fails.
-    }
-    versions.push({ version: match[1] as string, path: resolvedPath });
-  }
-
-  return sortVersionsDescending(versions);
+  return readManagedVersions(deps.fs, versionsRoot, (entry) =>
+    join(versionsRoot, entry, 'bin', 'node')
+  );
 }
 
 function highestVersion(versions: readonly { version: string }[]): string | undefined {
