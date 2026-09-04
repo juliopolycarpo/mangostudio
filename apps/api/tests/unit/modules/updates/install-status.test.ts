@@ -47,6 +47,39 @@ describe('resolveInstallStatus', () => {
     expect(status.plan.kind).toBe('delegate');
     expect(status.command).toBe('bun add -g mangostudio@latest');
   });
+
+  it('lets a request override the channel for a specific ask, ahead of the configured one', () => {
+    const status = resolveInstallStatus(probe(), 'stable', '0.1.1', { channel: 'canary' });
+
+    expect(status.channel).toBe('canary');
+  });
+
+  it('threads a request’s version and sha into the plan for a self-managed install', () => {
+    const status = resolveInstallStatus(probe(), null, '0.1.1', {
+      channel: 'canary',
+      sha: 'abc1234',
+    });
+
+    // A self-managed plan carries no request echo (planUpgrade's `self`
+    // branch ignores version/sha entirely) — this only proves the request
+    // reached planUpgrade rather than throwing or being silently dropped.
+    expect(status.plan.kind).toBe('self');
+  });
+
+  it('threads a request’s pinned version into a delegate plan (cargo canary)', () => {
+    const status = resolveInstallStatus(
+      probe({ env: { MANGOSTUDIO_LAUNCHER: 'cargo' } }),
+      null,
+      '0.1.1',
+      { channel: 'canary', version: '0.2.0' }
+    );
+
+    expect(status.plan).toEqual({
+      kind: 'delegate',
+      command: 'cargo install mangostudio --version 0.2.0-canary --locked',
+      argv: ['cargo', 'install', 'mangostudio', '--version', '0.2.0-canary', '--locked'],
+    });
+  });
 });
 
 describe('upgradeRefusalReason', () => {

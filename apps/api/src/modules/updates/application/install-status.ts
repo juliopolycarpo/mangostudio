@@ -22,20 +22,34 @@ export interface InstallStatus {
   readonly command: string;
 }
 
+/** A specific ask (`mangostudio upgrade --canary <sha>`), rather than "this build's own channel". */
+export interface UpgradeStatusRequest {
+  readonly channel?: UpdateChannel;
+  readonly version?: string;
+  readonly sha?: string;
+}
+
 /**
- * Resolve the install status for the running process.
+ * Resolve the install status for the running process. `request` overrides the
+ * channel (and, self-managed only, pins a version or canary commit) for a
+ * specific ask; omitted, this is "what upgrades this build to its own
+ * channel" — the shape every read-only caller (`status`, `doctor`, `GET
+ * /machine/update`) wants. The upgrade engine and the machine route's
+ * pre-flight guard both pass `request`, so neither resolves a plan a second,
+ * possibly different way.
  * // Usage: resolveInstallStatus(probe, config.updates.channel, getVersion())
  */
 export function resolveInstallStatus(
   probe: InstallOriginProbe,
   configuredChannel: UpdateChannel | null,
-  currentVersion: string
+  currentVersion: string,
+  request: UpgradeStatusRequest = {}
 ): InstallStatus {
   const installedVia = detectInstallOrigin(probe);
-  const channel = configuredChannel ?? installedVia.channel;
+  const channel = request.channel ?? configuredChannel ?? installedVia.channel;
   const plan = planUpgrade(
     installedVia.manager,
-    { channel },
+    { channel, version: request.version, sha: request.sha },
     { platform: probe.platform, currentVersion }
   );
   return { installedVia, channel, plan, command: upgradeCommandFor(plan, channel) };

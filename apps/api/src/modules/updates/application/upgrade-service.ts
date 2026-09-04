@@ -50,7 +50,6 @@ import { hubLaunchMode } from '../../machine/domain/hub-process';
 import { fitToLimit } from '../../machine/domain/machine-limits';
 import { decideRestart } from '../domain/decide-restart';
 import {
-  detectInstallOrigin,
   fitInstalledVia,
   type InstallOrigin,
   type InstallOriginProbe,
@@ -63,7 +62,7 @@ import {
   type UpgradeTargetContext,
   type UpgradeTargetRequest,
 } from '../domain/resolve-target';
-import { planUpgrade, type UpgradePlan } from '../domain/upgrade-plan';
+import type { UpgradePlan } from '../domain/upgrade-plan';
 import {
   embeddedInstaller,
   embeddedInstallerFileName,
@@ -79,6 +78,7 @@ import {
   type ScriptOutputLine,
   type ScriptRun,
 } from '../infrastructure/run-script';
+import { resolveInstallStatus } from './install-status';
 
 export interface UpgradeRunRequest {
   readonly channel?: UpdateChannel;
@@ -529,14 +529,13 @@ async function runInner(
   installedViaRef: { current: InstallOrigin }
 ): Promise<UpgradeReport> {
   emit(stageEvent('resolve'));
-  const installedVia = detectInstallOrigin(d.probe());
-  installedViaRef.current = installedVia;
-  const channel = request.channel ?? d.configuredChannel() ?? installedVia.channel;
-  const plan = planUpgrade(
-    installedVia.manager,
-    { channel, version: request.version, sha: request.sha },
-    { platform: d.platform, currentVersion: d.getVersion() }
+  const { installedVia, channel, plan } = resolveInstallStatus(
+    d.probe(),
+    d.configuredChannel(),
+    d.getVersion(),
+    { channel: request.channel, version: request.version, sha: request.sha }
   );
+  installedViaRef.current = installedVia;
 
   if (plan.kind === 'refused') {
     return {
@@ -560,14 +559,12 @@ async function rollbackInner(
   restart: boolean
 ): Promise<UpgradeReport> {
   emit(stageEvent('resolve'));
-  const installedVia = detectInstallOrigin(d.probe());
-  installedViaRef.current = installedVia;
-  const channel = d.configuredChannel() ?? installedVia.channel;
-  const plan = planUpgrade(
-    installedVia.manager,
-    { channel },
-    { platform: d.platform, currentVersion: d.getVersion() }
+  const { installedVia, plan } = resolveInstallStatus(
+    d.probe(),
+    d.configuredChannel(),
+    d.getVersion()
   );
+  installedViaRef.current = installedVia;
 
   if (plan.kind !== 'self') {
     const reason = plan.kind === 'refused' ? plan.reason : 'package-manager';
