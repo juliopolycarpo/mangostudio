@@ -693,7 +693,14 @@ function reduceExternalSessionStarted(
       persistedBytes: 0,
     } satisfies MessagePart,
   ];
-  return withAiMessageUpdate({ ...state, parts }, { parts });
+  // The hub's resolved model replaces the client's optimistic label. Absent
+  // means the vendor's own default, which the hub cannot name either — the
+  // header renders the bare target id as the vendor's localized name, so
+  // leaving it alone is the honest answer rather than inventing one.
+  return withAiMessageUpdate(
+    { ...state, parts },
+    { parts, ...(chunk.model !== undefined ? { modelName: chunk.model } : {}) }
+  );
 }
 
 function reduceExternalText(state: TextGenerationStreamState, textDelta: string) {

@@ -45,6 +45,8 @@ export interface ExternalStreamSession {
   readonly targetId: ExternalAgentTargetId;
   readonly resumed: boolean;
   readonly fallbackReason?: string;
+  /** The model the hub resolved, when it resolved one. */
+  readonly model?: string;
 }
 
 /**
@@ -67,6 +69,7 @@ export function externalSessionStartedChunk(session: ExternalStreamSession): Str
     targetId: session.targetId,
     resumed: session.resumed,
     ...(session.fallbackReason !== undefined ? { fallbackReason: session.fallbackReason } : {}),
+    ...(session.model !== undefined ? { model: session.model } : {}),
     done: false,
   };
 }

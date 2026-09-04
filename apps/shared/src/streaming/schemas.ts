@@ -15,6 +15,7 @@ import {
   ExternalThreadUsageSchema,
   ExternalTurnTerminalReasonSchema,
   ExternalUsageSchema,
+  ExternalVendorIdSchema,
 } from '../external-agents/schemas';
 import { ImageGenerationErrorCodeSchema } from '../generation/schemas';
 import {
@@ -356,6 +357,15 @@ const SSEExternalSessionStartedEventSchema = Type.Object({
   targetId: ExternalAgentTargetIdSchema,
   resumed: Type.Boolean(),
   fallbackReason: Type.Optional(Type.String()),
+  /**
+   * The model the hub resolved for this turn, when it resolved one (#816).
+   *
+   * Absent means the vendor's own default is in force — which the hub does not
+   * name either, so the header falls back to the vendor's localized name. The
+   * client cannot derive this: `pickModel` runs server-side over a catalog the
+   * client may not have loaded, and the request often names no model at all.
+   */
+  model: Type.Optional(ExternalVendorIdSchema),
   done: Type.Literal(false),
 });
 

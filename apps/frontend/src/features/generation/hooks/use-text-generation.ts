@@ -497,15 +497,11 @@ export function useTextGeneration({
       // the vendor itself is the only name available until the user picks a
       // model.
       //
-      // Approximate on purpose, and known to be: the hub persists
-      // `configuration.model ?? target`, where `configuration.model` is the
-      // catalog default the *adapter* resolved when the request named none. The
-      // bare target id agrees either way — the header renders it as the vendor's
-      // name — but a vendor that advertises a catalog makes this read as the
-      // vendor live and as a model id once the stored record replaces it.
-      // Closing that gap needs the effective model on the wire: the hub knows
-      // it, the `external_session_started` chunk does not carry it yet (see
-      // issue #816).
+      // Optimistic only, and corrected in place: `external_session_started`
+      // now carries the model the hub actually resolved, which is the one the
+      // stored record will name. Until that chunk arrives this is the best
+      // available guess, and the bare target id renders as the vendor's own
+      // localized name rather than as a model nobody chose.
       const displayModel = externalTargetId
         ? (externalTurnRequest?.model ?? externalTargetId)
         : model;

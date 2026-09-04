@@ -384,7 +384,19 @@ function openStream(
             credentialHomeFingerprint: resolution.credentialHomeFingerprint,
             observer: {
               onSession(session) {
-                send(externalSessionStartedChunk(session));
+                // The model the hub resolved, announced with the session so a
+                // live turn and a reloaded one name the same thing (#816). The
+                // client cannot derive it: `pickModel` ran server-side over a
+                // catalog the client may not have loaded, and the request
+                // frequently names no model at all.
+                send(
+                  externalSessionStartedChunk({
+                    ...session,
+                    ...(resolution.configuration.model !== undefined
+                      ? { model: resolution.configuration.model }
+                      : {}),
+                  })
+                );
               },
               onTurnPrepared(ids) {
                 send({ type: 'user_message_id', messageId: ids.userMessageId, done: false });
