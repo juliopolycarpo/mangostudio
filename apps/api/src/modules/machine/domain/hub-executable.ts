@@ -73,6 +73,14 @@ export function hubDistRootFor(
   return hubDistRoot(probe);
 }
 
+/** The launcher the installer maintains across upgrades, inside an already-resolved root. */
+function pointerPathForRoot(root: string, platform: NodeJS.Platform): string {
+  const join = joiner(platform);
+  return platform === 'win32'
+    ? join(root, 'bin', 'mangostudio.cmd')
+    : join(root, 'current', 'mangostudio');
+}
+
 /** The launcher the installer maintains across upgrades. */
 export function hubCurrentPointerPath(
   probe: Pick<HubExecutableProbe, 'platform' | 'home' | 'localAppData'> &
@@ -82,13 +90,15 @@ export function hubCurrentPointerPath(
     probe.execPath !== undefined && probe.pathExists !== undefined
       ? hubDistRootFor({ ...probe, execPath: probe.execPath, pathExists: probe.pathExists })
       : hubDistRoot(probe);
-  const join = joiner(probe.platform);
-  return probe.platform === 'win32'
-    ? join(root, 'bin', 'mangostudio.cmd')
-    : join(root, 'current', 'mangostudio');
+  return pointerPathForRoot(root, probe.platform);
 }
 
-function isUnder(path: string, root: string, platform: NodeJS.Platform): boolean {
+/**
+ * Whether `path` sits inside `root`, comparing the way the host's file system
+ * does — `\` and `/` are the same separator, and Windows is case-insensitive.
+ * // Usage: isUnder('/home/j/.mango/dist/0.1.1/mangostudio', '/home/j/.mango/dist', 'linux')
+ */
+export function isUnder(path: string, root: string, platform: NodeJS.Platform): boolean {
   const normalize = (value: string) => {
     const unified = value.replaceAll('\\', '/');
     return platform === 'win32' ? unified.toLowerCase() : unified;
@@ -113,7 +123,10 @@ export function resolveHubExecutable(probe: HubExecutableProbe): HubExecutable {
     return { argv: [probe.execPath], pointer: 'external' };
   }
 
-  const pointer = hubCurrentPointerPath(probe);
+  // `root` is already resolved above; going back through
+  // `hubCurrentPointerPath` would repeat its realpath probe on every call,
+  // and `/machine/status` polls this.
+  const pointer = pointerPathForRoot(root, probe.platform);
   if (probe.pathExists(pointer)) {
     return { argv: [pointer], pointer: 'current' };
   }

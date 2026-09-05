@@ -20,6 +20,7 @@ import {
   grandparentDirectory,
   hubDistRoot,
   INSTALL_ORIGIN_FILE,
+  isUnder,
 } from '../../machine/domain/hub-executable';
 import { fitToLimit } from '../../machine/domain/machine-limits';
 
@@ -78,11 +79,6 @@ export function versionChannel(version: string): UpdateChannel {
 function normalizePath(path: string, platform: NodeJS.Platform): string {
   const unified = path.replaceAll('\\', '/');
   return platform === 'win32' ? unified.toLowerCase() : unified;
-}
-
-function isUnder(path: string, root: string, platform: NodeJS.Platform): boolean {
-  const prefix = normalizePath(root, platform).replace(/\/+$/, '');
-  return normalizePath(path, platform).startsWith(`${prefix}/`);
 }
 
 function joinPath(platform: NodeJS.Platform, root: string, name: string): string {
