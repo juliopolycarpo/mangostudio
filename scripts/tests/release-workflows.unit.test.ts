@@ -587,6 +587,21 @@ describe('release workflow binary gate', () => {
     expect(workflow).toContain('__installer ps1 | diff - scripts/install/install.ps1');
   });
 
+  test('both dry-run jobs make the installed binary detect its own moved install root', () => {
+    // The dry run installs under RUNNER_TEMP, not the default root, so this is
+    // the one CI path that runs origin detection on a MANGOSTUDIO_INSTALL_DIR
+    // layout — the case a hand-run of the built binary first caught.
+    const workflow = readText('.github/workflows/release-dry-run.yml');
+    const linux = extractJobBlock(workflow, 'dry-run-linux');
+    const windows = extractJobBlock(workflow, 'dry-run-windows');
+    for (const block of [linux, windows]) {
+      expect(block).toContain('upgrade --check --json');
+      expect(block).toContain('self-managed');
+    }
+    expect(linux).toContain("jq -r '.installedVia.manager'");
+    expect(windows).toContain('$report.installedVia.manager');
+  });
+
   test('release dry run builds and archives windows-x64 last, after the Linux archive is done with', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
     const linuxBlock = extractJobBlock(workflow, 'dry-run-linux');

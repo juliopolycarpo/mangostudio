@@ -147,6 +147,24 @@ jobs:
             exit 1
           fi
 
+      # The install root here is not the default one, so this is the only
+      # place that exercises origin detection on a root moved with
+      # MANGOSTUDIO_INSTALL_DIR: the binary has to recognise the layout it was
+      # just installed into. `--check` resolves the real latest release and
+      # downloads nothing.
+      - name: Verify the installed binary recognises its own install
+        env:
+          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}/mango-bin
+        run: |
+          set -euo pipefail
+          report="$("${MANGOSTUDIO_BIN_DIR}/mangostudio" upgrade --check --json)"
+          echo "$report"
+          manager="$(printf '%s' "$report" | jq -r '.installedVia.manager')"
+          if [ "$manager" != "self-managed" ]; then
+            echo "Expected installedVia.manager self-managed, got ${manager}"
+            exit 1
+          fi
+
       - name: Verify local archive serves health
         run: scripts/release/smoke-binary.sh "${RUNNER_TEMP}/mango-bin/mangostudio" "$DRY_RUN_VERSION" 13003
 
@@ -306,6 +324,24 @@ jobs:
           $content = Get-Content -Raw "$env:MANGOSTUDIO_BIN_DIR\mangostudio.cmd"
           if ($content -notmatch [regex]::Escape($expected)) {
             Write-Error "mangostudio.cmd does not point at the installed version"
+            exit 1
+          }
+
+      # Same check as the Linux job: the hub's own origin detection on a root
+      # moved with MANGOSTUDIO_INSTALL_DIR, this time through the .cmd shim.
+      - name: Verify the installed binary recognises its own install
+        env:
+          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}\mango-bin
+        run: |
+          $raw = & "$env:MANGOSTUDIO_BIN_DIR\mangostudio.cmd" upgrade --check --json
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "upgrade --check exited $LASTEXITCODE"
+            exit 1
+          }
+          Write-Host ($raw -join "`n")
+          $report = ($raw -join "`n") | ConvertFrom-Json
+          if ($report.installedVia.manager -ne 'self-managed') {
+            Write-Error "Expected installedVia.manager self-managed, got $($report.installedVia.manager)"
             exit 1
           }
 
