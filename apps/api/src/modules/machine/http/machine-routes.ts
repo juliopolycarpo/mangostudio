@@ -82,8 +82,8 @@ export function createMachineRoutes(
     .get('/machine/status', { response: { 200: MachineStatusSchema } }, ({ guardClientIp }) =>
       service.status({ clientIp: guardClientIp })
     )
-    .get('/machine/update', { response: { 200: MachineUpdateStatusSchema } }, () =>
-      service.update()
+    .get('/machine/update', { response: { 200: MachineUpdateStatusSchema } }, ({ guardClientIp }) =>
+      service.update({ clientIp: guardClientIp })
     )
     .get(
       '/machine/doctor',

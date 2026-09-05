@@ -235,7 +235,7 @@ export interface MachineService {
     body: MachineConfigWriteBody,
     context: MachineRequestContext
   ): Promise<MachineConfigWriteResponse>;
-  update(): Promise<MachineUpdateStatus>;
+  update(context: MachineRequestContext): Promise<MachineUpdateStatus>;
   /**
    * Stream an upgrade. The guard and the plan check both happen before the
    * promise resolves, so a caller can `await` this and map a thrown
@@ -434,7 +434,7 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
     // Every read here is synchronous; `check()` below is deliberately not
     // awaited, so nothing in this method actually suspends. `Promise`-returning
     // for the same reason `writeConfig` is: callers never have to know that.
-    update() {
+    update(context) {
       const { check: checksEnabled, channel: configuredChannel } = d.updatesConfig();
       const status = resolveInstallStatus(
         d.installOriginProbe(),
@@ -448,11 +448,17 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       }
       const check = checksEnabled ? d.checker.readCached() : null;
       const reason = upgradeRefusalReason(status.plan);
+      // A remote signed-in reader can see this page but must not be offered
+      // the button: `canUpgrade` folds the same loopback guard `upgrade()`
+      // itself enforces, so a stale "can upgrade" answer never survives past
+      // the guard that would actually refuse the POST.
+      const canUpgrade = status.plan.kind === 'self' && d.evaluateGuard(context.clientIp).allowed;
       return Promise.resolve({
         installedVia: fitInstalledVia(status.installedVia),
+        channel: status.channel,
         check: check ? fitUpdateCheck(check) : null,
         checksEnabled,
-        canUpgrade: status.plan.kind === 'self',
+        canUpgrade,
         ...(reason !== undefined ? { reason } : {}),
         command: fitToLimit(status.command, UPGRADE_COMMAND_MAX),
       });

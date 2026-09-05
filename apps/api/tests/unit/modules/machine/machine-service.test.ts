@@ -517,7 +517,7 @@ describe('machineService.update', () => {
       checker,
     });
 
-    const status = await service.update();
+    const status = await service.update(LOCAL);
 
     expect(Value.Check(MachineUpdateStatusSchema, status)).toBe(true);
     expect(status.installedVia.manager).toBe('bun');
@@ -541,7 +541,7 @@ describe('machineService.update', () => {
       checker,
     });
 
-    const status = await service.update();
+    const status = await service.update(LOCAL);
 
     expect(status.installedVia.manager).toBe('self-managed');
     expect(status.canUpgrade).toBe(true);
@@ -563,11 +563,60 @@ describe('machineService.update', () => {
       checker,
     });
 
-    const status = await service.update();
+    const status = await service.update(LOCAL);
 
     expect(status.checksEnabled).toBe(false);
     expect(status.check).toBeNull();
     expect(checker.checkCalls).toBe(0);
+  });
+
+  it('reports the configured channel, not installedVia’s build-origin channel', async () => {
+    // installOriginProbe() below reports a build whose own channel is
+    // 'stable' (the default fixture); [updates] channel configures canary.
+    // The two must not be conflated — a stable build configured for canary
+    // shows canary here, the channel an upgrade would actually target.
+    const checker = new FakeUpdateChecker({
+      channel: 'canary',
+      currentVersion: '0.1.1',
+      latestVersion: '0.1.1-canary.deadbee',
+      updateAvailable: true,
+      checkedAt: 6_000,
+    });
+    const { service } = makeService({
+      installOriginProbe: () => installOriginProbe(),
+      updatesConfig: () => ({ check: true, channel: 'canary' }),
+      checker,
+    });
+
+    const status = await service.update(LOCAL);
+
+    expect(status.installedVia.channel).toBe('stable');
+    expect(status.channel).toBe('canary');
+  });
+
+  it('folds the local-surface guard into canUpgrade, so a remote reader sees the command block, not a button', async () => {
+    const checker = new FakeUpdateChecker({
+      channel: 'stable',
+      currentVersion: '0.1.1',
+      latestVersion: '0.2.0',
+      updateAvailable: true,
+      checkedAt: 6_000,
+    });
+    const { service } = makeService({
+      installOriginProbe: () => installOriginProbe(),
+      updatesConfig: () => ({ check: true, channel: null }),
+      checker,
+    });
+
+    const remote = await service.update({ clientIp: '203.0.113.5' });
+    expect(remote.canUpgrade).toBe(false);
+    // Still the command a signed-in-but-remote reader can copy and run
+    // themselves — this is a self-managed plan, unlike the delegate case
+    // above, which already carries its own command for a different reason.
+    expect(remote.command).toBe('mangostudio upgrade');
+
+    const local = await service.update(LOCAL);
+    expect(local.canUpgrade).toBe(true);
   });
 });
 

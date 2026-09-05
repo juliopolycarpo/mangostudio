@@ -80,6 +80,7 @@ const UPDATE_STATUS: MachineUpdateStatus = {
     channel: 'stable',
     executable: '/home/j/.mango/dist/current/mangostudio',
   },
+  channel: 'stable',
   check: {
     channel: 'stable',
     currentVersion: '0.1.1',
@@ -106,7 +107,8 @@ class FakeMachineService implements MachineService {
     return Promise.resolve(STATUS);
   }
 
-  update(): Promise<MachineUpdateStatus> {
+  update(context: { clientIp: string | undefined }): Promise<MachineUpdateStatus> {
+    this.clientIps.push(context.clientIp);
     return Promise.resolve(UPDATE_STATUS);
   }
 
@@ -220,6 +222,17 @@ describe('machine routes', () => {
     const response = await mount(service).handle(new Request('http://localhost/machine/update'));
     expect(response.status).toBe(200);
     expect(Value.Check(MachineUpdateStatusSchema, await response.json())).toBe(true);
+  });
+
+  it('passes the guarded client IP into service.update, the same as every other machine route', async () => {
+    const service = new FakeMachineService();
+    await mount(service, { trustProxy: true }).handle(
+      new Request('http://localhost/machine/update', {
+        headers: { 'x-forwarded-for': '203.0.113.5' },
+      })
+    );
+
+    expect(service.clientIps).toEqual(['203.0.113.5']);
   });
 
   it('refuses /machine/update without a session', async () => {
