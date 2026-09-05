@@ -182,12 +182,30 @@ function UpgradeOutcome({ stream }: { readonly stream: UseUpgradeStreamResult })
   if (stream.phase === 'done' && stream.report) {
     const { report } = stream;
     if (report.outcome === 'upgraded') {
+      // Installed is not activated: a foreground hub or a Windows Scheduled
+      // Task comes back as `restart: 'manual'` with the old process still
+      // serving, and `--no-restart` as `'skipped'`. Showing only the success
+      // line reads as finished when it is not.
       return (
-        <p className="text-sm text-on-surface">
-          {formatMessage(m.outcome.upgraded, {
-            version: report.target?.version ?? report.currentVersion,
-          })}
-        </p>
+        <div className="space-y-1">
+          <p className="text-sm text-on-surface">
+            {formatMessage(m.outcome.upgraded, {
+              version: report.target?.version ?? report.currentVersion,
+            })}
+          </p>
+          {report.restart ? (
+            <p
+              className={
+                report.restart === 'scheduled'
+                  ? 'text-sm text-on-surface-variant'
+                  : 'text-sm text-warning'
+              }
+              data-testid="upgrade-restart-note"
+            >
+              {m.outcome.restart[report.restart]}
+            </p>
+          ) : null}
+        </div>
       );
     }
     if (report.outcome === 'already-current') {

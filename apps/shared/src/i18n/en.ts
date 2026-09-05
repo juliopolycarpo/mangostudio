@@ -2790,6 +2790,19 @@ export const messages: Messages = {
           upgraded: 'Upgraded to {version}.',
           alreadyCurrent: 'Already running the latest version.',
           failedGeneric: 'The upgrade failed for an unknown reason.',
+          /**
+           * What the report's `restart` says happened after the pointer moved.
+           * Installing is not activating: without this line an upgrade that
+           * needs a hand-run restart reads as finished while the old process
+           * keeps serving.
+           */
+          restart: {
+            scheduled: 'The server is restarting with the new version.',
+            'not-running': 'It starts the next time you run the server.',
+            skipped: 'The server is still running the old version; restart it to use the new one.',
+            manual:
+              'The server is still running the old version and cannot restart itself — restart it to finish.',
+          },
         },
         streamEnded: 'The connection ended before the upgrade finished.',
       },

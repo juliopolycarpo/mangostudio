@@ -2793,6 +2793,13 @@ export const messages = {
           upgraded: 'Atualizado para {version}.',
           alreadyCurrent: 'Já está na versão mais recente.',
           failedGeneric: 'A atualização falhou por um motivo desconhecido.',
+          restart: {
+            scheduled: 'O servidor está reiniciando com a nova versão.',
+            'not-running': 'Ela entra em uso na próxima vez que você iniciar o servidor.',
+            skipped: 'O servidor ainda roda a versão antiga; reinicie-o para usar a nova.',
+            manual:
+              'O servidor ainda roda a versão antiga e não consegue se reiniciar — reinicie-o para concluir.',
+          },
         },
         streamEnded: 'A conexão caiu antes da atualização terminar.',
       },
