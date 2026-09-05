@@ -13,12 +13,18 @@ import { getRunDir } from '../../../lib/mango-paths';
 import { currentInstallOriginProbe } from '../../machine/application/hub-service';
 import { detectInstallOrigin, type InstallOriginProbe } from '../domain/install-origin';
 import { shouldRetryPrune } from '../domain/prune-retry';
+import {
+  buildScriptEnv,
+  installerArgv,
+  writeTempScriptReal,
+} from '../infrastructure/installer-invocation';
 import { type RunScript, runScript } from '../infrastructure/run-script';
-import { buildScriptEnv, powershellInterpreter, writeTempScriptReal } from './upgrade-service';
 
 const logger = createDiagnosticLogger('prune-retry');
 
 export interface PruneRetryDeps {
+  /** Checked before `probe()`, so a non-Windows start pays nothing for this hook. */
+  readonly platform: NodeJS.Platform;
   readonly probe: () => InstallOriginProbe;
   readonly runScript: RunScript;
   readonly which: (name: string) => string | null;
@@ -32,6 +38,7 @@ export interface PruneRetryDeps {
 
 function resolveDeps(deps: Partial<PruneRetryDeps>): PruneRetryDeps {
   return {
+    platform: deps.platform ?? process.platform,
     probe: deps.probe ?? (() => currentInstallOriginProbe()),
     runScript: deps.runScript ?? runScript,
     which: deps.which ?? ((name) => Bun.which(name)),
@@ -51,6 +58,10 @@ function resolveDeps(deps: Partial<PruneRetryDeps>): PruneRetryDeps {
  */
 export async function runPruneRetry(deps: Partial<PruneRetryDeps> = {}): Promise<void> {
   const d = resolveDeps(deps);
+  // Ahead of `probe()`: this runs on the startup tick of every hub, and the
+  // probe is a realpath plus a read of `install-origin.json` that no non-
+  // Windows start has any use for.
+  if (d.platform !== 'win32') return;
   const probe = d.probe();
   const installedVia = detectInstallOrigin(probe);
   const prunePending = installedVia.record?.prunePending;
@@ -60,16 +71,7 @@ export async function runPruneRetry(deps: Partial<PruneRetryDeps> = {}): Promise
   try {
     await d.mkdir(directory);
     const scriptPath = await d.writeScript(directory);
-    const argv = [
-      powershellInterpreter(d.which),
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-File',
-      scriptPath,
-      '-Prune',
-    ];
+    const argv = installerArgv('ps1', scriptPath, ['-Prune'], d.which);
     const run = d.runScript(argv, { env: buildScriptEnv(d.env, installedVia) });
     for await (const line of run.lines) {
       logger.debug('output', { stream: line.stream, line: line.line });

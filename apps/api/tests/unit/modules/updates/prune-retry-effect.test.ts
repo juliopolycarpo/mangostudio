@@ -60,6 +60,7 @@ describe('runPruneRetry', () => {
     };
 
     await runPruneRetry({
+      platform: 'win32',
       probe: () => windowsProbe(ORIGIN_RECORD_WITHOUT_PENDING),
       runScript,
       which: () => null,
@@ -93,13 +94,22 @@ describe('runPruneRetry', () => {
         path === '/home/j/.mango/dist/install-origin.json' ? ORIGIN_RECORD_WITH_PENDING : null,
     };
 
+    let probeCalls = 0;
+
     await runPruneRetry({
-      probe: () => posixProbe,
+      platform: 'linux',
+      probe: () => {
+        probeCalls += 1;
+        return posixProbe;
+      },
       runScript,
       which: () => null,
     });
 
     expect(runCalls).toEqual([]);
+    // The guard is ahead of the probe: this hook runs on the startup tick of
+    // every hub, and the probe is a realpath plus an install-origin.json read.
+    expect(probeCalls).toBe(0);
   });
 
   it('runs the embedded script with -Prune and the install dir env, then cleans up', async () => {
@@ -111,6 +121,7 @@ describe('runPruneRetry', () => {
     };
 
     await runPruneRetry({
+      platform: 'win32',
       probe: () => windowsProbe(ORIGIN_RECORD_WITH_PENDING),
       runScript,
       which: () => 'C:\\pwsh\\pwsh.exe',
@@ -134,6 +145,7 @@ describe('runPruneRetry', () => {
     const runScript: RunScript = () => fakeScriptRun(1);
 
     await runPruneRetry({
+      platform: 'win32',
       probe: () => windowsProbe(ORIGIN_RECORD_WITH_PENDING),
       runScript,
       which: () => null,
