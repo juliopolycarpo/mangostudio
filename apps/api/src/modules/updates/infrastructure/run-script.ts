@@ -12,6 +12,7 @@
  */
 
 import { HIDDEN_WINDOW } from '@mangostudio/runtime';
+import { bridgeEmitter } from '../../../lib/emit-bridge';
 
 export interface ScriptOutputLine {
   readonly stream: 'stdout' | 'stderr';
@@ -30,7 +31,6 @@ export interface RunScriptOptions {
 
 export type RunScript = (argv: readonly string[], options: RunScriptOptions) => ScriptRun;
 
-/** A `ScriptRun` that never spawned anything — one synthetic stderr line and a fixed exit code. */
 /** An `AsyncIterable` yielding exactly one item, with no `async function*` (and so no idle await). */
 function oneLine(item: ScriptOutputLine): AsyncIterable<ScriptOutputLine> {
   return {
@@ -113,43 +113,19 @@ async function pumpLines(
 }
 
 /**
- * Interleaves stdout and stderr lines in the order they actually arrive, via
- * a small push queue: each reader pushes a line and wakes the consumer,
- * rather than the consumer polling either stream in a fixed order (which
- * would starve whichever stream it did not ask first).
+ * Interleaves stdout and stderr lines in the order they actually arrive:
+ * `bridgeEmitter` supplies the push queue so each reader pushing a line
+ * wakes the consumer, rather than the consumer polling either stream in a
+ * fixed order (which would starve whichever stream it did not ask first).
  */
-async function* mergeOutputLines(proc: {
+function mergeOutputLines(proc: {
   readonly stdout: ReadableStream<Uint8Array>;
   readonly stderr: ReadableStream<Uint8Array>;
 }): AsyncGenerator<ScriptOutputLine> {
-  const queue: ScriptOutputLine[] = [];
-  let wake: (() => void) | null = null;
-  const push = (line: ScriptOutputLine): void => {
-    queue.push(line);
-    wake?.();
-    wake = null;
-  };
-
-  let readersDone = false;
-  const readers = Promise.all([
-    pumpLines(proc.stdout, 'stdout', push),
-    pumpLines(proc.stderr, 'stderr', push),
-  ]).then(() => {
-    readersDone = true;
-    wake?.();
-    wake = null;
-  });
-
-  for (;;) {
-    const next = queue.shift();
-    if (next) {
-      yield next;
-      continue;
-    }
-    if (readersDone) break;
-    await new Promise<void>((resolve) => {
-      wake = resolve;
-    });
-  }
-  await readers;
+  return bridgeEmitter<ScriptOutputLine, void>((push) =>
+    Promise.all([
+      pumpLines(proc.stdout, 'stdout', push),
+      pumpLines(proc.stderr, 'stderr', push),
+    ]).then(() => undefined)
+  ).items;
 }
