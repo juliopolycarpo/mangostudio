@@ -8,7 +8,16 @@
  *
  * `scripts/` is not a workspace, so there is no package name to import it by;
  * this is the one file allowed to reach outside `apps/api` for it.
+ *
+ * The `.sh`/`.ps1` module declarations live in `../../../types/text-imports.d.ts`.
+ * `apps/api`'s own `tsconfig.json` picks that file up via its `include`, but any
+ * consumer of `@mangostudio/api`'s `App` type (e.g. `apps/frontend`) type-checks
+ * this file too, without that `include`. The reference directive below makes the
+ * declaration travel with the file that needs it, instead of every downstream
+ * tsconfig having to know about it.
  */
+
+/// <reference path="../../../types/text-imports.d.ts" />
 
 import installPs1 from '../../../../../../scripts/install/install.ps1' with { type: 'text' };
 import installSh from '../../../../../../scripts/install/install.sh' with { type: 'text' };
