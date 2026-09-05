@@ -909,6 +909,33 @@ describe('upgrade-service delegate plans', () => {
     expect(spawned).toBe(false);
   });
 
+  it('names the comeback command when the waiter cannot be spawned after the hub was stopped', async () => {
+    // The hub is already down by the time the waiter spawn is attempted, and
+    // the waiter is the only thing that would have brought it back. A bare
+    // spawn error leaves the operator with a stopped hub and no instruction.
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe({ platform: 'win32' }),
+        platform: 'win32',
+        pid: 555,
+        readState: () => Promise.resolve(detachedState({ pid: 999 })),
+        isAlive: () => true,
+        stopHub: () => Promise.resolve(),
+        spawnDetachedWaiter: () => {
+          throw new Error('powershell.exe: No such file or directory');
+        },
+      })
+    );
+
+    const { report } = await collect(service);
+
+    expect(report.outcome).toBe('failed');
+    expect(report.exitCode).toBe(2);
+    expect(report.message).toContain('powershell.exe');
+    expect(report.message).toContain('PID 999');
+    expect(report.message).toContain('mangostudio serve -d localhost:3001');
+  });
+
   it('waits on only the CLI pid, and stops nothing, when the state file is stale (no live hub)', async () => {
     let stopped = false;
     const waiterCalls: { waitForPid: number | readonly number[] }[] = [];

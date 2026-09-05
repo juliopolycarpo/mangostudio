@@ -469,13 +469,26 @@ async function runWindowsDelegate(
 
   const logFile = getUpgradeLogPath(d.now());
   const afterSuccess = hub && request.restart ? comebackArgv(hub) : undefined;
-  d.spawnDetachedWaiter({
-    argv: plan.argv,
-    waitForPid: hub ? [hub.state.pid, d.pid] : d.pid,
-    logFile,
-    env: delegateEnv(d.env),
-    ...(afterSuccess ? { afterSuccess } : {}),
-  });
+  try {
+    d.spawnDetachedWaiter({
+      argv: plan.argv,
+      waitForPid: hub ? [hub.state.pid, d.pid] : d.pid,
+      logFile,
+      env: delegateEnv(d.env),
+      ...(afterSuccess ? { afterSuccess } : {}),
+    });
+  } catch (error) {
+    // The hub above is already stopped and the waiter that would have brought
+    // it back never started, so the generic `failed` message is not enough:
+    // name the command that recovers it, the way the `--no-restart` wording
+    // does. Nothing was installed, so there is nothing else to undo.
+    const reason = error instanceof Error ? error.message : String(error);
+    return report('failed', installedVia, d.getVersion(), {
+      message: hub
+        ? `${reason}. MangoStudio (PID ${hub.state.pid}) was stopped for this upgrade and was not started again — run "${comebackArgv(hub).join(' ')}".`
+        : reason,
+    });
+  }
   return report('upgraded', installedVia, d.getVersion(), {
     restart: !hub ? 'not-running' : request.restart ? 'scheduled' : 'manual',
     logFile,
