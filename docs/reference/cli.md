@@ -273,9 +273,10 @@ self-managed upgrade restarts it. On Windows the npm managers delete the
 package that holds the running `mangostudio.exe`, so `--yes` there stops a live
 hub first (a foreground hub is refused: press Ctrl-C in its terminal), then
 hands the command to a detached waiter (`Wait-Process` on this pid and the
-stopped hub's, then the manager, then — when the manager exited 0 —
-`mangostudio restart` for a Scheduled Task or `mangostudio serve -d <host:port>`
-for a detached instance) whose output lands in
+stopped hub's, then the manager, then — unconditionally, since a hub already
+stopped for the upgrade needs recovering whether or not the manager succeeded
+— `mangostudio restart` for a Scheduled Task or `mangostudio serve -d
+<host:port>` for a detached instance) whose output lands in
 `~/.mango/run/upgrade-<timestamp>.log`; the report names the log. With
 `--no-restart` the hub is still stopped, and the report names the command that
 brings it back. Scoop goes through the same waiter. Refusals always print the
