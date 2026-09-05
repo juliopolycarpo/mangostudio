@@ -16,6 +16,7 @@ import {
 import { readUtf8FileOrNull, SECRET_FILE_MODE, writeFileAtomic } from '../lib/safe-file';
 import { CliError } from './errors';
 import { writeLine } from './output';
+import { isInteractiveTerminal } from './prompt';
 
 export type AuthSecretStorageTarget = 'env' | 'toml';
 
@@ -63,7 +64,7 @@ function buildInteractiveSetupMessage(message: string, options: AuthSecretStorag
 }
 
 function isInteractive(deps: AuthSecretSetupDeps): boolean {
-  return deps.isInteractive?.() ?? Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  return deps.isInteractive?.() ?? isInteractiveTerminal();
 }
 
 function getGeneratedSecret(deps: AuthSecretSetupDeps): string {
