@@ -383,6 +383,10 @@ jobs:
       - name: Download the install script
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job never checks the repository out, so `gh` has no git remote
+          # to infer one from and would fail with "not a git repository"
+          # before it reaches the release. The resolve job names it the same way.
+          GH_REPO: ${{ github.repository }}
           SCRIPT_NAME: ${{ matrix.script }}
         run: |
           set -euo pipefail
