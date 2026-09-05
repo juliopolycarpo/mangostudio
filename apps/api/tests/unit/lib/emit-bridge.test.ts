@@ -82,4 +82,36 @@ describe('bridgeEmitter', () => {
     const items = await collect(bridge.items);
     expect(items.sort()).toEqual(['x1', 'x2', 'y1']);
   });
+
+  it('keeps delivering `settled` after the consumer returns the generator mid-run', async () => {
+    // `items()` wraps its loop in a try/finally to stop queueing for a
+    // consumer that has gone away; the producer must still run to its own end
+    // and hand its result to `settled` — that is the whole reason the upgrade
+    // route can still schedule a restart after an SSE client disconnects.
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let emitAfterClose: ((line: string) => void) | undefined;
+
+    const bridge = bridgeEmitter<string, number>(async (emit) => {
+      emit('first');
+      emitAfterClose = emit;
+      await held;
+      emit('after-return');
+      return 9;
+    });
+
+    const iterator = bridge.items[Symbol.asyncIterator]();
+    expect((await iterator.next()).value).toBe('first');
+    // An SSE client disconnecting: sseResponse's cancel() returns the iterator.
+    await iterator.return?.(undefined);
+
+    release?.();
+    await expect(bridge.settled).resolves.toBe(9);
+
+    // A late emit must not throw into the producer either.
+    expect(() => emitAfterClose?.('later')).not.toThrow();
+    expect((await iterator.next()).done).toBe(true);
+  });
 });

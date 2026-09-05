@@ -14,10 +14,11 @@ import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 
 const KEEPALIVE_INTERVAL_MS = 15_000;
-const KEEPALIVE_BYTES = new TextEncoder().encode(': keepalive\n\n');
+const ENCODER = new TextEncoder();
+const KEEPALIVE_BYTES = ENCODER.encode(': keepalive\n\n');
 
 function sseEvent(data: object): Uint8Array {
-  return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
+  return ENCODER.encode(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 /**

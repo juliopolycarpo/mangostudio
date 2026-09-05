@@ -30,7 +30,13 @@ export function bridgeEmitter<T, R>(
 ): EmitBridge<T, R> {
   const queue: T[] = [];
   let wake: (() => void) | null = null;
+  let closed = false;
   const emit = (item: T): void => {
+    // Once the consumer has stopped draining (an SSE client disconnecting
+    // returns the generator), nothing will ever read these. The producer runs
+    // on to its own end either way — `settled` is how a caller still learns
+    // the outcome — but its remaining output is dropped rather than retained.
+    if (closed) return;
     queue.push(item);
     wake?.();
     wake = null;
@@ -59,18 +65,23 @@ export function bridgeEmitter<T, R>(
   );
 
   async function* items(): AsyncGenerator<T> {
-    for (;;) {
-      if (queue.length > 0) {
-        // biome-ignore lint/style/noNonNullAssertion: length just checked under single-threaded JS; nothing else drains this queue between the check and the shift.
-        yield queue.shift()!;
-        continue;
+    try {
+      for (;;) {
+        if (queue.length > 0) {
+          // biome-ignore lint/style/noNonNullAssertion: length just checked under single-threaded JS; nothing else drains this queue between the check and the shift.
+          yield queue.shift()!;
+          continue;
+        }
+        if (done) break;
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
       }
-      if (done) break;
-      await new Promise<void>((resolve) => {
-        wake = resolve;
-      });
+      await running;
+    } finally {
+      closed = true;
+      queue.length = 0;
     }
-    await running;
   }
 
   return { items: items(), result: () => result, settled: running };
