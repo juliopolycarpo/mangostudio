@@ -587,8 +587,8 @@ describe('install.sh under bash 3.2 (docker)', () => {
   test.skipIf(!!DOCKER_SKIP_REASON)(
     'a set -u abort does not carry a meaningful $? into the EXIT trap, with or without the trap fix',
     () => {
-      // Documents a nuance the review's causal story got slightly wrong: a
-      // `set -u`/nounset fatal abort never calls `exit N`, so there is no
+      // Documents a nuance worth pinning: a `set -u`/nounset fatal abort
+      // never calls `exit N`, so there is no
       // pending exit status for the trap to protect — capturing $? at trap
       // entry (`rc=$?`) still only sees whatever the *last successful*
       // command left behind (0 here), not "the abort". Both the old and the
