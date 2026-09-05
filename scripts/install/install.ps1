@@ -379,10 +379,12 @@ function Remove-UserPath([string]$BinDir) {
   return $true
 }
 
-# The .cmd shim's own quoted path is the single source of truth for "what
-# version is current" — it is identical in shape whether this build wrote it
-# or a pre-`current` install did, so it doubles as legacy detection.
-function Get-CurrentVersionFromCmd([string]$InstallRoot, [string]$CmdPath) {
+# The version directory a shim points at, absolute and normalized, or $null
+# when there is no shim or it is not one of ours. A `%~dp0` target resolves
+# against the shim's own directory, exactly the way cmd.exe resolves it.
+# Shared by Get-CurrentVersionFromCmd and Invoke-Uninstall so one decode and
+# one pattern serve both.
+function Get-ShimVersionDir([string]$CmdPath) {
   if (-not (Test-Path $CmdPath)) { return $null }
   $content = Get-Content -Raw -Encoding Oem -ErrorAction SilentlyContinue $CmdPath
   if ([string]::IsNullOrEmpty($content)) { return $null }
@@ -390,11 +392,27 @@ function Get-CurrentVersionFromCmd([string]$InstallRoot, [string]$CmdPath) {
   $match = [regex]::Match($content, '"([^"]+)\\mangostudio\.exe"\s+%\*')
   if (-not $match.Success) { return $null }
 
-  $versionDir = $match.Groups[1].Value
-  $versionDirParent = Normalize-PathEntry (Split-Path $versionDir -Parent)
-  $rootFull = Normalize-PathEntry $InstallRoot
-  if (-not [StringComparer]::OrdinalIgnoreCase.Equals($versionDirParent, $rootFull)) { return $null }
+  $target = $match.Groups[1].Value
+  if ($target.StartsWith('%~dp0')) {
+    $target = Join-Path (Split-Path $CmdPath -Parent) $target.Substring(5)
+  }
+  return Normalize-PathEntry $target
+}
 
+# Whether a version directory sits directly inside this install root — what
+# makes a shim on PATH ours to read a version out of, or to remove.
+function Test-ShimOwnedBy([string]$InstallRoot, [AllowNull()][string]$VersionDir) {
+  if ([string]::IsNullOrEmpty($VersionDir)) { return $false }
+  $parent = Normalize-PathEntry (Split-Path $VersionDir -Parent)
+  return [StringComparer]::OrdinalIgnoreCase.Equals($parent, (Normalize-PathEntry $InstallRoot))
+}
+
+# The .cmd shim's own quoted path is the single source of truth for "what
+# version is current" — it is identical in shape whether this build wrote it
+# or a pre-`current` install did, so it doubles as legacy detection.
+function Get-CurrentVersionFromCmd([string]$InstallRoot, [string]$CmdPath) {
+  $versionDir = Get-ShimVersionDir $CmdPath
+  if (-not (Test-ShimOwnedBy $InstallRoot $versionDir)) { return $null }
   return Split-Path $versionDir -Leaf
 }
 
@@ -435,17 +453,58 @@ function Set-CurrentJunction([string]$InstallRoot, [string]$Version) {
   }
 }
 
+# $TargetPath relative to $BaseDir, or $null when there is no relative form
+# (different drive, a UNC share, anything that does not round-trip).
+function Get-RelativePathOrNull([string]$BaseDir, [string]$TargetPath) {
+  try {
+    $base = New-Object System.Uri((Normalize-PathEntry $BaseDir) + '\')
+    $target = New-Object System.Uri((Normalize-PathEntry $TargetPath))
+    $relative = [System.Uri]::UnescapeDataString($base.MakeRelativeUri($target).ToString())
+    $relative = $relative.Replace('/', '\')
+    # A relative path never carries a drive letter or a scheme; MakeRelativeUri
+    # hands back the absolute uri when it cannot relativize.
+    if ([string]::IsNullOrEmpty($relative) -or $relative.Contains(':')) { return $null }
+    if ($relative.StartsWith('\')) { return $null }
+    $roundTrip = Normalize-PathEntry (Join-Path $BaseDir $relative)
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals($roundTrip, (Normalize-PathEntry $TargetPath))) {
+      return $null
+    }
+    return $relative
+  } catch {
+    return $null
+  }
+}
+
+# What the shim's quoted target should say. cmd.exe decodes a .cmd in the
+# console's OEM code page, so an install path holding a character outside that
+# page cannot be written into the shim body at all — host-verified on Windows
+# 11 24H2 at CP850, an Oem, ASCII, UTF-8 (with or without a BOM) and UTF-16
+# shim all fail to find C:\Users\<CJK>\...\mangostudio.exe. cmd resolves
+# %~dp0 itself, in Unicode, so a target written relative to the shim keeps
+# every non-ASCII segment out of the file: this installer puts the shim in
+# <root>\bin, one level from a version directory whose name is a semver, so
+# the relative form is `%~dp0..\<version>\mangostudio.exe` — pure ASCII
+# whatever the install root is called. A MANGOSTUDIO_BIN_DIR somewhere with
+# its own non-ASCII segments keeps the absolute path, no worse than before.
+function Get-ShimTarget([string]$BinDir, [string]$ExePath) {
+  $relative = Get-RelativePathOrNull $BinDir $ExePath
+  if ([string]::IsNullOrEmpty($relative)) { return $ExePath }
+  if ($relative -match '[^\u0020-\u007E]') { return $ExePath }
+  return '%~dp0' + $relative
+}
+
 function Write-Shim([string]$InstallRoot, [string]$Version, [string]$BinDir) {
   $exePath = Join-Path (Join-Path $InstallRoot $Version) 'mangostudio.exe'
   $shimPath = Get-BinCmdPath $BinDir
   $tmp = "$shimPath.tmp.$PID"
   New-Item -ItemType Directory -Force $BinDir | Out-Null
-  # OEM, not ASCII: cmd.exe reads a .cmd in the console's OEM code page, and
-  # ASCII would replace every non-ASCII character in the install path with `?`
-  # — a profile such as C:\Users\Jose\... survives, C:\Users\José\... does not,
-  # and the shim then points at a path that does not exist. Both readers below
-  # decode with the same code page.
-  Set-Content -Path $tmp -Encoding Oem -Value @('@echo off', ('"{0}" %*' -f $exePath))
+  # OEM, not ASCII: for the absolute fallback below, ASCII would replace every
+  # non-ASCII character in the install path with `?`, and a profile such as
+  # C:\Users\José\... survives OEM. Get-ShimVersionDir decodes the same way.
+  Set-Content -Path $tmp -Encoding Oem -Value @(
+    '@echo off',
+    ('"{0}" %*' -f (Get-ShimTarget $BinDir $exePath))
+  )
   Move-Item -Path $tmp -Destination $shimPath -Force
   return $shimPath
 }
@@ -729,17 +788,7 @@ function Invoke-Uninstall([string]$InstallRoot, [string]$BinDir) {
 
   $cmdPath = Get-BinCmdPath $BinDir
   if (Test-Path $cmdPath) {
-    $content = Get-Content -Raw -Encoding Oem -ErrorAction SilentlyContinue $cmdPath
-    $ownsIt = $false
-    if ($content) {
-      $match = [regex]::Match($content, '"([^"]+)\\mangostudio\.exe"\s+%\*')
-      if ($match.Success) {
-        $versionDirParent = Normalize-PathEntry (Split-Path $match.Groups[1].Value -Parent)
-        $rootFull = Normalize-PathEntry $InstallRoot
-        $ownsIt = [StringComparer]::OrdinalIgnoreCase.Equals($versionDirParent, $rootFull)
-      }
-    }
-    if ($ownsIt) {
+    if (Test-ShimOwnedBy $InstallRoot (Get-ShimVersionDir $cmdPath)) {
       Remove-Item -Force $cmdPath
       $removed += $cmdPath
     }

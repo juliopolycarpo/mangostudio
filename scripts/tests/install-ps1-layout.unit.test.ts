@@ -405,6 +405,125 @@ describe('install.ps1 layout (hand-crafted state, no real exe needed)', () => {
   );
 });
 
+/**
+ * Run `script` with install.ps1 dot-sourced, so a case can call one of its
+ * functions without the side effects of a full install (the script guards
+ * `Invoke-Main` on `$MyInvocation.InvocationName`).
+ */
+function runDotSourced(scriptPath: string, script: string): RunResult {
+  return sh([
+    POWERSHELL as string,
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    `. ${psQuote(scriptPath)}; ${script}`,
+  ]);
+}
+
+describe('install.ps1 shim target', () => {
+  // cmd.exe decodes a .cmd in the console's OEM code page, so a path holding a
+  // character outside that page cannot survive in the shim body whatever we
+  // write it as — host-verified on Windows 11 24H2 at CP850: Oem, ASCII, UTF-8
+  // with and without a BOM, and UTF-16 shims all fail to find
+  // C:\Users\<CJK>\...\mangostudio.exe. cmd resolves %~dp0 itself, in
+  // Unicode, so the target is written relative to the shim instead.
+  const roots: readonly (readonly [string, string])[] = [
+    ['ascii', 'root'],
+    ['cjk', '\u674e\u6e2c\u8a66'],
+    ['latin-1 outside ascii', 'Jos\u00e9'],
+  ];
+
+  for (const [label, leaf] of roots) {
+    test.skipIf(!POWERSHELL)(`writes an ascii-only shim under a ${label} install root`, () => {
+      const l = layout();
+      const version = '0.1.1-canary.abc1234';
+      const root = `${toWindowsPath(l.linuxDir)}\\${leaf}`;
+      const bin = `${root}\\bin`;
+      const result = runDotSourced(
+        l.scriptPath,
+        [
+          `New-Item -ItemType Directory -Force (Join-Path ${psQuote(root)} '${version}') | Out-Null`,
+          `$shim = Write-Shim ${psQuote(root)} '${version}' ${psQuote(bin)}`,
+          '$bytes = [System.IO.File]::ReadAllBytes($shim)',
+          // @(...) because install.ps1 sets StrictMode: an all-ascii shim makes
+          // Where-Object return $null, which has no .Count.
+          "Write-Output ('ascii=' + (@($bytes | Where-Object { $_ -gt 127 }).Count -eq 0))",
+          `Write-Output ('body=' + ((Get-Content -Raw -Encoding Oem $shim) -replace "\`r?\`n", ' '))`,
+          `Write-Output ('version=' + (Get-CurrentVersionFromCmd ${psQuote(root)} $shim))`,
+        ].join('; ')
+      );
+
+      expect(result.exitCode).toBe(0);
+      // Not just "no ? placeholders": every byte in the file is ascii, so no
+      // console code page can mangle the path cmd.exe has to resolve.
+      expect(result.stdout).toContain('ascii=True');
+      expect(result.stdout).toContain(`body=@echo off "%~dp0..\\${version}\\mangostudio.exe" %*`);
+      // The shim is still the single source of truth for "what is current".
+      expect(result.stdout).toContain(`version=${version}`);
+    });
+  }
+
+  test.skipIf(!POWERSHELL)('keeps the absolute path when the bin dir has no relative form', () => {
+    // A MANGOSTUDIO_BIN_DIR on another drive cannot be expressed relative to
+    // the install root; that install keeps exactly the shim it had before.
+    const l = layout();
+    const root = `${toWindowsPath(l.linuxDir)}\\root`;
+    const result = runDotSourced(
+      l.scriptPath,
+      `Write-Output ('target=' + (Get-ShimTarget 'Z:\\tools\\bin' (Join-Path ${psQuote(root)} '0.1.0\\mangostudio.exe')))`
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(`target=${root}\\0.1.0\\mangostudio.exe`);
+  });
+
+  test.skipIf(!POWERSHELL)('still reads a version out of an absolute legacy shim', () => {
+    // Every install made before this change has an absolute shim; the reader
+    // must keep recognising one or an upgrade loses its current version.
+    const l = layout();
+    craftInstalledState(l, '0.1.0');
+    const result = runDotSourced(
+      l.scriptPath,
+      `Write-Output ('version=' + (Get-CurrentVersionFromCmd ${psQuote(l.root)} ${psQuote(`${l.bin}\\mangostudio.cmd`)}))`
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('version=0.1.0');
+  });
+
+  test.skipIf(!POWERSHELL)('-Uninstall removes a shim written in the relative form', () => {
+    const l = layout();
+    craftInstalledState(l, '0.1.0');
+    // The relative shape Write-Shim now produces, pointing at the same place.
+    writeFileSync(
+      join(l.binLinux, 'mangostudio.cmd'),
+      '@echo off\r\n"%~dp0..\\root\\0.1.0\\mangostudio.exe" %*\r\n'
+    );
+
+    const result = run(l.scriptPath, ['-Uninstall'], l.env);
+
+    expect(result.exitCode).toBe(0);
+    expect(sh(['test', '-e', join(l.binLinux, 'mangostudio.cmd')]).exitCode).not.toBe(0);
+  });
+
+  test.skipIf(!POWERSHELL)(
+    '-Uninstall leaves a relative shim that resolves outside the install root alone',
+    () => {
+      const l = layout();
+      craftInstalledState(l, '0.1.0');
+      writeFileSync(
+        join(l.binLinux, 'mangostudio.cmd'),
+        '@echo off\r\n"%~dp0..\\elsewhere\\0.1.0\\mangostudio.exe" %*\r\n'
+      );
+
+      run(l.scriptPath, ['-Uninstall'], l.env);
+
+      expect(sh(['test', '-f', join(l.binLinux, 'mangostudio.cmd')]).exitCode).toBe(0);
+    }
+  );
+});
+
 describe('install.ps1 layout (real windows-x64 exe required)', () => {
   // Every case below is individually gated with test.skipIf(!POWERSHELL ||
   // !WINDOWS_BINARY); this one surfaces *why* they're skipped as a named,
@@ -435,7 +554,7 @@ describe('install.ps1 layout (real windows-x64 exe required)', () => {
 
       expect(result.stderr).toBe('');
       expect(result.exitCode).toBe(0);
-      expect(readCmd(l.binLinux)).toContain(`${l.root}\\${goodVersion}\\mangostudio.exe`);
+      expect(readCmd(l.binLinux)).toContain(`\\${goodVersion}\\mangostudio.exe`);
     },
     90000
   );
@@ -511,7 +630,7 @@ describe('install.ps1 layout (real windows-x64 exe required)', () => {
       const result = run(l.scriptPath, ['-Use', goodVersion], l.env);
 
       expect(result.exitCode).toBe(0);
-      expect(readCmd(l.binLinux)).toContain(`${l.root}\\${goodVersion}\\mangostudio.exe`);
+      expect(readCmd(l.binLinux)).toContain(`\\${goodVersion}\\mangostudio.exe`);
       const record = originRecord(l.rootLinux);
       expect(record.version).toBe(goodVersion);
       expect(record.previousVersion).toBe(otherVersion);
@@ -577,7 +696,7 @@ describe('install.ps1 layout (real windows-x64 exe required)', () => {
 
       expect(result.exitCode).not.toBe(0);
       expect(result.stderr).toContain(`expected version: 9.9.9 | received: ${goodVersion}`);
-      expect(readCmd(l.binLinux)).toContain(`${l.root}\\${goodVersion}\\mangostudio.exe`);
+      expect(readCmd(l.binLinux)).toContain(`\\${goodVersion}\\mangostudio.exe`);
       expect(sh(['test', '-d', join(l.rootLinux, '9.9.9')]).exitCode).not.toBe(0);
     },
     90000
