@@ -45,6 +45,25 @@ describe('bridgeEmitter', () => {
     await expect(collect(bridge.items)).rejects.toThrow('producer failed');
   });
 
+  it('resolves `settled` with the producer result even if nothing ever drains `items`', async () => {
+    // A consumer that stops pulling early (an SSE client disconnecting, for
+    // instance) still needs a way to learn the producer's outcome. `settled`
+    // is that path — independent of `items`/`result()`.
+    const bridge = bridgeEmitter<string, number>(async (emit) => {
+      emit('a');
+      await Promise.resolve();
+      return 7;
+    });
+
+    await expect(bridge.settled).resolves.toBe(7);
+  });
+
+  it('rejects `settled` when the producer rejects, without anyone draining `items`', async () => {
+    const bridge = bridgeEmitter<string, void>(() => Promise.reject(new Error('producer failed')));
+
+    await expect(bridge.settled).rejects.toThrow('producer failed');
+  });
+
   it('interleaves emissions from two concurrent producers merged into one bridge', async () => {
     const bridge = bridgeEmitter<string, void>((emit) =>
       Promise.all([

@@ -15,6 +15,13 @@ export interface EmitBridge<T, R> {
   readonly items: AsyncGenerator<T>;
   /** The producer's settled result, or undefined before `items` has finished. */
   result(): R | undefined;
+  /**
+   * Resolves with the producer's result whenever it settles, independent of
+   * whether anything is still consuming `items`. A consumer that stops
+   * draining `items` early (e.g. an SSE client disconnecting) can await this
+   * to react to the producer's outcome instead of missing it.
+   */
+  readonly settled: Promise<R>;
 }
 
 /** // Usage: bridgeEmitter((emit) => runSomething(emit)) */
@@ -29,10 +36,10 @@ export function bridgeEmitter<T, R>(
     wake = null;
   };
 
-  let settled = false;
+  let done = false;
   let result: R | undefined;
   const wakeConsumer = (): void => {
-    settled = true;
+    done = true;
     wake?.();
     wake = null;
   };
@@ -43,6 +50,7 @@ export function bridgeEmitter<T, R>(
     (value) => {
       result = value;
       wakeConsumer();
+      return value;
     },
     (error: unknown) => {
       wakeConsumer();
@@ -57,7 +65,7 @@ export function bridgeEmitter<T, R>(
         yield queue.shift()!;
         continue;
       }
-      if (settled) break;
+      if (done) break;
       await new Promise<void>((resolve) => {
         wake = resolve;
       });
@@ -65,5 +73,5 @@ export function bridgeEmitter<T, R>(
     await running;
   }
 
-  return { items: items(), result: () => result };
+  return { items: items(), result: () => result, settled: running };
 }
