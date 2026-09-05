@@ -9,6 +9,7 @@ import { RuntimeServiceManagementError, type UserServiceManager } from '@mangost
 import type { InstallGuard } from '@mangostudio/shared/environments';
 import type {
   HubHealth,
+  HubLaunchMode,
   MachineActionReason,
   MachineActionResponse,
   MachineCheck,
@@ -373,21 +374,14 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       refuse(restartReason(input), input.guard, RESTART_COMMAND);
       if (!state) throw new MachineActionUnavailableError('foreground', RESTART_COMMAND);
 
-      if (input.launch === 'service') {
-        d.schedule(() => d.manager.restart());
-        return {
-          accepted: true,
-          outcome: 'restarting-service',
-          ...(state.service && { unit: state.service }),
-        };
-      }
-      d.schedule(() => {
-        // Only let go once a successor exists; a failed spawn followed by a
-        // shutdown would leave nothing serving.
-        d.spawnSuccessor(state);
-        d.shutdown();
-      });
-      return { accepted: true, outcome: 'restarting-detached' };
+      scheduleRestart(state, input.launch, d);
+      return input.launch === 'service'
+        ? {
+            accepted: true,
+            outcome: 'restarting-service',
+            ...(state.service && { unit: state.service }),
+          }
+        : { accepted: true, outcome: 'restarting-detached' };
     },
 
     async service(action, context) {
@@ -649,6 +643,28 @@ async function* upgradeEvents(
   }
 }
 
+/**
+ * Bring the hub back the way whoever owns this process expects. A
+ * service-supervised hub must ask its supervisor to restart it rather than
+ * spawn a successor and exit — a systemd unit with `KillMode=control-group`
+ * would tear down the successor along with this process, and launchd would
+ * lose track of it as an orphan. Deferred through `schedule` either way, so
+ * the response is written before this process goes anywhere.
+ * // Usage: scheduleRestart(state, hubLaunchMode(state), d)
+ */
+function scheduleRestart(state: ServerState, launch: HubLaunchMode, d: MachineServiceDeps): void {
+  if (launch === 'service') {
+    d.schedule(() => d.manager.restart());
+    return;
+  }
+  d.schedule(() => {
+    // Only let go once a successor exists; a failed spawn followed by a
+    // shutdown would leave nothing serving.
+    d.spawnSuccessor(state);
+    d.shutdown();
+  });
+}
+
 async function scheduleRestartIfNeeded(
   report: UpgradeReport,
   d: MachineServiceDeps,
@@ -657,18 +673,7 @@ async function scheduleRestartIfNeeded(
   if (report.restart !== 'scheduled') return;
   const state = await liveState();
   if (!state) return;
-  // Mirrors `restart()`: a service-supervised hub must ask its supervisor to
-  // restart it, not spawn a successor and exit — a systemd unit with
-  // `KillMode=control-group` would tear down the successor along with this
-  // process, and launchd would lose track of it as an orphan.
-  if (hubLaunchMode(state) === 'service') {
-    d.schedule(() => d.manager.restart());
-    return;
-  }
-  d.schedule(() => {
-    d.spawnSuccessor(state);
-    d.shutdown();
-  });
+  scheduleRestart(state, hubLaunchMode(state), d);
 }
 
 /**
