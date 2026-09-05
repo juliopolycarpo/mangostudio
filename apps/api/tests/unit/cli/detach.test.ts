@@ -113,6 +113,16 @@ describe('buildWaiterCommand', () => {
 
     expect(command).toContain("'it''s-mango'");
   });
+
+  it('waits on every pid in a list, comma-separated, when the CLI is not the process holding the exe open', () => {
+    const command = buildWaiterCommand({
+      argv: ['npm', 'install', '-g', 'mangostudio@latest'],
+      waitForPid: [999, 555],
+      logFile: 'C:\\log.txt',
+    });
+
+    expect(command).toStartWith('Wait-Process -Id 999, 555 -Timeout 60');
+  });
 });
 
 describe('WINDOWS_SYSTEM_ENV_KEYS', () => {

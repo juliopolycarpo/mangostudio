@@ -429,16 +429,22 @@ async function runPosixDelegate(
 /**
  * Windows: the manager that owns the binary cannot replace a file this
  * process still has open, so it runs detached, after this process exits.
+ * When a hub is running in a different process from the one handling this
+ * upgrade (the common case for a CLI-triggered upgrade), the manager has to
+ * wait out both — the hub, not the CLI, is what holds `mangostudio.exe` open.
  */
-function runWindowsDelegate(
+async function runWindowsDelegate(
   plan: Extract<UpgradePlan, { kind: 'delegate' }>,
   installedVia: InstallOrigin,
   d: UpgradeServiceDeps,
   emit: EmitUpgradeEvent
-): UpgradeReport {
+): Promise<UpgradeReport> {
   emit(stageEvent('install'));
   const logFile = getUpgradeLogPath(d.now());
-  d.spawnDetachedWaiter({ argv: plan.argv, waitForPid: d.pid, logFile });
+  const rawState = await d.readState();
+  const hubPid = rawState && isStateLive(rawState, d.isAlive) ? rawState.pid : undefined;
+  const waitForPid = hubPid !== undefined && hubPid !== d.pid ? [hubPid, d.pid] : d.pid;
+  d.spawnDetachedWaiter({ argv: plan.argv, waitForPid, logFile });
   return {
     outcome: 'upgraded',
     installedVia: fitInstalledVia(installedVia),
@@ -473,7 +479,7 @@ async function runDelegate(
       exitCode: 1,
     };
   }
-  if (d.platform === 'win32') return runWindowsDelegate(plan, installedVia, d, emit);
+  if (d.platform === 'win32') return await runWindowsDelegate(plan, installedVia, d, emit);
   return await runPosixDelegate(plan, installedVia, d, emit);
 }
 

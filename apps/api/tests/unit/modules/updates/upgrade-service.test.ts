@@ -606,13 +606,20 @@ describe('upgrade-service delegate plans', () => {
   });
 
   it('runs a Windows delegation through the detached waiter instead of in-process', async () => {
-    const waiterCalls: { argv: readonly string[]; waitForPid: number; logFile: string }[] = [];
+    const waiterCalls: {
+      argv: readonly string[];
+      waitForPid: number | readonly number[];
+      logFile: string;
+    }[] = [];
     let ran = false;
     const service = createUpgradeService(
       baseDeps({
         probe: () => npmProbe({ platform: 'win32' }),
         platform: 'win32',
         pid: 555,
+        // No live hub owns the state file, so there is only this process's
+        // pid to wait on.
+        readState: () => Promise.resolve(null),
         spawnDetachedWaiter: (input) => {
           waiterCalls.push(input);
           return 1;
@@ -635,6 +642,52 @@ describe('upgrade-service delegate plans', () => {
     expect(report.logFile).toBe(waiterCalls[0]?.logFile);
     expect(report.message).toContain('runs after this process exits');
     expect(report.exitCode).toBe(0);
+  });
+
+  it('waits on both the CLI and a separately running live hub before delegating on Windows', async () => {
+    // The CLI invoking `mangostudio upgrade` (d.pid) is not always the same
+    // process holding mangostudio.exe open — a hub launched separately (as a
+    // service, or `serve -d`) is. The manager cannot replace the file until
+    // both have exited.
+    const waiterCalls: { waitForPid: number | readonly number[] }[] = [];
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe({ platform: 'win32' }),
+        platform: 'win32',
+        pid: 555,
+        readState: () => Promise.resolve(detachedState({ pid: 999 })),
+        isAlive: () => true,
+        spawnDetachedWaiter: (input) => {
+          waiterCalls.push(input);
+          return 1;
+        },
+      })
+    );
+
+    await collect(service);
+
+    expect(waiterCalls[0]?.waitForPid).toEqual([999, 555]);
+  });
+
+  it('waits on only the CLI pid when the state file is stale (no live hub)', async () => {
+    const waiterCalls: { waitForPid: number | readonly number[] }[] = [];
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe({ platform: 'win32' }),
+        platform: 'win32',
+        pid: 555,
+        readState: () => Promise.resolve(detachedState({ pid: 999 })),
+        isAlive: () => false,
+        spawnDetachedWaiter: (input) => {
+          waiterCalls.push(input);
+          return 1;
+        },
+      })
+    );
+
+    await collect(service);
+
+    expect(waiterCalls[0]?.waitForPid).toBe(555);
   });
 
   it('reports a refused plan verbatim for a manager the hub must not fight', async () => {

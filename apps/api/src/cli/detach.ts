@@ -270,8 +270,13 @@ export function spawnServeChild(
 export interface SpawnDetachedWaiterInput {
   /** The package manager command to run once the wait is over, e.g. `['npm', 'install', '-g', 'mangostudio@latest']`. */
   readonly argv: readonly string[];
-  /** The pid to wait on — this process, so the manager never races its own file lock. */
-  readonly waitForPid: number;
+  /**
+   * The pid(s) to wait on before running the manager. A single pid for the
+   * common case; a list when the process invoking the upgrade (the CLI) is
+   * not the same process holding `mangostudio.exe` open (a live hub) — the
+   * manager cannot replace the file until both have exited.
+   */
+  readonly waitForPid: number | readonly number[];
   /** Where the manager's combined output is appended. */
   readonly logFile: string;
 }
@@ -282,17 +287,18 @@ function powerShellQuote(value: string): string {
 }
 
 /**
- * The `-Command` script text a detached waiter runs: wait out this process,
- * then invoke the package manager and append its output to the log.
- * // Usage: buildWaiterCommand({ argv: ['npm', 'install', '-g', 'x'], waitForPid: 123, logFile: 'C:\\log.txt' })
+ * The `-Command` script text a detached waiter runs: wait out one or more
+ * pids, then invoke the package manager and append its output to the log.
+ * // Usage: buildWaiterCommand({ argv: ['npm', 'install', '-g', 'x'], waitForPid: [123, 456], logFile: 'C:\\log.txt' })
  */
 export function buildWaiterCommand(
   input: Pick<SpawnDetachedWaiterInput, 'argv' | 'waitForPid' | 'logFile'>
 ): string {
   const [manager, ...args] = input.argv;
   const invocation = ['&', powerShellQuote(manager ?? ''), ...args.map(powerShellQuote)].join(' ');
+  const ids = Array.isArray(input.waitForPid) ? input.waitForPid.join(', ') : input.waitForPid;
   return (
-    `Wait-Process -Id ${input.waitForPid} -Timeout 60 -ErrorAction SilentlyContinue; ` +
+    `Wait-Process -Id ${ids} -Timeout 60 -ErrorAction SilentlyContinue; ` +
     `${invocation} *>> ${powerShellQuote(input.logFile)}`
   );
 }
