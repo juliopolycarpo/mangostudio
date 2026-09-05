@@ -308,7 +308,8 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
     cfg.updates.check = parseBooleanFlag(v);
   },
   MANGO_UPDATES_CHANNEL: (cfg, v) => {
-    if (v === 'stable' || v === 'canary') cfg.updates.channel = v;
+    assertValidUpdatesChannel('MANGO_UPDATES_CHANNEL', v);
+    cfg.updates.channel = v;
   },
   MANGO_ENV_LTS_REFRESH: (cfg, v) => {
     cfg.environments.ltsRefresh = parseBooleanFlag(v);
@@ -467,6 +468,24 @@ function getAllowedOriginValidationMessage(origin: string): string | null {
     return `"${origin}" must be a bare scheme://host[:port] origin (did you mean "${parsed.origin}"?)`;
   }
   return null;
+}
+
+/**
+ * Fails immediately on an unrecognized `[updates] channel` / `MANGO_UPDATES_CHANNEL`
+ * value, naming what was received and the two it must be one of. Without
+ * this, both call sites below silently kept the build's own channel instead
+ * — an operator who mistypes "cannary" would see no error at all, just an
+ * update behavior that never matches the config they wrote.
+ */
+function assertValidUpdatesChannel(
+  source: string,
+  value: unknown
+): asserts value is 'stable' | 'canary' {
+  if (value === 'stable' || value === 'canary') return;
+  throw new CliError(
+    `Invalid updates.channel (${source}): "${String(value)}" is not a channel. ` +
+      'It must be "stable" or "canary".'
+  );
 }
 
 /** Fails before the server binds with an origin no browser request can match. */
@@ -718,7 +737,8 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
   const updates = parsed.updates as Record<string, unknown> | undefined;
   if (updates) {
     if (typeof updates.check === 'boolean') cfg.updates.check = updates.check;
-    if (updates.channel === 'stable' || updates.channel === 'canary') {
+    if (updates.channel !== undefined) {
+      assertValidUpdatesChannel('config.toml', updates.channel);
       cfg.updates.channel = updates.channel;
     }
   }
@@ -960,15 +980,24 @@ export function loadConfig(overridePath?: string): MangoConfig {
   // 1. Determine and read config.toml
   const tomlPath = overridePath ?? resolveConfigTomlPath();
   if (existsSync(tomlPath)) {
+    let parsed: Record<string, unknown> | null = null;
     try {
       const content = readFileSync(tomlPath, 'utf8');
-      const parsed = parseToml(content) as Record<string, unknown>;
+      parsed = parseToml(content) as Record<string, unknown>;
+    } catch (err) {
+      console.warn(`[config] Failed to parse ${tomlPath}:`, err);
+    }
+    // Outside the try/catch above on purpose: that one is for a file that
+    // does not parse as TOML at all, which falls back to defaults. A value
+    // this hub understands as TOML but rejects on its own terms — an
+    // updates.channel it does not recognize — is a `CliError` the operator
+    // needs to see, not a warning next to a config that silently kept
+    // running on some other channel.
+    if (parsed) {
       // Either key: host is as deprecated (and as ignored) as port.
       const frontendTable = parsed.frontend as Record<string, unknown> | undefined;
       frontendPortInToml = frontendTable?.port !== undefined || frontendTable?.host !== undefined;
       applyToml(cfg, parsed);
-    } catch (err) {
-      console.warn(`[config] Failed to parse ${tomlPath}:`, err);
     }
   }
 

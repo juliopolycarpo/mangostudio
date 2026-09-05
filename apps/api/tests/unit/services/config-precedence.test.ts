@@ -313,12 +313,25 @@ describe('config precedence', () => {
     expect(cfg.updates.channel).toBe('canary');
   });
 
-  test('ignores an unrecognized updates.channel value', () => {
+  test('rejects an unrecognized config.toml updates.channel value instead of silently ignoring it', () => {
+    // Previously fell back to the build's own channel with no diagnostic — a
+    // typo like "nightly" produced update behavior that matched nothing the
+    // operator wrote, and nothing said why.
     writeFileSync(TMP_TOML, '[updates]\nchannel = "nightly"\n');
 
-    const cfg = loadConfig(TMP_TOML);
+    expect(() => loadConfig(TMP_TOML)).toThrow(
+      'Invalid updates.channel (config.toml): "nightly" is not a channel. It must be "stable" or "canary".'
+    );
+    expect(() => loadConfig(TMP_TOML)).toThrow(CliError);
+  });
 
-    expect(cfg.updates.channel).toBeNull();
+  test('rejects an unrecognized MANGO_UPDATES_CHANNEL value instead of silently ignoring it', () => {
+    process.env.MANGO_UPDATES_CHANNEL = 'nightly';
+
+    expect(() => loadConfig(join(TMP_DIR, 'nonexistent.toml'))).toThrow(
+      'Invalid updates.channel (MANGO_UPDATES_CHANNEL): "nightly" is not a channel. It must be "stable" or "canary".'
+    );
+    expect(() => loadConfig(join(TMP_DIR, 'nonexistent.toml'))).toThrow(CliError);
   });
 
   test('process.env MANGO_UPDATES_CHANNEL overrides config.toml updates.channel', () => {
