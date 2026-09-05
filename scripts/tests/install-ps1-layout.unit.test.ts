@@ -179,6 +179,17 @@ function buildReleaseZip(linuxDir: string, name: string): string {
   return toWindowsPath(zipPath);
 }
 
+/** A zip with no mangostudio.exe at all — Expand-InstallArchive must Fail() on it, with no real exe needed. */
+function buildZipMissingExe(linuxDir: string, name: string): string {
+  const stageDir = join(linuxDir, `stage-bad-${name}`);
+  mkdirSync(stageDir, { recursive: true });
+  writeFileSync(join(stageDir, 'not-mangostudio.txt'), 'not a binary');
+  const zipPath = join(linuxDir, name);
+  const result = sh(['zip', '-jq', zipPath, join(stageDir, 'not-mangostudio.txt')]);
+  if (result.exitCode !== 0) throw new Error(`zip failed: ${result.stderr}`);
+  return toWindowsPath(zipPath);
+}
+
 function buildNpmTarball(linuxDir: string): string {
   const srcDir = join(linuxDir, 'npm-src');
   mkdirSync(join(srcDir, 'package'), { recursive: true });
@@ -344,6 +355,52 @@ describe('install.ps1 layout (hand-crafted state, no real exe needed)', () => {
       const uninstallResult = run(l.scriptPath, ['-Uninstall'], bogusArchEnv);
       expect(uninstallResult.exitCode).toBe(0);
       expect(uninstallResult.stderr).not.toContain('unsupported architecture');
+    }
+  );
+
+  test.skipIf(!POWERSHELL)(
+    '-Prune sweeps leftover .install-*/.staging-*/.rollback-* scratch directories',
+    () => {
+      // Left behind by an install/upgrade that failed before the swap, or
+      // was interrupted mid-flight. None of them match the version-directory
+      // pattern the main sweep looks for, so they accumulate forever unless
+      // -Prune sweeps them explicitly.
+      const l = layout();
+      craftInstalledState(l, '0.1.0');
+      mkdirSync(join(l.rootLinux, '.install-0.2.0-1234'), { recursive: true });
+      mkdirSync(join(l.rootLinux, '.staging-0.2.0-1234'), { recursive: true });
+      mkdirSync(join(l.rootLinux, '.rollback-0.0.9-1234'), { recursive: true });
+
+      const result = run(l.scriptPath, ['-Prune'], l.env);
+
+      expect(result.exitCode).toBe(0);
+      expect(sh(['test', '-d', join(l.rootLinux, '.install-0.2.0-1234')]).exitCode).not.toBe(0);
+      expect(sh(['test', '-d', join(l.rootLinux, '.staging-0.2.0-1234')]).exitCode).not.toBe(0);
+      expect(sh(['test', '-d', join(l.rootLinux, '.rollback-0.0.9-1234')]).exitCode).not.toBe(0);
+      expect(sh(['test', '-d', join(l.rootLinux, '0.1.0')]).exitCode).toBe(0);
+    }
+  );
+
+  test.skipIf(!POWERSHELL)(
+    'a zip missing mangostudio.exe fails and leaves no .install-* scratch directory behind',
+    () => {
+      // Fails inside Expand-InstallArchive, before any smoke check — never
+      // needs a real, working exe.
+      const l = layout();
+      const bad = buildZipMissingExe(l.linuxDir, 'mangostudio-9.9.9-windows-x64.zip');
+
+      const result = run(l.scriptPath, ['-Local', bad], l.env);
+
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain('missing mangostudio.exe');
+      // ls -1 hides dotfiles by default — -A is required, or a leftover
+      // `.install-*` directory (always a dotfile) silently passes either way.
+      const leftovers = sh([
+        'sh',
+        '-c',
+        `ls -1A "${l.rootLinux}" 2>/dev/null | grep '^\\.install-' || true`,
+      ]);
+      expect(leftovers.stdout.trim()).toBe('');
     }
   );
 });

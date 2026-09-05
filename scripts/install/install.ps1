@@ -451,12 +451,17 @@ function Expand-NpmTarball([string]$ArchivePath, [string]$DestinationPath) {
   if (Test-Path $stagingDir) { Remove-Item $stagingDir -Recurse -Force }
   New-Item -ItemType Directory -Force $stagingDir | Out-Null
 
-  & tar.exe -xzf $ArchivePath -C $stagingDir
-  if ($LASTEXITCODE -ne 0) { Fail "tar.exe failed to extract $ArchivePath" }
+  try {
+    & tar.exe -xzf $ArchivePath -C $stagingDir
+    if ($LASTEXITCODE -ne 0) { Fail "tar.exe failed to extract $ArchivePath" }
 
-  $packageDir = Join-Path $stagingDir 'package'
-  if (-not (Test-Path $packageDir)) { Fail "npm archive is missing a package/ directory: $ArchivePath" }
-  Get-ChildItem -Path $packageDir -Force | Move-Item -Destination $DestinationPath -Force
+    $packageDir = Join-Path $stagingDir 'package'
+    if (-not (Test-Path $packageDir)) { Fail "npm archive is missing a package/ directory: $ArchivePath" }
+    Get-ChildItem -Path $packageDir -Force | Move-Item -Destination $DestinationPath -Force
+  } catch {
+    Remove-Item $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
+    throw
+  }
   Remove-Item $stagingDir -Recurse -Force
 }
 
@@ -465,16 +470,21 @@ function Expand-InstallArchive([string]$ArchivePath, [string]$Version, [string]$
   if (Test-Path $tempInstall) { Remove-Item $tempInstall -Recurse -Force }
   New-Item -ItemType Directory -Force $tempInstall | Out-Null
 
-  if ($ArchivePath -like '*.tgz') {
-    Expand-NpmTarball $ArchivePath $tempInstall
-  } elseif ($ArchivePath -like '*.zip') {
-    Expand-Archive -Path $ArchivePath -DestinationPath $tempInstall -Force
-  } else {
-    Fail "unsupported archive type: $ArchivePath"
-  }
+  try {
+    if ($ArchivePath -like '*.tgz') {
+      Expand-NpmTarball $ArchivePath $tempInstall
+    } elseif ($ArchivePath -like '*.zip') {
+      Expand-Archive -Path $ArchivePath -DestinationPath $tempInstall -Force
+    } else {
+      Fail "unsupported archive type: $ArchivePath"
+    }
 
-  if (-not (Test-Path (Join-Path $tempInstall 'mangostudio.exe'))) {
-    Fail 'archive is missing mangostudio.exe'
+    if (-not (Test-Path (Join-Path $tempInstall 'mangostudio.exe'))) {
+      Fail 'archive is missing mangostudio.exe'
+    }
+  } catch {
+    Remove-Item $tempInstall -Recurse -Force -ErrorAction SilentlyContinue
+    throw
   }
   return $tempInstall
 }
@@ -672,6 +682,21 @@ function Invoke-Prune([string]$InstallRoot, [string]$BinDir) {
         return $name
       }
     })
+
+  # Leftover scratch directories from an install/upgrade that failed before
+  # the swap (Expand-InstallArchive) or was interrupted mid-flight. They
+  # never match the version-directory pattern above, so a plain prune leaves
+  # them to accumulate forever; sweep them explicitly.
+  Get-ChildItem -Path $InstallRoot -Directory -Force -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^\.(install|staging|rollback)-' } |
+    ForEach-Object {
+      try {
+        Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction Stop
+        Write-Host "Removed $($_.Name)"
+      } catch {
+        Write-Host "Could not remove $($_.Name) (close editors or stop the process, then run again)"
+      }
+    }
 
   Save-PruneRecord $InstallRoot $remaining
 }
