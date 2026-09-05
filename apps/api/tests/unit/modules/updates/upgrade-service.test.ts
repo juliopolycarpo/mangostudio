@@ -670,6 +670,40 @@ describe('upgrade-service delegate plans', () => {
     expect(report.exitCode).toBe(0);
   });
 
+  it('never hands the hub secrets to the Windows waiter either, but keeps the system block and npm config', async () => {
+    // The waiter is the Windows twin of runPosixDelegate: powershell.exe
+    // execs the package manager, and an npm postinstall inherits whatever
+    // env the waiter was spawned with.
+    const waiterCalls: { env: Record<string, string> }[] = [];
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe({ platform: 'win32' }),
+        platform: 'win32',
+        readState: () => Promise.resolve(null),
+        env: {
+          PATH: 'C:\\Windows\\System32',
+          SystemRoot: 'C:\\Windows',
+          BETTER_AUTH_SECRET: 'top-secret',
+          ANTHROPIC_API_KEY: 'sk-also-secret',
+          npm_config_registry: 'https://registry.example.test',
+        },
+        spawnDetachedWaiter: (input) => {
+          waiterCalls.push(input);
+          return 1;
+        },
+      })
+    );
+
+    await collect(service);
+
+    const env = waiterCalls[0]?.env;
+    expect(env?.PATH).toBe('C:\\Windows\\System32');
+    expect(env?.SystemRoot).toBe('C:\\Windows');
+    expect(env?.npm_config_registry).toBe('https://registry.example.test');
+    expect(env?.BETTER_AUTH_SECRET).toBeUndefined();
+    expect(env?.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
   it('waits on both the CLI and a separately running live hub before delegating on Windows', async () => {
     // The CLI invoking `mangostudio upgrade` (d.pid) is not always the same
     // process holding mangostudio.exe open — a hub launched separately (as a

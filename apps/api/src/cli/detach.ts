@@ -294,6 +294,13 @@ export interface SpawnDetachedWaiterInput {
   readonly waitForPid: number | readonly number[];
   /** Where the manager's combined output is appended. */
   readonly logFile: string;
+  /**
+   * The env the PowerShell host (and so the manager and anything it spawns,
+   * such as an npm postinstall) runs with. The caller curates it — the
+   * upgrade engine hands over the same delegate env the POSIX path uses,
+   * never this process's full environment.
+   */
+  readonly env: Record<string, string>;
 }
 
 /** Single-quotes a PowerShell string literal, doubling any embedded quote. */
@@ -333,13 +340,13 @@ export function ensureLogDir(logFile: string): void {
  * exit, then runs a package-manager upgrade and logs its output — used when
  * the manager that owns the binary would otherwise try to replace a file
  * this process still holds open.
- * // Usage: spawnDetachedWaiter({ argv: ['npm', 'install', '-g', 'mangostudio@latest'], waitForPid: process.pid, logFile })
+ * // Usage: spawnDetachedWaiter({ argv: ['npm', 'install', '-g', 'mangostudio@latest'], waitForPid: process.pid, logFile, env })
  */
 export function spawnDetachedWaiter(input: SpawnDetachedWaiterInput): number {
   ensureLogDir(input.logFile);
   const proc = Bun.spawn({
     cmd: ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', buildWaiterCommand(input)],
-    env: pickAllowedEnv(process.env, DETACH_ENV_ALLOWLIST),
+    env: input.env,
     detached: true,
     stdin: 'ignore',
     stdout: 'ignore',

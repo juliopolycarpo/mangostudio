@@ -229,7 +229,7 @@ function joinMessages(...parts: readonly (string | undefined)[]): string | undef
 }
 
 /**
- * Env a POSIX package-manager delegate runs with: the system and networking
+ * Env a package-manager delegate runs with (see `delegateEnv`): the system and networking
  * essentials `DETACH_ENV_ALLOWLIST` already curates (including the proxy
  * variables), minus `RUNTIME_CONFIG_ENV_KEYS` — `DETACH_ENV_ALLOWLIST` is
  * built for the hub's own detached re-exec, which needs its runtime
@@ -244,6 +244,21 @@ const DELEGATE_ENV_ALLOWLIST: readonly string[] = [...DETACH_ENV_ALLOWLIST].filt
 );
 const DELEGATE_ENV_EXTRA_NAMES: readonly string[] = ['CARGO_HOME', 'RUSTUP_HOME'];
 const DELEGATE_ENV_PREFIXES: readonly string[] = ['npm_config_', 'HOMEBREW_'];
+
+/**
+ * The env a package-manager delegate runs with, on either platform: the
+ * POSIX in-process run and the Windows detached waiter (whose `powershell.exe`
+ * execs the same manager, and whose postinstall hooks inherit the same env)
+ * must agree, so neither can reach the hub's secrets.
+ * // Usage: delegateEnv(process.env)
+ */
+export function delegateEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  return pickAllowedEnv(
+    env,
+    [...DELEGATE_ENV_ALLOWLIST, ...DELEGATE_ENV_EXTRA_NAMES],
+    DELEGATE_ENV_PREFIXES
+  );
+}
 
 /**
  * Env the embedded install script receives: the passthrough set plus what
@@ -426,12 +441,7 @@ async function runPosixDelegate(
   emit: EmitUpgradeEvent
 ): Promise<UpgradeReport> {
   emit(stageEvent('install'));
-  const env = pickAllowedEnv(
-    d.env,
-    [...DELEGATE_ENV_ALLOWLIST, ...DELEGATE_ENV_EXTRA_NAMES],
-    DELEGATE_ENV_PREFIXES
-  );
-  const run = d.runScript(plan.argv, { env });
+  const run = d.runScript(plan.argv, { env: delegateEnv(d.env) });
   const exitCode = await relayLines(run, emit);
   if (exitCode !== 0) return scriptFailedReport(installedVia, d.getVersion(), exitCode);
   return {
@@ -460,7 +470,7 @@ async function runWindowsDelegate(
   const rawState = await d.readState();
   const hubPid = rawState && isStateLive(rawState, d.isAlive) ? rawState.pid : undefined;
   const waitForPid = hubPid !== undefined && hubPid !== d.pid ? [hubPid, d.pid] : d.pid;
-  d.spawnDetachedWaiter({ argv: plan.argv, waitForPid, logFile });
+  d.spawnDetachedWaiter({ argv: plan.argv, waitForPid, logFile, env: delegateEnv(d.env) });
   return {
     outcome: 'upgraded',
     installedVia: fitInstalledVia(installedVia),
