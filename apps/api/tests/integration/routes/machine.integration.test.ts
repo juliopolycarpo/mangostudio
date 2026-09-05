@@ -498,6 +498,26 @@ describe('POST /machine/upgrade', () => {
     });
   });
 
+  it('reports a second concurrent upgrade as 409 with reason in-progress', async () => {
+    const service = new FakeMachineService();
+    service.refuseWith = new UpgradeUnavailableError('in-progress', 'mangostudio status');
+    const app = mount(service);
+
+    const response = await app.handle(
+      new Request('http://localhost/machine/upgrade', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      code: 'UNSUPPORTED',
+      details: { reason: 'in-progress', command: 'mangostudio status' },
+    });
+  });
+
   it('streams a self origin as SSE, ending with the done event', async () => {
     const service = new FakeMachineService();
     const app = mount(service);

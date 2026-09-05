@@ -692,20 +692,59 @@ function resolveDeps(deps: Partial<UpgradeServiceDeps>): UpgradeServiceDeps {
   };
 }
 
+/**
+ * A second `run()`/`rollback()` while one is still live on this engine
+ * instance would stage into the same `.staging-<version>-<pid>` directory
+ * (keyed off this process's own pid) as the first, racing its download and
+ * deleting its script out from under it once either one's `finally` cleans
+ * up. This is the last line of defence: `machine-service.ts` already refuses
+ * a second `POST /machine/upgrade` while one is streaming, but the CLI calls
+ * `run()`/`rollback()` directly, and a client that disconnects mid-stream
+ * frees the machine-service lock while the engine call above is still
+ * running in the background.
+ */
+function inProgressReport(currentVersion: string): UpgradeReport {
+  return {
+    outcome: 'refused',
+    installedVia: fitInstalledVia(UNKNOWN_INSTALLED_VIA),
+    currentVersion,
+    reason: 'in-progress',
+    command: 'mangostudio status',
+    message: fitToLimit('Another upgrade is already running from this process.', UPDATE_ERROR_MAX),
+    exitCode: 1,
+  };
+}
+
 /** Build the engine. // Usage: createUpgradeService().run({ restart: true }, emit) */
 export function createUpgradeService(deps: Partial<UpgradeServiceDeps> = {}): UpgradeService {
   const d = resolveDeps(deps);
+  let running = false;
+
+  async function guardedRun(body: () => Promise<UpgradeReport>): Promise<UpgradeReport> {
+    if (running) return inProgressReport(d.getVersion());
+    running = true;
+    try {
+      return await body();
+    } finally {
+      running = false;
+    }
+  }
+
   return {
     run: (request, emit) => {
       const installedViaRef = { current: UNKNOWN_INSTALLED_VIA };
-      return neverRejects(installedViaRef, d.getVersion(), () =>
-        runInner(request, emit, d, installedViaRef)
+      return guardedRun(() =>
+        neverRejects(installedViaRef, d.getVersion(), () =>
+          runInner(request, emit, d, installedViaRef)
+        )
       );
     },
     rollback: (emit, options = {}) => {
       const installedViaRef = { current: UNKNOWN_INSTALLED_VIA };
-      return neverRejects(installedViaRef, d.getVersion(), () =>
-        rollbackInner(emit, d, installedViaRef, options.restart ?? true)
+      return guardedRun(() =>
+        neverRejects(installedViaRef, d.getVersion(), () =>
+          rollbackInner(emit, d, installedViaRef, options.restart ?? true)
+        )
       );
     },
   };

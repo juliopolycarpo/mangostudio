@@ -575,3 +575,74 @@ describe('upgrade-service rollback', () => {
     expect(report.message).toContain('Rollback only applies');
   });
 });
+
+describe('upgrade-service concurrency guard', () => {
+  it('refuses a second run() while the first is still downloading, then accepts one once it settles', async () => {
+    let resolveDownload: (() => void) | undefined;
+    const service = createUpgradeService(
+      baseDeps({
+        downloadVerified: (resolved) =>
+          new Promise((resolve) => {
+            resolveDownload = () =>
+              resolve({
+                path: `/staging/${resolved.assetName}`,
+                verification: resolved.verification,
+              });
+          }),
+      })
+    );
+
+    const firstEvents: UpgradeStreamEvent[] = [];
+    const firstPromise = service.run(REQUEST, (event) => firstEvents.push(event));
+    // Let the first call reach the paused download before racing a second one.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const secondEvents: UpgradeStreamEvent[] = [];
+    const secondReport = await service.run(REQUEST, (event) => secondEvents.push(event));
+    expect(secondReport).toMatchObject({
+      outcome: 'refused',
+      reason: 'in-progress',
+      command: 'mangostudio status',
+    });
+    // Refused before ever emitting a stage — it never touched the engine's
+    // own work, just this instance's lock.
+    expect(secondEvents).toEqual([]);
+
+    resolveDownload?.();
+    const firstReport = await firstPromise;
+    expect(firstReport.outcome).toBe('upgraded');
+    expect(firstEvents.length).toBeGreaterThan(0);
+
+    // The third call downloads again — resolve its own paused download too.
+    const thirdPromise = service.run(REQUEST, () => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    resolveDownload?.();
+    const thirdReport = await thirdPromise;
+    expect(thirdReport.outcome).toBe('upgraded');
+  });
+
+  it('refuses rollback() while a run() on the same instance is still in flight', async () => {
+    let resolveDownload: (() => void) | undefined;
+    const service = createUpgradeService(
+      baseDeps({
+        downloadVerified: (resolved) =>
+          new Promise((resolve) => {
+            resolveDownload = () =>
+              resolve({
+                path: `/staging/${resolved.assetName}`,
+                verification: resolved.verification,
+              });
+          }),
+      })
+    );
+
+    const firstPromise = service.run(REQUEST, () => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const rollbackReport = await service.rollback(() => undefined);
+    expect(rollbackReport).toMatchObject({ outcome: 'refused', reason: 'in-progress' });
+
+    resolveDownload?.();
+    await firstPromise;
+  });
+});

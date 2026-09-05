@@ -763,4 +763,72 @@ describe('machineService.upgrade', () => {
 
     expect(recorder.scheduled).toHaveLength(1);
   });
+
+  it('refuses a second concurrent upgrade with in-progress, then accepts a new one once the first stream ends', async () => {
+    // `upgradeNow` sets the lock synchronously, before the returned async
+    // generator is ever iterated — so the second call below is refused
+    // without the fake engine needing to pause mid-run.
+    const upgradeService = new FakeUpgradeService(
+      [{ type: 'stage', stage: 'resolve', done: false }],
+      UPGRADED_SCHEDULED
+    );
+    const { service } = makeService({
+      installOriginProbe: () => installOriginProbe(),
+      updatesConfig: () => ({ check: true, channel: null }),
+      upgradeService,
+    });
+
+    const first = await service.upgrade({}, LOCAL);
+    // The generator body — and with it the engine's `run()` — only starts on
+    // first pull; the lock itself was already set by `upgradeNow` above.
+    const firstIterator = first[Symbol.asyncIterator]();
+    await firstIterator.next();
+
+    let error: unknown;
+    try {
+      await service.upgrade({}, LOCAL);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(UpgradeUnavailableError);
+    expect((error as UpgradeUnavailableError).reason).toBe('in-progress');
+    expect((error as UpgradeUnavailableError).command).toBe('mangostudio status');
+    // The lock, not a second call to the engine, is what refused it.
+    expect(upgradeService.runCalls).toHaveLength(1);
+
+    for (let step = await firstIterator.next(); !step.done; step = await firstIterator.next()) {
+      // Drain the first stream to its `done` event, which frees the lock.
+    }
+
+    const second = await service.upgrade({}, LOCAL);
+    for await (const _event of second) {
+      // A third call is accepted once the first has fully ended.
+    }
+    expect(upgradeService.runCalls).toHaveLength(2);
+  });
+
+  it('frees the lock when the client disconnects before the stream reaches done', async () => {
+    const upgradeService = new FakeUpgradeService(
+      [{ type: 'stage', stage: 'resolve', done: false }],
+      UPGRADED_SCHEDULED
+    );
+    const { service } = makeService({
+      installOriginProbe: () => installOriginProbe(),
+      updatesConfig: () => ({ check: true, channel: null }),
+      upgradeService,
+    });
+
+    const first = await service.upgrade({}, LOCAL);
+    const iterator = first[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.return?.();
+
+    // A cancelled stream still runs the generator's `finally`, so the lock
+    // is not held forever.
+    const second = await service.upgrade({}, LOCAL);
+    for await (const _event of second) {
+      // Drain to completion.
+    }
+    expect(upgradeService.runCalls).toHaveLength(2);
+  });
 });

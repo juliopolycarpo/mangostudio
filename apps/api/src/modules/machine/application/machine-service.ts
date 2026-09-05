@@ -146,6 +146,9 @@ export class UpgradeUnavailableError extends Error {
   }
 }
 
+/** What a caller refused with `'in-progress'` should run instead, to see how the running upgrade ends. */
+const STATUS_COMMAND = 'mangostudio status';
+
 export interface MachineRequestContext {
   readonly clientIp: string | undefined;
 }
@@ -251,6 +254,15 @@ const logger = createDiagnosticLogger('machine');
 /** Build the service. // Usage: createMachineService().status({ clientIp }) */
 export function createMachineService(deps: Partial<MachineServiceDeps> = {}): MachineService {
   const d = resolveDeps(deps);
+
+  // A page can hold a banner and a card that both offer Upgrade, and a second
+  // tab is free to open the same page: without this, two concurrent
+  // `upgrade()` calls would both stage into the same
+  // `.staging-<version>-<pid>` directory (the engine keys it off this
+  // process's own pid) and race the download and the install script. One
+  // flag is enough — the service is a singleton and only one upgrade at a
+  // time makes sense for it to run.
+  let upgradeInFlight = false;
 
   const liveState = async (): Promise<ServerState | null> => {
     const state = await d.readState();
@@ -466,6 +478,7 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
   ): AsyncIterable<UpgradeStreamEvent> {
     const guard = d.evaluateGuard(context.clientIp);
     if (!guard.allowed) throw new MachineActionBlockedError(guard);
+    if (upgradeInFlight) throw new UpgradeUnavailableError('in-progress', STATUS_COMMAND);
 
     const environment = d.environment();
     const { channel: configuredChannel } = d.updatesConfig();
@@ -480,7 +493,10 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       throw new UpgradeUnavailableError(reason, status.command);
     }
 
-    return upgradeEvents(body, d, liveState);
+    upgradeInFlight = true;
+    return upgradeEvents(body, d, liveState, () => {
+      upgradeInFlight = false;
+    });
   }
 
   function writeConfigNow(
@@ -585,7 +601,8 @@ function refuse(reason: MachineActionReason | null, guard: InstallGuard, command
 async function* upgradeEvents(
   body: MachineUpgradeBody,
   d: MachineServiceDeps,
-  liveState: () => Promise<ServerState | null>
+  liveState: () => Promise<ServerState | null>,
+  onDone: () => void
 ): AsyncGenerator<UpgradeStreamEvent> {
   const request: UpgradeRunRequest = {
     ...(body.channel !== undefined ? { channel: body.channel } : {}),
@@ -602,6 +619,12 @@ async function* upgradeEvents(
     const report = bridge.result();
     if (report) yield { type: 'done', done: true, ...report };
   } finally {
+    // Frees a second `upgrade()` call to start the moment this one stops
+    // being watched — whether the stream ran to its `done` event or the
+    // client disconnected mid-way. The engine itself may still be finishing
+    // up in the background (see below); `upgrade-service.ts`'s own
+    // in-flight guard is what keeps that from racing a second `run()`.
+    onDone();
     // Runs whether the stream ended normally or the client disconnected
     // mid-way (`cancel()` stops `bridge.items` short of its last `yield`,
     // which would otherwise skip scheduling a restart the upgrade already
