@@ -975,10 +975,14 @@ describe('upgrade-service delegate plans', () => {
     expect(spawned).toBe(false);
   });
 
-  it('names the comeback command when the waiter cannot be spawned after the hub was stopped', async () => {
+  it('restarts the hub itself when the waiter cannot be spawned after the hub was stopped', async () => {
     // The hub is already down by the time the waiter spawn is attempted, and
-    // the waiter is the only thing that would have brought it back. A bare
-    // spawn error leaves the operator with a stopped hub and no instruction.
+    // the waiter is the only thing that would have brought it back — but
+    // nothing was installed either, so the restart needs no powershell.exe
+    // (which is exactly what just failed) and no new binary to activate.
+    // Naming the command in a message only recovers a hub whose operator
+    // reads it; a `--yes` script would leave it down.
+    const restarted: { pid: number }[] = [];
     const service = createUpgradeService(
       baseDeps({
         probe: () => npmProbe({ platform: 'win32' }),
@@ -987,6 +991,65 @@ describe('upgrade-service delegate plans', () => {
         readState: () => Promise.resolve(detachedState({ pid: 999 })),
         isAlive: () => true,
         stopHub: () => Promise.resolve(),
+        restartHub: (input) => {
+          restarted.push({ pid: input.state.pid });
+          return Promise.resolve();
+        },
+        spawnDetachedWaiter: () => {
+          throw new Error('powershell.exe: No such file or directory');
+        },
+      })
+    );
+
+    const { report } = await collect(service);
+
+    expect(restarted).toEqual([{ pid: 999 }]);
+    expect(report.outcome).toBe('failed');
+    expect(report.exitCode).toBe(2);
+    expect(report.message).toContain('powershell.exe');
+    expect(report.message).toContain('has been started again');
+    expect(report.message).not.toContain('mangostudio serve -d');
+  });
+
+  it('restarts the stopped hub after a waiter spawn failure even under --no-restart', async () => {
+    // --no-restart declines the activation of a *new* version. The waiter
+    // never ran, so nothing was installed: the stop was only to unlock the
+    // binary, and leaving the hub down is not what the flag asked for.
+    const restarted: number[] = [];
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe({ platform: 'win32' }),
+        platform: 'win32',
+        pid: 555,
+        readState: () => Promise.resolve(detachedState({ pid: 999 })),
+        isAlive: () => true,
+        stopHub: () => Promise.resolve(),
+        restartHub: (input) => {
+          restarted.push(input.state.pid);
+          return Promise.resolve();
+        },
+        spawnDetachedWaiter: () => {
+          throw new Error('powershell.exe: No such file or directory');
+        },
+      })
+    );
+
+    const { report } = await collect(service, { restart: false });
+
+    expect(restarted).toEqual([999]);
+    expect(report.outcome).toBe('failed');
+  });
+
+  it('falls back to naming the comeback command when that restart also fails', async () => {
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe({ platform: 'win32' }),
+        platform: 'win32',
+        pid: 555,
+        readState: () => Promise.resolve(detachedState({ pid: 999 })),
+        isAlive: () => true,
+        stopHub: () => Promise.resolve(),
+        restartHub: () => Promise.reject(new Error('spawn ENOENT')),
         spawnDetachedWaiter: () => {
           throw new Error('powershell.exe: No such file or directory');
         },
@@ -996,9 +1059,8 @@ describe('upgrade-service delegate plans', () => {
     const { report } = await collect(service);
 
     expect(report.outcome).toBe('failed');
-    expect(report.exitCode).toBe(2);
     expect(report.message).toContain('powershell.exe');
-    expect(report.message).toContain('PID 999');
+    expect(report.message).toContain('spawn ENOENT');
     expect(report.message).toContain('mangostudio serve -d localhost:3001');
   });
 

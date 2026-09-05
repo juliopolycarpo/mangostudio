@@ -430,6 +430,38 @@ function windowsDelegateMessage(
 }
 
 /**
+ * The waiter could not be spawned, so the manager step never starts and
+ * nothing gets installed — but the hub was already stopped to unlock
+ * `mangostudio.exe`. Bring it back here rather than naming the command in a
+ * `failed` report and hoping an operator reads it: this path is CLI-only, so
+ * `restartHub` is the real effect, and it needs no `powershell.exe` (which is
+ * what just failed to spawn). `--no-restart` does not apply — the stop was
+ * only to unlock the binary, and there is no new version to activate. Only if
+ * the restart itself throws does the report fall back to naming the command.
+ */
+async function recoverFromWaiterFailure(
+  hub: LiveHub | null,
+  installedVia: InstallOrigin,
+  error: unknown,
+  d: UpgradeServiceDeps
+): Promise<UpgradeReport> {
+  const reason = error instanceof Error ? error.message : String(error);
+  if (!hub) return report('failed', installedVia, d.getVersion(), { message: reason });
+  try {
+    await d.restartHub(hub);
+    return report('failed', installedVia, d.getVersion(), {
+      message: `${reason}. Nothing was installed; MangoStudio (PID ${hub.state.pid}) was stopped for this upgrade and has been started again.`,
+    });
+  } catch (restartError) {
+    const restartReason =
+      restartError instanceof Error ? restartError.message : String(restartError);
+    return report('failed', installedVia, d.getVersion(), {
+      message: `${reason}. MangoStudio (PID ${hub.state.pid}) was stopped for this upgrade and could not be started again (${restartReason}) — run "${comebackArgv(hub).join(' ')}".`,
+    });
+  }
+}
+
+/**
  * Windows: the manager that owns the binary cannot replace a file a running
  * process holds open, so it runs detached, after this process exits. A hub
  * running in a different process from the one handling this upgrade (the
@@ -486,16 +518,7 @@ async function runWindowsDelegate(
       ...(afterSuccess ? { afterSuccess } : {}),
     });
   } catch (error) {
-    // The hub above is already stopped and the waiter that would have brought
-    // it back never started, so the generic `failed` message is not enough:
-    // name the command that recovers it, the way the `--no-restart` wording
-    // does. Nothing was installed, so there is nothing else to undo.
-    const reason = error instanceof Error ? error.message : String(error);
-    return report('failed', installedVia, d.getVersion(), {
-      message: hub
-        ? `${reason}. MangoStudio (PID ${hub.state.pid}) was stopped for this upgrade and was not started again — run "${comebackArgv(hub).join(' ')}".`
-        : reason,
-    });
+    return await recoverFromWaiterFailure(hub, installedVia, error, d);
   }
   return report('upgraded', installedVia, d.getVersion(), {
     restart: !hub ? 'not-running' : request.restart ? 'scheduled' : 'manual',
