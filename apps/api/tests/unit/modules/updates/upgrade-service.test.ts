@@ -569,7 +569,72 @@ describe('upgrade-service delegate plans', () => {
     expect(report.outcome).toBe('upgraded');
     expect(report.exitCode).toBe(0);
     expect(script.calls[0]?.argv).toEqual(['npm', 'install', '-g', `mangostudio@latest`]);
-    expect(stages(events)).toEqual(['resolve', 'install']);
+    expect(stages(events)).toEqual(['resolve', 'install', 'restart']);
+  });
+
+  it('restarts a live detached hub after the POSIX package manager succeeds', async () => {
+    // npm/brew replace the file on disk, but a hub already running keeps
+    // serving the old inode until something bounces it — the same restart
+    // stage the self-managed path goes through.
+    const restarts: { state: ServerState; launch: string }[] = [];
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe(),
+        readState: () => Promise.resolve(detachedState({ pid: 999 })),
+        isAlive: () => true,
+        restartHub: (input) => {
+          restarts.push(input);
+          return Promise.resolve();
+        },
+      })
+    );
+
+    const { report } = await collect(service);
+
+    expect(report.outcome).toBe('upgraded');
+    expect(report.restart).toBe('scheduled');
+    expect(restarts).toEqual([{ state: detachedState({ pid: 999 }), launch: 'detached' }]);
+  });
+
+  it('leaves a live hub alone after a POSIX delegation when asked --no-restart', async () => {
+    let restarted = false;
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe(),
+        readState: () => Promise.resolve(detachedState({ pid: 999 })),
+        isAlive: () => true,
+        restartHub: () => {
+          restarted = true;
+          return Promise.resolve();
+        },
+      })
+    );
+
+    const { report } = await collect(service, { restart: false });
+
+    expect(report.restart).toBe('skipped');
+    expect(restarted).toBe(false);
+  });
+
+  it('does not restart anything after a POSIX delegation when the package manager fails', async () => {
+    let restarted = false;
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe(),
+        runScript: fakeRunScript(1).runScript,
+        readState: () => Promise.resolve(detachedState({ pid: 999 })),
+        isAlive: () => true,
+        restartHub: () => {
+          restarted = true;
+          return Promise.resolve();
+        },
+      })
+    );
+
+    const { report } = await collect(service);
+
+    expect(report.outcome).toBe('failed');
+    expect(restarted).toBe(false);
   });
 
   it('never hands the hub secrets to the POSIX delegate, but keeps PATH and npm/cargo config', async () => {

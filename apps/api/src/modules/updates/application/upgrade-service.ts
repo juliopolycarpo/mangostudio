@@ -433,10 +433,17 @@ async function withRestart(
   };
 }
 
-/** POSIX: run the package manager's own command directly, relaying its output. Windows: see `runWindowsDelegate`. */
+/**
+ * POSIX: run the package manager's own command directly, relaying its
+ * output, then go through the same restart stage as a self-managed install —
+ * the manager replaced the file on disk, but a hub already running keeps
+ * serving the old inode until something bounces it. Windows: see
+ * `runWindowsDelegate`.
+ */
 async function runPosixDelegate(
   plan: Extract<UpgradePlan, { kind: 'delegate' }>,
   installedVia: InstallOrigin,
+  request: UpgradeRunRequest,
   d: UpgradeServiceDeps,
   emit: EmitUpgradeEvent
 ): Promise<UpgradeReport> {
@@ -444,12 +451,7 @@ async function runPosixDelegate(
   const run = d.runScript(plan.argv, { env: delegateEnv(d.env) });
   const exitCode = await relayLines(run, emit);
   if (exitCode !== 0) return scriptFailedReport(installedVia, d.getVersion(), exitCode);
-  return {
-    outcome: 'upgraded',
-    installedVia: fitInstalledVia(installedVia),
-    currentVersion: d.getVersion(),
-    exitCode: 0,
-  };
+  return await withRestart(installedVia, d.getVersion(), undefined, request.restart, d, emit);
 }
 
 /**
@@ -506,7 +508,7 @@ async function runDelegate(
     };
   }
   if (d.platform === 'win32') return await runWindowsDelegate(plan, installedVia, d, emit);
-  return await runPosixDelegate(plan, installedVia, d, emit);
+  return await runPosixDelegate(plan, installedVia, request, d, emit);
 }
 
 async function runSelf(
