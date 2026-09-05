@@ -557,7 +557,13 @@ async function runInstallScript(
 
     return await withRestart(installedVia, d.getVersion(), target, input.restart, d, emit);
   } finally {
-    await d.removeDir(stagingDir);
+    // Swallowed on purpose: a throw here would replace the `try`'s own return
+    // value, so an upgrade that installed, moved the pointer and scheduled a
+    // restart would report `failed` because Windows still held a handle on the
+    // script or the archive. The install scripts sweep leftover `.staging-*` /
+    // `.rollback-*` directories on the next `--prune`/`-Prune`, which is what
+    // makes a failed cleanup recoverable rather than fatal.
+    await d.removeDir(stagingDir).catch(() => undefined);
   }
 }
 

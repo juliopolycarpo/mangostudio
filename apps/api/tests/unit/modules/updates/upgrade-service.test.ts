@@ -422,6 +422,25 @@ describe('upgrade-service self-managed', () => {
     expect(removeDirCalls).toHaveLength(1);
   });
 
+  it('still reports upgraded when cleaning the staging directory fails', async () => {
+    // Windows can hold a handle on the script or the archive right after the
+    // install exits. A throw from the `finally`'s cleanup replaces the return
+    // value of the whole flow, so an upgrade that installed, moved the pointer
+    // and scheduled a restart would report `failed` — the one outcome that is
+    // definitely wrong once the pointer has already moved.
+    const service = createUpgradeService(
+      baseDeps({
+        removeDir: () => Promise.reject(new Error('EBUSY: resource busy or locked')),
+      })
+    );
+
+    const { report } = await collect(service);
+
+    expect(report.outcome).toBe('upgraded');
+    expect(report.exitCode).toBe(0);
+    expect(report.restart).toBe('scheduled');
+  });
+
   it('reports refused when the resolver cannot serve the target', async () => {
     const service = createUpgradeService(
       baseDeps({
