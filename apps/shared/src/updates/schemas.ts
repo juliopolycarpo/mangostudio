@@ -100,6 +100,13 @@ export const UPGRADE_COMMAND_MAX = 512;
 /** `GET /api/machine/update`: the banner's whole input. */
 export const MachineUpdateStatusSchema = Type.Object({
   installedVia: InstalledViaSchema,
+  /**
+   * The channel an upgrade would actually target: `[updates] channel` when
+   * set, otherwise `installedVia.channel` (this build's own). Distinct from
+   * `installedVia.channel` on purpose — a stable build configured for
+   * canary must show canary here, not the build's own origin.
+   */
+  channel: UpdateChannelSchema,
   /** Null when checks are disabled or none has run yet. */
   check: Type.Union([UpdateCheckSchema, Type.Null()]),
   /** Whether `[updates] check` is on for this hub. */
