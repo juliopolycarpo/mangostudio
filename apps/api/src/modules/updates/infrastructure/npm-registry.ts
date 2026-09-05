@@ -117,8 +117,9 @@ export async function fetchNpmPackument(
   deps: SafeFetchDeps
 ): Promise<NpmPackument> {
   // The registry URL-encodes the scope's slash but keeps the leading `@`
-  // literal — a plain encodeURIComponent would escape both.
-  const url = `${NPM_REGISTRY_BASE}/${packageName.replace('/', '%2F')}`;
+  // literal — a plain encodeURIComponent would escape both. Every slash is
+  // encoded, not just the first, so the name can never open a new path segment.
+  const url = `${NPM_REGISTRY_BASE}/${packageName.replaceAll('/', '%2F')}`;
   const result = await safeFetchBytes(
     url,
     {
