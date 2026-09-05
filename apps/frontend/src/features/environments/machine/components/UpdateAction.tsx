@@ -9,8 +9,8 @@ import type { MachineUpdateStatus } from '@mangostudio/shared/updates';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
-import { CopyLine } from '../../components/CopyLine';
 import { upgradeRefusalReasonLabel } from '../format';
+import { RefusalNotice } from './RefusalNotice';
 import { UpgradeDialog } from './UpgradeDialog';
 
 interface UpdateActionProps {
@@ -30,14 +30,12 @@ export function UpdateAction({
   const [dialogOpen, setDialogOpen] = useState(false);
 
   if (!status.canUpgrade) {
-    const reasonLine = status.reason ? upgradeRefusalReasonLabel(t, status.reason) : null;
     return (
-      <div className="space-y-2" data-testid={`${testId}-refused`}>
-        {reasonLine && <p className="text-sm text-on-surface-variant">{reasonLine}</p>}
-        {status.command && (
-          <CopyLine label={t.environments.machine.actions.runInstead} value={status.command} />
-        )}
-      </div>
+      <RefusalNotice
+        reasonLine={status.reason ? upgradeRefusalReasonLabel(t, status.reason) : null}
+        command={status.command ?? null}
+        testId={`${testId}-refused`}
+      />
     );
   }
 

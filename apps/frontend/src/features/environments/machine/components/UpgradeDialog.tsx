@@ -21,10 +21,10 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { CopyLine } from '../../components/CopyLine';
 import { machineGuardReasonLabel, upgradeRefusalReasonLabel } from '../format';
 import { type UseUpgradeStreamResult, useUpgradeStream } from '../hooks/use-upgrade-stream';
 import { invalidateMachineUpdate } from '../queries';
+import { RefusalNotice } from './RefusalNotice';
 
 interface UpgradeDialogProps {
   readonly status: MachineUpdateStatus;
@@ -172,17 +172,7 @@ function UpgradeOutcome({ stream }: { readonly stream: UseUpgradeStreamResult })
       : stream.refusal.reasons.length > 0
         ? stream.refusal.reasons.map((reason) => machineGuardReasonLabel(t, reason)).join(' ')
         : t.environments.machine.actions.refused;
-    return (
-      <div className="space-y-2">
-        {reasonLine && <p className="text-sm text-on-surface-variant">{reasonLine}</p>}
-        {stream.refusal.command && (
-          <CopyLine
-            label={t.environments.machine.actions.runInstead}
-            value={stream.refusal.command}
-          />
-        )}
-      </div>
-    );
+    return <RefusalNotice reasonLine={reasonLine} command={stream.refusal.command ?? null} />;
   }
 
   if (stream.phase === 'failed') {
@@ -204,14 +194,11 @@ function UpgradeOutcome({ stream }: { readonly stream: UseUpgradeStreamResult })
       return <p className="text-sm text-on-surface">{m.outcome.alreadyCurrent}</p>;
     }
     if (report.outcome === 'refused') {
-      const reasonLine = report.reason ? upgradeRefusalReasonLabel(t, report.reason) : null;
       return (
-        <div className="space-y-2">
-          {reasonLine && <p className="text-sm text-on-surface-variant">{reasonLine}</p>}
-          {report.command && (
-            <CopyLine label={t.environments.machine.actions.runInstead} value={report.command} />
-          )}
-        </div>
+        <RefusalNotice
+          reasonLine={report.reason ? upgradeRefusalReasonLabel(t, report.reason) : null}
+          command={report.command ?? null}
+        />
       );
     }
     // `failed`
