@@ -197,8 +197,14 @@ function toEnvRecord(env: NodeJS.ProcessEnv): Record<string, string> {
   return record;
 }
 
-/** Env the embedded install script receives: the passthrough set plus what tells it this is an upgrade. */
-function buildScriptEnv(
+/**
+ * Env the embedded install script receives: the passthrough set plus what
+ * tells it this is an upgrade. Also used by `prune-retry.ts` for the
+ * `-Prune` retry on start — `MANGOSTUDIO_INSTALL_ORIGIN` is harmless there
+ * since `-Prune`/`--prune` never reads it, and the install dir/bin dir
+ * overrides are exactly what a prune needs to find the right root.
+ */
+export function buildScriptEnv(
   env: NodeJS.ProcessEnv,
   installedVia: InstallOrigin
 ): Record<string, string> {
@@ -216,7 +222,7 @@ function buildScriptEnv(
   return scriptEnv;
 }
 
-function powershellInterpreter(which: (name: string) => string | null): string {
+export function powershellInterpreter(which: (name: string) => string | null): string {
   return which('pwsh') !== null ? 'pwsh' : 'powershell.exe';
 }
 
@@ -648,7 +654,7 @@ async function defaultRestartHub(input: {
   );
 }
 
-async function writeTempScriptReal(directory: string, kind: InstallerKind): Promise<string> {
+export async function writeTempScriptReal(directory: string, kind: InstallerKind): Promise<string> {
   const path = joinPath(process.platform, directory, embeddedInstallerFileName(kind));
   await writeFile(path, embeddedInstaller(kind), { mode: kind === 'sh' ? 0o755 : 0o644 });
   return path;
