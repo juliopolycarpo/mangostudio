@@ -74,10 +74,21 @@ export function hubDistRootFor(
 }
 
 /** The launcher the installer maintains across upgrades, inside an already-resolved root. */
+/**
+ * The upgrade-surviving path to the installed hub: the `current` symlink on
+ * POSIX, the `current` junction install.ps1 creates on Windows. Never the
+ * `bin` shim on Windows — that is a `.cmd`, so `Bun.spawn` starts cmd.exe and
+ * gets *its* pid, which never matches the pid the hub writes to the state
+ * file, and every detached restart then fails its own health handshake after
+ * 20s even though the hub came back fine (verified on Windows 11 24H2). A
+ * service unit given a batch file has the same problem in reverse: the
+ * supervisor supervises cmd.exe. The junction is a real PE image on the other
+ * side, and a missing one already falls back to the versioned path.
+ */
 function pointerPathForRoot(root: string, platform: NodeJS.Platform): string {
   const join = joiner(platform);
   return platform === 'win32'
-    ? join(root, 'bin', 'mangostudio.cmd')
+    ? join(root, 'current', 'mangostudio.exe')
     : join(root, 'current', 'mangostudio');
 }
 
