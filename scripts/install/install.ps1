@@ -339,6 +339,14 @@ function Test-PathListContains([string[]]$Entries, [string]$Candidate) {
 }
 
 function Add-UserPath([string]$BinDir) {
+  # Trade-off, left as-is: [Environment]::SetEnvironmentVariable('Path', ...,
+  # User) rewrites the registry value as REG_SZ, expanding any %VAR%
+  # references the existing REG_EXPAND_SZ value held. Writing the registry
+  # value directly (Microsoft.Win32.Registry with
+  # RegistryValueKind.ExpandString) would preserve the expandable type, but
+  # it would not broadcast WM_SETTINGCHANGE the way SetEnvironmentVariable
+  # does, so already-running processes such as Explorer would not observe
+  # the PATH update at all.
   $target = [System.EnvironmentVariableTarget]::User
   $userPath = [Environment]::GetEnvironmentVariable('Path', $target)
   $userParts = Split-PathList $userPath
