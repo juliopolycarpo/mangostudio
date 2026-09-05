@@ -1,9 +1,11 @@
 /**
  * The release platform id this binary belongs to — `linux-x64`,
- * `windows-arm64`, ... — mirroring `scripts/lib/release-targets.ts`. The api
- * workspace cannot import from `scripts/` (it is not a workspace), so the
- * eight ids are frozen here as well; a platform release-targets.ts adds must
- * be added here too.
+ * `windows-arm64`, ... The posix six come from
+ * `@mangostudio/shared/runtime-home`, which already names exactly the set the
+ * release plan publishes; only the two Windows ids are added here, since
+ * nothing pushes a hub to a Windows host over SSH. `scripts/` is not a
+ * workspace and cannot be imported from, so a target added to
+ * `scripts/lib/release-targets.ts` still has to reach one of these two lists.
  *
  * A release binary knows its id exactly: `scripts/build.ts` bakes it in as
  * `BUILD_PLATFORM_ID` through `--define`, the same mechanism that stamps
@@ -14,25 +16,17 @@
  * which never resolves an upgrade target for itself.
  */
 
-export type ReleasePlatformId =
-  | 'linux-x64'
-  | 'linux-arm64'
-  | 'windows-x64'
-  | 'windows-arm64'
-  | 'darwin-x64'
-  | 'darwin-arm64'
-  | 'linux-x64-musl'
-  | 'linux-arm64-musl';
+import { RUNTIME_PLATFORM_IDS, type RuntimePlatformId } from '@mangostudio/shared/runtime-home';
+
+/** The two ids the posix set does not carry: nothing pushes a hub over SSH to Windows. */
+export type WindowsPlatformId = 'windows-x64' | 'windows-arm64';
+
+export type ReleasePlatformId = RuntimePlatformId | WindowsPlatformId;
 
 export const RELEASE_PLATFORM_IDS: readonly ReleasePlatformId[] = [
-  'linux-x64',
-  'linux-arm64',
+  ...RUNTIME_PLATFORM_IDS,
   'windows-x64',
   'windows-arm64',
-  'darwin-x64',
-  'darwin-arm64',
-  'linux-x64-musl',
-  'linux-arm64-musl',
 ];
 
 /** Parses a release platform id, or null for anything else. // Usage: parseReleasePlatformId('linux-x64') */
