@@ -93,10 +93,25 @@ describe('nightly distribution health workflow', () => {
       const [, laneBody = ''] = workflow.split(/\n {2}install-script:\n/);
       const [installScriptLane] = laneBody.split(/\n {2}health-summary:\n/);
 
-      // `if gh release download ...; then ... else ...; fi` keeps the step
-      // green on a 404 — the notice-and-continue branch never exits non-zero.
+      // The not-found branch (matched against gh's captured stderr) keeps
+      // the step green and records a notice; it never exits non-zero.
       expect(installScriptLane).toMatch(
-        /if gh release download "\$RELEASE_TAG" --pattern "\$SCRIPT_NAME"[\s\S]*?else\n\s+echo "No[\s\S]*?GITHUB_STEP_SUMMARY[\s\S]*?SCRIPT_AVAILABLE=false[\s\S]*?fi/
+        /if gh release download "\$RELEASE_TAG" --pattern "\$SCRIPT_NAME"[\s\S]*?else[\s\S]*?if grep -qiE "release not found\|no assets match\|HTTP 404" download-error\.log; then\n\s+echo "No[\s\S]*?GITHUB_STEP_SUMMARY[\s\S]*?SCRIPT_AVAILABLE=false[\s\S]*?fi\n\s+fi/
+      );
+    });
+
+    test('a gh failure that is not a missing-asset 404 fails the step instead of skipping it', () => {
+      const workflow = readText(WORKFLOW_PATH);
+      const [, laneBody = ''] = workflow.split(/\n {2}install-script:\n/);
+      const [installScriptLane] = laneBody.split(/\n {2}health-summary:\n/);
+
+      // Reproduces the gap: any gh release download failure used to fall
+      // straight into the "asset absent" branch — an auth error or rate
+      // limit would silently skip the rest of the lane instead of failing
+      // it. The else branch's fallback path must exit non-zero.
+      expect(installScriptLane).toContain('2>download-error.log');
+      expect(installScriptLane).toMatch(
+        /else\n\s+echo "gh release download failed for a reason other than a missing asset[\s\S]*?exit 1/
       );
     });
 

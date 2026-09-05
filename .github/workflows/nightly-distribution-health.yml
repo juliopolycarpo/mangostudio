@@ -377,7 +377,9 @@ jobs:
       # Every release before this change shipped no install-script asset, so a
       # 404 here is an expected gap in old history, not a failure: the lane
       # notices and stops rather than failing a nightly run that pins an
-      # older stable release on purpose.
+      # older stable release on purpose. Any other gh failure (auth, rate
+      # limit, a transient API error) is not that gap and must fail the step
+      # instead of silently skipping the rest of the lane.
       - name: Download the install script
         env:
           GH_TOKEN: ${{ github.token }}
@@ -385,11 +387,17 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p install-script
-          if gh release download "$RELEASE_TAG" --pattern "$SCRIPT_NAME" --dir install-script; then
+          if gh release download "$RELEASE_TAG" --pattern "$SCRIPT_NAME" --dir install-script 2>download-error.log; then
             echo "SCRIPT_AVAILABLE=true" >> "$GITHUB_ENV"
           else
-            echo "No ${SCRIPT_NAME} asset on ${RELEASE_TAG} (published before install scripts shipped as release assets)." >> "$GITHUB_STEP_SUMMARY"
-            echo "SCRIPT_AVAILABLE=false" >> "$GITHUB_ENV"
+            cat download-error.log >&2
+            if grep -qiE "release not found|no assets match|HTTP 404" download-error.log; then
+              echo "No ${SCRIPT_NAME} asset on ${RELEASE_TAG} (published before install scripts shipped as release assets)." >> "$GITHUB_STEP_SUMMARY"
+              echo "SCRIPT_AVAILABLE=false" >> "$GITHUB_ENV"
+            else
+              echo "gh release download failed for a reason other than a missing asset; see the log above." >&2
+              exit 1
+            fi
           fi
 
       - name: Run the install script and verify its own report (Linux/macOS)
