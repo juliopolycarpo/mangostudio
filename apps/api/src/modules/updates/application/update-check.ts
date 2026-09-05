@@ -133,14 +133,20 @@ export function createUpdateChecker(deps: Partial<UpdateCheckerDeps> = {}): Upda
 
   /**
    * Whatever `check()` last wrote — but not a cache left over from a channel
-   * `[updates] channel` no longer names. Without this, flipping the config
-   * would keep answering from the old channel's cache until the next
-   * `check()` call happened to overwrite it, up to 24h later.
+   * `[updates] channel` no longer names, and not one computed for a version
+   * this process is no longer running. Without the channel rule, flipping the
+   * config would keep answering from the old channel's cache until the next
+   * `check()` call happened to overwrite it, up to 24h later; without the
+   * version rule, the process that comes back after an upgrade reuses its
+   * predecessor's answer and the banner, `status` and `doctor` keep offering
+   * the release that is already installed.
    */
   function readCached(): UpdateCheck | null {
     if (skipReason() !== null) return null;
     const cached = d.readCacheFile(d.cachePath());
-    if (cached && cached.channel !== effectiveChannel()) return null;
+    if (!cached) return null;
+    if (cached.channel !== effectiveChannel()) return null;
+    if (cached.currentVersion !== d.getCurrentVersion()) return null;
     return cached;
   }
 

@@ -222,9 +222,51 @@ describe('createUpdateChecker', () => {
 
       expect(createUpdateChecker(deps).readCached()).toBeNull();
     });
+
+    it('returns null when the cache was computed for a different running version', () => {
+      // After an upgrade the new process finds its predecessor's cache: same
+      // channel, unexpired, and `updateAvailable: true` for the very version
+      // now running. `check()` treats that as fresh, so the banner, `status`
+      // and `doctor` would keep offering an already-installed release for up
+      // to 24h without ever making a request.
+      const { deps, store } = harness({ getCurrentVersion: () => '0.2.0' });
+      store.set({
+        channel: 'stable',
+        currentVersion: '0.1.1',
+        latestVersion: '0.2.0',
+        updateAvailable: true,
+        checkedAt: 0,
+      });
+
+      expect(createUpdateChecker(deps).readCached()).toBeNull();
+    });
   });
 
   describe('check', () => {
+    it('refetches instead of answering from a cache written by the previous version', async () => {
+      // The read path and `check()`'s freshness gate have to agree: if only
+      // `readCached` rejected the stale record, `check()` would still find it
+      // through its own `readCached()` call — this pins the whole path.
+      const fake = new FakeFetch({
+        'https://api.github.com/repos/juliopolycarpo/mangostudio/releases/latest': () =>
+          STABLE_TAG_RESPONSE('v0.2.0'),
+      });
+      const { deps, store } = harness({ getCurrentVersion: () => '0.2.0', fetch: fake.fetch });
+      store.set({
+        channel: 'stable',
+        currentVersion: '0.1.1',
+        latestVersion: '0.2.0',
+        updateAvailable: true,
+        checkedAt: 0,
+      });
+
+      const result = await createUpdateChecker(deps).check();
+
+      expect(fake.calls).toHaveLength(1);
+      expect(result?.currentVersion).toBe('0.2.0');
+      expect(result?.updateAvailable).toBe(false);
+    });
+
     it('returns null and never fetches when skipped', async () => {
       const fake = new FakeFetch({});
       const { deps } = harness({ getConfig: () => configWith(false), fetch: fake.fetch });
