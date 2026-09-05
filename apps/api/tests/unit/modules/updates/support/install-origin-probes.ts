@@ -53,6 +53,21 @@ export function npmProbe(overrides: Partial<InstallOriginProbe> = {}): InstallOr
   });
 }
 
+/**
+ * A cargo install: the shim on PATH announces itself through the launcher
+ * marker, so the origin records the shim's own path alongside the versioned
+ * binary the shim actually exec'd.
+ */
+export function cargoProbe(overrides: Partial<InstallOriginProbe> = {}): InstallOriginProbe {
+  return probe({
+    env: {
+      MANGOSTUDIO_LAUNCHER: 'cargo',
+      MANGOSTUDIO_LAUNCHER_PATH: `${HOME}/.cargo/bin/mangostudio`,
+    },
+    ...overrides,
+  });
+}
+
 /** Running inside a container, where no in-place upgrade applies at all. */
 export function dockerProbe(overrides: Partial<InstallOriginProbe> = {}): InstallOriginProbe {
   return npmProbe({ execPath: '/usr/local/bin/mangostudio', container: true, ...overrides });

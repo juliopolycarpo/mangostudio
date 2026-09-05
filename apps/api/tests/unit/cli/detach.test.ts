@@ -92,6 +92,21 @@ describe('restartExecutableOptions', () => {
       expect(restartExecutableOptions({ pointer, argv: ['/anything'] })).toEqual({});
     }
   });
+
+  it("prefers a package manager's launcher over this process's own path", () => {
+    // A cargo or npm install runs through a shim whose job is to select the
+    // installed version. After a delegated upgrade the shim points at the new
+    // build while this process's path still names the version directory the
+    // manager just replaced — and brew may have deleted it outright.
+    for (const pointer of ['versioned', 'external', 'source', 'current'] as const) {
+      expect(
+        restartExecutableOptions(
+          { pointer, argv: ['/home/j/.mango/dist/0.1.0/mangostudio'] },
+          '/home/j/.cargo/bin/mangostudio'
+        )
+      ).toEqual({ executable: ['/home/j/.cargo/bin/mangostudio'] });
+    }
+  });
 });
 
 describe('buildWaiterCommand', () => {

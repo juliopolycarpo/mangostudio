@@ -39,15 +39,25 @@ export interface DetachOptions {
 }
 
 /**
- * Spawn options that route a restart through the installer's `current`
- * pointer, when this process resolves to it. Every other pointer kind keeps
- * today's behaviour (re-exec this binary), so an upgrade never changes what a
- * non-installer restart does.
- * // Usage: spawnDetached(port, host, {}, { waitForPid, ...restartExecutableOptions(currentHubExecutable()) })
+ * Spawn options that route a restart through the launcher a package manager
+ * owns, when there is one, or the installer's `current` pointer when this
+ * process resolves to it. Every other pointer kind keeps today's behaviour
+ * (re-exec this binary), so an upgrade never changes what a non-installer
+ * restart does.
+ * // Usage: spawnDetached(port, host, {}, { waitForPid, ...restartExecutableOptions(currentHubExecutable(), origin.launcherPath) })
  */
 export function restartExecutableOptions(
-  executable: Pick<HubExecutable, 'pointer' | 'argv'>
+  executable: Pick<HubExecutable, 'pointer' | 'argv'>,
+  launcherPath?: string
 ): Pick<DetachOptions, 'executable'> {
+  // A manager-owned install is launched through a stable shim (the npm
+  // wrapper, `~/.cargo/bin/mangostudio`) whose whole job is to run the version
+  // that manager has installed. `process.execPath` names the version
+  // directory this process came from, so after a delegated upgrade re-execing
+  // it starts the *old* build again — and Homebrew may have removed that
+  // directory outright when it cleaned the Cellar. The shim is the only path
+  // that survives the manager replacing what is underneath it.
+  if (launcherPath) return { executable: [launcherPath] };
   return executable.pointer === 'current' ? { executable: executable.argv } : {};
 }
 

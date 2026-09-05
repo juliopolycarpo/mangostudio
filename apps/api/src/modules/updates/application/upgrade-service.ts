@@ -139,8 +139,16 @@ export interface UpgradeServiceDeps {
    * while a hub holds it open and nothing else in that flow makes one exit.
    */
   readonly stopHub: (input: { state: ServerState; launch: HubLaunchMode }) => Promise<void>;
-  /** Effect for a `'scheduled'` restart decision; a route defers this itself instead (see machine-routes.ts). */
-  readonly restartHub: (input: { state: ServerState; launch: HubLaunchMode }) => Promise<void>;
+  /**
+   * Effect for a `'scheduled'` restart decision; a route defers this itself
+   * instead (see machine-routes.ts). `launcherPath` is the manager-owned shim
+   * to come back through, when the origin records one.
+   */
+  readonly restartHub: (input: {
+    state: ServerState;
+    launch: HubLaunchMode;
+    launcherPath?: string;
+  }) => Promise<void>;
   readonly currentExecutable: () => HubExecutable;
   readonly readState: typeof readState;
   /** Whether the state file's pid is a live process — see `isStateLive`. */
@@ -354,7 +362,14 @@ async function withRestart(
   let restartFailure: string | undefined;
   if (decision.restart === 'scheduled' && state && launch) {
     try {
-      await d.restartHub({ state, launch });
+      // A delegated upgrade replaced what the manager's launcher points at,
+      // not this process's own path: come back through the launcher or the
+      // restart re-execs the version that was just replaced.
+      await d.restartHub({
+        state,
+        launch,
+        ...(installedVia.launcherPath ? { launcherPath: installedVia.launcherPath } : {}),
+      });
     } catch (error) {
       restart = 'manual';
       const reason = error instanceof Error ? error.message : String(error);
@@ -795,6 +810,7 @@ async function defaultStopHub(input: { state: ServerState; launch: HubLaunchMode
 async function defaultRestartHub(input: {
   state: ServerState;
   launch: HubLaunchMode;
+  launcherPath?: string;
 }): Promise<void> {
   if (input.launch === 'service') {
     await createHubServiceManager().restart();
@@ -810,7 +826,10 @@ async function defaultRestartHub(input: {
     input.state.port,
     input.state.host,
     {},
-    { waitForPid: input.state.pid, ...restartExecutableOptions(currentHubExecutable()) }
+    {
+      waitForPid: input.state.pid,
+      ...restartExecutableOptions(currentHubExecutable(), input.launcherPath),
+    }
   );
 }
 

@@ -9,6 +9,7 @@ import { isStateLive, readState, removeState, type ServerState } from '../../lib
 import {
   createHubServiceManager,
   currentHubExecutable,
+  currentLauncherPath,
 } from '../../modules/machine/application/hub-service';
 import type { HubExecutable } from '../../modules/machine/domain/hub-executable';
 import { hubLaunchMode, hubUrl } from '../../modules/machine/domain/hub-process';
@@ -36,6 +37,12 @@ export interface RestartDeps {
   sleep: (ms: number) => Promise<void>;
   /** What a unit (or a respawned detached instance) would run right now. */
   executable: () => HubExecutable;
+  /**
+   * The package manager's own launcher for this install, when it left a
+   * marker — the path a restart has to come back through, since the version
+   * directory this process runs from is the manager's to replace.
+   */
+  launcherPath: () => string | undefined;
 }
 
 const COMEBACK_TIMEOUT_MS = 20_000;
@@ -100,7 +107,7 @@ async function restartDetached(state: ServerState, d: Required<RestartDeps>): Pr
     {},
     {
       waitForPid: state.pid,
-      ...restartExecutableOptions(d.executable()),
+      ...restartExecutableOptions(d.executable(), d.launcherPath()),
     }
   );
   d.log(`MangoStudio restarted (PID ${result.pid}, ${hubUrl(state.host, result.port)}).`);
@@ -148,5 +155,6 @@ function resolveDeps(deps: Partial<RestartDeps>): Required<RestartDeps> {
     now: deps.now ?? Date.now,
     sleep: deps.sleep ?? sleep,
     executable: deps.executable ?? (() => currentHubExecutable()),
+    launcherPath: deps.launcherPath ?? currentLauncherPath,
   };
 }

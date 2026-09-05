@@ -17,6 +17,7 @@ import type {
 } from '../../../../src/modules/updates/infrastructure/run-script';
 import {
   PROBE_VERSION as CURRENT_VERSION,
+  cargoProbe,
   dockerProbe,
   npmProbe,
   selfManagedProbe,
@@ -709,6 +710,28 @@ describe('upgrade-service delegate plans', () => {
 
     expect(waiterCalls[0]?.env.BETTER_AUTH_SECRET).toBeUndefined();
     expect(waiterCalls[0]?.hiddenFromManager).toBeUndefined();
+  });
+
+  it('restarts a delegated install through the manager launcher, not this binary', async () => {
+    // `cargo install` replaces what ~/.cargo/bin/mangostudio points at; this
+    // process's own path still names the version directory it just replaced,
+    // so a restart there brings the old build back. Homebrew can leave that
+    // path gone entirely once it cleans the Cellar.
+    const restarted: (string | undefined)[] = [];
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => cargoProbe(),
+        runScript: fakeRunScript(0).runScript,
+        restartHub: (input) => {
+          restarted.push(input.launcherPath);
+          return Promise.resolve();
+        },
+      })
+    );
+
+    await collect(service);
+
+    expect(restarted).toEqual(['/home/j/.cargo/bin/mangostudio']);
   });
 
   it('reports failed with exit 2 when the package manager exits non-zero', async () => {
