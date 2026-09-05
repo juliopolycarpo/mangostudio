@@ -53,6 +53,13 @@ const FETCH_MAX_BYTES = 1024 * 1024;
 
 const GITHUB_LATEST_RELEASE_API =
   'https://api.github.com/repos/juliopolycarpo/mangostudio/releases/latest';
+// Same headers `release-index.ts` sends for the same host: GitHub's REST API
+// answers 403 to a request with no User-Agent at all, and the `Accept` pins
+// the response shape this parser reads `tag_name` out of.
+const GITHUB_API_HEADERS = {
+  'User-Agent': 'mangostudio-hub',
+  Accept: 'application/vnd.github+json',
+};
 
 export type UpdateCheckSkipReason = 'disabled' | 'env' | 'dev';
 
@@ -214,7 +221,12 @@ function errorMessage(error: unknown): string {
 async function checkStable(d: ResolvedDeps, currentVersion: string): Promise<UpdateCheck> {
   const result = await safeFetchBytes(
     GITHUB_LATEST_RELEASE_API,
-    { maxBytes: FETCH_MAX_BYTES, maxRedirects: FETCH_MAX_REDIRECTS, timeoutMs: FETCH_TIMEOUT_MS },
+    {
+      maxBytes: FETCH_MAX_BYTES,
+      maxRedirects: FETCH_MAX_REDIRECTS,
+      timeoutMs: FETCH_TIMEOUT_MS,
+      headers: GITHUB_API_HEADERS,
+    },
     { fetch: d.fetch, resolveHostname: d.resolveHostname }
   );
   const parsed = JSON.parse(new TextDecoder().decode(result.bytes)) as { tag_name?: unknown };
