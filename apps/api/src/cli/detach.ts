@@ -118,6 +118,23 @@ async function confirmStarted(
 }
 
 /**
+ * Flags every PowerShell host this project starts is given, whether it runs a
+ * script file (`installer-invocation.ts`'s `installerArgv`) or a command
+ * string (`spawnDetachedWaiter` below). `-ExecutionPolicy Bypass` is not only
+ * about the script we wrote: with the machine on the default `Restricted`
+ * policy, `npm`/`pnpm` resolve to their `.ps1` shim ahead of the `.cmd` one,
+ * and the host refuses to run it — so a delegated upgrade would fail for
+ * anyone who installed through CMD without ever enabling scripts.
+ * // Usage: ['powershell.exe', ...POWERSHELL_HOST_FLAGS, '-Command', script]
+ */
+export const POWERSHELL_HOST_FLAGS: readonly string[] = [
+  '-NoProfile',
+  '-NonInteractive',
+  '-ExecutionPolicy',
+  'Bypass',
+];
+
+/**
  * Windows system variables a spawned child needs to resolve executables
  * (COMSPEC/PATHEXT), locate its data directories, and detect host
  * architecture (PROCESSOR_ARCHITECTURE/PROCESSOR_ARCHITEW6432 — set by a
@@ -400,6 +417,22 @@ export function ensureLogDir(logFile: string): void {
 }
 
 /**
+ * The full `powershell.exe` argv the waiter is spawned as. Split out from
+ * `spawnDetachedWaiter` so the host flags — `-ExecutionPolicy Bypass` above
+ * all, which is what lets a Restricted machine run `npm.ps1` — are assertable
+ * off Windows, where the spawn itself cannot run.
+ * // Usage: waiterArgv({ argv: ['npm', 'install', '-g', 'mangostudio@latest'], waitForPid: 1, logFile })
+ */
+export function waiterArgv(
+  input: Pick<
+    SpawnDetachedWaiterInput,
+    'argv' | 'waitForPid' | 'logFile' | 'afterSuccess' | 'hiddenFromManager'
+  >
+): string[] {
+  return ['powershell.exe', ...POWERSHELL_HOST_FLAGS, '-Command', buildWaiterCommand(input)];
+}
+
+/**
  * Windows-only: spawn a detached PowerShell that waits for this process (and
  * a hub the caller stopped) to exit, then runs a package-manager upgrade,
  * logs its output, and optionally brings the hub back — used when the
@@ -410,7 +443,7 @@ export function ensureLogDir(logFile: string): void {
 export function spawnDetachedWaiter(input: SpawnDetachedWaiterInput): number {
   ensureLogDir(input.logFile);
   const proc = Bun.spawn({
-    cmd: ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', buildWaiterCommand(input)],
+    cmd: waiterArgv(input),
     env: input.env,
     detached: true,
     stdin: 'ignore',

@@ -8,7 +8,7 @@
 
 import { writeFile } from 'node:fs/promises';
 import { posix, win32 } from 'node:path';
-import { WINDOWS_SYSTEM_ENV_KEYS } from '../../../cli/detach';
+import { POWERSHELL_HOST_FLAGS, WINDOWS_SYSTEM_ENV_KEYS } from '../../../cli/detach';
 import type { InstallOrigin } from '../domain/install-origin';
 import {
   embeddedInstaller,
@@ -76,9 +76,10 @@ function powershellInterpreter(which: (name: string) => string | null): string {
 
 /**
  * argv that runs the embedded script with `flags`, under the interpreter its
- * shell needs. The PowerShell prelude is stated once here: a script written to
- * a temp file only runs under a non-interactive, profile-free host with the
- * execution policy bypassed. // Usage: installerArgv('sh', path, ['--prune'], which)
+ * shell needs. The PowerShell prelude is `POWERSHELL_HOST_FLAGS` (detach.ts):
+ * a script written to a temp file only runs under a non-interactive,
+ * profile-free host with the execution policy bypassed.
+ * // Usage: installerArgv('sh', path, ['--prune'], which)
  */
 export function installerArgv(
   kind: InstallerKind,
@@ -87,16 +88,7 @@ export function installerArgv(
   which: (name: string) => string | null
 ): string[] {
   if (kind === 'sh') return ['bash', scriptPath, ...flags];
-  return [
-    powershellInterpreter(which),
-    '-NoProfile',
-    '-NonInteractive',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-File',
-    scriptPath,
-    ...flags,
-  ];
+  return [powershellInterpreter(which), ...POWERSHELL_HOST_FLAGS, '-File', scriptPath, ...flags];
 }
 
 /**

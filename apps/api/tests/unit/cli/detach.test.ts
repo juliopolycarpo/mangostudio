@@ -7,12 +7,15 @@ import {
   DETACH_ENV_ALLOWLIST,
   type DetachDeps,
   ensureLogDir,
+  POWERSHELL_HOST_FLAGS,
   pickAllowedEnv,
   restartExecutableOptions,
   spawnDetached,
   WINDOWS_SYSTEM_ENV_KEYS,
+  waiterArgv,
 } from '../../../src/cli/detach';
 import type { ServerState } from '../../../src/lib/server-state';
+import { installerArgv } from '../../../src/modules/updates/infrastructure/installer-invocation';
 import { FakeProcessController } from '../../support/mocks/fake-process-controller';
 
 const CHILD_PID = 100;
@@ -221,6 +224,45 @@ describe('buildWaiterCommand', () => {
     });
 
     expect(command).toStartWith('Wait-Process -Id 999, 555 -ErrorAction');
+  });
+});
+
+describe('waiterArgv', () => {
+  it('bypasses the execution policy, so a Restricted host can still run npm.ps1', () => {
+    // Unlike `installerArgv`, the waiter used to get only -NoProfile
+    // -NonInteractive: `npm` resolves to `npm.ps1` ahead of `npm.cmd`, and a
+    // default-Restricted machine refuses to run it.
+    const argv = waiterArgv({
+      argv: ['npm', 'install', '-g', 'mangostudio@latest'],
+      waitForPid: 1,
+      logFile: 'C:\\log.txt',
+    });
+
+    expect(argv[0]).toBe('powershell.exe');
+    expect(argv.slice(0, -1)).toContain('-ExecutionPolicy');
+    expect(argv.slice(0, -1)).toContain('Bypass');
+    expect(argv.at(-2)).toBe('-Command');
+  });
+});
+
+describe('POWERSHELL_HOST_FLAGS', () => {
+  it('names the flags every PowerShell host this project starts is given', () => {
+    // `npm`/`pnpm` resolve to their `.ps1` shim ahead of the `.cmd` one. On a
+    // default-Restricted machine — anyone who installed through CMD without
+    // ever enabling scripts — the host refuses to run it, and the delegated
+    // upgrade dies before the manager starts.
+    expect(POWERSHELL_HOST_FLAGS).toEqual([
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+    ]);
+  });
+
+  it('is the same prelude installerArgv gives the embedded script', () => {
+    const argv = installerArgv('ps1', 'C:\\t\\install.ps1', ['-Prune'], () => null);
+
+    expect(argv.slice(1, 1 + POWERSHELL_HOST_FLAGS.length)).toEqual([...POWERSHELL_HOST_FLAGS]);
   });
 });
 
