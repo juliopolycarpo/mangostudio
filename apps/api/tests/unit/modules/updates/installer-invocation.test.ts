@@ -73,6 +73,32 @@ describe('buildScriptEnv', () => {
     record: { origin: 'installer' as const, channel: 'stable' as const, version: '0.1.1' },
   };
 
+  it('falls back to MANGOSTUDIO_BIN_DIR when a legacy install recorded no binDir', () => {
+    // An install made before `binDir` was recorded has none, and this env
+    // replaces rather than merges — so without the fallback the installer
+    // writes the link into its default directory and the command already on
+    // PATH keeps pointing at the old version, while the upgrade reports
+    // success.
+    const legacy = { ...installedVia, record: { ...installedVia.record } };
+
+    const env = buildScriptEnv({ MANGOSTUDIO_BIN_DIR: '/opt/tools/bin' }, legacy);
+
+    expect(env.MANGOSTUDIO_BIN_DIR).toBe('/opt/tools/bin');
+  });
+
+  it('prefers the recorded binDir over the environment', () => {
+    // The record is what the last install actually wrote; an operator's env
+    // must not silently retarget an install that already knows its own bin dir.
+    const recorded = {
+      ...installedVia,
+      record: { ...installedVia.record, binDir: '/home/j/.local/bin' },
+    };
+
+    const env = buildScriptEnv({ MANGOSTUDIO_BIN_DIR: '/opt/tools/bin' }, recorded);
+
+    expect(env.MANGOSTUDIO_BIN_DIR).toBe('/home/j/.local/bin');
+  });
+
   it('carries the Windows system block install.ps1 needs to detect the host architecture and resolve executables', () => {
     // Get-Platform reads PROCESSOR_ARCHITECTURE/PROCESSOR_ARCHITEW6432; the
     // PowerShell 5.1 smoke check ("& $exe '--version'") needs PATHEXT to

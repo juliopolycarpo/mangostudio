@@ -63,9 +63,14 @@ export function buildScriptEnv(
   scriptEnv.MANGOSTUDIO_INSTALL_ORIGIN = 'upgrade';
   if (installedVia.distRoot !== undefined)
     scriptEnv.MANGOSTUDIO_INSTALL_DIR = installedVia.distRoot;
-  if (installedVia.record?.binDir !== undefined) {
-    scriptEnv.MANGOSTUDIO_BIN_DIR = installedVia.record.binDir;
-  }
+  // The record is the authority once an install has written one, but a legacy
+  // install made before `binDir` was recorded has none — and this env replaces
+  // rather than merges, so without the fallback an operator who supplies
+  // MANGOSTUDIO_BIN_DIR again for the upgrade still gets the link written to
+  // the default directory, leaving the command on PATH pointing at the old
+  // version while the upgrade reports success.
+  const binDir = installedVia.record?.binDir ?? env.MANGOSTUDIO_BIN_DIR;
+  if (binDir !== undefined) scriptEnv.MANGOSTUDIO_BIN_DIR = binDir;
   return scriptEnv;
 }
 
