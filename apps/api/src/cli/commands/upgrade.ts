@@ -157,10 +157,10 @@ function printFinal(report: UpgradeReport, args: UpgradeArgs, d: Required<Upgrad
     d.log(JSON.stringify(report, null, 2));
     return;
   }
-  d.log(outcomeSentence(report));
+  d.log(outcomeSentence(report, args.rollback));
 }
 
-function outcomeSentence(report: UpgradeReport): string {
+function outcomeSentence(report: UpgradeReport, rollback: boolean): string {
   switch (report.outcome) {
     case 'already-current':
       return `MangoStudio is already up to date (${report.currentVersion}).`;
@@ -170,9 +170,12 @@ function outcomeSentence(report: UpgradeReport): string {
         'Re-run with --yes to install it.'
       );
     case 'upgraded': {
-      const version = report.target?.version ?? 'the requested version';
+      // A rollback re-publishes an installed version and carries no target.
+      const headline = rollback
+        ? 'Rolled back to the previous version.'
+        : `Upgraded to ${report.target?.version ?? 'the requested version'}.`;
       const restartNote = restartSentence(report);
-      return `Upgraded to ${version}.${restartNote ? ` ${restartNote}` : ''}${report.message ? ` ${report.message}` : ''}`;
+      return `${headline}${restartNote ? ` ${restartNote}` : ''}${report.message ? ` ${report.message}` : ''}`;
     }
     case 'refused':
       return `${report.message ?? 'MangoStudio will not upgrade itself here.'}${

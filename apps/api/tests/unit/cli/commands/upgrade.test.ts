@@ -320,12 +320,13 @@ describe('runUpgrade --rollback', () => {
     expect(lines[0]).toContain('needs --yes');
   });
 
-  it('rolls back with --yes, honoring --no-restart', async () => {
-    const service = new QueueUpgradeService([upgradedReport('skipped')]);
-    const { deps } = baseDeps(service);
+  it('rolls back with --yes, honoring --no-restart, and says so rather than "upgraded"', async () => {
+    const service = new QueueUpgradeService([{ ...upgradedReport('skipped'), target: undefined }]);
+    const { deps, lines } = baseDeps(service);
 
     await runUpgrade(baseArgs({ rollback: true, yes: true, noRestart: true }), deps);
 
     expect(service.rollbackCalls).toEqual([{ restart: false }]);
+    expect(lines.at(-1)).toBe('Rolled back to the previous version.');
   });
 });
