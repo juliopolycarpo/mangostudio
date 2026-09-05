@@ -22,7 +22,7 @@ import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { CopyLine } from '../../components/CopyLine';
-import { upgradeRefusalReasonLabel } from '../format';
+import { machineGuardReasonLabel, upgradeRefusalReasonLabel } from '../format';
 import { type UseUpgradeStreamResult, useUpgradeStream } from '../hooks/use-upgrade-stream';
 import { invalidateMachineUpdate } from '../queries';
 
@@ -163,9 +163,15 @@ function UpgradeOutcome({ stream }: { readonly stream: UseUpgradeStreamResult })
   const m = t.environments.machine.update;
 
   if (stream.phase === 'refused' && stream.refusal) {
+    // A 403 from the loopback guard (a remote signed-in user clicking
+    // Upgrade) carries `reasons` — the guard's own checks — not `reason`,
+    // which is this dialog's own refusal enum. Without this fallback the
+    // dialog showed neither line: a blank confirm-turned-refusal.
     const reasonLine = stream.refusal.reason
       ? upgradeRefusalReasonLabel(t, stream.refusal.reason)
-      : null;
+      : stream.refusal.reasons.length > 0
+        ? stream.refusal.reasons.map((reason) => machineGuardReasonLabel(t, reason)).join(' ')
+        : t.environments.machine.actions.refused;
     return (
       <div className="space-y-2">
         {reasonLine && <p className="text-sm text-on-surface-variant">{reasonLine}</p>}

@@ -326,5 +326,46 @@ describe('MachinePage', () => {
     );
     const body = JSON.parse((upgradeCall?.[1]?.body as string) ?? '{}') as Record<string, unknown>;
     expect(body).not.toHaveProperty('channel');
+
+    // Same response also exercises the 'in-progress' refusal reason's i18n
+    // string, end to end through the dialog that renders it.
+    const progressDialog = await screen.findByRole('dialog', { name: 'Upgrade' });
+    await waitFor(() =>
+      expect(progressDialog.textContent).toContain(
+        'Another upgrade is already running from this hub.'
+      )
+    );
+  });
+
+  it('shows the guard reasons, not a blank dialog, when a remote signed-in user is refused with 403', async () => {
+    // The loopback guard's 403 carries `details.reasons`, not `details.reason`
+    // (the upgrade-specific enum) — the dialog must fall back to those
+    // instead of rendering nothing.
+    mountScenario();
+    scenario.respondWithJson('POST', '/api/machine/upgrade', {
+      status: 403,
+      body: {
+        error: 'blocked',
+        code: 'PERMISSION_DENIED',
+        details: { reasons: 'client-not-loopback' },
+      },
+    });
+    render(<MachinePage />);
+    const user = userEvent.setup();
+
+    const card = await screen.findByTestId('machine-update-card');
+    await user.click(within(card).getByTestId('machine-update-card-action'));
+    const confirmDialog = screen.getByRole('dialog', { name: 'Upgrade to 0.1.1?' });
+    await user.click(within(confirmDialog).getByRole('button', { name: 'Upgrade' }));
+
+    // The confirm step's dialog unmounts once `confirmed` flips; the progress
+    // view mounts its own dialog (aria-label is the plain "Upgrade" title,
+    // not the confirm step's formatted question).
+    const progressDialog = await screen.findByRole('dialog', { name: 'Upgrade' });
+    await waitFor(() =>
+      expect(progressDialog.textContent).toContain(
+        'This page was not opened from the machine the hub runs on.'
+      )
+    );
   });
 });
