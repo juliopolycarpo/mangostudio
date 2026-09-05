@@ -24,16 +24,18 @@ export function UpdateBanner() {
   const { data } = useMachineUpdate();
   // Local only: dismissing does not need the query to refetch, it only needs
   // this render to stop showing the banner for the version already stored.
-  const [dismissedLocally, setDismissedLocally] = useState(false);
+  // Keyed on the version, not a boolean — the query can refetch a newer
+  // release into the same mount, and that one has not been dismissed.
+  const [dismissedLocally, setDismissedLocally] = useState<string | null>(null);
 
   if (!data?.check?.updateAvailable || !data.check.latestVersion) return null;
-  if (dismissedLocally) return null;
   const latestVersion = data.check.latestVersion;
+  if (dismissedLocally === latestVersion) return null;
   if (readDismissedUpdateVersion() === latestVersion) return null;
 
   const handleDismiss = () => {
     dismissUpdateVersion(latestVersion);
-    setDismissedLocally(true);
+    setDismissedLocally(latestVersion);
   };
 
   return (

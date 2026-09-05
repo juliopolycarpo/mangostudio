@@ -13,7 +13,24 @@ mock.module('@tanstack/react-router', await routerWithLinkStub());
 const { UpdateBanner } = await import(
   '../../../../src/features/environments/machine/components/UpdateBanner'
 );
-const { render, screen, waitFor, within } = await import('../../../support/harness/render');
+const { act, render, screen, waitFor, within } = await import('../../../support/harness/render');
+const { useQueryClient } = await import('@tanstack/react-query');
+
+/** Only what this file drives; the real client's surface is far wider. */
+interface TestQueryClient {
+  invalidateQueries: () => Promise<void>;
+}
+
+/**
+ * The banner plus a handle on the query client behind it, so a test can push a
+ * second answer into a banner that never unmounted — the only way to reach the
+ * "a newer release arrived while this one was dismissed" state.
+ */
+let queryClient: TestQueryClient | undefined;
+function BannerWithClient() {
+  queryClient = useQueryClient() as unknown as TestQueryClient;
+  return <UpdateBanner />;
+}
 const { createFetchScenario } = await import('../../../support/mocks/create-fetch-scenario');
 
 const UPDATE_DISMISSED_KEY = 'mangostudio:update-dismissed';
@@ -65,6 +82,7 @@ function mountScenario(status: MachineUpdateStatus) {
 }
 
 afterEach(() => {
+  queryClient = undefined;
   scenario.restore();
   window.localStorage.removeItem(UPDATE_DISMISSED_KEY);
   localStorage.removeItem(LOCALE_STORAGE_KEY);
@@ -126,6 +144,32 @@ describe('UpdateBanner', () => {
 
     expect(screen.queryByTestId('machine-update-banner')).toBeNull();
     expect(window.localStorage.getItem(UPDATE_DISMISSED_KEY)).toBe('0.3.0');
+  });
+
+  it('reopens for a newer release dismissed nowhere, without remounting', async () => {
+    // Dismissal is per version, not per session: the query can refetch a newer
+    // release into a banner that is still mounted, and a boolean "dismissed"
+    // flag would keep hiding one the reader has never seen.
+    mountScenario(SELF_MANAGED_STATUS);
+    const { default: userEvent } = await import('@testing-library/user-event');
+    render(<BannerWithClient />);
+
+    await screen.findByTestId('machine-update-banner');
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('machine-update-banner-dismiss'));
+    expect(screen.queryByTestId('machine-update-banner')).toBeNull();
+
+    scenario
+      .respondWithJson('GET', '/api/machine/update', {
+        body: { ...SELF_MANAGED_STATUS, check: { ...BASE_CHECK, latestVersion: '0.4.0' } },
+      })
+      .install();
+    await act(async () => {
+      await queryClient?.invalidateQueries();
+    });
+
+    const banner = await screen.findByTestId('machine-update-banner');
+    expect(banner.textContent).toContain('0.4.0');
   });
 
   it("renders the banner sentence in the reader's locale", async () => {
