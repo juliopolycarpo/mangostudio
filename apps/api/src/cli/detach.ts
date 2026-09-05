@@ -305,12 +305,20 @@ export interface SpawnDetachedWaiterInput {
    */
   readonly afterSuccess?: readonly string[];
   /**
-   * The env the PowerShell host (and so the manager and anything it spawns,
-   * such as an npm postinstall) runs with. The caller curates it — the
-   * upgrade engine hands over the same delegate env the POSIX path uses,
-   * never this process's full environment.
+   * The env the PowerShell host runs with. The caller curates it — the upgrade
+   * engine hands over the same delegate env the POSIX path uses, never this
+   * process's full environment, plus whatever `hiddenFromManager` names.
    */
   readonly env: Record<string, string>;
+  /**
+   * Keys of `env` the manager step must not see, cleared before it runs and
+   * restored before `afterSuccess`. The hub's own runtime configuration
+   * (`BETTER_AUTH_SECRET`, `DATABASE_PATH`, …) has to reach the comeback
+   * command or the hub restarts unconfigured — but a package manager and its
+   * postinstall hooks have no business reading it. Values travel in this
+   * process's environment, never on a command line.
+   */
+  readonly hiddenFromManager?: readonly string[];
 }
 
 /** Single-quotes a PowerShell string literal, doubling any embedded quote. */
@@ -323,6 +331,20 @@ function loggedInvocation(argv: readonly string[], logFile: string): string {
   const [program, ...args] = argv;
   const invocation = ['&', powerShellQuote(program ?? ''), ...args.map(powerShellQuote)].join(' ');
   return `${invocation} *>> ${powerShellQuote(logFile)}`;
+}
+
+/**
+ * `hiddenFromManager` as two script fragments: stash the named variables into
+ * a hashtable and clear them, then put back whichever were set. Only the key
+ * names are written into the script text — the values stay in the host's own
+ * environment, out of the process listing.
+ */
+function hideForManagerSteps(keys: readonly string[]): { before: string; after: string } {
+  const list = keys.map(powerShellQuote).join(', ');
+  return {
+    before: `$mgHidden = @{}; foreach ($k in @(${list})) { $mgHidden[$k] = [Environment]::GetEnvironmentVariable($k); Remove-Item -LiteralPath ('Env:' + $k) -ErrorAction SilentlyContinue }`,
+    after: `foreach ($k in @(${list})) { if ($null -ne $mgHidden[$k]) { Set-Item -LiteralPath ('Env:' + $k) -Value $mgHidden[$k] } }`,
+  };
 }
 
 /**
@@ -345,12 +367,21 @@ function loggedInvocation(argv: readonly string[], logFile: string): string {
  * // Usage: buildWaiterCommand({ argv: ['npm', 'install', '-g', 'x'], waitForPid: [123, 456], logFile: 'C:\\log.txt', afterSuccess: ['mangostudio', 'restart'] })
  */
 export function buildWaiterCommand(
-  input: Pick<SpawnDetachedWaiterInput, 'argv' | 'waitForPid' | 'logFile' | 'afterSuccess'>
+  input: Pick<
+    SpawnDetachedWaiterInput,
+    'argv' | 'waitForPid' | 'logFile' | 'afterSuccess' | 'hiddenFromManager'
+  >
 ): string {
   const ids = Array.isArray(input.waitForPid) ? input.waitForPid.join(', ') : input.waitForPid;
+  const hidden =
+    input.hiddenFromManager && input.hiddenFromManager.length > 0
+      ? hideForManagerSteps(input.hiddenFromManager)
+      : undefined;
   const steps = [
     `Wait-Process -Id ${ids} -ErrorAction SilentlyContinue`,
+    ...(hidden ? [hidden.before] : []),
     loggedInvocation(input.argv, input.logFile),
+    ...(hidden ? [hidden.after] : []),
   ];
   if (input.afterSuccess) {
     steps.push(loggedInvocation(input.afterSuccess, input.logFile));

@@ -645,6 +645,72 @@ describe('upgrade-service delegate plans', () => {
     expect(env?.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
+  it('carries the hub config to the comeback while hiding it from the manager step', async () => {
+    // The comeback runs `mangostudio serve -d` out of the waiter's own env.
+    // Handing the waiter the delegate env alone restarts the hub without the
+    // secret it was started with, or against a different database.
+    const waiterCalls: {
+      env: Record<string, string>;
+      hiddenFromManager?: readonly string[];
+    }[] = [];
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe({ platform: 'win32' }),
+        platform: 'win32',
+        pid: 555,
+        readState: () => Promise.resolve(detachedState({ pid: 999 })),
+        isAlive: () => true,
+        env: {
+          PATH: 'C:\\bin',
+          BETTER_AUTH_SECRET: 's3cret',
+          DATABASE_PATH: 'D:\\mango\\db.sqlite',
+        },
+        spawnDetachedWaiter: (input) => {
+          waiterCalls.push(input);
+          return 1;
+        },
+      })
+    );
+
+    await collect(service);
+
+    const call = waiterCalls[0];
+    expect(call?.env.BETTER_AUTH_SECRET).toBe('s3cret');
+    expect(call?.env.DATABASE_PATH).toBe('D:\\mango\\db.sqlite');
+    expect(call?.env.PATH).toBe('C:\\bin');
+    expect(call?.hiddenFromManager).toContain('BETTER_AUTH_SECRET');
+    expect(call?.hiddenFromManager).toContain('DATABASE_PATH');
+    expect(call?.hiddenFromManager).not.toContain('PATH');
+  });
+
+  it('carries no hub config when there is no comeback to configure', async () => {
+    // Nothing to bring back means nothing that needs the secret; the manager
+    // step should see the delegate env and only the delegate env.
+    const waiterCalls: {
+      env: Record<string, string>;
+      hiddenFromManager?: readonly string[];
+    }[] = [];
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe({ platform: 'win32' }),
+        platform: 'win32',
+        pid: 555,
+        readState: () => Promise.resolve(detachedState({ pid: 999 })),
+        isAlive: () => false,
+        env: { PATH: 'C:\\bin', BETTER_AUTH_SECRET: 's3cret' },
+        spawnDetachedWaiter: (input) => {
+          waiterCalls.push(input);
+          return 1;
+        },
+      })
+    );
+
+    await collect(service);
+
+    expect(waiterCalls[0]?.env.BETTER_AUTH_SECRET).toBeUndefined();
+    expect(waiterCalls[0]?.hiddenFromManager).toBeUndefined();
+  });
+
   it('reports failed with exit 2 when the package manager exits non-zero', async () => {
     const script = fakeRunScript(1);
     const service = createUpgradeService(

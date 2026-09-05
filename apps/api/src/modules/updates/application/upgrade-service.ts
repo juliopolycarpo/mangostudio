@@ -469,12 +469,20 @@ async function runWindowsDelegate(
 
   const logFile = getUpgradeLogPath(d.now());
   const afterSuccess = hub && request.restart ? comebackArgv(hub) : undefined;
+  // The comeback runs `mangostudio serve -d` out of the waiter's own
+  // environment, so the hub's runtime configuration has to travel with it or
+  // it comes back without the secret and database path it was started with.
+  // The manager step never sees those keys: `hiddenFromManager` clears them
+  // around it (see `buildWaiterCommand`).
+  const hubConfig = afterSuccess ? pickAllowedEnv(d.env, RUNTIME_CONFIG_ENV_KEYS) : {};
+  const hiddenFromManager = Object.keys(hubConfig);
   try {
     d.spawnDetachedWaiter({
       argv: plan.argv,
       waitForPid: hub ? [hub.state.pid, d.pid] : d.pid,
       logFile,
-      env: delegateEnv(d.env),
+      env: { ...delegateEnv(d.env), ...hubConfig },
+      ...(hiddenFromManager.length > 0 ? { hiddenFromManager } : {}),
       ...(afterSuccess ? { afterSuccess } : {}),
     });
   } catch (error) {

@@ -151,6 +151,68 @@ describe('buildWaiterCommand', () => {
     expect(command).toContain("'it''s-mango'");
   });
 
+  it('clears the hidden keys before the manager and restores them before the comeback', () => {
+    // `mangostudio serve -d` runs out of this host's environment, so the hub's
+    // runtime config has to survive to the comeback step — but npm and its
+    // postinstall hooks must not see it in between.
+    const command = buildWaiterCommand({
+      argv: ['npm', 'install', '-g', 'mangostudio@latest'],
+      waitForPid: [999, 555],
+      logFile: 'C:\\log.txt',
+      hiddenFromManager: ['BETTER_AUTH_SECRET', 'DATABASE_PATH'],
+      afterSuccess: ['mangostudio', 'serve', '-d', 'localhost:3001'],
+    });
+
+    const clear = command.indexOf('Remove-Item');
+    const manager = command.indexOf("& 'npm'");
+    const restore = command.indexOf('Set-Item');
+    const comeback = command.indexOf("& 'mangostudio'");
+    expect(clear).toBeGreaterThan(-1);
+    expect(clear).toBeLessThan(manager);
+    expect(manager).toBeLessThan(restore);
+    expect(restore).toBeLessThan(comeback);
+    expect(command).toContain("@('BETTER_AUTH_SECRET', 'DATABASE_PATH')");
+  });
+
+  it('never writes a hidden value into the command text, only its key', () => {
+    // The script text lands in a process listing; the values travel in the
+    // host's own environment instead.
+    const command = buildWaiterCommand({
+      argv: ['npm', 'install', '-g', 'mangostudio@latest'],
+      waitForPid: 999,
+      logFile: 'C:\\log.txt',
+      hiddenFromManager: ['BETTER_AUTH_SECRET'],
+      afterSuccess: ['mangostudio', 'restart'],
+    });
+
+    expect(command).toContain('BETTER_AUTH_SECRET');
+    expect(command).toContain('[Environment]::GetEnvironmentVariable($k)');
+  });
+
+  it('quotes only with single quotes, so Windows command-line escaping never has to carry a double quote', () => {
+    const command = buildWaiterCommand({
+      argv: ['npm', 'install', '-g', 'mangostudio@latest'],
+      waitForPid: 999,
+      logFile: 'C:\\log.txt',
+      hiddenFromManager: ['BETTER_AUTH_SECRET'],
+      afterSuccess: ['mangostudio', 'restart'],
+    });
+
+    expect(command).not.toContain('"');
+  });
+
+  it('adds no hide/restore steps when nothing is hidden', () => {
+    const command = buildWaiterCommand({
+      argv: ['npm', 'install', '-g', 'mangostudio@latest'],
+      waitForPid: 999,
+      logFile: 'C:\\log.txt',
+      hiddenFromManager: [],
+    });
+
+    expect(command).not.toContain('Remove-Item');
+    expect(command).not.toContain('Set-Item');
+  });
+
   it('waits on every pid in a list, comma-separated, when the CLI is not the process holding the exe open', () => {
     const command = buildWaiterCommand({
       argv: ['npm', 'install', '-g', 'mangostudio@latest'],
