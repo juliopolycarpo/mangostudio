@@ -19,6 +19,7 @@ describe('updates contract', () => {
             '/home/j/.bun/install/global/node_modules/@mangostudio/cli-linux-x64/mangostudio',
           launcherPath: '/home/j/.bun/install/global/node_modules/mangostudio/bin/mangostudio.js',
         },
+        channel: 'stable',
         check: null,
         checksEnabled: true,
         canUpgrade: false,
