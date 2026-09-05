@@ -84,5 +84,13 @@ export function bridgeEmitter<T, R>(
     }
   }
 
+  // `running` is handed out as `settled` and awaited by `items()`, but neither
+  // is guaranteed to be observed: `run-script.ts` keeps only `items`, and a
+  // consumer that abandons the generator never reaches `await running`. A
+  // producer that rejects would then be an unhandled rejection — fatal to the
+  // hub process under Bun. This no-op handler marks it observed without
+  // changing what `settled` (or `items`) rejects with for a real caller.
+  void running.catch(() => undefined);
+
   return { items: items(), result: () => result, settled: running };
 }

@@ -64,6 +64,36 @@ describe('bridgeEmitter', () => {
     await expect(bridge.settled).rejects.toThrow('producer failed');
   });
 
+  it('does not leave an unhandled rejection when nobody observes a rejecting producer', async () => {
+    // `run-script.ts` keeps only `items` and drops `settled`; a consumer that
+    // abandons the generator (an `emit` that throws mid-relay) never reaches
+    // `await running` either. Under Bun an unobserved rejection takes the hub
+    // process down, so the bridge has to mark its own promise observed.
+    const seen: unknown[] = [];
+    const onUnhandled = (error: unknown) => seen.push(error);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      let reject: ((error: Error) => void) | undefined;
+      const bridge = bridgeEmitter<string, void>((emit) => {
+        emit('first');
+        return new Promise<void>((_resolve, rejectPromise) => {
+          reject = rejectPromise;
+        });
+      });
+
+      const iterator = bridge.items[Symbol.asyncIterator]();
+      expect((await iterator.next()).value).toBe('first');
+      await iterator.return?.(undefined);
+
+      reject?.(new Error('producer failed'));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(seen).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
   it('interleaves emissions from two concurrent producers merged into one bridge', async () => {
     const bridge = bridgeEmitter<string, void>((emit) =>
       Promise.all([
