@@ -39,7 +39,7 @@ export function UpdateCard({ status, onUpgraded }: UpdateCardProps) {
           label={m.installedVia}
           value={installedViaManagerLabel(t, status.installedVia.manager)}
         />
-        <Row label={m.channel} value={m.channelName[status.installedVia.channel]} />
+        <Row label={m.channel} value={m.channelName[status.channel]} />
         <Row label={m.latest} value={updateLatestLabel(t, status)} />
       </div>
       <div className="border-t border-outline-variant/15 pt-4">

@@ -91,6 +91,7 @@ const UPDATE_STATUS: MachineUpdateStatus = {
     channel: 'stable',
     executable: '/home/j/.mango/dist/current/mangostudio',
   },
+  channel: 'stable',
   check: {
     channel: 'stable',
     currentVersion: '0.1.1',
@@ -279,5 +280,51 @@ describe('MachinePage', () => {
     expect(within(card).getByText('Installed via')).toBeTruthy();
     expect(within(card).getByText('Install script')).toBeTruthy();
     expect(within(card).getByText('Up to date (0.1.1)')).toBeTruthy();
+  });
+
+  it('shows the configured channel, not the build-origin channel installedVia carries', async () => {
+    // A stable build configured for canary must show "Canary" here — the
+    // channel an upgrade would actually target — not "Stable" (this build's
+    // own origin), which used to be the only channel the card could read.
+    mountScenario(STATUS, { ...UPDATE_STATUS, channel: 'canary' });
+    render(<MachinePage />);
+
+    const card = await screen.findByTestId('machine-update-card');
+    expect(within(card).getByText('Canary')).toBeTruthy();
+    expect(within(card).queryByText('Stable')).toBeNull();
+  });
+
+  it('never sends channel in the upgrade POST body — the server resolves its own effective channel', async () => {
+    // installedVia.channel here is 'stable'; sending it would override the
+    // operator's configured [updates] channel on the server, which resolves
+    // request.channel ?? configuredChannel ?? installedVia.channel.
+    mountScenario();
+    scenario.respondWithJson('POST', '/api/machine/upgrade', {
+      status: 409,
+      body: {
+        error: 'in progress',
+        code: 'UNSUPPORTED',
+        details: { reason: 'in-progress', command: 'mangostudio status' },
+      },
+    });
+    render(<MachinePage />);
+    const user = userEvent.setup();
+
+    const card = await screen.findByTestId('machine-update-card');
+    await user.click(within(card).getByTestId('machine-update-card-action'));
+    const dialog = screen.getByRole('dialog', { name: 'Upgrade to 0.1.1?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Upgrade' }));
+
+    await waitFor(() => {
+      const posts = scenario.fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes('/api/machine/upgrade')
+      );
+      expect(posts.length).toBeGreaterThan(0);
+    });
+    const upgradeCall = scenario.fetchMock.mock.calls.find(([input]) =>
+      String(input).includes('/api/machine/upgrade')
+    );
+    const body = JSON.parse((upgradeCall?.[1]?.body as string) ?? '{}') as Record<string, unknown>;
+    expect(body).not.toHaveProperty('channel');
   });
 });

@@ -68,7 +68,13 @@ export function UpgradeDialog({ status, onClose, onUpgraded }: UpgradeDialogProp
         cancelLabel={t.environments.machine.actions.cancel}
         onConfirm={() => {
           setConfirmed(true);
-          stream.start({ channel: status.installedVia.channel });
+          // No channel here: the server resolves its own effective channel
+          // (config's `[updates] channel`, or the build's own) the same way
+          // GET /machine/update already reported it as `status.channel`.
+          // Sending `installedVia.channel` — the build's own origin, not the
+          // configured target — would override the operator's configured
+          // channel and could install the wrong one.
+          stream.start({});
         }}
         onCancel={onClose}
       />
