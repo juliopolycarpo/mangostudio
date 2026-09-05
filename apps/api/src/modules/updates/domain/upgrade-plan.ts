@@ -104,6 +104,19 @@ export function planUpgrade(
     case 'npm':
     case 'bun':
     case 'pnpm':
+      // A canary is published as `<root>-canary.<sha7>`, and nothing here can
+      // turn a bare sha into that version: the root belongs to the commit
+      // being asked for, not to this build, so guessing it installs a
+      // different commit under the name of the one requested. Refuse the way
+      // the cargo branch already refuses a sha, instead of silently handing
+      // back the rolling `@canary`.
+      if (request.sha !== undefined && request.version === undefined) {
+        return refused(
+          'channel-unsupported',
+          installer,
+          `${manager} installs a published version, not a commit. Pass --version <x.y.z-canary.${request.sha.slice(0, 7)}> if you know it, or use the shell installer to pin a commit.`
+        );
+      }
       return delegate(npmFamilyArgv(manager, npmSpec(request)));
     case 'homebrew':
       if (canary) {
@@ -113,6 +126,13 @@ export function planUpgrade(
           'Homebrew publishes stable releases only. Switch to the shell installer for canary.'
         );
       }
+      if (request.version !== undefined) {
+        return refused(
+          'channel-unsupported',
+          installer,
+          'Homebrew upgrades a formula to whatever its tap publishes and cannot be pointed at an exact version. Use the shell installer to pin one.'
+        );
+      }
       return delegate(['brew', 'upgrade', 'mangostudio']);
     case 'scoop':
       if (canary) {
@@ -120,6 +140,13 @@ export function planUpgrade(
           'channel-unsupported',
           installer,
           'Scoop publishes stable releases only. Switch to the PowerShell installer for canary.'
+        );
+      }
+      if (request.version !== undefined) {
+        return refused(
+          'channel-unsupported',
+          installer,
+          'Scoop updates to the manifest in its bucket and cannot be pointed at an exact version. Use the PowerShell installer to pin one.'
         );
       }
       return delegate(['scoop', 'update', 'mangostudio']);
@@ -139,6 +166,16 @@ export function planUpgrade(
           'mangostudio',
           '--version',
           `${root}-canary`,
+          '--locked',
+        ]);
+      }
+      if (request.version !== undefined) {
+        return delegate([
+          'cargo',
+          'install',
+          'mangostudio',
+          '--version',
+          request.version,
           '--locked',
         ]);
       }
