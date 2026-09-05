@@ -132,6 +132,19 @@ describe('runUpgrade --check', () => {
 
     expect(lines).toEqual([JSON.stringify(report, null, 2)]);
   });
+
+  it('still only previews when --yes is passed alongside it', async () => {
+    // --check is a preview and nothing else; combining it with --yes must not
+    // install, however emphatic the pair reads.
+    const service = new QueueUpgradeService([availableReport()]);
+    const { deps } = baseDeps(service);
+
+    const exitCode = await runUpgrade(baseArgs({ check: true, yes: true }), deps);
+
+    expect(exitCode).toBe(0);
+    expect(service.runCalls).toHaveLength(1);
+    expect(service.runCalls[0]?.checkOnly).toBe(true);
+  });
 });
 
 describe('runUpgrade --yes', () => {

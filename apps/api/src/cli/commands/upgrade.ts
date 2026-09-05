@@ -14,7 +14,7 @@ import {
 import type { UpgradeArgs } from '../args';
 import { writeLine } from '../output';
 import { createProcessController, type ProcessController } from '../process-control';
-import { promptYesNo } from '../prompt';
+import { isInteractiveTerminal, promptYesNo } from '../prompt';
 
 export interface UpgradeCliDeps {
   readonly service: UpgradeService;
@@ -43,36 +43,20 @@ function baseRequest(args: UpgradeArgs): Omit<UpgradeRunRequest, 'restart' | 'ch
 }
 
 async function runUpgradeFlow(args: UpgradeArgs, d: Required<UpgradeCliDeps>): Promise<number> {
-  const request = baseRequest(args);
+  const request = { ...baseRequest(args), restart: !args.noRestart };
 
-  if (args.check) {
-    const report = await d.service.run(
-      { ...request, restart: !args.noRestart, checkOnly: true },
-      () => undefined
-    );
-    printFinal(report, args, d);
-    return report.exitCode;
+  // Already confirmed: go straight to the real request rather than spending a
+  // resolver round trip on a preview nobody will be shown. `--check` still
+  // wins over `--yes` — previewing is all it ever does.
+  if (args.yes && !args.check) {
+    return await streamAndPrint({ ...request, checkOnly: false }, args, d);
   }
 
-  if (args.yes) {
-    return await streamAndPrint(
-      { ...request, restart: !args.noRestart, checkOnly: false },
-      args,
-      d
-    );
-  }
-
-  // The unconfirmed path previews first: a self plan with an update available
-  // resolves without downloading (outcome: 'available'); anything else — no
-  // update, a refusal, a resolver failure — is already the final report.
-  const preview = await d.service.run(
-    { ...request, restart: !args.noRestart, checkOnly: true },
-    () => undefined
-  );
-  if (preview.outcome !== 'available') {
-    printFinal(preview, args, d);
-    return preview.exitCode;
-  }
+  // A self plan with an update available resolves without downloading
+  // (outcome: 'available'); anything else — no update, a refusal, a resolver
+  // failure — is already the final report.
+  const preview = await d.service.run({ ...request, checkOnly: true }, () => undefined);
+  if (args.check || preview.outcome !== 'available') return finish(preview, args, d);
 
   const interactive = d.isInteractive();
   const proceed =
@@ -83,12 +67,17 @@ async function runUpgradeFlow(args: UpgradeArgs, d: Required<UpgradeCliDeps>): P
   if (!proceed) {
     // Non-interactive or declined: the preview report already says what is
     // available and is exit 0 — "no" to a download is not a failure.
-    printFinal(preview, args, d);
-    return preview.exitCode;
+    return finish(preview, args, d);
   }
 
   const restart = await resolveRestartFlag(args, d, interactive);
   return await streamAndPrint({ ...request, restart, checkOnly: false }, args, d);
+}
+
+/** Print a report the way `--json` or the terminal wants it, and hand back its exit code. */
+function finish(report: UpgradeReport, args: UpgradeArgs, d: Required<UpgradeCliDeps>): number {
+  printFinal(report, args, d);
+  return report.exitCode;
 }
 
 async function runRollback(args: UpgradeArgs, d: Required<UpgradeCliDeps>): Promise<number> {
@@ -101,9 +90,7 @@ async function runRollback(args: UpgradeArgs, d: Required<UpgradeCliDeps>): Prom
   }
 
   const emit = args.json ? noopEmit : (event: UpgradeStreamEvent) => printEvent(event, d.log);
-  const report = await d.service.rollback(emit, { restart: !args.noRestart });
-  printFinal(report, args, d);
-  return report.exitCode;
+  return finish(await d.service.rollback(emit, { restart: !args.noRestart }), args, d);
 }
 
 async function streamAndPrint(
@@ -112,9 +99,7 @@ async function streamAndPrint(
   d: Required<UpgradeCliDeps>
 ): Promise<number> {
   const emit = args.json ? noopEmit : (event: UpgradeStreamEvent) => printEvent(event, d.log);
-  const report = await d.service.run(request, emit);
-  printFinal(report, args, d);
-  return report.exitCode;
+  return finish(await d.service.run(request, emit), args, d);
 }
 
 function noopEmit(): void {
@@ -204,8 +189,7 @@ function resolveDeps(deps: Partial<UpgradeCliDeps>): Required<UpgradeCliDeps> {
     service: deps.service ?? createUpgradeService(),
     readState: deps.readState ?? readState,
     controller: deps.controller ?? createProcessController(),
-    isInteractive:
-      deps.isInteractive ?? (() => Boolean(process.stdin.isTTY && process.stdout.isTTY)),
+    isInteractive: deps.isInteractive ?? isInteractiveTerminal,
     confirm: deps.confirm ?? promptYesNo,
     log: deps.log ?? writeLine,
   };
