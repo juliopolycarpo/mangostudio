@@ -2,9 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import {
   buildScriptEnv,
   installerArgv,
-  powershellInterpreter,
-  selfInstallArgv,
-  useVersionArgv,
+  selfInstallFlags,
+  useVersionFlags,
 } from '../../../../src/modules/updates/infrastructure/installer-invocation';
 
 const noPwsh = () => null;
@@ -34,17 +33,13 @@ describe('installerArgv', () => {
 
   it('prefers pwsh when the host has it', () => {
     expect(installerArgv('ps1', 'C:\\t\\install.ps1', [], hasPwsh)[0]).toBe('pwsh');
-    expect(powershellInterpreter(noPwsh)).toBe('powershell.exe');
+    expect(installerArgv('ps1', 'C:\\t\\install.ps1', [], noPwsh)[0]).toBe('powershell.exe');
   });
 });
 
-describe('selfInstallArgv', () => {
+describe('selfInstallFlags', () => {
   it('passes the resolved version for every kind, so a canary smoke check compares the full string', () => {
-    expect(
-      selfInstallArgv('sh', '/tmp/install.sh', '/tmp/a.tar.gz', '0.1.1-canary.abc1234', noPwsh)
-    ).toEqual([
-      'bash',
-      '/tmp/install.sh',
+    expect(selfInstallFlags('sh', '/tmp/a.tar.gz', '0.1.1-canary.abc1234')).toEqual([
       '--local',
       '/tmp/a.tar.gz',
       '--version',
@@ -53,25 +48,19 @@ describe('selfInstallArgv', () => {
   });
 
   it('uses the PowerShell flag spelling on ps1', () => {
-    expect(
-      selfInstallArgv('ps1', 'C:\\t\\i.ps1', 'C:\\t\\a.zip', '0.1.1', noPwsh).slice(6)
-    ).toEqual(['C:\\t\\i.ps1', '-Local', 'C:\\t\\a.zip', '-Version', '0.1.1']);
+    expect(selfInstallFlags('ps1', 'C:\\t\\a.zip', '0.1.1')).toEqual([
+      '-Local',
+      'C:\\t\\a.zip',
+      '-Version',
+      '0.1.1',
+    ]);
   });
 });
 
-describe('useVersionArgv', () => {
+describe('useVersionFlags', () => {
   it('asks for a pointer swap only, per shell', () => {
-    expect(useVersionArgv('sh', '/tmp/install.sh', '0.1.0', noPwsh)).toEqual([
-      'bash',
-      '/tmp/install.sh',
-      '--use',
-      '0.1.0',
-    ]);
-    expect(useVersionArgv('ps1', 'C:\\t\\i.ps1', '0.1.0', noPwsh).slice(6)).toEqual([
-      'C:\\t\\i.ps1',
-      '-Use',
-      '0.1.0',
-    ]);
+    expect(useVersionFlags('sh', '0.1.0')).toEqual(['--use', '0.1.0']);
+    expect(useVersionFlags('ps1', '0.1.0')).toEqual(['-Use', '0.1.0']);
   });
 });
 

@@ -79,6 +79,8 @@ import type { InstallerKind } from '../infrastructure/embedded-installers';
 import {
   buildScriptEnv,
   installerArgv,
+  selfInstallFlags,
+  useVersionFlags,
   writeTempScriptReal,
 } from '../infrastructure/installer-invocation';
 import {
@@ -612,9 +614,7 @@ async function runSelf(
         const downloaded = await d.downloadVerified(resolved, stagingDir);
         emit(stageEvent('verify', downloaded.verification));
         emit(stageEvent('install'));
-        return kind === 'sh'
-          ? ['--local', downloaded.path, '--version', resolved.version]
-          : ['-Local', downloaded.path, '-Version', resolved.version];
+        return selfInstallFlags(kind, downloaded.path, resolved.version);
       },
     },
     d,
@@ -705,8 +705,7 @@ async function rollbackInner(
       stagingName: `.rollback-${previousVersion}-${d.pid}`,
       firstStage: stageEvent('install'),
       restart,
-      buildFlags: (_stagingDir, kind) =>
-        Promise.resolve(kind === 'sh' ? ['--use', previousVersion] : ['-Use', previousVersion]),
+      buildFlags: (_stagingDir, kind) => Promise.resolve(useVersionFlags(kind, previousVersion)),
     },
     d,
     emit

@@ -70,7 +70,7 @@ export function buildScriptEnv(
 }
 
 /** PowerShell 7 when the host has it, the 5.1 that ships with Windows otherwise. */
-export function powershellInterpreter(which: (name: string) => string | null): string {
+function powershellInterpreter(which: (name: string) => string | null): string {
   return which('pwsh') !== null ? 'pwsh' : 'powershell.exe';
 }
 
@@ -100,42 +100,32 @@ export function installerArgv(
 }
 
 /**
- * argv for the embedded script's install path, one flag set per shell.
- * `--version`/`-Version` is passed for every kind, not just `npm-tarball`: a
- * canary archive's file name only carries the bare `<major>.<minor>.<patch>-
- * canary`, but the resolved version (from the canary manifest) carries
- * the full `<version>.<sha7>` the binary reports — without it install.sh
- * falls back to deriving the version from the file name and the post-install
- * smoke check compares that truncated string against `--version`, failing
- * every canary self-upgrade.
+ * The flags that tell the script to install `archivePath`, in the spelling its
+ * shell uses. `--version`/`-Version` is passed for every kind, not just
+ * `npm-tarball`: a canary archive's file name only carries the bare
+ * `<major>.<minor>.<patch>-canary`, but the resolved version (from the canary
+ * manifest) carries the full `<version>.<sha7>` the binary reports — without it
+ * install.sh falls back to deriving the version from the file name and the
+ * post-install smoke check compares that truncated string against `--version`,
+ * failing every canary self-upgrade.
+ * // Usage: selfInstallFlags('sh', '/tmp/a.tar.gz', '0.1.1')
  */
-export function selfInstallArgv(
+export function selfInstallFlags(
   kind: InstallerKind,
-  scriptPath: string,
   archivePath: string,
-  version: string,
-  which: (name: string) => string | null
+  version: string
 ): string[] {
-  const flags =
-    kind === 'sh'
-      ? ['--local', archivePath, '--version', version]
-      : ['-Local', archivePath, '-Version', version];
-  return installerArgv(kind, scriptPath, flags, which);
+  return kind === 'sh'
+    ? ['--local', archivePath, '--version', version]
+    : ['-Local', archivePath, '-Version', version];
 }
 
-/** argv for the embedded script's `--use`/`-Use` path — no download, just a pointer swap. */
-export function useVersionArgv(
-  kind: InstallerKind,
-  scriptPath: string,
-  version: string,
-  which: (name: string) => string | null
-): string[] {
-  return installerArgv(
-    kind,
-    scriptPath,
-    kind === 'sh' ? ['--use', version] : ['-Use', version],
-    which
-  );
+/**
+ * The flags for the script's `--use`/`-Use` path — no download, just a pointer
+ * swap back to a version already on disk. // Usage: useVersionFlags('ps1', '0.1.0')
+ */
+export function useVersionFlags(kind: InstallerKind, version: string): string[] {
+  return kind === 'sh' ? ['--use', version] : ['-Use', version];
 }
 
 /**
