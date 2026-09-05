@@ -87,7 +87,11 @@ export function versionRoot(version: string): string {
   return version.split('-')[0] ?? version;
 }
 
-function planForManager(
+/**
+ * Decide how a request is carried out for this origin.
+ * // Usage: planUpgrade('bun', { channel: 'stable' }, { platform: 'linux', currentVersion: '0.1.1' })
+ */
+export function planUpgrade(
   manager: InstallManager,
   request: UpgradeRequest,
   context: { readonly platform: NodeJS.Platform; readonly currentVersion: string }
@@ -160,18 +164,6 @@ function planForManager(
         'Could not tell how this binary was installed. Reinstall with the install script, which records its origin.'
       );
   }
-}
-
-/**
- * Decide how a request is carried out for this origin.
- * // Usage: planUpgrade('bun', { channel: 'stable' }, { platform: 'linux', currentVersion: '0.1.1' })
- */
-export function planUpgrade(
-  manager: InstallManager,
-  request: UpgradeRequest,
-  context: { readonly platform: NodeJS.Platform; readonly currentVersion: string }
-): UpgradePlan {
-  return planForManager(manager, request, context);
 }
 
 /** The one-line command to print beside "update available". // Usage: upgradeCommandFor(plan) */
