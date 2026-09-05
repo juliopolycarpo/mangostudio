@@ -118,6 +118,7 @@
   "/api/machine/service": ["post"],
   "/api/machine/status": ["get"],
   "/api/machine/update": ["get"],
+  "/api/machine/upgrade": ["post"],
   "/api/mcp/elicitations/{id}/respond": ["post"],
   "/api/mcp/servers": ["get", "post"],
   "/api/mcp/servers/import": ["post"],

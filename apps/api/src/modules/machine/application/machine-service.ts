@@ -33,11 +33,15 @@ import {
 } from '@mangostudio/shared/runtime-home';
 import {
   type MachineUpdateStatus,
+  type MachineUpgradeBody,
   UPDATE_ERROR_MAX,
   UPDATE_VERSION_MAX,
   UPGRADE_COMMAND_MAX,
   type UpdateChannel,
   type UpdateCheck,
+  type UpgradeRefusalReason,
+  type UpgradeReport,
+  type UpgradeStreamEvent,
 } from '@mangostudio/shared/updates';
 import { stringify as stringifyToml } from 'smol-toml';
 import { restartExecutableOptions, spawnServeChild } from '../../../cli/detach';
@@ -58,6 +62,7 @@ import {
   getVersion,
   resetConfig,
 } from '../../../lib/config';
+import { bridgeEmitter } from '../../../lib/emit-bridge';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getLogsDir, getServerLogPath } from '../../../lib/mango-paths';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
@@ -70,6 +75,11 @@ import {
   upgradeRefusalReason,
 } from '../../updates/application/install-status';
 import { type UpdateChecker, updateChecker } from '../../updates/application/update-check';
+import {
+  createUpgradeService,
+  type UpgradeRunRequest,
+  type UpgradeService,
+} from '../../updates/application/upgrade-service';
 import { fitInstalledVia, type InstallOriginProbe } from '../../updates/domain/install-origin';
 import type { HubExecutable } from '../domain/hub-executable';
 import { describeHubProcess, hubLaunchMode } from '../domain/hub-process';
@@ -116,6 +126,23 @@ export class MachineActionUnavailableError extends Error {
   ) {
     super(`This action is not available here (${reason}). Run "${command}" in a terminal instead.`);
     this.name = 'MachineActionUnavailableError';
+  }
+}
+
+/**
+ * `POST /machine/upgrade` was asked for a plan this hub does not carry out
+ * itself. Its own error type, not `MachineActionUnavailableError`: an
+ * upgrade refusal reason (`package-manager`, `container`, ...) is a
+ * different enum than `MachineActionReason`, and widening that shared schema
+ * for one route is not warranted when a second error type does the job.
+ */
+export class UpgradeUnavailableError extends Error {
+  constructor(
+    readonly reason: UpgradeRefusalReason,
+    readonly command: string
+  ) {
+    super(`This action is not available here (${reason}). Run "${command}" in a terminal instead.`);
+    this.name = 'UpgradeUnavailableError';
   }
 }
 
@@ -184,6 +211,12 @@ export interface MachineServiceDeps {
   /** `config.updates`, re-read each call so a reload takes effect immediately. */
   readonly updatesConfig: () => { readonly check: boolean; readonly channel: UpdateChannel | null };
   readonly checker: Pick<UpdateChecker, 'readCached' | 'check'>;
+  /**
+   * The upgrade engine, wired with a no-op `restartHub`: this route defers
+   * the actual restart until after the SSE stream has ended (see `upgrade`
+   * below), the same way `restart()` above defers through `schedule`.
+   */
+  readonly upgradeService: UpgradeService;
 }
 
 export interface MachineService {
@@ -200,6 +233,16 @@ export interface MachineService {
     context: MachineRequestContext
   ): Promise<MachineConfigWriteResponse>;
   update(): Promise<MachineUpdateStatus>;
+  /**
+   * Stream an upgrade. The guard and the plan check both happen before the
+   * promise resolves, so a caller can `await` this and map a thrown
+   * `MachineActionBlockedError`/`UpgradeUnavailableError` to 403/409 before
+   * ever opening the response stream.
+   */
+  upgrade(
+    body: MachineUpgradeBody,
+    context: MachineRequestContext
+  ): Promise<AsyncIterable<UpgradeStreamEvent>>;
 }
 
 const AFTER_RESPONSE_MS = 50;
@@ -402,7 +445,43 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
         command: fitToLimit(status.command, UPGRADE_COMMAND_MAX),
       });
     },
+
+    // The guard and the plan lookup are both synchronous; wrapping in
+    // Promise.resolve/reject (rather than declaring this async, which would
+    // trip the no-idle-await lint) keeps every failure a rejection the same
+    // way writeConfig above does, so a caller `await`ing this never has to
+    // tell a thrown guard error apart from a rejected one.
+    upgrade(body, context) {
+      try {
+        return Promise.resolve(upgradeNow(body, context));
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
   };
+
+  function upgradeNow(
+    body: MachineUpgradeBody,
+    context: MachineRequestContext
+  ): AsyncIterable<UpgradeStreamEvent> {
+    const guard = d.evaluateGuard(context.clientIp);
+    if (!guard.allowed) throw new MachineActionBlockedError(guard);
+
+    const environment = d.environment();
+    const { channel: configuredChannel } = d.updatesConfig();
+    const status = resolveInstallStatus(
+      d.installOriginProbe(),
+      configuredChannel,
+      environment.version,
+      { channel: body.channel, version: body.version, sha: body.sha }
+    );
+    if (status.plan.kind !== 'self') {
+      const reason = upgradeRefusalReason(status.plan) ?? 'unknown-origin';
+      throw new UpgradeUnavailableError(reason, status.command);
+    }
+
+    return upgradeEvents(body, d, liveState);
+  }
 
   function writeConfigNow(
     body: MachineConfigWriteBody,
@@ -494,6 +573,68 @@ function refuse(reason: MachineActionReason | null, guard: InstallGuard, command
   if (reason === null) return;
   if (reason === 'guard') throw new MachineActionBlockedError(guard);
   throw new MachineActionUnavailableError(reason, command);
+}
+
+/**
+ * Bridges the engine's `emit` callback into the SSE source `upgrade()`
+ * returns, then — once the caller has drained it — schedules the real
+ * restart in a `finally`, so a client that disconnects mid-stream (`cancel()`
+ * → the generator never resumes past its last `yield`) still gets the
+ * restart it was promised, not just one that completed normally.
+ */
+async function* upgradeEvents(
+  body: MachineUpgradeBody,
+  d: MachineServiceDeps,
+  liveState: () => Promise<ServerState | null>
+): AsyncGenerator<UpgradeStreamEvent> {
+  const request: UpgradeRunRequest = {
+    ...(body.channel !== undefined ? { channel: body.channel } : {}),
+    ...(body.version !== undefined ? { version: body.version } : {}),
+    ...(body.sha !== undefined ? { sha: body.sha } : {}),
+    restart: body.restart ?? true,
+  };
+  const bridge = bridgeEmitter<UpgradeStreamEvent, UpgradeReport>((emit) =>
+    d.upgradeService.run(request, emit)
+  );
+
+  try {
+    yield* bridge.items;
+    const report = bridge.result();
+    if (report) yield { type: 'done', done: true, ...report };
+  } finally {
+    // Runs whether the stream ended normally or the client disconnected
+    // mid-way (`cancel()` stops `bridge.items` short of its last `yield`,
+    // which would otherwise skip scheduling a restart the upgrade already
+    // earned). `bridge.result()` is only set once the engine has actually
+    // settled; still undefined here means the client left before the engine
+    // finished. The engine keeps running regardless (it never reads from
+    // this generator), so wait for `bridge.settled` instead of giving up —
+    // fire-and-forget, so a slow download does not hold `iterator.return()`
+    // open for the caller.
+    const report = bridge.result();
+    if (report !== undefined) {
+      await scheduleRestartIfNeeded(report, d, liveState);
+    } else {
+      void bridge.settled.then(
+        (finalReport) => scheduleRestartIfNeeded(finalReport, d, liveState),
+        () => undefined
+      );
+    }
+  }
+}
+
+async function scheduleRestartIfNeeded(
+  report: UpgradeReport,
+  d: MachineServiceDeps,
+  liveState: () => Promise<ServerState | null>
+): Promise<void> {
+  if (report.restart !== 'scheduled') return;
+  const state = await liveState();
+  if (!state) return;
+  d.schedule(() => {
+    d.spawnSuccessor(state);
+    d.shutdown();
+  });
 }
 
 /**
@@ -606,6 +747,11 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
     installOriginProbe: deps.installOriginProbe ?? currentInstallOriginProbe,
     updatesConfig: deps.updatesConfig ?? (() => getConfig().updates),
     checker: deps.checker ?? updateChecker,
+    // A no-op restartHub: this process is the hub the upgrade would restart,
+    // so the actual restart is scheduled by upgradeEvents() above, after the
+    // SSE stream has ended — never by the engine itself mid-request.
+    upgradeService:
+      deps.upgradeService ?? createUpgradeService({ restartHub: () => Promise.resolve() }),
   };
 }
 
