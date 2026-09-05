@@ -16,12 +16,16 @@ import {
   type UpdateChannel,
 } from '@mangostudio/shared/updates';
 import { resolveRuntimeRelease } from '../../environments/domain/runtime-release-resolution';
-import { hubDistRoot } from '../../machine/domain/hub-executable';
+import {
+  grandparentDirectory,
+  hubDistRoot,
+  INSTALL_ORIGIN_FILE,
+} from '../../machine/domain/hub-executable';
 import { fitToLimit } from '../../machine/domain/machine-limits';
 
 export const LAUNCHER_ENV = 'MANGOSTUDIO_LAUNCHER';
 export const LAUNCHER_PATH_ENV = 'MANGOSTUDIO_LAUNCHER_PATH';
-export const INSTALL_ORIGIN_FILE = 'install-origin.json';
+export const INSTALL_DIR_ENV = 'MANGOSTUDIO_INSTALL_DIR';
 
 /**
  * The record `install.sh` / `install.ps1` write at the dist root. Read
@@ -150,13 +154,33 @@ function fromLauncher(probe: InstallOriginProbe, base: InstalledVia): InstallOri
   return null;
 }
 
-function fromDistRoot(probe: InstallOriginProbe, base: InstalledVia): InstallOrigin | null {
-  const distRoot = hubDistRoot(probe);
-  if (!isUnder(probe.execPath, distRoot, probe.platform)) return null;
+function readOriginRecord(probe: InstallOriginProbe, distRoot: string): InstallOriginRecord | null {
   const text = probe.readFile(joinPath(probe.platform, distRoot, INSTALL_ORIGIN_FILE));
-  const record = text === null ? null : parseInstallOriginRecord(text);
-  if (record) return { ...base, manager: 'self-managed', distRoot, record };
-  return { ...base, manager: 'self-managed', distRoot, legacy: true };
+  return text === null ? null : parseInstallOriginRecord(text);
+}
+
+/**
+ * Roots that may hold this binary without a record: the one the environment
+ * names and the platform default. Any other directory only counts as a root
+ * when the scripts left `install-origin.json` in it — otherwise every
+ * `<vendor>/<version>/mangostudio` layout would read as a legacy install.
+ */
+function knownDistRoots(probe: InstallOriginProbe): readonly string[] {
+  const configured = probe.env[INSTALL_DIR_ENV]?.trim();
+  const defaultRoot = hubDistRoot(probe);
+  return configured ? [configured, defaultRoot] : [defaultRoot];
+}
+
+function fromDistRoot(probe: InstallOriginProbe, base: InstalledVia): InstallOrigin | null {
+  for (const distRoot of knownDistRoots(probe)) {
+    if (!isUnder(probe.execPath, distRoot, probe.platform)) continue;
+    const record = readOriginRecord(probe, distRoot);
+    if (record) return { ...base, manager: 'self-managed', distRoot, record };
+    return { ...base, manager: 'self-managed', distRoot, legacy: true };
+  }
+  const distRoot = grandparentDirectory(probe.execPath, probe.platform);
+  const record = readOriginRecord(probe, distRoot);
+  return record ? { ...base, manager: 'self-managed', distRoot, record } : null;
 }
 
 function fromPath(probe: InstallOriginProbe, base: InstalledVia): InstallOrigin {

@@ -215,3 +215,35 @@ describe('npmFamilyFromPath', () => {
     expect(npmFamilyFromPath('/usr/local/lib/node_modules/mangostudio/bin/x.js')).toBe('npm');
   });
 });
+
+describe('detectInstallOrigin with a custom install root', () => {
+  it('finds the origin record two levels above the executable when MANGOSTUDIO_INSTALL_DIR moved the root', () => {
+    const origin = detectInstallOrigin(
+      probe({
+        execPath: '/opt/mango/dist/0.1.1/mangostudio',
+        readFile: (path) => (path === '/opt/mango/dist/install-origin.json' ? ORIGIN_RECORD : null),
+      })
+    );
+    expect(origin.manager).toBe('self-managed');
+    expect(origin.distRoot).toBe('/opt/mango/dist');
+    expect(origin.legacy).toBeUndefined();
+  });
+
+  it('treats the configured install dir as a root even without a record', () => {
+    const origin = detectInstallOrigin(
+      probe({
+        execPath: '/srv/tools/mangostudio/0.1.1/mangostudio',
+        env: { MANGOSTUDIO_INSTALL_DIR: '/srv/tools/mangostudio' },
+      })
+    );
+    expect(origin.manager).toBe('self-managed');
+    expect(origin.distRoot).toBe('/srv/tools/mangostudio');
+    expect(origin.legacy).toBe(true);
+  });
+
+  it('does not call an arbitrary versioned directory self-managed without a record', () => {
+    expect(detectInstallOrigin(probe({ execPath: '/opt/vendor/1.0/mangostudio' })).manager).toBe(
+      'unknown'
+    );
+  });
+});

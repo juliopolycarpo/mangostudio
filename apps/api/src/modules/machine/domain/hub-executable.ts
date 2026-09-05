@@ -46,11 +46,42 @@ export function hubDistRoot(probe: Pick<HubExecutableProbe, 'platform' | 'home' 
   return join(probe.home, '.mango', 'dist');
 }
 
+export const INSTALL_ORIGIN_FILE = 'install-origin.json';
+
+/**
+ * The directory two levels above the executable: `<root>/<version>/mangostudio`
+ * puts the root there. Platform-aware, since the probe may describe a Windows
+ * path on a POSIX host.
+ */
+export function grandparentDirectory(execPath: string, platform: NodeJS.Platform): string {
+  const path = platform === 'win32' ? win32 : posix;
+  return path.dirname(path.dirname(execPath));
+}
+
+/**
+ * The dist root holding this executable. Normally the default root, but the
+ * install scripts honour `MANGOSTUDIO_INSTALL_DIR`, so a binary may live under
+ * any root — recognised by the `install-origin.json` the scripts leave two
+ * levels above it. // Usage: hubDistRootFor(probe)
+ */
+export function hubDistRootFor(
+  probe: Pick<HubExecutableProbe, 'platform' | 'home' | 'localAppData' | 'execPath' | 'pathExists'>
+): string {
+  const candidate = grandparentDirectory(probe.execPath, probe.platform);
+  const join = joiner(probe.platform);
+  if (probe.pathExists(join(candidate, INSTALL_ORIGIN_FILE))) return candidate;
+  return hubDistRoot(probe);
+}
+
 /** The launcher the installer maintains across upgrades. */
 export function hubCurrentPointerPath(
-  probe: Pick<HubExecutableProbe, 'platform' | 'home' | 'localAppData'>
+  probe: Pick<HubExecutableProbe, 'platform' | 'home' | 'localAppData'> &
+    Partial<Pick<HubExecutableProbe, 'execPath' | 'pathExists'>>
 ): string {
-  const root = hubDistRoot(probe);
+  const root =
+    probe.execPath !== undefined && probe.pathExists !== undefined
+      ? hubDistRootFor({ ...probe, execPath: probe.execPath, pathExists: probe.pathExists })
+      : hubDistRoot(probe);
   const join = joiner(probe.platform);
   return probe.platform === 'win32'
     ? join(root, 'bin', 'mangostudio.cmd')
@@ -77,7 +108,7 @@ export function resolveHubExecutable(probe: HubExecutableProbe): HubExecutable {
     };
   }
 
-  const root = hubDistRoot(probe);
+  const root = hubDistRootFor(probe);
   if (!isUnder(probe.execPath, root, probe.platform)) {
     return { argv: [probe.execPath], pointer: 'external' };
   }

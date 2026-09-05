@@ -13,7 +13,9 @@ function probe(overrides: Partial<HubExecutableProbe> = {}): HubExecutableProbe 
     entryPath: '/repo/apps/api/src/cli.ts',
     cwd: '/repo',
     home: '/home/j',
-    pathExists: () => true,
+    // Every pointer exists; no origin record anywhere, as on every install
+    // made before the scripts started writing one.
+    pathExists: (path) => !path.endsWith('install-origin.json'),
     ...overrides,
   };
 }
@@ -70,5 +72,19 @@ describe('resolveHubExecutable', () => {
   it('does not mistake a sibling directory for the dist root', () => {
     const result = resolveHubExecutable(probe({ execPath: '/home/j/.mango/dist-old/mangostudio' }));
     expect(result.pointer).toBe('external');
+  });
+});
+
+describe('resolveHubExecutable with a custom install root', () => {
+  it('points at the current launcher two levels above the executable when the root carries an origin record', () => {
+    const result = resolveHubExecutable(
+      probe({
+        execPath: '/opt/mango/dist/0.1.1/mangostudio',
+        pathExists: (path) =>
+          path === '/opt/mango/dist/install-origin.json' ||
+          path === '/opt/mango/dist/current/mangostudio',
+      })
+    );
+    expect(result).toEqual({ argv: ['/opt/mango/dist/current/mangostudio'], pointer: 'current' });
   });
 });
