@@ -19,6 +19,7 @@ import type {
 } from '@mangostudio/shared/updates';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getApiBaseUrl } from '@/lib/api-base-url';
+import { readSseChunks } from '@/lib/sse';
 import { ApiError } from '@/lib/utils';
 import { type MachineActionRefusal, refusalOrThrow } from '../api';
 
@@ -121,8 +122,6 @@ async function run(
   setState((previous) => ({ ...previous, phase: 'streaming' }));
 
   const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
   let nextLineId = 0;
   let sawDone = false;
 
@@ -157,17 +156,9 @@ async function run(
   };
 
   try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split('\n');
-      buffer = parts.pop() ?? '';
-
-      for (const part of parts) {
-        if (!part.startsWith('data: ')) continue;
-        const event = parseEvent(part.slice(6));
+    for await (const payloads of readSseChunks(reader)) {
+      for (const payload of payloads) {
+        const event = parseEvent(payload);
         if (event) handleEvent(event);
       }
 
