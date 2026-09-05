@@ -32,6 +32,7 @@ import {
   type SpawnDetachedWaiterInput,
   spawnDetached,
   spawnDetachedWaiter,
+  WINDOWS_SYSTEM_ENV_KEYS,
 } from '../../../cli/detach';
 import { createProcessController, stopPidOrThrow } from '../../../cli/process-control';
 import { sleep } from '../../../cli/sleep';
@@ -131,19 +132,32 @@ export interface UpgradeServiceDeps {
   readonly pid: number;
 }
 
-const SCRIPT_ENV_PASSTHROUGH: readonly string[] = [
-  'PATH',
-  'HOME',
-  'USERPROFILE',
-  'LOCALAPPDATA',
-  'TEMP',
-  'TMP',
-  // install.sh's mktemp -d reads TMPDIR (POSIX); not in the brief's list, but
-  // without it a HOME override in a test or a sandboxed run cannot steer
-  // where the script stages its own extraction.
-  'TMPDIR',
-  'SystemRoot',
-];
+/**
+ * Env keys the embedded install script needs, deduped against
+ * `WINDOWS_SYSTEM_ENV_KEYS` (detach.ts) rather than repeating the ones this
+ * list already names (LOCALAPPDATA, SystemRoot). Without the rest of that
+ * Windows block, install.ps1's `Get-Platform` cannot classify the host
+ * architecture (PROCESSOR_ARCHITECTURE/PROCESSOR_ARCHITEW6432) and, even once
+ * it does, PowerShell 5.1's `& $exe '--version'` smoke check needs PATHEXT to
+ * resolve the target as executable. `runScript` (run-script.ts) replaces
+ * rather than merges the child's environment, so a missing key here is
+ * simply gone for the whole run.
+ */
+const SCRIPT_ENV_PASSTHROUGH: readonly string[] = Array.from(
+  new Set<string>([
+    'PATH',
+    'HOME',
+    'USERPROFILE',
+    'LOCALAPPDATA',
+    'TEMP',
+    'TMP',
+    // install.sh's mktemp -d reads TMPDIR (POSIX); not in the brief's list, but
+    // without it a HOME override in a test or a sandboxed run cannot steer
+    // where the script stages its own extraction.
+    'TMPDIR',
+    ...WINDOWS_SYSTEM_ENV_KEYS,
+  ])
+);
 
 /** Path joining that follows the deps' platform, not the one running the process — see hub-executable.ts's `joiner`. */
 function joinPath(platform: NodeJS.Platform, ...segments: string[]): string {

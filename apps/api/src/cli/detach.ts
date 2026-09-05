@@ -118,12 +118,37 @@ async function confirmStarted(
 }
 
 /**
+ * Windows system variables a spawned child needs to resolve executables
+ * (COMSPEC/PATHEXT), locate its data directories, and detect host
+ * architecture (PROCESSOR_ARCHITECTURE/PROCESSOR_ARCHITEW6432 — set by a
+ * 32-bit process running under WOW64). Shared by `DETACH_ENV_ALLOWLIST`
+ * below and `upgrade-service.ts`'s `SCRIPT_ENV_PASSTHROUGH` (the env the
+ * embedded install script runs with), so a key added for one reaches the
+ * other instead of drifting between two copied lists.
+ */
+export const WINDOWS_SYSTEM_ENV_KEYS: readonly string[] = [
+  'SystemRoot',
+  'windir',
+  'SystemDrive',
+  'COMSPEC',
+  'PATHEXT',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'ProgramData',
+  'ProgramFiles',
+  'ProgramW6432',
+  'NUMBER_OF_PROCESSORS',
+  'PROCESSOR_ARCHITECTURE',
+  'PROCESSOR_ARCHITEW6432',
+];
+
+/**
  * Runtime env keys forwarded to detached child processes.
  * Connector secrets and other injectable credentials are excluded; only the
  * runtime configuration (mirrors config.ts `ENV_KEY_MAP`) plus the system and
  * networking variables the server actually needs to run are forwarded.
  */
-const DETACH_ENV_ALLOWLIST = new Set<string>([
+export const DETACH_ENV_ALLOWLIST = new Set<string>([
   // Runtime configuration — sourced from config.ts so a new ENV_KEY_MAP key
   // reaches detached children without editing two lists.
   ...RUNTIME_CONFIG_ENV_KEYS,
@@ -170,17 +195,7 @@ const DETACH_ENV_ALLOWLIST = new Set<string>([
   // ProgramW6432 — wsl-executable.ts's MSI lookup, which falls back to the
   // System32 launcher stub and reintroduces the console-window flash this hub
   // spawns wsl.exe directly to avoid (see wsl-executable.ts).
-  'SystemRoot',
-  'windir',
-  'SystemDrive',
-  'COMSPEC',
-  'PATHEXT',
-  'APPDATA',
-  'LOCALAPPDATA',
-  'ProgramData',
-  'ProgramFiles',
-  'ProgramW6432',
-  'NUMBER_OF_PROCESSORS',
+  ...WINDOWS_SYSTEM_ENV_KEYS,
 ]);
 
 /** The subset of `source` whose keys are in `allowlist`, dropping anything unset. */

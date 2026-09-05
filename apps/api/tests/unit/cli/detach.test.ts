@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   buildWaiterCommand,
+  DETACH_ENV_ALLOWLIST,
   type DetachDeps,
   ensureLogDir,
   restartExecutableOptions,
   spawnDetached,
+  WINDOWS_SYSTEM_ENV_KEYS,
 } from '../../../src/cli/detach';
 import type { ServerState } from '../../../src/lib/server-state';
 import { FakeProcessController } from '../../support/mocks/fake-process-controller';
@@ -110,6 +112,22 @@ describe('buildWaiterCommand', () => {
     });
 
     expect(command).toContain("'it''s-mango'");
+  });
+});
+
+describe('WINDOWS_SYSTEM_ENV_KEYS', () => {
+  it('includes host-architecture detection alongside the executable-resolution and data-directory keys', () => {
+    // install.ps1's Get-Platform reads PROCESSOR_ARCHITECTURE/
+    // PROCESSOR_ARCHITEW6432 to classify the host; DETACH_ENV_ALLOWLIST
+    // composes this same list, so both the detached hub and the embedded
+    // install script (upgrade-service.ts's SCRIPT_ENV_PASSTHROUGH) get it
+    // from one place instead of two copies drifting apart.
+    expect(WINDOWS_SYSTEM_ENV_KEYS).toContain('PROCESSOR_ARCHITECTURE');
+    expect(WINDOWS_SYSTEM_ENV_KEYS).toContain('PROCESSOR_ARCHITEW6432');
+    expect(WINDOWS_SYSTEM_ENV_KEYS).toContain('PATHEXT');
+    for (const key of WINDOWS_SYSTEM_ENV_KEYS) {
+      expect(DETACH_ENV_ALLOWLIST.has(key)).toBe(true);
+    }
   });
 });
 
