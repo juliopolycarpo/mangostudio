@@ -494,7 +494,7 @@ function windowsDelegateMessage(
   }
   const stopped = `Stopped MangoStudio (PID ${hub.state.pid}) so the package manager can replace the binary once this process exits`;
   if (wantsRestart) {
-    return `${stopped}; it starts the hub again when the manager succeeds. Check ${logFile} and "mangostudio status" in a minute.`;
+    return `${stopped}; it starts the hub again once the manager step finishes. Check ${logFile} and "mangostudio status" in a minute.`;
   }
   return `${stopped}. Bring it back with "${comebackArgv(hub).join(' ')}" once ${logFile} shows the manager finished.`;
 }

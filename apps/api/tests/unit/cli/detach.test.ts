@@ -115,7 +115,7 @@ describe('buildWaiterCommand', () => {
     expect(command).not.toContain('-Timeout');
   });
 
-  it('brings the hub back only when the manager exited 0, appending that output to the same log', () => {
+  it('brings the hub back unconditionally when a pre-stopped hub needs recovering, appending that output to the same log', () => {
     const command = buildWaiterCommand({
       argv: ['npm', 'install', '-g', 'mangostudio@latest'],
       waitForPid: [999, 555],
@@ -126,8 +126,19 @@ describe('buildWaiterCommand', () => {
     expect(command).toBe(
       'Wait-Process -Id 999, 555 -ErrorAction SilentlyContinue; ' +
         "& 'npm' 'install' '-g' 'mangostudio@latest' *>> 'C:\\log.txt'; " +
-        "if ($LASTEXITCODE -eq 0) { & 'mangostudio' 'serve' '-d' 'it''s:3001' *>> 'C:\\log.txt' }"
+        "& 'mangostudio' 'serve' '-d' 'it''s:3001' *>> 'C:\\log.txt'"
     );
+  });
+
+  it('never guards afterSuccess on $LASTEXITCODE: a fresh powershell.exe leaves it $null and Wait-Process never sets it, so gating on it would silently skip recovery', () => {
+    const command = buildWaiterCommand({
+      argv: ['npm', 'install', '-g', 'mangostudio@latest'],
+      waitForPid: 999,
+      logFile: 'C:\\log.txt',
+      afterSuccess: ['mangostudio', 'restart'],
+    });
+
+    expect(command).not.toContain('LASTEXITCODE');
   });
 
   it('doubles an embedded single quote so PowerShell reads it as one literal quote', () => {

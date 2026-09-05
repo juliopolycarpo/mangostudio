@@ -295,10 +295,13 @@ export interface SpawnDetachedWaiterInput {
   /** Where the manager's combined output is appended. */
   readonly logFile: string;
   /**
-   * What to run once the manager has exited 0 — the command that brings a
+   * What to run once the manager step has run — the command that brings a
    * hub the caller stopped for this upgrade back up, through the launcher on
    * PATH (never this process's realpath: scoop's is versioned and changes
-   * with the upgrade). Its output goes to the same log.
+   * with the upgrade). Runs unconditionally, not gated on the manager's exit:
+   * a hub already stopped for the upgrade needs recovering either way, and a
+   * fresh `powershell.exe`'s `$LASTEXITCODE` cannot be trusted to reflect it.
+   * Its output goes to the same log.
    */
   readonly afterSuccess?: readonly string[];
   /**
@@ -325,13 +328,20 @@ function loggedInvocation(argv: readonly string[], logFile: string): string {
 /**
  * The `-Command` script text a detached waiter runs: wait out one or more
  * pids, invoke the package manager appending its output to the log, and —
- * when an `afterSuccess` step is given — run it only if the manager exited 0.
+ * when an `afterSuccess` step is given — run it unconditionally afterward.
  *
  * The wait has no timeout on purpose: the caller has already confirmed every
  * pid it names is exiting (its own, and a hub it stopped), so giving up early
  * could only start the manager against a file still held open.
- * `$LASTEXITCODE` rather than `$?`: for a native command `$?` is true in
- * Windows PowerShell whatever the exit code.
+ *
+ * `afterSuccess` is only ever set once a live hub has already been stopped
+ * for this upgrade (see `runWindowsDelegate`), so it is not actually gated on
+ * the manager's exit code: a failed or crashed manager still leaves the old
+ * binary on disk, and bringing that hub back is the recovery, not a reward
+ * for success. Gating it would also be unreliable in practice — a fresh
+ * `powershell.exe` starts with `$LASTEXITCODE` as `$null`, `Wait-Process`
+ * never touches it, and `npm`/`scoop` on Windows are `.cmd` shims — so
+ * `$LASTEXITCODE` cannot be trusted to reflect the manager's own exit.
  * // Usage: buildWaiterCommand({ argv: ['npm', 'install', '-g', 'x'], waitForPid: [123, 456], logFile: 'C:\\log.txt', afterSuccess: ['mangostudio', 'restart'] })
  */
 export function buildWaiterCommand(
@@ -343,9 +353,7 @@ export function buildWaiterCommand(
     loggedInvocation(input.argv, input.logFile),
   ];
   if (input.afterSuccess) {
-    steps.push(
-      `if ($LASTEXITCODE -eq 0) { ${loggedInvocation(input.afterSuccess, input.logFile)} }`
-    );
+    steps.push(loggedInvocation(input.afterSuccess, input.logFile));
   }
   return steps.join('; ');
 }
