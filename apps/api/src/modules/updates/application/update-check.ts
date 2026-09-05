@@ -33,8 +33,9 @@ import {
 } from '../../environments/domain/canary-manifest';
 import { resolveRuntimeRelease } from '../../environments/domain/runtime-release-resolution';
 import { fitToLimit } from '../../machine/domain/machine-limits';
+import { versionChannel } from '../domain/install-origin';
 import { RELEASES_BASE_URL, versionRoot } from '../domain/upgrade-plan';
-import { compareStableVersions } from '../domain/version-compare';
+import { compareStableVersions, sharesShaPrefix, stripLeadingV } from '../domain/version-compare';
 
 const logger = createDiagnosticLogger('update-check');
 
@@ -123,7 +124,7 @@ export function createUpdateChecker(deps: Partial<UpdateCheckerDeps> = {}): Upda
 
   /** The channel a fresh check would run against right now: config's own choice, or the build's. */
   function effectiveChannel(): UpdateChannel {
-    return d.getConfig().updates.channel ?? versionChannelOf(d.getCurrentVersion());
+    return d.getConfig().updates.channel ?? versionChannel(d.getCurrentVersion());
   }
 
   /**
@@ -140,13 +141,11 @@ export function createUpdateChecker(deps: Partial<UpdateCheckerDeps> = {}): Upda
   }
 
   /**
-   * Fresh enough to reuse without a fetch: within its TTL (shorter for an
-   * errored answer) and for the channel this call would otherwise check.
-   * Without the channel guard, flipping `updates.channel` in config would
-   * keep answering from the old channel's cache for up to 24h.
+   * Fresh enough to reuse without a fetch: within its TTL, which is shorter
+   * for an errored answer so a transient failure is retried sooner. The
+   * channel it belongs to is already `readCached`'s business.
    */
-  function isFresh(check: UpdateCheck, channel: UpdateChannel): boolean {
-    if (check.channel !== channel) return false;
+  function isFresh(check: UpdateCheck): boolean {
     const ttl = check.error === undefined ? CHECK_TTL_MS : ERROR_TTL_MS;
     return d.now() - check.checkedAt < ttl;
   }
@@ -155,9 +154,8 @@ export function createUpdateChecker(deps: Partial<UpdateCheckerDeps> = {}): Upda
     if (skipReason() !== null) return Promise.resolve(null);
     if (inFlight) return inFlight;
 
-    const channel = effectiveChannel();
-    const existing = d.readCacheFile(d.cachePath());
-    if (!options.force && existing && isFresh(existing, channel)) {
+    const existing = readCached();
+    if (!options.force && existing && isFresh(existing)) {
       return Promise.resolve(existing);
     }
 
@@ -216,15 +214,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** The channel a version string belongs to, without importing the install-origin module. */
-function versionChannelOf(version: string): 'stable' | 'canary' {
-  return resolveRuntimeRelease(version, 'linux-x64').channel;
-}
-
-function stripLeadingV(version: string): string {
-  return version.startsWith('v') ? version.slice(1) : version;
-}
-
 async function checkStable(d: ResolvedDeps, currentVersion: string): Promise<UpdateCheck> {
   const result = await safeFetchBytes(
     GITHUB_LATEST_RELEASE_API,
@@ -240,9 +229,6 @@ async function checkStable(d: ResolvedDeps, currentVersion: string): Promise<Upd
     channel: 'stable',
     currentVersion,
     latestVersion: fitToLimit(latestVersion, UPDATE_VERSION_MAX),
-    // Not `!==`: a yanked release can leave "latest" behind the version
-    // already running, and string inequality would still call that an
-    // "update" — one the button would then install as a downgrade.
     // Not `!==`: a yanked release can leave "latest" behind the version
     // already running, and string inequality would still call that an
     // "update" — one the button would then install as a downgrade.
@@ -264,14 +250,6 @@ function canaryReleaseTag(currentVersion: string): string {
       ? resolution.tagVersion
       : `${versionRoot(currentVersion)}-canary`;
   return `v${root}`;
-}
-
-/** Whether two source shas agree on at least their first `minLength` characters. */
-function sharesShaPrefix(a: string, b: string, minLength = 7): boolean {
-  const len = Math.min(a.length, b.length, Math.max(minLength, 0));
-  let common = 0;
-  while (common < len && a[common]?.toLowerCase() === b[common]?.toLowerCase()) common += 1;
-  return common >= minLength;
 }
 
 async function checkCanary(d: ResolvedDeps, currentVersion: string): Promise<UpdateCheck> {

@@ -1,13 +1,21 @@
 /**
- * Numeric ordering for stable-channel version strings, shared by
- * `update-check.ts` (is the latest release actually newer?) and
- * `resolve-target.ts` (has an unpinned upgrade already caught up?). Neither
- * one can use plain string (in)equality: a yanked release drops the latest
- * tag back a version, and `"0.1.10" !== "0.1.9"` is true but says nothing
- * about which is newer.
+ * Version-string semantics for the updates module: what counts as a version,
+ * how a leading `v` is normalized away, how two stable versions order, and
+ * when two source shas name the same commit. Shared by `update-check.ts` (is
+ * the latest release actually newer?) and `resolve-target.ts` (has an unpinned
+ * upgrade already caught up?). Neither one can use plain string (in)equality:
+ * a yanked release drops the latest tag back a version, and `"0.1.10" !==
+ * "0.1.9"` is true but says nothing about which is newer.
  */
 
-const VERSION_SHAPE = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+import { UPGRADE_VERSION_PATTERN } from '@mangostudio/shared/updates';
+
+/**
+ * The same shape the wire and CLI boundaries accept — built from the shared
+ * pattern rather than copied, so loosening one cannot leave this stricter and
+ * make `isAlreadyCurrent` answer "no" for a version the API took.
+ */
+const VERSION_SHAPE = new RegExp(UPGRADE_VERSION_PATTERN);
 
 /**
  * Whether a string is a version this module can order at all. A caller that
@@ -19,8 +27,27 @@ export function isVersionShaped(version: string): boolean {
   return VERSION_SHAPE.test(version);
 }
 
-function stripLeadingV(version: string): string {
+/**
+ * Strips a leading `v`, the same normalization `install.sh`'s
+ * `normalize_version` applies to a pinned version — a rule that has to match
+ * the shell installer, so it is stated in one place.
+ * // Usage: stripLeadingV('v0.1.1') // '0.1.1'
+ */
+export function stripLeadingV(version: string): string {
   return version.startsWith('v') ? version.slice(1) : version;
+}
+
+/**
+ * Whether two source shas agree on at least their first `minLength`
+ * characters — how "is the running build this commit?" is decided, at the
+ * short-sha length every release artifact carries.
+ * // Usage: sharesShaPrefix('abc1234def', 'ABC1234') // true
+ */
+export function sharesShaPrefix(a: string, b: string, minLength = 7): boolean {
+  const len = Math.min(a.length, b.length, Math.max(minLength, 0));
+  let common = 0;
+  while (common < len && a[common]?.toLowerCase() === b[common]?.toLowerCase()) common += 1;
+  return common >= minLength;
 }
 
 function parseRootSegments(root: string): readonly [number, number, number] {

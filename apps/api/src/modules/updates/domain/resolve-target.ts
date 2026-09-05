@@ -25,7 +25,12 @@ import {
   resolveStableLatestVersion,
 } from '../infrastructure/release-index';
 import type { ReleasePlatformId } from './platform-id';
-import { compareStableVersions, isVersionShaped } from './version-compare';
+import {
+  compareStableVersions,
+  isVersionShaped,
+  sharesShaPrefix,
+  stripLeadingV,
+} from './version-compare';
 
 export interface UpgradeTargetRequest {
   readonly channel: UpdateChannel;
@@ -100,18 +105,13 @@ function stableAsset(version: string, platformId: ReleasePlatformId): ResolvedAr
   };
 }
 
-/** Strips a leading `v`, the same normalization `install.sh`'s `normalize_version` applies to a pinned version. */
-function normalizeVersion(version: string): string {
-  return version.startsWith('v') ? version.slice(1) : version;
-}
-
 async function resolveStableTarget(
   request: UpgradeTargetRequest,
   context: UpgradeTargetContext,
   deps: SafeFetchDeps
 ): Promise<ResolvedArchiveDownload> {
   const version = request.version
-    ? normalizeVersion(request.version)
+    ? stripLeadingV(request.version)
     : await resolveStableLatestVersion(deps);
   return stableAsset(version, context.platformId);
 }
@@ -266,9 +266,8 @@ export function isAlreadyCurrent(
   }
   if (target.version === context.currentVersion) return true;
 
-  const a = target.sourceSha?.toLowerCase();
-  const b = context.buildSha?.toLowerCase();
+  const a = target.sourceSha;
+  const b = context.buildSha;
   if (!a || !b) return false;
-  const prefixLength = Math.min(a.length, b.length, 7);
-  return prefixLength >= 7 && a.slice(0, 7) === b.slice(0, 7);
+  return sharesShaPrefix(a, b);
 }
