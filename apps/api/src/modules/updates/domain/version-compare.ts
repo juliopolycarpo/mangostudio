@@ -7,6 +7,18 @@
  * about which is newer.
  */
 
+const VERSION_SHAPE = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+
+/**
+ * Whether a string is a version this module can order at all. A caller that
+ * asks "is this already current?" about something that is not a version must
+ * hear "no" — a malformed value read as older than everything would otherwise
+ * be waved through as up to date. // Usage: isVersionShaped('0.1.1') // true
+ */
+export function isVersionShaped(version: string): boolean {
+  return VERSION_SHAPE.test(version);
+}
+
 function stripLeadingV(version: string): string {
   return version.startsWith('v') ? version.slice(1) : version;
 }

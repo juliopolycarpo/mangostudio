@@ -192,6 +192,17 @@ describe('resolveUpgradeTarget — canary <sha>', () => {
 });
 
 describe('isAlreadyCurrent', () => {
+  it('stable: never calls a malformed target version current', () => {
+    // A path-shaped "version" parsed as 0.0.0 read as older than everything and
+    // was waved through as up to date, so the engine's containment check
+    // downstream never ran.
+    expect(
+      isAlreadyCurrent({ channel: 'stable', version: '../../../../../evil' } as never, {
+        currentVersion: '0.1.1',
+      })
+    ).toBe(false);
+  });
+
   it('stable: compares versions exactly', () => {
     expect(
       isAlreadyCurrent({ channel: 'stable', version: '1.0.0' } as never, {

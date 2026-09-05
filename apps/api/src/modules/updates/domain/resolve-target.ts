@@ -25,7 +25,7 @@ import {
   resolveStableLatestVersion,
 } from '../infrastructure/release-index';
 import type { ReleasePlatformId } from './platform-id';
-import { compareStableVersions } from './version-compare';
+import { compareStableVersions, isVersionShaped } from './version-compare';
 
 export interface UpgradeTargetRequest {
   readonly channel: UpdateChannel;
@@ -260,6 +260,8 @@ export function isAlreadyCurrent(
 ): boolean {
   if (target.channel === 'stable') {
     if (context.pinned) return target.version === context.currentVersion;
+    // Something that is not a version cannot be "already installed".
+    if (!isVersionShaped(target.version)) return false;
     return compareStableVersions(target.version, context.currentVersion) <= 0;
   }
   if (target.version === context.currentVersion) return true;

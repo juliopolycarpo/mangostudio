@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { compareStableVersions } from '../../../../src/modules/updates/domain/version-compare';
+import {
+  compareStableVersions,
+  isVersionShaped,
+} from '../../../../src/modules/updates/domain/version-compare';
 
 describe('compareStableVersions', () => {
   it('reports a newer patch version', () => {
@@ -27,5 +30,19 @@ describe('compareStableVersions', () => {
   it('counts a same-root stable release as newer than its own prerelease', () => {
     expect(compareStableVersions('0.1.5', '0.1.5-canary.deadbee')).toBe(1);
     expect(compareStableVersions('0.1.5-canary.deadbee', '0.1.5')).toBe(-1);
+  });
+});
+
+describe('isVersionShaped', () => {
+  it('accepts release and prerelease versions, with or without a leading v', () => {
+    expect(isVersionShaped('0.1.1')).toBe(true);
+    expect(isVersionShaped('v0.1.1')).toBe(true);
+    expect(isVersionShaped('0.1.1-canary.abc1234')).toBe(true);
+  });
+
+  it('rejects anything that is not a version', () => {
+    expect(isVersionShaped('../../../../../evil')).toBe(false);
+    expect(isVersionShaped('latest')).toBe(false);
+    expect(isVersionShaped('0.1')).toBe(false);
   });
 });
