@@ -307,7 +307,7 @@ write_origin_record() {
 record_origin() {
   local root="$1" origin_kind="$2" new_version="$3" old_version="$4" source_kind="$5" source_sha="$6"
   local file="${root}/install-origin.json"
-  local old_source='' prune_csv=''
+  local old_source='' prune_csv='' previous_version="$old_version"
 
   ORIGIN_EXTRA_LINES=()
   if [ -f "$file" ]; then
@@ -318,6 +318,14 @@ record_origin() {
     prune_csv="$(join_json_array "${prune_arr[@]+"${prune_arr[@]}"}")"
     local extra_line
     while IFS= read -r extra_line; do ORIGIN_EXTRA_LINES+=("$extra_line"); done < <(origin_unknown_lines "$file")
+
+    # A repair install, a retried upgrade, or `--use <current>` reports
+    # old_version == new_version: the pointer never actually moved. Keep the
+    # rollback anchor pointing at whatever it already recorded instead of
+    # collapsing previousVersion onto the version that is not changing.
+    if [ "$new_version" = "$old_version" ]; then
+      previous_version="$(origin_field "$file" previousVersion)"
+    fi
   fi
 
   local source_val="${source_kind:-$old_source}"
@@ -326,7 +334,7 @@ record_origin() {
   local installed_at
   installed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-  write_origin_record "$file" "$origin_kind" "$channel" "$new_version" "$old_version" \
+  write_origin_record "$file" "$origin_kind" "$channel" "$new_version" "$previous_version" \
     "$source_sha" "$installed_at" "$source_val" "$BIN_DIR" "$prune_csv"
 }
 

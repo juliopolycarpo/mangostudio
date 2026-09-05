@@ -184,6 +184,24 @@ describe('install.sh layout', () => {
     expect(record.previousVersion).toBe('0.2.0');
   });
 
+  test('reinstalling the same version (a repair install) carries the existing previousVersion forward', () => {
+    const { workDir, root, env } = layout();
+    const first = buildReleaseArchive(workDir, `mangostudio-1.0.0-${PLATFORM}.tar.gz`, '1.0.0');
+    const second = buildReleaseArchive(workDir, `mangostudio-2.0.0-${PLATFORM}.tar.gz`, '2.0.0');
+    run(['--local', first], env);
+    run(['--local', second], env);
+    expect(originRecord(root).previousVersion).toBe('1.0.0');
+
+    // A repair install / retried upgrade: old_version === new_version, so
+    // the pointer never actually moves. previousVersion must not collapse
+    // onto 2.0.0 just because this install happened again.
+    const result = run(['--local', second], env);
+
+    expect(result.exitCode).toBe(0);
+    expect(readlinkSync(join(root, 'current'))).toBe('2.0.0');
+    expect(originRecord(root).previousVersion).toBe('1.0.0');
+  });
+
   test('--rollback returns to the version --use came from', () => {
     const { workDir, root, env } = layout();
     const first = buildReleaseArchive(workDir, `mangostudio-0.1.0-${PLATFORM}.tar.gz`, '0.1.0');
