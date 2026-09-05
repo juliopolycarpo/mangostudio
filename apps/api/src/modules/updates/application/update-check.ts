@@ -19,7 +19,9 @@ import {
   UPDATE_VERSION_MAX,
   type UpdateChannel,
   type UpdateCheck,
+  UpdateCheckSchema,
 } from '@mangostudio/shared/updates';
+import Value from 'typebox/value';
 import { type BuildInfo, getBuildInfo } from '../../../lib/build-info';
 import { getConfig, getVersion, isDevelopmentVersion, type MangoConfig } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
@@ -301,11 +303,25 @@ function resolveDeps(deps: Partial<UpdateCheckerDeps>): UpdateCheckerDeps {
  * hundred bytes, and every caller wants an answer now rather than a promise
  * to resolve later.
  */
+/**
+ * Parses one cache file's contents against the wire schema — not a
+ * hand-written shape guard, so a corrupt `latestVersion`/`latestSourceSha`
+ * type or a negative `checkedAt` reads as "no cache" the same as invalid
+ * JSON, rather than reaching a caller as a value it then has to trust.
+ * // Usage: parseUpdateCheckFile('{"channel":"stable",...}')
+ */
+export function parseUpdateCheckFile(raw: string): UpdateCheck | null {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Value.Check(UpdateCheckSchema, parsed) ? (parsed as UpdateCheck) : null;
+  } catch {
+    return null;
+  }
+}
+
 function readCacheFileReal(path: string): UpdateCheck | null {
   try {
-    const raw = readFileSync(path, 'utf8');
-    const parsed = JSON.parse(raw) as unknown;
-    return isUpdateCheck(parsed) ? parsed : null;
+    return parseUpdateCheckFile(readFileSync(path, 'utf8'));
   } catch {
     return null;
   }
@@ -316,17 +332,6 @@ async function writeCacheFileReal(path: string, check: UpdateCheck): Promise<voi
   const tmp = `${path}.${process.pid}.tmp`;
   await writeFile(tmp, `${JSON.stringify(check, null, 2)}\n`, 'utf8');
   await rename(tmp, path);
-}
-
-function isUpdateCheck(value: unknown): value is UpdateCheck {
-  if (typeof value !== 'object' || value === null) return false;
-  const v = value as Record<string, unknown>;
-  return (
-    (v.channel === 'stable' || v.channel === 'canary') &&
-    typeof v.currentVersion === 'string' &&
-    typeof v.updateAvailable === 'boolean' &&
-    typeof v.checkedAt === 'number'
-  );
 }
 
 /** Shared across the CLI, the API and the server hook. */

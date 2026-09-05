@@ -10,6 +10,7 @@ import type { UpdateChannel, UpdateCheck } from '@mangostudio/shared/updates';
 import type { MangoConfig } from '../../../../src/lib/config';
 import {
   createUpdateChecker,
+  parseUpdateCheckFile,
   type UpdateCheckerDeps,
   updateChecker,
   updateCheckSkipReason,
@@ -482,5 +483,37 @@ describe('updateChecker singleton', () => {
     expect(typeof updateChecker.readCached).toBe('function');
     expect(typeof updateChecker.check).toBe('function');
     expect(typeof updateChecker.schedule).toBe('function');
+  });
+});
+
+describe('parseUpdateCheckFile', () => {
+  const VALID: UpdateCheck = {
+    channel: 'stable',
+    currentVersion: '0.1.1',
+    latestVersion: '0.1.2',
+    updateAvailable: true,
+    checkedAt: 1_000,
+  };
+
+  it('accepts a well-formed cache file', () => {
+    expect(parseUpdateCheckFile(JSON.stringify(VALID))).toEqual(VALID);
+  });
+
+  it('rejects invalid JSON', () => {
+    expect(parseUpdateCheckFile('not json')).toBeNull();
+  });
+
+  it('rejects a latestVersion of the wrong type', () => {
+    expect(parseUpdateCheckFile(JSON.stringify({ ...VALID, latestVersion: 42 }))).toBeNull();
+  });
+
+  it('rejects a latestSourceSha of the wrong type', () => {
+    expect(
+      parseUpdateCheckFile(JSON.stringify({ ...VALID, channel: 'canary', latestSourceSha: 42 }))
+    ).toBeNull();
+  });
+
+  it('rejects a negative checkedAt', () => {
+    expect(parseUpdateCheckFile(JSON.stringify({ ...VALID, checkedAt: -1 }))).toBeNull();
   });
 });
