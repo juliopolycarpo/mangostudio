@@ -90,6 +90,8 @@ export const UpgradeRefusalReasonSchema = Type.Union([
   Type.Literal('unsupported-target'),
   /** Windows: the process that must be replaced is the one asking. */
   Type.Literal('windows-service'),
+  /** Another upgrade is already running from this hub. */
+  Type.Literal('in-progress'),
 ]);
 export type UpgradeRefusalReason = Static<typeof UpgradeRefusalReasonSchema>;
 
