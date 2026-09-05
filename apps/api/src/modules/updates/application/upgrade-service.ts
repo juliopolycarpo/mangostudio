@@ -164,6 +164,27 @@ function joinPath(platform: NodeJS.Platform, ...segments: string[]): string {
   return (platform === 'win32' ? win32.join : posix.join)(...segments);
 }
 
+/**
+ * A `.staging-<version>-<pid>`/`.rollback-<version>-<pid>` scratch directory
+ * under `root`, refusing to resolve outside it. The schema and CLI layers
+ * reject a `version` shaped like a path traversal before it reaches here, but
+ * `resolve-target.ts`'s canary manifest and a hand-edited `install-origin.json`
+ * both feed a version into this join without going through either — this is
+ * the last check before `mkdir`/`rm -rf` ever sees the result.
+ */
+function resolveContainedStagingDir(platform: NodeJS.Platform, root: string, name: string): string {
+  const path = platform === 'win32' ? win32 : posix;
+  const candidate = joinPath(platform, root, name);
+  const resolvedRoot = path.resolve(root);
+  const resolvedCandidate = path.resolve(candidate);
+  const withinRoot =
+    resolvedCandidate === resolvedRoot || resolvedCandidate.startsWith(resolvedRoot + path.sep);
+  if (!withinRoot) {
+    throw new Error(`Staging directory resolves outside the install root: ${candidate}`);
+  }
+  return candidate;
+}
+
 function stageEvent(stage: UpgradeStage, detail?: string): UpgradeStreamEvent {
   return detail !== undefined
     ? { type: 'stage', stage, detail, done: false }
@@ -512,7 +533,7 @@ async function runSelf(
       `A self-managed install has no distRoot on installedVia: ${installedVia.executable}`
     );
   }
-  const stagingDir = joinPath(
+  const stagingDir = resolveContainedStagingDir(
     d.platform,
     installedVia.distRoot,
     `.staging-${resolved.version}-${d.pid}`
@@ -633,7 +654,7 @@ async function rollbackInner(
     );
   }
 
-  const stagingDir = joinPath(
+  const stagingDir = resolveContainedStagingDir(
     d.platform,
     installedVia.distRoot,
     `.rollback-${previousVersion}-${d.pid}`

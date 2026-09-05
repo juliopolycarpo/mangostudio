@@ -452,6 +452,33 @@ describe('upgrade-service self-managed', () => {
     expect(report.exitCode).toBe(1);
   });
 
+  it('reports failed instead of mkdir-ing outside distRoot when a resolved version is a path traversal', async () => {
+    // Schema validation (UPGRADE_VERSION_PATTERN) and parseUpgradeArgs reject
+    // a version shaped like this before it reaches the engine in production,
+    // but the engine is the last line of defense against a value that
+    // reaches it some other way (a tampered install-origin.json, an
+    // unvalidated upstream manifest) — it must never mkdir/rm -rf outside the
+    // install root just because a version string contains "..".
+    let mkdirCalled = false;
+    const service = createUpgradeService(
+      baseDeps({
+        resolveUpgradeTarget: () =>
+          Promise.resolve(newerTarget({ version: '../../../../../evil' })),
+        mkdir: () => {
+          mkdirCalled = true;
+          return Promise.resolve();
+        },
+      })
+    );
+
+    const { report } = await collect(service);
+
+    expect(report.outcome).toBe('failed');
+    expect(report.exitCode).toBe(2);
+    expect(report.message).toContain('outside the install root');
+    expect(mkdirCalled).toBe(false);
+  });
+
   it('appends the versioned-pointer note when the unit still needs reinstalling', async () => {
     const service = createUpgradeService(
       baseDeps({

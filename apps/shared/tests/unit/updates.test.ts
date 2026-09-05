@@ -35,6 +35,17 @@ describe('updates contract', () => {
     expect(Value.Check(MachineUpgradeBodySchema, { force: true })).toBe(false);
   });
 
+  it('rejects a version that is not shaped like a version, including a path traversal', () => {
+    // The engine builds a staging directory name from this value
+    // (`.staging-<version>-<pid>`) before it ever validates it again — an
+    // unshaped value here would reach mkdir/rm -rf outside the install root.
+    expect(Value.Check(MachineUpgradeBodySchema, { version: '0.1.2' })).toBe(true);
+    expect(Value.Check(MachineUpgradeBodySchema, { version: 'v0.1.2' })).toBe(true);
+    expect(Value.Check(MachineUpgradeBodySchema, { version: '0.1.0-canary.abc1234' })).toBe(true);
+    expect(Value.Check(MachineUpgradeBodySchema, { version: '../../evil' })).toBe(false);
+    expect(Value.Check(MachineUpgradeBodySchema, { version: 'not-a-version' })).toBe(false);
+  });
+
   it('types every stream event the engine emits', () => {
     const events: UpgradeStreamEvent[] = [
       {

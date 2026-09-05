@@ -121,12 +121,24 @@ export type MachineUpdateStatus = Static<typeof MachineUpdateStatusSchema>;
 
 export const UPGRADE_SHA_PATTERN = '^[0-9a-f]{7,40}$';
 
+/**
+ * A pinned upgrade version: optional leading `v`, semver core, optional
+ * pre-release/build metadata (a canary's `-<sha7>` suffix, say). The engine
+ * builds a staging directory name from this value
+ * (`.staging-<version>-<pid>`) — this pattern is what keeps `../../x` from
+ * ever reaching a path join, at the same boundary `UPGRADE_SHA_PATTERN` holds
+ * for the sibling `sha` field.
+ */
+export const UPGRADE_VERSION_PATTERN = '^v?\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$';
+
 /** `POST /api/machine/upgrade` body. No channel means the build's own. */
 export const MachineUpgradeBodySchema = Type.Object(
   {
     channel: Type.Optional(UpdateChannelSchema),
     /** Stable only: an exact version instead of the latest. */
-    version: Type.Optional(Type.String({ maxLength: UPDATE_VERSION_MAX })),
+    version: Type.Optional(
+      Type.String({ maxLength: UPDATE_VERSION_MAX, pattern: UPGRADE_VERSION_PATTERN })
+    ),
     /** Canary only: a source commit instead of the rolling latest. */
     sha: Type.Optional(Type.String({ pattern: UPGRADE_SHA_PATTERN })),
     /** Restart the hub once the pointer has moved. Defaults to true. */
