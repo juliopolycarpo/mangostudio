@@ -505,7 +505,17 @@ function Test-SmokeOrFail([string]$Dir, [string]$Expected, [bool]$RemoveOnFailur
 
   if ($actual -eq $Expected) { return }
 
-  if ($RemoveOnFailure -and (Test-Path $Dir)) { Remove-Item -Recurse -Force $Dir }
+  # Windows can still hold the exe handle open right after the smoke-check
+  # process exits; a few short retries usually clear it. Cleanup is
+  # best-effort either way — the diagnostic below must reach the caller, not
+  # an access-denied error from Remove-Item.
+  if ($RemoveOnFailure -and (Test-Path $Dir)) {
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+      Remove-Item -Recurse -Force $Dir -ErrorAction SilentlyContinue
+      if (-not (Test-Path $Dir)) { break }
+      Start-Sleep -Milliseconds 200
+    }
+  }
   $received = if ($actual) { $actual } else { '<none>' }
   Fail "expected version: $Expected | received: $received"
 }
