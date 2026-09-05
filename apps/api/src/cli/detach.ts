@@ -295,6 +295,13 @@ export interface SpawnDetachedWaiterInput {
   /** Where the manager's combined output is appended. */
   readonly logFile: string;
   /**
+   * What to run once the manager has exited 0 — the command that brings a
+   * hub the caller stopped for this upgrade back up, through the launcher on
+   * PATH (never this process's realpath: scoop's is versioned and changes
+   * with the upgrade). Its output goes to the same log.
+   */
+  readonly afterSuccess?: readonly string[];
+  /**
    * The env the PowerShell host (and so the manager and anything it spawns,
    * such as an npm postinstall) runs with. The caller curates it — the
    * upgrade engine hands over the same delegate env the POSIX path uses,
@@ -308,21 +315,39 @@ function powerShellQuote(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
+/** `& 'program' 'arg'… *>> 'log'`: run argv, appending every stream to the log. */
+function loggedInvocation(argv: readonly string[], logFile: string): string {
+  const [program, ...args] = argv;
+  const invocation = ['&', powerShellQuote(program ?? ''), ...args.map(powerShellQuote)].join(' ');
+  return `${invocation} *>> ${powerShellQuote(logFile)}`;
+}
+
 /**
  * The `-Command` script text a detached waiter runs: wait out one or more
- * pids, then invoke the package manager and append its output to the log.
- * // Usage: buildWaiterCommand({ argv: ['npm', 'install', '-g', 'x'], waitForPid: [123, 456], logFile: 'C:\\log.txt' })
+ * pids, invoke the package manager appending its output to the log, and —
+ * when an `afterSuccess` step is given — run it only if the manager exited 0.
+ *
+ * The wait has no timeout on purpose: the caller has already confirmed every
+ * pid it names is exiting (its own, and a hub it stopped), so giving up early
+ * could only start the manager against a file still held open.
+ * `$LASTEXITCODE` rather than `$?`: for a native command `$?` is true in
+ * Windows PowerShell whatever the exit code.
+ * // Usage: buildWaiterCommand({ argv: ['npm', 'install', '-g', 'x'], waitForPid: [123, 456], logFile: 'C:\\log.txt', afterSuccess: ['mangostudio', 'restart'] })
  */
 export function buildWaiterCommand(
-  input: Pick<SpawnDetachedWaiterInput, 'argv' | 'waitForPid' | 'logFile'>
+  input: Pick<SpawnDetachedWaiterInput, 'argv' | 'waitForPid' | 'logFile' | 'afterSuccess'>
 ): string {
-  const [manager, ...args] = input.argv;
-  const invocation = ['&', powerShellQuote(manager ?? ''), ...args.map(powerShellQuote)].join(' ');
   const ids = Array.isArray(input.waitForPid) ? input.waitForPid.join(', ') : input.waitForPid;
-  return (
-    `Wait-Process -Id ${ids} -Timeout 60 -ErrorAction SilentlyContinue; ` +
-    `${invocation} *>> ${powerShellQuote(input.logFile)}`
-  );
+  const steps = [
+    `Wait-Process -Id ${ids} -ErrorAction SilentlyContinue`,
+    loggedInvocation(input.argv, input.logFile),
+  ];
+  if (input.afterSuccess) {
+    steps.push(
+      `if ($LASTEXITCODE -eq 0) { ${loggedInvocation(input.afterSuccess, input.logFile)} }`
+    );
+  }
+  return steps.join('; ');
 }
 
 /**
@@ -336,10 +361,11 @@ export function ensureLogDir(logFile: string): void {
 }
 
 /**
- * Windows-only: spawn a detached PowerShell that waits for this process to
- * exit, then runs a package-manager upgrade and logs its output — used when
- * the manager that owns the binary would otherwise try to replace a file
- * this process still holds open.
+ * Windows-only: spawn a detached PowerShell that waits for this process (and
+ * a hub the caller stopped) to exit, then runs a package-manager upgrade,
+ * logs its output, and optionally brings the hub back — used when the
+ * manager that owns the binary would otherwise try to replace a file a
+ * running process still holds open.
  * // Usage: spawnDetachedWaiter({ argv: ['npm', 'install', '-g', 'mangostudio@latest'], waitForPid: process.pid, logFile, env })
  */
 export function spawnDetachedWaiter(input: SpawnDetachedWaiterInput): number {

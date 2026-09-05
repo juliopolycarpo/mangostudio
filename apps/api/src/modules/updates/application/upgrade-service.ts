@@ -36,7 +36,13 @@ import {
   spawnDetachedWaiter,
   WINDOWS_SYSTEM_ENV_KEYS,
 } from '../../../cli/detach';
-import { createProcessController, stopPidOrThrow } from '../../../cli/process-control';
+import {
+  createProcessController,
+  STOP_POLL_INTERVAL_MS,
+  STOP_TIMEOUT_MS,
+  stopPidOrThrow,
+  waitForExit,
+} from '../../../cli/process-control';
 import { sleep } from '../../../cli/sleep';
 import { type BuildInfo, getBuildInfo, isKnownBuildSha } from '../../../lib/build-info';
 import { getConfig, getVersion, RUNTIME_CONFIG_ENV_KEYS } from '../../../lib/config';
@@ -121,6 +127,12 @@ export interface UpgradeServiceDeps {
   readonly mkdir: (path: string) => Promise<void>;
   readonly removeDir: (path: string) => Promise<void>;
   readonly spawnDetachedWaiter: (input: SpawnDetachedWaiterInput) => number;
+  /**
+   * Stop a live hub and return once its pid is gone — the Windows delegate's
+   * precondition, since the package manager cannot replace `mangostudio.exe`
+   * while a hub holds it open and nothing else in that flow makes one exit.
+   */
+  readonly stopHub: (input: { state: ServerState; launch: HubLaunchMode }) => Promise<void>;
   /** Effect for a `'scheduled'` restart decision; a route defers this itself instead (see machine-routes.ts). */
   readonly restartHub: (input: { state: ServerState; launch: HubLaunchMode }) => Promise<void>;
   readonly currentExecutable: () => HubExecutable;
@@ -454,35 +466,94 @@ async function runPosixDelegate(
   return await withRestart(installedVia, d.getVersion(), undefined, request.restart, d, emit);
 }
 
+/** A hub running in a process other than the one handling this upgrade. */
+interface LiveHub {
+  readonly state: ServerState;
+  readonly launch: HubLaunchMode;
+}
+
 /**
- * Windows: the manager that owns the binary cannot replace a file this
- * process still has open, so it runs detached, after this process exits.
- * When a hub is running in a different process from the one handling this
- * upgrade (the common case for a CLI-triggered upgrade), the manager has to
- * wait out both — the hub, not the CLI, is what holds `mangostudio.exe` open.
+ * The command that brings a stopped hub back the way it was started, run by
+ * the waiter through the launcher on PATH once the manager has replaced the
+ * binary. `restart` starts the installed unit when nothing is live; a
+ * detached instance needs `serve -d` with its own target, since `restart`
+ * has no state file to read by then.
+ */
+function comebackArgv(hub: LiveHub): readonly string[] {
+  if (hub.launch === 'service') return ['mangostudio', 'restart'];
+  return ['mangostudio', 'serve', '-d', `${hub.state.host}:${hub.state.port}`];
+}
+
+function windowsDelegateMessage(
+  hub: LiveHub | null,
+  wantsRestart: boolean,
+  logFile: string
+): string {
+  if (!hub) {
+    return 'The package manager runs after this process exits; check the log and run "mangostudio --version" in a minute.';
+  }
+  const stopped = `Stopped MangoStudio (PID ${hub.state.pid}) so the package manager can replace the binary once this process exits`;
+  if (wantsRestart) {
+    return `${stopped}; it starts the hub again when the manager succeeds. Check ${logFile} and "mangostudio status" in a minute.`;
+  }
+  return `${stopped}. Bring it back with "${comebackArgv(hub).join(' ')}" once ${logFile} shows the manager finished.`;
+}
+
+/**
+ * Windows: the manager that owns the binary cannot replace a file a running
+ * process holds open, so it runs detached, after this process exits. A hub
+ * running in a different process from the one handling this upgrade (the
+ * CLI-triggered case — the machine route refuses delegate plans) would never
+ * exit on its own, so it is stopped here first: the waiter's wait on its pid
+ * is then a safety net, and the waiter's `afterSuccess` step is what brings it back.
+ * A foreground hub belongs to the terminal that owns it, the same refusal
+ * `mangostudio restart` makes.
  */
 async function runWindowsDelegate(
   plan: Extract<UpgradePlan, { kind: 'delegate' }>,
   installedVia: InstallOrigin,
+  request: UpgradeRunRequest,
   d: UpgradeServiceDeps,
   emit: EmitUpgradeEvent
 ): Promise<UpgradeReport> {
   emit(stageEvent('install'));
-  const logFile = getUpgradeLogPath(d.now());
   const rawState = await d.readState();
-  const hubPid = rawState && isStateLive(rawState, d.isAlive) ? rawState.pid : undefined;
-  const waitForPid = hubPid !== undefined && hubPid !== d.pid ? [hubPid, d.pid] : d.pid;
-  d.spawnDetachedWaiter({ argv: plan.argv, waitForPid, logFile, env: delegateEnv(d.env) });
+  const state = rawState && isStateLive(rawState, d.isAlive) ? rawState : null;
+  const hub: LiveHub | null =
+    state && state.pid !== d.pid ? { state, launch: hubLaunchMode(state) } : null;
+  if (hub?.launch === 'foreground') {
+    return caughtFailure(
+      installedVia,
+      d.getVersion(),
+      new Error(
+        `MangoStudio is running in the foreground (PID ${hub.state.pid}) and holds mangostudio.exe open. Press Ctrl-C in its terminal and run "mangostudio upgrade" again.`
+      )
+    );
+  }
+  if (hub) {
+    try {
+      await d.stopHub(hub);
+    } catch (error) {
+      return caughtFailure(installedVia, d.getVersion(), error);
+    }
+  }
+
+  const logFile = getUpgradeLogPath(d.now());
+  const afterSuccess = hub && request.restart ? comebackArgv(hub) : undefined;
+  d.spawnDetachedWaiter({
+    argv: plan.argv,
+    waitForPid: hub ? [hub.state.pid, d.pid] : d.pid,
+    logFile,
+    env: delegateEnv(d.env),
+    ...(afterSuccess ? { afterSuccess } : {}),
+  });
   return {
     outcome: 'upgraded',
     installedVia: fitInstalledVia(installedVia),
     currentVersion: d.getVersion(),
-    restart: 'skipped',
+    restart: !hub ? 'not-running' : request.restart ? 'scheduled' : 'manual',
     logFile,
-    message: fitToLimit(
-      'The package manager runs after this process exits; check the log and run "mangostudio --version" in a minute.',
-      UPDATE_ERROR_MAX
-    ),
+    message: fitToLimit(windowsDelegateMessage(hub, request.restart, logFile), UPDATE_ERROR_MAX),
     exitCode: 0,
   };
 }
@@ -507,7 +578,7 @@ async function runDelegate(
       exitCode: 1,
     };
   }
-  if (d.platform === 'win32') return await runWindowsDelegate(plan, installedVia, d, emit);
+  if (d.platform === 'win32') return await runWindowsDelegate(plan, installedVia, request, d, emit);
   return await runPosixDelegate(plan, installedVia, request, d, emit);
 }
 
@@ -717,6 +788,29 @@ async function rollbackInner(
 }
 
 /**
+ * Real `stopHub` effect: a service-managed hub is stopped through its
+ * supervisor and then waited out — `Stop-ScheduledTask` returns before the
+ * process is gone, and the caller needs the pid gone, not the request
+ * accepted; a detached one is signalled and waited out the way `stop` does.
+ */
+async function defaultStopHub(input: { state: ServerState; launch: HubLaunchMode }): Promise<void> {
+  const controller = createProcessController();
+  const timeoutMessage = `MangoStudio (PID ${input.state.pid}) did not stop within ${STOP_TIMEOUT_MS / 1000}s.`;
+  if (input.launch === 'service') {
+    await createHubServiceManager().stop();
+    const stopped = await waitForExit(controller, input.state.pid, {
+      timeoutMs: STOP_TIMEOUT_MS,
+      intervalMs: STOP_POLL_INTERVAL_MS,
+      now: Date.now,
+      sleep,
+    });
+    if (!stopped) throw new Error(timeoutMessage);
+    return;
+  }
+  await stopPidOrThrow({ controller, now: Date.now, sleep }, input.state.pid, timeoutMessage);
+}
+
+/**
  * Real `restartHub` effect: service-managed bounces through the supervisor,
  * detached stops the old pid and spawns a successor through the installer's
  * `current` pointer when it resolves to one. Fire-and-forget by design — it
@@ -770,6 +864,7 @@ function resolveDeps(deps: Partial<UpgradeServiceDeps>): UpgradeServiceDeps {
     removeDir:
       deps.removeDir ?? (async (path) => void (await rm(path, { recursive: true, force: true }))),
     spawnDetachedWaiter: deps.spawnDetachedWaiter ?? spawnDetachedWaiter,
+    stopHub: deps.stopHub ?? defaultStopHub,
     restartHub: deps.restartHub ?? defaultRestartHub,
     currentExecutable: deps.currentExecutable ?? (() => currentHubExecutable()),
     readState: deps.readState ?? readState,

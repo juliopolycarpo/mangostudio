@@ -135,6 +135,7 @@ function baseDeps(overrides: Partial<UpgradeServiceDeps> = {}): Partial<UpgradeS
     mkdir: () => Promise.resolve(),
     removeDir: () => Promise.resolve(),
     spawnDetachedWaiter: () => 4242,
+    stopHub: () => Promise.resolve(),
     restartHub: () => Promise.resolve(),
     currentExecutable: () => ({
       argv: ['/home/j/.mango/dist/current/mangostudio'],
@@ -701,6 +702,7 @@ describe('upgrade-service delegate plans', () => {
       argv: readonly string[];
       waitForPid: number | readonly number[];
       logFile: string;
+      afterSuccess?: readonly string[];
     }[] = [];
     let ran = false;
     const service = createUpgradeService(
@@ -728,8 +730,9 @@ describe('upgrade-service delegate plans', () => {
     expect(waiterCalls).toHaveLength(1);
     expect(waiterCalls[0]?.argv).toEqual(['npm', 'install', '-g', 'mangostudio@latest']);
     expect(waiterCalls[0]?.waitForPid).toBe(555);
+    expect(waiterCalls[0]?.afterSuccess).toBeUndefined();
     expect(report.outcome).toBe('upgraded');
-    expect(report.restart).toBe('skipped');
+    expect(report.restart).toBe('not-running');
     expect(report.logFile).toBe(waiterCalls[0]?.logFile);
     expect(report.message).toContain('runs after this process exits');
     expect(report.exitCode).toBe(0);
@@ -769,19 +772,28 @@ describe('upgrade-service delegate plans', () => {
     expect(env?.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
-  it('waits on both the CLI and a separately running live hub before delegating on Windows', async () => {
-    // The CLI invoking `mangostudio upgrade` (d.pid) is not always the same
-    // process holding mangostudio.exe open — a hub launched separately (as a
-    // service, or `serve -d`) is. The manager cannot replace the file until
-    // both have exited.
-    const waiterCalls: { waitForPid: number | readonly number[] }[] = [];
+  it('stops a live detached hub first, then has the waiter bring it back once the manager succeeds', async () => {
+    // The CLI invoking `mangostudio upgrade` (d.pid) is not the process
+    // holding mangostudio.exe open — a hub launched separately (`serve -d`)
+    // is, and nothing else in this flow would ever make it exit. The engine
+    // stops it before spawning the waiter; the waiter's wait on both pids is
+    // then a safety net, and its `afterSuccess` step is what restarts the hub.
+    const stops: { state: ServerState; launch: string }[] = [];
+    const waiterCalls: {
+      waitForPid: number | readonly number[];
+      afterSuccess?: readonly string[];
+    }[] = [];
     const service = createUpgradeService(
       baseDeps({
         probe: () => npmProbe({ platform: 'win32' }),
         platform: 'win32',
         pid: 555,
-        readState: () => Promise.resolve(detachedState({ pid: 999 })),
+        readState: () => Promise.resolve(detachedState({ pid: 999, host: '0.0.0.0', port: 4000 })),
         isAlive: () => true,
+        stopHub: (input) => {
+          stops.push(input);
+          return Promise.resolve();
+        },
         spawnDetachedWaiter: (input) => {
           waiterCalls.push(input);
           return 1;
@@ -789,12 +801,135 @@ describe('upgrade-service delegate plans', () => {
       })
     );
 
-    await collect(service);
+    const { report } = await collect(service);
 
+    expect(stops).toEqual([
+      { state: detachedState({ pid: 999, host: '0.0.0.0', port: 4000 }), launch: 'detached' },
+    ]);
     expect(waiterCalls[0]?.waitForPid).toEqual([999, 555]);
+    expect(waiterCalls[0]?.afterSuccess).toEqual(['mangostudio', 'serve', '-d', '0.0.0.0:4000']);
+    expect(report.outcome).toBe('upgraded');
+    expect(report.restart).toBe('scheduled');
+    expect(report.message).toContain('PID 999');
   });
 
-  it('waits on only the CLI pid when the state file is stale (no live hub)', async () => {
+  it('brings a Scheduled Task hub back through "mangostudio restart", which starts the installed unit', async () => {
+    const stops: { launch: string }[] = [];
+    const waiterCalls: { afterSuccess?: readonly string[] }[] = [];
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe({ platform: 'win32' }),
+        platform: 'win32',
+        pid: 555,
+        readState: () =>
+          Promise.resolve(detachedState({ pid: 999, logFile: '', service: 'MangoStudio' })),
+        isAlive: () => true,
+        stopHub: (input) => {
+          stops.push(input);
+          return Promise.resolve();
+        },
+        spawnDetachedWaiter: (input) => {
+          waiterCalls.push(input);
+          return 1;
+        },
+      })
+    );
+
+    const { report } = await collect(service);
+
+    expect(stops).toEqual([{ launch: 'service' }].map((s) => expect.objectContaining(s)));
+    expect(waiterCalls[0]?.afterSuccess).toEqual(['mangostudio', 'restart']);
+    expect(report.restart).toBe('scheduled');
+  });
+
+  it('still stops a live hub under --no-restart (the manager cannot replace a held file) and reports the restart as manual', async () => {
+    let stopped = false;
+    const waiterCalls: { afterSuccess?: readonly string[] }[] = [];
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe({ platform: 'win32' }),
+        platform: 'win32',
+        pid: 555,
+        readState: () => Promise.resolve(detachedState({ pid: 999 })),
+        isAlive: () => true,
+        stopHub: () => {
+          stopped = true;
+          return Promise.resolve();
+        },
+        spawnDetachedWaiter: (input) => {
+          waiterCalls.push(input);
+          return 1;
+        },
+      })
+    );
+
+    const { report } = await collect(service, { restart: false });
+
+    expect(stopped).toBe(true);
+    expect(waiterCalls[0]?.afterSuccess).toBeUndefined();
+    expect(report.restart).toBe('manual');
+    expect(report.message).toContain('mangostudio serve -d localhost:3001');
+  });
+
+  it('fails without stopping or spawning anything when the live hub runs in the foreground', async () => {
+    // The terminal that owns a foreground hub is the only thing that should
+    // stop it — the same refusal `mangostudio restart` makes.
+    let stopped = false;
+    let spawned = false;
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe({ platform: 'win32' }),
+        platform: 'win32',
+        pid: 555,
+        readState: () => Promise.resolve(detachedState({ pid: 999, logFile: '' })),
+        isAlive: () => true,
+        stopHub: () => {
+          stopped = true;
+          return Promise.resolve();
+        },
+        spawnDetachedWaiter: () => {
+          spawned = true;
+          return 1;
+        },
+      })
+    );
+
+    const { report } = await collect(service);
+
+    expect(report.outcome).toBe('failed');
+    expect(report.exitCode).toBe(2);
+    expect(report.message).toContain('PID 999');
+    expect(report.message).toContain('Ctrl-C');
+    expect(stopped).toBe(false);
+    expect(spawned).toBe(false);
+  });
+
+  it('fails and spawns no waiter when the live hub does not stop', async () => {
+    let spawned = false;
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe({ platform: 'win32' }),
+        platform: 'win32',
+        pid: 555,
+        readState: () => Promise.resolve(detachedState({ pid: 999 })),
+        isAlive: () => true,
+        stopHub: () => Promise.reject(new Error('MangoStudio (PID 999) did not stop within 10s.')),
+        spawnDetachedWaiter: () => {
+          spawned = true;
+          return 1;
+        },
+      })
+    );
+
+    const { report } = await collect(service);
+
+    expect(report.outcome).toBe('failed');
+    expect(report.message).toContain('did not stop within 10s');
+    expect(spawned).toBe(false);
+  });
+
+  it('waits on only the CLI pid, and stops nothing, when the state file is stale (no live hub)', async () => {
+    let stopped = false;
     const waiterCalls: { waitForPid: number | readonly number[] }[] = [];
     const service = createUpgradeService(
       baseDeps({
@@ -803,6 +938,10 @@ describe('upgrade-service delegate plans', () => {
         pid: 555,
         readState: () => Promise.resolve(detachedState({ pid: 999 })),
         isAlive: () => false,
+        stopHub: () => {
+          stopped = true;
+          return Promise.resolve();
+        },
         spawnDetachedWaiter: (input) => {
           waiterCalls.push(input);
           return 1;
@@ -810,9 +949,11 @@ describe('upgrade-service delegate plans', () => {
       })
     );
 
-    await collect(service);
+    const { report } = await collect(service);
 
     expect(waiterCalls[0]?.waitForPid).toBe(555);
+    expect(stopped).toBe(false);
+    expect(report.restart).toBe('not-running');
   });
 
   it('reports a refused plan verbatim for a manager the hub must not fight', async () => {

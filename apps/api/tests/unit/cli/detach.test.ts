@@ -100,8 +100,33 @@ describe('buildWaiterCommand', () => {
     });
 
     expect(command).toBe(
-      'Wait-Process -Id 4242 -Timeout 60 -ErrorAction SilentlyContinue; ' +
+      'Wait-Process -Id 4242 -ErrorAction SilentlyContinue; ' +
         "& 'npm' 'install' '-g' 'mangostudio@latest' *>> 'C:\\Users\\j\\.mango\\run\\upgrade-1.log'"
+    );
+  });
+
+  it('never gives up waiting: the caller has already confirmed every pid is stopping, so a timeout could only start the manager against a file still held open', () => {
+    const command = buildWaiterCommand({
+      argv: ['npm', 'install', '-g', 'mangostudio@latest'],
+      waitForPid: [999, 555],
+      logFile: 'C:\\log.txt',
+    });
+
+    expect(command).not.toContain('-Timeout');
+  });
+
+  it('brings the hub back only when the manager exited 0, appending that output to the same log', () => {
+    const command = buildWaiterCommand({
+      argv: ['npm', 'install', '-g', 'mangostudio@latest'],
+      waitForPid: [999, 555],
+      logFile: 'C:\\log.txt',
+      afterSuccess: ['mangostudio', 'serve', '-d', "it's:3001"],
+    });
+
+    expect(command).toBe(
+      'Wait-Process -Id 999, 555 -ErrorAction SilentlyContinue; ' +
+        "& 'npm' 'install' '-g' 'mangostudio@latest' *>> 'C:\\log.txt'; " +
+        "if ($LASTEXITCODE -eq 0) { & 'mangostudio' 'serve' '-d' 'it''s:3001' *>> 'C:\\log.txt' }"
     );
   });
 
@@ -122,7 +147,7 @@ describe('buildWaiterCommand', () => {
       logFile: 'C:\\log.txt',
     });
 
-    expect(command).toStartWith('Wait-Process -Id 999, 555 -Timeout 60');
+    expect(command).toStartWith('Wait-Process -Id 999, 555 -ErrorAction');
   });
 });
 
