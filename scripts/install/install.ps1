@@ -257,12 +257,18 @@ function Save-OriginRecord {
   $oldSource = Get-Prop $existing 'source'
   $prunePending = Get-Prop $existing 'prunePending'
 
+  # A repair install, a retried upgrade, or -Use <current> reports
+  # NewVersion -eq OldVersion: the pointer never actually moved. Keep the
+  # rollback anchor pointing at whatever it already recorded instead of
+  # collapsing previousVersion onto the version that is not changing.
+  $previousVersion = if ($NewVersion -eq $OldVersion) { Get-Prop $existing 'previousVersion' } else { $OldVersion }
+
   $sourceVal = if ($SourceKind) { $SourceKind } else { $oldSource }
   $channel = Get-VersionChannel $NewVersion
   $installedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 
   $record = New-OriginRecord -Origin $OriginKind -Channel $channel -RecordVersion $NewVersion `
-    -PreviousVersion $OldVersion -SourceSha $SourceSha -InstalledAt $installedAt `
+    -PreviousVersion $previousVersion -SourceSha $SourceSha -InstalledAt $installedAt `
     -Source $sourceVal -BinDir $BinDir -PrunePending $prunePending -Carry $existing
 
   Write-OriginRecord $originFile $record

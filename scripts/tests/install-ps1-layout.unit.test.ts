@@ -405,6 +405,28 @@ describe('install.ps1 layout (real windows-x64 exe required)', () => {
   );
 
   test.skipIf(!POWERSHELL || !WINDOWS_BINARY)(
+    'reinstalling the same version (a repair install) carries the existing previousVersion forward',
+    () => {
+      // Simulates: install 0.0.1 (placeholder); install goodVersion (normal
+      // swap, previousVersion becomes 0.0.1); install goodVersion again (a
+      // repair install / retried upgrade) — NewVersion == OldVersion this
+      // time, so the anchor must not collapse onto goodVersion itself.
+      const l = layout();
+      craftInstalledState(l, '0.0.1', { previousVersion: '0.0.0' });
+      const archive = buildReleaseZip(l.linuxDir, `mangostudio-${goodVersion}-windows-x64.zip`);
+
+      const first = run(l.scriptPath, ['-Local', archive], l.env);
+      expect(first.exitCode).toBe(0);
+      expect(originRecord(l.rootLinux).previousVersion).toBe('0.0.1');
+
+      const second = run(l.scriptPath, ['-Local', archive], l.env);
+      expect(second.exitCode).toBe(0);
+      expect(originRecord(l.rootLinux).previousVersion).toBe('0.0.1');
+    },
+    90000
+  );
+
+  test.skipIf(!POWERSHELL || !WINDOWS_BINARY)(
     'MANGOSTUDIO_INSTALL_ORIGIN=upgrade records origin: upgrade',
     () => {
       const l = layout();
