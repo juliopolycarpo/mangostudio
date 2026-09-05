@@ -2731,7 +2731,7 @@ export const messages = {
       },
       update: {
         title: 'Atualização',
-        available: 'O MangoStudio {latest} está disponível (você está na {current})',
+        available: 'O MangoStudio {latest} está disponível (você está na versão {current})',
         upgrade: 'Atualizar',
         dismiss: 'Dispensar',
         dismissAria: 'Dispensar o aviso de atualização',
@@ -2746,6 +2746,7 @@ export const messages = {
         upToDate: 'Atualizado ({version})',
         checksDisabled: 'Verificações desativadas',
         notCheckedYet: 'Ainda não verificado',
+        checkFailed: 'Falha na verificação',
         updateAvailable: '{version} disponível',
         manager: {
           'self-managed': 'Script de instalação',

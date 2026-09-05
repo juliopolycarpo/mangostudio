@@ -2743,6 +2743,7 @@ export const messages: Messages = {
         upToDate: 'Up to date ({version})',
         checksDisabled: 'Checks disabled',
         notCheckedYet: 'Not checked yet',
+        checkFailed: 'Check failed',
         updateAvailable: '{version} available',
         manager: {
           'self-managed': 'Install script',
