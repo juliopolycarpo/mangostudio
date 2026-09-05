@@ -9,7 +9,7 @@ import {
   type UserServiceAction,
 } from '@mangostudio/runtime';
 import type { ResourceKind } from '@mangostudio/shared/library';
-import type { UpdateChannel } from '@mangostudio/shared/updates';
+import { UPGRADE_VERSION_PATTERN, type UpdateChannel } from '@mangostudio/shared/updates';
 import { CliError } from './errors';
 
 export interface ServeArgs {
@@ -261,6 +261,7 @@ export function parseLogsArgs(rest: string[]): LogsArgs {
 }
 
 const CANARY_SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
+const UPGRADE_VERSION_REGEX = new RegExp(UPGRADE_VERSION_PATTERN);
 
 /**
  * Parse `upgrade`/`update` args: --check, --yes, one of --stable/--canary
@@ -307,6 +308,14 @@ export function parseUpgradeArgs(rest: string[]): UpgradeArgs {
       const value = rest[index + 1];
       if (!value || value.startsWith('-')) {
         throw new CliError('Missing value for upgrade --version.');
+      }
+      // The engine builds a staging directory name from this value
+      // (`.staging-<version>-<pid>`), so it has to look like a version — not
+      // a path segment such as `../../x` — before it ever reaches a join.
+      if (!UPGRADE_VERSION_REGEX.test(value)) {
+        throw new CliError(
+          `Invalid value for upgrade --version: ${value} | expected shape: ${UPGRADE_VERSION_PATTERN}`
+        );
       }
       // --version names a stable release by definition; the rolling canary
       // has no notion of an exact version to pin without a --canary <sha>.

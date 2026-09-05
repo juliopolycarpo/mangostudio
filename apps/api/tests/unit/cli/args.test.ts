@@ -330,6 +330,20 @@ describe('parseUpgradeArgs', () => {
     );
   });
 
+  it('rejects a --version shaped like a path traversal, naming the value and the expected shape', () => {
+    // The engine builds a staging directory name from this value
+    // (`.staging-<version>-<pid>`); it must never reach a path join.
+    expect(() => parseUpgradeArgs(['--version', '../../evil'])).toThrow(
+      /Invalid value for upgrade --version: \.\.\/\.\.\/evil \| expected shape: /
+    );
+  });
+
+  it('accepts a canary-style version with a source-sha suffix', () => {
+    expect(parseUpgradeArgs(['--version', '0.1.0-canary.abc1234'])).toMatchObject({
+      version: '0.1.0-canary.abc1234',
+    });
+  });
+
   it('rejects more than one channel selector', () => {
     expect(() => parseUpgradeArgs(['--stable', '--canary'])).toThrow(CliError);
     expect(() => parseUpgradeArgs(['--stable', '--canary'])).toThrow(/mutually exclusive/);
