@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { buildDetachedEnv } from '../../../src/cli/detach';
+import type { MangoConfig } from '../../../src/lib/config';
+import { updateCheckSkipReason } from '../../../src/modules/updates/application/update-check';
+
+/** Checks enabled, so only the environment can produce a skip. */
+const configWithCheck = {
+  updates: { check: true, channel: null },
+} as Pick<MangoConfig, 'updates'>;
 
 const CONNECTOR_ENV_VARS = [
   'GEMINI_API_KEY_DEFAULT',
@@ -23,6 +30,9 @@ const MUTATED_ENV_KEYS = [
   'ProgramW6432',
   'MANGOSTUDIO_LAUNCHER',
   'MANGOSTUDIO_LAUNCHER_PATH',
+  'NO_UPDATE_NOTIFIER',
+  'DO_NOT_TRACK',
+  'CI',
 ];
 
 let envSnapshot: Record<string, string | undefined> = {};
@@ -112,6 +122,23 @@ describe('buildDetachedEnv', () => {
     expect(env.MANGOSTUDIO_LAUNCHER_PATH).toBe(
       '/home/user/.bun/install/global/node_modules/.bin/mangostudio'
     );
+  });
+
+  it('forwards the update-check opt-outs, so the privacy choice survives the spawn', () => {
+    // `NO_UPDATE_NOTIFIER=1 mangostudio serve -d` used to skip the check in
+    // the CLI process and then hand the hub an environment without it, so the
+    // detached process — the one that actually runs the scheduled check —
+    // went to the release host anyway.
+    process.env.NO_UPDATE_NOTIFIER = '1';
+    process.env.DO_NOT_TRACK = '1';
+    process.env.CI = 'true';
+
+    const env = buildDetachedEnv('localhost', 3001, '/tmp/server.log');
+
+    expect(updateCheckSkipReason(configWithCheck, env, '0.1.1')).toBe('env');
+    expect(env.NO_UPDATE_NOTIFIER).toBe('1');
+    expect(env.DO_NOT_TRACK).toBe('1');
+    expect(env.CI).toBe('true');
   });
 
   it('preserves diagnostic log toggle when set to 0', () => {

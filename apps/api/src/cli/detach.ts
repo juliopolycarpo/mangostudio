@@ -178,6 +178,14 @@ export const DETACH_ENV_ALLOWLIST = new Set<string>([
   // the detached child needs the same answer the foreground process had.
   'MANGOSTUDIO_LAUNCHER',
   'MANGOSTUDIO_LAUNCHER_PATH',
+  // The update check's own opt-outs (update-check.ts's
+  // `updateCheckSkipReason`). Dropping them turns `NO_UPDATE_NOTIFIER=1
+  // mangostudio serve -d` into a hub that reaches the release host anyway —
+  // the privacy choice has to survive the spawn, not just the CLI process
+  // that made it.
+  'NO_UPDATE_NOTIFIER',
+  'DO_NOT_TRACK',
+  'CI',
   // System and networking essentials. Bun.spawn replaces (not merges) the
   // child's environment, so omitting these would leave the detached server
   // without executable lookup (breaking the shell-exec tool), home-dir
