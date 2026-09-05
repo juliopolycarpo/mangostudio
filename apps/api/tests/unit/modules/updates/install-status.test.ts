@@ -3,21 +3,7 @@ import {
   resolveInstallStatus,
   upgradeRefusalReason,
 } from '../../../../src/modules/updates/application/install-status';
-import type { InstallOriginProbe } from '../../../../src/modules/updates/domain/install-origin';
-
-function probe(overrides: Partial<InstallOriginProbe> = {}): InstallOriginProbe {
-  return {
-    platform: 'linux',
-    env: {},
-    execPath: '/home/j/.mango/dist/0.1.1/mangostudio',
-    version: '0.1.1',
-    standalone: true,
-    container: false,
-    home: '/home/j',
-    readFile: () => null,
-    ...overrides,
-  };
-}
+import { probe } from './support/install-origin-probes';
 
 describe('resolveInstallStatus', () => {
   it('uses the build’s own channel when none is configured', () => {

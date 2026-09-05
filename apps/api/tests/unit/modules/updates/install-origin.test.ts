@@ -3,11 +3,11 @@ import { INSTALLED_VIA_PATH_MAX } from '@mangostudio/shared/updates';
 import {
   detectInstallOrigin,
   fitInstalledVia,
-  type InstallOriginProbe,
   npmFamilyFromPath,
   parseInstallOriginRecord,
   versionChannel,
 } from '../../../../src/modules/updates/domain/install-origin';
+import { probe } from './support/install-origin-probes';
 
 const ORIGIN_RECORD = JSON.stringify({
   origin: 'installer',
@@ -18,20 +18,6 @@ const ORIGIN_RECORD = JSON.stringify({
   source: 'github-release',
   futureKey: 'ignored',
 });
-
-function probe(overrides: Partial<InstallOriginProbe> = {}): InstallOriginProbe {
-  return {
-    platform: 'linux',
-    env: {},
-    execPath: '/home/j/.mango/dist/0.1.1/mangostudio',
-    version: '0.1.1',
-    standalone: true,
-    container: false,
-    home: '/home/j',
-    readFile: () => null,
-    ...overrides,
-  };
-}
 
 describe('detectInstallOrigin', () => {
   it('reads the origin record from the dist root', () => {

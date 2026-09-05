@@ -6,7 +6,6 @@ import {
   type UpgradeRunRequest,
   type UpgradeServiceDeps,
 } from '../../../../src/modules/updates/application/upgrade-service';
-import type { InstallOriginProbe } from '../../../../src/modules/updates/domain/install-origin';
 import type {
   ResolvedArchiveDownload,
   ResolvedDownload,
@@ -16,8 +15,13 @@ import type {
   ScriptOutputLine,
   ScriptRun,
 } from '../../../../src/modules/updates/infrastructure/run-script';
+import {
+  PROBE_VERSION as CURRENT_VERSION,
+  dockerProbe,
+  npmProbe,
+  selfManagedProbe,
+} from './support/install-origin-probes';
 
-const CURRENT_VERSION = '0.1.1';
 const NEWER_VERSION = '0.1.2';
 
 function linesFrom(items: readonly ScriptOutputLine[]): AsyncIterable<ScriptOutputLine> {
@@ -48,47 +52,6 @@ function fakeRunScript(exitCode: number, lines: readonly ScriptOutputLine[] = []
     return { lines: linesFrom(lines), exitCode: Promise.resolve(exitCode) };
   };
   return { runScript, calls };
-}
-
-function selfManagedProbe(overrides: Partial<InstallOriginProbe> = {}): InstallOriginProbe {
-  return {
-    platform: 'linux',
-    env: {},
-    execPath: `/home/j/.mango/dist/${CURRENT_VERSION}/mangostudio`,
-    version: CURRENT_VERSION,
-    standalone: true,
-    container: false,
-    home: '/home/j',
-    readFile: (path) =>
-      path === '/home/j/.mango/dist/install-origin.json'
-        ? JSON.stringify({
-            origin: 'installer',
-            channel: 'stable',
-            version: CURRENT_VERSION,
-            previousVersion: '0.1.0',
-            binDir: '/home/j/.local/bin',
-          })
-        : null,
-    ...overrides,
-  };
-}
-
-function npmProbe(overrides: Partial<InstallOriginProbe> = {}): InstallOriginProbe {
-  return {
-    platform: 'linux',
-    env: {},
-    execPath: '/usr/local/lib/node_modules/mangostudio/bin/mangostudio.js',
-    version: CURRENT_VERSION,
-    standalone: true,
-    container: false,
-    home: '/home/j',
-    readFile: () => null,
-    ...overrides,
-  };
-}
-
-function dockerProbe(overrides: Partial<InstallOriginProbe> = {}): InstallOriginProbe {
-  return { ...npmProbe(), execPath: '/usr/local/bin/mangostudio', container: true, ...overrides };
 }
 
 function newerTarget(overrides: Partial<ResolvedArchiveDownload> = {}): ResolvedDownload {
