@@ -120,9 +120,22 @@ export function createUpdateChecker(deps: Partial<UpdateCheckerDeps> = {}): Upda
     return updateCheckSkipReason(d.getConfig(), d.env, d.getCurrentVersion());
   }
 
+  /** The channel a fresh check would run against right now: config's own choice, or the build's. */
+  function effectiveChannel(): UpdateChannel {
+    return d.getConfig().updates.channel ?? versionChannelOf(d.getCurrentVersion());
+  }
+
+  /**
+   * Whatever `check()` last wrote — but not a cache left over from a channel
+   * `[updates] channel` no longer names. Without this, flipping the config
+   * would keep answering from the old channel's cache until the next
+   * `check()` call happened to overwrite it, up to 24h later.
+   */
   function readCached(): UpdateCheck | null {
     if (skipReason() !== null) return null;
-    return d.readCacheFile(d.cachePath());
+    const cached = d.readCacheFile(d.cachePath());
+    if (cached && cached.channel !== effectiveChannel()) return null;
+    return cached;
   }
 
   /**
@@ -131,8 +144,8 @@ export function createUpdateChecker(deps: Partial<UpdateCheckerDeps> = {}): Upda
    * Without the channel guard, flipping `updates.channel` in config would
    * keep answering from the old channel's cache for up to 24h.
    */
-  function isFresh(check: UpdateCheck, effectiveChannel: UpdateChannel): boolean {
-    if (check.channel !== effectiveChannel) return false;
+  function isFresh(check: UpdateCheck, channel: UpdateChannel): boolean {
+    if (check.channel !== channel) return false;
     const ttl = check.error === undefined ? CHECK_TTL_MS : ERROR_TTL_MS;
     return d.now() - check.checkedAt < ttl;
   }
@@ -141,10 +154,9 @@ export function createUpdateChecker(deps: Partial<UpdateCheckerDeps> = {}): Upda
     if (skipReason() !== null) return Promise.resolve(null);
     if (inFlight) return inFlight;
 
-    const effectiveChannel =
-      d.getConfig().updates.channel ?? versionChannelOf(d.getCurrentVersion());
+    const channel = effectiveChannel();
     const existing = d.readCacheFile(d.cachePath());
-    if (!options.force && existing && isFresh(existing, effectiveChannel)) {
+    if (!options.force && existing && isFresh(existing, channel)) {
       return Promise.resolve(existing);
     }
 
@@ -156,7 +168,7 @@ export function createUpdateChecker(deps: Partial<UpdateCheckerDeps> = {}): Upda
 
   async function performCheck(): Promise<UpdateCheck> {
     const currentVersion = d.getCurrentVersion();
-    const channel = d.getConfig().updates.channel ?? versionChannelOf(currentVersion);
+    const channel = effectiveChannel();
     let result: UpdateCheck;
     try {
       result =

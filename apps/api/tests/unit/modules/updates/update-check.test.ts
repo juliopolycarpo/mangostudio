@@ -206,6 +206,22 @@ describe('createUpdateChecker', () => {
 
       expect(createUpdateChecker(deps).readCached()).toEqual(cached);
     });
+
+    it('returns null when the cache is for a channel config no longer names', () => {
+      // Same staleness rule `isFresh` applies inside `check()`: a cache
+      // written on canary must not answer for a hub just switched to stable
+      // (or vice versa), even though nothing has expired it yet.
+      const { deps, store } = harness({ getConfig: () => configWith(true, 'stable') });
+      store.set({
+        channel: 'canary',
+        currentVersion: '0.1.1-canary.deadbee',
+        latestVersion: '0.1.2-canary.cafebee',
+        updateAvailable: true,
+        checkedAt: 0,
+      });
+
+      expect(createUpdateChecker(deps).readCached()).toBeNull();
+    });
   });
 
   describe('check', () => {
