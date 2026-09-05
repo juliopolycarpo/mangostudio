@@ -122,7 +122,7 @@ async function confirmStarted(
  * (COMSPEC/PATHEXT), locate its data directories, and detect host
  * architecture (PROCESSOR_ARCHITECTURE/PROCESSOR_ARCHITEW6432 — set by a
  * 32-bit process running under WOW64). Shared by `DETACH_ENV_ALLOWLIST`
- * below and `upgrade-service.ts`'s `SCRIPT_ENV_PASSTHROUGH` (the env the
+ * below and `installer-invocation.ts`'s `SCRIPT_ENV_PASSTHROUGH` (the env the
  * embedded install script runs with), so a key added for one reaches the
  * other instead of drifting between two copied lists.
  */
