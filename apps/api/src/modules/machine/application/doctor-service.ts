@@ -191,23 +191,23 @@ async function collectResults(
     ? options.sections.includes('library')
     : !options.envOnly || options.libraryOnly;
 
-  // Four independent probes, two of which spawn a program (`--version` on the
-  // runtime binary, `ssh -V`). Inside the array literal below they would run
+  // Five independent probes, two of which spawn a program (`--version` on the
+  // runtime binary, `ssh -V`) and one of which can reach the release host on a
+  // TTY run with a cold cache. Inside the array literal below they would run
   // one after another; the doctor is an HTTP endpoint now, not only a command
   // that exits afterwards.
-  const [runtimeBinary, runtimeSlots, runtimeCache, sshClient] = await Promise.all([
-    d.probeRuntimeBinary(),
-    d.probeRuntimeSlots(),
-    probeRuntimeCache(),
-    d.probeSshClient(),
-  ]);
-
   const installStatus = resolveInstallStatus(
     d.installOriginProbe(),
     config.updates.channel,
     getVersion()
   );
-  const updateRow = await collectUpdateDoctorRow(config, installStatus, d);
+  const [runtimeBinary, runtimeSlots, runtimeCache, sshClient, updateRow] = await Promise.all([
+    d.probeRuntimeBinary(),
+    d.probeRuntimeSlots(),
+    probeRuntimeCache(),
+    d.probeSshClient(),
+    collectUpdateDoctorRow(config, installStatus, d),
+  ]);
 
   const results: CheckResult[] = [
     checkDir('Home directory', getHomeMangoDir(), d.fs),
