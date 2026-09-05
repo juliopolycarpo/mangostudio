@@ -118,6 +118,12 @@ export interface DoctorCollectDeps {
   installOriginProbe: () => InstallOriginProbe;
   checker: Pick<UpdateChecker, 'readCached' | 'check'>;
   /**
+   * The environment the Update row reads its opt-outs from
+   * (`NO_UPDATE_NOTIFIER`, `DO_NOT_TRACK`, `CI`). Injected so a test is not at
+   * the mercy of the runner's own `CI=true`.
+   */
+  env: NodeJS.ProcessEnv;
+  /**
    * Whether this run may talk to the network for the Update row. False for
    * the API's `GET /api/machine/doctor` and for every test default; only the
    * `doctor` CLI command, with a real terminal attached, sets it true — a
@@ -351,6 +357,7 @@ function resolveDoctorCollectDeps(deps: Partial<DoctorCollectDeps>): Required<Do
     collectLibraryChecks: deps.collectLibraryChecks ?? (() => collectLibraryDoctorSection()),
     installOriginProbe: deps.installOriginProbe ?? currentInstallOriginProbe,
     checker: deps.checker ?? updateChecker,
+    env: deps.env ?? process.env,
     // Real default is false: this is what the API's `GET /api/machine/doctor`
     // gets (a background server has no terminal), and what every test gets
     // unless it opts in. `runDoctor` overrides it with a real TTY check.
@@ -382,7 +389,7 @@ async function collectUpdateDoctorRow(
   status: InstallStatus,
   d: Required<DoctorCollectDeps>
 ): Promise<CheckResult> {
-  const skip = updateCheckSkipReason(config, process.env, getVersion());
+  const skip = updateCheckSkipReason(config, d.env, getVersion());
   if (skip === 'disabled') return ok('Update', 'checks disabled');
   if (skip === 'env') return ok('Update', 'skipped (NO_UPDATE_NOTIFIER|DO_NOT_TRACK|CI)');
   if (skip === 'dev') return ok('Update', 'skipped (development build)');

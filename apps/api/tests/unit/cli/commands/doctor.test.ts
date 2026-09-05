@@ -82,6 +82,9 @@ function makeConfig(): MangoConfig {
 function makeDoctorDeps(overrides: Record<string, unknown> = {}) {
   return {
     loadConfig: makeConfig,
+    // A clean environment: the runner's own CI=true must not turn the Update
+    // row into "skipped" underneath a test that asserts a real answer.
+    env: {},
     fs: ALL_OK,
     frontendDir: () => '/app',
     controller: new FakeProcessController(),
