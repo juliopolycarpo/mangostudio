@@ -159,4 +159,24 @@ describe('runPruneRetry', () => {
 
     expect(removeCalls).toHaveLength(1);
   });
+
+  it('never rejects when its own temp-directory cleanup fails', async () => {
+    // The catch above sits inside the try, so a throw from the finally's
+    // cleanup escapes the function — and the only caller is `void
+    // runPruneRetry()` on the startup tick, where that is an unhandled
+    // rejection that takes the hub down.
+    const runScript: RunScript = () => fakeScriptRun(0);
+
+    await expect(
+      runPruneRetry({
+        platform: 'win32',
+        probe: () => windowsProbe(ORIGIN_RECORD_WITH_PENDING),
+        runScript,
+        which: () => null,
+        writeScript: (directory) => Promise.resolve(`${directory}\\install.ps1`),
+        mkdir: () => Promise.resolve(),
+        removeDir: () => Promise.reject(new Error('EPERM: operation not permitted')),
+      })
+    ).resolves.toBeUndefined();
+  });
 });

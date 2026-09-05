@@ -85,6 +85,12 @@ export async function runPruneRetry(deps: Partial<PruneRetryDeps> = {}): Promise
   } catch (error) {
     logger.warn('failed', { pending: prunePending, error });
   } finally {
-    await d.removeDir(directory);
+    // The `catch` above is inside the `try`, so a throw from here escapes the
+    // function — and the only caller is `void runPruneRetry()` on the startup
+    // tick, where that is an unhandled rejection. Cleaning up a scratch
+    // directory is never worth taking the hub down for.
+    await d.removeDir(directory).catch((error: unknown) => {
+      logger.warn('cleanup_failed', { directory, error });
+    });
   }
 }
