@@ -8,7 +8,10 @@ import {
   type UpgradeServiceDeps,
 } from '../../../../src/modules/updates/application/upgrade-service';
 import type { InstallOriginProbe } from '../../../../src/modules/updates/domain/install-origin';
-import type { ResolvedDownload } from '../../../../src/modules/updates/domain/resolve-target';
+import type {
+  ResolvedArchiveDownload,
+  ResolvedDownload,
+} from '../../../../src/modules/updates/domain/resolve-target';
 import type {
   RunScript,
   ScriptOutputLine,
@@ -89,7 +92,7 @@ function dockerProbe(overrides: Partial<InstallOriginProbe> = {}): InstallOrigin
   return { ...npmProbe(), execPath: '/usr/local/bin/mangostudio', container: true, ...overrides };
 }
 
-function newerTarget(overrides: { readonly version?: string } = {}): ResolvedDownload {
+function newerTarget(overrides: Partial<ResolvedArchiveDownload> = {}): ResolvedDownload {
   return {
     kind: 'archive',
     channel: 'stable',
@@ -237,6 +240,8 @@ describe('upgrade-service self-managed', () => {
       '/home/j/.mango/dist/.staging-0.1.2-4242/install.sh',
       '--local',
       '/staging/mangostudio-0.1.2-linux-x64.tar.gz',
+      '--version',
+      '0.1.2',
     ]);
     expect(script.calls[0]?.env.MANGOSTUDIO_INSTALL_ORIGIN).toBe('upgrade');
     expect(script.calls[0]?.env.MANGOSTUDIO_INSTALL_DIR).toBe('/home/j/.mango/dist');
@@ -246,6 +251,41 @@ describe('upgrade-service self-managed', () => {
     expect(mkdirCalls).toEqual(['/home/j/.mango/dist/.staging-0.1.2-4242']);
     expect(removeDirCalls).toEqual(['/home/j/.mango/dist/.staging-0.1.2-4242']);
     expect(restartCalls).toEqual([{ state: detachedState(), launch: 'detached' }]);
+  });
+
+  it('passes the resolved sha-suffixed version for a canary archive, not the file name', async () => {
+    // A canary archive's file name only carries "0.1.0-canary" (see
+    // hubArchiveName); the manifest-resolved target.version carries the full
+    // "0.1.0-canary.<sha7>" the binary reports. install.sh derives its own
+    // version from the file name when --version is absent, so omitting it
+    // here would make the post-install smoke check compare the truncated
+    // name against the binary's real --version and fail every canary upgrade.
+    const canaryVersion = '0.1.0-canary.abc1234';
+    const script = fakeRunScript(0);
+    const service = createUpgradeService(
+      baseDeps({
+        runScript: script.runScript,
+        resolveUpgradeTarget: () =>
+          Promise.resolve(
+            newerTarget({
+              version: canaryVersion,
+              channel: 'canary',
+              assetName: 'mangostudio-0.1.0-canary-linux-x64.tar.gz',
+            })
+          ),
+      })
+    );
+
+    await collect(service);
+
+    expect(script.calls[0]?.argv).toEqual([
+      'bash',
+      `/home/j/.mango/dist/.staging-${canaryVersion}-4242/install.sh`,
+      '--local',
+      '/staging/mangostudio-0.1.0-canary-linux-x64.tar.gz',
+      '--version',
+      canaryVersion,
+    ]);
   });
 
   it('reports already-current without downloading or running anything', async () => {

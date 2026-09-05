@@ -240,7 +240,16 @@ export function powershellInterpreter(which: (name: string) => string | null): s
   return which('pwsh') !== null ? 'pwsh' : 'powershell.exe';
 }
 
-/** argv for the embedded script's install path, one flag set per shell. */
+/**
+ * argv for the embedded script's install path, one flag set per shell.
+ * `--version`/`-Version` is passed for every kind, not just `npm-tarball`: a
+ * canary archive's file name only carries the bare `<major>.<minor>.<patch>-
+ * canary`, but `target.version` (resolved from the canary manifest) carries
+ * the full `<version>.<sha7>` the binary reports — without it install.sh
+ * falls back to deriving the version from the file name and the post-install
+ * smoke check compares that truncated string against `--version`, failing
+ * every canary self-upgrade.
+ */
 function selfInstallArgv(
   kind: InstallerKind,
   scriptPath: string,
@@ -248,15 +257,8 @@ function selfInstallArgv(
   target: ResolvedDownload,
   which: (name: string) => string | null
 ): string[] {
-  const versionArg = target.kind === 'npm-tarball' ? [target.version] : [];
   if (kind === 'sh') {
-    return [
-      'bash',
-      scriptPath,
-      '--local',
-      archivePath,
-      ...(versionArg.length ? ['--version', ...versionArg] : []),
-    ];
+    return ['bash', scriptPath, '--local', archivePath, '--version', target.version];
   }
   return [
     powershellInterpreter(which),
@@ -268,7 +270,8 @@ function selfInstallArgv(
     scriptPath,
     '-Local',
     archivePath,
-    ...(versionArg.length ? ['-Version', ...versionArg] : []),
+    '-Version',
+    target.version,
   ];
 }
 
