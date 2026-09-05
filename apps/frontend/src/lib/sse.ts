@@ -7,8 +7,10 @@
  * trailing line carried into the next chunk.
  *
  * Payloads are yielded one array per `read()` rather than one at a time on
- * purpose: a chunk can carry hundreds of frames, and both consumers batch
- * their React state update at that boundary to avoid a render per line.
+ * purpose: a chunk can carry hundreds of frames, and that boundary is where a
+ * consumer can batch its React state update instead of paying a render per
+ * line — `useInstallStream` flushes there; `useUpgradeStream` leans on React's
+ * own automatic batching, since an install script's output is already capped.
  */
 
 const DATA_PREFIX = 'data: ';

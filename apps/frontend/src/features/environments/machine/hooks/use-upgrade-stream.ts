@@ -134,9 +134,14 @@ async function run(
       return;
     }
     if (event.type === 'output') {
+      // The id is taken here, not inside the updater: React may invoke an
+      // updater more than once for one queued update (StrictMode, a discarded
+      // render), and one that mutates `nextLineId` would hand out a different
+      // key each time it ran.
+      const id = nextLineId;
+      nextLineId += 1;
       setState((previous) => {
-        let lines = [...previous.lines, { id: nextLineId, stream: event.stream, text: event.line }];
-        nextLineId += 1;
+        let lines = [...previous.lines, { id, stream: event.stream, text: event.line }];
         if (lines.length > UPGRADE_CONSOLE_MAX_LINES) {
           lines = lines.slice(lines.length - UPGRADE_CONSOLE_MAX_LINES);
         }
