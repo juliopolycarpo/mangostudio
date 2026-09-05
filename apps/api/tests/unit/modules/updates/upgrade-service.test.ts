@@ -141,6 +141,7 @@ function baseDeps(overrides: Partial<UpgradeServiceDeps> = {}): Partial<UpgradeS
       pointer: 'current',
     }),
     readState: () => Promise.resolve(detachedState()),
+    isAlive: () => true,
     now: () => 1_700_000_000_000,
     platform: 'linux',
     env: { PATH: '/usr/bin' },
@@ -372,6 +373,30 @@ describe('upgrade-service self-managed', () => {
 
     expect(report.outcome).toBe('upgraded');
     expect(report.restart).toBe('not-running');
+  });
+
+  it('reports not-running, and never restarts, when the state file survives a SIGKILL of a recycled pid', async () => {
+    // A crash that skips cleanup leaves the old state file behind; its pid can
+    // already belong to an unrelated process the OS recycled. Only isStateLive
+    // tells the two apart — treating the file as live would SIGTERM that
+    // unrelated pid and then report a restart that never happened.
+    let restarted = false;
+    const service = createUpgradeService(
+      baseDeps({
+        readState: () => Promise.resolve(detachedState()),
+        isAlive: () => false,
+        restartHub: () => {
+          restarted = true;
+          return Promise.resolve();
+        },
+      })
+    );
+
+    const { report } = await collect(service);
+
+    expect(report.outcome).toBe('upgraded');
+    expect(report.restart).toBe('not-running');
+    expect(restarted).toBe(false);
   });
 
   it('reports skipped and never restarts when the request declines a restart', async () => {

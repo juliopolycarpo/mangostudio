@@ -40,7 +40,7 @@ import { type BuildInfo, getBuildInfo, isKnownBuildSha } from '../../../lib/buil
 import { getConfig, getVersion } from '../../../lib/config';
 import { getUpgradeLogPath } from '../../../lib/mango-paths';
 import type { SafeFetchDeps } from '../../../lib/safe-fetch';
-import { readState, type ServerState } from '../../../lib/server-state';
+import { isStateLive, readState, type ServerState } from '../../../lib/server-state';
 import {
   createHubServiceManager,
   currentHubExecutable,
@@ -123,6 +123,8 @@ export interface UpgradeServiceDeps {
   readonly restartHub: (input: { state: ServerState; launch: HubLaunchMode }) => Promise<void>;
   readonly currentExecutable: () => HubExecutable;
   readonly readState: typeof readState;
+  /** Whether the state file's pid is a live process — see `isStateLive`. */
+  readonly isAlive: (pid: number) => boolean;
   readonly now: () => number;
   readonly platform: NodeJS.Platform;
   readonly env: NodeJS.ProcessEnv;
@@ -364,7 +366,12 @@ async function withRestart(
   emit: EmitUpgradeEvent
 ): Promise<UpgradeReport> {
   emit(stageEvent('restart'));
-  const state = await d.readState();
+  const rawState = await d.readState();
+  // A state file surviving a SIGKILL (or any crash that skips cleanup) still
+  // names a pid, but that pid can already belong to an unrelated, recycled
+  // process — isStateLive is the only thing distinguishing "the hub owns
+  // this file" from "a stale file with no hub behind it".
+  const state = rawState && isStateLive(rawState, d.isAlive) ? rawState : null;
   const launch: HubLaunchMode | null = state ? hubLaunchMode(state) : null;
   const decision = decideRestart({ launch, platform: d.platform, restart: wantsRestart });
 
@@ -732,6 +739,7 @@ function resolveDeps(deps: Partial<UpgradeServiceDeps>): UpgradeServiceDeps {
     restartHub: deps.restartHub ?? defaultRestartHub,
     currentExecutable: deps.currentExecutable ?? (() => currentHubExecutable()),
     readState: deps.readState ?? readState,
+    isAlive: deps.isAlive ?? createProcessController().isAlive,
     now: deps.now ?? Date.now,
     platform: deps.platform ?? process.platform,
     env: deps.env ?? process.env,
