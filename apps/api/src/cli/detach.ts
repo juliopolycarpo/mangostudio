@@ -198,15 +198,30 @@ export const DETACH_ENV_ALLOWLIST = new Set<string>([
   ...WINDOWS_SYSTEM_ENV_KEYS,
 ]);
 
-/** The subset of `source` whose keys are in `allowlist`, dropping anything unset. */
-function pickAllowedEnv(
+/**
+ * The subset of `source` whose keys are in `allowlist` or start with one of
+ * `prefixes`, dropping anything unset. Exported for callers outside this
+ * module that need a narrower env than the hub's full one but cannot name
+ * every key up front — a package-manager delegate, for instance, needs
+ * `npm_config_*`/`HOMEBREW_*` without enumerating every value npm or
+ * Homebrew might set.
+ * // Usage: pickAllowedEnv(process.env, ['PATH'], ['npm_config_'])
+ */
+export function pickAllowedEnv(
   source: NodeJS.ProcessEnv,
-  allowlist: ReadonlySet<string> | readonly string[]
+  allowlist: ReadonlySet<string> | readonly string[],
+  prefixes: readonly string[] = []
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const key of allowlist) {
     const value = source[key];
     if (value !== undefined) env[key] = value;
+  }
+  if (prefixes.length > 0) {
+    for (const [key, value] of Object.entries(source)) {
+      if (value === undefined) continue;
+      if (prefixes.some((prefix) => key.startsWith(prefix))) env[key] = value;
+    }
   }
   return env;
 }

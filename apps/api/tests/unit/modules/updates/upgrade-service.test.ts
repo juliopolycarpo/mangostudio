@@ -572,6 +572,32 @@ describe('upgrade-service delegate plans', () => {
     expect(stages(events)).toEqual(['resolve', 'install']);
   });
 
+  it('never hands the hub secrets to the POSIX delegate, but keeps PATH and npm/cargo config', async () => {
+    const script = fakeRunScript(0);
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe(),
+        runScript: script.runScript,
+        env: {
+          PATH: '/usr/bin',
+          BETTER_AUTH_SECRET: 'top-secret',
+          ANTHROPIC_API_KEY: 'sk-also-secret',
+          npm_config_registry: 'https://registry.example.test',
+          CARGO_HOME: '/home/j/.cargo',
+        },
+      })
+    );
+
+    await collect(service);
+
+    const env = script.calls[0]?.env;
+    expect(env?.PATH).toBe('/usr/bin');
+    expect(env?.npm_config_registry).toBe('https://registry.example.test');
+    expect(env?.CARGO_HOME).toBe('/home/j/.cargo');
+    expect(env?.BETTER_AUTH_SECRET).toBeUndefined();
+    expect(env?.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
   it('reports failed with exit 2 when the package manager exits non-zero', async () => {
     const script = fakeRunScript(1);
     const service = createUpgradeService(

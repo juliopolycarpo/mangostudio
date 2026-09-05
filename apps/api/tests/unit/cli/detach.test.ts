@@ -7,6 +7,7 @@ import {
   DETACH_ENV_ALLOWLIST,
   type DetachDeps,
   ensureLogDir,
+  pickAllowedEnv,
   restartExecutableOptions,
   spawnDetached,
   WINDOWS_SYSTEM_ENV_KEYS,
@@ -138,6 +139,28 @@ describe('WINDOWS_SYSTEM_ENV_KEYS', () => {
     for (const key of WINDOWS_SYSTEM_ENV_KEYS) {
       expect(DETACH_ENV_ALLOWLIST.has(key)).toBe(true);
     }
+  });
+});
+
+describe('pickAllowedEnv', () => {
+  it('keeps only allowlisted keys, dropping anything unset', () => {
+    const env = pickAllowedEnv({ PATH: '/usr/bin', SECRET: 'x', EMPTY: undefined }, [
+      'PATH',
+      'EMPTY',
+      'MISSING',
+    ]);
+
+    expect(env).toEqual({ PATH: '/usr/bin' });
+  });
+
+  it('also keeps any key starting with a given prefix', () => {
+    const env = pickAllowedEnv(
+      { PATH: '/usr/bin', npm_config_registry: 'https://registry.example.test', SECRET: 'x' },
+      ['PATH'],
+      ['npm_config_']
+    );
+
+    expect(env).toEqual({ PATH: '/usr/bin', npm_config_registry: 'https://registry.example.test' });
   });
 });
 

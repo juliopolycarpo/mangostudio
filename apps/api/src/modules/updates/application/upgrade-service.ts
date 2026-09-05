@@ -28,6 +28,8 @@ import {
   type UpgradeTarget,
 } from '@mangostudio/shared/updates';
 import {
+  DETACH_ENV_ALLOWLIST,
+  pickAllowedEnv,
   restartExecutableOptions,
   type SpawnDetachedWaiterInput,
   spawnDetached,
@@ -37,7 +39,7 @@ import {
 import { createProcessController, stopPidOrThrow } from '../../../cli/process-control';
 import { sleep } from '../../../cli/sleep';
 import { type BuildInfo, getBuildInfo, isKnownBuildSha } from '../../../lib/build-info';
-import { getConfig, getVersion } from '../../../lib/config';
+import { getConfig, getVersion, RUNTIME_CONFIG_ENV_KEYS } from '../../../lib/config';
 import { getUpgradeLogPath } from '../../../lib/mango-paths';
 import type { SafeFetchDeps } from '../../../lib/safe-fetch';
 import { isStateLive, readState, type ServerState } from '../../../lib/server-state';
@@ -226,13 +228,22 @@ function joinMessages(...parts: readonly (string | undefined)[]): string | undef
   return filtered.length > 0 ? filtered.join(' ') : undefined;
 }
 
-function toEnvRecord(env: NodeJS.ProcessEnv): Record<string, string> {
-  const record: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env)) {
-    if (value !== undefined) record[key] = value;
-  }
-  return record;
-}
+/**
+ * Env a POSIX package-manager delegate runs with: the system and networking
+ * essentials `DETACH_ENV_ALLOWLIST` already curates (including the proxy
+ * variables), minus `RUNTIME_CONFIG_ENV_KEYS` — `DETACH_ENV_ALLOWLIST` is
+ * built for the hub's own detached re-exec, which needs its runtime
+ * configuration (BETTER_AUTH_SECRET, connector settings) to keep serving the
+ * same config; a delegate is a different program entirely (`npm`/`brew`/
+ * `cargo`) and has no business seeing them. Named vars a manager's own
+ * install docs point at, plus the prefixes npm/Homebrew set a family of
+ * config keys under, are added on top.
+ */
+const DELEGATE_ENV_ALLOWLIST: readonly string[] = [...DETACH_ENV_ALLOWLIST].filter(
+  (key) => !RUNTIME_CONFIG_ENV_KEYS.includes(key)
+);
+const DELEGATE_ENV_EXTRA_NAMES: readonly string[] = ['CARGO_HOME', 'RUSTUP_HOME'];
+const DELEGATE_ENV_PREFIXES: readonly string[] = ['npm_config_', 'HOMEBREW_'];
 
 /**
  * Env the embedded install script receives: the passthrough set plus what
@@ -415,7 +426,12 @@ async function runPosixDelegate(
   emit: EmitUpgradeEvent
 ): Promise<UpgradeReport> {
   emit(stageEvent('install'));
-  const run = d.runScript(plan.argv, { env: toEnvRecord(d.env) });
+  const env = pickAllowedEnv(
+    d.env,
+    [...DELEGATE_ENV_ALLOWLIST, ...DELEGATE_ENV_EXTRA_NAMES],
+    DELEGATE_ENV_PREFIXES
+  );
+  const run = d.runScript(plan.argv, { env });
   const exitCode = await relayLines(run, emit);
   if (exitCode !== 0) return scriptFailedReport(installedVia, d.getVersion(), exitCode);
   return {
