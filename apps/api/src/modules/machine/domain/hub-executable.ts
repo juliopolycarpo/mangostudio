@@ -81,18 +81,6 @@ function pointerPathForRoot(root: string, platform: NodeJS.Platform): string {
     : join(root, 'current', 'mangostudio');
 }
 
-/** The launcher the installer maintains across upgrades. */
-export function hubCurrentPointerPath(
-  probe: Pick<HubExecutableProbe, 'platform' | 'home' | 'localAppData'> &
-    Partial<Pick<HubExecutableProbe, 'execPath' | 'pathExists'>>
-): string {
-  const root =
-    probe.execPath !== undefined && probe.pathExists !== undefined
-      ? hubDistRootFor({ ...probe, execPath: probe.execPath, pathExists: probe.pathExists })
-      : hubDistRoot(probe);
-  return pointerPathForRoot(root, probe.platform);
-}
-
 /**
  * Whether `path` sits inside `root`, comparing the way the host's file system
  * does — `\` and `/` are the same separator, and Windows is case-insensitive.
@@ -123,9 +111,9 @@ export function resolveHubExecutable(probe: HubExecutableProbe): HubExecutable {
     return { argv: [probe.execPath], pointer: 'external' };
   }
 
-  // `root` is already resolved above; going back through
-  // `hubCurrentPointerPath` would repeat its realpath probe on every call,
-  // and `/machine/status` polls this.
+  // `root` is already resolved above: resolving it a second time would repeat
+  // `hubDistRootFor`'s `install-origin.json` probe on every call, and
+  // `/machine/status` polls this.
   const pointer = pointerPathForRoot(root, probe.platform);
   if (probe.pathExists(pointer)) {
     return { argv: [pointer], pointer: 'current' };

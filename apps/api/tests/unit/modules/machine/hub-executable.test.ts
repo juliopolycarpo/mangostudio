@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
   type HubExecutableProbe,
-  hubCurrentPointerPath,
   resolveHubExecutable,
 } from '../../../../src/modules/machine/domain/hub-executable';
 
@@ -60,9 +59,6 @@ describe('resolveHubExecutable', () => {
       home: 'C:\\Users\\J',
       localAppData: 'C:\\Users\\J\\AppData\\Local',
     });
-    expect(hubCurrentPointerPath(windows)).toBe(
-      'C:\\Users\\J\\AppData\\Local\\mangostudio\\bin\\mangostudio.cmd'
-    );
     expect(resolveHubExecutable(windows)).toEqual({
       argv: ['C:\\Users\\J\\AppData\\Local\\mangostudio\\bin\\mangostudio.cmd'],
       pointer: 'current',
