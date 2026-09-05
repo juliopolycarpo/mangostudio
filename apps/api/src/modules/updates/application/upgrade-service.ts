@@ -22,7 +22,10 @@ import {
   UPGRADE_COMMAND_MAX,
   UPGRADE_OUTPUT_LINE_MAX,
   type UpdateChannel,
+  type UpgradeOutcome,
+  type UpgradeRefusalReason,
   type UpgradeReport,
+  type UpgradeRestart,
   type UpgradeStage,
   type UpgradeStreamEvent,
   type UpgradeTarget,
@@ -245,20 +248,68 @@ export function delegateEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   );
 }
 
+/**
+ * What each outcome exits with, stated once: 0 for an outcome the caller can
+ * act on (upgraded, already current, a `--check` preview), 1 for a refusal,
+ * 2 for a failure — including a script that ran and exited non-zero, whose own
+ * code is named in the message rather than passed through here.
+ */
+const OUTCOME_EXIT_CODES: Record<UpgradeOutcome, number> = {
+  upgraded: 0,
+  'already-current': 0,
+  available: 0,
+  refused: 1,
+  failed: 2,
+};
+
+interface ReportExtras {
+  readonly target?: ResolvedDownload;
+  readonly reason?: UpgradeRefusalReason;
+  readonly command?: string;
+  readonly restart?: UpgradeRestart;
+  readonly logFile?: string;
+  readonly message?: string;
+}
+
+/**
+ * One `UpgradeReport`, with the wire caps and the exit-code table applied in a
+ * single place — every outcome this engine can return goes through here.
+ * // Usage: report('refused', installedVia, version, { reason: 'package-manager', command })
+ */
+function report(
+  outcome: UpgradeOutcome,
+  installedVia: InstallOrigin,
+  currentVersion: string,
+  extras: ReportExtras = {}
+): UpgradeReport {
+  return {
+    outcome,
+    installedVia: fitInstalledVia(installedVia),
+    currentVersion,
+    ...(extras.target ? { target: toWireTarget(extras.target) } : {}),
+    ...(extras.reason ? { reason: extras.reason } : {}),
+    ...(extras.command !== undefined
+      ? { command: fitToLimit(extras.command, UPGRADE_COMMAND_MAX) }
+      : {}),
+    ...(extras.restart ? { restart: extras.restart } : {}),
+    ...(extras.logFile !== undefined ? { logFile: extras.logFile } : {}),
+    ...(extras.message !== undefined
+      ? { message: fitToLimit(extras.message, UPDATE_ERROR_MAX) }
+      : {}),
+    exitCode: OUTCOME_EXIT_CODES[outcome],
+  };
+}
+
 function scriptFailedReport(
   installedVia: InstallOrigin,
   currentVersion: string,
   exitCode: number,
   target?: ResolvedDownload
 ): UpgradeReport {
-  return {
-    outcome: 'failed',
-    installedVia: fitInstalledVia(installedVia),
-    currentVersion,
-    ...(target ? { target: toWireTarget(target) } : {}),
-    exitCode: 2,
-    message: fitToLimit(`Install script exited with code ${exitCode}.`, UPDATE_ERROR_MAX),
-  };
+  return report('failed', installedVia, currentVersion, {
+    ...(target ? { target } : {}),
+    message: `Install script exited with code ${exitCode}.`,
+  });
 }
 
 function caughtFailure(
@@ -266,14 +317,9 @@ function caughtFailure(
   currentVersion: string,
   error: unknown
 ): UpgradeReport {
-  const message = error instanceof Error ? error.message : String(error);
-  return {
-    outcome: 'failed',
-    installedVia: fitInstalledVia(installedVia),
-    currentVersion,
-    exitCode: 2,
-    message: fitToLimit(message, UPDATE_ERROR_MAX),
-  };
+  return report('failed', installedVia, currentVersion, {
+    message: error instanceof Error ? error.message : String(error),
+  });
 }
 
 const UNKNOWN_INSTALLED_VIA: InstallOrigin = {
@@ -322,15 +368,11 @@ async function withRestart(
   const versionedNote = executable.pointer === 'versioned' ? executable.note : undefined;
   const message = joinMessages(decision.message, restartFailure, versionedNote);
 
-  return {
-    outcome: 'upgraded',
-    installedVia: fitInstalledVia(installedVia),
-    currentVersion,
-    ...(target ? { target: toWireTarget(target) } : {}),
+  return report('upgraded', installedVia, currentVersion, {
+    ...(target ? { target } : {}),
     restart,
-    ...(message ? { message: fitToLimit(message, UPDATE_ERROR_MAX) } : {}),
-    exitCode: 0,
-  };
+    ...(message !== undefined ? { message } : {}),
+  });
 }
 
 /**
@@ -435,15 +477,11 @@ async function runWindowsDelegate(
     env: delegateEnv(d.env),
     ...(afterSuccess ? { afterSuccess } : {}),
   });
-  return {
-    outcome: 'upgraded',
-    installedVia: fitInstalledVia(installedVia),
-    currentVersion: d.getVersion(),
+  return report('upgraded', installedVia, d.getVersion(), {
     restart: !hub ? 'not-running' : request.restart ? 'scheduled' : 'manual',
     logFile,
-    message: fitToLimit(windowsDelegateMessage(hub, request.restart, logFile), UPDATE_ERROR_MAX),
-    exitCode: 0,
-  };
+    message: windowsDelegateMessage(hub, request.restart, logFile),
+  });
 }
 
 async function runDelegate(
@@ -457,14 +495,10 @@ async function runDelegate(
   // or the package manager's own "latest") at run time, not through this
   // engine, so a --check here can only name the command instead of running it.
   if (request.checkOnly) {
-    return {
-      outcome: 'refused',
-      installedVia: fitInstalledVia(installedVia),
-      currentVersion: d.getVersion(),
+    return report('refused', installedVia, d.getVersion(), {
       reason: 'package-manager',
-      command: fitToLimit(plan.command, UPGRADE_COMMAND_MAX),
-      exitCode: 1,
-    };
+      command: plan.command,
+    });
   }
   if (d.platform === 'win32') return await runWindowsDelegate(plan, installedVia, request, d, emit);
   return await runPosixDelegate(plan, installedVia, request, d, emit);
@@ -551,14 +585,10 @@ async function runSelf(
     context
   );
   if ('reason' in resolved) {
-    return {
-      outcome: 'refused',
-      installedVia: fitInstalledVia(installedVia),
-      currentVersion: d.getVersion(),
+    return report('refused', installedVia, d.getVersion(), {
       reason: resolved.reason,
-      message: fitToLimit(resolved.message, UPDATE_ERROR_MAX),
-      exitCode: 1,
-    };
+      message: resolved.message,
+    });
   }
 
   if (
@@ -568,22 +598,10 @@ async function runSelf(
       pinned: request.version !== undefined,
     })
   ) {
-    return {
-      outcome: 'already-current',
-      installedVia: fitInstalledVia(installedVia),
-      currentVersion: d.getVersion(),
-      target: toWireTarget(resolved),
-      exitCode: 0,
-    };
+    return report('already-current', installedVia, d.getVersion(), { target: resolved });
   }
   if (request.checkOnly) {
-    return {
-      outcome: 'available',
-      installedVia: fitInstalledVia(installedVia),
-      currentVersion: d.getVersion(),
-      target: toWireTarget(resolved),
-      exitCode: 0,
-    };
+    return report('available', installedVia, d.getVersion(), { target: resolved });
   }
 
   return await runInstallScript(
@@ -642,15 +660,11 @@ async function runInner(
   installedViaRef.current = installedVia;
 
   if (plan.kind === 'refused') {
-    return {
-      outcome: 'refused',
-      installedVia: fitInstalledVia(installedVia),
-      currentVersion: d.getVersion(),
+    return report('refused', installedVia, d.getVersion(), {
       reason: plan.reason,
-      command: fitToLimit(plan.command, UPGRADE_COMMAND_MAX),
-      message: fitToLimit(plan.message, UPDATE_ERROR_MAX),
-      exitCode: 1,
-    };
+      command: plan.command,
+      message: plan.message,
+    });
   }
   if (plan.kind === 'delegate') return await runDelegate(plan, installedVia, request, d, emit);
   return await runSelf(installedVia, channel, request, d, emit);
@@ -672,15 +686,11 @@ async function rollbackInner(
 
   if (plan.kind !== 'self') {
     const reason = plan.kind === 'refused' ? plan.reason : 'package-manager';
-    return {
-      outcome: 'refused',
-      installedVia: fitInstalledVia(installedVia),
-      currentVersion: d.getVersion(),
+    return report('refused', installedVia, d.getVersion(), {
       reason,
-      command: fitToLimit(plan.command, UPGRADE_COMMAND_MAX),
-      message: fitToLimit('Rollback only applies to a self-managed install.', UPDATE_ERROR_MAX),
-      exitCode: 1,
-    };
+      command: plan.command,
+      message: 'Rollback only applies to a self-managed install.',
+    });
   }
 
   const previousVersion = installedVia.record?.previousVersion;
@@ -688,13 +698,9 @@ async function rollbackInner(
     // Neither a package-manager reason nor a plan command applies here —
     // both fields are optional, and inventing one would misdirect the CLI's
     // "Run: <command>" line toward something that does not fix this.
-    return {
-      outcome: 'refused',
-      installedVia: fitInstalledVia(installedVia),
-      currentVersion: d.getVersion(),
-      message: fitToLimit('No previous version recorded to roll back to.', UPDATE_ERROR_MAX),
-      exitCode: 1,
-    };
+    return report('refused', installedVia, d.getVersion(), {
+      message: 'No previous version recorded to roll back to.',
+    });
   }
   return await runInstallScript(
     {
@@ -808,15 +814,11 @@ function resolveDeps(deps: Partial<UpgradeServiceDeps>): UpgradeServiceDeps {
  * running in the background.
  */
 function inProgressReport(currentVersion: string): UpgradeReport {
-  return {
-    outcome: 'refused',
-    installedVia: fitInstalledVia(UNKNOWN_INSTALLED_VIA),
-    currentVersion,
+  return report('refused', UNKNOWN_INSTALLED_VIA, currentVersion, {
     reason: 'in-progress',
     command: 'mangostudio status',
-    message: fitToLimit('Another upgrade is already running from this process.', UPDATE_ERROR_MAX),
-    exitCode: 1,
-  };
+    message: 'Another upgrade is already running from this process.',
+  });
 }
 
 /** Build the engine. // Usage: createUpgradeService().run({ restart: true }, emit) */

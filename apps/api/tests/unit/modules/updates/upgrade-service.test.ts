@@ -1122,3 +1122,39 @@ describe('upgrade-service concurrency guard', () => {
     await firstPromise;
   });
 });
+
+describe('exit codes', () => {
+  // Every outcome now maps to its exit code through one table in the engine
+  // (OUTCOME_EXIT_CODES); this pins the contract the CLI and the SSE `done`
+  // event both publish, so a new outcome cannot quietly inherit the wrong one.
+  it('is 0 for upgraded, already-current and available, 1 for refused, 2 for failed', async () => {
+    const upgraded = await createUpgradeService(baseDeps()).run(REQUEST, () => undefined);
+    expect(upgraded).toMatchObject({ outcome: 'upgraded', exitCode: 0 });
+
+    const alreadyCurrent = await createUpgradeService(
+      baseDeps({
+        resolveUpgradeTarget: () => Promise.resolve(newerTarget({ version: CURRENT_VERSION })),
+      })
+    ).run(REQUEST, () => undefined);
+    expect(alreadyCurrent).toMatchObject({ outcome: 'already-current', exitCode: 0 });
+
+    const available = await createUpgradeService(baseDeps()).run(
+      { ...REQUEST, checkOnly: true },
+      () => undefined
+    );
+    expect(available).toMatchObject({ outcome: 'available', exitCode: 0 });
+
+    const refused = await createUpgradeService(baseDeps({ probe: () => dockerProbe() })).run(
+      REQUEST,
+      () => undefined
+    );
+    expect(refused).toMatchObject({ outcome: 'refused', exitCode: 1 });
+
+    // The script's own non-zero code is named in the message; the wire code is 2.
+    const failed = await createUpgradeService(
+      baseDeps({ runScript: fakeRunScript(7).runScript })
+    ).run(REQUEST, () => undefined);
+    expect(failed).toMatchObject({ outcome: 'failed', exitCode: 2 });
+    expect(failed.message).toContain('7');
+  });
+});
