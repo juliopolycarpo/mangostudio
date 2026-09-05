@@ -12,7 +12,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { UpgradeVerification } from '@mangostudio/shared/updates';
 import type { SafeFetchDeps } from '../../../lib/safe-fetch';
@@ -60,7 +60,7 @@ function expectedDigestFor(
 /**
  * Downloads `resolved.url`, verifies it against the digest its own
  * verification shape names, and writes it to `<destinationDir>/<assetName>` —
- * or throws and removes anything left at that path.
+ * or throws before anything is written.
  * // Usage: await downloadVerified(resolved, '/tmp/mango-upgrade', { fetch })
  */
 export async function downloadVerified(
@@ -94,7 +94,9 @@ export async function downloadVerified(
 
   const actual = createHash(expected.algorithm).update(result.bytes).digest('hex').toLowerCase();
   if (actual !== expected.hex.toLowerCase()) {
-    await rm(destinationPath, { force: true });
+    // Nothing has been written yet — the `writeFile` below is the only thing
+    // that ever touches `destinationPath`, and it is deliberately after this
+    // check, so unverified bytes never reach the disk at all.
     throw new Error(
       `checksum mismatch for ${resolved.assetName}: expected ${expected.hex} | received ${actual}`
     );
