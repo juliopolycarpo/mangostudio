@@ -267,12 +267,19 @@ runs the script with `--use <previousVersion>`; `--check` resolves and reports
 without downloading.
 
 Delegated commands (the package-manager rows) are **printed** by default. With
-`--yes` they are **run** on macOS and Linux. On Windows the npm managers delete
-the package that holds the running `mangostudio.exe`, so `--yes` there hands the
-command to a detached waiter (`Wait-Process` on this pid, then the manager)
-whose output lands in `~/.mango/run/upgrade-<timestamp>.log`; the report names
-the log and says to run `mangostudio --version` in a minute. Scoop goes through
-the same waiter. Refusals always print the exact command to run instead.
+`--yes` they are **run** on macOS and Linux with the hub's allowlisted env
+(never its secrets), and a live hub is then restarted the same way a
+self-managed upgrade restarts it. On Windows the npm managers delete the
+package that holds the running `mangostudio.exe`, so `--yes` there stops a live
+hub first (a foreground hub is refused: press Ctrl-C in its terminal), then
+hands the command to a detached waiter (`Wait-Process` on this pid and the
+stopped hub's, then the manager, then — when the manager exited 0 —
+`mangostudio restart` for a Scheduled Task or `mangostudio serve -d <host:port>`
+for a detached instance) whose output lands in
+`~/.mango/run/upgrade-<timestamp>.log`; the report names the log. With
+`--no-restart` the hub is still stopped, and the report names the command that
+brings it back. Scoop goes through the same waiter. Refusals always print the
+exact command to run instead.
 
 Restart: after the pointer moves, a live hub is restarted through the `current`
 pointer — the service manager when a unit exists, otherwise a new detached
