@@ -435,10 +435,20 @@ resolve_current_version_or_legacy() {
 # replacing the link (unlike replacing a symlink-to-a-file, which every other
 # swap in this script does). Unlinking first keeps the window where "current"
 # does not exist as short as a single syscall.
+# Replace the `current` symlink in one step. `mv -f tmp current` on its own
+# stats the destination, sees a directory through the existing link, and moves
+# the new link *inside* the version directory it points at — so the old
+# rm-then-mv had to blank `current` first, leaving a window where another
+# process (a second CLI, the hub's own prune) reads no pointer at all, and
+# losing the race left a stray `.current.<pid>` inside a version directory.
+# `-T` (GNU) and `-h` (BSD/macOS) both mean "the destination is the link
+# itself"; where neither is understood, fall back to the old two-step.
 swap_current() {
   local root="$1" version="$2" tmp="${1}/.current.$$"
   rm -f "$tmp"
   ln -s "$version" "$tmp"
+  if mv -Tf "$tmp" "${root}/current" 2>/dev/null; then return; fi
+  if mv -hf "$tmp" "${root}/current" 2>/dev/null; then return; fi
   rm -f "${root}/current"
   mv -f "$tmp" "${root}/current"
 }

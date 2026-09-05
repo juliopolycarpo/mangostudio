@@ -398,7 +398,7 @@ describe('install.sh layout', () => {
   });
 });
 
-describe('install.sh canary parsing (network-free)', () => {
+describe('install.sh internals (network-free)', () => {
   test('extract_canary_tag picks the first *-canary tag_name', () => {
     const releasesJson = JSON.stringify([
       { tag_name: 'v0.1.2', prerelease: false },
@@ -418,6 +418,40 @@ describe('install.sh canary parsing (network-free)', () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe('');
+  });
+
+  test('swap_current replaces the pointer without ever unlinking it first', () => {
+    const root = tempDir('mango-swap-');
+    mkdirSync(join(root, '0.1.0'));
+    mkdirSync(join(root, '0.2.0'));
+    symlinkSync('0.1.0', join(root, 'current'));
+
+    const result = sourceAndCall(`swap_current '${root}' 0.2.0`);
+
+    expect(result.exitCode).toBe(0);
+    expect(readlinkSync(join(root, 'current'))).toBe('0.2.0');
+    // A `mv` that followed the old link would have dropped the temporary
+    // inside the version directory instead of replacing the pointer.
+    expect(readdirSync(join(root, '0.1.0'))).toEqual([]);
+    expect(readdirSync(root).filter((entry) => entry.startsWith('.current.'))).toEqual([]);
+  });
+
+  test('swap_current leaves nothing behind when the pointer is recreated mid-swap', () => {
+    // The concurrent case, made deterministic: `rm` is a no-op, standing in
+    // for a second process putting `current` back between the unlink and the
+    // move. `mv -f` then stats the destination, sees a directory through the
+    // link, and moves the new pointer *inside* the old version directory —
+    // leaving `current` pointing at the version that was replaced.
+    const root = tempDir('mango-swap-race-');
+    mkdirSync(join(root, '0.1.0'));
+    mkdirSync(join(root, '0.2.0'));
+    symlinkSync('0.1.0', join(root, 'current'));
+
+    const result = sourceAndCall(`rm() { :; }; swap_current '${root}' 0.2.0`);
+
+    expect(result.exitCode).toBe(0);
+    expect(readlinkSync(join(root, 'current'))).toBe('0.2.0');
+    expect(readdirSync(join(root, '0.1.0'))).toEqual([]);
   });
 
   test('parse_manifest_field reads a top-level string field without matching nested keys', () => {
