@@ -459,6 +459,12 @@ function dockerUnavailableReason(): string {
   if (!HAS_UID) return 'process.getuid/getgid are unavailable on this platform';
   const check = Bun.spawnSync({ cmd: [DOCKER, 'info'] });
   if (check.exitCode !== 0) return 'docker daemon is not reachable';
+  // Pull up front: a first `docker run` otherwise pulls inline, and its
+  // progress lands on the stderr the cases below assert is empty.
+  const pull = Bun.spawnSync({ cmd: [DOCKER, 'pull', '--quiet', BASH32_IMAGE] });
+  if (pull.exitCode !== 0) {
+    return `could not pull ${BASH32_IMAGE}: ${pull.stderr.toString().trim()}`;
+  }
   return '';
 }
 
@@ -508,6 +514,9 @@ function runInBash32(l: Bash32Layout, script: string): RunResult {
 function runBash32(l: Bash32Layout, args: string[], env: Record<string, string>): RunResult {
   const containerEnv = {
     ...env,
+    // `--user <uid>` names a user the image has no passwd entry for, so give
+    // the script an explicit HOME rather than whatever the runtime defaults to.
+    HOME: '/w',
     MANGOSTUDIO_INSTALL_DIR: '/w/root',
     MANGOSTUDIO_BIN_DIR: '/w/bin',
   };
@@ -551,8 +560,10 @@ describe('install.sh under bash 3.2 (docker)', () => {
       const archive = buildReleaseArchive(l.workDir, 'mangostudio-0.1.0-linux-x64.tar.gz', '0.1.0');
 
       const first = runBash32(l, ['--local', archive, '--version', '0.1.0'], {});
-      expect(first.stderr).toBe('');
-      expect(first.exitCode).toBe(0);
+      expect({ exitCode: first.exitCode, stderr: first.stderr }).toEqual({
+        exitCode: 0,
+        stderr: '',
+      });
       expect(existsSync(join(l.root, 'install-origin.json'))).toBe(true);
       expect(originRecord(l.root)).toMatchObject({ version: '0.1.0' });
 
