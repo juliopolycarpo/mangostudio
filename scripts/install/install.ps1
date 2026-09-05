@@ -384,7 +384,7 @@ function Remove-UserPath([string]$BinDir) {
 # or a pre-`current` install did, so it doubles as legacy detection.
 function Get-CurrentVersionFromCmd([string]$InstallRoot, [string]$CmdPath) {
   if (-not (Test-Path $CmdPath)) { return $null }
-  $content = Get-Content -Raw -ErrorAction SilentlyContinue $CmdPath
+  $content = Get-Content -Raw -Encoding Oem -ErrorAction SilentlyContinue $CmdPath
   if ([string]::IsNullOrEmpty($content)) { return $null }
 
   $match = [regex]::Match($content, '"([^"]+)\\mangostudio\.exe"\s+%\*')
@@ -440,7 +440,12 @@ function Write-Shim([string]$InstallRoot, [string]$Version, [string]$BinDir) {
   $shimPath = Get-BinCmdPath $BinDir
   $tmp = "$shimPath.tmp.$PID"
   New-Item -ItemType Directory -Force $BinDir | Out-Null
-  Set-Content -Path $tmp -Encoding ASCII -Value @('@echo off', ('"{0}" %*' -f $exePath))
+  # OEM, not ASCII: cmd.exe reads a .cmd in the console's OEM code page, and
+  # ASCII would replace every non-ASCII character in the install path with `?`
+  # — a profile such as C:\Users\Jose\... survives, C:\Users\José\... does not,
+  # and the shim then points at a path that does not exist. Both readers below
+  # decode with the same code page.
+  Set-Content -Path $tmp -Encoding Oem -Value @('@echo off', ('"{0}" %*' -f $exePath))
   Move-Item -Path $tmp -Destination $shimPath -Force
   return $shimPath
 }
@@ -724,7 +729,7 @@ function Invoke-Uninstall([string]$InstallRoot, [string]$BinDir) {
 
   $cmdPath = Get-BinCmdPath $BinDir
   if (Test-Path $cmdPath) {
-    $content = Get-Content -Raw -ErrorAction SilentlyContinue $cmdPath
+    $content = Get-Content -Raw -Encoding Oem -ErrorAction SilentlyContinue $cmdPath
     $ownsIt = $false
     if ($content) {
       $match = [regex]::Match($content, '"([^"]+)\\mangostudio\.exe"\s+%\*')
