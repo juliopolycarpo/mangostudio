@@ -51,7 +51,7 @@ import { type BuildInfo, getBuildInfo, isKnownBuildSha } from '../../../lib/buil
 import { getConfig, getVersion, RUNTIME_CONFIG_ENV_KEYS } from '../../../lib/config';
 import { getUpgradeLogPath } from '../../../lib/mango-paths';
 import type { SafeFetchDeps } from '../../../lib/safe-fetch';
-import { isStateLive, readState, type ServerState } from '../../../lib/server-state';
+import { readLiveState, readState, type ServerState } from '../../../lib/server-state';
 import {
   createHubServiceManager,
   currentHubExecutable,
@@ -341,12 +341,7 @@ async function withRestart(
   emit: EmitUpgradeEvent
 ): Promise<UpgradeReport> {
   emit(stageEvent('restart'));
-  const rawState = await d.readState();
-  // A state file surviving a SIGKILL (or any crash that skips cleanup) still
-  // names a pid, but that pid can already belong to an unrelated, recycled
-  // process — isStateLive is the only thing distinguishing "the hub owns
-  // this file" from "a stale file with no hub behind it".
-  const state = rawState && isStateLive(rawState, d.isAlive) ? rawState : null;
+  const state = await readLiveState(d.readState, d.isAlive);
   const launch: HubLaunchMode | null = state ? hubLaunchMode(state) : null;
   const decision = decideRestart({ launch, platform: d.platform, restart: wantsRestart });
 
@@ -450,8 +445,7 @@ async function runWindowsDelegate(
   emit: EmitUpgradeEvent
 ): Promise<UpgradeReport> {
   emit(stageEvent('install'));
-  const rawState = await d.readState();
-  const state = rawState && isStateLive(rawState, d.isAlive) ? rawState : null;
+  const state = await readLiveState(d.readState, d.isAlive);
   const hub: LiveHub | null =
     state && state.pid !== d.pid ? { state, launch: hubLaunchMode(state) } : null;
   if (hub?.launch === 'foreground') {

@@ -68,7 +68,7 @@ import { createDiagnosticLogger } from '../../../lib/logger';
 import { getLogsDir, getServerLogPath } from '../../../lib/mango-paths';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
 import { writeFileAtomic } from '../../../lib/safe-file';
-import { isStateLive, readState, type ServerState } from '../../../lib/server-state';
+import { readLiveState, readState, type ServerState } from '../../../lib/server-state';
 import { readTomlDocument, setTomlSectionValue } from '../../../lib/toml';
 import { requestShutdown } from '../../../server/shutdown-request';
 import {
@@ -265,11 +265,8 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
   // time makes sense for it to run.
   let upgradeInFlight = false;
 
-  const liveState = async (): Promise<ServerState | null> => {
-    const state = await d.readState();
-    if (!state) return null;
-    return isStateLive(state, (pid) => d.controller.isAlive(pid)) ? state : null;
-  };
+  const liveState = (): Promise<ServerState | null> =>
+    readLiveState(d.readState, (pid) => d.controller.isAlive(pid));
 
   /** Assemble the action inputs around a service status already in hand. */
   const actionsInputFrom = (
