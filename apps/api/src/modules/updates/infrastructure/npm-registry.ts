@@ -26,6 +26,8 @@ const ABBREVIATED_PACKUMENT_ACCEPT = 'application/vnd.npm.install-v1+json';
 
 /** Generous cap for an abbreviated packument; still far below a full one. */
 const MAX_PACKUMENT_BYTES = 4 * 1024 * 1024;
+/** Same reason as release-index.ts's: an untimed lookup wedges the upgrade lock. */
+const LOOKUP_TIMEOUT_MS = 30_000;
 
 /** Maps a release platform id onto the npm package that ships its binary. musl has none — see `install.sh`/the shell installer instead. */
 const RELEASE_PLATFORM_NPM_PACKAGES: Partial<Record<ReleasePlatformId, string>> = {
@@ -124,6 +126,7 @@ export async function fetchNpmPackument(
     url,
     {
       maxBytes: MAX_PACKUMENT_BYTES,
+      timeoutMs: LOOKUP_TIMEOUT_MS,
       maxRedirects: 3,
       headers: { Accept: ABBREVIATED_PACKUMENT_ACCEPT },
     },

@@ -16,15 +16,18 @@ export interface FakeReleaseHostRoute {
 
 export class FakeReleaseHost {
   readonly calls: string[] = [];
+  /** The `AbortSignal` each call carried — undefined when no deadline was armed. */
+  readonly signals: (AbortSignal | undefined)[] = [];
   private readonly routes: Map<string, FakeReleaseHostRoute>;
 
   constructor(routes: Readonly<Record<string, FakeReleaseHostRoute>>) {
     this.routes = new Map(Object.entries(routes));
   }
 
-  readonly fetch = ((input: Parameters<typeof fetch>[0]) => {
+  readonly fetch = ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     const url = String(input);
     this.calls.push(url);
+    this.signals.push(init?.signal ?? undefined);
     const route = this.routes.get(url);
     if (!route) {
       throw new Error(`FakeReleaseHost has no route for ${url}`);

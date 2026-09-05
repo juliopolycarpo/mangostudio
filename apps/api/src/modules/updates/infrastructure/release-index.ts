@@ -27,6 +27,13 @@ const GITHUB_API_BASE = `https://api.github.com/repos/${UPDATES_REPOSITORY}`;
 const GITHUB_HEADERS = { 'User-Agent': 'mangostudio-hub' };
 const GITHUB_API_HEADERS = { ...GITHUB_HEADERS, Accept: 'application/vnd.github+json' };
 
+/**
+ * Without a deadline a stalled socket hangs the whole upgrade: the engine's
+ * `running` flag and machine-service's `upgradeInFlight` both stay set, so no
+ * further upgrade can start until the hub restarts. Generous enough for the
+ * ~600KB release page on a slow link, and still bounded.
+ */
+const LOOKUP_TIMEOUT_MS = 30_000;
 const MAX_TAG_PAGE_BYTES = 4 * 1024 * 1024;
 const MAX_RELEASE_LIST_BYTES = 512 * 1024;
 const MAX_MANIFEST_BYTES = 64 * 1024;
@@ -42,7 +49,12 @@ const MAX_MANIFEST_BYTES = 64 * 1024;
 export async function resolveStableLatestVersion(deps: SafeFetchDeps): Promise<string> {
   const result = await safeFetchBytes(
     `${GITHUB_RELEASES_BASE}/releases/latest`,
-    { maxBytes: MAX_TAG_PAGE_BYTES, maxRedirects: 5, headers: GITHUB_HEADERS },
+    {
+      maxBytes: MAX_TAG_PAGE_BYTES,
+      maxRedirects: 5,
+      timeoutMs: LOOKUP_TIMEOUT_MS,
+      headers: GITHUB_HEADERS,
+    },
     deps
   );
   const tag = result.url.split('/').filter(Boolean).pop();
@@ -76,7 +88,12 @@ const CANARY_ROLLING_TAG = /^v\d+\.\d+\.\d+-canary$/;
 export async function resolveCanaryRollingVersion(deps: SafeFetchDeps): Promise<string> {
   const result = await safeFetchBytes(
     `${GITHUB_API_BASE}/releases?per_page=30`,
-    { maxBytes: MAX_RELEASE_LIST_BYTES, maxRedirects: 3, headers: GITHUB_API_HEADERS },
+    {
+      maxBytes: MAX_RELEASE_LIST_BYTES,
+      maxRedirects: 3,
+      timeoutMs: LOOKUP_TIMEOUT_MS,
+      headers: GITHUB_API_HEADERS,
+    },
     deps
   );
   const parsed: unknown = JSON.parse(new TextDecoder().decode(result.bytes));
@@ -108,7 +125,12 @@ export async function fetchCanaryManifestForTag(
   try {
     const result = await safeFetchBytes(
       releaseAssetUrl(tagVersion, CANARY_MANIFEST_ASSET),
-      { maxBytes: MAX_MANIFEST_BYTES, maxRedirects: 5, headers: GITHUB_HEADERS },
+      {
+        maxBytes: MAX_MANIFEST_BYTES,
+        maxRedirects: 5,
+        timeoutMs: LOOKUP_TIMEOUT_MS,
+        headers: GITHUB_HEADERS,
+      },
       deps
     );
     return parseCanaryManifest(new TextDecoder().decode(result.bytes));
@@ -130,7 +152,12 @@ export async function fetchReleaseChecksums(
 ): Promise<string> {
   const result = await safeFetchBytes(
     checksumsUrl,
-    { maxBytes: MAX_MANIFEST_BYTES, maxRedirects: 5, headers: GITHUB_HEADERS },
+    {
+      maxBytes: MAX_MANIFEST_BYTES,
+      maxRedirects: 5,
+      timeoutMs: LOOKUP_TIMEOUT_MS,
+      headers: GITHUB_HEADERS,
+    },
     deps
   );
   return new TextDecoder().decode(result.bytes);

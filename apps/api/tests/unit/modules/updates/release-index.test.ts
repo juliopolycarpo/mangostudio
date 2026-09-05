@@ -131,3 +131,24 @@ describe('fetchReleaseChecksums', () => {
     expect(checksums).toContain('mangostudio-1.4.0-linux-x64.tar.gz');
   });
 });
+
+describe('lookup deadlines', () => {
+  it('arms an abort signal on every release-host lookup', async () => {
+    // Without a deadline a stalled socket hangs the upgrade indefinitely,
+    // holding the engine's `running` flag and machine-service's
+    // `upgradeInFlight` until the hub restarts.
+    const host = new FakeReleaseHost({
+      'https://github.com/juliopolycarpo/mangostudio/releases/latest': {
+        redirectTo: 'https://github.com/juliopolycarpo/mangostudio/releases/tag/v1.4.0',
+      },
+      'https://github.com/juliopolycarpo/mangostudio/releases/tag/v1.4.0': {
+        body: '<html></html>',
+      },
+    });
+
+    await resolveStableLatestVersion({ fetch: host.fetch, resolveHostname: host.resolveHostname });
+
+    expect(host.signals).not.toHaveLength(0);
+    for (const signal of host.signals) expect(signal).toBeInstanceOf(AbortSignal);
+  });
+});
