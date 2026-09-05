@@ -16,12 +16,23 @@ interface UpdateCardProps {
   readonly onUpgraded?: () => void;
 }
 
-function Row({ label, value }: { readonly label: string; readonly value: string }) {
+function Row({
+  label,
+  value,
+  title,
+}: {
+  readonly label: string;
+  readonly value: string;
+  /** The release host's own text for a failed check — kept for a hover, not shown as the row's sentence. */
+  readonly title?: string;
+}) {
   return (
     <div className="flex items-start gap-2 text-sm">
       <div className="min-w-0">
         <p className="text-on-surface-variant/70">{label}</p>
-        <p className="break-all font-mono text-xs text-on-surface">{value}</p>
+        <p className="break-all font-mono text-xs text-on-surface" title={title}>
+          {value}
+        </p>
       </div>
     </div>
   );
@@ -40,7 +51,7 @@ export function UpdateCard({ status, onUpgraded }: UpdateCardProps) {
           value={installedViaManagerLabel(t, status.installedVia.manager)}
         />
         <Row label={m.channel} value={m.channelName[status.channel]} />
-        <Row label={m.latest} value={updateLatestLabel(t, status)} />
+        <Row label={m.latest} value={updateLatestLabel(t, status)} title={status.check?.error} />
       </div>
       <div className="border-t border-outline-variant/15 pt-4">
         <UpdateAction status={status} testId="machine-update-card-action" onUpgraded={onUpgraded} />

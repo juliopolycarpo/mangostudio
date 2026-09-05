@@ -368,4 +368,26 @@ describe('MachinePage', () => {
       )
     );
   });
+
+  it('shows a translated "check failed" sentence, keeping the server’s own text as a title', async () => {
+    // check.error is the release host's own text, in whatever language it
+    // answered in — worth keeping for a hover, but not fit as the row's
+    // visible sentence.
+    mountScenario(STATUS, {
+      ...UPDATE_STATUS,
+      check: {
+        channel: 'stable',
+        currentVersion: '0.1.1',
+        updateAvailable: false,
+        checkedAt: 1_700_000_000_000,
+        error: 'ECONNRESET fetching release index',
+      },
+    });
+    render(<MachinePage />);
+
+    const card = await screen.findByTestId('machine-update-card');
+    const latestValue = within(card).getByText('Check failed');
+    expect(latestValue.getAttribute('title')).toBe('ECONNRESET fetching release index');
+    expect(within(card).queryByText('ECONNRESET fetching release index')).toBeNull();
+  });
 });

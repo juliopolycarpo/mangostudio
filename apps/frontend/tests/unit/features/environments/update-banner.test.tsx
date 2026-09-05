@@ -33,6 +33,7 @@ const SELF_MANAGED_STATUS: MachineUpdateStatus = {
     channel: 'stable',
     executable: '/home/j/.mango/dist/current/mangostudio',
   },
+  channel: 'stable',
   check: BASE_CHECK,
   checksEnabled: true,
   canUpgrade: true,
@@ -44,6 +45,7 @@ const DELEGATE_STATUS: MachineUpdateStatus = {
     channel: 'stable',
     executable: '/usr/local/bin/mangostudio',
   },
+  channel: 'stable',
   check: BASE_CHECK,
   checksEnabled: true,
   canUpgrade: false,
@@ -133,6 +135,8 @@ describe('UpdateBanner', () => {
 
     const banner = await screen.findByTestId('machine-update-banner');
     expect(banner.textContent).toContain('O MangoStudio 0.3.0 está disponível');
+    // "na versão {current}", not the missing-noun "na {current}".
+    expect(banner.textContent).toContain('você está na versão 0.2.0');
     expect(within(banner).getByText('Atualizar')).toBeTruthy();
   });
 });

@@ -128,8 +128,12 @@ export function upgradeRefusalReasonLabel(t: Messages, reason: UpgradeRefusalRea
 
 /**
  * The "Latest" row on the update card: checks disabled, never checked, the
- * check's own error, or the version comparison — in that order, so a check
+ * check having failed, or the version comparison — in that order, so a check
  * that failed reads as "we tried and this is why" rather than "not checked".
+ * A failed check's own text is the release host's, in whatever language it
+ * answered in — worth keeping for whoever reports the bug, but not fit to
+ * show as the row's own sentence; callers that want it read
+ * `status.check?.error` themselves (a `title` attribute, say) alongside this.
  */
 export function updateLatestLabel(
   t: Messages,
@@ -139,7 +143,7 @@ export function updateLatestLabel(
   if (!status.checksEnabled) return m.checksDisabled;
   const check = status.check;
   if (!check) return m.notCheckedYet;
-  if (check.error) return check.error;
+  if (check.error) return m.checkFailed;
   if (check.updateAvailable) {
     return formatMessage(m.updateAvailable, { version: check.latestVersion ?? '' });
   }
