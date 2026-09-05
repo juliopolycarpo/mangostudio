@@ -434,11 +434,11 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
     // for the same reason `writeConfig` is: callers never have to know that.
     update(context) {
       const { check: checksEnabled, channel: configuredChannel } = d.updatesConfig();
-      const status = resolveInstallStatus(
-        d.installOriginProbe(),
-        configuredChannel,
-        d.environment().version
-      );
+      // The probe already carries the running version; building a whole
+      // `MachineEnvironment` (config, home/logs dirs, runtime slot dir) to read
+      // one string off it is work this request has no other use for.
+      const probe = d.installOriginProbe();
+      const status = resolveInstallStatus(probe, configuredChannel, probe.version);
       if (checksEnabled) {
         // The cache the response reads below; the checker itself decides
         // whether it is still fresh enough to skip the network.
@@ -484,14 +484,13 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
     if (!guard.allowed) throw new MachineActionBlockedError(guard);
     if (upgradeInFlight) throw new UpgradeUnavailableError('in-progress', STATUS_COMMAND);
 
-    const environment = d.environment();
     const { channel: configuredChannel } = d.updatesConfig();
-    const status = resolveInstallStatus(
-      d.installOriginProbe(),
-      configuredChannel,
-      environment.version,
-      { channel: body.channel, version: body.version, sha: body.sha }
-    );
+    const probe = d.installOriginProbe();
+    const status = resolveInstallStatus(probe, configuredChannel, probe.version, {
+      channel: body.channel,
+      version: body.version,
+      sha: body.sha,
+    });
     if (status.plan.kind !== 'self') {
       const reason = upgradeRefusalReason(status.plan) ?? 'unknown-origin';
       throw new UpgradeUnavailableError(reason, status.command);
