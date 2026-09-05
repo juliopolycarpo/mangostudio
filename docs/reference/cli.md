@@ -264,7 +264,9 @@ the script sees them. The script receives `MANGOSTUDIO_INSTALL_ORIGIN=upgrade`,
 names one, `MANGOSTUDIO_BIN_DIR`. A legacy layout (version directories with no
 `current` and no origin record) is migrated by that first run. `--rollback`
 runs the script with `--use <previousVersion>`; `--check` resolves and reports
-without downloading.
+without downloading. The two are refused together: a rollback resolves
+nothing, so there is no preview to give, and running one under `--check` would
+move the pointer.
 
 Delegated commands (the package-manager rows) are **printed** by default. With
 `--yes` they are **run** on macOS and Linux with the hub's allowlisted env

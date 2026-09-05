@@ -293,6 +293,15 @@ describe('parseUpgradeArgs', () => {
     expect(parseUpgradeArgs(['--rollback'])).toMatchObject({ rollback: true });
   });
 
+  it('rejects --rollback --check instead of quietly rolling back for real', () => {
+    // `runRollback` never reads args.check, so the pair used to perform the
+    // rollback — moving the pointer and restarting the hub — under a flag
+    // that means "resolve and report, change nothing" everywhere else.
+    expect(() => parseUpgradeArgs(['--rollback', '--check', '--yes'])).toThrow(
+      /--rollback has nothing to preview/
+    );
+  });
+
   it('parses --canary with an optional trailing sha', () => {
     expect(parseUpgradeArgs(['--canary'])).toMatchObject({ channel: 'canary' });
     expect(parseUpgradeArgs(['--canary', 'abc1234'])).toMatchObject({

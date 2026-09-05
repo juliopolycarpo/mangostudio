@@ -352,6 +352,16 @@ export function parseUpgradeArgs(rest: string[]): UpgradeArgs {
     );
   }
 
+  // `--check` previews a *resolution*; a rollback has nothing to resolve — it
+  // swaps the pointer to the version already on disk. Accepting the pair would
+  // run the rollback for real (moving the pointer, restarting the hub), which
+  // is the opposite of what --check promises everywhere else.
+  if (rollback && check) {
+    throw new CliError(
+      'upgrade --rollback has nothing to preview; drop --check, or run "mangostudio status" to see the version it would roll back to.'
+    );
+  }
+
   return {
     check,
     yes,
