@@ -160,6 +160,25 @@ describe('runUpgrade --yes', () => {
     expect(lines).toEqual(['→ resolve', 'a script line', 'Upgraded to 0.1.2. Restarting.']);
   });
 
+  it('names the manager, not a version it never learned, for a delegate', async () => {
+    // A delegate carries no target: the package manager resolves the version
+    // inside itself. "Upgraded to the requested version." claimed something
+    // this process never saw — and, for a manager that cannot honour a pin,
+    // something untrue.
+    const service = new QueueUpgradeService([
+      upgradedReport('not-running', {
+        installedVia: { ...INSTALLED_VIA, manager: 'homebrew' },
+        target: undefined,
+      }),
+    ]);
+    const { deps, lines } = baseDeps(service);
+
+    await runUpgrade(baseArgs({ yes: true }), deps);
+
+    expect(lines.at(-1)).toContain('Upgraded through homebrew.');
+    expect(lines.at(-1)).not.toContain('the requested version');
+  });
+
   it('honors --no-restart', async () => {
     const service = new QueueUpgradeService([upgradedReport('skipped')]);
     const { deps } = baseDeps(service, {});

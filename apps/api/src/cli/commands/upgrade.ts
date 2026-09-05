@@ -155,10 +155,16 @@ function outcomeSentence(report: UpgradeReport, rollback: boolean): string {
         'Re-run with --yes to install it.'
       );
     case 'upgraded': {
-      // A rollback re-publishes an installed version and carries no target.
+      // A rollback re-publishes an installed version and carries no target;
+      // neither does a delegate, which resolves its own version inside the
+      // package manager. Claiming "the requested version" there states
+      // something this process never learned — and, when the request carried
+      // a pin the manager cannot honour, something untrue.
       const headline = rollback
         ? 'Rolled back to the previous version.'
-        : `Upgraded to ${report.target?.version ?? 'the requested version'}.`;
+        : report.target?.version
+          ? `Upgraded to ${report.target.version}.`
+          : `Upgraded through ${report.installedVia.manager}.`;
       const restartNote = restartSentence(report);
       return `${headline}${restartNote ? ` ${restartNote}` : ''}${report.message ? ` ${report.message}` : ''}`;
     }
