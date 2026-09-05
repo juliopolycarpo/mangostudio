@@ -93,10 +93,12 @@ No root is needed for the unit itself.
 The unit runs `serve` through whichever program survives an upgrade:
 
 - **Installer layout** — the launcher the installer maintains,
-  `~/.mango/dist/current/mangostudio` (`%LOCALAPPDATA%\mangostudio\bin\mangostudio.cmd`
-  on Windows), so a new version is picked up without touching the unit.
-- **Package manager** — the resolved executable, whose path the package manager
-  keeps stable on its own.
+  `~/.mango/dist/current/mangostudio` (`%LOCALAPPDATA%\mangostudio\current\mangostudio.exe`
+  on Windows — the junction, never the `bin` shim: a `.cmd` would make the
+  supervisor supervise `cmd.exe`), so a new version is picked up without
+  touching the unit.
+- **Package manager** — the launcher the manager keeps stable (`~/.cargo/bin/mangostudio`,
+  the npm wrapper) when one announced itself, otherwise the resolved executable.
 - **Source checkout** — the workspace entry through Bun, with the directory
   `install` was run from as the unit's working directory.
 - **Installer layout with no launcher yet** — this version's own directory. The
@@ -271,7 +273,9 @@ move the pointer.
 Delegated commands (the package-manager rows) are **printed** by default. With
 `--yes` they are **run** on macOS and Linux with the hub's allowlisted env
 (never its secrets), and a live hub is then restarted the same way a
-self-managed upgrade restarts it. On Windows the npm managers delete the
+self-managed upgrade restarts it — through the package manager's own launcher
+when one announced itself, since the manager has just replaced what this
+process's own path points at. On Windows the npm managers delete the
 package that holds the running `mangostudio.exe`, so `--yes` there stops a live
 hub first (a foreground hub is refused: press Ctrl-C in its terminal), then
 hands the command to a detached waiter (`Wait-Process` on this pid and the
@@ -279,9 +283,13 @@ stopped hub's, then the manager, then — unconditionally, since a hub already
 stopped for the upgrade needs recovering whether or not the manager succeeded
 — `mangostudio restart` for a Scheduled Task or `mangostudio serve -d
 <host:port>` for a detached instance) whose output lands in
-`~/.mango/run/upgrade-<timestamp>.log`; the report names the log. With
+`~/.mango/run/upgrade-<timestamp>.log`; the report names the log. The waiter
+carries the hub's own runtime configuration so the comeback starts with the
+secret and database it was running with, and clears those variables around the
+manager step so the manager and its postinstall hooks never see them. With
 `--no-restart` the hub is still stopped, and the report names the command that
-brings it back. Scoop goes through the same waiter. Refusals always print the
+brings it back. If the waiter cannot be spawned at all, nothing is installed
+and the hub is started again from here. Scoop goes through the same waiter. Refusals always print the
 exact command to run instead.
 
 Restart: after the pointer moves, a live hub is restarted through the `current`
