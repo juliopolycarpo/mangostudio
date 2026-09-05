@@ -52,6 +52,8 @@ export type InstalledVia = Static<typeof InstalledViaSchema>;
 
 export const UPDATE_VERSION_MAX = 128;
 export const UPDATE_ERROR_MAX = 1_024;
+/** A full git object id; every producer sends a 40-char sha, sha-256 leaves room. */
+export const SOURCE_SHA_MAX = 64;
 
 /**
  * The last answer from the release host. `latestVersion` is absent when the
@@ -63,7 +65,7 @@ export const UpdateCheckSchema = Type.Object({
   currentVersion: Type.String({ maxLength: UPDATE_VERSION_MAX }),
   latestVersion: Type.Optional(Type.String({ maxLength: UPDATE_VERSION_MAX })),
   /** Canary only: the source commit the rolling pre-release currently carries. */
-  latestSourceSha: Type.Optional(Type.String({ maxLength: 64 })),
+  latestSourceSha: Type.Optional(Type.String({ maxLength: SOURCE_SHA_MAX })),
   updateAvailable: Type.Boolean(),
   /** Epoch milliseconds of the check that produced this answer. */
   checkedAt: Type.Integer({ minimum: 0 }),
@@ -167,7 +169,7 @@ export type UpgradeVerification = Static<typeof UpgradeVerificationSchema>;
 export const UpgradeTargetSchema = Type.Object({
   channel: UpdateChannelSchema,
   version: Type.String({ maxLength: UPDATE_VERSION_MAX }),
-  sourceSha: Type.Optional(Type.String({ maxLength: 64 })),
+  sourceSha: Type.Optional(Type.String({ maxLength: SOURCE_SHA_MAX })),
   assetName: Type.String({ maxLength: 256 }),
   url: Type.String({ maxLength: 2_048 }),
   kind: UpgradeSourceKindSchema,

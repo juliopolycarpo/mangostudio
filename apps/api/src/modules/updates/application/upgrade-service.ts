@@ -17,6 +17,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { posix, win32 } from 'node:path';
 import type { HubLaunchMode } from '@mangostudio/shared/machine';
 import {
+  SOURCE_SHA_MAX,
   UPDATE_ERROR_MAX,
   UPDATE_VERSION_MAX,
   UPGRADE_COMMAND_MAX,
@@ -203,7 +204,9 @@ function toWireTarget(resolved: ResolvedDownload): UpgradeTarget {
   return {
     channel: resolved.channel,
     version: fitToLimit(resolved.version, UPDATE_VERSION_MAX),
-    ...(resolved.sourceSha !== undefined ? { sourceSha: fitToLimit(resolved.sourceSha, 64) } : {}),
+    ...(resolved.sourceSha !== undefined
+      ? { sourceSha: fitToLimit(resolved.sourceSha, SOURCE_SHA_MAX) }
+      : {}),
     assetName: fitToLimit(resolved.assetName, 256),
     url: fitToLimit(resolved.url, 2_048),
     kind: resolved.kind,

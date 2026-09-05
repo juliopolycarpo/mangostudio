@@ -34,6 +34,7 @@ import {
 import {
   type MachineUpdateStatus,
   type MachineUpgradeBody,
+  SOURCE_SHA_MAX,
   UPDATE_ERROR_MAX,
   UPDATE_VERSION_MAX,
   UPGRADE_COMMAND_MAX,
@@ -801,7 +802,7 @@ function fitUpdateCheck(check: UpdateCheck): UpdateCheck {
       ? { latestVersion: fitToLimit(check.latestVersion, UPDATE_VERSION_MAX) }
       : {}),
     ...(check.latestSourceSha !== undefined
-      ? { latestSourceSha: fitToLimit(check.latestSourceSha, 64) }
+      ? { latestSourceSha: fitToLimit(check.latestSourceSha, SOURCE_SHA_MAX) }
       : {}),
     updateAvailable: check.updateAvailable,
     checkedAt: check.checkedAt,

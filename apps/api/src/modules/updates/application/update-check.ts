@@ -15,6 +15,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import {
+  SOURCE_SHA_MAX,
   UPDATE_ERROR_MAX,
   UPDATE_VERSION_MAX,
   type UpdateChannel,
@@ -52,10 +53,6 @@ const FETCH_MAX_BYTES = 1024 * 1024;
 
 const GITHUB_LATEST_RELEASE_API =
   'https://api.github.com/repos/juliopolycarpo/mangostudio/releases/latest';
-
-// Not exported by the shared schema on its own — it caps `latestSourceSha`
-// alongside `UPDATE_VERSION_MAX` and `UPDATE_ERROR_MAX`, which are.
-const SOURCE_SHA_MAX = 64;
 
 export type UpdateCheckSkipReason = 'disabled' | 'env' | 'dev';
 

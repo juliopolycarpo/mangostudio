@@ -9,7 +9,11 @@ import {
   type UserServiceAction,
 } from '@mangostudio/runtime';
 import type { ResourceKind } from '@mangostudio/shared/library';
-import { UPGRADE_VERSION_PATTERN, type UpdateChannel } from '@mangostudio/shared/updates';
+import {
+  UPGRADE_SHA_PATTERN,
+  UPGRADE_VERSION_PATTERN,
+  type UpdateChannel,
+} from '@mangostudio/shared/updates';
 import { CliError } from './errors';
 
 export interface ServeArgs {
@@ -260,7 +264,9 @@ export function parseLogsArgs(rest: string[]): LogsArgs {
   return { follow, lines };
 }
 
-const CANARY_SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
+// The shared pattern is unflagged for the wire; the `i` here is load-bearing —
+// the CLI accepts an uppercase sha off a terminal and lowercases it below.
+const CANARY_SHA_PATTERN = new RegExp(UPGRADE_SHA_PATTERN, 'i');
 const UPGRADE_VERSION_REGEX = new RegExp(UPGRADE_VERSION_PATTERN);
 
 /**
