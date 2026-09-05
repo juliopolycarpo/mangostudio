@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   rmSync,
@@ -267,6 +268,27 @@ describe('install.sh layout', () => {
     expect(existsSync(join(root, 'random-file.txt'))).toBe(true);
   });
 
+  test('--prune sweeps leftover .install-*/.staging-*/.rollback-* scratch directories', () => {
+    // Left behind by an install/upgrade that failed before the swap
+    // (extract_archive) or was interrupted mid-flight. None of them match
+    // the version-directory pattern the main sweep looks for, so they
+    // accumulate forever unless --prune sweeps them explicitly.
+    const { workDir, root, env } = layout();
+    const archive = buildReleaseArchive(workDir, `mangostudio-0.1.0-${PLATFORM}.tar.gz`, '0.1.0');
+    run(['--local', archive], env);
+    mkdirSync(join(root, '.install-0.2.0.1234'), { recursive: true });
+    mkdirSync(join(root, '.staging-0.2.0-1234'), { recursive: true });
+    mkdirSync(join(root, '.rollback-0.0.9-1234'), { recursive: true });
+
+    const result = run(['--prune'], env);
+
+    expect(result.exitCode).toBe(0);
+    expect(existsSync(join(root, '.install-0.2.0.1234'))).toBe(false);
+    expect(existsSync(join(root, '.staging-0.2.0-1234'))).toBe(false);
+    expect(existsSync(join(root, '.rollback-0.0.9-1234'))).toBe(false);
+    expect(existsSync(join(root, '0.1.0'))).toBe(true);
+  });
+
   test('unknown lines in install-origin.json survive a rewrite', () => {
     const { workDir, root, env } = layout();
     const first = buildReleaseArchive(workDir, `mangostudio-0.1.0-${PLATFORM}.tar.gz`, '0.1.0');
@@ -332,6 +354,20 @@ describe('install.sh layout', () => {
     expect(readlinkSync(join(root, 'current'))).toBe('0.1.0');
     const stillGood = Bun.spawnSync({ cmd: [join(root, '0.1.0', 'mangostudio'), '--version'] });
     expect(stillGood.stdout.toString().trim()).toBe('0.1.0');
+  });
+
+  test('an archive missing mangostudio fails and leaves no .install-* scratch directory behind', () => {
+    const { workDir, root, env } = layout();
+    const bad = buildArchiveMissingBinary(workDir, 'mangostudio-9.9.9-bad.tar.gz');
+
+    const result = run(['--local', bad, '--version', '9.9.9'], env);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('archive is missing mangostudio');
+    const leftovers = existsSync(root)
+      ? readdirSync(root).filter((name) => name.startsWith('.install-'))
+      : [];
+    expect(leftovers).toEqual([]);
   });
 
   test('--uninstall removes the install root and the linked binary', () => {

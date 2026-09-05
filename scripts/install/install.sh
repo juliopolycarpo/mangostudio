@@ -489,12 +489,21 @@ extract_archive() {
   rm -rf "$tmp_install"
   mkdir -p "$tmp_install"
   if [ "$strip" = '1' ]; then
-    tar -xzf "$archive" -C "$tmp_install" --strip-components=1
+    tar -xzf "$archive" -C "$tmp_install" --strip-components=1 || {
+      rm -rf "$tmp_install"
+      fail 'failed to extract archive'
+    }
   else
-    tar -xzf "$archive" -C "$tmp_install"
+    tar -xzf "$archive" -C "$tmp_install" || {
+      rm -rf "$tmp_install"
+      fail 'failed to extract archive'
+    }
   fi
 
-  [ -f "${tmp_install}/mangostudio" ] || fail 'archive is missing mangostudio'
+  if [ ! -f "${tmp_install}/mangostudio" ]; then
+    rm -rf "$tmp_install"
+    fail 'archive is missing mangostudio'
+  fi
   chmod +x "${tmp_install}/mangostudio"
 
   # The execution host for out-of-process environments. MangoStudio resolves it
@@ -688,6 +697,20 @@ do_prune() {
     else
       log "Could not remove ${name} (close editors or stop the process, then run again)"
       remaining+=("$name")
+    fi
+  done
+
+  # Leftover scratch directories from an install/upgrade that failed before
+  # the swap (extract_archive) or was interrupted mid-flight. They never
+  # match the version glob above, so a plain prune leaves them to accumulate
+  # forever; sweep them explicitly.
+  for dir in "$INSTALL_ROOT"/.install-*/ "$INSTALL_ROOT"/.staging-*/ "$INSTALL_ROOT"/.rollback-*/; do
+    [ -d "$dir" ] || continue
+    name="$(basename "$dir")"
+    if rm -rf "$dir" 2>/dev/null; then
+      log "Removed ${name}"
+    else
+      log "Could not remove ${name} (close editors or stop the process, then run again)"
     fi
   done
 
