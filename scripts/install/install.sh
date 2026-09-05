@@ -280,7 +280,7 @@ write_origin_record() {
   [ -n "$prune_csv" ] && lines+=("  \"prunePending\": [${prune_csv}]")
 
   local extra
-  for extra in "${ORIGIN_EXTRA_LINES[@]}"; do
+  for extra in "${ORIGIN_EXTRA_LINES[@]+"${ORIGIN_EXTRA_LINES[@]}"}"; do
     [ -n "$extra" ] && lines+=("$extra")
   done
 
@@ -313,9 +313,11 @@ record_origin() {
   if [ -f "$file" ]; then
     old_source="$(origin_field "$file" source)"
     local -a prune_arr=()
-    readarray -t prune_arr < <(origin_array_field "$file" prunePending)
-    prune_csv="$(join_json_array "${prune_arr[@]}")"
-    readarray -t ORIGIN_EXTRA_LINES < <(origin_unknown_lines "$file")
+    local prune_line
+    while IFS= read -r prune_line; do prune_arr+=("$prune_line"); done < <(origin_array_field "$file" prunePending)
+    prune_csv="$(join_json_array "${prune_arr[@]+"${prune_arr[@]}"}")"
+    local extra_line
+    while IFS= read -r extra_line; do ORIGIN_EXTRA_LINES+=("$extra_line"); done < <(origin_unknown_lines "$file")
   fi
 
   local source_val="${source_kind:-$old_source}"
@@ -347,7 +349,8 @@ record_prune() {
   bin_dir="$(origin_field "$file" binDir)"
 
   ORIGIN_EXTRA_LINES=()
-  readarray -t ORIGIN_EXTRA_LINES < <(origin_unknown_lines "$file")
+  local extra_line
+  while IFS= read -r extra_line; do ORIGIN_EXTRA_LINES+=("$extra_line"); done < <(origin_unknown_lines "$file")
 
   local prune_csv
   prune_csv="$(join_json_array "$@")"
@@ -680,7 +683,7 @@ do_prune() {
     fi
   done
 
-  record_prune "$INSTALL_ROOT" "${remaining[@]}"
+  record_prune "$INSTALL_ROOT" "${remaining[@]+"${remaining[@]}"}"
 }
 
 do_uninstall() {
@@ -714,6 +717,21 @@ do_uninstall() {
   for item in "${removed[@]}"; do
     log "Removed ${item}"
   done
+}
+
+# Clears TMP_DIR on the way out without letting the trap's own exit status
+# stand in for the script's. A bare `trap 'rm -rf "$TMP_DIR"' EXIT` runs
+# rm -rf as the last command in the trap; bash preserves an explicit `exit N`
+# (fail()'s path) through that regardless, but a `set -u`/`set -e` abort that
+# never calls `exit` does not carry a meaningful pending status into the trap
+# at all — capturing and restoring $? here is the defensive habit for that
+# class of abort in general, even though the specific "unbound variable"
+# crash this script used to hit is what the empty-array guards above
+# actually eliminate.
+cleanup_tmp_dir() {
+  rc=$?
+  rm -rf "$TMP_DIR"
+  exit "$rc"
 }
 
 main() {
@@ -770,7 +788,7 @@ main() {
   [ "${MANGOSTUDIO_INSTALL_ORIGIN:-}" = 'upgrade' ] && ORIGIN_KIND='upgrade'
 
   TMP_DIR="$(mktemp -d)"
-  trap 'rm -rf "$TMP_DIR"' EXIT
+  trap cleanup_tmp_dir EXIT
 
   case "$ACTION" in
     install) do_install ;;

@@ -91,6 +91,19 @@ function buildNpmTarball(dir: string, printedVersion: string): string {
   return archivePath;
 }
 
+/** A broken archive with no `mangostudio` at all — extract_archive must fail() on it. */
+function buildArchiveMissingBinary(dir: string, name: string): string {
+  const srcDir = join(dir, `src-bad-${name}`);
+  mkdirSync(srcDir, { recursive: true });
+  writeFileSync(join(srcDir, 'not-mangostudio'), 'not a binary');
+  const archivePath = join(dir, name);
+  const result = Bun.spawnSync({
+    cmd: ['tar', '-czf', archivePath, '-C', srcDir, 'not-mangostudio'],
+  });
+  if (result.exitCode !== 0) throw new Error(`tar failed: ${result.stderr.toString()}`);
+  return archivePath;
+}
+
 interface Layout {
   readonly workDir: string;
   readonly root: string;
@@ -375,4 +388,172 @@ describe('install.sh canary parsing (network-free)', () => {
     expect(version.stdout.trim()).toBe('0.1.1-canary.abc1234');
     expect(sourceSha.stdout.trim()).toBe('abc1234');
   });
+});
+
+// macOS ships /bin/bash 3.2.57, and both `curl | bash` and the hub's own
+// ['bash', script] spawn run this script under whatever bash is on PATH — so
+// it has to work on 3.2, not just the bash 4/5 this host and CI normally run.
+// The image is Alpine/musl (no curl, busybox tar/sed/grep), so only the
+// `--local`/`--use`/`--rollback`/`--prune` paths are exercised here; that
+// matches every case that can run without a network fetch.
+const DOCKER = Bun.which('docker');
+const BASH32_IMAGE = 'docker.io/library/bash:3.2';
+const HAS_UID = typeof process.getuid === 'function' && typeof process.getgid === 'function';
+
+function dockerUnavailableReason(): string {
+  if (!DOCKER) return 'docker is not on PATH';
+  if (!HAS_UID) return 'process.getuid/getgid are unavailable on this platform';
+  const check = Bun.spawnSync({ cmd: [DOCKER, 'info'] });
+  if (check.exitCode !== 0) return 'docker daemon is not reachable';
+  return '';
+}
+
+const DOCKER_SKIP_REASON = dockerUnavailableReason();
+
+interface Bash32Layout extends Layout {
+  readonly scriptPathInContainer: string;
+}
+
+/** Same layout as the host-bash suite, plus install.sh copied into the mounted workDir. */
+function bash32Layout(): Bash32Layout {
+  const l = layout();
+  const scriptPath = join(l.workDir, 'install.sh');
+  writeFileSync(scriptPath, readFileSync(INSTALL_SH, 'utf8'));
+  chmodSync(scriptPath, 0o755);
+  return { ...l, scriptPathInContainer: '/w/install.sh' };
+}
+
+/** `<workDir host path> → /w` inside the container; every fixture path under workDir needs the same rewrite. */
+function toContainerPath(l: Bash32Layout, hostPath: string): string {
+  return hostPath.replace(l.workDir, '/w');
+}
+
+/** Runs an arbitrary bash -c script inside the container, with install.sh's functions (cleanup_tmp_dir, etc.) sourced in first. */
+function runInBash32(l: Bash32Layout, script: string): RunResult {
+  const result = Bun.spawnSync({
+    cmd: [
+      DOCKER as string,
+      'run',
+      '--rm',
+      '--user',
+      `${process.getuid?.()}:${process.getgid?.()}`,
+      '-v',
+      `${l.workDir}:/w`,
+      BASH32_IMAGE,
+      '-c',
+      `source "${l.scriptPathInContainer}"; ${script}`,
+    ],
+  });
+  return {
+    exitCode: result.exitCode ?? 1,
+    stdout: result.stdout.toString(),
+    stderr: result.stderr.toString(),
+  };
+}
+
+function runBash32(l: Bash32Layout, args: string[], env: Record<string, string>): RunResult {
+  const containerEnv = {
+    ...env,
+    MANGOSTUDIO_INSTALL_DIR: '/w/root',
+    MANGOSTUDIO_BIN_DIR: '/w/bin',
+  };
+  const envArgs = Object.entries(containerEnv).flatMap(([key, value]) => ['-e', `${key}=${value}`]);
+  const result = Bun.spawnSync({
+    cmd: [
+      DOCKER as string,
+      'run',
+      '--rm',
+      '--user',
+      `${process.getuid?.()}:${process.getgid?.()}`,
+      '-v',
+      `${l.workDir}:/w`,
+      ...envArgs,
+      BASH32_IMAGE,
+      l.scriptPathInContainer,
+      ...args.map((arg) => toContainerPath(l, arg)),
+    ],
+  });
+  return {
+    exitCode: result.exitCode ?? 1,
+    stdout: result.stdout.toString(),
+    stderr: result.stderr.toString(),
+  };
+}
+
+describe('install.sh under bash 3.2 (docker)', () => {
+  test.skipIf(!DOCKER_SKIP_REASON)(`skipped: ${DOCKER_SKIP_REASON}`, () => {
+    // Body intentionally empty: this entry exists only to name the skip reason.
+  });
+
+  test.skipIf(!!DOCKER_SKIP_REASON)(
+    'a fresh install and a repair reinstall both exit 0 and write install-origin.json',
+    () => {
+      // Reproduces the P1: on bash < 4.4, iterating the empty
+      // ORIGIN_EXTRA_LINES array under `set -u` was "unbound variable" on
+      // *every* write_origin_record call — including a plain first install —
+      // and the EXIT trap swallowed that failure's exit status, so the
+      // script still reported success with current moved and no origin file.
+      const l = bash32Layout();
+      const archive = buildReleaseArchive(l.workDir, 'mangostudio-0.1.0-linux-x64.tar.gz', '0.1.0');
+
+      const first = runBash32(l, ['--local', archive, '--version', '0.1.0'], {});
+      expect(first.stderr).toBe('');
+      expect(first.exitCode).toBe(0);
+      expect(existsSync(join(l.root, 'install-origin.json'))).toBe(true);
+      expect(originRecord(l.root)).toMatchObject({ version: '0.1.0' });
+
+      // A second install of the same archive/version exercises the
+      // `[ -f "$file" ]` branch in record_origin (readarray on an existing
+      // file), the other call site the same bug lived in.
+      const second = runBash32(l, ['--local', archive, '--version', '0.1.0'], {});
+      expect(second.stderr).toBe('');
+      expect(second.exitCode).toBe(0);
+      expect(originRecord(l.root)).toMatchObject({ version: '0.1.0' });
+    }
+  );
+
+  // extract_archive's own `fail 'archive is missing mangostudio'` calls
+  // `exit 1` directly; bash preserves an explicit `exit N` through an EXIT
+  // trap regardless of the trap's own last command (verified directly
+  // against this image: `trap 'true' EXIT; exit 1` and `trap 'false' EXIT;
+  // exit 1` both still exit 1) — so this case was never actually at risk of
+  // the "trap swallows the status" defect. It pins the ordinary failure path
+  // instead: non-zero exit, and no install-origin.json.
+  test.skipIf(!!DOCKER_SKIP_REASON)('a forced mid-script failure exits non-zero, not 0', () => {
+    const l = bash32Layout();
+    const bad = buildArchiveMissingBinary(l.workDir, 'mangostudio-9.9.9-bad.tar.gz');
+
+    const result = runBash32(l, ['--local', bad, '--version', '9.9.9'], {});
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('archive is missing mangostudio');
+    expect(existsSync(join(l.root, 'install-origin.json'))).toBe(false);
+  });
+
+  test.skipIf(!!DOCKER_SKIP_REASON)(
+    'a set -u abort does not carry a meaningful $? into the EXIT trap, with or without the trap fix',
+    () => {
+      // Documents a nuance the review's causal story got slightly wrong: a
+      // `set -u`/nounset fatal abort never calls `exit N`, so there is no
+      // pending exit status for the trap to protect — capturing $? at trap
+      // entry (`rc=$?`) still only sees whatever the *last successful*
+      // command left behind (0 here), not "the abort". Both the old and the
+      // fixed trap give exit 0 in this isolated case; what actually turns
+      // the real bug's "exits 0" into "exits non-zero" is eliminating the
+      // abort itself (the empty-array guards above), not the trap's shape.
+      // This test exists so a future change to cleanup_tmp_dir does not
+      // reintroduce a claim this bash version does not support.
+      const l = bash32Layout();
+      const abort = 'set -u; : "$NOPE"';
+
+      const oldTrap = runInBash32(
+        l,
+        `TMP_DIR="$(mktemp -d)"; trap 'rm -rf "$TMP_DIR"' EXIT; ${abort}`
+      );
+      const newTrap = runInBash32(l, `TMP_DIR="$(mktemp -d)"; trap cleanup_tmp_dir EXIT; ${abort}`);
+
+      expect(oldTrap.exitCode).toBe(0);
+      expect(newTrap.exitCode).toBe(0);
+    }
+  );
 });
