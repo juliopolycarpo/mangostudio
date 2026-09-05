@@ -13,7 +13,7 @@
  * rejected promise.
  */
 
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { posix, win32 } from 'node:path';
 import type { HubLaunchMode } from '@mangostudio/shared/machine';
 import {
@@ -34,7 +34,6 @@ import {
   type SpawnDetachedWaiterInput,
   spawnDetached,
   spawnDetachedWaiter,
-  WINDOWS_SYSTEM_ENV_KEYS,
 } from '../../../cli/detach';
 import {
   createProcessController,
@@ -72,11 +71,13 @@ import {
   type UpgradeTargetRequest,
 } from '../domain/resolve-target';
 import type { UpgradePlan } from '../domain/upgrade-plan';
+import type { InstallerKind } from '../infrastructure/embedded-installers';
 import {
-  embeddedInstaller,
-  embeddedInstallerFileName,
-  type InstallerKind,
-} from '../infrastructure/embedded-installers';
+  buildScriptEnv,
+  selfInstallArgv,
+  useVersionArgv,
+  writeTempScriptReal,
+} from '../infrastructure/installer-invocation';
 import {
   type DownloadedUpgrade,
   downloadVerified as downloadVerifiedImpl,
@@ -147,33 +148,6 @@ export interface UpgradeServiceDeps {
   readonly platformId: ReleasePlatformId;
   readonly pid: number;
 }
-
-/**
- * Env keys the embedded install script needs, deduped against
- * `WINDOWS_SYSTEM_ENV_KEYS` (detach.ts) rather than repeating the ones this
- * list already names (LOCALAPPDATA, SystemRoot). Without the rest of that
- * Windows block, install.ps1's `Get-Platform` cannot classify the host
- * architecture (PROCESSOR_ARCHITECTURE/PROCESSOR_ARCHITEW6432) and, even once
- * it does, PowerShell 5.1's `& $exe '--version'` smoke check needs PATHEXT to
- * resolve the target as executable. `runScript` (run-script.ts) replaces
- * rather than merges the child's environment, so a missing key here is
- * simply gone for the whole run.
- */
-const SCRIPT_ENV_PASSTHROUGH: readonly string[] = Array.from(
-  new Set<string>([
-    'PATH',
-    'HOME',
-    'USERPROFILE',
-    'LOCALAPPDATA',
-    'TEMP',
-    'TMP',
-    // install.sh's mktemp -d reads TMPDIR (POSIX); not in the brief's list, but
-    // without it a HOME override in a test or a sandboxed run cannot steer
-    // where the script stages its own extraction.
-    'TMPDIR',
-    ...WINDOWS_SYSTEM_ENV_KEYS,
-  ])
-);
 
 /** Path joining that follows the deps' platform, not the one running the process — see hub-executable.ts's `joiner`. */
 function joinPath(platform: NodeJS.Platform, ...segments: string[]): string {
@@ -270,91 +244,6 @@ export function delegateEnv(env: NodeJS.ProcessEnv): Record<string, string> {
     [...DELEGATE_ENV_ALLOWLIST, ...DELEGATE_ENV_EXTRA_NAMES],
     DELEGATE_ENV_PREFIXES
   );
-}
-
-/**
- * Env the embedded install script receives: the passthrough set plus what
- * tells it this is an upgrade. Also used by `prune-retry.ts` for the
- * `-Prune` retry on start — `MANGOSTUDIO_INSTALL_ORIGIN` is harmless there
- * since `-Prune`/`--prune` never reads it, and the install dir/bin dir
- * overrides are exactly what a prune needs to find the right root.
- */
-export function buildScriptEnv(
-  env: NodeJS.ProcessEnv,
-  installedVia: InstallOrigin
-): Record<string, string> {
-  const scriptEnv: Record<string, string> = {};
-  for (const key of SCRIPT_ENV_PASSTHROUGH) {
-    const value = env[key];
-    if (value !== undefined) scriptEnv[key] = value;
-  }
-  scriptEnv.MANGOSTUDIO_INSTALL_ORIGIN = 'upgrade';
-  if (installedVia.distRoot !== undefined)
-    scriptEnv.MANGOSTUDIO_INSTALL_DIR = installedVia.distRoot;
-  if (installedVia.record?.binDir !== undefined) {
-    scriptEnv.MANGOSTUDIO_BIN_DIR = installedVia.record.binDir;
-  }
-  return scriptEnv;
-}
-
-export function powershellInterpreter(which: (name: string) => string | null): string {
-  return which('pwsh') !== null ? 'pwsh' : 'powershell.exe';
-}
-
-/**
- * argv for the embedded script's install path, one flag set per shell.
- * `--version`/`-Version` is passed for every kind, not just `npm-tarball`: a
- * canary archive's file name only carries the bare `<major>.<minor>.<patch>-
- * canary`, but `target.version` (resolved from the canary manifest) carries
- * the full `<version>.<sha7>` the binary reports — without it install.sh
- * falls back to deriving the version from the file name and the post-install
- * smoke check compares that truncated string against `--version`, failing
- * every canary self-upgrade.
- */
-function selfInstallArgv(
-  kind: InstallerKind,
-  scriptPath: string,
-  archivePath: string,
-  target: ResolvedDownload,
-  which: (name: string) => string | null
-): string[] {
-  if (kind === 'sh') {
-    return ['bash', scriptPath, '--local', archivePath, '--version', target.version];
-  }
-  return [
-    powershellInterpreter(which),
-    '-NoProfile',
-    '-NonInteractive',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-File',
-    scriptPath,
-    '-Local',
-    archivePath,
-    '-Version',
-    target.version,
-  ];
-}
-
-/** argv for the embedded script's `--use`/`-Use` path — no download, just a pointer swap. */
-function useVersionArgv(
-  kind: InstallerKind,
-  scriptPath: string,
-  version: string,
-  which: (name: string) => string | null
-): string[] {
-  if (kind === 'sh') return ['bash', scriptPath, '--use', version];
-  return [
-    powershellInterpreter(which),
-    '-NoProfile',
-    '-NonInteractive',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-File',
-    scriptPath,
-    '-Use',
-    version,
-  ];
 }
 
 function scriptFailedReport(
@@ -660,7 +549,7 @@ async function runSelf(
     emit(stageEvent('install'));
     const kind: InstallerKind = d.platform === 'win32' ? 'ps1' : 'sh';
     const scriptPath = await d.writeTempScript(stagingDir, kind);
-    const argv = selfInstallArgv(kind, scriptPath, downloaded.path, resolved, d.which);
+    const argv = selfInstallArgv(kind, scriptPath, downloaded.path, resolved.version, d.which);
     const run = d.runScript(argv, { env: buildScriptEnv(d.env, installedVia) });
     const exitCode = await relayLines(run, emit);
     if (exitCode !== 0) return scriptFailedReport(installedVia, d.getVersion(), exitCode, resolved);
@@ -837,12 +726,6 @@ async function defaultRestartHub(input: {
     {},
     { waitForPid: input.state.pid, ...restartExecutableOptions(currentHubExecutable()) }
   );
-}
-
-export async function writeTempScriptReal(directory: string, kind: InstallerKind): Promise<string> {
-  const path = joinPath(process.platform, directory, embeddedInstallerFileName(kind));
-  await writeFile(path, embeddedInstaller(kind), { mode: kind === 'sh' ? 0o755 : 0o644 });
-  return path;
 }
 
 const safeFetchDeps: SafeFetchDeps = { fetch };

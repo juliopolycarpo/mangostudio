@@ -2,7 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import type { UpgradeReport, UpgradeStreamEvent } from '@mangostudio/shared/updates';
 import type { ServerState } from '../../../../src/lib/server-state';
 import {
-  buildScriptEnv,
   createUpgradeService,
   type UpgradeRunRequest,
   type UpgradeServiceDeps,
@@ -1121,59 +1120,5 @@ describe('upgrade-service concurrency guard', () => {
 
     resolveDownload?.();
     await firstPromise;
-  });
-});
-
-describe('buildScriptEnv', () => {
-  const installedVia = {
-    manager: 'self-managed' as const,
-    channel: 'stable' as const,
-    executable: '/home/j/.mango/dist/current/mangostudio',
-    distRoot: '/home/j/.mango/dist',
-    record: { origin: 'installer' as const, channel: 'stable' as const, version: '0.1.1' },
-  };
-
-  it('carries the Windows system block install.ps1 needs to detect the host architecture and resolve executables', () => {
-    // Get-Platform reads PROCESSOR_ARCHITECTURE/PROCESSOR_ARCHITEW6432; the
-    // PowerShell 5.1 smoke check ("& $exe '--version'") needs PATHEXT to
-    // treat mangostudio.exe as executable. Bun.spawn({ env }) replaces the
-    // child's environment, so a key missing here is simply gone for the
-    // script's whole run, not merged from this process's own environment.
-    const env = buildScriptEnv(
-      {
-        PATH: 'C:\\Windows\\System32',
-        PROCESSOR_ARCHITECTURE: 'AMD64',
-        PROCESSOR_ARCHITEW6432: 'AMD64',
-        PATHEXT: '.COM;.EXE;.BAT',
-        SystemRoot: 'C:\\Windows',
-      },
-      installedVia
-    );
-
-    expect(env.PROCESSOR_ARCHITECTURE).toBe('AMD64');
-    expect(env.PROCESSOR_ARCHITEW6432).toBe('AMD64');
-    expect(env.PATHEXT).toBe('.COM;.EXE;.BAT');
-    expect(env.SystemRoot).toBe('C:\\Windows');
-  });
-
-  it('never forwards a key the source env does not have', () => {
-    const env = buildScriptEnv({ PATH: '/usr/bin' }, installedVia);
-
-    expect(env.PROCESSOR_ARCHITECTURE).toBeUndefined();
-    expect(env.PATHEXT).toBeUndefined();
-  });
-
-  it('always sets MANGOSTUDIO_INSTALL_ORIGIN=upgrade and the dist/bin dir overrides', () => {
-    const env = buildScriptEnv(
-      { PATH: '/usr/bin' },
-      {
-        ...installedVia,
-        record: { ...installedVia.record, binDir: '/home/j/.local/bin' },
-      }
-    );
-
-    expect(env.MANGOSTUDIO_INSTALL_ORIGIN).toBe('upgrade');
-    expect(env.MANGOSTUDIO_INSTALL_DIR).toBe('/home/j/.mango/dist');
-    expect(env.MANGOSTUDIO_BIN_DIR).toBe('/home/j/.local/bin');
   });
 });
