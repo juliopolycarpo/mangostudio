@@ -2773,6 +2773,7 @@ export const messages = {
           'unsupported-target': 'Ainda não há build publicado para esta plataforma neste canal.',
           'windows-service':
             'Uma Tarefa Agendada não consegue substituir o próprio binário de dentro do próprio processo. Use o comando abaixo.',
+          'in-progress': 'Já existe uma atualização em andamento a partir deste hub.',
         },
         dialog: {
           title: 'Atualizar para {latest}?',

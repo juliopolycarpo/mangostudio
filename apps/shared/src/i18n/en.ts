@@ -2770,6 +2770,7 @@ export const messages: Messages = {
             'There is no published build for this platform on this channel yet.',
           'windows-service':
             'A Scheduled Task cannot replace its own binary from inside its own process. Use the command below.',
+          'in-progress': 'Another upgrade is already running from this hub.',
         },
         dialog: {
           title: 'Upgrade to {latest}?',
