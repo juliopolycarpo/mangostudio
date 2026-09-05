@@ -10,45 +10,46 @@ Pick any distribution channel — each ships the same prebuilt binary and fronte
 sidecar. See the [README install matrix](../../README.md#install) for
 copy-paste commands, or:
 
-| Channel            | Entry point                                                                                                      |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| npm / bun          | `mangostudio` — see [`packages/cli/README.md`](../../packages/cli/README.md)                                     |
-| Homebrew           | `brew install juliopolycarpo/tap/mangostudio`                                                                    |
-| Shell / PowerShell | `install.sh` / `install.ps1` from [mangostudio.dev](https://mangostudio.dev)                                     |
-| Scoop              | `juliopolycarpo/scoop-bucket` → `scoop install mangostudio`                                                      |
-| Cargo              | `cargo install mangostudio` — see [`packages/cargo-shim/README.md`](../../packages/cargo-shim/README.md)         |
-| Docker             | `ghcr.io/juliopolycarpo/mangostudio` — see [`docs/operations/deployment.md`](../operations/deployment.md#docker) |
-| Manual             | Download platform archives from GitHub Releases and verify `SHA256SUMS`                                          |
+| Channel            | Entry point                                                                                                                                                          |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| npm / bun          | `mangostudio` — see [`packages/cli/README.md`](../../packages/cli/README.md)                                                                                         |
+| Homebrew           | `brew install juliopolycarpo/tap/mangostudio`                                                                                                                        |
+| Shell / PowerShell | `install.sh` / `install.ps1` from [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh) (mirrored at mangostudio.dev) |
+| Scoop              | `juliopolycarpo/scoop-bucket` → `scoop install mangostudio`                                                                                                          |
+| Cargo              | `cargo install mangostudio` — see [`packages/cargo-shim/README.md`](../../packages/cargo-shim/README.md)                                                             |
+| Docker             | `ghcr.io/juliopolycarpo/mangostudio` — see [`docs/operations/deployment.md`](../operations/deployment.md#docker)                                                     |
+| Manual             | Download platform archives from GitHub Releases and verify `SHA256SUMS`                                                                                              |
 
 ## Commands
 
-| Command                                                                        | Description                                                                          |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| `mangostudio`                                                                  | Print help and the command list.                                                     |
-| `serve [host\|port\|host:port]`                                                | Start the server in the foreground (default `localhost:3001`).                       |
-| `serve [host\|port\|host:port] -d`                                             | Start the server in the background (detached) and return.                            |
-| `status`                                                                       | Show whether a server is running, its URL, launch mode, and health.                  |
-| `status --json`                                                                | Emit the shared hub status document instead of plain text.                           |
-| `stop`                                                                         | Gracefully stop the running server (SIGTERM).                                        |
-| `restart`                                                                      | Restart the running server the way it was started.                                   |
-| `killserver`                                                                   | Force-kill the running server (SIGKILL).                                             |
-| `service <action> [host\|port\|host:port] [--json]`                            | Keep the server running across logout and reboot.                                    |
-| `logs [-f] [-n <count>]`                                                       | Print the tail of the server log; `-f` follows it.                                   |
-| `open`                                                                         | Open the running server in the default browser.                                      |
-| `doctor`                                                                       | Run environment and configuration diagnostics.                                       |
-| `doctor --all`                                                                 | Include ChatGPT connector checks even without a configured connector.                |
-| `doctor --chatgpt-refresh`                                                     | Perform a live ChatGPT token refresh probe (rotates the stored refresh token).       |
-| `doctor --probe`                                                               | Actively connect to each enabled MCP server (spawns children / hits URLs).           |
-| `doctor --env` / `--library`                                                   | Limit extra sections to environments and/or library (core checks always run).        |
-| `doctor --json`                                                                | Emit structured JSON (checks, warning/failure counts).                               |
-| `env [runtimes\|agents] [--json]`                                              | Report runtimes, version managers, and agent CLIs (read-only).                       |
-| `env install <recipe> [--environment <id>] [--version <spec>]`                 | Run an install recipe on this machine (`--environment` is currently always refused). |
-| `env update <recipe> [--environment <id>]`                                     | Same as `env install`, restricted to update recipes.                                 |
-| `env toolchain [node\|bun <path\|auto>] [--environment <id>] [--user <email>]` | Show or set which Node and Bun spawned processes run with on an environment.         |
-| `library [locations] [--json]`                                                 | Library coverage matrix and location health (read-only).                             |
-| `library --kind <kind>`                                                        | Filter resources by kind (`skill`, `subagent`, etc.).                                |
-| `library --divergent`                                                          | List only resources whose copies disagree across locations.                          |
-| `version`, `--version`, `-v`                                                   | Print the embedded MangoStudio version.                                              |
+| Command                                                                                                               | Description                                                                                  |
+| --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `mangostudio`                                                                                                         | Print help and the command list.                                                             |
+| `serve [host\|port\|host:port]`                                                                                       | Start the server in the foreground (default `localhost:3001`).                               |
+| `serve [host\|port\|host:port] -d`                                                                                    | Start the server in the background (detached) and return.                                    |
+| `status`                                                                                                              | Show whether a server is running, its URL, launch mode, and health.                          |
+| `status --json`                                                                                                       | Emit the shared hub status document instead of plain text.                                   |
+| `stop`                                                                                                                | Gracefully stop the running server (SIGTERM).                                                |
+| `restart`                                                                                                             | Restart the running server the way it was started.                                           |
+| `killserver`                                                                                                          | Force-kill the running server (SIGKILL).                                                     |
+| `service <action> [host\|port\|host:port] [--json]`                                                                   | Keep the server running across logout and reboot.                                            |
+| `logs [-f] [-n <count>]`                                                                                              | Print the tail of the server log; `-f` follows it.                                           |
+| `open`                                                                                                                | Open the running server in the default browser.                                              |
+| `doctor`                                                                                                              | Run environment and configuration diagnostics.                                               |
+| `doctor --all`                                                                                                        | Include ChatGPT connector checks even without a configured connector.                        |
+| `doctor --chatgpt-refresh`                                                                                            | Perform a live ChatGPT token refresh probe (rotates the stored refresh token).               |
+| `doctor --probe`                                                                                                      | Actively connect to each enabled MCP server (spawns children / hits URLs).                   |
+| `doctor --env` / `--library`                                                                                          | Limit extra sections to environments and/or library (core checks always run).                |
+| `doctor --json`                                                                                                       | Emit structured JSON (checks, warning/failure counts).                                       |
+| `env [runtimes\|agents] [--json]`                                                                                     | Report runtimes, version managers, and agent CLIs (read-only).                               |
+| `env install <recipe> [--environment <id>] [--version <spec>]`                                                        | Run an install recipe on this machine (`--environment` is currently always refused).         |
+| `env update <recipe> [--environment <id>]`                                                                            | Same as `env install`, restricted to update recipes.                                         |
+| `env toolchain [node\|bun <path\|auto>] [--environment <id>] [--user <email>]`                                        | Show or set which Node and Bun spawned processes run with on an environment.                 |
+| `library [locations] [--json]`                                                                                        | Library coverage matrix and location health (read-only).                                     |
+| `library --kind <kind>`                                                                                               | Filter resources by kind (`skill`, `subagent`, etc.).                                        |
+| `library --divergent`                                                                                                 | List only resources whose copies disagree across locations.                                  |
+| `upgrade [--check] [--yes] [--stable \| --canary [<sha7>] \| --version <x.y.z>] [--rollback] [--no-restart] [--json]` | Upgrade this install, or hand off to the package manager that owns it. `update` is an alias. |
+| `version`, `--version`, `-v`                                                                                          | Print the embedded MangoStudio version.                                                      |
 
 `-d` / `--detach` and the positional host/port target may be combined in any
 order, e.g. `mangostudio serve 127.0.0.1:3000 -d`.
@@ -226,6 +227,81 @@ mangostudio env update bun.update --json
 | `--version <spec>`   | `lts`, `latest`, or a numeric version, for a recipe that takes a Node spec.                                                                                                    |
 | `--user <email>`     | The account the run is recorded under and whose toolchain selection the installer starts with; omitted means the hub's only account, or a local sentinel when none exists yet. |
 | `--json`             | Print the final `InstallRun` audit row instead of a plain summary.                                                                                                             |
+
+### upgrade
+
+`mangostudio upgrade` (alias `update`) first works out **who installed the
+binary** and only then decides what to do. Three signals, in precedence order:
+the launcher marker the npm wrapper and the Cargo shim set
+(`MANGOSTUDIO_LAUNCHER`, `MANGOSTUDIO_LAUNCHER_PATH`), the `install-origin.json`
+the install scripts write at the dist root, and the shape of the executable's
+own path. A source checkout (`dev`) and a container refuse whatever launched
+them. `status` prints the answer as `Installed via:`; `doctor` has an
+`Installed via` row.
+
+| Installed via                        | Stable                                   | Canary (latest)                                     | Canary `<sha7>`                                       |
+| ------------------------------------ | ---------------------------------------- | --------------------------------------------------- | ----------------------------------------------------- |
+| install script (`install.sh`/`.ps1`) | archive + embedded script                | rolling archive + embedded script                   | npm platform tarball + embedded script; musl: refused |
+| npm / bun / pnpm                     | `<pm> … mangostudio@latest`              | `<pm> … mangostudio@canary`                         | `<pm> … mangostudio@<root>-canary.<sha7>`             |
+| Homebrew                             | `brew upgrade mangostudio`               | refused → shell installer `--canary`                | refused                                               |
+| Scoop                                | `scoop update mangostudio`               | refused → `install.ps1 -Canary`                     | refused                                               |
+| Cargo                                | `cargo install mangostudio --locked`     | `cargo install mangostudio --version <root>-canary` | refused                                               |
+| Docker                               | prints `docker pull ghcr.io/…:<version>` | prints `docker pull ghcr.io/…:canary`               | prints `docker pull ghcr.io/…:<root>-canary.<sha7>`   |
+| source checkout                      | `git pull && bun run build`              | same                                                | same                                                  |
+
+For an install-script layout the hub does the work itself: resolve the target
+(no channel flag means the channel this build came from), download the archive
+into `<dist>/.staging-<version>-<pid>/`, verify it (`SHA256SUMS` for release
+archives, the registry's `dist.integrity` for an npm tarball), then write the
+install script embedded in its own binary to a temp file and run it with
+`--local <archive>` (`bash` on POSIX; `pwsh` when present, else
+`powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File`, on
+Windows). The script extracts, smokes `mangostudio --version`, moves the
+`current` pointer, rewrites `install-origin.json` with `origin: upgrade`, and
+prunes. No executable code is ever downloaded — only archives, verified before
+the script sees them. The script receives `MANGOSTUDIO_INSTALL_ORIGIN=upgrade`,
+`MANGOSTUDIO_INSTALL_DIR` (the detected dist root) and, when the origin record
+names one, `MANGOSTUDIO_BIN_DIR`. A legacy layout (version directories with no
+`current` and no origin record) is migrated by that first run. `--rollback`
+runs the script with `--use <previousVersion>`; `--check` resolves and reports
+without downloading.
+
+Delegated commands (the package-manager rows) are **printed** by default. With
+`--yes` they are **run** on macOS and Linux. On Windows the npm managers delete
+the package that holds the running `mangostudio.exe`, so `--yes` there hands the
+command to a detached waiter (`Wait-Process` on this pid, then the manager)
+whose output lands in `~/.mango/run/upgrade-<timestamp>.log`; the report names
+the log and says to run `mangostudio --version` in a minute. Scoop goes through
+the same waiter. Refusals always print the exact command to run instead.
+
+Restart: after the pointer moves, a live hub is restarted through the `current`
+pointer — the service manager when a unit exists, otherwise a new detached
+instance on the recorded host and port — so `mangostudio restart` on an
+install-script layout always launches the new version. A foreground hub, or a
+service-managed hub on Windows (a Scheduled Task cannot restart itself from
+inside its own process), is reported as `manual`. `--no-restart` leaves the old
+build running. Detached terminals end with the hub; remote runtimes reconnect on
+their next call.
+
+Prompts: without `--yes`, an interactive terminal confirms before downloading
+and again before restarting a live hub; anywhere else `upgrade` reports what is
+available, says `Re-run with --yes to install it.`, and exits `0`. `--json`
+prints the `UpgradeReport` document from
+[`apps/shared/src/updates/schemas.ts`](../../apps/shared/src/updates/schemas.ts)
+and nothing else. Exit codes: `0` upgraded, already current, or a `--check`
+preview; `1` refused (the report carries `reason` and `command`); `2` download,
+verification or script failure (the script's output is relayed verbatim).
+
+The hub checks for a newer release at most once every 24 hours from the
+serving process and caches the answer in `~/.mango/run/update-check.json`.
+`[updates] check = false` in `config.toml` (`MANGO_UPDATES_CHECK=false`) turns
+it off; `[updates] channel` (`MANGO_UPDATES_CHANNEL`) picks `stable` or `canary`
+instead of the build's own; `NO_UPDATE_NOTIFIER`, `DO_NOT_TRACK` and `CI` skip
+it. `status` and `doctor` print `Update: x.y.z available — run: <command>` when
+one is cached; `doctor` on a terminal performs the check itself when the cache
+is stale or absent. The same answer feeds `GET /api/machine/update` and the
+banner on the "This machine" page, whose Upgrade button streams
+`POST /api/machine/upgrade` (loopback-only, like the other machine actions).
 
 ### env toolchain
 
@@ -460,7 +536,9 @@ a service-launched instance from a `serve -d` one, and it is absent for both
 ## Doctor
 
 `mangostudio doctor` prints a plain-text checklist for home directories, config,
-database, frontend, auth secret, running instance, and MangoStudio runtime.
+database, frontend, auth secret, running instance, MangoStudio runtime, how the
+binary was installed (`Installed via`), and whether a newer release exists
+(`Update`; see [upgrade](#upgrade)).
 It also reports the running server build SHA, build date, dirty flag, current
 checkout SHA, and the frontend asset SHA from `build-info.json`. If the server
 SHA is behind the checkout or differs from the served frontend assets, restart
@@ -563,6 +641,11 @@ servers MCP is designed around.
 - `2` — `env install`/`env update` only: the recipe never started (blocked by
   the guard, unsupported on this platform, missing a requirement, or
   copy-only).
+- `upgrade`: `0` upgraded, already current, or a `--check` preview; `1`
+  refused (a package manager owns the binary and the command to run is
+  printed, a source checkout, a container, an unknown origin, or an
+  unsupported target); `2` the download, its verification, or the install
+  script failed.
 
 ## Configuration
 
