@@ -25,6 +25,7 @@ import {
   resolveStableLatestVersion,
 } from '../infrastructure/release-index';
 import type { ReleasePlatformId } from './platform-id';
+import { compareStableVersions } from './version-compare';
 
 export interface UpgradeTargetRequest {
   readonly channel: UpdateChannel;
@@ -239,12 +240,28 @@ export function resolveUpgradeTarget(
   return resolveCanaryLatest(context, deps);
 }
 
-/** True when a resolved target is what the caller is already running. // Usage: isAlreadyCurrent(target, { currentVersion: '0.1.1' }) */
+/**
+ * True when a resolved target is what the caller is already running, or —
+ * for an unpinned stable target — is not even newer. An explicit
+ * `--version x.y.z` pin is a deliberate choice, including a downgrade, so it
+ * only ever matches on exact equality; the rolling "latest" target has no
+ * such intent behind it; a yanked release can leave it behind the version
+ * already installed, and that must read as "nothing to do" rather than as a
+ * downgrade the caller never asked for.
+ * // Usage: isAlreadyCurrent(target, { currentVersion: '0.1.1' })
+ */
 export function isAlreadyCurrent(
   target: UpgradeTarget,
-  context: { readonly currentVersion: string; readonly buildSha?: string }
+  context: {
+    readonly currentVersion: string;
+    readonly buildSha?: string;
+    readonly pinned?: boolean;
+  }
 ): boolean {
-  if (target.channel === 'stable') return target.version === context.currentVersion;
+  if (target.channel === 'stable') {
+    if (context.pinned) return target.version === context.currentVersion;
+    return compareStableVersions(target.version, context.currentVersion) <= 0;
+  }
   if (target.version === context.currentVersion) return true;
 
   const a = target.sourceSha?.toLowerCase();

@@ -240,6 +240,44 @@ describe('upgrade-service self-managed', () => {
     expect(stages(events)).toEqual(['resolve']);
   });
 
+  it('reports already-current for an unpinned "latest" that has fallen behind (a yanked release)', async () => {
+    // The release index still names an older version "latest" — 0.1.2 was
+    // published then pulled, leaving 0.1.1 (the version already running) as
+    // the top of the index again. No `request.version`, so this is not a
+    // pin; it must read as nothing to do, not as a downgrade to install.
+    let downloadCalled = false;
+    const service = createUpgradeService(
+      baseDeps({
+        resolveUpgradeTarget: () => Promise.resolve(newerTarget({ version: '0.1.0' })),
+        downloadVerified: () => {
+          downloadCalled = true;
+          return Promise.resolve({ path: '/x', verification: 'sha256-sums' });
+        },
+      })
+    );
+
+    const { report } = await collect(service);
+
+    expect(report.outcome).toBe('already-current');
+    expect(downloadCalled).toBe(false);
+  });
+
+  it('installs an explicit older --version pin as the deliberate downgrade it is', async () => {
+    const script = fakeRunScript(0);
+    const service = createUpgradeService(
+      baseDeps({
+        resolveUpgradeTarget: () => Promise.resolve(newerTarget({ version: '0.1.0' })),
+        runScript: script.runScript,
+      })
+    );
+
+    const { report } = await collect(service, { restart: false, version: '0.1.0' });
+
+    expect(report.outcome).toBe('upgraded');
+    expect(report.target?.version).toBe('0.1.0');
+    expect(script.calls).toHaveLength(1);
+  });
+
   it('previews an available update with --check and never downloads', async () => {
     let downloadCalled = false;
     const service = createUpgradeService(

@@ -459,7 +459,13 @@ async function runSelf(
     };
   }
 
-  if (isAlreadyCurrent(resolved, { currentVersion: d.getVersion(), buildSha: context.buildSha })) {
+  if (
+    isAlreadyCurrent(resolved, {
+      currentVersion: d.getVersion(),
+      buildSha: context.buildSha,
+      pinned: request.version !== undefined,
+    })
+  ) {
     return {
       outcome: 'already-current',
       installedVia: fitInstalledVia(installedVia),

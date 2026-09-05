@@ -34,6 +34,7 @@ import {
 import { resolveRuntimeRelease } from '../../environments/domain/runtime-release-resolution';
 import { fitToLimit } from '../../machine/domain/machine-limits';
 import { RELEASES_BASE_URL, versionRoot } from '../domain/upgrade-plan';
+import { compareStableVersions } from '../domain/version-compare';
 
 const logger = createDiagnosticLogger('update-check');
 
@@ -239,7 +240,13 @@ async function checkStable(d: ResolvedDeps, currentVersion: string): Promise<Upd
     channel: 'stable',
     currentVersion,
     latestVersion: fitToLimit(latestVersion, UPDATE_VERSION_MAX),
-    updateAvailable: latestVersion !== stripLeadingV(currentVersion),
+    // Not `!==`: a yanked release can leave "latest" behind the version
+    // already running, and string inequality would still call that an
+    // "update" — one the button would then install as a downgrade.
+    // Not `!==`: a yanked release can leave "latest" behind the version
+    // already running, and string inequality would still call that an
+    // "update" — one the button would then install as a downgrade.
+    updateAvailable: compareStableVersions(latestVersion, currentVersion) > 0,
     checkedAt: d.now(),
   };
 }

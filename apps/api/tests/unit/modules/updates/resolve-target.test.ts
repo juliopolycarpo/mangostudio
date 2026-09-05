@@ -205,6 +205,27 @@ describe('isAlreadyCurrent', () => {
     ).toBe(false);
   });
 
+  it('stable, unpinned: an older "latest" (a yanked release) reads as already current', () => {
+    // Nothing pinned this to 1.0.4 — it is just what the release index says
+    // is latest, and it has fallen behind 1.0.5 because 1.0.5 was pulled.
+    // Reporting "already current" (not "downgrade available") is what keeps
+    // `runSelf` from installing it.
+    expect(
+      isAlreadyCurrent({ channel: 'stable', version: '1.0.4' } as never, {
+        currentVersion: '1.0.5',
+      })
+    ).toBe(true);
+  });
+
+  it('stable, pinned: an explicit older version is a deliberate downgrade, not "already current"', () => {
+    expect(
+      isAlreadyCurrent({ channel: 'stable', version: '1.0.4' } as never, {
+        currentVersion: '1.0.5',
+        pinned: true,
+      })
+    ).toBe(false);
+  });
+
   it('canary: matches on a shared 7+ char source sha prefix', () => {
     const target = {
       channel: 'canary',

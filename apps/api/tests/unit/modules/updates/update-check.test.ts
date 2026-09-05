@@ -266,6 +266,33 @@ describe('createUpdateChecker', () => {
       expect(result?.updateAvailable).toBe(false);
     });
 
+    it('does not offer a yanked release that leaves latest behind the running version', async () => {
+      // The tag GitHub reports as "latest" can fall behind after a release
+      // is deleted (0.1.5 published, then pulled, leaving 0.1.4 as latest
+      // again) — string inequality would still call that an "update".
+      const fake = new FakeFetch({
+        'https://api.github.com/repos/juliopolycarpo/mangostudio/releases/latest': () =>
+          STABLE_TAG_RESPONSE('v0.1.4'),
+      });
+      const { deps } = harness({ fetch: fake.fetch, getCurrentVersion: () => '0.1.5' });
+
+      const result = await createUpdateChecker(deps).check();
+
+      expect(result).toMatchObject({ latestVersion: '0.1.4', updateAvailable: false });
+    });
+
+    it('reports an update available once a newer patch is actually published', async () => {
+      const fake = new FakeFetch({
+        'https://api.github.com/repos/juliopolycarpo/mangostudio/releases/latest': () =>
+          STABLE_TAG_RESPONSE('v0.1.10'),
+      });
+      const { deps } = harness({ fetch: fake.fetch, getCurrentVersion: () => '0.1.9' });
+
+      const result = await createUpdateChecker(deps).check();
+
+      expect(result).toMatchObject({ latestVersion: '0.1.10', updateAvailable: true });
+    });
+
     it('fetches the canary manifest at the rolling tag and compares source shas', async () => {
       const fake = new FakeFetch({
         'https://github.com/juliopolycarpo/mangostudio/releases/download/v0.1.1-canary/canary-manifest.json':
