@@ -631,6 +631,14 @@ async function scheduleRestartIfNeeded(
   if (report.restart !== 'scheduled') return;
   const state = await liveState();
   if (!state) return;
+  // Mirrors `restart()`: a service-supervised hub must ask its supervisor to
+  // restart it, not spawn a successor and exit — a systemd unit with
+  // `KillMode=control-group` would tear down the successor along with this
+  // process, and launchd would lose track of it as an orphan.
+  if (hubLaunchMode(state) === 'service') {
+    d.schedule(() => d.manager.restart());
+    return;
+  }
   d.schedule(() => {
     d.spawnSuccessor(state);
     d.shutdown();

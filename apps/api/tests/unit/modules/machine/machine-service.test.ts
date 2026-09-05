@@ -664,6 +664,32 @@ describe('machineService.upgrade', () => {
     expect(recorder.shutdowns).toBe(1);
   });
 
+  it('restarts through the supervisor, not spawn+shutdown, when the hub is service-launched', async () => {
+    const upgradeService = new FakeUpgradeService(
+      [{ type: 'stage', stage: 'resolve', done: false }],
+      UPGRADED_SCHEDULED
+    );
+    const { service, recorder, manager } = makeService(
+      {
+        installOriginProbe: () => installOriginProbe(),
+        updatesConfig: () => ({ check: true, channel: null }),
+        upgradeService,
+      },
+      SERVICE
+    );
+
+    const source = await service.upgrade({ restart: true }, LOCAL);
+    for await (const _event of source) {
+      // Drain to completion.
+    }
+
+    expect(recorder.scheduled).toHaveLength(1);
+    await recorder.flush();
+    expect(manager.calls).toEqual(['restart']);
+    expect(recorder.spawned).toEqual([]);
+    expect(recorder.shutdowns).toBe(0);
+  });
+
   it('never schedules a restart when the report says not-running', async () => {
     const report: UpgradeReport = { ...UPGRADED_SCHEDULED, restart: 'not-running' };
     const upgradeService = new FakeUpgradeService([], report);
