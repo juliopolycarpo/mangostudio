@@ -320,6 +320,32 @@ describe('install.ps1 layout (hand-crafted state, no real exe needed)', () => {
       expect(sh(['test', '-f', join(l.binLinux, 'mangostudio.cmd')]).exitCode).toBe(0);
     }
   );
+
+  test.skipIf(!POWERSHELL)(
+    '-Prune and -Uninstall never fail on host architecture detection',
+    () => {
+      // Get-Platform used to run unconditionally at the top of Invoke-Main;
+      // -Prune/-Use/-Rollback/-Uninstall never fetch an archive and so never
+      // needed to classify the host, but an unrecognised
+      // PROCESSOR_ARCHITECTURE would fail Get-Platform anyway and refuse
+      // every one of them.
+      const l = layout();
+      craftInstalledState(l, '0.2.0', { previousVersion: '0.1.0' });
+      const bogusArchEnv = {
+        ...l.env,
+        PROCESSOR_ARCHITECTURE: 'bogus-arch',
+        PROCESSOR_ARCHITEW6432: '',
+      };
+
+      const pruneResult = run(l.scriptPath, ['-Prune'], bogusArchEnv);
+      expect(pruneResult.exitCode).toBe(0);
+      expect(pruneResult.stderr).not.toContain('unsupported architecture');
+
+      const uninstallResult = run(l.scriptPath, ['-Uninstall'], bogusArchEnv);
+      expect(uninstallResult.exitCode).toBe(0);
+      expect(uninstallResult.stderr).not.toContain('unsupported architecture');
+    }
+  );
 });
 
 describe('install.ps1 layout (real windows-x64 exe required)', () => {

@@ -715,7 +715,6 @@ function Invoke-Main {
     return
   }
 
-  $platform = Get-Platform
   $installRoot = Get-InstallRoot
   $binDir = Get-BinDir $installRoot
   $envOrigin = [Environment]::GetEnvironmentVariable('MANGOSTUDIO_INSTALL_ORIGIN')
@@ -737,6 +736,11 @@ function Invoke-Main {
     Invoke-Use $installRoot $binDir $originKind $Use
     return
   }
+
+  # Only the archive-fetching branches below need to know the host
+  # platform/architecture; -Prune/-Use/-Rollback/-Uninstall must never fail
+  # because Get-Platform could not classify an unusual PROCESSOR_ARCHITECTURE.
+  $platform = Get-Platform
 
   $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "mangostudio-install-$PID"
   New-Item -ItemType Directory -Force $tempDir | Out-Null
