@@ -74,8 +74,7 @@ import type { UpgradePlan } from '../domain/upgrade-plan';
 import type { InstallerKind } from '../infrastructure/embedded-installers';
 import {
   buildScriptEnv,
-  selfInstallArgv,
-  useVersionArgv,
+  installerArgv,
   writeTempScriptReal,
 } from '../infrastructure/installer-invocation';
 import {
@@ -471,6 +470,64 @@ async function runDelegate(
   return await runPosixDelegate(plan, installedVia, request, d, emit);
 }
 
+interface InstallScriptRun {
+  readonly installedVia: InstallOrigin;
+  /** Scratch directory name under the dist root — contained by `resolveContainedStagingDir`. */
+  readonly stagingName: string;
+  /** Emitted before the staging directory exists, so a failed `mkdir` still names what was being attempted. */
+  readonly firstStage: UpgradeStreamEvent;
+  /** Reported on the outcome; a rollback has no resolved target to name. */
+  readonly target?: ResolvedDownload;
+  readonly restart: boolean;
+  /**
+   * Everything the flow does inside its own staging directory before the
+   * script runs — the install path downloads and verifies here — returning the
+   * flags that tell the script which job to do.
+   */
+  readonly buildFlags: (stagingDir: string, kind: InstallerKind) => Promise<readonly string[]>;
+}
+
+/**
+ * Stage, run and clean up one invocation of the embedded install script. The
+ * install and rollback paths differ only in which flags they hand it and what
+ * they do inside the staging directory first; containment, cleanup, the script
+ * env and the exit-code convention are stated here once.
+ */
+async function runInstallScript(
+  input: InstallScriptRun,
+  d: UpgradeServiceDeps,
+  emit: EmitUpgradeEvent
+): Promise<UpgradeReport> {
+  const { installedVia, target } = input;
+  if (installedVia.distRoot === undefined) {
+    throw new Error(
+      `A self-managed install has no distRoot on installedVia: ${installedVia.executable}`
+    );
+  }
+  const stagingDir = resolveContainedStagingDir(
+    d.platform,
+    installedVia.distRoot,
+    input.stagingName
+  );
+  const kind: InstallerKind = d.platform === 'win32' ? 'ps1' : 'sh';
+
+  try {
+    emit(input.firstStage);
+    await d.mkdir(stagingDir);
+    const flags = await input.buildFlags(stagingDir, kind);
+    const scriptPath = await d.writeTempScript(stagingDir, kind);
+    const run = d.runScript(installerArgv(kind, scriptPath, flags, d.which), {
+      env: buildScriptEnv(d.env, installedVia),
+    });
+    const exitCode = await relayLines(run, emit);
+    if (exitCode !== 0) return scriptFailedReport(installedVia, d.getVersion(), exitCode, target);
+
+    return await withRestart(installedVia, d.getVersion(), target, input.restart, d, emit);
+  } finally {
+    await d.removeDir(stagingDir);
+  }
+}
+
 async function runSelf(
   installedVia: InstallOrigin,
   channel: UpdateChannel,
@@ -529,35 +586,25 @@ async function runSelf(
     };
   }
 
-  if (installedVia.distRoot === undefined) {
-    throw new Error(
-      `A self-managed install has no distRoot on installedVia: ${installedVia.executable}`
-    );
-  }
-  const stagingDir = resolveContainedStagingDir(
-    d.platform,
-    installedVia.distRoot,
-    `.staging-${resolved.version}-${d.pid}`
+  return await runInstallScript(
+    {
+      installedVia,
+      stagingName: `.staging-${resolved.version}-${d.pid}`,
+      firstStage: stageEvent('download', resolved.assetName),
+      target: resolved,
+      restart: request.restart,
+      buildFlags: async (stagingDir, kind) => {
+        const downloaded = await d.downloadVerified(resolved, stagingDir);
+        emit(stageEvent('verify', downloaded.verification));
+        emit(stageEvent('install'));
+        return kind === 'sh'
+          ? ['--local', downloaded.path, '--version', resolved.version]
+          : ['-Local', downloaded.path, '-Version', resolved.version];
+      },
+    },
+    d,
+    emit
   );
-
-  try {
-    emit(stageEvent('download', resolved.assetName));
-    await d.mkdir(stagingDir);
-    const downloaded = await d.downloadVerified(resolved, stagingDir);
-    emit(stageEvent('verify', downloaded.verification));
-
-    emit(stageEvent('install'));
-    const kind: InstallerKind = d.platform === 'win32' ? 'ps1' : 'sh';
-    const scriptPath = await d.writeTempScript(stagingDir, kind);
-    const argv = selfInstallArgv(kind, scriptPath, downloaded.path, resolved.version, d.which);
-    const run = d.runScript(argv, { env: buildScriptEnv(d.env, installedVia) });
-    const exitCode = await relayLines(run, emit);
-    if (exitCode !== 0) return scriptFailedReport(installedVia, d.getVersion(), exitCode, resolved);
-
-    return await withRestart(installedVia, d.getVersion(), resolved, request.restart, d, emit);
-  } finally {
-    await d.removeDir(stagingDir);
-  }
 }
 
 /**
@@ -649,31 +696,18 @@ async function rollbackInner(
       exitCode: 1,
     };
   }
-  if (installedVia.distRoot === undefined) {
-    throw new Error(
-      `A self-managed install has no distRoot on installedVia: ${installedVia.executable}`
-    );
-  }
-
-  const stagingDir = resolveContainedStagingDir(
-    d.platform,
-    installedVia.distRoot,
-    `.rollback-${previousVersion}-${d.pid}`
+  return await runInstallScript(
+    {
+      installedVia,
+      stagingName: `.rollback-${previousVersion}-${d.pid}`,
+      firstStage: stageEvent('install'),
+      restart,
+      buildFlags: (_stagingDir, kind) =>
+        Promise.resolve(kind === 'sh' ? ['--use', previousVersion] : ['-Use', previousVersion]),
+    },
+    d,
+    emit
   );
-  try {
-    emit(stageEvent('install'));
-    await d.mkdir(stagingDir);
-    const kind: InstallerKind = d.platform === 'win32' ? 'ps1' : 'sh';
-    const scriptPath = await d.writeTempScript(stagingDir, kind);
-    const argv = useVersionArgv(kind, scriptPath, previousVersion, d.which);
-    const run = d.runScript(argv, { env: buildScriptEnv(d.env, installedVia) });
-    const exitCode = await relayLines(run, emit);
-    if (exitCode !== 0) return scriptFailedReport(installedVia, d.getVersion(), exitCode);
-
-    return await withRestart(installedVia, d.getVersion(), undefined, restart, d, emit);
-  } finally {
-    await d.removeDir(stagingDir);
-  }
 }
 
 /**
