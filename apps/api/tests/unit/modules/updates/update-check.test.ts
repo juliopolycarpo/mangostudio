@@ -343,6 +343,63 @@ describe('createUpdateChecker', () => {
       expect(result?.updateAvailable).toBe(false);
     });
 
+    it('falls back to a version compare when this build has no stamped git sha', async () => {
+      // build-info.ts's own fallback for an unstamped build is the literal
+      // string 'unknown' — never a real hex sha, so a prefix compare against
+      // it would call this permanently out of date even when it is running
+      // the exact commit the manifest names.
+      const fake = new FakeFetch({
+        'https://github.com/juliopolycarpo/mangostudio/releases/download/v0.1.1-canary/canary-manifest.json':
+          () => CANARY_MANIFEST_RESPONSE({ sourceSha: 'cafebabe00' }),
+      });
+      const { deps } = harness({
+        fetch: fake.fetch,
+        getCurrentVersion: () => '0.1.1-canary.deadbee',
+        getConfig: () => configWith(true, 'canary'),
+        getBuildInfo: () => ({
+          gitSha: 'unknown',
+          gitDirty: 'unknown',
+          builtAt: 'x',
+          buildType: 'production',
+        }),
+      });
+
+      const result = await createUpdateChecker(deps).check();
+
+      // The manifest's own version matches currentVersion, so the version
+      // fallback agrees this build is current.
+      expect(result).toMatchObject({
+        latestVersion: '0.1.1-canary.deadbee',
+        updateAvailable: false,
+      });
+    });
+
+    it('still reports a canary update via version compare when unstamped and the manifest has moved on', async () => {
+      const fake = new FakeFetch({
+        'https://github.com/juliopolycarpo/mangostudio/releases/download/v0.1.1-canary/canary-manifest.json':
+          () =>
+            CANARY_MANIFEST_RESPONSE({ version: '0.1.1-canary.cafebee', sourceSha: 'cafebee000' }),
+      });
+      const { deps } = harness({
+        fetch: fake.fetch,
+        getCurrentVersion: () => '0.1.1-canary.deadbee',
+        getConfig: () => configWith(true, 'canary'),
+        getBuildInfo: () => ({
+          gitSha: 'unknown',
+          gitDirty: 'unknown',
+          builtAt: 'x',
+          buildType: 'production',
+        }),
+      });
+
+      const result = await createUpdateChecker(deps).check();
+
+      expect(result).toMatchObject({
+        latestVersion: '0.1.1-canary.cafebee',
+        updateAvailable: true,
+      });
+    });
+
     it('resolves the rolling tag the same way for a stable build asking about canary', async () => {
       const fake = new FakeFetch({
         'https://github.com/juliopolycarpo/mangostudio/releases/download/v0.1.1-canary/canary-manifest.json':

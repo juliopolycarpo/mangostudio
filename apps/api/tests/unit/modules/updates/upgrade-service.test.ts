@@ -164,6 +164,33 @@ function stages(events: UpgradeStreamEvent[]): string[] {
 }
 
 describe('upgrade-service self-managed', () => {
+  it('omits buildSha from the resolve context rather than passing the unstamped-build sentinel', async () => {
+    // build-info.ts's own fallback for a build with no BUILD_GIT_SHA is the
+    // literal string 'unknown' — never a real hex sha. Passing it through
+    // as buildSha would defeat isAlreadyCurrent's sha-prefix compare
+    // permanently (it can never match a real sha), rather than falling
+    // back to the version compare the way a genuinely absent sha does.
+    let capturedContext: { readonly buildSha?: string } | undefined;
+    const service = createUpgradeService(
+      baseDeps({
+        getBuildInfo: () => ({
+          gitSha: 'unknown',
+          gitDirty: 'unknown',
+          builtAt: '',
+          buildType: 'release',
+        }),
+        resolveUpgradeTarget: (_request, context) => {
+          capturedContext = context;
+          return Promise.resolve(newerTarget());
+        },
+      })
+    );
+
+    await collect(service);
+
+    expect(capturedContext?.buildSha).toBeUndefined();
+  });
+
   it('upgrades, restarts a detached hub, and reports every stage in order', async () => {
     const script = fakeRunScript(0, [{ stream: 'stdout', line: 'Installed MangoStudio 0.1.2' }]);
     const restartCalls: { state: ServerState; launch: string }[] = [];

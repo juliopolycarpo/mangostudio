@@ -22,7 +22,7 @@ import {
   UpdateCheckSchema,
 } from '@mangostudio/shared/updates';
 import Value from 'typebox/value';
-import { type BuildInfo, getBuildInfo } from '../../../lib/build-info';
+import { type BuildInfo, getBuildInfo, isKnownBuildSha } from '../../../lib/build-info';
 import { getConfig, getVersion, isDevelopmentVersion, type MangoConfig } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getUpdateCheckPath } from '../../../lib/mango-paths';
@@ -285,13 +285,21 @@ async function checkCanary(d: ResolvedDeps, currentVersion: string): Promise<Upd
   const manifest = parseCanaryManifest(new TextDecoder().decode(result.bytes));
   if (!manifest) throw new Error(`Canary manifest at ${tag} could not be parsed.`);
 
-  const buildSha = d.getBuildInfo().gitSha;
+  const buildInfo = d.getBuildInfo();
+  // A canary build with no BUILD_GIT_SHA stamped in (buildInfo.gitSha ===
+  // 'unknown') can never share a prefix with a real sha, so the prefix
+  // compare would call every check an update — permanently, even running
+  // the exact commit the manifest names. Falling back to a version compare
+  // is the same signal update-check.ts already has for every other channel.
+  const updateAvailable = isKnownBuildSha(buildInfo)
+    ? !sharesShaPrefix(manifest.sourceSha, buildInfo.gitSha)
+    : manifest.version !== currentVersion;
   return {
     channel: 'canary',
     currentVersion,
     latestVersion: fitToLimit(manifest.version, UPDATE_VERSION_MAX),
     latestSourceSha: fitToLimit(manifest.sourceSha, SOURCE_SHA_MAX),
-    updateAvailable: !sharesShaPrefix(manifest.sourceSha, buildSha),
+    updateAvailable,
     checkedAt: d.now(),
   };
 }

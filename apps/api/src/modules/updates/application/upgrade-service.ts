@@ -35,7 +35,7 @@ import {
 } from '../../../cli/detach';
 import { createProcessController, stopPidOrThrow } from '../../../cli/process-control';
 import { sleep } from '../../../cli/sleep';
-import { type BuildInfo, getBuildInfo } from '../../../lib/build-info';
+import { type BuildInfo, getBuildInfo, isKnownBuildSha } from '../../../lib/build-info';
 import { getConfig, getVersion } from '../../../lib/config';
 import { getUpgradeLogPath } from '../../../lib/mango-paths';
 import type { SafeFetchDeps } from '../../../lib/safe-fetch';
@@ -439,10 +439,16 @@ async function runSelf(
   d: UpgradeServiceDeps,
   emit: EmitUpgradeEvent
 ): Promise<UpgradeReport> {
+  const buildInfo = d.getBuildInfo();
   const context: UpgradeTargetContext = {
     platformId: d.platformId,
     currentVersion: d.getVersion(),
-    buildSha: d.getBuildInfo().gitSha,
+    // Omitted rather than sent as the 'unknown' sentinel: isAlreadyCurrent's
+    // sha-prefix compare would otherwise run against a string that can
+    // never match a real sha, always concluding "different" for a canary
+    // build with no BUILD_GIT_SHA stamped in — falling back to its version
+    // check instead, the same as if this build genuinely had no sha to offer.
+    ...(isKnownBuildSha(buildInfo) ? { buildSha: buildInfo.gitSha } : {}),
   };
   const resolved = await d.resolveUpgradeTarget(
     { channel, version: request.version, sha: request.sha },
