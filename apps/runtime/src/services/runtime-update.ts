@@ -41,6 +41,7 @@ import {
   releaseSlotUpdateLock,
   type SlotUpdateLock,
 } from './slot-update-lock';
+import { type WriteChunk, writeAllBytes } from './write-all-bytes';
 
 const RUNTIME_UPDATE_MAX_BYTES = 256 * 1024 * 1024;
 const RUNTIME_UPDATE_MAX_CHUNK_BYTES = 32 * 1024;
@@ -60,7 +61,7 @@ export interface RuntimeUpdateServiceOptions {
   readonly sessionTimeoutMs?: number;
   readonly platform?: NodeJS.Platform;
   /** Writes one bounded slice and reports only bytes confirmed by the filesystem. */
-  readonly writeChunk?: (handle: FileHandle, bytes: Uint8Array) => Promise<number>;
+  readonly writeChunk?: WriteChunk;
   /**
    * Pointer filesystem and backoff, so a test can drive the Windows branch off
    * Windows — a junction is the one operation a Linux runner cannot perform.
@@ -289,26 +290,20 @@ export function createRuntimeUpdateService(
           });
         }
 
-        const writeChunk =
-          options.writeChunk ??
-          (async (handle: FileHandle, chunk: Uint8Array) =>
-            (await handle.write(chunk)).bytesWritten);
-        let offset = 0;
         try {
-          while (offset < bytes.byteLength) {
-            const remaining = bytes.subarray(offset);
-            const written = await writeChunk(active.handle, remaining);
-            if (!Number.isSafeInteger(written) || written <= 0 || written > remaining.byteLength) {
-              throw fail('Runtime update write did not report a valid byte count.', {
+          await writeAllBytes(active.handle, bytes, {
+            writeChunk: options.writeChunk,
+            onWritten: (confirmed) => {
+              active.hash.update(confirmed);
+              active.receivedBytes += confirmed.byteLength;
+            },
+            invalidWrite: (written, remainingBytes) =>
+              fail('Runtime update write did not report a valid byte count.', {
                 reason: 'invalid_write_count',
                 written,
-                remainingBytes: remaining.byteLength,
-              });
-            }
-            active.hash.update(remaining.subarray(0, written));
-            active.receivedBytes += written;
-            offset += written;
-          }
+                remainingBytes,
+              }),
+          });
         } catch (error) {
           await discard(active);
           throw error;

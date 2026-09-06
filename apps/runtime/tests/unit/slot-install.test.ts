@@ -42,7 +42,7 @@ async function fixture(contents = 'runtime-bytes') {
   };
 }
 
-function digestOf(value: string): string {
+function digestOf(value: string): `sha256:${string}` {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`;
 }
 
@@ -195,6 +195,28 @@ describe('installRuntimeIntoSlot', () => {
         sourcePath: inSlot,
       })
     ).rejects.toMatchObject({ data: { reason: 'already_in_slot' } });
+  });
+
+  /**
+   * The digest is taken from the *source* stream, so it cannot see a short
+   * write: a truncated destination still matches it and gets published as this
+   * version. Only the bytes the filesystem confirmed prove anything.
+   */
+  it('writes every byte when the filesystem takes them a few at a time', async () => {
+    const contents = 'runtime-bytes-that-arrive-in-pieces';
+    const { env, sourcePath, slotDir } = await fixture(contents);
+
+    const result = await installRuntimeIntoSlot({
+      slot: 'remote',
+      version: '1.2.0',
+      env,
+      platform: 'linux',
+      sourcePath,
+      writeChunk: async (handle, bytes) => (await handle.write(bytes.subarray(0, 2))).bytesWritten,
+    });
+
+    expect(await readFile(join(slotDir, '1.2.0', 'mangostudio-runtime'), 'utf8')).toBe(contents);
+    expect(result.digest).toBe(digestOf(contents));
   });
 
   it('refuses a source checkout, where the executable is bun', async () => {

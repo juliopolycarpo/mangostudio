@@ -37,6 +37,7 @@ import {
   slotVersionFromPointer,
 } from './services/slot-publish';
 import { acquireSlotUpdateLock, releaseSlotUpdateLock } from './services/slot-update-lock';
+import { type WriteChunk, writeAllBytes } from './services/write-all-bytes';
 
 /** How long a stalled install may hold the slot before another writer reclaims it. */
 const SLOT_INSTALL_LOCK_TIMEOUT_MS = 120_000;
@@ -50,6 +51,11 @@ export interface RuntimeSlotInstallOptions {
   readonly sourcePath?: string;
   /** Pointer filesystem and backoff; see the update service's own note. */
   readonly slotPublish?: Omit<SlotPublishOptions, 'platform'>;
+  /**
+   * Injected for tests, exactly as the update service does it: a real short
+   * write is not something a test can provoke on demand.
+   */
+  readonly writeChunk?: WriteChunk;
 }
 
 export interface RuntimeSlotInstallResult {
@@ -116,7 +122,7 @@ export async function installRuntimeIntoSlot(
     await mkdir(versionDir, { recursive: true });
     await rm(incomingPath, { force: true });
     try {
-      await copyVerified(sourcePath, incomingPath, digest);
+      await copyVerified(sourcePath, incomingPath, digest, options.writeChunk);
       await chmod(incomingPath, 0o755);
       await moveSlotFile(incomingPath, binaryPath, publish);
       await publishSlotCurrent(slotDir, options.version, `install-${process.pid}`, publish);
@@ -234,14 +240,22 @@ async function digestOfFile(path: string): Promise<`sha256:${string}`> {
 async function copyVerified(
   sourcePath: string,
   destinationPath: string,
-  expectedDigest: string
+  expectedDigest: string,
+  writeChunk: WriteChunk | undefined
 ): Promise<void> {
   const hash = createHash('sha256');
   const handle = await open(destinationPath, 'wx', 0o700);
   try {
     for await (const chunk of Bun.file(sourcePath).stream()) {
-      hash.update(chunk);
-      await handle.write(chunk);
+      await writeAllBytes(handle, chunk, {
+        writeChunk,
+        onWritten: (confirmed) => hash.update(confirmed),
+        invalidWrite: (written, remainingBytes) =>
+          new RuntimeUpdateError(
+            `Copying ${sourcePath} reported writing ${written} of ${remainingBytes} remaining bytes, which is not a valid count.`,
+            { reason: 'invalid_write_count', written, remainingBytes }
+          ),
+      });
     }
     await handle.sync();
   } finally {
