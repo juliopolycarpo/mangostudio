@@ -122,41 +122,34 @@ describe('buildGeminiInteractionsReplay', () => {
     expect(buildGeminiInteractionsReplay([])).toEqual([]);
   });
 
-  it('falls back to role+text when parts are absent', () => {
+  it('falls back to text steps when parts are absent', () => {
     const result = buildGeminiInteractionsReplay(PLAIN_TEXT_HISTORY);
     expect(result).toEqual([
-      { role: 'user', content: 'Hello' },
-      { role: 'model', content: 'Hi there!' },
+      { type: 'user_input', content: [{ type: 'text', text: 'Hello' }] },
+      { type: 'model_output', content: [{ type: 'text', text: 'Hi there!' }] },
     ]);
   });
 
   it('reconstructs tool_call and tool_result from agentic parts', () => {
     const result = buildGeminiInteractionsReplay(AGENTIC_HISTORY);
     expect(result).toEqual([
-      { role: 'user', content: 'What is the weather in Paris?' },
-      { role: 'model', content: 'The weather in Paris is sunny and 22°C.' },
+      { type: 'user_input', content: [{ type: 'text', text: 'What is the weather in Paris?' }] },
       {
-        role: 'model',
-        content: [
-          {
-            type: 'function_call',
-            id: 'call_1',
-            name: 'get_weather',
-            arguments: { city: 'Paris' },
-          },
-        ],
+        type: 'model_output',
+        content: [{ type: 'text', text: 'The weather in Paris is sunny and 22°C.' }],
       },
       {
-        role: 'user',
-        content: [
-          {
-            type: 'function_result',
-            call_id: 'call_1',
-            name: '',
-            result: { output: '{"temp":22}' },
-            is_error: false,
-          },
-        ],
+        type: 'function_call',
+        id: 'call_1',
+        name: 'get_weather',
+        arguments: { city: 'Paris' },
+      },
+      {
+        type: 'function_result',
+        call_id: 'call_1',
+        name: '',
+        result: { output: '{"temp":22}' },
+        is_error: false,
       },
     ]);
   });
@@ -169,10 +162,9 @@ describe('buildGeminiInteractionsReplay', () => {
       ]),
     ];
     const result = buildGeminiInteractionsReplay(history);
-    const resultTurn = result.find((t) => t.role === 'user' && Array.isArray(t.content));
-    expect(resultTurn).toBeDefined();
-    const contents = resultTurn?.content as Array<Record<string, unknown>>;
-    expect(contents[0].result).toEqual({ output: '{"ok":true}' });
+    const resultStep = result.find((step) => step.type === 'function_result');
+    expect(resultStep).toBeDefined();
+    expect(resultStep?.result).toEqual({ output: '{"ok":true}' });
   });
 
   it('wraps plain tool_result content as function output', () => {
@@ -183,24 +175,32 @@ describe('buildGeminiInteractionsReplay', () => {
       ]),
     ];
     const result = buildGeminiInteractionsReplay(history);
-    const resultTurn = result.find((t) => t.role === 'user' && Array.isArray(t.content));
-    const contents = resultTurn?.content as Array<Record<string, unknown>>;
-    expect(contents[0].result).toEqual({ output: 'plain text output' });
+    const resultStep = result.find((step) => step.type === 'function_result');
+    expect(resultStep?.result).toEqual({ output: 'plain text output' });
   });
 
   it('handles mixed history (some turns have parts, some do not)', () => {
     const result = buildGeminiInteractionsReplay(MIXED_HISTORY);
-    expect(result).toContainEqual({ role: 'user', content: 'Run the tool' });
-    expect(result).toContainEqual({ role: 'user', content: 'Thanks' });
+    expect(result).toContainEqual({
+      type: 'user_input',
+      content: [{ type: 'text', text: 'Run the tool' }],
+    });
+    expect(result).toContainEqual({
+      type: 'user_input',
+      content: [{ type: 'text', text: 'Thanks' }],
+    });
     // Fallback turn
-    expect(result).toContainEqual({ role: 'model', content: 'You are welcome!' });
+    expect(result).toContainEqual({
+      type: 'model_output',
+      content: [{ type: 'text', text: 'You are welcome!' }],
+    });
   });
 
   it('excludes thinking parts from replay output', () => {
     const result = buildGeminiInteractionsReplay(THINKING_HISTORY);
     expect(result).toEqual([
-      { role: 'user', content: "What's 2+2?" },
-      { role: 'model', content: '4' },
+      { type: 'user_input', content: [{ type: 'text', text: "What's 2+2?" }] },
+      { type: 'model_output', content: [{ type: 'text', text: '4' }] },
     ]);
     expect(JSON.stringify(result)).not.toContain('arithmetic');
   });
@@ -212,8 +212,11 @@ describe('buildGeminiInteractionsReplay', () => {
     ];
     const result = buildGeminiInteractionsReplay(history);
     // Whitespace-only user turn is skipped
-    expect(result).not.toContainEqual(expect.objectContaining({ role: 'user' }));
-    expect(result).toContainEqual({ role: 'model', content: 'Hi' });
+    expect(result).not.toContainEqual(expect.objectContaining({ type: 'user_input' }));
+    expect(result).toContainEqual({
+      type: 'model_output',
+      content: [{ type: 'text', text: 'Hi' }],
+    });
   });
 });
 

@@ -126,7 +126,7 @@ describe('streamGeminiAgentTurn — request shape', () => {
     expect(captured?.previous_interaction_id).toBeUndefined();
     expect(captured?.input).toEqual([
       ...buildGeminiInteractionsReplay(req.history),
-      { role: 'user', content: 'New prompt' },
+      { type: 'user_input', content: [{ type: 'text', text: 'New prompt' }] },
     ]);
     expect(captured?.store).toBe(true);
     expect(capturedOptions?.signal).toBe(signal);
@@ -294,7 +294,10 @@ describe('streamGeminiAgentTurn — continuation matrix', () => {
     expect(captured?.previous_interaction_id).toBeUndefined();
     const input = captured?.input as Array<Record<string, unknown>>;
     expect(input.length).toBeGreaterThan(1);
-    expect(input.at(-1)).toEqual({ role: 'user', content: 'Next' });
+    expect(input.at(-1)).toEqual({
+      type: 'user_input',
+      content: [{ type: 'text', text: 'Next' }],
+    });
   });
 
   it('valid cursor chains with previous_interaction_id', async () => {
