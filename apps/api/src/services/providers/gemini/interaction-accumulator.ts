@@ -9,6 +9,7 @@
  */
 
 import { createDiagnosticLogger } from '../../../lib/logger';
+import { safeJsonParse } from '../../../lib/safe-parse';
 import type { AgentEvent } from '../types';
 import {
   extractGeminiUsage,
@@ -119,10 +120,12 @@ function mapStepStart(event: StepStartEvent, activeCalls: ActiveCalls): AgentEve
   activeCalls.set(event.index, call);
 
   // v2 makes `name` required on FunctionCallStep and no longer repeats it in
-  // the deltas, so a nameless call can never be started later — track it so
-  // its arguments still land, but keep it off the wire.
-  if (!name) return [];
-  return [{ type: 'tool_call_started', callId, name }];
+  // the deltas, so a nameless call can never be named later. Announce it
+  // anyway: `tool_call_started` is what opens the consumer's pending-call
+  // entry, and without it every `arguments_delta` for this call is dropped
+  // while `step.stop` still completes it. `name` is optional on the event for
+  // exactly this case — the same shape the chat-completions accumulator uses.
+  return [{ type: 'tool_call_started', callId, name: name || undefined }];
 }
 
 function mapStepDelta(event: StepDeltaEvent, activeCalls: ActiveCalls): AgentEvent[] {
@@ -148,11 +151,20 @@ function mapArgumentsDelta(
   activeCalls: ActiveCalls
 ): AgentEvent[] {
   const call = activeCalls.get(index);
-  if (!call || !fragment) return [];
+  if (!call) {
+    // v2 moved every argument byte into the deltas, so an unmatched fragment
+    // is a whole tool call lost rather than a partial update missed.
+    geminiInteractionsLogger.warn('orphan_arguments_delta', { index });
+    return [];
+  }
+  if (!fragment) return [];
 
   call.argumentsJson += fragment;
   return [{ type: 'tool_call_arguments_delta', callId: call.id, delta: fragment }];
 }
+
+/** Cap on the argument text echoed into a diagnostic; calls carry file bodies. */
+const ARGUMENTS_DIAGNOSTIC_PREVIEW_CHARS = 200;
 
 /**
  * Resolves the call's final argument JSON.
@@ -160,23 +172,29 @@ function mapArgumentsDelta(
  * `step.stop` carries no payload, so the arguments are whatever the
  * `arguments_delta` fragments assembled. A call whose arguments were sent
  * whole on `step.start` streams no fragments at all, and a truncated stream
- * leaves an unparsable buffer; both fall back to the opening arguments.
+ * leaves an unusable buffer; both fall back to the opening arguments.
+ *
+ * The buffer is validated with `safeJsonParse` rather than a bare `JSON.parse`
+ * so it has to be a JSON *object*: a fragment stream that reassembles into an
+ * array, a bare string or `null` parses fine but is not an argument map, and
+ * passing it on would drop the `step.start` fallback for a `{}` the consumer
+ * silently substitutes downstream.
+ *
+ * Usage: resolveCallArguments({ id: 'fc_1', name: 'search', argumentsJson: '{"q":1}', initialArguments: {} })
+ *        -> '{"q":1}'
  */
 function resolveCallArguments(call: ActiveCall): string {
   const buffered = call.argumentsJson.trim();
   if (!buffered) return JSON.stringify(call.initialArguments);
+  if (safeJsonParse(buffered)) return buffered;
 
-  try {
-    JSON.parse(buffered);
-    return buffered;
-  } catch {
-    geminiInteractionsLogger.warn('unparsable_arguments_delta', {
-      callId: call.id,
-      name: call.name,
-      buffered,
-    });
-    return JSON.stringify(call.initialArguments);
-  }
+  geminiInteractionsLogger.warn('unusable_arguments_delta', {
+    callId: call.id,
+    name: call.name,
+    bufferedChars: buffered.length,
+    bufferedPreview: buffered.slice(0, ARGUMENTS_DIAGNOSTIC_PREVIEW_CHARS),
+  });
+  return JSON.stringify(call.initialArguments);
 }
 
 function mapStepStop(event: StepStopEvent, activeCalls: ActiveCalls): AgentEvent[] {

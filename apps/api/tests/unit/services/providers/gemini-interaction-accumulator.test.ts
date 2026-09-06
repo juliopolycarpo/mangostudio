@@ -99,9 +99,12 @@ describe('createGeminiInteractionAccumulator', () => {
     ]);
   });
 
-  it('tracks a nameless function call without announcing it', () => {
+  it('announces a nameless function call so its arguments still pair with it', () => {
     const accumulator = createGeminiInteractionAccumulator();
 
+    // v2 can never name the call later, but suppressing `tool_call_started`
+    // leaves the consumer with no pending-call entry, so every argument delta
+    // is dropped while `step.stop` still completes the call.
     expect(
       accumulator.mapEvent(
         event({
@@ -110,7 +113,7 @@ describe('createGeminiInteractionAccumulator', () => {
           step: { type: 'function_call', id: 'fc_2', name: '', arguments: {} },
         })
       )
-    ).toEqual([]);
+    ).toEqual([{ type: 'tool_call_started', callId: 'fc_2', name: undefined }]);
 
     expect(
       accumulator.mapEvent(
@@ -121,6 +124,36 @@ describe('createGeminiInteractionAccumulator', () => {
         })
       )
     ).toEqual([{ type: 'tool_call_arguments_delta', callId: 'fc_2', delta: '{"q":1}' }]);
+  });
+
+  it('falls back to the opening arguments when the buffer is not an object', () => {
+    const accumulator = createGeminiInteractionAccumulator();
+
+    accumulator.mapEvent(
+      event({
+        event_type: 'step.start',
+        index: 0,
+        step: { type: 'function_call', id: 'fc_arr', name: 'lookup', arguments: { q: 'opening' } },
+      })
+    );
+    // Valid JSON, but not an argument map: passing it through would leave the
+    // consumer's own parser to reduce it to `{}` and lose the fallback.
+    accumulator.mapEvent(
+      event({
+        event_type: 'step.delta',
+        index: 0,
+        delta: { type: 'arguments_delta', arguments: '[1,2]' },
+      })
+    );
+
+    expect(accumulator.mapEvent(event({ event_type: 'step.stop', index: 0 }))).toEqual([
+      {
+        type: 'tool_call_completed',
+        callId: 'fc_arr',
+        name: 'lookup',
+        arguments: '{"q":"opening"}',
+      },
+    ]);
   });
 
   it('maps text and thought-summary deltas, ignoring thought signatures', () => {
