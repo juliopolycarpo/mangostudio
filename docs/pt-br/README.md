@@ -97,7 +97,7 @@ Para deploy em container, veja [`docs/operations/deployment.md`](../operations/d
 
 ## Pré-requisitos (desenvolvimento)
 
-- [Bun](https://bun.sh/) 1.4.0 ou mais recente (`bun upgrade` ou
+- [Bun](https://bun.sh/) 1.4.2 ou mais recente (`bun upgrade` ou
   `curl -fsSL https://bun.sh/install | bash` na primeira instalação)
 - Uma ou mais chaves de API ou contas com login para provedores suportados
   (Gemini, compatíveis com OpenAI, Anthropic, DeepSeek, ChatGPT)

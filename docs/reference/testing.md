@@ -277,10 +277,26 @@ Observed on stock Bun 1.4.0 across at least seven CI runs (different PRs and
 only isolate-mode lane in the shard matrix. Upstream this is
 [oven-sh/bun#39709](https://github.com/oven-sh/bun/issues/39709) (isolate
 runner never exits after its per-file work; dropping `--isolate` removes it)
-and [oven-sh/bun#39584](https://github.com/oven-sh/bun/issues/39584). Bun
-1.4.0 shipped without oven-sh/bun#38008; in the 234-run soak recorded above,
-the only build with zero hangs across 85 runs was the #38008 build, so that
-patch is the unblock for this too.
+and [oven-sh/bun#39584](https://github.com/oven-sh/bun/issues/39584). In the
+234-run soak recorded above, the only build with zero hangs across 85 runs was
+the [oven-sh/bun#38008](https://github.com/oven-sh/bun/pull/38008) build, so
+that patch is the unblock for this too.
+
+**Still true on the 1.4.2 pin (checked 2026-09-05).** None of #38008, #39709,
+#39584, or #37190 — the candidate fix for #39584 — is merged upstream; #39709
+has no fix in flight at all. Both mitigations below stay. What 1.4.1 *did* ship
+is adjacent and easy to mistake for the unblock:
+
+- `bun test --isolate` no longer keeps a finished file's module graph alive when
+  that file called `mock()`, `spyOn()`, `mock.module()` or `Bun.plugin()`. That
+  is a **memory leak**, not the hang — worth having on a lane that mocks in
+  nearly every file, but it does not retire the watchdog.
+- A `bun test --parallel` hang when a worker exited before finishing startup.
+  Narrower than #39709, which parks *after* every per-file child has finished.
+- 1.4.2 closed a `FileSink` double-close on a **failed** epoll registration.
+  Same file, different bug: #38008 is a leaked dup on a **successful** one.
+
+Re-check the merge state of #38008 before reading a quiet lane as a fix.
 
 Two mitigations are in place until it ships:
 

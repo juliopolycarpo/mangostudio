@@ -100,7 +100,7 @@ For container deployment details, see [`docs/operations/deployment.md`](docs/ope
 
 ## Prerequisites
 
-- [Bun](https://bun.sh/) 1.4.0 or newer (`bun upgrade`, or
+- [Bun](https://bun.sh/) 1.4.2 or newer (`bun upgrade`, or
   `curl -fsSL https://bun.sh/install | bash` for a first install)
 - One or more API keys or sign-in capable accounts for supported providers
   (Gemini, OpenAI-compatible, Anthropic, DeepSeek, ChatGPT)
