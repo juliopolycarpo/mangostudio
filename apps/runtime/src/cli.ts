@@ -571,7 +571,7 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
   if (!restricted) {
     log(
       process.platform === 'win32'
-        ? 'Warning: the pairing token file is not restricted to this account. Windows needs an ACL this runtime does not set; restrict it yourself if other accounts use this machine.'
+        ? 'Warning: the pairing token file is not restricted to this account. icacls could not write its ACL; restrict it yourself if other accounts use this machine.'
         : 'Warning: the pairing token file could not be restricted to this user.'
     );
   }
@@ -654,7 +654,7 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
     if (!resolved.restricted) {
       log(
         process.platform === 'win32'
-          ? 'Warning: the serve token file is not restricted to this account. Windows needs an ACL this runtime does not set; restrict it yourself if other accounts use this machine.'
+          ? 'Warning: the serve token file is not restricted to this account. icacls could not write its ACL; restrict it yourself if other accounts use this machine.'
           : 'Warning: the serve token file could not be restricted to this user.'
       );
     }

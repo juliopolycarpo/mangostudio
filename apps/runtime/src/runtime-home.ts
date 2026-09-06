@@ -11,7 +11,7 @@
  * machine at once, and a reader must never see a half-written config.
  */
 
-import { chmod, mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import {
@@ -31,6 +31,7 @@ import {
 } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
 import { loadRuntimeConfig } from './config';
+import { defaultOwnerOnlyDeps, type OwnerOnlyDeps, restrictToOwner } from './services/owner-only';
 
 export type { RuntimeSlot } from '@mangostudio/shared/runtime-home';
 
@@ -327,18 +328,16 @@ export async function readPairingToken(
  * — a Windows volume, a mounted share — the write still happens and the caller
  * is told, rather than the runtime pretending the file is protected.
  *
- * Windows is reported as unrestricted unconditionally, and that is not
- * pessimism. `chmod` there resolves after setting the read-only attribute and
- * reports success, so a `restricted: true` on Windows would mean "the call did
- * not throw", not "no other account can read this" — and the whole point of
- * the flag is the second sentence. Owner-only access needs an ACL this
- * runtime does not set yet, so it says so instead.
+ * Windows gets an ACL rather than a mode, because `chmod` there sets the
+ * read-only attribute and reports success — a `restricted: true` from it would
+ * mean "the call did not throw" rather than "no other account can read this",
+ * and the flag exists to answer the second question. See `owner-only.ts`.
  */
 export async function writePairingToken(
   slot: RuntimeSlot,
   token: string,
   env?: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform = process.platform
+  ownerOnly?: OwnerOnlyDeps
 ): Promise<{ readonly restricted: boolean }> {
   return await withSlotLock(slot, CREDENTIALS_LOCK_FILE, env, async () => {
     const current = await readCredentials(slot, env);
@@ -350,7 +349,7 @@ export async function writePairingToken(
         ...(current.serveToken ? { serveToken: current.serveToken } : {}),
       },
       env,
-      platform
+      ownerOnly
     );
   });
 }
@@ -371,7 +370,7 @@ export async function writeServeToken(
   slot: RuntimeSlot,
   token: string,
   env?: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform = process.platform
+  ownerOnly?: OwnerOnlyDeps
 ): Promise<{ readonly restricted: boolean }> {
   return await withSlotLock(slot, CREDENTIALS_LOCK_FILE, env, async () => {
     const current = await readCredentials(slot, env);
@@ -383,7 +382,7 @@ export async function writeServeToken(
         ...(current.pairingToken ? { pairingToken: current.pairingToken } : {}),
       },
       env,
-      platform
+      ownerOnly
     );
   });
 }
@@ -396,10 +395,10 @@ export async function writeServeToken(
 export async function bootstrapServeToken(
   slot: RuntimeSlot,
   env?: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform = process.platform
+  ownerOnly?: OwnerOnlyDeps
 ): Promise<{ readonly token: string; readonly restricted: boolean }> {
   const token = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
-  const { restricted } = await writeServeToken(slot, token, env, platform);
+  const { restricted } = await writeServeToken(slot, token, env, ownerOnly);
   return { token, restricted };
 }
 
@@ -515,17 +514,14 @@ async function writeCredentials(
   slot: RuntimeSlot,
   credentials: RuntimeSlotCredentials,
   env: NodeJS.ProcessEnv | undefined,
-  platform: NodeJS.Platform
+  ownerOnly: OwnerOnlyDeps | undefined
 ): Promise<{ readonly restricted: boolean }> {
   const path = runtimeSlotCredentialsPath(slot, homeOptions(env));
+  // Restricted after every write, not only the first: the publication is a
+  // rename over the old file, and the file that arrives is a new one carrying
+  // whatever the directory hands down.
   await writeFileAtomically(path, credentials, OWNER_ONLY);
-  if (platform === 'win32') return { restricted: false };
-  try {
-    await chmod(path, OWNER_ONLY);
-    return { restricted: true };
-  } catch {
-    return { restricted: false };
-  }
+  return { restricted: await restrictToOwner(path, ownerOnly ?? defaultOwnerOnlyDeps(env)) };
 }
 
 /** Drops keys an update explicitly cleared, so they leave the file entirely. */

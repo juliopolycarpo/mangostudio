@@ -169,21 +169,66 @@ describe('runtime home', () => {
     }
   });
 
-  it('does not claim owner-only access on Windows, where chmod cannot grant it', async () => {
+  // `chmod(0o600)` resolves on Windows after setting the read-only attribute, so
+  // the mode says nothing there; an ACL is what actually excludes other accounts.
+  it('restricts the credentials file with an ACL on Windows', async () => {
     const env = await isolatedEnv();
-    // `chmod(0o600)` resolves on Windows after setting the read-only attribute,
-    // so a `restricted: true` there would mean "the call did not throw" rather
-    // than "no other account can read this" — and the flag exists to answer the
-    // second question, which is the one that suppresses the warning.
-    const { restricted } = await writePairingToken(
-      'remote',
-      'mrt_selector.secret',
-      env,
-      'win32' as NodeJS.Platform
-    );
+    const runs: (readonly string[])[] = [];
+
+    const { restricted } = await writePairingToken('remote', 'mrt_selector.secret', env, {
+      platform: 'win32',
+      user: 'ada',
+      chmod: () => Promise.reject(new Error('chmod must not be the Windows answer')),
+      exec: (argv) => {
+        runs.push(argv);
+        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+      },
+    });
+
+    expect(restricted).toBe(true);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.slice(0, 1)).toEqual(['icacls']);
+    expect(runs[0]?.slice(2)).toEqual(['/inheritance:r', '/grant:r', 'ada:(M)']);
+    expect(await readPairingToken('remote', env)).toBe('mrt_selector.secret');
+  });
+
+  // The honest `false` is what raises the warning telling somebody at that
+  // machine to restrict the file themselves.
+  it('reports unrestricted when the ACL could not be written', async () => {
+    const env = await isolatedEnv();
+
+    const { restricted } = await writePairingToken('remote', 'mrt_selector.secret', env, {
+      platform: 'win32',
+      user: 'ada',
+      chmod: () => Promise.resolve(),
+      exec: () =>
+        Promise.resolve({ exitCode: 127, stdout: '', stderr: 'icacls: command not found' }),
+    });
 
     expect(restricted).toBe(false);
     expect(await readPairingToken('remote', env)).toBe('mrt_selector.secret');
+  });
+
+  // Every write publishes a *new* file by rename, and the file that arrives
+  // carries whatever the directory hands down — so the ACL is not a one-off.
+  it('restricts the file again on every rotation', async () => {
+    const env = await isolatedEnv();
+    let runs = 0;
+    const windows = {
+      platform: 'win32' as const,
+      user: 'ada',
+      chmod: () => Promise.resolve(),
+      exec: () => {
+        runs += 1;
+        return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+      },
+    };
+
+    await writePairingToken('remote', 'first.secret', env, windows);
+    await writePairingToken('remote', 'second.secret', env, windows);
+
+    expect(runs).toBe(2);
+    expect(await readPairingToken('remote', env)).toBe('second.secret');
   });
 
   it('replaces a rotated credential rather than appending to it', async () => {
