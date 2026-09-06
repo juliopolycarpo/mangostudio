@@ -496,7 +496,8 @@ describe('streamGeminiAgentTurn — event emission', () => {
       Promise.resolve(
         chainEvents(
           functionCallStartEvent(0, 'fc_1', 'search'),
-          functionCallDeltaEvent(0, 'fc_1', 'search', { query: 'cats' }),
+          functionCallDeltaEvent(0, '{"query":'),
+          functionCallDeltaEvent(0, '"cats"}'),
           functionCallStopEvent(0),
           completedInteractionEvent('int_tools')
         )
@@ -511,14 +512,20 @@ describe('streamGeminiAgentTurn — event emission', () => {
     expect(started.callId).toBe('fc_1');
     expect(started.name).toBe('search');
 
-    const argsDelta = events.find((e) => e.type === 'tool_call_arguments_delta');
-    expect(argsDelta).toBeDefined();
+    // v2 streams argument JSON as raw string fragments, so the deltas are
+    // passed through verbatim and only reassemble at the stop event.
+    const argsDeltas = events.filter((e) => e.type === 'tool_call_arguments_delta');
+    expect(argsDeltas.map((e) => (e.type === 'tool_call_arguments_delta' ? e.delta : ''))).toEqual([
+      '{"query":',
+      '"cats"}',
+    ]);
 
     const completed = events.find((e) => e.type === 'tool_call_completed');
     expect(completed).toBeDefined();
     if (completed?.type !== 'tool_call_completed') return;
     expect(completed.callId).toBe('fc_1');
     expect(completed.name).toBe('search');
+    expect(completed.arguments).toBe('{"query":"cats"}');
   });
 });
 

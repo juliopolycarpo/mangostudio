@@ -2,7 +2,7 @@
  * Maps raw Gemini Interactions SSE events into canonical AgentEvents.
  *
  * Owns the per-turn function-call bookkeeping (calls keyed by stream index,
- * whose name and arguments may arrive incrementally across content deltas) and
+ * whose JSON arguments arrive as string fragments across step deltas) and
  * captures the terminal interaction id and reported usage used to mint the
  * continuation envelope. Owns its diagnostic logging for cache hits and
  * unrecognised delta shapes.
@@ -12,6 +12,7 @@ import { createDiagnosticLogger } from '../../../lib/logger';
 import type { AgentEvent } from '../types';
 import {
   extractGeminiUsage,
+  hasInlineStepContent,
   type InteractionSSEEvent,
   isFunctionCallStart,
   narrowGeminiDelta,
@@ -22,8 +23,10 @@ const geminiInteractionsLogger = createDiagnosticLogger('gemini-interactions');
 interface ActiveCall {
   id: string;
   name: string;
-  args: Record<string, unknown>;
-  started: boolean;
+  /** JSON text assembled from `arguments_delta` fragments. */
+  argumentsJson: string;
+  /** Arguments already present on the opening `step.start`. */
+  initialArguments: Record<string, unknown>;
 }
 
 type ActiveCalls = Map<number, ActiveCall>;
@@ -31,9 +34,9 @@ type ActiveCalls = Map<number, ActiveCall>;
 export interface GeminiInteractionAccumulator {
   /** Maps one raw Interactions SSE event into zero or more AgentEvents. */
   mapEvent(event: InteractionSSEEvent): AgentEvent[];
-  /** Interaction id captured from `interaction.start` / `interaction.complete`. */
+  /** Interaction id captured from `interaction.created` / `interaction.completed`. */
   readonly interactionId: string | undefined;
-  /** Provider-reported input tokens captured from `interaction.complete`. */
+  /** Provider-reported input tokens captured from `interaction.completed`. */
   readonly providerReportedInputTokens: number | undefined;
 }
 
@@ -45,7 +48,7 @@ export function createGeminiInteractionAccumulator(): GeminiInteractionAccumulat
   let providerReportedInputTokens: number | undefined;
 
   const captureUsage = (
-    event: Extract<InteractionSSEEvent, { event_type: 'interaction.complete' }>
+    event: Extract<InteractionSSEEvent, { event_type: 'interaction.completed' }>
   ) => {
     interactionId = event.interaction.id;
     const usage = extractGeminiUsage(event.interaction.usage);
@@ -62,16 +65,16 @@ export function createGeminiInteractionAccumulator(): GeminiInteractionAccumulat
   return {
     mapEvent(event) {
       switch (event.event_type) {
-        case 'content.start':
-          return mapContentStart(event, activeCalls);
-        case 'content.delta':
-          return mapContentDelta(event, activeCalls);
-        case 'content.stop':
-          return mapContentStop(event, activeCalls);
-        case 'interaction.complete':
+        case 'step.start':
+          return mapStepStart(event, activeCalls);
+        case 'step.delta':
+          return mapStepDelta(event, activeCalls);
+        case 'step.stop':
+          return mapStepStop(event, activeCalls);
+        case 'interaction.completed':
           captureUsage(event);
           return [];
-        case 'interaction.start':
+        case 'interaction.created':
           interactionId = event.interaction.id;
           return [];
         default:
@@ -87,23 +90,42 @@ export function createGeminiInteractionAccumulator(): GeminiInteractionAccumulat
   };
 }
 
-type ContentStartEvent = Extract<InteractionSSEEvent, { event_type: 'content.start' }>;
-type ContentDeltaEvent = Extract<InteractionSSEEvent, { event_type: 'content.delta' }>;
-type ContentStopEvent = Extract<InteractionSSEEvent, { event_type: 'content.stop' }>;
+type StepStartEvent = Extract<InteractionSSEEvent, { event_type: 'step.start' }>;
+type StepDeltaEvent = Extract<InteractionSSEEvent, { event_type: 'step.delta' }>;
+type StepStopEvent = Extract<InteractionSSEEvent, { event_type: 'step.stop' }>;
 
-function mapContentStart(event: ContentStartEvent, activeCalls: ActiveCalls): AgentEvent[] {
-  if (!isFunctionCallStart(event.content)) return [];
-  const callId = event.content.id || `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const name = event.content.name;
-  const call: ActiveCall = { id: callId, name, args: {}, started: false };
+function mapStepStart(event: StepStartEvent, activeCalls: ActiveCalls): AgentEvent[] {
+  if (!isFunctionCallStart(event.step)) {
+    // Assistant text and thought summaries are rendered from step.delta only.
+    // A pre-populated step means the deltas are not coming — surface it rather
+    // than silently dropping a turn's visible output.
+    if (hasInlineStepContent(event.step)) {
+      geminiInteractionsLogger.warn('inline_step_content', {
+        index: event.index,
+        stepType: event.step.type,
+      });
+    }
+    return [];
+  }
+
+  const callId = event.step.id || `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const name = event.step.name;
+  const call: ActiveCall = {
+    id: callId,
+    name,
+    argumentsJson: '',
+    initialArguments: event.step.arguments ?? {},
+  };
   activeCalls.set(event.index, call);
 
+  // v2 makes `name` required on FunctionCallStep and no longer repeats it in
+  // the deltas, so a nameless call can never be started later — track it so
+  // its arguments still land, but keep it off the wire.
   if (!name) return [];
-  call.started = true;
   return [{ type: 'tool_call_started', callId, name }];
 }
 
-function mapContentDelta(event: ContentDeltaEvent, activeCalls: ActiveCalls): AgentEvent[] {
+function mapStepDelta(event: StepDeltaEvent, activeCalls: ActiveCalls): AgentEvent[] {
   const delta = narrowGeminiDelta(event.delta);
   if (delta.kind === 'thought_summary') {
     return delta.text ? [{ type: 'reasoning_delta', text: delta.text }] : [];
@@ -111,8 +133,8 @@ function mapContentDelta(event: ContentDeltaEvent, activeCalls: ActiveCalls): Ag
   if (delta.kind === 'text') {
     return [{ type: 'assistant_text_delta', text: delta.text }];
   }
-  if (delta.kind === 'function_call') {
-    return mapFunctionCallDelta(event.index, delta, activeCalls);
+  if (delta.kind === 'arguments_delta') {
+    return mapArgumentsDelta(event.index, delta.arguments, activeCalls);
   }
   if (delta.kind !== 'thought_signature') {
     geminiInteractionsLogger.warn('unknown_delta_type', { delta: event.delta });
@@ -120,30 +142,44 @@ function mapContentDelta(event: ContentDeltaEvent, activeCalls: ActiveCalls): Ag
   return [];
 }
 
-function mapFunctionCallDelta(
+function mapArgumentsDelta(
   index: number,
-  delta: Extract<ReturnType<typeof narrowGeminiDelta>, { kind: 'function_call' }>,
+  fragment: string,
   activeCalls: ActiveCalls
 ): AgentEvent[] {
   const call = activeCalls.get(index);
-  if (!call) return [];
+  if (!call || !fragment) return [];
 
-  const events: AgentEvent[] = [];
-  if (delta.name && !call.name) call.name = delta.name;
-  if (!call.started && call.name) {
-    call.started = true;
-    events.push({ type: 'tool_call_started', callId: call.id, name: call.name });
-  }
-  Object.assign(call.args, delta.args);
-  events.push({
-    type: 'tool_call_arguments_delta',
-    callId: call.id,
-    delta: JSON.stringify(delta.args),
-  });
-  return events;
+  call.argumentsJson += fragment;
+  return [{ type: 'tool_call_arguments_delta', callId: call.id, delta: fragment }];
 }
 
-function mapContentStop(event: ContentStopEvent, activeCalls: ActiveCalls): AgentEvent[] {
+/**
+ * Resolves the call's final argument JSON.
+ *
+ * `step.stop` carries no payload, so the arguments are whatever the
+ * `arguments_delta` fragments assembled. A call whose arguments were sent
+ * whole on `step.start` streams no fragments at all, and a truncated stream
+ * leaves an unparsable buffer; both fall back to the opening arguments.
+ */
+function resolveCallArguments(call: ActiveCall): string {
+  const buffered = call.argumentsJson.trim();
+  if (!buffered) return JSON.stringify(call.initialArguments);
+
+  try {
+    JSON.parse(buffered);
+    return buffered;
+  } catch {
+    geminiInteractionsLogger.warn('unparsable_arguments_delta', {
+      callId: call.id,
+      name: call.name,
+      buffered,
+    });
+    return JSON.stringify(call.initialArguments);
+  }
+}
+
+function mapStepStop(event: StepStopEvent, activeCalls: ActiveCalls): AgentEvent[] {
   const call = activeCalls.get(event.index);
   if (!call) return [];
   activeCalls.delete(event.index);
@@ -152,7 +188,7 @@ function mapContentStop(event: ContentStopEvent, activeCalls: ActiveCalls): Agen
       type: 'tool_call_completed',
       callId: call.id,
       name: call.name,
-      arguments: JSON.stringify(call.args),
+      arguments: resolveCallArguments(call),
     },
   ];
 }

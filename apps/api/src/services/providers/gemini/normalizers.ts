@@ -6,9 +6,9 @@
  */
 import type { Interactions } from '@google/genai';
 
-type ContentStart = Interactions.ContentStart;
-type ContentDelta = Interactions.ContentDelta;
-type FunctionCallContent = Interactions.FunctionCallContent;
+type StepStart = Interactions.StepStart;
+type StepDelta = Interactions.StepDelta;
+type FunctionCallStep = Interactions.FunctionCallStep;
 export type InteractionSSEEvent = Interactions.InteractionSSEEvent;
 type GeminiUsage = Interactions.Usage;
 type CreateModelInteractionParamsStreaming = Interactions.CreateModelInteractionParamsStreaming;
@@ -29,29 +29,43 @@ export function toInteractionParams(
 }
 
 // ---------------------------------------------------------------------------
-// Content-start narrowing
+// Step-start narrowing
 // ---------------------------------------------------------------------------
 
-/** Check whether a content.start event carries a function_call block. */
-export function isFunctionCallStart(
-  content: ContentStart['content']
-): content is FunctionCallContent {
-  return content.type === 'function_call';
+/** Check whether a step.start event opens a function_call step. */
+export function isFunctionCallStart(step: StepStart['step']): step is FunctionCallStep {
+  return step.type === 'function_call';
+}
+
+/**
+ * Check whether a step.start event already carries model-visible content.
+ *
+ * A streaming turn delivers assistant text and thought summaries through
+ * step.delta, so a `model_output` / `thought` step that arrives already
+ * populated means the server switched to whole-step delivery and the deltas
+ * this accumulator renders from are not coming. Callers use this to raise a
+ * diagnostic, not to render — emitting here too would double every token in
+ * the normal streaming case.
+ */
+export function hasInlineStepContent(step: StepStart['step']): boolean {
+  if (step.type === 'model_output') return (step.content?.length ?? 0) > 0;
+  if (step.type === 'thought') return (step.summary?.length ?? 0) > 0;
+  return false;
 }
 
 // ---------------------------------------------------------------------------
-// Content-delta narrowing
+// Step-delta narrowing
 // ---------------------------------------------------------------------------
 
 export type NarrowedGeminiDelta =
   | { kind: 'thought_summary'; text: string }
   | { kind: 'text'; text: string }
-  | { kind: 'function_call'; id: string; name: string; args: Record<string, unknown> }
+  | { kind: 'arguments_delta'; arguments: string }
   | { kind: 'thought_signature' }
   | { kind: 'other' };
 
-/** Narrow a ContentDelta's delta union into a simple discriminated shape. */
-export function narrowGeminiDelta(delta: ContentDelta['delta']): NarrowedGeminiDelta {
+/** Narrow a StepDelta's delta union into a simple discriminated shape. */
+export function narrowGeminiDelta(delta: StepDelta['delta']): NarrowedGeminiDelta {
   switch (delta.type) {
     case 'thought_summary': {
       const text = delta.content && 'text' in delta.content ? delta.content.text : '';
@@ -59,13 +73,8 @@ export function narrowGeminiDelta(delta: ContentDelta['delta']): NarrowedGeminiD
     }
     case 'text':
       return { kind: 'text', text: delta.text };
-    case 'function_call':
-      return {
-        kind: 'function_call',
-        id: delta.id,
-        name: delta.name,
-        args: delta.arguments,
-      };
+    case 'arguments_delta':
+      return { kind: 'arguments_delta', arguments: delta.arguments ?? '' };
     case 'thought_signature':
       return { kind: 'thought_signature' };
     default:

@@ -2,36 +2,63 @@ import { describe, expect, it } from 'bun:test';
 import type { Interactions } from '@google/genai';
 import {
   extractGeminiUsage,
+  hasInlineStepContent,
   isFunctionCallStart,
   narrowGeminiDelta,
   toInteractionParams,
 } from '../../../../src/services/providers/gemini/normalizers';
 
 /** Cast partial mock delta to the full SDK type for test purposes. */
-const mockDelta = (data: Record<string, unknown>): Interactions.ContentDelta['delta'] =>
-  data as unknown as Interactions.ContentDelta['delta'];
+const mockDelta = (data: Record<string, unknown>): Interactions.StepDelta['delta'] =>
+  data as unknown as Interactions.StepDelta['delta'];
 
-/** Cast partial mock content to the full SDK type for test purposes. */
-const mockContent = (data: Record<string, unknown>): Interactions.ContentStart['content'] =>
-  data as unknown as Interactions.ContentStart['content'];
+/** Cast partial mock step to the full SDK type for test purposes. */
+const mockStep = (data: Record<string, unknown>): Interactions.StepStart['step'] =>
+  data as unknown as Interactions.StepStart['step'];
 
 // ---------------------------------------------------------------------------
 // isFunctionCallStart
 // ---------------------------------------------------------------------------
 
 describe('isFunctionCallStart', () => {
-  it('returns true for function_call content', () => {
-    const content = mockContent({
+  it('returns true for a function_call step', () => {
+    const step = mockStep({
       type: 'function_call',
       id: 'call_1',
       name: 'search',
+      arguments: {},
     });
-    expect(isFunctionCallStart(content)).toBe(true);
+    expect(isFunctionCallStart(step)).toBe(true);
   });
 
-  it('returns false for text content', () => {
-    const content = mockContent({ type: 'text', text: 'Hello' });
-    expect(isFunctionCallStart(content)).toBe(false);
+  it('returns false for a model_output step', () => {
+    const step = mockStep({ type: 'model_output', content: [] });
+    expect(isFunctionCallStart(step)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hasInlineStepContent
+// ---------------------------------------------------------------------------
+
+describe('hasInlineStepContent', () => {
+  it('detects a model_output step that already carries content', () => {
+    const step = mockStep({ type: 'model_output', content: [{ type: 'text', text: 'Hi' }] });
+    expect(hasInlineStepContent(step)).toBe(true);
+  });
+
+  it('detects a thought step that already carries a summary', () => {
+    const step = mockStep({ type: 'thought', summary: [{ type: 'text', text: 'Hmm' }] });
+    expect(hasInlineStepContent(step)).toBe(true);
+  });
+
+  it('returns false for an empty model_output step', () => {
+    expect(hasInlineStepContent(mockStep({ type: 'model_output' }))).toBe(false);
+  });
+
+  it('returns false for a function_call step', () => {
+    const step = mockStep({ type: 'function_call', id: 'c', name: 'n', arguments: {} });
+    expect(hasInlineStepContent(step)).toBe(false);
   });
 });
 
@@ -45,25 +72,23 @@ describe('narrowGeminiDelta', () => {
     expect(narrowGeminiDelta(delta)).toEqual({ kind: 'text', text: 'Hello' });
   });
 
-  it('narrows function_call delta', () => {
-    const delta = mockDelta({
-      type: 'function_call',
-      id: 'call_1',
-      name: 'search',
-      arguments: { query: 'test' },
-    });
+  it('narrows arguments_delta to its raw JSON fragment', () => {
+    const delta = mockDelta({ type: 'arguments_delta', arguments: '{"query":' });
     expect(narrowGeminiDelta(delta)).toEqual({
-      kind: 'function_call',
-      id: 'call_1',
-      name: 'search',
-      args: { query: 'test' },
+      kind: 'arguments_delta',
+      arguments: '{"query":',
     });
+  });
+
+  it('narrows arguments_delta without a fragment to an empty string', () => {
+    const delta = mockDelta({ type: 'arguments_delta' });
+    expect(narrowGeminiDelta(delta)).toEqual({ kind: 'arguments_delta', arguments: '' });
   });
 
   it('narrows thought_summary delta', () => {
     const delta = mockDelta({
       type: 'thought_summary',
-      content: { text: 'Thinking...' },
+      content: { type: 'text', text: 'Thinking...' },
     });
     expect(narrowGeminiDelta(delta)).toEqual({
       kind: 'thought_summary',

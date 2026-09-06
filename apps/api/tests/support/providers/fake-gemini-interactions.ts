@@ -31,8 +31,8 @@ export async function* completedInteractionEvent(
 ): AsyncIterable<InteractionSSEEvent> {
   await Promise.resolve();
   yield {
-    event_type: 'interaction.complete',
-    interaction: { id, usage: { total_input_tokens: inputTokens } },
+    event_type: 'interaction.completed',
+    interaction: { id, status: 'completed', usage: { total_input_tokens: inputTokens } },
   } as InteractionSSEEvent;
 }
 
@@ -40,12 +40,13 @@ export async function* completedInteractionEvent(
 export async function* textDeltaEvent(text: string): AsyncIterable<InteractionSSEEvent> {
   await Promise.resolve();
   yield {
-    event_type: 'content.delta',
+    event_type: 'step.delta',
+    index: 0,
     delta: { type: 'text', text },
   } as InteractionSSEEvent;
 }
 
-/** Yields a function_call start event. */
+/** Yields a function_call step.start event. */
 export async function* functionCallStartEvent(
   index: number,
   id: string,
@@ -53,32 +54,30 @@ export async function* functionCallStartEvent(
 ): AsyncIterable<InteractionSSEEvent> {
   await Promise.resolve();
   yield {
-    event_type: 'content.start',
+    event_type: 'step.start',
     index,
-    content: { type: 'function_call', id, name },
+    step: { type: 'function_call', id, name, arguments: {} },
   } as InteractionSSEEvent;
 }
 
-/** Yields a function_call delta event with partial arguments. */
+/** Yields an arguments_delta event carrying a JSON fragment for the call. */
 export async function* functionCallDeltaEvent(
   index: number,
-  id: string,
-  name: string,
-  args: Record<string, unknown>
+  argumentsFragment: string
 ): AsyncIterable<InteractionSSEEvent> {
   await Promise.resolve();
   yield {
-    event_type: 'content.delta',
+    event_type: 'step.delta',
     index,
-    delta: { type: 'function_call', id, name, arguments: args },
+    delta: { type: 'arguments_delta', arguments: argumentsFragment },
   } as InteractionSSEEvent;
 }
 
-/** Yields a content.stop event for a function call. */
+/** Yields a step.stop event for a function call. */
 export async function* functionCallStopEvent(index: number): AsyncIterable<InteractionSSEEvent> {
   await Promise.resolve();
   yield {
-    event_type: 'content.stop',
+    event_type: 'step.stop',
     index,
   } as InteractionSSEEvent;
 }
@@ -87,8 +86,9 @@ export async function* functionCallStopEvent(index: number): AsyncIterable<Inter
 export async function* thoughtSummaryEvent(text: string): AsyncIterable<InteractionSSEEvent> {
   await Promise.resolve();
   yield {
-    event_type: 'content.delta',
-    delta: { type: 'thought_summary', content: { text } },
+    event_type: 'step.delta',
+    index: 0,
+    delta: { type: 'thought_summary', content: { type: 'text', text } },
   } as InteractionSSEEvent;
 }
 

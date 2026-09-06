@@ -9,35 +9,38 @@ function event(data: Record<string, unknown>): InteractionSSEEvent {
 }
 
 describe('createGeminiInteractionAccumulator', () => {
-  it('maps a function call whose name is known at content.start', () => {
+  it('reassembles arguments streamed as JSON fragments across step deltas', () => {
     const accumulator = createGeminiInteractionAccumulator();
 
     const events: AgentEvent[] = [
       ...accumulator.mapEvent(
         event({
-          event_type: 'content.start',
+          event_type: 'step.start',
           index: 0,
-          content: { type: 'function_call', id: 'fc_1', name: 'search' },
+          step: { type: 'function_call', id: 'fc_1', name: 'search', arguments: {} },
         })
       ),
       ...accumulator.mapEvent(
         event({
-          event_type: 'content.delta',
+          event_type: 'step.delta',
           index: 0,
-          delta: {
-            type: 'function_call',
-            id: 'fc_1',
-            name: 'search',
-            arguments: { query: 'cats' },
-          },
+          delta: { type: 'arguments_delta', arguments: '{"query":' },
         })
       ),
-      ...accumulator.mapEvent(event({ event_type: 'content.stop', index: 0 })),
+      ...accumulator.mapEvent(
+        event({
+          event_type: 'step.delta',
+          index: 0,
+          delta: { type: 'arguments_delta', arguments: '"cats"}' },
+        })
+      ),
+      ...accumulator.mapEvent(event({ event_type: 'step.stop', index: 0 })),
     ];
 
     expect(events).toEqual([
       { type: 'tool_call_started', callId: 'fc_1', name: 'search' },
-      { type: 'tool_call_arguments_delta', callId: 'fc_1', delta: '{"query":"cats"}' },
+      { type: 'tool_call_arguments_delta', callId: 'fc_1', delta: '{"query":' },
+      { type: 'tool_call_arguments_delta', callId: 'fc_1', delta: '"cats"}' },
       {
         type: 'tool_call_completed',
         callId: 'fc_1',
@@ -47,32 +50,77 @@ describe('createGeminiInteractionAccumulator', () => {
     ]);
   });
 
-  it('starts a function call lazily when the name only arrives in a delta', () => {
+  it('falls back to the arguments sent whole on step.start when no delta streams', () => {
     const accumulator = createGeminiInteractionAccumulator();
 
-    // No name at start: the call is tracked but not yet started.
+    accumulator.mapEvent(
+      event({
+        event_type: 'step.start',
+        index: 0,
+        step: { type: 'function_call', id: 'fc_whole', name: 'lookup', arguments: { q: 1 } },
+      })
+    );
+
+    expect(accumulator.mapEvent(event({ event_type: 'step.stop', index: 0 }))).toEqual([
+      {
+        type: 'tool_call_completed',
+        callId: 'fc_whole',
+        name: 'lookup',
+        arguments: '{"q":1}',
+      },
+    ]);
+  });
+
+  it('falls back to the opening arguments when the delta buffer is truncated', () => {
+    const accumulator = createGeminiInteractionAccumulator();
+
+    accumulator.mapEvent(
+      event({
+        event_type: 'step.start',
+        index: 0,
+        step: { type: 'function_call', id: 'fc_cut', name: 'lookup', arguments: { q: 'fallback' } },
+      })
+    );
+    accumulator.mapEvent(
+      event({
+        event_type: 'step.delta',
+        index: 0,
+        delta: { type: 'arguments_delta', arguments: '{"q":' },
+      })
+    );
+
+    expect(accumulator.mapEvent(event({ event_type: 'step.stop', index: 0 }))).toEqual([
+      {
+        type: 'tool_call_completed',
+        callId: 'fc_cut',
+        name: 'lookup',
+        arguments: '{"q":"fallback"}',
+      },
+    ]);
+  });
+
+  it('tracks a nameless function call without announcing it', () => {
+    const accumulator = createGeminiInteractionAccumulator();
+
     expect(
       accumulator.mapEvent(
         event({
-          event_type: 'content.start',
+          event_type: 'step.start',
           index: 0,
-          content: { type: 'function_call', id: 'fc_2', name: '' },
+          step: { type: 'function_call', id: 'fc_2', name: '', arguments: {} },
         })
       )
     ).toEqual([]);
 
-    const events = accumulator.mapEvent(
-      event({
-        event_type: 'content.delta',
-        index: 0,
-        delta: { type: 'function_call', id: 'fc_2', name: 'lookup', arguments: { q: 1 } },
-      })
-    );
-
-    expect(events).toEqual([
-      { type: 'tool_call_started', callId: 'fc_2', name: 'lookup' },
-      { type: 'tool_call_arguments_delta', callId: 'fc_2', delta: '{"q":1}' },
-    ]);
+    expect(
+      accumulator.mapEvent(
+        event({
+          event_type: 'step.delta',
+          index: 0,
+          delta: { type: 'arguments_delta', arguments: '{"q":1}' },
+        })
+      )
+    ).toEqual([{ type: 'tool_call_arguments_delta', callId: 'fc_2', delta: '{"q":1}' }]);
   });
 
   it('maps text and thought-summary deltas, ignoring thought signatures', () => {
@@ -81,23 +129,39 @@ describe('createGeminiInteractionAccumulator', () => {
     expect(
       accumulator.mapEvent(
         event({
-          event_type: 'content.delta',
-          delta: { type: 'thought_summary', content: { text: 'Thinking.' } },
+          event_type: 'step.delta',
+          index: 0,
+          delta: { type: 'thought_summary', content: { type: 'text', text: 'Thinking.' } },
         })
       )
     ).toEqual([{ type: 'reasoning_delta', text: 'Thinking.' }]);
 
     expect(
       accumulator.mapEvent(
-        event({ event_type: 'content.delta', delta: { type: 'text', text: 'Answer.' } })
+        event({ event_type: 'step.delta', index: 0, delta: { type: 'text', text: 'Answer.' } })
       )
     ).toEqual([{ type: 'assistant_text_delta', text: 'Answer.' }]);
 
     expect(
       accumulator.mapEvent(
         event({
-          event_type: 'content.delta',
+          event_type: 'step.delta',
+          index: 0,
           delta: { type: 'thought_signature', signature: 'sig' },
+        })
+      )
+    ).toEqual([]);
+  });
+
+  it('does not render a model_output step that arrives already populated', () => {
+    const accumulator = createGeminiInteractionAccumulator();
+
+    expect(
+      accumulator.mapEvent(
+        event({
+          event_type: 'step.start',
+          index: 0,
+          step: { type: 'model_output', content: [{ type: 'text', text: 'Whole answer.' }] },
         })
       )
     ).toEqual([]);
@@ -109,9 +173,10 @@ describe('createGeminiInteractionAccumulator', () => {
     expect(
       accumulator.mapEvent(
         event({
-          event_type: 'interaction.complete',
+          event_type: 'interaction.completed',
           interaction: {
             id: 'int_done',
+            status: 'completed',
             usage: { total_input_tokens: 99, total_cached_tokens: 33 },
           },
         })
@@ -122,11 +187,14 @@ describe('createGeminiInteractionAccumulator', () => {
     expect(accumulator.providerReportedInputTokens).toBe(99);
   });
 
-  it('captures interaction id from interaction.start', () => {
+  it('captures interaction id from interaction.created', () => {
     const accumulator = createGeminiInteractionAccumulator();
 
     accumulator.mapEvent(
-      event({ event_type: 'interaction.start', interaction: { id: 'int_started' } })
+      event({
+        event_type: 'interaction.created',
+        interaction: { id: 'int_started', status: 'in_progress' },
+      })
     );
 
     expect(accumulator.interactionId).toBe('int_started');
@@ -138,8 +206,8 @@ describe('createGeminiInteractionAccumulator', () => {
 
     accumulator.mapEvent(
       event({
-        event_type: 'interaction.complete',
-        interaction: { id: 'int_zero', usage: { total_input_tokens: 0 } },
+        event_type: 'interaction.completed',
+        interaction: { id: 'int_zero', status: 'completed', usage: { total_input_tokens: 0 } },
       })
     );
 
@@ -152,12 +220,12 @@ describe('createGeminiInteractionAccumulator', () => {
     expect(
       accumulator.mapEvent(
         event({
-          event_type: 'content.delta',
+          event_type: 'step.delta',
           index: 5,
-          delta: { type: 'function_call', id: 'fc_x', name: 'x', arguments: {} },
+          delta: { type: 'arguments_delta', arguments: '{}' },
         })
       )
     ).toEqual([]);
-    expect(accumulator.mapEvent(event({ event_type: 'content.stop', index: 5 }))).toEqual([]);
+    expect(accumulator.mapEvent(event({ event_type: 'step.stop', index: 5 }))).toEqual([]);
   });
 });
