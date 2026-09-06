@@ -26,10 +26,8 @@ tar = "0.4"
 zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [package.metadata.binstall]
-# Release archives have a flat root: mangostudio(.exe) plus README.md, and on
-# Cursor-supported platforms a cursor-sidecar/ tree. binstall installs only the
-# binary named below; the sidecar is dropped, so binstall installs lack the
-# Cursor SDK (use the shell installer or `cargo install` for that). See README.md.
+# Release archives have a flat root: mangostudio(.exe), mangostudio-runtime(.exe)
+# and README.md. binstall installs only the binary named below. See README.md.
 bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 disabled-strategies = ["quick-install"]

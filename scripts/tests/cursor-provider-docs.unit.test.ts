@@ -17,11 +17,14 @@ describe('cursor provider docs', () => {
     expect(doc).toMatch(/forks/i);
   });
 
-  test('cursor.md carries no stale sidecar or SDK instructions', () => {
+  test('cursor.md never mentions the Node sidecar, not even to say it is gone', () => {
     const doc = readText(CURSOR_DOC);
 
-    // The removal list names these deliberately. What must not survive is the
-    // imperative form — telling a reader to install Node or run the sidecar.
+    // MangoStudio ships no Cursor sidecar, so a reader of this doc has no use
+    // for the word — an inventory of what was removed is CHANGELOG territory,
+    // and leaving one here is how a removed thing reads as a current option.
+    expect(doc).not.toMatch(/sidecar/i);
+    expect(doc).not.toMatch(/@cursor\/sdk/i);
     expect(doc).not.toMatch(/install Node\.js for Cursor/i);
     expect(doc).not.toMatch(/generateAgentTurnStream/);
     expect(doc).toMatch(/Generic Node\.js support is unaffected/i);
