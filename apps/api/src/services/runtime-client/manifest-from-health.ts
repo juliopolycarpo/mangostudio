@@ -87,6 +87,9 @@ export function capabilityManifestFromHealth(
     ...(handshake?.enforcesPathPolicy === undefined
       ? {}
       : { enforcesPathPolicy: handshake.enforcesPathPolicy }),
+    ...(handshake?.publishesWindowsSlot === undefined
+      ? {}
+      : { publishesWindowsSlot: handshake.publishesWindowsSlot }),
     ...(handshake?.directoryHashDomain === undefined
       ? {}
       : { directoryHashDomain: handshake.directoryHashDomain }),
