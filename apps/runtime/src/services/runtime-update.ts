@@ -27,6 +27,7 @@ import type {
 import { runtimeSlotDir, writeRuntimeSlotConfig } from '../runtime-home';
 import {
   isLockedFileError,
+  isSafeSlotVersion,
   moveSlotFile,
   pruneSlotVersions,
   publishSlotCurrent,
@@ -47,7 +48,6 @@ const RUNTIME_UPDATE_SESSION_TIMEOUT_MS = 120_000;
 /** Distinct from ordinary failure so a supervisor can identify an intentional restart. */
 export const RUNTIME_UPDATE_EXIT_CODE = 75;
 
-const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
 const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
 
 export interface RuntimeUpdateServiceOptions {
@@ -187,7 +187,7 @@ export function createRuntimeUpdateService(
             sessionId: session.id,
           });
         }
-        if (!VERSION_PATTERN.test(params.version)) {
+        if (!isSafeSlotVersion(params.version)) {
           throw fail('Runtime update version is not a safe slot directory name.', {
             reason: 'invalid_version',
           });

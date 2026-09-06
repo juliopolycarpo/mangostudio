@@ -89,6 +89,20 @@ export async function withSlotWriteRetry<T>(
   }
 }
 
+/**
+ * A version string that is safe to use as a directory name inside a slot.
+ *
+ * Deliberately narrower than semver: this becomes a path segment next to
+ * `current` and the slot's config files, so a separator, a dot-run or a
+ * leading punctuation character has to be refused before anything is created.
+ * // Usage: isSafeSlotVersion('0.2.0-canary.4') // → true
+ */
+export function isSafeSlotVersion(version: string): boolean {
+  return SAFE_SLOT_VERSION.test(version);
+}
+
+const SAFE_SLOT_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
+
 /** Where `current` lives for a slot directory. */
 export function slotCurrentPath(slotDir: string): string {
   return join(slotDir, RUNTIME_CURRENT_LINK_NAME);

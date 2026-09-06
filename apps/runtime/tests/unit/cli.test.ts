@@ -205,6 +205,26 @@ describe('parseRuntimeCliArgs', () => {
     });
   });
 
+  // `install` and `service install` are different commands one word apart, and
+  // the slot install defaults to the one a downloaded binary belongs to.
+  it('parses install, defaulting to the remote slot', () => {
+    expect(parseRuntimeCliArgs(['install'])).toEqual({
+      command: 'install',
+      args: { slot: 'remote', json: false },
+    });
+    expect(parseRuntimeCliArgs(['install', '--slot', 'host', '--json'])).toEqual({
+      command: 'install',
+      args: { slot: 'host', json: true },
+    });
+    expect(parseRuntimeCliArgs(['install', '--slot', 'nowhere'])).toMatchObject({
+      command: 'invalid',
+    });
+    expect(parseRuntimeCliArgs(['install', '--mode', 'connect'])).toEqual({
+      command: 'unknown',
+      argument: '--mode',
+    });
+  });
+
   it('parses health and doctor with their one flag', () => {
     expect(parseRuntimeCliArgs(['health'])).toEqual({ command: 'health', args: { json: false } });
     expect(parseRuntimeCliArgs(['doctor', '--json'])).toEqual({
