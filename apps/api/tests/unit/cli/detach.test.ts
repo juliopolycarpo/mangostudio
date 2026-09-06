@@ -94,10 +94,12 @@ describe('restartExecutableOptions', () => {
   });
 
   it("prefers a package manager's launcher over this process's own path", () => {
-    // A cargo or npm install runs through a shim whose job is to select the
+    // A cargo Unix install runs through a shim whose job is to select the
     // installed version. After a delegated upgrade the shim points at the new
     // build while this process's path still names the version directory the
-    // manager just replaced — and brew may have deleted it outright.
+    // manager just replaced — and brew may have deleted it outright. Which
+    // launchers reach this argument at all is `restartLauncher`'s call, not
+    // this function's.
     for (const pointer of ['versioned', 'external', 'source', 'current'] as const) {
       expect(
         restartExecutableOptions(
