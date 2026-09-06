@@ -4,7 +4,7 @@
  *
  * Each provider needs its own format:
  * - OpenAI Responses API: input items with role + content, function_call + function_call_output
- * - Gemini Interactions: turns with role user/model, content objects, function_result
+ * - Gemini Interactions: a flat step list — user_input/model_output, function_call, function_result
  * - OpenAI-compatible (Chat Completions): ChatCompletionMessageParam with tool_calls + tool results
  *
  * Falls back to plain text when no structured parts are available (backward compatible
