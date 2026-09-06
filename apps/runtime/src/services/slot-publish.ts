@@ -288,16 +288,55 @@ async function writePointer(
   // window never got that far — it would be left with no pointer at all, which
   // is a slot no service unit and no launcher can start from.
   const replaced = windows ? await fs.readlink(currentPath).catch(() => null) : null;
+  // Tracked rather than inferred from the error: if the *removal* is what
+  // failed, the old pointer never left and putting it back would collide with
+  // itself. Only a removal that succeeded leaves something to restore.
+  let removed = false;
   try {
-    if (windows) await removePointer(currentPath, options);
+    if (windows) {
+      await removePointer(currentPath, options);
+      removed = true;
+    }
     await withSlotWriteRetry(() => fs.rename(stagePath, currentPath), options);
   } catch (error) {
     await removePointer(stagePath, options).catch(() => undefined);
-    if (replaced !== null) {
-      await fs.symlink(replaced, currentPath, 'junction').catch(() => undefined);
-    }
+    if (removed && replaced !== null) await restorePointer(currentPath, replaced, error, options);
     throw error;
   }
+}
+
+/**
+ * Puts back the pointer the Windows swap removed to make room for itself.
+ *
+ * Retried like every other slot write, and for the same reason: whatever held
+ * the slot long enough to exhaust the rename's attempts is still holding it
+ * here, so a single try would give the lock the one thing the retry exists to
+ * deny it. If the pointer still cannot go back, that outranks the error that
+ * started it — a caller told only "the rename failed" rolls back nothing,
+ * because as far as it knows nothing was ever swapped.
+ * // Usage: await restorePointer(currentPath, '1.0.0', renameError, options)
+ */
+async function restorePointer(
+  currentPath: string,
+  target: string,
+  swapError: unknown,
+  options: SlotPublishOptions
+): Promise<void> {
+  const fs = options.fs ?? systemFs;
+  try {
+    await withSlotWriteRetry(() => fs.symlink(target, currentPath, 'junction'), options);
+  } catch (error) {
+    throw new Error(
+      `${currentPath} has no current pointer: the swap failed with "${messageOf(swapError)}" ` +
+        `and putting "${target}" back failed with "${messageOf(error)}". ` +
+        `No service unit or launcher can start this slot until a pointer is restored.`,
+      { cause: swapError }
+    );
+  }
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** Unlinks a pointer, treating "already gone" as done. */

@@ -110,6 +110,60 @@ describe('publishSlotCurrent on Windows', () => {
 
     expect(await readSlotCurrentTarget(slotDir, windows)).toBeNull();
   });
+
+  /**
+   * The put-back is the same class of write as the swap, against the same slot
+   * something is holding — so one attempt is not enough. Whatever made the
+   * rename exhaust its retries is still there when the junction goes back.
+   */
+  it('waits out a lock on the put-back the same way the swap does', async () => {
+    const slotDir = await slot();
+    await publishSlotCurrent(slotDir, '1.0.0', 'first', { ...windows, fs: junctionFs().fs });
+    let putBacks = 0;
+    const pointer = junctionFs((call) => {
+      if (call.args[1] !== slotCurrentPath(slotDir)) return null;
+      if (call.op === 'rename') return lockedError();
+      if (call.op !== 'symlink') return null;
+      putBacks += 1;
+      return putBacks === 1 ? lockedError() : null;
+    });
+
+    await expect(
+      publishSlotCurrent(slotDir, '1.1.0', 'second', {
+        ...windows,
+        fs: pointer.fs,
+        sleep: () => Promise.resolve(),
+      })
+    ).rejects.toMatchObject({ code: 'EPERM' });
+
+    expect(putBacks).toBe(2);
+    expect(await readSlotCurrentTarget(slotDir, windows)).toBe(join(slotDir, '1.0.0'));
+  });
+
+  /**
+   * A caller told only "the rename failed" rolls back nothing, because as far
+   * as it knows nothing was swapped. So a slot left with no `current` has to
+   * say so itself rather than hide behind the error that started it.
+   */
+  it('reports a slot left with no pointer instead of the swap error', async () => {
+    const slotDir = await slot();
+    await publishSlotCurrent(slotDir, '1.0.0', 'first', { ...windows, fs: junctionFs().fs });
+    const pointer = junctionFs((call) =>
+      (call.op === 'rename' || call.op === 'symlink') && call.args[1] === slotCurrentPath(slotDir)
+        ? lockedError()
+        : null
+    );
+
+    await expect(
+      publishSlotCurrent(slotDir, '1.1.0', 'second', {
+        ...windows,
+        fs: pointer.fs,
+        sleep: () => Promise.resolve(),
+      })
+    ).rejects.toThrow(/has no current pointer/);
+
+    expect(await readSlotCurrentTarget(slotDir, windows)).toBeNull();
+  });
 });
 
 describe('pruneSlotVersions', () => {
