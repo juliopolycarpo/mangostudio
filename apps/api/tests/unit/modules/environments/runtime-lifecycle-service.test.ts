@@ -4,6 +4,7 @@ import { RUNTIME_CAPABILITY_KEYS, RUNTIME_CONSENT_PRESETS } from '@mangostudio/s
 import {
   buildSetupCommand,
   pushRuntimeOverSsh,
+  restartBudgetMs,
 } from '../../../../src/modules/environments/application/runtime-lifecycle-service';
 import type {
   RuntimeCommandOptions,
@@ -213,5 +214,21 @@ describe('pushRuntimeOverSsh', () => {
     await expect(push(runnerProbing('Linux\n'))).rejects.toThrow(
       'Could not read what "example.test" reported about itself: Linux'
     );
+  });
+});
+
+describe('restartBudgetMs', () => {
+  // Regression: the post-commit wait was one minute on every platform, which is
+  // exactly the `-RestartInterval 1 minute` a supervised Windows peer sits out
+  // before Task Scheduler even tries the new bytes. Every win32 live upgrade
+  // committed and then reported failed.
+  it('gives a Windows peer more than the Task Scheduler restart interval', () => {
+    expect(restartBudgetMs('win32')).toBeGreaterThan(60_000);
+  });
+
+  it('leaves every other platform on the one-minute budget', () => {
+    expect(restartBudgetMs('linux')).toBe(60_000);
+    expect(restartBudgetMs('darwin')).toBe(60_000);
+    expect(restartBudgetMs(undefined)).toBe(60_000);
   });
 });

@@ -1694,6 +1694,104 @@ describe('environment entity routes', () => {
     await manager.closeAll();
   });
 
+  // Regression: the hub-dialled transports got one reconnect attempt, fired the
+  // moment the peer dropped. A supervised peer is still inside its restart
+  // interval then — on Windows that interval is Task Scheduler's one-minute
+  // floor, so it is every time — and the single refusal failed a run whose
+  // `current` already pointed at the new bytes.
+  it('keeps dialling a supervised runtime that is still inside its restart interval', async () => {
+    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-restart-interval-route-'));
+    tempHomes.push(mangoHome);
+    const env = { MANGO_HOME: mangoHome };
+    const bytes = new TextEncoder().encode('restart-interval-runtime-binary');
+    const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    const targetVersion = getVersion();
+    let connectionCount = 0;
+    let activeConnection: { close(): void } | undefined;
+
+    const { app, repository, manager } = createTestApp(
+      {
+        http: async (_definition, onUnavailable) => {
+          connectionCount += 1;
+          // Attempt 2 is the hub reaching out while the supervisor is still
+          // sitting out its interval: the port is not listening yet.
+          if (connectionCount === 2) {
+            throw new Error('connect ECONNREFUSED runtime.test:443');
+          }
+          const firstConnection = connectionCount === 1;
+          const host = createProvisionedRuntimeHost({
+            runtimeVersion: firstConnection ? '0.0.1-old' : targetVersion,
+            ...(firstConnection
+              ? {
+                  slot: 'host' as const,
+                  update: {
+                    env,
+                    supervised: true,
+                    requestRestart: () => {
+                      activeConnection?.close();
+                      onUnavailable();
+                    },
+                  },
+                }
+              : {}),
+          });
+          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          activeConnection = connection;
+          return {
+            client: new RuntimeClient(connection.client, onUnavailable),
+            close: () => connection.close(),
+          };
+        },
+      },
+      undefined,
+      undefined,
+      (runtimeManager) =>
+        createRuntimeLifecycleService({
+          manager: runtimeManager,
+          loadRuntimeAsset: () =>
+            Promise.resolve({
+              bytes,
+              digest,
+              fromArchive: false as const,
+              cached: true,
+              offlineCache: false,
+            }),
+        })
+    );
+    await repository.create({
+      id: 'http-restart-interval',
+      userId: TEST_USER.id,
+      name: 'Interval runtime',
+      transportKind: 'http',
+      config: { baseUrl: 'http://runtime.test' },
+      enabled: true,
+    });
+    await manager.connect(TEST_USER.id, 'http-restart-interval');
+    await manager.refreshManifest(TEST_USER.id, 'http-restart-interval');
+
+    const started = await app.handle(
+      new Request(
+        'http://localhost/environments/http-restart-interval/runtime/install',
+        jsonRequest('POST', { action: 'upgrade' })
+      )
+    );
+    const { runId } = (await started.json()) as { runId: string };
+    const log = await app.handle(
+      new Request(`http://localhost/environments/http-restart-interval/runtime/runs/${runId}/log`)
+    );
+    const body = await log.text();
+
+    expect(body).toContain(`Runtime reconnected on ${targetVersion}; version drift cleared.`);
+    expect(body).toContain('"status":"succeeded"');
+    // One refused dial, then the one that found the restarted peer.
+    expect(connectionCount).toBe(3);
+    expect(manager.getStatus(TEST_USER.id, 'http-restart-interval')).toMatchObject({
+      state: 'connected',
+      runtimeVersion: targetVersion,
+    });
+    await manager.closeAll();
+  });
+
   it('cancels restart waiting without disconnecting a replacement client', async () => {
     const mangoHome = await mkdtemp(join(tmpdir(), 'mango-cancelled-update-route-'));
     tempHomes.push(mangoHome);

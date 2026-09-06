@@ -307,7 +307,10 @@ unit owns exits with the update code on commit and the supervisor's restart-on-f
 brings it back on the new bytes, without touching the wire contract. On Windows that is
 `-RestartCount 3 -RestartInterval 1 minute`, whose one-minute floor is Task Scheduler's,
 so the card shows a supervised Windows peer disconnected for about that long after a
-commit.
+commit. The upgrade run waits through it rather than reporting a failure over it: the
+post-commit budget is one minute on every other platform and four on win32, and the
+hub-dialled transports keep dialling for that whole budget instead of taking one refusal
+from a peer that is only mid-interval.
 
 Windows never replaces a running executable. The new version is a new directory beside the
 old one, the junction moves, and the directory the old process is executing out of is kept
