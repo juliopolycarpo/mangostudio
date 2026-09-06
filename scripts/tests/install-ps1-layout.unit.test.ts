@@ -586,6 +586,27 @@ describe('install.ps1 current junction', () => {
     expect(readFileSync(join(l.rootLinux, 'current'), 'utf8')).toBe('not a junction');
   });
 
+  test.skipIf(!POWERSHELL)('-Prune unlinks an orphaned staging junction', () => {
+    // Set-CurrentJunction killed between the create and the rename leaves
+    // .current.<pid> behind. It is a reparse point, so the scratch sweep's
+    // Remove-Item -Recurse would follow it and delete the version it points
+    // at — the whole reason Remove-Junction exists.
+    const l = layout();
+    craftInstalledState(l, '0.1.0');
+    writeFileSync(join(l.rootLinux, '0.1.0', 'keep.txt'), 'survives');
+    const staged = runDotSourced(
+      l.scriptPath,
+      `New-Item -ItemType Junction -Path (Join-Path ${psQuote(l.root)} '.current.1234') -Target (Join-Path ${psQuote(l.root)} '0.1.0') | Out-Null`
+    );
+    expect(staged.exitCode).toBe(0);
+
+    const result = run(l.scriptPath, ['-Prune'], l.env);
+
+    expect(result.exitCode).toBe(0);
+    expect(sh(['test', '-e', join(l.rootLinux, '.current.1234')]).exitCode).not.toBe(0);
+    expect(readFileSync(join(l.rootLinux, '0.1.0', 'keep.txt'), 'utf8')).toBe('survives');
+  });
+
   test.skipIf(!POWERSHELL)('points at the new version before the shim is written', () => {
     // Ordering, not decoration: if the shim moved first, a junction failure
     // would leave the shim on the new version and the pointer on the old one.

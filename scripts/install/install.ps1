@@ -798,6 +798,21 @@ function Invoke-Prune([string]$InstallRoot, [string]$BinDir) {
       }
     }
 
+  # A staging junction from a Set-CurrentJunction killed between the create
+  # and the rename. Swept separately from the directories above because it is
+  # a reparse point: Remove-Item -Recurse would follow it and delete the
+  # target version's contents instead of the link.
+  Get-ChildItem -Path $InstallRoot -Directory -Force -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^\.current\.' } |
+    ForEach-Object {
+      Remove-Junction $_.FullName
+      if (Test-Path -LiteralPath $_.FullName) {
+        Write-Host "Could not remove $($_.Name) (close editors or stop the process, then run again)"
+      } else {
+        Write-Host "Removed $($_.Name)"
+      }
+    }
+
   Save-PruneRecord $InstallRoot $remaining
 }
 
