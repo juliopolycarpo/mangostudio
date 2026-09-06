@@ -6,11 +6,12 @@ const USER_ID = 'user-gemini-image-abort';
 const MODEL_ID = 'gemini-2.5-flash-image';
 
 /**
- * Reproduces how `@google/genai` 1.52 treats `config.abortSignal`: it forwards
- * the signal by attaching an `abort` listener to a fresh internal controller
- * and never reads `signal.aborted`, so a signal that fired before the call is
- * silently ignored and the request runs to completion. A fake that rejected on
- * an already-aborted signal would pass with or without the guard under test.
+ * Stands in for an SDK that only honours an abort landing *after* dispatch: it
+ * forwards `config.abortSignal` but never reads `signal.aborted`, so a signal
+ * that fired before the call is ignored and the request runs to completion.
+ * That was `@google/genai` 1.52 exactly; 2.x checks `aborted` up front. The
+ * fake keeps the old behaviour on purpose — one that rejected on an
+ * already-aborted signal would pass with or without the guard under test.
  */
 class SignalIgnoringGeminiClient {
   callCount = 0;

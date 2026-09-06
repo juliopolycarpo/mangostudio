@@ -6,9 +6,9 @@
  */
 import type { Interactions } from '@google/genai';
 
-type ContentStart = Interactions.ContentStart;
-type ContentDelta = Interactions.ContentDelta;
-type FunctionCallContent = Interactions.FunctionCallContent;
+type StepStart = Interactions.StepStart;
+type StepDelta = Interactions.StepDelta;
+type FunctionCallStep = Interactions.FunctionCallStep;
 export type InteractionSSEEvent = Interactions.InteractionSSEEvent;
 type GeminiUsage = Interactions.Usage;
 type CreateModelInteractionParamsStreaming = Interactions.CreateModelInteractionParamsStreaming;
@@ -29,29 +29,83 @@ export function toInteractionParams(
 }
 
 // ---------------------------------------------------------------------------
-// Content-start narrowing
+// Step-start narrowing
 // ---------------------------------------------------------------------------
 
-/** Check whether a content.start event carries a function_call block. */
-export function isFunctionCallStart(
-  content: ContentStart['content']
-): content is FunctionCallContent {
-  return content.type === 'function_call';
+/** Check whether a step.start event opens a function_call step. */
+export function isFunctionCallStart(step: StepStart['step']): step is FunctionCallStep {
+  return step.type === 'function_call';
+}
+
+/**
+ * Extracts the text a `model_output` / `thought` step.start already carries.
+ *
+ * A `step.start` can open with the turn's first chunk already attached, with
+ * subsequent `step.delta` events continuing (not repeating) it — the
+ * documented v2 shape is concatenation, so this text is a prefix to render,
+ * not a duplicate of what the deltas will send.
+ *
+ * Usage: extractInlineStepText({ type: 'model_output', content: [{ type: 'text', text: 'Hi' }] })
+ *        -> 'Hi'
+ */
+export function extractInlineStepText(step: StepStart['step']): string {
+  const content =
+    step.type === 'model_output' ? step.content : step.type === 'thought' ? step.summary : [];
+  return (content ?? [])
+    .filter((part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text')
+    .map((part) => part.text)
+    .join('');
 }
 
 // ---------------------------------------------------------------------------
-// Content-delta narrowing
+// Interaction status narrowing
+// ---------------------------------------------------------------------------
+
+/**
+ * Interaction statuses that end a turn with no usable result, and the reason to
+ * report for each.
+ *
+ * Deliberately narrow. `incomplete` is absent because the API defines it as
+ * "completed, but contains incomplete results (e.g. hitting max_tokens)" — the
+ * output is real and the interaction is still chainable. `requires_action` is
+ * absent because it is the ordinary terminal status of a turn that called a
+ * tool and is waiting for its result. `budget_exceeded` is present because it
+ * only ever arrives on `interaction.status_update`, never on
+ * `interaction.completed`: the API halted the interaction rather than finishing
+ * it.
+ */
+const ABANDONED_INTERACTION_REASONS = new Map<string, string>([
+  ['budget_exceeded', 'Gemini halted the interaction: the token budget was exceeded.'],
+  ['cancelled', 'Gemini cancelled the interaction before it produced a result.'],
+  ['failed', 'Gemini reported that the interaction failed.'],
+]);
+
+/**
+ * Describe an interaction status that the turn must not treat as a success.
+ *
+ * Returns the reason to report, or `undefined` for any status the interaction
+ * can still be continued from.
+ *
+ * Usage: describeAbandonedInteraction('failed')
+ *        -> 'Gemini reported that the interaction failed.'
+ */
+export function describeAbandonedInteraction(status: string): string | undefined {
+  return ABANDONED_INTERACTION_REASONS.get(status);
+}
+
+// ---------------------------------------------------------------------------
+// Step-delta narrowing
 // ---------------------------------------------------------------------------
 
 export type NarrowedGeminiDelta =
   | { kind: 'thought_summary'; text: string }
   | { kind: 'text'; text: string }
-  | { kind: 'function_call'; id: string; name: string; args: Record<string, unknown> }
+  | { kind: 'arguments_delta'; arguments: string }
   | { kind: 'thought_signature' }
   | { kind: 'other' };
 
-/** Narrow a ContentDelta's delta union into a simple discriminated shape. */
-export function narrowGeminiDelta(delta: ContentDelta['delta']): NarrowedGeminiDelta {
+/** Narrow a StepDelta's delta union into a simple discriminated shape. */
+export function narrowGeminiDelta(delta: StepDelta['delta']): NarrowedGeminiDelta {
   switch (delta.type) {
     case 'thought_summary': {
       const text = delta.content && 'text' in delta.content ? delta.content.text : '';
@@ -59,13 +113,8 @@ export function narrowGeminiDelta(delta: ContentDelta['delta']): NarrowedGeminiD
     }
     case 'text':
       return { kind: 'text', text: delta.text };
-    case 'function_call':
-      return {
-        kind: 'function_call',
-        id: delta.id,
-        name: delta.name,
-        args: delta.arguments,
-      };
+    case 'arguments_delta':
+      return { kind: 'arguments_delta', arguments: delta.arguments ?? '' };
     case 'thought_signature':
       return { kind: 'thought_signature' };
     default:

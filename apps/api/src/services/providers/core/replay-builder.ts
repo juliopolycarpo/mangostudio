@@ -4,7 +4,7 @@
  *
  * Each provider needs its own format:
  * - OpenAI Responses API: input items with role + content, function_call + function_call_output
- * - Gemini Interactions: turns with role user/model, content objects, function_result
+ * - Gemini Interactions: a flat step list — user_input/model_output, function_call, function_result
  * - OpenAI-compatible (Chat Completions): ChatCompletionMessageParam with tool_calls + tool results
  *
  * Falls back to plain text when no structured parts are available (backward compatible
@@ -17,13 +17,6 @@
 import type { MessagePart } from '@mangostudio/shared/types';
 import type OpenAI from 'openai';
 import type { ChatTurnContext } from '../types';
-
-export function toGeminiFunctionResultPayload(
-  output: string,
-  isError?: boolean
-): Record<string, string> {
-  return isError ? { error: output } : { output };
-}
 
 // ---------------------------------------------------------------------------
 // OpenAI Responses API replay
@@ -103,35 +96,52 @@ export function buildOpenAIResponsesReplay(
 // ---------------------------------------------------------------------------
 
 /**
- * Builds Gemini Interactions-compatible turn array from rich history.
+ * Wraps plain text as a Gemini Interactions input or output step.
+ *
+ * @param type - `user_input` for a user turn, `model_output` for an AI turn.
+ * @param text - The turn's plain text.
+ * @returns A step carrying a single text content block.
+ *
+ * Usage: geminiTextStep('user_input', 'Hello')
+ *        -> { type: 'user_input', content: [{ type: 'text', text: 'Hello' }] }
+ */
+function geminiTextStep(
+  type: 'user_input' | 'model_output',
+  text: string
+): Record<string, unknown> {
+  return { type, content: [{ type: 'text', text }] };
+}
+
+/**
+ * Builds a Gemini Interactions step list from rich history.
+ *
+ * `@google/genai` 2.x dropped the `{ role, content }` turn from the
+ * Interactions input union; the input is now a flat list of steps.
  *
  * Structured parts are reconstructed into:
- * - { role: 'user', content: text }
- * - { role: 'model', content: text }
- * - { role: 'model', content: [{ type: 'function_call', ... }] }  (tool calls)
- * - { role: 'user', content: [{ type: 'function_result', ... }] } (tool results)
+ * - { type: 'user_input', content: [{ type: 'text', ... }] }
+ * - { type: 'model_output', content: [{ type: 'text', ... }] }
+ * - { type: 'function_call', id, name, arguments }        (tool calls)
+ * - { type: 'function_result', call_id, name, result }    (tool results)
  *
  * Falls back to plain text when parts are absent.
  */
 export function buildGeminiInteractionsReplay(
   history: ChatTurnContext[]
 ): Array<Record<string, unknown>> {
-  const turns: Array<Record<string, unknown>> = [];
+  const steps: Array<Record<string, unknown>> = [];
 
   for (const turn of history) {
     if (!turn.parts || turn.parts.length === 0) {
       if (!turn.text.trim()) continue;
-      turns.push({
-        role: turn.role === 'ai' ? 'model' : 'user',
-        content: turn.text,
-      });
+      steps.push(geminiTextStep(turn.role === 'ai' ? 'model_output' : 'user_input', turn.text));
       continue;
     }
 
     // User turns always emit plain text
     if (turn.role === 'user') {
       if (!turn.text.trim()) continue;
-      turns.push({ role: 'user', content: turn.text });
+      steps.push(geminiTextStep('user_input', turn.text));
       continue;
     }
 
@@ -148,36 +158,31 @@ export function buildGeminiInteractionsReplay(
 
     const textContent = textParts.map((p) => p.text).join('');
     if (textContent) {
-      turns.push({ role: 'model', content: textContent });
+      steps.push(geminiTextStep('model_output', textContent));
     }
 
-    if (toolCallParts.length > 0) {
-      turns.push({
-        role: 'model',
-        content: toolCallParts.map((tc) => ({
-          type: 'function_call' as const,
-          id: tc.toolCallId,
-          name: tc.name,
-          arguments: tc.args,
-        })),
+    for (const toolCall of toolCallParts) {
+      steps.push({
+        type: 'function_call',
+        id: toolCall.toolCallId,
+        name: toolCall.name,
+        arguments: toolCall.args,
       });
     }
 
-    if (toolResultParts.length > 0) {
-      turns.push({
-        role: 'user',
-        content: toolResultParts.map((tr) => ({
-          type: 'function_result' as const,
-          call_id: tr.toolCallId,
-          name: '',
-          result: toGeminiFunctionResultPayload(tr.content, tr.isError),
-          is_error: tr.isError ?? false,
-        })),
+    const toolNameByCallId = new Map(toolCallParts.map((call) => [call.toolCallId, call.name]));
+    for (const toolResult of toolResultParts) {
+      steps.push({
+        type: 'function_result',
+        call_id: toolResult.toolCallId,
+        name: toolNameByCallId.get(toolResult.toolCallId) ?? '',
+        result: toolResult.content,
+        is_error: toolResult.isError ?? false,
       });
     }
   }
 
-  return turns;
+  return steps;
 }
 
 // ---------------------------------------------------------------------------

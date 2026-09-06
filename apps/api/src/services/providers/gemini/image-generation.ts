@@ -168,12 +168,11 @@ export async function generateGeminiImage(
     config.imageConfig = { aspectRatio: '1:1' };
   }
 
-  // `config.abortSignal` only covers an abort that lands *after* dispatch: the
-  // SDK wires it with `addEventListener('abort')` onto a fresh controller and
-  // never reads `signal.aborted`, so a Stop during key resolution or the
-  // reference-image read above would be dropped and the request would run to
-  // completion. Every await between the caller's check and here is covered by
-  // checking once, at the last possible moment.
+  // `@google/genai` 2.x does read `signal.aborted` before dispatch, so this is
+  // no longer the only thing standing between a Stop and a paid request — but
+  // it is the only one this code owns. Checking once, at the last possible
+  // moment, covers every await between the caller's check and here without
+  // depending on the SDK to keep that behaviour.
   throwIfAborted(signal, 'Image generation was aborted.');
 
   const response = await ai.models.generateContent({

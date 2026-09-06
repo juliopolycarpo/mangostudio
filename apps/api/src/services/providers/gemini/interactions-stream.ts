@@ -20,10 +20,7 @@ import {
   serializeContinuationEnvelope,
 } from '../core/continuation-envelope';
 import { logProviderDegrade } from '../core/continuation-logger';
-import {
-  buildGeminiInteractionsReplay,
-  toGeminiFunctionResultPayload,
-} from '../core/replay-builder';
+import { buildGeminiInteractionsReplay } from '../core/replay-builder';
 import { toolDefsToGeminiInteractions } from '../core/tool-mapper';
 import type { AgentEvent, AgentTurnRequest } from '../types';
 import { createGeminiClient } from './client';
@@ -49,8 +46,19 @@ interface GeminiInteractionState {
 
 type GeminiInteractionInput = string | Array<Record<string, unknown>>;
 
+/**
+ * The current turn's input, before it is placed in an Interactions request.
+ *
+ * `user` carries what the user sent (plain text, or content blocks when there
+ * are attachments); `steps` carries tool results, which are already
+ * Interactions steps and must not be wrapped in a `user_input` step.
+ */
+type GeminiTurnInput =
+  | { kind: 'user'; content: GeminiInteractionInput }
+  | { kind: 'steps'; steps: Array<Record<string, unknown>> };
+
 interface BuildGeminiInteractionParamsOptions {
-  input: GeminiInteractionInput;
+  input: GeminiTurnInput;
   previousInteractionId?: string;
 }
 
@@ -75,19 +83,34 @@ function parseGeminiState(providerState: string | null | undefined): GeminiInter
   return null;
 }
 
+/** Renders the current turn on its own, without replayed history. */
+function toCurrentTurnInput(input: GeminiTurnInput): GeminiInteractionInput {
+  return input.kind === 'steps' ? input.steps : input.content;
+}
+
+/**
+ * Renders the current turn as Interactions steps so it can follow replayed
+ * history. User content becomes a `user_input` step; tool results are already
+ * steps and pass through untouched.
+ */
+function toCurrentTurnSteps(input: GeminiTurnInput): Array<Record<string, unknown>> {
+  if (input.kind === 'steps') return input.steps;
+
+  const content =
+    typeof input.content === 'string' ? [{ type: 'text', text: input.content }] : input.content;
+
+  return content.length > 0 ? [{ type: 'user_input', content }] : [];
+}
+
 function buildGeminiReplayInput(
   history: AgentTurnRequest['history'],
-  input: GeminiInteractionInput
-): GeminiInteractionInput | Array<Record<string, unknown>> {
+  input: GeminiTurnInput
+): GeminiInteractionInput {
   if (history.length === 0) {
-    return input;
+    return toCurrentTurnInput(input);
   }
 
-  const historyTurns = buildGeminiInteractionsReplay(history);
-  const currentTurn =
-    typeof input === 'string' || input.length > 0 ? [{ role: 'user', content: input }] : [];
-
-  return [...historyTurns, ...currentTurn];
+  return [...buildGeminiInteractionsReplay(history), ...toCurrentTurnSteps(input)];
 }
 
 function buildGeminiInteractionParams(
@@ -97,7 +120,7 @@ function buildGeminiInteractionParams(
   const params: Record<string, unknown> = {
     model: req.modelName,
     input: options.previousInteractionId
-      ? options.input
+      ? toCurrentTurnInput(options.input)
       : buildGeminiReplayInput(req.history, options.input),
     store: true,
     stream: true,
@@ -126,10 +149,15 @@ function buildGeminiInteractionParams(
     params.generation_config = thinkingConfig;
   }
 
+  // `@google/genai` 2.x made `response_format` a tagged object that carries its
+  // own mime type, and deprecated the sibling `response_mime_type`.
   const structured = req.generationConfig?.structuredOutput;
   if (structured) {
-    params.response_mime_type = 'application/json';
-    params.response_format = structured.schema;
+    params.response_format = {
+      type: 'text',
+      mime_type: 'application/json',
+      schema: structured.schema,
+    };
   }
 
   return params;
@@ -179,17 +207,20 @@ export async function* streamGeminiAgentTurn(
     prevState.toolsetHash === currentToolsetHash &&
     prevState.systemPromptHash === currentSystemPromptHash;
 
-  let input: GeminiInteractionInput;
+  let input: GeminiTurnInput;
   if (req.toolResults && req.toolResults.length > 0) {
-    input = req.toolResults.map((tr) => ({
-      type: 'function_result' as const,
-      call_id: tr.callId,
-      name: tr.name,
-      result: toGeminiFunctionResultPayload(tr.result, tr.isError),
-      is_error: tr.isError ?? false,
-    }));
+    input = {
+      kind: 'steps',
+      steps: req.toolResults.map((tr) => ({
+        type: 'function_result' as const,
+        call_id: tr.callId,
+        name: tr.name,
+        result: tr.result,
+        is_error: tr.isError ?? false,
+      })),
+    };
   } else if (req.prompt !== undefined || (req.attachments?.length ?? 0) > 0) {
-    input = buildGeminiInteractionInput(req);
+    input = { kind: 'user', content: buildGeminiInteractionInput(req) };
   } else {
     yield { type: 'turn_error', error: 'No input for Gemini interaction' };
     return;
@@ -331,6 +362,17 @@ export async function* processGeminiInteractionStream(
     for (const agentEvent of accumulator.mapEvent(event)) {
       yield agentEvent;
     }
+  }
+
+  // `interaction.created` captures the id before any output, so an interaction
+  // the API then abandons would otherwise mint a cursor and report a successful
+  // turn. Failing here keeps the partial output the stream already yielded and
+  // sends the turn down the loop's error path, which clears the chat's stored
+  // state — so the next turn degrades to a full replay rather than chaining
+  // onto a dead interaction.
+  if (accumulator.abandonedReason) {
+    yield { type: 'turn_error', error: accumulator.abandonedReason };
+    return;
   }
 
   if (!accumulator.interactionId) {

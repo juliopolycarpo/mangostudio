@@ -21,10 +21,12 @@ import { expectTurnCompletedEnvelope } from '../../../support/providers/contract
 import {
   chainEvents,
   completedInteractionEvent,
+  createdInteractionEvent,
   createFakeGeminiInteractionsClient,
   functionCallDeltaEvent,
   functionCallStartEvent,
   functionCallStopEvent,
+  interactionStatusEvent,
   textDeltaEvent,
   thoughtSummaryEvent,
 } from '../../../support/providers/fake-gemini-interactions';
@@ -126,7 +128,7 @@ describe('streamGeminiAgentTurn — request shape', () => {
     expect(captured?.previous_interaction_id).toBeUndefined();
     expect(captured?.input).toEqual([
       ...buildGeminiInteractionsReplay(req.history),
-      { role: 'user', content: 'New prompt' },
+      { type: 'user_input', content: [{ type: 'text', text: 'New prompt' }] },
     ]);
     expect(captured?.store).toBe(true);
     expect(capturedOptions?.signal).toBe(signal);
@@ -216,7 +218,7 @@ describe('streamGeminiAgentTurn — request shape', () => {
     ]);
   });
 
-  it('maps structured output to top-level response_format', async () => {
+  it('maps structured output to a tagged top-level response_format', async () => {
     const req = baseRequest({
       modelName: 'gemini-3-flash-preview',
       generationConfig: {
@@ -234,8 +236,12 @@ describe('streamGeminiAgentTurn — request shape', () => {
 
     await collectAgentEvents(streamGeminiAgentTurn(req, fakeClient as never));
 
-    expect(captured?.response_mime_type).toBe('application/json');
-    expect(captured?.response_format).toEqual({ type: 'object' });
+    expect(captured?.response_mime_type).toBeUndefined();
+    expect(captured?.response_format).toEqual({
+      type: 'text',
+      mime_type: 'application/json',
+      schema: { type: 'object' },
+    });
     expect(captured?.generation_config).toEqual({
       thinking_level: 'high',
       thinking_summaries: 'auto',
@@ -266,7 +272,7 @@ describe('streamGeminiAgentTurn — request shape', () => {
       type: 'function_result',
       call_id: 'call_1',
       name: 'search',
-      result: { output: '{"hits":[]}' },
+      result: '{"hits":[]}',
       is_error: false,
     });
   });
@@ -294,7 +300,10 @@ describe('streamGeminiAgentTurn — continuation matrix', () => {
     expect(captured?.previous_interaction_id).toBeUndefined();
     const input = captured?.input as Array<Record<string, unknown>>;
     expect(input.length).toBeGreaterThan(1);
-    expect(input.at(-1)).toEqual({ role: 'user', content: 'Next' });
+    expect(input.at(-1)).toEqual({
+      type: 'user_input',
+      content: [{ type: 'text', text: 'Next' }],
+    });
   });
 
   it('valid cursor chains with previous_interaction_id', async () => {
@@ -496,7 +505,8 @@ describe('streamGeminiAgentTurn — event emission', () => {
       Promise.resolve(
         chainEvents(
           functionCallStartEvent(0, 'fc_1', 'search'),
-          functionCallDeltaEvent(0, 'fc_1', 'search', { query: 'cats' }),
+          functionCallDeltaEvent(0, '{"query":'),
+          functionCallDeltaEvent(0, '"cats"}'),
           functionCallStopEvent(0),
           completedInteractionEvent('int_tools')
         )
@@ -511,14 +521,20 @@ describe('streamGeminiAgentTurn — event emission', () => {
     expect(started.callId).toBe('fc_1');
     expect(started.name).toBe('search');
 
-    const argsDelta = events.find((e) => e.type === 'tool_call_arguments_delta');
-    expect(argsDelta).toBeDefined();
+    // v2 streams argument JSON as raw string fragments, so the deltas are
+    // passed through verbatim and only reassemble at the stop event.
+    const argsDeltas = events.filter((e) => e.type === 'tool_call_arguments_delta');
+    expect(argsDeltas.map((e) => (e.type === 'tool_call_arguments_delta' ? e.delta : ''))).toEqual([
+      '{"query":',
+      '"cats"}',
+    ]);
 
     const completed = events.find((e) => e.type === 'tool_call_completed');
     expect(completed).toBeDefined();
     if (completed?.type !== 'tool_call_completed') return;
     expect(completed.callId).toBe('fc_1');
     expect(completed.name).toBe('search');
+    expect(completed.arguments).toBe('{"query":"cats"}');
   });
 });
 
@@ -541,6 +557,49 @@ describe('processGeminiInteractionStream', () => {
       provider: 'gemini',
       mode: 'interactions',
       cursor: 'int_done',
+    });
+  });
+
+  it('fails the turn when the interaction ends on an abandoned status', async () => {
+    // `interaction.created` already captured the id, so without this guard the
+    // turn reports success and mints a cursor onto an interaction the server
+    // gave up on.
+    const events: AgentEvent[] = [];
+
+    for await (const event of processGeminiInteractionStream(
+      chainEvents(
+        createdInteractionEvent('int_failed'),
+        textDeltaEvent('Partial'),
+        interactionStatusEvent('int_failed', 'failed')
+      ),
+      baseRequest()
+    )) {
+      events.push(event);
+    }
+
+    expect(events.filter((event) => event.type === 'turn_completed')).toEqual([]);
+    expect(events.at(-1)).toEqual({
+      type: 'turn_error',
+      error: 'Gemini reported that the interaction failed.',
+    });
+  });
+
+  it('still mints a cursor when the interaction completes with truncated output', async () => {
+    // `incomplete` is "completed, but contains incomplete results (e.g. hitting
+    // max_tokens)" — the output is real and the interaction is chainable.
+    const events: AgentEvent[] = [];
+
+    for await (const event of processGeminiInteractionStream(
+      completedInteractionEvent('int_truncated', 12, 'incomplete'),
+      baseRequest()
+    )) {
+      events.push(event);
+    }
+
+    expectTurnCompletedEnvelope(events, {
+      provider: 'gemini',
+      mode: 'interactions',
+      cursor: 'int_truncated',
     });
   });
 });

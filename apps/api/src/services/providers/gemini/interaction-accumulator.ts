@@ -2,16 +2,19 @@
  * Maps raw Gemini Interactions SSE events into canonical AgentEvents.
  *
  * Owns the per-turn function-call bookkeeping (calls keyed by stream index,
- * whose name and arguments may arrive incrementally across content deltas) and
- * captures the terminal interaction id and reported usage used to mint the
- * continuation envelope. Owns its diagnostic logging for cache hits and
- * unrecognised delta shapes.
+ * whose JSON arguments arrive as string fragments across step deltas) and
+ * captures the terminal interaction id, reported usage, and final status used
+ * to decide whether a continuation envelope may be minted at all. Owns its
+ * diagnostic logging for cache hits and unrecognised delta shapes.
  */
 
 import { createDiagnosticLogger } from '../../../lib/logger';
+import { safeJsonParse } from '../../../lib/safe-parse';
 import type { AgentEvent } from '../types';
 import {
+  describeAbandonedInteraction,
   extractGeminiUsage,
+  extractInlineStepText,
   type InteractionSSEEvent,
   isFunctionCallStart,
   narrowGeminiDelta,
@@ -22,8 +25,10 @@ const geminiInteractionsLogger = createDiagnosticLogger('gemini-interactions');
 interface ActiveCall {
   id: string;
   name: string;
-  args: Record<string, unknown>;
-  started: boolean;
+  /** JSON text assembled from `arguments_delta` fragments. */
+  argumentsJson: string;
+  /** Arguments already present on the opening `step.start`. */
+  initialArguments: Record<string, unknown>;
 }
 
 type ActiveCalls = Map<number, ActiveCall>;
@@ -31,10 +36,18 @@ type ActiveCalls = Map<number, ActiveCall>;
 export interface GeminiInteractionAccumulator {
   /** Maps one raw Interactions SSE event into zero or more AgentEvents. */
   mapEvent(event: InteractionSSEEvent): AgentEvent[];
-  /** Interaction id captured from `interaction.start` / `interaction.complete`. */
+  /** Interaction id captured from `interaction.created` / `interaction.completed`. */
   readonly interactionId: string | undefined;
-  /** Provider-reported input tokens captured from `interaction.complete`. */
+  /** Provider-reported input tokens captured from `interaction.completed`. */
   readonly providerReportedInputTokens: number | undefined;
+  /**
+   * Why the turn must not be reported as a success, when the last status the
+   * stream reported was one the interaction cannot be continued from.
+   *
+   * This is the surface a mapped `error` event should feed too (#1032), rather
+   * than growing a second path to the same decision.
+   */
+  readonly abandonedReason: string | undefined;
 }
 
 /** Builds an accumulator for a single Gemini Interactions stream. */
@@ -43,9 +56,16 @@ export function createGeminiInteractionAccumulator(): GeminiInteractionAccumulat
   const activeCalls: ActiveCalls = new Map();
   let interactionId: string | undefined;
   let providerReportedInputTokens: number | undefined;
+  let abandonedReason: string | undefined;
+
+  // Last status wins: every lifecycle event carries the interaction's status,
+  // so the one the stream ends on is the one that decides the turn.
+  const noteStatus = (status: string) => {
+    abandonedReason = describeAbandonedInteraction(status);
+  };
 
   const captureUsage = (
-    event: Extract<InteractionSSEEvent, { event_type: 'interaction.complete' }>
+    event: Extract<InteractionSSEEvent, { event_type: 'interaction.completed' }>
   ) => {
     interactionId = event.interaction.id;
     const usage = extractGeminiUsage(event.interaction.usage);
@@ -62,17 +82,22 @@ export function createGeminiInteractionAccumulator(): GeminiInteractionAccumulat
   return {
     mapEvent(event) {
       switch (event.event_type) {
-        case 'content.start':
-          return mapContentStart(event, activeCalls);
-        case 'content.delta':
-          return mapContentDelta(event, activeCalls);
-        case 'content.stop':
-          return mapContentStop(event, activeCalls);
-        case 'interaction.complete':
+        case 'step.start':
+          return mapStepStart(event, activeCalls);
+        case 'step.delta':
+          return mapStepDelta(event, activeCalls);
+        case 'step.stop':
+          return mapStepStop(event, activeCalls);
+        case 'interaction.completed':
+          noteStatus(event.interaction.status);
           captureUsage(event);
           return [];
-        case 'interaction.start':
+        case 'interaction.created':
+          noteStatus(event.interaction.status);
           interactionId = event.interaction.id;
+          return [];
+        case 'interaction.status_update':
+          noteStatus(event.status);
           return [];
         default:
           return [];
@@ -84,26 +109,48 @@ export function createGeminiInteractionAccumulator(): GeminiInteractionAccumulat
     get providerReportedInputTokens() {
       return providerReportedInputTokens;
     },
+    get abandonedReason() {
+      return abandonedReason;
+    },
   };
 }
 
-type ContentStartEvent = Extract<InteractionSSEEvent, { event_type: 'content.start' }>;
-type ContentDeltaEvent = Extract<InteractionSSEEvent, { event_type: 'content.delta' }>;
-type ContentStopEvent = Extract<InteractionSSEEvent, { event_type: 'content.stop' }>;
+type StepStartEvent = Extract<InteractionSSEEvent, { event_type: 'step.start' }>;
+type StepDeltaEvent = Extract<InteractionSSEEvent, { event_type: 'step.delta' }>;
+type StepStopEvent = Extract<InteractionSSEEvent, { event_type: 'step.stop' }>;
 
-function mapContentStart(event: ContentStartEvent, activeCalls: ActiveCalls): AgentEvent[] {
-  if (!isFunctionCallStart(event.content)) return [];
-  const callId = event.content.id || `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const name = event.content.name;
-  const call: ActiveCall = { id: callId, name, args: {}, started: false };
+function mapStepStart(event: StepStartEvent, activeCalls: ActiveCalls): AgentEvent[] {
+  if (!isFunctionCallStart(event.step)) {
+    // A `model_output` / `thought` step.start can open with the turn's first
+    // chunk already attached; step.delta continues it rather than repeating
+    // it, so this text is a prefix to render, not a duplicate to drop.
+    const text = extractInlineStepText(event.step);
+    if (!text) return [];
+    return event.step.type === 'thought'
+      ? [{ type: 'reasoning_delta', text }]
+      : [{ type: 'assistant_text_delta', text }];
+  }
+
+  const callId = event.step.id || `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const name = event.step.name;
+  const call: ActiveCall = {
+    id: callId,
+    name,
+    argumentsJson: '',
+    initialArguments: event.step.arguments ?? {},
+  };
   activeCalls.set(event.index, call);
 
-  if (!name) return [];
-  call.started = true;
-  return [{ type: 'tool_call_started', callId, name }];
+  // v2 makes `name` required on FunctionCallStep and no longer repeats it in
+  // the deltas, so a nameless call can never be named later. Announce it
+  // anyway: `tool_call_started` is what opens the consumer's pending-call
+  // entry, and without it every `arguments_delta` for this call is dropped
+  // while `step.stop` still completes it. `name` is optional on the event for
+  // exactly this case — the same shape the chat-completions accumulator uses.
+  return [{ type: 'tool_call_started', callId, name: name || undefined }];
 }
 
-function mapContentDelta(event: ContentDeltaEvent, activeCalls: ActiveCalls): AgentEvent[] {
+function mapStepDelta(event: StepDeltaEvent, activeCalls: ActiveCalls): AgentEvent[] {
   const delta = narrowGeminiDelta(event.delta);
   if (delta.kind === 'thought_summary') {
     return delta.text ? [{ type: 'reasoning_delta', text: delta.text }] : [];
@@ -111,8 +158,8 @@ function mapContentDelta(event: ContentDeltaEvent, activeCalls: ActiveCalls): Ag
   if (delta.kind === 'text') {
     return [{ type: 'assistant_text_delta', text: delta.text }];
   }
-  if (delta.kind === 'function_call') {
-    return mapFunctionCallDelta(event.index, delta, activeCalls);
+  if (delta.kind === 'arguments_delta') {
+    return mapArgumentsDelta(event.index, delta.arguments, activeCalls);
   }
   if (delta.kind !== 'thought_signature') {
     geminiInteractionsLogger.warn('unknown_delta_type', { delta: event.delta });
@@ -120,30 +167,59 @@ function mapContentDelta(event: ContentDeltaEvent, activeCalls: ActiveCalls): Ag
   return [];
 }
 
-function mapFunctionCallDelta(
+function mapArgumentsDelta(
   index: number,
-  delta: Extract<ReturnType<typeof narrowGeminiDelta>, { kind: 'function_call' }>,
+  fragment: string,
   activeCalls: ActiveCalls
 ): AgentEvent[] {
   const call = activeCalls.get(index);
-  if (!call) return [];
-
-  const events: AgentEvent[] = [];
-  if (delta.name && !call.name) call.name = delta.name;
-  if (!call.started && call.name) {
-    call.started = true;
-    events.push({ type: 'tool_call_started', callId: call.id, name: call.name });
+  if (!call) {
+    // v2 moved every argument byte into the deltas, so an unmatched fragment
+    // is a whole tool call lost rather than a partial update missed.
+    geminiInteractionsLogger.warn('orphan_arguments_delta', { index });
+    return [];
   }
-  Object.assign(call.args, delta.args);
-  events.push({
-    type: 'tool_call_arguments_delta',
-    callId: call.id,
-    delta: JSON.stringify(delta.args),
-  });
-  return events;
+  if (!fragment) return [];
+
+  call.argumentsJson += fragment;
+  return [{ type: 'tool_call_arguments_delta', callId: call.id, delta: fragment }];
 }
 
-function mapContentStop(event: ContentStopEvent, activeCalls: ActiveCalls): AgentEvent[] {
+/** Cap on the argument text echoed into a diagnostic; calls carry file bodies. */
+const ARGUMENTS_DIAGNOSTIC_PREVIEW_CHARS = 200;
+
+/**
+ * Resolves the call's final argument JSON.
+ *
+ * `step.stop` carries no payload, so the arguments are whatever the
+ * `arguments_delta` fragments assembled. A call whose arguments were sent
+ * whole on `step.start` streams no fragments at all, and a truncated stream
+ * leaves an unusable buffer; both fall back to the opening arguments.
+ *
+ * The buffer is validated with `safeJsonParse` rather than a bare `JSON.parse`
+ * so it has to be a JSON *object*: a fragment stream that reassembles into an
+ * array, a bare string or `null` parses fine but is not an argument map, and
+ * passing it on would drop the `step.start` fallback for a `{}` the consumer
+ * silently substitutes downstream.
+ *
+ * Usage: resolveCallArguments({ id: 'fc_1', name: 'search', argumentsJson: '{"q":1}', initialArguments: {} })
+ *        -> '{"q":1}'
+ */
+function resolveCallArguments(call: ActiveCall): string {
+  const buffered = call.argumentsJson.trim();
+  if (!buffered) return JSON.stringify(call.initialArguments);
+  if (safeJsonParse(buffered)) return buffered;
+
+  geminiInteractionsLogger.warn('unusable_arguments_delta', {
+    callId: call.id,
+    name: call.name,
+    bufferedChars: buffered.length,
+    bufferedPreview: buffered.slice(0, ARGUMENTS_DIAGNOSTIC_PREVIEW_CHARS),
+  });
+  return JSON.stringify(call.initialArguments);
+}
+
+function mapStepStop(event: StepStopEvent, activeCalls: ActiveCalls): AgentEvent[] {
   const call = activeCalls.get(event.index);
   if (!call) return [];
   activeCalls.delete(event.index);
@@ -152,7 +228,7 @@ function mapContentStop(event: ContentStopEvent, activeCalls: ActiveCalls): Agen
       type: 'tool_call_completed',
       callId: call.id,
       name: call.name,
-      arguments: JSON.stringify(call.args),
+      arguments: resolveCallArguments(call),
     },
   ];
 }
