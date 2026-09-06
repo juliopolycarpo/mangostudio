@@ -187,8 +187,9 @@ describe('parseDoctorArgs', () => {
     expect(() => parseDoctorArgs(['--bogus'])).toThrow(CliError);
   });
 
-  // Removed with the Cursor sidecar it probed. Asserted rather than assumed: a
-  // silently accepted no-op flag would read as a probe that ran and passed.
+  // Removed with the MangoStudio-owned Cursor provider it probed. Asserted
+  // rather than assumed: a silently accepted no-op flag would read as a probe
+  // that ran and passed.
   it('rejects the removed --cursor-probe flag', () => {
     expect(() => parseDoctorArgs(['--cursor-probe'])).toThrow(CliError);
   });

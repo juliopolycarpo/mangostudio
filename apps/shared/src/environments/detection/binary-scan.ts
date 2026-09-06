@@ -29,7 +29,7 @@ export interface RuntimeDefinition {
    */
   readonly keepUnparsedVersion?: boolean;
   readonly wellKnownDirs: (env: PathEnv) => readonly string[];
-  /** Retains the sidecar detector's final OS-resolved fallback. */
+  /** Also probes the bare binary name, as a final OS-resolved fallback. */
   readonly includeBareBinaryNames?: boolean;
 }
 
@@ -59,9 +59,10 @@ export interface BinaryScanDeps extends PathEnv {
   /**
    * Stops the scan once a probed version satisfies the caller. Candidates are
    * handed out in PATH order, so every candidate ahead of the match has already
-   * started and is still awaited — only strictly later ones are skipped. Gate
-   * consumers (the sidecar detector) set this to keep their first-match cost;
-   * duplicate analysis leaves it unset because it needs the full list.
+   * started and is still awaited — only strictly later ones are skipped. A
+   * caller that only needs to know whether a satisfying version exists sets
+   * this to keep its cost down; duplicate analysis leaves it unset because it
+   * needs the full list.
    */
   readonly stopWhen?: (version: string) => boolean;
 }

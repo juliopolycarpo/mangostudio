@@ -481,9 +481,9 @@ export async function* emitAgentStreamEvent(
       break;
 
     case 'tool_result': {
-      // Only providers that run their own tool loop (e.g. Cursor's sidecar)
-      // emit tool_result; the result marks the call satisfied so the
-      // orchestrator must not re-execute it.
+      // Only providers that run their own tool loop emit tool_result; the
+      // result marks the call satisfied so the orchestrator must not
+      // re-execute it.
       if (!resolvedModel.capabilities?.internalAgentTools) break;
       loop.inThinkingSegment = false;
       const satisfiedCall = loop.pendingCalls.get(event.callId);

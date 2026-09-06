@@ -61,7 +61,7 @@ async function collect(
   return emitted;
 }
 
-const CURSOR_CAPABILITIES: ModelCapabilities = {
+const INTERNAL_TOOL_LOOP_CAPABILITIES: ModelCapabilities = {
   text: true,
   image: false,
   streaming: true,
@@ -71,7 +71,7 @@ const CURSOR_CAPABILITIES: ModelCapabilities = {
 
 describe('emitAgentStreamEvent — provider-supplied tool_result', () => {
   it('marks the pending call satisfied and persists tool_call/tool_result parts', async () => {
-    const session = makeSession(CURSOR_CAPABILITIES);
+    const session = makeSession(INTERNAL_TOOL_LOOP_CAPABILITIES);
     const loop = makeLoopState();
 
     const emitted = await collect(session, loop, [
@@ -95,7 +95,7 @@ describe('emitAgentStreamEvent — provider-supplied tool_result', () => {
   });
 
   it('persists a tool_result part even when no pending call matches', async () => {
-    const session = makeSession(CURSOR_CAPABILITIES);
+    const session = makeSession(INTERNAL_TOOL_LOOP_CAPABILITIES);
     const loop = makeLoopState();
 
     const emitted = await collect(session, loop, [
@@ -109,7 +109,7 @@ describe('emitAgentStreamEvent — provider-supplied tool_result', () => {
   });
 
   it('ignores tool_result events from providers without internalAgentTools', async () => {
-    const session = makeSession({ ...CURSOR_CAPABILITIES, internalAgentTools: false });
+    const session = makeSession({ ...INTERNAL_TOOL_LOOP_CAPABILITIES, internalAgentTools: false });
     const loop = makeLoopState();
 
     const emitted = await collect(session, loop, [

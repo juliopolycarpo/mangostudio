@@ -375,13 +375,14 @@ describe('config precedence', () => {
     expect(loadConfig(TMP_TOML).environments.container).toBe(true);
   });
 
-  // The `[cursor]` section went with the Node sidecar. A TOML key nothing reads
-  // must not look like it still works, and an unknown section is ignored rather
-  // than rejected — so this asserts the ignoring, not an error.
+  // The `[cursor]` section went with the MangoStudio-owned Cursor provider. A
+  // TOML key nothing reads must not look like it still works, and an unknown
+  // section is ignored rather than rejected — so this asserts the ignoring, not
+  // an error.
   test('ignores a leftover [cursor] section without failing to load', () => {
     writeFileSync(
       TMP_TOML,
-      '[cursor]\nsidecar_script = "/tmp/custom-run-agent.mjs"\nnode_path = "/opt/node22/bin/node"\n'
+      '[cursor]\nworkspace_dir = "/tmp/project"\nnode_path = "/opt/node22/bin/node"\n'
     );
 
     const cfg = loadConfig(TMP_TOML);
