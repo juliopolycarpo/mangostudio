@@ -46,6 +46,9 @@ export function isFunctionCallStart(step: StepStart['step']): step is FunctionCa
  * this accumulator renders from are not coming. Callers use this to raise a
  * diagnostic, not to render — emitting here too would double every token in
  * the normal streaming case.
+ *
+ * Usage: hasInlineStepContent({ type: 'model_output', content: [{ type: 'text', text: 'Hi' }] })
+ *        -> true
  */
 export function hasInlineStepContent(step: StepStart['step']): boolean {
   if (step.type === 'model_output') return (step.content?.length ?? 0) > 0;
