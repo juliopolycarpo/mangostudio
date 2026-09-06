@@ -17,9 +17,10 @@
  * two and every write against it fails with `EPERM` until it lets go.
  */
 
-import { rename, rmdir, symlink, readlink as systemReadlink, unlink } from 'node:fs/promises';
+import { rename, rm, rmdir, symlink, readlink as systemReadlink, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RUNTIME_CURRENT_LINK_NAME } from '@mangostudio/shared/runtime-home';
+import { RUNTIME_UPDATE_LOCK_FILE } from './slot-update-lock';
 
 /** Attempts, and the backoff between them, for a write a scanner may be blocking. */
 const SLOT_WRITE_RETRY_ATTEMPTS = 5;
@@ -176,6 +177,45 @@ export async function restoreSlotCurrent(
     previousTarget,
     `.${RUNTIME_CURRENT_LINK_NAME}.rollback.${stageId}`,
     options
+  );
+}
+
+/**
+ * Removes every version directory but the two that are still in use.
+ *
+ * The previous one stays because a process launched through the old pointer is
+ * executing out of it — on Windows the filesystem enforces that, and on POSIX
+ * the open inode survives a delete but the directory a `doctor` reports would
+ * not. Everything else is a version an earlier publication superseded.
+ * // Usage: await pruneSlotVersions(slotDir, '1.2.0', '1.1.0')
+ */
+export async function pruneSlotVersions(
+  slotDir: string,
+  currentVersion: string,
+  previousVersion: string | null
+): Promise<void> {
+  const entries = await Array.fromAsync(new Bun.Glob('*').scan({ cwd: slotDir, onlyFiles: false }));
+  await Promise.all(
+    entries
+      .filter(
+        (entry) =>
+          entry !== currentVersion &&
+          entry !== previousVersion &&
+          entry !== RUNTIME_CURRENT_LINK_NAME &&
+          !entry.endsWith('.json') &&
+          !entry.endsWith('.lock') &&
+          // `runtime-update.lock.reclaim` ends in neither, and unlinking another
+          // process's reclaim guard mid-flight lets two of them reclaim the same
+          // lock. Prefix rather than suffix so every file the lock owns is kept.
+          !entry.startsWith(RUNTIME_UPDATE_LOCK_FILE)
+      )
+      // Per entry, not per batch: Windows refuses to delete a directory holding
+      // a running executable, and one refusal used to abandon every other
+      // removal in the same `Promise.all`. Pruning is housekeeping — the next
+      // publication sweeps whatever this leaves behind.
+      .map((entry) =>
+        rm(join(slotDir, entry), { recursive: true, force: true }).catch(() => undefined)
+      )
   );
 }
 
