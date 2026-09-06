@@ -15,6 +15,9 @@ describe('createLocalRuntimeManifest', () => {
     expect(manifest.features.tools).toBe(true);
     expect(manifest.features.toolchain).toBe(true);
     expect(manifest.enforcesPathPolicy).toBe(true);
+    // The hub's win32 upgrade gate reads this and nothing else; a peer that
+    // stays silent is treated as one that refuses Windows publication.
+    expect(manifest.publishesWindowsSlot).toBe(true);
     expect(manifest.directoryHashDomain).toBe(directoryHashDomainVersion());
     // A shell binary is what CI actually has, so this is asserted as agreement
     // with `supportsPty()` rather than a hard-coded `true`.

@@ -521,6 +521,7 @@ export function createRuntimeLifecycleService(
           ? {
               enforcesPathPolicy: status.manifest?.enforcesPathPolicy === true,
               directoryHashDomain: directoryHashDomainOf(status.manifest?.directoryHashDomain),
+              publishesWindowsSlot: status.manifest?.publishesWindowsSlot === true,
             }
           : {}),
       });
@@ -568,6 +569,7 @@ export function createRuntimeLifecycleService(
           health: cached.health,
           connected: status.state === 'connected',
           managedPush: !sshCustomPath,
+          publishesWindowsSlot: status.manifest?.publishesWindowsSlot === true,
         });
 
       if (!canPushOutOfBand && !canUpdateLive) {
@@ -628,6 +630,7 @@ export function createRuntimeLifecycleService(
               environmentId,
               transportKind: record.transportKind,
               health: cached.health,
+              publishesWindowsSlot: status.manifest?.publishesWindowsSlot === true,
               manager,
               loadRuntimeAsset,
               stream,
@@ -846,6 +849,8 @@ interface LiveUpdateInput {
   readonly environmentId: string;
   readonly transportKind: EnvironmentTransportKind;
   readonly health: RuntimeHealthReport;
+  /** Whether the connected peer declared Windows slot publication. */
+  readonly publishesWindowsSlot: boolean;
   readonly manager: RuntimeConnectionManager;
   readonly loadRuntimeAsset: (
     platformId: string,
@@ -856,9 +861,9 @@ interface LiveUpdateInput {
 }
 
 async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
-  if (input.health.platform === 'win32') {
+  if (input.health.platform === 'win32' && !input.publishesWindowsSlot) {
     throw new RuntimeLifecycleUnavailableError(
-      'Live runtime update is currently available only for POSIX runtime slots.',
+      'This Windows runtime is too old to publish a slot in place. Upgrade it with "mangostudio-runtime install" from a newer download, then live updates work from here.',
       409
     );
   }

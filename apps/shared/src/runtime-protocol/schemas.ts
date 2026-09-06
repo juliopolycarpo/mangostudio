@@ -202,6 +202,20 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
    */
   enforcesPathPolicy: Type.Optional(Type.Boolean()),
   /**
+   * Whether this runtime can publish new slot bytes on Windows.
+   *
+   * Live update refused win32 outright until side-by-side version directories
+   * gained a junction pointer, and a hub cannot tell the two builds apart from
+   * a version string alone — a peer can be older than the hub talking to it.
+   * Without this the environment card would offer an upgrade that the far side
+   * refuses the instant somebody presses it.
+   *
+   * Absent means **false**, like {@link enforcesPathPolicy} and unlike the
+   * `features` keys. Meaningless off Windows, where publication never needed a
+   * declaration, and read only when `platform` is `win32`.
+   */
+  publishesWindowsSlot: Type.Optional(Type.Boolean()),
+  /**
    * Which directory-hash domain this runtime computes. A version, not a boolean:
    * the domain is monotonic and will move again, and a v3 must not need a new
    * field.

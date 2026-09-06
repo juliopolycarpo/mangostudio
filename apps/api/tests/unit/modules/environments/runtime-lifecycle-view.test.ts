@@ -196,7 +196,9 @@ describe('buildRuntimeLifecycleView', () => {
     });
     expect(disconnected.actions).toEqual([]);
 
-    const windows = buildRuntimeLifecycleView({
+    // A Windows peer that never declared slot publication is one built before
+    // it existed: it would refuse the transfer the click starts.
+    const silentWindows = buildRuntimeLifecycleView({
       transportKind: 'http',
       health: health({
         slot: 'remote',
@@ -207,7 +209,21 @@ describe('buildRuntimeLifecycleView', () => {
       connected: true,
       nowMs: 2_000,
     });
-    expect(windows.actions).toEqual([]);
+    expect(silentWindows.actions).toEqual([]);
+
+    const windows = buildRuntimeLifecycleView({
+      transportKind: 'http',
+      health: health({
+        slot: 'remote',
+        runtimeVersion: '0.0.1-old',
+        platform: 'win32',
+      }),
+      readAtMs: 1_000,
+      connected: true,
+      nowMs: 2_000,
+      publishesWindowsSlot: true,
+    });
+    expect(windows.actions).toEqual(['upgrade']);
 
     const bundled = buildRuntimeLifecycleView({
       transportKind: 'websocket',

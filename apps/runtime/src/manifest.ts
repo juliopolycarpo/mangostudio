@@ -93,6 +93,10 @@ export function createLocalRuntimeManifest(
     // inferred from the version, because the hub's alternative is to assume —
     // and assuming enforcement is the failure this field exists to prevent.
     enforcesPathPolicy: true,
+    // This build publishes a Windows slot through a directory junction, so a
+    // hub may offer it the same live upgrade it offers a POSIX peer. Stated
+    // rather than inferred from the version: a peer can be older than the hub.
+    publishesWindowsSlot: true,
     // Derived from the domain string this build actually hashes with, so a
     // later v3 cannot advertise v2 while computing v3. File hashes are
     // unversioned; only the directory domain moved.
