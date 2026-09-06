@@ -45,6 +45,26 @@ const V2_EVENT_FRAMES = [
   },
 ];
 
+/** A v2 SSE body whose step.start opens with the turn's first chunk already attached. */
+const INLINE_PREFIX_EVENT_FRAMES = [
+  { event_type: 'interaction.created', interaction: { id: 'int_prefix', status: 'in_progress' } },
+  {
+    event_type: 'step.start',
+    index: 0,
+    step: { type: 'model_output', content: [{ type: 'text', text: 'Once upon' }] },
+  },
+  { event_type: 'step.delta', index: 0, delta: { type: 'text', text: ' a time...' } },
+  { event_type: 'step.stop', index: 0 },
+  {
+    event_type: 'interaction.completed',
+    interaction: {
+      id: 'int_prefix',
+      status: 'completed',
+      usage: { total_input_tokens: 12, total_cached_tokens: 0 },
+    },
+  },
+];
+
 /** A v2 SSE body whose interaction is abandoned rather than completed. */
 const ABANDONED_EVENT_FRAMES = [
   { event_type: 'interaction.created', interaction: { id: 'int_gone', status: 'in_progress' } },
@@ -254,6 +274,20 @@ describe('Gemini Interactions wire contract', () => {
         name: 'search',
         arguments: '{"query":"cats"}',
       },
+      { type: 'turn_completed', providerState: expect.any(String) },
+    ]);
+  });
+
+  it('renders the prefix a step.start carries inline, then its continuation, without doubling', async () => {
+    const server = startServer(INLINE_PREFIX_EVENT_FRAMES);
+
+    const events: AgentEvent[] = await collectAgentEvents(
+      streamGeminiAgentTurn(baseRequest(), server.client)
+    );
+
+    expect(events).toEqual([
+      { type: 'assistant_text_delta', text: 'Once upon' },
+      { type: 'assistant_text_delta', text: ' a time...' },
       { type: 'turn_completed', providerState: expect.any(String) },
     ]);
   });

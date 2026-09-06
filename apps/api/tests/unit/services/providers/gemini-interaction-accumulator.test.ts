@@ -186,7 +186,7 @@ describe('createGeminiInteractionAccumulator', () => {
     ).toEqual([]);
   });
 
-  it('does not render a model_output step that arrives already populated', () => {
+  it('renders the prefix a model_output step.start already carries', () => {
     const accumulator = createGeminiInteractionAccumulator();
 
     expect(
@@ -194,8 +194,38 @@ describe('createGeminiInteractionAccumulator', () => {
         event({
           event_type: 'step.start',
           index: 0,
-          step: { type: 'model_output', content: [{ type: 'text', text: 'Whole answer.' }] },
+          step: { type: 'model_output', content: [{ type: 'text', text: 'Once upon' }] },
         })
+      )
+    ).toEqual([{ type: 'assistant_text_delta', text: 'Once upon' }]);
+
+    expect(
+      accumulator.mapEvent(
+        event({ event_type: 'step.delta', index: 0, delta: { type: 'text', text: ' a time...' } })
+      )
+    ).toEqual([{ type: 'assistant_text_delta', text: ' a time...' }]);
+  });
+
+  it('renders the prefix a thought step.start already carries', () => {
+    const accumulator = createGeminiInteractionAccumulator();
+
+    expect(
+      accumulator.mapEvent(
+        event({
+          event_type: 'step.start',
+          index: 0,
+          step: { type: 'thought', summary: [{ type: 'text', text: 'Thinking' }] },
+        })
+      )
+    ).toEqual([{ type: 'reasoning_delta', text: 'Thinking' }]);
+  });
+
+  it('does not render an empty model_output step.start', () => {
+    const accumulator = createGeminiInteractionAccumulator();
+
+    expect(
+      accumulator.mapEvent(
+        event({ event_type: 'step.start', index: 0, step: { type: 'model_output', content: [] } })
       )
     ).toEqual([]);
   });

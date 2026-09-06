@@ -38,22 +38,23 @@ export function isFunctionCallStart(step: StepStart['step']): step is FunctionCa
 }
 
 /**
- * Check whether a step.start event already carries model-visible content.
+ * Extracts the text a `model_output` / `thought` step.start already carries.
  *
- * A streaming turn delivers assistant text and thought summaries through
- * step.delta, so a `model_output` / `thought` step that arrives already
- * populated means the server switched to whole-step delivery and the deltas
- * this accumulator renders from are not coming. Callers use this to raise a
- * diagnostic, not to render — emitting here too would double every token in
- * the normal streaming case.
+ * A `step.start` can open with the turn's first chunk already attached, with
+ * subsequent `step.delta` events continuing (not repeating) it — the
+ * documented v2 shape is concatenation, so this text is a prefix to render,
+ * not a duplicate of what the deltas will send.
  *
- * Usage: hasInlineStepContent({ type: 'model_output', content: [{ type: 'text', text: 'Hi' }] })
- *        -> true
+ * Usage: extractInlineStepText({ type: 'model_output', content: [{ type: 'text', text: 'Hi' }] })
+ *        -> 'Hi'
  */
-export function hasInlineStepContent(step: StepStart['step']): boolean {
-  if (step.type === 'model_output') return (step.content?.length ?? 0) > 0;
-  if (step.type === 'thought') return (step.summary?.length ?? 0) > 0;
-  return false;
+export function extractInlineStepText(step: StepStart['step']): string {
+  const content =
+    step.type === 'model_output' ? step.content : step.type === 'thought' ? step.summary : [];
+  return (content ?? [])
+    .filter((part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text')
+    .map((part) => part.text)
+    .join('');
 }
 
 // ---------------------------------------------------------------------------

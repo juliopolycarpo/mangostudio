@@ -14,7 +14,7 @@ import type { AgentEvent } from '../types';
 import {
   describeAbandonedInteraction,
   extractGeminiUsage,
-  hasInlineStepContent,
+  extractInlineStepText,
   type InteractionSSEEvent,
   isFunctionCallStart,
   narrowGeminiDelta,
@@ -121,16 +121,14 @@ type StepStopEvent = Extract<InteractionSSEEvent, { event_type: 'step.stop' }>;
 
 function mapStepStart(event: StepStartEvent, activeCalls: ActiveCalls): AgentEvent[] {
   if (!isFunctionCallStart(event.step)) {
-    // Assistant text and thought summaries are rendered from step.delta only.
-    // A pre-populated step means the deltas are not coming — surface it rather
-    // than silently dropping a turn's visible output.
-    if (hasInlineStepContent(event.step)) {
-      geminiInteractionsLogger.warn('inline_step_content', {
-        index: event.index,
-        stepType: event.step.type,
-      });
-    }
-    return [];
+    // A `model_output` / `thought` step.start can open with the turn's first
+    // chunk already attached; step.delta continues it rather than repeating
+    // it, so this text is a prefix to render, not a duplicate to drop.
+    const text = extractInlineStepText(event.step);
+    if (!text) return [];
+    return event.step.type === 'thought'
+      ? [{ type: 'reasoning_delta', text }]
+      : [{ type: 'assistant_text_delta', text }];
   }
 
   const callId = event.step.id || `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;

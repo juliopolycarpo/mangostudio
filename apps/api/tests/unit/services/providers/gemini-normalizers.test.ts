@@ -3,7 +3,7 @@ import type { Interactions } from '@google/genai';
 import {
   describeAbandonedInteraction,
   extractGeminiUsage,
-  hasInlineStepContent,
+  extractInlineStepText,
   isFunctionCallStart,
   narrowGeminiDelta,
   toInteractionParams,
@@ -39,27 +39,46 @@ describe('isFunctionCallStart', () => {
 });
 
 // ---------------------------------------------------------------------------
-// hasInlineStepContent
+// extractInlineStepText
 // ---------------------------------------------------------------------------
 
-describe('hasInlineStepContent', () => {
-  it('detects a model_output step that already carries content', () => {
+describe('extractInlineStepText', () => {
+  it('extracts text from a model_output step that already carries content', () => {
     const step = mockStep({ type: 'model_output', content: [{ type: 'text', text: 'Hi' }] });
-    expect(hasInlineStepContent(step)).toBe(true);
+    expect(extractInlineStepText(step)).toBe('Hi');
   });
 
-  it('detects a thought step that already carries a summary', () => {
+  it('extracts text from a thought step that already carries a summary', () => {
     const step = mockStep({ type: 'thought', summary: [{ type: 'text', text: 'Hmm' }] });
-    expect(hasInlineStepContent(step)).toBe(true);
+    expect(extractInlineStepText(step)).toBe('Hmm');
   });
 
-  it('returns false for an empty model_output step', () => {
-    expect(hasInlineStepContent(mockStep({ type: 'model_output' }))).toBe(false);
+  it('joins multiple text parts', () => {
+    const step = mockStep({
+      type: 'model_output',
+      content: [
+        { type: 'text', text: 'Once upon' },
+        { type: 'text', text: ' a time' },
+      ],
+    });
+    expect(extractInlineStepText(step)).toBe('Once upon a time');
   });
 
-  it('returns false for a function_call step', () => {
+  it('ignores non-text content parts', () => {
+    const step = mockStep({
+      type: 'model_output',
+      content: [{ type: 'image', image: {} }],
+    });
+    expect(extractInlineStepText(step)).toBe('');
+  });
+
+  it('returns empty for an empty model_output step', () => {
+    expect(extractInlineStepText(mockStep({ type: 'model_output' }))).toBe('');
+  });
+
+  it('returns empty for a function_call step', () => {
     const step = mockStep({ type: 'function_call', id: 'c', name: 'n', arguments: {} });
-    expect(hasInlineStepContent(step)).toBe(false);
+    expect(extractInlineStepText(step)).toBe('');
   });
 });
 
