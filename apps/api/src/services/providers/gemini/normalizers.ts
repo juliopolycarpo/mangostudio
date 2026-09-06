@@ -57,6 +57,42 @@ export function hasInlineStepContent(step: StepStart['step']): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Interaction status narrowing
+// ---------------------------------------------------------------------------
+
+/**
+ * Interaction statuses that end a turn with no usable result, and the reason to
+ * report for each.
+ *
+ * Deliberately narrow. `incomplete` is absent because the API defines it as
+ * "completed, but contains incomplete results (e.g. hitting max_tokens)" — the
+ * output is real and the interaction is still chainable. `requires_action` is
+ * absent because it is the ordinary terminal status of a turn that called a
+ * tool and is waiting for its result. `budget_exceeded` is present because it
+ * only ever arrives on `interaction.status_update`, never on
+ * `interaction.completed`: the API halted the interaction rather than finishing
+ * it.
+ */
+const ABANDONED_INTERACTION_REASONS = new Map<string, string>([
+  ['budget_exceeded', 'Gemini halted the interaction: the token budget was exceeded.'],
+  ['cancelled', 'Gemini cancelled the interaction before it produced a result.'],
+  ['failed', 'Gemini reported that the interaction failed.'],
+]);
+
+/**
+ * Describe an interaction status that the turn must not treat as a success.
+ *
+ * Returns the reason to report, or `undefined` for any status the interaction
+ * can still be continued from.
+ *
+ * Usage: describeAbandonedInteraction('failed')
+ *        -> 'Gemini reported that the interaction failed.'
+ */
+export function describeAbandonedInteraction(status: string): string | undefined {
+  return ABANDONED_INTERACTION_REASONS.get(status);
+}
+
+// ---------------------------------------------------------------------------
 // Step-delta narrowing
 // ---------------------------------------------------------------------------
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { Interactions } from '@google/genai';
 import {
+  describeAbandonedInteraction,
   extractGeminiUsage,
   hasInlineStepContent,
   isFunctionCallStart,
@@ -158,5 +159,36 @@ describe('extractGeminiUsage', () => {
       cachedTokens: 0,
       totalInputTokens: 200,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// describeAbandonedInteraction
+// ---------------------------------------------------------------------------
+
+describe('describeAbandonedInteraction', () => {
+  it('describes each status the interaction cannot be continued from', () => {
+    expect(describeAbandonedInteraction('failed')).toBe(
+      'Gemini reported that the interaction failed.'
+    );
+    expect(describeAbandonedInteraction('cancelled')).toBe(
+      'Gemini cancelled the interaction before it produced a result.'
+    );
+    expect(describeAbandonedInteraction('budget_exceeded')).toBe(
+      'Gemini halted the interaction: the token budget was exceeded.'
+    );
+  });
+
+  it.each(['in_progress', 'queued', 'requires_action', 'incomplete', 'completed'])(
+    'returns undefined for the continuable status %s',
+    (status) => {
+      expect(describeAbandonedInteraction(status)).toBeUndefined();
+    }
+  );
+
+  it('returns undefined for a status the SDK union does not name', () => {
+    // The status field is `... | (string & {})`, so an unrecognised value must
+    // not be read as a failure.
+    expect(describeAbandonedInteraction('some_future_status')).toBeUndefined();
   });
 });

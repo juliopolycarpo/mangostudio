@@ -367,6 +367,15 @@ export async function* processGeminiInteractionStream(
     }
   }
 
+  // `interaction.created` captures the id before any output, so an interaction
+  // the API then abandons would otherwise mint a cursor and report a successful
+  // turn. Failing here keeps the partial output and leaves the previous cursor
+  // in place instead of chaining onto a dead interaction.
+  if (accumulator.abandonedReason) {
+    yield { type: 'turn_error', error: accumulator.abandonedReason };
+    return;
+  }
+
   if (!accumulator.interactionId) {
     yield { type: 'turn_error', error: 'No interaction ID returned from Gemini streaming' };
     return;

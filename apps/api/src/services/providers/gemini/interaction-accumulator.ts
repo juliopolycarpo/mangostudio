@@ -3,15 +3,16 @@
  *
  * Owns the per-turn function-call bookkeeping (calls keyed by stream index,
  * whose JSON arguments arrive as string fragments across step deltas) and
- * captures the terminal interaction id and reported usage used to mint the
- * continuation envelope. Owns its diagnostic logging for cache hits and
- * unrecognised delta shapes.
+ * captures the terminal interaction id, reported usage, and final status used
+ * to decide whether a continuation envelope may be minted at all. Owns its
+ * diagnostic logging for cache hits and unrecognised delta shapes.
  */
 
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { safeJsonParse } from '../../../lib/safe-parse';
 import type { AgentEvent } from '../types';
 import {
+  describeAbandonedInteraction,
   extractGeminiUsage,
   hasInlineStepContent,
   type InteractionSSEEvent,
@@ -39,6 +40,14 @@ export interface GeminiInteractionAccumulator {
   readonly interactionId: string | undefined;
   /** Provider-reported input tokens captured from `interaction.completed`. */
   readonly providerReportedInputTokens: number | undefined;
+  /**
+   * Why the turn must not be reported as a success, when the last status the
+   * stream reported was one the interaction cannot be continued from.
+   *
+   * This is the surface a mapped `error` event should feed too (#1032), rather
+   * than growing a second path to the same decision.
+   */
+  readonly abandonedReason: string | undefined;
 }
 
 /** Builds an accumulator for a single Gemini Interactions stream. */
@@ -47,6 +56,13 @@ export function createGeminiInteractionAccumulator(): GeminiInteractionAccumulat
   const activeCalls: ActiveCalls = new Map();
   let interactionId: string | undefined;
   let providerReportedInputTokens: number | undefined;
+  let abandonedReason: string | undefined;
+
+  // Last status wins: every lifecycle event carries the interaction's status,
+  // so the one the stream ends on is the one that decides the turn.
+  const noteStatus = (status: string) => {
+    abandonedReason = describeAbandonedInteraction(status);
+  };
 
   const captureUsage = (
     event: Extract<InteractionSSEEvent, { event_type: 'interaction.completed' }>
@@ -73,10 +89,15 @@ export function createGeminiInteractionAccumulator(): GeminiInteractionAccumulat
         case 'step.stop':
           return mapStepStop(event, activeCalls);
         case 'interaction.completed':
+          noteStatus(event.interaction.status);
           captureUsage(event);
           return [];
         case 'interaction.created':
+          noteStatus(event.interaction.status);
           interactionId = event.interaction.id;
+          return [];
+        case 'interaction.status_update':
+          noteStatus(event.status);
           return [];
         default:
           return [];
@@ -87,6 +108,9 @@ export function createGeminiInteractionAccumulator(): GeminiInteractionAccumulat
     },
     get providerReportedInputTokens() {
       return providerReportedInputTokens;
+    },
+    get abandonedReason() {
+      return abandonedReason;
     },
   };
 }

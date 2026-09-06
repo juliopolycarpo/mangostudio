@@ -21,10 +21,12 @@ import { expectTurnCompletedEnvelope } from '../../../support/providers/contract
 import {
   chainEvents,
   completedInteractionEvent,
+  createdInteractionEvent,
   createFakeGeminiInteractionsClient,
   functionCallDeltaEvent,
   functionCallStartEvent,
   functionCallStopEvent,
+  interactionStatusEvent,
   textDeltaEvent,
   thoughtSummaryEvent,
 } from '../../../support/providers/fake-gemini-interactions';
@@ -555,6 +557,49 @@ describe('processGeminiInteractionStream', () => {
       provider: 'gemini',
       mode: 'interactions',
       cursor: 'int_done',
+    });
+  });
+
+  it('fails the turn when the interaction ends on an abandoned status', async () => {
+    // `interaction.created` already captured the id, so without this guard the
+    // turn reports success and mints a cursor onto an interaction the server
+    // gave up on.
+    const events: AgentEvent[] = [];
+
+    for await (const event of processGeminiInteractionStream(
+      chainEvents(
+        createdInteractionEvent('int_failed'),
+        textDeltaEvent('Partial'),
+        interactionStatusEvent('int_failed', 'failed')
+      ),
+      baseRequest()
+    )) {
+      events.push(event);
+    }
+
+    expect(events.filter((event) => event.type === 'turn_completed')).toEqual([]);
+    expect(events.at(-1)).toEqual({
+      type: 'turn_error',
+      error: 'Gemini reported that the interaction failed.',
+    });
+  });
+
+  it('still mints a cursor when the interaction completes with truncated output', async () => {
+    // `incomplete` is "completed, but contains incomplete results (e.g. hitting
+    // max_tokens)" — the output is real and the interaction is chainable.
+    const events: AgentEvent[] = [];
+
+    for await (const event of processGeminiInteractionStream(
+      completedInteractionEvent('int_truncated', 12, 'incomplete'),
+      baseRequest()
+    )) {
+      events.push(event);
+    }
+
+    expectTurnCompletedEnvelope(events, {
+      provider: 'gemini',
+      mode: 'interactions',
+      cursor: 'int_truncated',
     });
   });
 });

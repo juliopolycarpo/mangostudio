@@ -234,6 +234,66 @@ describe('createGeminiInteractionAccumulator', () => {
     expect(accumulator.providerReportedInputTokens).toBeUndefined();
   });
 
+  it.each([
+    ['failed', 'Gemini reported that the interaction failed.'],
+    ['cancelled', 'Gemini cancelled the interaction before it produced a result.'],
+    ['budget_exceeded', 'Gemini halted the interaction: the token budget was exceeded.'],
+  ])('reports an abandoned interaction for status %s', (status, reason) => {
+    const accumulator = createGeminiInteractionAccumulator();
+
+    accumulator.mapEvent(
+      event({
+        event_type: 'interaction.created',
+        interaction: { id: 'int_abandoned', status: 'in_progress' },
+      })
+    );
+
+    expect(
+      accumulator.mapEvent(
+        event({ event_type: 'interaction.status_update', interaction_id: 'int_abandoned', status })
+      )
+    ).toEqual([]);
+    expect(accumulator.abandonedReason).toBe(reason);
+    // The id is still captured; refusing the cursor is the stream's decision.
+    expect(accumulator.interactionId).toBe('int_abandoned');
+  });
+
+  it.each(['in_progress', 'queued', 'requires_action', 'incomplete', 'completed'])(
+    'treats status %s as a live interaction',
+    (status) => {
+      // `requires_action` is the normal terminal status of a turn that called a
+      // tool, and `incomplete` is completion with truncated output — failing
+      // either would break the paths they describe.
+      const accumulator = createGeminiInteractionAccumulator();
+
+      accumulator.mapEvent(
+        event({ event_type: 'interaction.status_update', interaction_id: 'int_live', status })
+      );
+
+      expect(accumulator.abandonedReason).toBeUndefined();
+    }
+  );
+
+  it('clears an abandoned status when the interaction completes after it', () => {
+    const accumulator = createGeminiInteractionAccumulator();
+
+    accumulator.mapEvent(
+      event({
+        event_type: 'interaction.status_update',
+        interaction_id: 'int_late',
+        status: 'failed',
+      })
+    );
+    accumulator.mapEvent(
+      event({
+        event_type: 'interaction.completed',
+        interaction: { id: 'int_late', status: 'completed', usage: { total_input_tokens: 4 } },
+      })
+    );
+
+    expect(accumulator.abandonedReason).toBeUndefined();
+  });
+
   it('skips usage when completion reports zero input tokens', () => {
     const accumulator = createGeminiInteractionAccumulator();
 

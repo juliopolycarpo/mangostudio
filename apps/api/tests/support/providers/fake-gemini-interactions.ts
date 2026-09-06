@@ -27,12 +27,38 @@ export function createFakeGeminiInteractionsClient(create: CreateFn): Record<str
 /** Yields a completed interaction event with the given id. */
 export async function* completedInteractionEvent(
   id = 'int_new',
-  inputTokens = 12
+  inputTokens = 12,
+  status = 'completed'
 ): AsyncIterable<InteractionSSEEvent> {
   await Promise.resolve();
   yield {
     event_type: 'interaction.completed',
-    interaction: { id, status: 'completed', usage: { total_input_tokens: inputTokens } },
+    interaction: { id, status, usage: { total_input_tokens: inputTokens } },
+  } as InteractionSSEEvent;
+}
+
+/** Yields the opening interaction.created event, before any step. */
+export async function* createdInteractionEvent(
+  id = 'int_new',
+  status = 'in_progress'
+): AsyncIterable<InteractionSSEEvent> {
+  await Promise.resolve();
+  yield {
+    event_type: 'interaction.created',
+    interaction: { id, status },
+  } as InteractionSSEEvent;
+}
+
+/** Yields an out-of-band interaction.status_update event. */
+export async function* interactionStatusEvent(
+  id: string,
+  status: string
+): AsyncIterable<InteractionSSEEvent> {
+  await Promise.resolve();
+  yield {
+    event_type: 'interaction.status_update',
+    interaction_id: id,
+    status,
   } as InteractionSSEEvent;
 }
 
