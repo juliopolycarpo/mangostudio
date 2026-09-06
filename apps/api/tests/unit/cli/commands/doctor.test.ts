@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +7,7 @@ import { runDoctor } from '../../../../src/cli/commands/doctor';
 import type { FsProbe } from '../../../../src/cli/doctor-checks';
 import type { BuildInfo } from '../../../../src/lib/build-info';
 import type { MangoConfig } from '../../../../src/lib/config';
+import type { InstallOriginProbe } from '../../../../src/modules/updates/domain/install-origin';
 import { FakeProcessController } from '../../../support/mocks/fake-process-controller';
 
 const ALL_OK: FsProbe = { exists: () => true, isWritable: () => true };
@@ -17,6 +18,33 @@ const BUILD_INFO: BuildInfo = {
   builtAt: '2026-07-04T12:00:00.000Z',
   buildType: 'production',
 };
+
+const INSTALL_ORIGIN_RECORD = JSON.stringify({
+  origin: 'installer',
+  channel: 'stable',
+  version: '0.1.1',
+});
+
+/** A self-managed install with a readable `install-origin.json` — not legacy. */
+function selfManagedProbe(overrides: Partial<InstallOriginProbe> = {}): InstallOriginProbe {
+  return {
+    platform: 'linux',
+    env: {},
+    execPath: '/home/j/.mango/dist/0.1.1/mangostudio',
+    version: '0.1.1',
+    standalone: true,
+    container: false,
+    home: '/home/j',
+    readFile: (path) =>
+      path === '/home/j/.mango/dist/install-origin.json' ? INSTALL_ORIGIN_RECORD : null,
+    ...overrides,
+  };
+}
+
+/** A self-managed dist root predating `install-origin.json` — legacy. */
+function legacyInstallProbe(): InstallOriginProbe {
+  return selfManagedProbe({ readFile: () => null });
+}
 
 function makeConfig(): MangoConfig {
   return {
@@ -36,6 +64,7 @@ function makeConfig(): MangoConfig {
     checkpoints: { dir: '/data/checkpoints' },
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
     security: { trustProxy: false, allowDirectLoopback: true },
+    updates: { check: true, channel: null },
     environments: {
       ltsRefresh: false,
       installsEnabled: false,
@@ -53,6 +82,9 @@ function makeConfig(): MangoConfig {
 function makeDoctorDeps(overrides: Record<string, unknown> = {}) {
   return {
     loadConfig: makeConfig,
+    // A clean environment: the runner's own CI=true must not turn the Update
+    // row into "skipped" underneath a test that asserts a real answer.
+    env: {},
     fs: ALL_OK,
     frontendDir: () => '/app',
     controller: new FakeProcessController(),
@@ -75,6 +107,10 @@ function makeDoctorDeps(overrides: Record<string, unknown> = {}) {
     collectMcpChecks: () => Promise.resolve([]),
     collectEnvironmentChecks: () => Promise.resolve([]),
     collectLibraryChecks: () => Promise.resolve([]),
+    installOriginProbe: () => selfManagedProbe(),
+    checker: { readCached: () => null, check: () => Promise.resolve(null) },
+    isTty: () => false,
+    now: () => 0,
     log: () => undefined,
     exit: () => undefined,
     ...overrides,
@@ -385,5 +421,204 @@ describe('runDoctor', () => {
 
     expect(lines.join('\n')).toContain('MCP github');
     expect(received).toEqual([{ probe: true, serverRunning: true }]);
+  });
+});
+
+describe('runDoctor Installed via / Update rows', () => {
+  // `getVersion()` reads `VERSION` from the environment directly, the same as
+  // every other doctor check that reports it — under `bun test` that is unset,
+  // which reads as a dev build and skips the Update row before it reaches
+  // anything these tests inject. A real version makes the row's own logic
+  // reachable.
+  let savedVersion: string | undefined;
+
+  beforeEach(() => {
+    savedVersion = process.env.VERSION;
+    process.env.VERSION = '0.1.1';
+  });
+
+  afterEach(() => {
+    if (savedVersion === undefined) delete process.env.VERSION;
+    else process.env.VERSION = savedVersion;
+  });
+
+  it('includes both rows in --json', async () => {
+    const lines: string[] = [];
+
+    await runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS, json: true },
+      {
+        ...makeDoctorDeps({
+          checker: {
+            readCached: () => ({
+              channel: 'stable',
+              currentVersion: '0.1.1',
+              latestVersion: '0.2.0',
+              updateAvailable: true,
+              checkedAt: 3_600_000,
+            }),
+            check: () => Promise.resolve(null),
+          },
+        }),
+        log: (msg) => lines.push(msg),
+      }
+    );
+
+    const document = JSON.parse(lines.join('\n')) as {
+      checks: Array<{ label: string; status: string; detail: string }>;
+    };
+    const labels = document.checks.map((check) => check.label);
+    expect(labels).toContain('Installed via');
+    expect(labels).toContain('Update');
+    expect(document.checks.find((check) => check.label === 'Update')).toMatchObject({
+      status: 'warn',
+      detail: '0.2.0 available — run: mangostudio upgrade',
+    });
+  });
+
+  it('reports checks disabled', async () => {
+    const lines: string[] = [];
+
+    await runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS },
+      {
+        ...makeDoctorDeps({
+          loadConfig: () => ({ ...makeConfig(), updates: { check: false, channel: null } }),
+        }),
+        log: (msg) => lines.push(msg),
+      }
+    );
+
+    expect(lines.join('\n')).toContain('checks disabled');
+  });
+
+  it('reports up to date with hours since the last check', async () => {
+    const lines: string[] = [];
+
+    await runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS },
+      {
+        ...makeDoctorDeps({
+          checker: {
+            readCached: () => ({
+              channel: 'stable',
+              currentVersion: '0.1.1',
+              updateAvailable: false,
+              checkedAt: 0,
+            }),
+            check: () => Promise.resolve(null),
+          },
+          now: () => 3 * 3_600_000,
+        }),
+        log: (msg) => lines.push(msg),
+      }
+    );
+
+    expect(lines.join('\n')).toContain('up to date (0.1.1, checked 3h ago)');
+  });
+
+  it('reports not checked yet when nothing is cached', async () => {
+    const lines: string[] = [];
+
+    await runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS },
+      { ...makeDoctorDeps(), log: (msg) => lines.push(msg) }
+    );
+
+    expect(lines.join('\n')).toContain('not checked yet');
+  });
+
+  it('reports a failed check', async () => {
+    const lines: string[] = [];
+
+    await runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS },
+      {
+        ...makeDoctorDeps({
+          checker: {
+            readCached: () => ({
+              channel: 'stable',
+              currentVersion: '0.1.1',
+              updateAvailable: false,
+              checkedAt: 0,
+              error: 'DNS lookup failed',
+            }),
+            check: () => Promise.resolve(null),
+          },
+        }),
+        log: (msg) => lines.push(msg),
+      }
+    );
+
+    expect(lines.join('\n')).toContain('check failed (DNS lookup failed)');
+  });
+
+  it('performs the check itself on a TTY when nothing fresh is cached', async () => {
+    const lines: string[] = [];
+    let checkCalls = 0;
+
+    await runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS },
+      {
+        ...makeDoctorDeps({
+          isTty: () => true,
+          checker: {
+            readCached: () => null,
+            check: () => {
+              checkCalls += 1;
+              return Promise.resolve({
+                channel: 'stable',
+                currentVersion: '0.1.1',
+                latestVersion: '0.2.0',
+                updateAvailable: true,
+                checkedAt: 0,
+              });
+            },
+          },
+        }),
+        log: (msg) => lines.push(msg),
+      }
+    );
+
+    expect(checkCalls).toBe(1);
+    expect(lines.join('\n')).toContain('0.2.0 available');
+  });
+
+  it('never checks itself off a TTY, even with nothing cached', async () => {
+    const lines: string[] = [];
+    let checkCalls = 0;
+
+    await runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS },
+      {
+        ...makeDoctorDeps({
+          checker: {
+            readCached: () => null,
+            check: () => {
+              checkCalls += 1;
+              return Promise.resolve(null);
+            },
+          },
+        }),
+        log: (msg) => lines.push(msg),
+      }
+    );
+
+    expect(checkCalls).toBe(0);
+    expect(lines.join('\n')).toContain('not checked yet');
+  });
+
+  it('notes a legacy self-managed dist root', async () => {
+    const lines: string[] = [];
+
+    await runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS },
+      {
+        ...makeDoctorDeps({ installOriginProbe: () => legacyInstallProbe() }),
+        log: (msg) => lines.push(msg),
+      }
+    );
+
+    expect(lines.join('\n')).toContain('legacy layout, run mangostudio upgrade to migrate');
   });
 });

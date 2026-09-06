@@ -12,6 +12,7 @@ import {
   displayHost,
   getConfig,
   getVersion,
+  isTestRuntime,
   reloadSecretEnv,
 } from '../lib/config';
 import { ensureRuntimeDirs } from '../lib/mango-paths';
@@ -23,6 +24,8 @@ import { isActiveTurn } from '../modules/generation/application/active-turn-regi
 import { reconcileStaleTurns } from '../modules/generation/application/turn-recovery';
 import { HUB_SERVICE_UNIT_ENV } from '../modules/machine/domain/hub-service-identity';
 import { terminalSessionService } from '../modules/terminals/application/terminal-session-service';
+import { runPruneRetry } from '../modules/updates/application/prune-retry';
+import { updateChecker } from '../modules/updates/application/update-check';
 import { closeAllMcpClients } from '../services/mcp/connection-manager';
 import {
   flushObservabilitySnapshot,
@@ -55,6 +58,7 @@ export interface StartOptions {
 
 let staleTurnReconcileSweep: StaleTurnReconcileSweep | null = null;
 let stopTerminalIdleReaper: (() => void) | null = null;
+let stopUpdateChecks: (() => void) | null = null;
 
 /** Start the API server and return a handle. // Usage: await startServer({ writeStateFile: true }) */
 export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
@@ -96,6 +100,17 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
     reconcileStaleTurns({ reasonCode: 'unknown', isActive: isActiveTurn }, getDb())
   );
   stopTerminalIdleReaper = terminalSessionService.startIdleReaper();
+  // Never under `bun test`: a check hits a real host, and nothing in the test
+  // suite should depend on GitHub being reachable or on a 24h timer outliving
+  // the test that started it.
+  if (!isTestRuntime()) {
+    stopUpdateChecks = updateChecker.schedule();
+    // Fire-and-forget: a leftover version directory from a prune Windows
+    // could not finish (the running exe held it open) is worth cleaning up,
+    // never worth delaying startup for. No-ops instantly on every other
+    // platform and whenever there is nothing pending.
+    void runPruneRetry();
+  }
 
   registerShutdown();
 
@@ -166,6 +181,8 @@ async function gracefulStop(): Promise<void> {
   staleTurnReconcileSweep = null;
   stopTerminalIdleReaper?.();
   stopTerminalIdleReaper = null;
+  stopUpdateChecks?.();
+  stopUpdateChecks = null;
   // Before the runtime connections close, so each session gets a real close
   // rather than a dropped socket, and no vendor process outlives the hub.
   await externalSessionManager.reapAll('hub-restarted');

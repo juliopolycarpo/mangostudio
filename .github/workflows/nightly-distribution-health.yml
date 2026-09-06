@@ -347,9 +347,117 @@ jobs:
           BETTER_AUTH_SECRET: nightly-smoke-secret-at-least-32-characters-long
           GEMINI_API_KEY: dummy
 
+  install-script:
+    name: Install script ${{ matrix.platform }}
+    needs: resolve
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-latest
+            script: install.sh
+          - platform: darwin-arm64
+            runner: macos-latest
+            script: install.sh
+          - platform: windows-x64
+            runner: windows-latest
+            script: install.ps1
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
+      ASSET_VERSION: ${{ needs.resolve.outputs.asset_version }}
+      ARCHIVE_VERSION: ${{ needs.resolve.outputs.archive_version }}
+      CHANNEL: ${{ needs.resolve.outputs.channel }}
+    steps:
+      # Every release before this change shipped no install-script asset, so a
+      # 404 here is an expected gap in old history, not a failure: the lane
+      # notices and stops rather than failing a nightly run that pins an
+      # older stable release on purpose. Any other gh failure (auth, rate
+      # limit, a transient API error) is not that gap and must fail the step
+      # instead of silently skipping the rest of the lane.
+      - name: Download the install script
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # This job never checks the repository out, so `gh` has no git remote
+          # to infer one from and would fail with "not a git repository"
+          # before it reaches the release. The resolve job names it the same way.
+          GH_REPO: ${{ github.repository }}
+          SCRIPT_NAME: ${{ matrix.script }}
+        run: |
+          set -euo pipefail
+          mkdir -p install-script
+          if gh release download "$RELEASE_TAG" --pattern "$SCRIPT_NAME" --dir install-script 2>download-error.log; then
+            echo "SCRIPT_AVAILABLE=true" >> "$GITHUB_ENV"
+          else
+            cat download-error.log >&2
+            if grep -qiE "release not found|no assets match|HTTP 404" download-error.log; then
+              echo "No ${SCRIPT_NAME} asset on ${RELEASE_TAG} (published before install scripts shipped as release assets)." >> "$GITHUB_STEP_SUMMARY"
+              echo "SCRIPT_AVAILABLE=false" >> "$GITHUB_ENV"
+            else
+              echo "gh release download failed for a reason other than a missing asset; see the log above." >&2
+              exit 1
+            fi
+          fi
+
+      - name: Run the install script and verify its own report (Linux/macOS)
+        if: env.SCRIPT_AVAILABLE == 'true' && runner.os != 'Windows'
+        env:
+          MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}/mango-dist
+          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}/mango-bin
+          MANGOSTUDIO_VERSION: ${{ needs.resolve.outputs.asset_version }}
+        run: |
+          set -euo pipefail
+          if [ "$CHANNEL" = "canary" ]; then
+            unset MANGOSTUDIO_VERSION
+            bash install-script/install.sh --canary
+          else
+            bash install-script/install.sh
+          fi
+          actual="$("${MANGOSTUDIO_BIN_DIR}/mangostudio" --version)"
+          if [ "$actual" != "$ARCHIVE_VERSION" ]; then
+            if [ "$CHANNEL" = "canary" ]; then
+              # --canary resolves its own tag, which can race the identity
+              # `resolve` pinned if the rolling pre-release republished
+              # mid-run — a divergence here is a notice, not a failure.
+              echo "::warning::install.sh resolved canary ${actual}, pinned identity was ${ARCHIVE_VERSION} — the rolling pre-release likely republished mid-run."
+            else
+              echo "Expected ${ARCHIVE_VERSION}, got ${actual}" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Run the install script and verify its own report (Windows)
+        if: env.SCRIPT_AVAILABLE == 'true' && runner.os == 'Windows'
+        shell: powershell
+        env:
+          MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}\mango-dist
+          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}\mango-bin
+          MANGOSTUDIO_VERSION: ${{ needs.resolve.outputs.asset_version }}
+        run: |
+          if ($env:CHANNEL -eq 'canary') {
+            Remove-Item Env:\MANGOSTUDIO_VERSION -ErrorAction SilentlyContinue
+            & install-script\install.ps1 -Canary
+          } else {
+            & install-script\install.ps1
+          }
+          $actual = & "$env:MANGOSTUDIO_BIN_DIR\mangostudio.cmd" --version
+          if ($actual -ne $env:ARCHIVE_VERSION) {
+            if ($env:CHANNEL -eq 'canary') {
+              Write-Host "::warning::install.ps1 resolved canary $actual, pinned identity was $env:ARCHIVE_VERSION — the rolling pre-release likely republished mid-run."
+            } else {
+              Write-Error "Expected $env:ARCHIVE_VERSION, got $actual"
+              exit 1
+            }
+          }
+
   health-summary:
     name: Nightly health summary
-    needs: [resolve, npm-install, release-archive]
+    needs: [resolve, npm-install, release-archive, install-script]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -363,6 +471,7 @@ jobs:
           RESOLVE_RESULT: ${{ needs.resolve.result }}
           NPM_RESULT: ${{ needs.npm-install.result }}
           ARCHIVE_RESULT: ${{ needs.release-archive.result }}
+          INSTALL_SCRIPT_RESULT: ${{ needs.install-script.result }}
         run: |
           set -euo pipefail
           icon() { if [ "$1" = "success" ]; then echo "✅"; else echo "❌"; fi; }
@@ -374,4 +483,5 @@ jobs:
             echo "| Resolve | ${NPM_VERSION:-n/a} / ${RELEASE_TAG:-n/a} | $(icon "$RESOLVE_RESULT") ${RESOLVE_RESULT} |"
             echo "| npm install + upgrade | ${NPM_VERSION:-n/a} | $(icon "$NPM_RESULT") ${NPM_RESULT} |"
             echo "| Release archive smoke | ${RELEASE_TAG:-n/a} (${ARCHIVE_VERSION:-n/a}) | $(icon "$ARCHIVE_RESULT") ${ARCHIVE_RESULT} |"
+            echo "| Install script | ${RELEASE_TAG:-n/a} (${ARCHIVE_VERSION:-n/a}) | $(icon "$INSTALL_SCRIPT_RESULT") ${INSTALL_SCRIPT_RESULT} |"
           } >> "$GITHUB_STEP_SUMMARY"

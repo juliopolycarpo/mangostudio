@@ -76,6 +76,15 @@ import {
   PROVIDER_SECRET_CONFIG,
 } from '../../connectors/domain/connector';
 import type { SkillsConfigOrigin } from '../../skills/application/skill-diagnostics';
+import { type InstallStatus, resolveInstallStatus } from '../../updates/application/install-status';
+import {
+  type UpdateChecker,
+  updateChecker,
+  updateCheckSkipReason,
+} from '../../updates/application/update-check';
+import type { InstallOriginProbe } from '../../updates/domain/install-origin';
+import { describeInstallManager } from '../../updates/domain/install-origin';
+import { currentInstallOriginProbe } from './hub-service';
 
 export interface DoctorCollectDeps {
   loadConfig: () => MangoConfig;
@@ -106,6 +115,22 @@ export interface DoctorCollectDeps {
   ) => Promise<CheckResult[]>;
   collectEnvironmentChecks: () => Promise<CheckResult[]>;
   collectLibraryChecks: () => Promise<CheckResult[]>;
+  installOriginProbe: () => InstallOriginProbe;
+  checker: Pick<UpdateChecker, 'readCached' | 'check'>;
+  /**
+   * The environment the Update row reads its opt-outs from
+   * (`NO_UPDATE_NOTIFIER`, `DO_NOT_TRACK`, `CI`). Injected so a test is not at
+   * the mercy of the runner's own `CI=true`.
+   */
+  env: NodeJS.ProcessEnv;
+  /**
+   * Whether this run may talk to the network for the Update row. False for
+   * the API's `GET /api/machine/doctor` and for every test default; only the
+   * `doctor` CLI command, with a real terminal attached, sets it true — a
+   * CLI-only user is otherwise never shown a check that ran.
+   */
+  isTty: () => boolean;
+  now: () => number;
 }
 
 /**
@@ -166,15 +191,22 @@ async function collectResults(
     ? options.sections.includes('library')
     : !options.envOnly || options.libraryOnly;
 
-  // Four independent probes, two of which spawn a program (`--version` on the
-  // runtime binary, `ssh -V`). Inside the array literal below they would run
+  // Five independent probes, two of which spawn a program (`--version` on the
+  // runtime binary, `ssh -V`) and one of which can reach the release host on a
+  // TTY run with a cold cache. Inside the array literal below they would run
   // one after another; the doctor is an HTTP endpoint now, not only a command
   // that exits afterwards.
-  const [runtimeBinary, runtimeSlots, runtimeCache, sshClient] = await Promise.all([
+  const installStatus = resolveInstallStatus(
+    d.installOriginProbe(),
+    config.updates.channel,
+    getVersion()
+  );
+  const [runtimeBinary, runtimeSlots, runtimeCache, sshClient, updateRow] = await Promise.all([
     d.probeRuntimeBinary(),
     d.probeRuntimeSlots(),
     probeRuntimeCache(),
     d.probeSshClient(),
+    collectUpdateDoctorRow(config, installStatus, d),
   ]);
 
   const results: CheckResult[] = [
@@ -199,6 +231,8 @@ async function collectResults(
         : d.readFrontendBuildInfo(frontendDir),
       frontendDir,
     }),
+    collectInstalledViaDoctorRow(installStatus),
+    updateRow,
   ];
 
   if (!sectionFilter) {
@@ -321,7 +355,56 @@ function resolveDoctorCollectDeps(deps: Partial<DoctorCollectDeps>): Required<Do
     collectEnvironmentChecks:
       deps.collectEnvironmentChecks ?? (() => collectEnvironmentDoctorSection()),
     collectLibraryChecks: deps.collectLibraryChecks ?? (() => collectLibraryDoctorSection()),
+    installOriginProbe: deps.installOriginProbe ?? currentInstallOriginProbe,
+    checker: deps.checker ?? updateChecker,
+    env: deps.env ?? process.env,
+    // Real default is false: this is what the API's `GET /api/machine/doctor`
+    // gets (a background server has no terminal), and what every test gets
+    // unless it opts in. `runDoctor` overrides it with a real TTY check.
+    isTty: deps.isTty ?? (() => false),
+    now: deps.now ?? Date.now,
   };
+}
+
+/** `Installed via` doctor row: always `ok`, the channel and manager it resolved. */
+function collectInstalledViaDoctorRow(status: InstallStatus): CheckResult {
+  const legacyNote =
+    status.installedVia.manager === 'self-managed' && status.installedVia.legacy
+      ? ' · legacy layout, run mangostudio upgrade to migrate'
+      : '';
+  return ok(
+    'Installed via',
+    `${describeInstallManager(status.installedVia.manager)} · channel ${status.channel}${legacyNote}`
+  );
+}
+
+/**
+ * `Update` doctor row. On a TTY this performs the check itself (through the
+ * checker's own freshness rule, so it is a real fetch only when the cache is
+ * stale or absent) so a CLI-only user sees a fresh answer; off a TTY — the API
+ * route, and every other CLI command — it only ever reads what is cached.
+ */
+async function collectUpdateDoctorRow(
+  config: MangoConfig,
+  status: InstallStatus,
+  d: Required<DoctorCollectDeps>
+): Promise<CheckResult> {
+  const skip = updateCheckSkipReason(config, d.env, getVersion());
+  if (skip === 'disabled') return ok('Update', 'checks disabled');
+  if (skip === 'env') return ok('Update', 'skipped (NO_UPDATE_NOTIFIER|DO_NOT_TRACK|CI)');
+  if (skip === 'dev') return ok('Update', 'skipped (development build)');
+
+  const check = d.isTty() ? await d.checker.check() : d.checker.readCached();
+  if (check === null) return ok('Update', 'not checked yet');
+  if (check.error !== undefined) return warn('Update', `check failed (${check.error})`);
+  if (check.updateAvailable) {
+    return warn(
+      'Update',
+      `${check.latestVersion ?? 'a newer build'} available — run: ${status.command}`
+    );
+  }
+  const hoursAgo = Math.max(0, Math.floor((d.now() - check.checkedAt) / 3_600_000));
+  return ok('Update', `up to date (${check.currentVersion}, checked ${hoursAgo}h ago)`);
 }
 
 /** True when a Cursor API key is present in env or config.toml. */

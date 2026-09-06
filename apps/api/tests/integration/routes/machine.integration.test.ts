@@ -10,12 +10,19 @@ import {
   type MachineStatus,
   MachineStatusSchema,
 } from '@mangostudio/shared/machine';
+import {
+  type MachineUpdateStatus,
+  MachineUpdateStatusSchema,
+  type MachineUpgradeBody,
+  type UpgradeStreamEvent,
+} from '@mangostudio/shared/updates';
 import Value from 'typebox/value';
 import type { GuardIpPolicy } from '../../../src/lib/client-ip';
 import {
   MachineActionBlockedError,
   MachineActionUnavailableError,
   type MachineService,
+  UpgradeUnavailableError,
 } from '../../../src/modules/machine/application/machine-service';
 import {
   createMachineRoutes,
@@ -67,6 +74,25 @@ const STATUS: MachineStatus = {
   },
 };
 
+const UPDATE_STATUS: MachineUpdateStatus = {
+  installedVia: {
+    manager: 'self-managed',
+    channel: 'stable',
+    executable: '/home/j/.mango/dist/current/mangostudio',
+  },
+  channel: 'stable',
+  check: {
+    channel: 'stable',
+    currentVersion: '0.1.1',
+    latestVersion: '0.2.0',
+    updateAvailable: true,
+    checkedAt: 0,
+  },
+  checksEnabled: true,
+  canUpgrade: true,
+  command: 'mangostudio upgrade',
+};
+
 /** Records what the routes asked for and answers from fixtures. */
 class FakeMachineService implements MachineService {
   readonly clientIps: Array<string | undefined> = [];
@@ -79,6 +105,11 @@ class FakeMachineService implements MachineService {
   status(context: { clientIp: string | undefined }): Promise<MachineStatus> {
     this.clientIps.push(context.clientIp);
     return Promise.resolve(STATUS);
+  }
+
+  update(context: { clientIp: string | undefined }): Promise<MachineUpdateStatus> {
+    this.clientIps.push(context.clientIp);
+    return Promise.resolve(UPDATE_STATUS);
   }
 
   doctor(sections: readonly string[], userId?: string): Promise<MachineDoctorReport> {
@@ -124,6 +155,35 @@ class FakeMachineService implements MachineService {
       installsEnabled: true,
     });
   }
+
+  readonly upgradeCalls: { body: MachineUpgradeBody; clientIp: string | undefined }[] = [];
+  upgradeEvents: UpgradeStreamEvent[] = [
+    { type: 'stage', stage: 'resolve', done: false },
+    {
+      type: 'done',
+      done: true,
+      outcome: 'upgraded',
+      installedVia: { manager: 'self-managed', channel: 'stable', executable: '/x' },
+      currentVersion: '0.1.1',
+      restart: 'not-running',
+      exitCode: 0,
+    },
+  ];
+
+  upgrade(
+    body: MachineUpgradeBody,
+    context: { clientIp: string | undefined }
+  ): Promise<AsyncIterable<UpgradeStreamEvent>> {
+    this.upgradeCalls.push({ body, clientIp: context.clientIp });
+    if (this.refuseWith) return Promise.reject(this.refuseWith);
+    const events = this.upgradeEvents;
+    return Promise.resolve({
+      async *[Symbol.asyncIterator]() {
+        await Promise.resolve();
+        for (const event of events) yield event;
+      },
+    });
+  }
 }
 
 let restoreAuth: (() => void) | null = null;
@@ -155,6 +215,30 @@ describe('machine routes', () => {
     // `app.handle` has no socket, so the peer is unknown — which is exactly
     // what the guard must treat as not local.
     expect(service.clientIps).toEqual(['unknown']);
+  });
+
+  it('serves the update status document to a signed-in user', async () => {
+    const service = new FakeMachineService();
+    const response = await mount(service).handle(new Request('http://localhost/machine/update'));
+    expect(response.status).toBe(200);
+    expect(Value.Check(MachineUpdateStatusSchema, await response.json())).toBe(true);
+  });
+
+  it('passes the guarded client IP into service.update, the same as every other machine route', async () => {
+    const service = new FakeMachineService();
+    await mount(service, { trustProxy: true }).handle(
+      new Request('http://localhost/machine/update', {
+        headers: { 'x-forwarded-for': '203.0.113.5' },
+      })
+    );
+
+    expect(service.clientIps).toEqual(['203.0.113.5']);
+  });
+
+  it('refuses /machine/update without a session', async () => {
+    const app = createApiTestApp(createMachineRoutes(new FakeMachineService()));
+    const response = await app.handle(new Request('http://localhost/machine/update'));
+    expect(response.status).toBe(401);
   });
 
   it('ignores a forged forwarded client when no proxy is trusted', async () => {
@@ -366,6 +450,122 @@ describe('machine routes', () => {
       code: 'UNSUPPORTED',
       details: { reason: 'foreground', command: 'mangostudio restart' },
     });
+  });
+});
+
+async function readSSEEvents(response: Response): Promise<UpgradeStreamEvent[]> {
+  return (await response.text())
+    .split('\n')
+    .filter((line) => line.startsWith('data: '))
+    .map((line) => JSON.parse(line.slice('data: '.length)) as UpgradeStreamEvent);
+}
+
+describe('POST /machine/upgrade', () => {
+  it('refuses a non-loopback caller behind a trusted proxy with 403', async () => {
+    const service = new FakeMachineService();
+    service.refuseWith = new MachineActionBlockedError({
+      allowed: false,
+      reasons: ['client-not-loopback'],
+    });
+    const app = mount(service, { trustProxy: true });
+
+    const response = await app.handle(
+      new Request('http://localhost/machine/upgrade', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-forwarded-for': '127.0.0.1, 203.0.113.5',
+        },
+        body: JSON.stringify({}),
+      })
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      code: 'PERMISSION_DENIED',
+      details: { reasons: 'client-not-loopback' },
+    });
+    expect(service.upgradeCalls).toEqual([{ body: {}, clientIp: '203.0.113.5' }]);
+  });
+
+  it('reports a delegate origin as 409 with the command to run instead', async () => {
+    const service = new FakeMachineService();
+    service.refuseWith = new UpgradeUnavailableError(
+      'package-manager',
+      'bun add -g mangostudio@latest'
+    );
+    const app = mount(service);
+
+    const response = await app.handle(
+      new Request('http://localhost/machine/upgrade', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      code: 'UNSUPPORTED',
+      details: { reason: 'package-manager', command: 'bun add -g mangostudio@latest' },
+    });
+  });
+
+  it('reports a second concurrent upgrade as 409 with reason in-progress', async () => {
+    const service = new FakeMachineService();
+    service.refuseWith = new UpgradeUnavailableError('in-progress', 'mangostudio status');
+    const app = mount(service);
+
+    const response = await app.handle(
+      new Request('http://localhost/machine/upgrade', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      code: 'UNSUPPORTED',
+      details: { reason: 'in-progress', command: 'mangostudio status' },
+    });
+  });
+
+  it('streams a self origin as SSE, ending with the done event', async () => {
+    const service = new FakeMachineService();
+    const app = mount(service);
+
+    const response = await app.handle(
+      new Request('http://localhost/machine/upgrade', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ channel: 'stable', restart: false }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+    const events = await readSSEEvents(response);
+    expect(events.map((event) => event.type)).toEqual(['stage', 'done']);
+    expect(events.at(-1)).toMatchObject({ type: 'done', outcome: 'upgraded' });
+    expect(service.upgradeCalls).toEqual([
+      { body: { channel: 'stable', restart: false }, clientIp: 'unknown' },
+    ]);
+  });
+
+  it('rejects a body with an unknown field', async () => {
+    const service = new FakeMachineService();
+    const app = mount(service);
+
+    const response = await app.handle(
+      new Request('http://localhost/machine/upgrade', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ force: true }),
+      })
+    );
+
+    expect(response.status).toBe(422);
   });
 });
 

@@ -11,9 +11,11 @@ import {
   parseServeArgs,
   parseServiceArgs,
   parseStatusArgs,
+  parseUpgradeArgs,
 } from './args';
 import { runDoctor } from './commands/doctor';
 import { runEnv, runEnvInstall, runEnvToolchain } from './commands/env';
+import { runInstaller } from './commands/installer';
 import { runKillServer } from './commands/killserver';
 import { runLibrary } from './commands/library';
 import { runLogs } from './commands/logs';
@@ -24,6 +26,7 @@ import { runServeInternal } from './commands/serve-internal';
 import { runService } from './commands/service';
 import { runStatus } from './commands/status';
 import { runStop } from './commands/stop';
+import { runUpgrade } from './commands/upgrade';
 import { runVersion } from './commands/version';
 import { isOperatorError } from './errors';
 import { writeError } from './output';
@@ -58,6 +61,11 @@ async function route(command: string | undefined, rest: string[]): Promise<void>
     // Hidden: re-exec target used by `serve -d`. Not shown in help.
     case '__serve':
       await runServeInternal(parseServeArgs(rest));
+      return;
+    // Hidden: prints the install script this build embeds. Not shown in
+    // help; the release dry-run's drift guard is the only intended caller.
+    case '__installer':
+      runInstaller(rest);
       return;
     case 'status':
       await runStatus(parseStatusArgs(rest));
@@ -101,6 +109,12 @@ async function route(command: string | undefined, rest: string[]): Promise<void>
     }
     case 'library':
       await runLibrary(parseLibraryArgs(rest));
+      return;
+    case 'upgrade':
+    case 'update':
+      // A refused or failed upgrade is an expected outcome, not an operator
+      // error — same convention as `env install`'s numeric exit code.
+      process.exitCode = await runUpgrade(parseUpgradeArgs(rest));
       return;
     case 'version':
     case '-v':

@@ -62,6 +62,7 @@
     "./runtime-protocol": "./src/runtime-protocol/index.ts",
     "./runtime-home": "./src/runtime-home/index.ts",
     "./machine": "./src/machine/index.ts",
+    "./updates": "./src/updates/index.ts",
     "./terminal": "./src/terminal/index.ts"
   },
   "devDependencies": {

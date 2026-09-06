@@ -68,3 +68,20 @@ export async function removeState(path: string = getPidFilePath()): Promise<void
 export function isStateLive(state: ServerState, isAlive: (pid: number) => boolean): boolean {
   return isAlive(state.pid);
 }
+
+/**
+ * The state file only when a hub is actually behind it. A file surviving a
+ * SIGKILL (or any crash that skips cleanup) still names a pid, but that pid
+ * can already belong to an unrelated, recycled process — every caller that
+ * asks "is a hub running?" has to pair the read with the liveness check, so
+ * the pair lives here rather than at each call site.
+ * // Usage: await readLiveState(readState, controller.isAlive)
+ */
+export async function readLiveState(
+  read: () => Promise<ServerState | null>,
+  isAlive: (pid: number) => boolean
+): Promise<ServerState | null> {
+  const state = await read();
+  if (!state) return null;
+  return isStateLive(state, isAlive) ? state : null;
+}

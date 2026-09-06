@@ -10,6 +10,7 @@ import type {
   MachineLogTail,
   MachineStatus,
 } from '@mangostudio/shared/machine';
+import type { MachineUpdateStatus } from '@mangostudio/shared/updates';
 import userEvent from '@testing-library/user-event';
 import { MachinePage } from '../../../../src/features/environments/machine/components/MachinePage';
 import { render, screen, waitFor, within } from '../../../support/harness/render';
@@ -84,13 +85,35 @@ const LOGS: MachineLogTail = {
   truncated: false,
 };
 
+const UPDATE_STATUS: MachineUpdateStatus = {
+  installedVia: {
+    manager: 'self-managed',
+    channel: 'stable',
+    executable: '/home/j/.mango/dist/current/mangostudio',
+  },
+  channel: 'stable',
+  check: {
+    channel: 'stable',
+    currentVersion: '0.1.1',
+    latestVersion: '0.1.1',
+    updateAvailable: false,
+    checkedAt: 1_700_000_000_000,
+  },
+  checksEnabled: true,
+  canUpgrade: true,
+};
+
 const scenario = createFetchScenario();
 
-function mountScenario(status: MachineStatus = STATUS) {
+function mountScenario(
+  status: MachineStatus = STATUS,
+  update: MachineUpdateStatus = UPDATE_STATUS
+) {
   scenario
     .respondWithJson('GET', '/api/machine/status', { body: status })
     .respondWithJson('GET', '/api/machine/doctor', { body: DOCTOR })
     .respondWithJson('GET', '/api/machine/logs?tail=200', { body: LOGS })
+    .respondWithJson('GET', '/api/machine/update', { body: update })
     .install();
 }
 
@@ -167,6 +190,7 @@ describe('MachinePage', () => {
           details: { reasons: 'client-not-loopback' },
         },
       })
+      .respondWithJson('GET', '/api/machine/update', { body: UPDATE_STATUS })
       .install();
     render(<MachinePage />);
     const refused = await screen.findByTestId('machine-logs-refused');
@@ -246,5 +270,124 @@ describe('MachinePage', () => {
       ([, init]) => init?.method?.toUpperCase() === 'POST'
     );
     expect(posts).toHaveLength(1);
+  });
+
+  it('shows what installed the hub and the release checker last answer', async () => {
+    mountScenario();
+    render(<MachinePage />);
+
+    const card = await screen.findByTestId('machine-update-card');
+    expect(within(card).getByText('Installed via')).toBeTruthy();
+    expect(within(card).getByText('Install script')).toBeTruthy();
+    expect(within(card).getByText('Up to date (0.1.1)')).toBeTruthy();
+  });
+
+  it('shows the configured channel, not the build-origin channel installedVia carries', async () => {
+    // A stable build configured for canary must show "Canary" here — the
+    // channel an upgrade would actually target — not "Stable" (this build's
+    // own origin), which used to be the only channel the card could read.
+    mountScenario(STATUS, { ...UPDATE_STATUS, channel: 'canary' });
+    render(<MachinePage />);
+
+    const card = await screen.findByTestId('machine-update-card');
+    expect(within(card).getByText('Canary')).toBeTruthy();
+    expect(within(card).queryByText('Stable')).toBeNull();
+  });
+
+  it('never sends channel in the upgrade POST body — the server resolves its own effective channel', async () => {
+    // installedVia.channel here is 'stable'; sending it would override the
+    // operator's configured [updates] channel on the server, which resolves
+    // request.channel ?? configuredChannel ?? installedVia.channel.
+    mountScenario();
+    scenario.respondWithJson('POST', '/api/machine/upgrade', {
+      status: 409,
+      body: {
+        error: 'in progress',
+        code: 'UNSUPPORTED',
+        details: { reason: 'in-progress', command: 'mangostudio status' },
+      },
+    });
+    render(<MachinePage />);
+    const user = userEvent.setup();
+
+    const card = await screen.findByTestId('machine-update-card');
+    await user.click(within(card).getByTestId('machine-update-card-action'));
+    const dialog = screen.getByRole('dialog', { name: 'Upgrade to 0.1.1?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Upgrade' }));
+
+    await waitFor(() => {
+      const posts = scenario.fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes('/api/machine/upgrade')
+      );
+      expect(posts.length).toBeGreaterThan(0);
+    });
+    const upgradeCall = scenario.fetchMock.mock.calls.find(([input]) =>
+      String(input).includes('/api/machine/upgrade')
+    );
+    const body = JSON.parse((upgradeCall?.[1]?.body as string) ?? '{}') as Record<string, unknown>;
+    expect(body).not.toHaveProperty('channel');
+
+    // Same response also exercises the 'in-progress' refusal reason's i18n
+    // string, end to end through the dialog that renders it.
+    const progressDialog = await screen.findByRole('dialog', { name: 'Upgrade' });
+    await waitFor(() =>
+      expect(progressDialog.textContent).toContain(
+        'Another upgrade is already running from this hub.'
+      )
+    );
+  });
+
+  it('shows the guard reasons, not a blank dialog, when a remote signed-in user is refused with 403', async () => {
+    // The loopback guard's 403 carries `details.reasons`, not `details.reason`
+    // (the upgrade-specific enum) — the dialog must fall back to those
+    // instead of rendering nothing.
+    mountScenario();
+    scenario.respondWithJson('POST', '/api/machine/upgrade', {
+      status: 403,
+      body: {
+        error: 'blocked',
+        code: 'PERMISSION_DENIED',
+        details: { reasons: 'client-not-loopback' },
+      },
+    });
+    render(<MachinePage />);
+    const user = userEvent.setup();
+
+    const card = await screen.findByTestId('machine-update-card');
+    await user.click(within(card).getByTestId('machine-update-card-action'));
+    const confirmDialog = screen.getByRole('dialog', { name: 'Upgrade to 0.1.1?' });
+    await user.click(within(confirmDialog).getByRole('button', { name: 'Upgrade' }));
+
+    // The confirm step's dialog unmounts once `confirmed` flips; the progress
+    // view mounts its own dialog (aria-label is the plain "Upgrade" title,
+    // not the confirm step's formatted question).
+    const progressDialog = await screen.findByRole('dialog', { name: 'Upgrade' });
+    await waitFor(() =>
+      expect(progressDialog.textContent).toContain(
+        'This page was not opened from the machine the hub runs on.'
+      )
+    );
+  });
+
+  it('shows a translated "check failed" sentence, keeping the server’s own text as a title', async () => {
+    // check.error is the release host's own text, in whatever language it
+    // answered in — worth keeping for a hover, but not fit as the row's
+    // visible sentence.
+    mountScenario(STATUS, {
+      ...UPDATE_STATUS,
+      check: {
+        channel: 'stable',
+        currentVersion: '0.1.1',
+        updateAvailable: false,
+        checkedAt: 1_700_000_000_000,
+        error: 'ECONNRESET fetching release index',
+      },
+    });
+    render(<MachinePage />);
+
+    const card = await screen.findByTestId('machine-update-card');
+    const latestValue = within(card).getByText('Check failed');
+    expect(latestValue.getAttribute('title')).toBe('ECONNRESET fetching release index');
+    expect(within(card).queryByText('ECONNRESET fetching release index')).toBeNull();
   });
 });

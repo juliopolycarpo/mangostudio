@@ -46,18 +46,58 @@ export function hubDistRoot(probe: Pick<HubExecutableProbe, 'platform' | 'home' 
   return join(probe.home, '.mango', 'dist');
 }
 
-/** The launcher the installer maintains across upgrades. */
-export function hubCurrentPointerPath(
-  probe: Pick<HubExecutableProbe, 'platform' | 'home' | 'localAppData'>
+export const INSTALL_ORIGIN_FILE = 'install-origin.json';
+
+/**
+ * The directory two levels above the executable: `<root>/<version>/mangostudio`
+ * puts the root there. Platform-aware, since the probe may describe a Windows
+ * path on a POSIX host.
+ */
+export function grandparentDirectory(execPath: string, platform: NodeJS.Platform): string {
+  const path = platform === 'win32' ? win32 : posix;
+  return path.dirname(path.dirname(execPath));
+}
+
+/**
+ * The dist root holding this executable. Normally the default root, but the
+ * install scripts honour `MANGOSTUDIO_INSTALL_DIR`, so a binary may live under
+ * any root — recognised by the `install-origin.json` the scripts leave two
+ * levels above it. // Usage: hubDistRootFor(probe)
+ */
+export function hubDistRootFor(
+  probe: Pick<HubExecutableProbe, 'platform' | 'home' | 'localAppData' | 'execPath' | 'pathExists'>
 ): string {
-  const root = hubDistRoot(probe);
+  const candidate = grandparentDirectory(probe.execPath, probe.platform);
   const join = joiner(probe.platform);
-  return probe.platform === 'win32'
-    ? join(root, 'bin', 'mangostudio.cmd')
+  if (probe.pathExists(join(candidate, INSTALL_ORIGIN_FILE))) return candidate;
+  return hubDistRoot(probe);
+}
+
+/** The launcher the installer maintains across upgrades, inside an already-resolved root. */
+/**
+ * The upgrade-surviving path to the installed hub: the `current` symlink on
+ * POSIX, the `current` junction install.ps1 creates on Windows. Never the
+ * `bin` shim on Windows — that is a `.cmd`, so `Bun.spawn` starts cmd.exe and
+ * gets *its* pid, which never matches the pid the hub writes to the state
+ * file, and every detached restart then fails its own health handshake after
+ * 20s even though the hub came back fine (verified on Windows 11 24H2). A
+ * service unit given a batch file has the same problem in reverse: the
+ * supervisor supervises cmd.exe. The junction is a real PE image on the other
+ * side, and a missing one already falls back to the versioned path.
+ */
+function pointerPathForRoot(root: string, platform: NodeJS.Platform): string {
+  const join = joiner(platform);
+  return platform === 'win32'
+    ? join(root, 'current', 'mangostudio.exe')
     : join(root, 'current', 'mangostudio');
 }
 
-function isUnder(path: string, root: string, platform: NodeJS.Platform): boolean {
+/**
+ * Whether `path` sits inside `root`, comparing the way the host's file system
+ * does — `\` and `/` are the same separator, and Windows is case-insensitive.
+ * // Usage: isUnder('/home/j/.mango/dist/0.1.1/mangostudio', '/home/j/.mango/dist', 'linux')
+ */
+export function isUnder(path: string, root: string, platform: NodeJS.Platform): boolean {
   const normalize = (value: string) => {
     const unified = value.replaceAll('\\', '/');
     return platform === 'win32' ? unified.toLowerCase() : unified;
@@ -77,12 +117,15 @@ export function resolveHubExecutable(probe: HubExecutableProbe): HubExecutable {
     };
   }
 
-  const root = hubDistRoot(probe);
+  const root = hubDistRootFor(probe);
   if (!isUnder(probe.execPath, root, probe.platform)) {
     return { argv: [probe.execPath], pointer: 'external' };
   }
 
-  const pointer = hubCurrentPointerPath(probe);
+  // `root` is already resolved above: resolving it a second time would repeat
+  // `hubDistRootFor`'s `install-origin.json` probe on every call, and
+  // `/machine/status` polls this.
+  const pointer = pointerPathForRoot(root, probe.platform);
   if (probe.pathExists(pointer)) {
     return { argv: [pointer], pointer: 'current' };
   }

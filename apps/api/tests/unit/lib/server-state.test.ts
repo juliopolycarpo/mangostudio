@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   isStateLive,
+  readLiveState,
   readState,
   removeState,
   type ServerState,
@@ -91,5 +92,42 @@ describe('server-state', () => {
 
     expect(isStateLive(state, (pid) => pid === 99)).toBe(true);
     expect(isStateLive(state, () => false)).toBe(false);
+  });
+});
+
+describe('readLiveState', () => {
+  it('returns the state when its pid is alive', async () => {
+    const state = makeState();
+    expect(
+      await readLiveState(
+        () => Promise.resolve(state),
+        () => true
+      )
+    ).toBe(state);
+  });
+
+  it('returns null for a state file left behind by a crash', async () => {
+    // The file still names a pid, but that pid can already belong to an
+    // unrelated, recycled process — a caller must not treat it as a live hub.
+    expect(
+      await readLiveState(
+        () => Promise.resolve(makeState()),
+        () => false
+      )
+    ).toBeNull();
+  });
+
+  it('returns null when there is no state file, without consulting isAlive', async () => {
+    let asked = 0;
+    const result = await readLiveState(
+      () => Promise.resolve(null),
+      () => {
+        asked += 1;
+        return true;
+      }
+    );
+
+    expect(result).toBeNull();
+    expect(asked).toBe(0);
   });
 });

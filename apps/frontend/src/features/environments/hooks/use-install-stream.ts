@@ -14,6 +14,7 @@ import type {
 } from '@mangostudio/shared/environments';
 import { useEffect, useEffectEvent, useState } from 'react';
 import { getApiBaseUrl } from '@/lib/api-base-url';
+import { readSseChunks } from '@/lib/sse';
 
 /**
  * Roughly the server's 1 MiB output budget at a typical line length. The cap is
@@ -122,8 +123,6 @@ export function useInstallStream({
 
       const reader = response.body.getReader();
       activeReader = reader;
-      const decoder = new TextDecoder();
-      let buffer = '';
       let nextLineId = 0;
       let lines: InstallStreamLine[] = [];
       let droppedLines = 0;
@@ -162,17 +161,11 @@ export function useInstallStream({
       };
 
       try {
-        while (!disposed) {
-          const { value, done } = await reader.read();
-          if (done) break;
+        for await (const payloads of readSseChunks(reader)) {
+          if (disposed) break;
 
-          buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split('\n');
-          buffer = parts.pop() ?? '';
-
-          for (const part of parts) {
-            if (!part.startsWith('data: ')) continue;
-            const event = parseEvent(part.slice(6));
+          for (const payload of payloads) {
+            const event = parseEvent(payload);
             if (!event) continue;
 
             if (event.type === 'log') {

@@ -62,6 +62,7 @@ function makeConfig(): MangoConfig {
     checkpoints: { dir: join(dir, 'checkpoints') },
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
     security: { trustProxy: false, allowDirectLoopback: true },
+    updates: { check: true, channel: null },
     library: { backupDir: '', backupRetentionCount: 5, backupRetentionBytes: 0 },
     environments: {
       ltsRefresh: false,
@@ -113,6 +114,19 @@ function recordingDeps() {
       },
       collectEnvironmentChecks: () => Promise.resolve([]),
       collectLibraryChecks: () => Promise.resolve([]),
+      installOriginProbe: () => ({
+        platform: 'linux' as const,
+        env: {},
+        execPath: '/home/j/.mango/dist/current/mangostudio',
+        version: '0.1.1',
+        standalone: true,
+        container: false,
+        home: '/home/j',
+        readFile: () => null,
+      }),
+      checker: { readCached: () => null, check: () => Promise.resolve(null) },
+      isTty: () => false,
+      now: () => 0,
     },
   };
 }

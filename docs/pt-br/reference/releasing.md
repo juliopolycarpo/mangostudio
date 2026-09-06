@@ -60,7 +60,7 @@ Complete uma vez por fork ou org antes do primeiro push de tag:
 ## Nomenclatura de assets de release
 
 Todo canal downstream (Homebrew, Scoop, launcher Cargo, os scripts de
-instalação do mangostudio.dev) codifica estes nomes públicos de assets. Não os
+instalação em `scripts/install/`) codifica estes nomes públicos de assets. Não os
 renomeie sem atualizar todos os templates e instaladores na mesma release.
 
 | Asset                                        | Notas                              |
@@ -75,11 +75,15 @@ Cada arquivo de plataforma tem **raiz plana**: `mangostudio` (ou
 binário embarca a UI do frontend; nenhum diretório de assets vizinho é
 necessário em tempo de execução.
 
-Os scripts de instalação **não** são assets de release. Os instaladores
-canônicos ficam hospedados em [mangostudio.dev](https://mangostudio.dev)
-(`install.sh` / `install.ps1`) e baixam os arquivos de plataforma acima,
-verificando-os contra `SHA256SUMS`. O repositório mantém
-`scripts/install/install.sh` apenas como fixture de teste do dry-run.
+Os scripts de instalação são assets de release nos dois canais, copiados sem
+alteração de `scripts/install/` para `release-assets/` e listados em
+`SHA256SUMS` ao lado dos arquivos que instalam. As URLs canônicas são
+`https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh`
+e `.../install.ps1`; ambos baixam os arquivos de plataforma acima e os verificam
+contra `SHA256SUMS`. O binário do hub embute os mesmos bytes e os executa
+localmente em `mangostudio upgrade` (`--local`, `--use`, `--prune`,
+`--uninstall`); o dry-run compara `mangostudio __installer sh` com o arquivo do
+repositório para que os dois não divirjam.
 
 ## Fonte da versão
 

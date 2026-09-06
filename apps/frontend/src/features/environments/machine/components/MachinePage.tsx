@@ -21,6 +21,7 @@ import { refusalMessage } from '../format';
 import {
   useChangeMachineServiceMutation,
   useMachineStatus,
+  useMachineUpdate,
   useRestartMachineMutation,
 } from '../queries';
 import { DoctorSection } from './DoctorSection';
@@ -28,12 +29,14 @@ import { HubProcessCard } from './HubProcessCard';
 import { InstallFactsCard } from './InstallFactsCard';
 import { LogTail } from './LogTail';
 import { ServiceCard } from './ServiceCard';
+import { UpdateCard } from './UpdateCard';
 
 export function MachinePage() {
   const { t } = useI18n();
   const m = t.environments.machine;
   const { toast } = useToast();
   const status = useMachineStatus();
+  const update = useMachineUpdate();
   const restart = useRestartMachineMutation();
   const service = useChangeMachineServiceMutation();
   const [notice, setNotice] = useState<string | null>(null);
@@ -130,6 +133,11 @@ export function MachinePage() {
           onUninstall={() => onService('uninstall')}
         />
       </div>
+
+      {/* Nothing while the query is pending or failed: the update card is
+          extra context on top of a page that already works without it, not
+          something worth a loading state of its own. */}
+      {update.data && <UpdateCard status={update.data} onUpgraded={status.expectChange} />}
 
       <InstallFactsCard status={status.data} />
       <DoctorSection />

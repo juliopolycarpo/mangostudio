@@ -102,11 +102,21 @@ describe('createReleaseAssetPlan', () => {
       )
     ).toBe(true);
     expect(plan.frontendArchive.assetName).toBe('mangostudio-1.2.3-frontend-dist.tar.gz');
+    expect(plan.installerScripts.map((asset) => asset.assetName)).toEqual([
+      'install.sh',
+      'install.ps1',
+    ]);
+    expect(plan.installerScripts.map((asset) => asset.sourcePath)).toEqual([
+      join('/repo', 'scripts', 'install', 'install.sh'),
+      join('/repo', 'scripts', 'install', 'install.ps1'),
+    ]);
     expect(plan.checksumPath).toBe(join('/repo', 'release-assets', 'SHA256SUMS'));
     expect(plan.checksummedAssetPaths.map((assetPath) => basename(assetPath))).toEqual([
       ...plan.platformArchives.map((asset) => asset.assetName),
       ...plan.rawBinaries.map((asset) => asset.assetName),
       'mangostudio-1.2.3-frontend-dist.tar.gz',
+      'install.sh',
+      'install.ps1',
     ]);
   });
 
@@ -160,6 +170,10 @@ describe('selectCanaryAssets', () => {
       'mangostudio-runtime-1.2.3-windows-x64.exe',
     ]);
     expect(CANARY_PAIR_PLATFORMS).not.toContain('linux-arm64');
+  });
+
+  test('includes both install scripts under their own names', () => {
+    expect(selectCanaryAssets(plan()).scripts).toEqual(['install.sh', 'install.ps1']);
   });
 
   // The Cargo launcher resolves `mangostudio-<version>-<its own platform>.<ext>`

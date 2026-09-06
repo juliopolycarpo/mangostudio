@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
   type HubExecutableProbe,
-  hubCurrentPointerPath,
   resolveHubExecutable,
 } from '../../../../src/modules/machine/domain/hub-executable';
 
@@ -13,7 +12,9 @@ function probe(overrides: Partial<HubExecutableProbe> = {}): HubExecutableProbe 
     entryPath: '/repo/apps/api/src/cli.ts',
     cwd: '/repo',
     home: '/home/j',
-    pathExists: () => true,
+    // Every pointer exists; no origin record anywhere, as on every install
+    // made before the scripts started writing one.
+    pathExists: (path) => !path.endsWith('install-origin.json'),
     ...overrides,
   };
 }
@@ -51,24 +52,59 @@ describe('resolveHubExecutable', () => {
     expect(result.pointer).toBe('source');
   });
 
-  it('uses the .cmd shim on Windows, case-insensitively', () => {
+  it('uses the current junction on Windows, not the .cmd shim, case-insensitively', () => {
+    // The shim is a batch file: Bun.spawn starts cmd.exe and returns *its*
+    // pid, which never equals the pid the hub writes to the state file, so
+    // every detached restart failed its own 20s health handshake even though
+    // the hub came back — reproduced on Windows 11 24H2. A service unit given
+    // a .cmd supervises cmd.exe for the same reason.
     const windows = probe({
       platform: 'win32',
       execPath: 'C:\\Users\\J\\AppData\\Local\\MangoStudio\\0.1.1\\mangostudio.exe',
       home: 'C:\\Users\\J',
       localAppData: 'C:\\Users\\J\\AppData\\Local',
     });
-    expect(hubCurrentPointerPath(windows)).toBe(
-      'C:\\Users\\J\\AppData\\Local\\mangostudio\\bin\\mangostudio.cmd'
-    );
     expect(resolveHubExecutable(windows)).toEqual({
-      argv: ['C:\\Users\\J\\AppData\\Local\\mangostudio\\bin\\mangostudio.cmd'],
+      argv: ['C:\\Users\\J\\AppData\\Local\\mangostudio\\current\\mangostudio.exe'],
       pointer: 'current',
     });
+  });
+
+  it('falls back to this version when install.ps1 could not create the junction', () => {
+    // Set-CurrentJunction is explicitly best-effort in install.ps1 (a failure
+    // is a warning), so a root without one must still resolve.
+    const windows = probe({
+      platform: 'win32',
+      execPath: 'C:\\Users\\J\\AppData\\Local\\MangoStudio\\0.1.1\\mangostudio.exe',
+      home: 'C:\\Users\\J',
+      localAppData: 'C:\\Users\\J\\AppData\\Local',
+      pathExists: () => false,
+    });
+
+    const result = resolveHubExecutable(windows);
+
+    expect(result.pointer).toBe('versioned');
+    expect(result.argv).toEqual([
+      'C:\\Users\\J\\AppData\\Local\\MangoStudio\\0.1.1\\mangostudio.exe',
+    ]);
   });
 
   it('does not mistake a sibling directory for the dist root', () => {
     const result = resolveHubExecutable(probe({ execPath: '/home/j/.mango/dist-old/mangostudio' }));
     expect(result.pointer).toBe('external');
+  });
+});
+
+describe('resolveHubExecutable with a custom install root', () => {
+  it('points at the current launcher two levels above the executable when the root carries an origin record', () => {
+    const result = resolveHubExecutable(
+      probe({
+        execPath: '/opt/mango/dist/0.1.1/mangostudio',
+        pathExists: (path) =>
+          path === '/opt/mango/dist/install-origin.json' ||
+          path === '/opt/mango/dist/current/mangostudio',
+      })
+    );
+    expect(result).toEqual({ argv: ['/opt/mango/dist/current/mangostudio'], pointer: 'current' });
   });
 });

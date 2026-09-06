@@ -58,6 +58,17 @@ Commands:
                       more than one.
   library [locations] [--kind <kind>] [--divergent] [--json]
                       Library coverage matrix and location health (read-only).
+  upgrade [--check] [--yes] [--stable | --canary [<sha7>] | --version <x.y.z>]
+          [--rollback] [--no-restart] [--json]
+                      Upgrade this install, or hand off to the package
+                      manager that owns it. --check previews without
+                      downloading. Without --yes, an interactive terminal
+                      confirms before downloading and again before
+                      restarting a live hub; anywhere else it just reports
+                      what is available and exits 0. --rollback returns to
+                      the version before the last upgrade. --no-restart
+                      leaves a live hub running the old build. --json prints
+                      the report only. update is an alias.
   version, --version  Print the MangoStudio version.
   help                Show this help.
 
@@ -70,6 +81,9 @@ Examples:
   mangostudio service install  Start now and again after every login
   mangostudio restart          Restart the running server
   mangostudio logs -f          Follow the server log
+  mangostudio upgrade          Check for and install an update
+  mangostudio upgrade --check  Report what is available, without installing
+  mangostudio upgrade --yes    Upgrade without any confirmation prompt
   mangostudio --version
   mangostudio status
   mangostudio stop`;

@@ -61,7 +61,8 @@ MANGOSTUDIO_WRAPPER_INFO=1 mangostudio
 ```
 
 This prints the detected platform, the resolved `@mangostudio/cli-*` package,
-its version, and the binary path, then exits without starting the CLI.
+its version, the binary path, and the wrapper's own real path, then exits
+without starting the CLI.
 
 ## License
 

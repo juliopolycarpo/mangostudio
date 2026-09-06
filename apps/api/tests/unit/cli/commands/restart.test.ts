@@ -32,6 +32,9 @@ function baseDeps(overrides: Partial<RestartDeps> = {}) {
     removeState: noop,
     spawnDetached: () => Promise.resolve({ pid: 43, port: 3001, logFile: '/x.log' }),
     confirmsHealthy: () => Promise.resolve(true),
+    // Hermetic by default: the real one probes this process's own install
+    // origin, so leaving it out would make these cases read the host env.
+    launcherPath: () => undefined,
     log: (msg) => lines.push(msg),
     now: () => now,
     sleep: (ms) => {
@@ -63,6 +66,49 @@ describe('runRestart', () => {
     expect(controller.terminated).toEqual([42]);
     expect(spawned).toEqual([[3001, '0.0.0.0', { waitForPid: 42 }]]);
     expect(lines[0]).toBe('MangoStudio restarted (PID 43, http://localhost:3001).');
+  });
+
+  it('respawns through the installer pointer when the executable resolves to it', async () => {
+    const controller = new FakeProcessController([42]);
+    const spawned: unknown[] = [];
+    const { deps } = baseDeps({
+      controller,
+      readState: () => Promise.resolve(DETACHED),
+      sleep: () => {
+        controller.die(42);
+        return Promise.resolve();
+      },
+      spawnDetached: (port, _host, _deps, options) => {
+        spawned.push(options);
+        return Promise.resolve({ pid: 43, port, logFile: '/x.log' });
+      },
+      executable: () => ({ pointer: 'current', argv: ['/mango/dist/current/mangostudio'] }),
+    });
+    await runRestart(deps);
+    expect(spawned).toEqual([{ waitForPid: 42, executable: ['/mango/dist/current/mangostudio'] }]);
+  });
+
+  it('respawns through the package manager launcher when the origin records one', async () => {
+    const controller = new FakeProcessController([42]);
+    const spawned: unknown[] = [];
+    const { deps } = baseDeps({
+      controller,
+      readState: () => Promise.resolve(DETACHED),
+      sleep: () => {
+        controller.die(42);
+        return Promise.resolve();
+      },
+      spawnDetached: (port, _host, _deps, options) => {
+        spawned.push(options);
+        return Promise.resolve({ pid: 43, port, logFile: '/x.log' });
+      },
+      executable: () => ({ pointer: 'versioned', argv: ['/home/j/.mango/dist/0.1.0/mangostudio'] }),
+      launcherPath: () => '/home/j/.cargo/bin/mangostudio',
+    });
+
+    await runRestart(deps);
+
+    expect(spawned).toEqual([{ waitForPid: 42, executable: ['/home/j/.cargo/bin/mangostudio'] }]);
   });
 
   it('bounces a service-managed instance through the supervisor and waits for the successor', async () => {

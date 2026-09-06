@@ -72,7 +72,61 @@ describe('nightly distribution health workflow', () => {
     const workflow = readText(WORKFLOW_PATH);
 
     expect(workflow).toMatch(
-      /health-summary:\n(?:.*\n)*?\s+needs: \[resolve, npm-install, release-archive\]\n\s+if: \$\{\{ always\(\) \}\}/
+      /health-summary:\n(?:.*\n)*?\s+needs: \[resolve, npm-install, release-archive, install-script\]\n\s+if: \$\{\{ always\(\) \}\}/
     );
+  });
+
+  describe('install-script lane', () => {
+    test('runs one lane per OS against the pinned identity, with no toolchain setup', () => {
+      const workflow = readText(WORKFLOW_PATH);
+
+      expect(workflow).toMatch(/install-script:\n(?:.*\n)*?\s+needs: resolve\n/);
+      expect(workflow).toContain('runner: ubuntu-latest');
+      expect(workflow).toContain('runner: macos-latest');
+      expect(workflow).toContain('runner: windows-latest');
+      expect(workflow).toContain('script: install.sh');
+      expect(workflow).toContain('script: install.ps1');
+    });
+
+    test('a missing script asset is a notice, not a failure', () => {
+      const workflow = readText(WORKFLOW_PATH);
+      const [, laneBody = ''] = workflow.split(/\n {2}install-script:\n/);
+      const [installScriptLane] = laneBody.split(/\n {2}health-summary:\n/);
+
+      // The not-found branch (matched against gh's captured stderr) keeps
+      // the step green and records a notice; it never exits non-zero.
+      expect(installScriptLane).toMatch(
+        /if gh release download "\$RELEASE_TAG" --pattern "\$SCRIPT_NAME"[\s\S]*?else[\s\S]*?if grep -qiE "release not found\|no assets match\|HTTP 404" download-error\.log; then\n\s+echo "No[\s\S]*?GITHUB_STEP_SUMMARY[\s\S]*?SCRIPT_AVAILABLE=false[\s\S]*?fi\n\s+fi/
+      );
+    });
+
+    test('a gh failure that is not a missing-asset 404 fails the step instead of skipping it', () => {
+      const workflow = readText(WORKFLOW_PATH);
+      const [, laneBody = ''] = workflow.split(/\n {2}install-script:\n/);
+      const [installScriptLane] = laneBody.split(/\n {2}health-summary:\n/);
+
+      // Reproduces the gap: any gh release download failure used to fall
+      // straight into the "asset absent" branch — an auth error or rate
+      // limit would silently skip the rest of the lane instead of failing
+      // it. The else branch's fallback path must exit non-zero.
+      expect(installScriptLane).toContain('2>download-error.log');
+      expect(installScriptLane).toMatch(
+        /else\n\s+echo "gh release download failed for a reason other than a missing asset[\s\S]*?exit 1/
+      );
+    });
+
+    test('verifies the script against the resolved identity on both shells', () => {
+      const workflow = readText(WORKFLOW_PATH);
+
+      expect(workflow).toContain("if: env.SCRIPT_AVAILABLE == 'true' && runner.os != 'Windows'");
+      expect(workflow).toContain('bash install-script/install.sh');
+      expect(workflow).toContain("if: env.SCRIPT_AVAILABLE == 'true' && runner.os == 'Windows'");
+      expect(workflow).toContain('shell: powershell');
+      expect(workflow).toContain('install-script\\install.ps1');
+      // Canary races the identity resolve pinned; both shells warn instead of
+      // failing when --canary/-Canary resolves a newer tag mid-run.
+      expect(workflow).toContain('::warning::install.sh resolved canary');
+      expect(workflow).toContain('::warning::install.ps1 resolved canary');
+    });
   });
 });

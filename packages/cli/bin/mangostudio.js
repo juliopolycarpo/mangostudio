@@ -7,6 +7,7 @@
 // right binary resolves with no install-time download.
 
 const { spawnSync } = require('node:child_process');
+const { realpathSync } = require('node:fs');
 const { dirname, join } = require('node:path');
 
 // Setting MANGOSTUDIO_WRAPPER_INFO=1 prints how the wrapper resolved the
@@ -14,6 +15,14 @@ const { dirname, join } = require('node:path');
 // without spawning the binary. Release verification uses it to assert the
 // right platform package was installed, not merely that a binary ran.
 const WRAPPER_INFO_ENV = 'MANGOSTUDIO_WRAPPER_INFO';
+
+// Announces this wrapper to the binary it spawns, so detectInstallOrigin can
+// tell an npm-family global install apart from a self-managed one sitting at
+// the same kind of path — see install-origin.ts. The path names *this* file,
+// symlinks resolved, so npmFamilyFromPath can read bun/pnpm/npm off it the
+// same way it reads a self-managed dist root off an executable path.
+const LAUNCHER_ENV = 'MANGOSTUDIO_LAUNCHER';
+const LAUNCHER_PATH_ENV = 'MANGOSTUDIO_LAUNCHER_PATH';
 
 const PLATFORM_PACKAGES = {
   'linux-x64': '@mangostudio/cli-linux-x64',
@@ -59,6 +68,7 @@ function printWrapperInfo(resolved) {
       `package=${resolved.packageName}`,
       `packageVersion=${require(resolved.manifestPath).version}`,
       `binary=${resolved.binaryPath}`,
+      `launcherPath=${realpathSync(__filename)}`,
       '',
     ].join('\n')
   );
@@ -70,7 +80,14 @@ function main() {
     printWrapperInfo(resolved);
     return;
   }
-  const result = spawnSync(resolved.binaryPath, process.argv.slice(2), { stdio: 'inherit' });
+  const result = spawnSync(resolved.binaryPath, process.argv.slice(2), {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      [LAUNCHER_ENV]: 'npm',
+      [LAUNCHER_PATH_ENV]: realpathSync(__filename),
+    },
+  });
   if (result.error) {
     throw result.error;
   }

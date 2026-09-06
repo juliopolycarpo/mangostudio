@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { type HubProcessStatus, HubProcessStatusSchema } from '@mangostudio/shared/machine';
+import type { UpdateCheck } from '@mangostudio/shared/updates';
 import Value from 'typebox/value';
 import { runStatus } from '../../../../src/cli/commands/status';
 import type { ServerState } from '../../../../src/lib/server-state';
+import type { InstallStatus } from '../../../../src/modules/updates/application/install-status';
 import { FakeProcessController } from '../../../support/mocks/fake-process-controller';
 
 const STATE: ServerState = {
@@ -29,6 +31,23 @@ const noop = (): Promise<void> => Promise.resolve();
 const TEXT = { json: false };
 const JSON_ARGS = { json: true };
 const healthy = (): Promise<boolean> => Promise.resolve(true);
+
+const SELF_MANAGED_STATUS: InstallStatus = {
+  installedVia: {
+    manager: 'self-managed',
+    channel: 'stable',
+    executable: '/home/j/.mango/dist/current/mangostudio',
+  },
+  channel: 'stable',
+  plan: { kind: 'self' },
+  command: 'mangostudio upgrade',
+};
+
+/** Never touches the network or the developer's real ~/.mango. */
+const RUNNING_DEPS = {
+  installStatus: () => SELF_MANAGED_STATUS,
+  readCachedUpdate: (): UpdateCheck | null => null,
+};
 
 describe('runStatus', () => {
   it('reports not running when there is no state', async () => {
@@ -76,6 +95,7 @@ describe('runStatus', () => {
       probeHealth: healthy,
       log,
       now: () => 5000,
+      ...RUNNING_DEPS,
     });
 
     const text = lines.join('\n');
@@ -99,6 +119,7 @@ describe('runStatus', () => {
       probeHealth: () => Promise.resolve(false),
       log,
       now: () => 5000,
+      ...RUNNING_DEPS,
     });
 
     expect(lines.join('\n')).toContain('Health:  unreachable');
@@ -117,9 +138,53 @@ describe('runStatus', () => {
       probeHealth: () => Promise.resolve(false),
       log,
       now: () => 5000,
+      ...RUNNING_DEPS,
     });
 
     expect(lines.join('\n')).toContain('Health:  unprobed');
+  });
+
+  it('prints the install origin, and an update line when one is cached', async () => {
+    const { lines, log } = capture();
+
+    await runStatus(TEXT, {
+      readState: () => Promise.resolve(STATE),
+      removeState: noop,
+      controller: new FakeProcessController([42]),
+      probeHealth: healthy,
+      log,
+      now: () => 5000,
+      installStatus: () => SELF_MANAGED_STATUS,
+      readCachedUpdate: () => ({
+        channel: 'stable',
+        currentVersion: 't',
+        latestVersion: '0.2.0',
+        updateAvailable: true,
+        checkedAt: 0,
+      }),
+    });
+
+    const text = lines.join('\n');
+    expect(text).toContain('Installed via: install script · channel: stable');
+    expect(text).toContain('Update:  0.2.0 available — run: mangostudio upgrade');
+  });
+
+  it('prints the install origin and nothing else when no update is cached', async () => {
+    const { lines, log } = capture();
+
+    await runStatus(TEXT, {
+      readState: () => Promise.resolve(STATE),
+      removeState: noop,
+      controller: new FakeProcessController([42]),
+      probeHealth: healthy,
+      log,
+      now: () => 5000,
+      ...RUNNING_DEPS,
+    });
+
+    const text = lines.join('\n');
+    expect(text).toContain('Installed via: install script · channel: stable');
+    expect(text).not.toContain('Update:');
   });
 
   it('prints the shared status document with --json', async () => {

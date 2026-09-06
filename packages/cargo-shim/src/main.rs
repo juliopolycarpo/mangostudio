@@ -4,7 +4,9 @@
 //! the frontend embedded in the executable; this crate is not the app source. On first run the launcher downloads the platform archive matching
 //! the crate version into `~/.mango/dist/<version>/` (checksum-verified, the
 //! same layout the shell installer uses), then hands over to the real binary
-//! with arguments and environment untouched.
+//! with arguments and environment untouched, except for two markers —
+//! `MANGOSTUDIO_LAUNCHER` and `MANGOSTUDIO_LAUNCHER_PATH` — that announce this
+//! shim to the binary it spawns, the way the npm wrapper announces itself too.
 
 use std::env;
 use std::fs;
@@ -255,18 +257,35 @@ fn make_executable(_binary: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// The `Command` that runs the real binary, with the two launcher markers set
+/// and everything else — arguments aside, added by each caller — left to
+/// std's default of inheriting the current environment untouched.
+/// `detectInstallOrigin` on the hub side reads these to tell a cargo install
+/// apart from a self-managed one sitting at a similar-looking path, the same
+/// way the npm wrapper announces itself. `current_exe()` can fail under some
+/// sandboxes; the path marker is simply omitted then rather than failing the
+/// whole launch over a diagnostic value.
+fn launcher_command(binary: &Path) -> Command {
+    let mut command = Command::new(binary);
+    command.env("MANGOSTUDIO_LAUNCHER", "cargo");
+    if let Ok(exe) = env::current_exe() {
+        command.env("MANGOSTUDIO_LAUNCHER_PATH", exe);
+    }
+    command
+}
+
 /// Replace this process with the real binary (Unix) or spawn it and forward
 /// the exit code (Windows).
 #[cfg(unix)]
 fn run_binary(binary: &Path) -> Result<(), String> {
     use std::os::unix::process::CommandExt;
-    let error = Command::new(binary).args(env::args_os().skip(1)).exec();
+    let error = launcher_command(binary).args(env::args_os().skip(1)).exec();
     Err(format!("cannot exec {}: {error}", binary.display()))
 }
 
 #[cfg(windows)]
 fn run_binary(binary: &Path) -> Result<(), String> {
-    let status = Command::new(binary)
+    let status = launcher_command(binary)
         .args(env::args_os().skip(1))
         .status()
         .map_err(|error| format!("cannot run {}: {error}", binary.display()))?;
@@ -319,5 +338,23 @@ mod tests {
             sha256_hex(b"abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    #[test]
+    fn launcher_command_sets_both_markers() {
+        let command = launcher_command(Path::new("/tmp/mangostudio"));
+        let envs: std::collections::HashMap<_, _> = command.get_envs().collect();
+
+        assert_eq!(
+            envs.get(std::ffi::OsStr::new("MANGOSTUDIO_LAUNCHER")),
+            Some(&Some(std::ffi::OsStr::new("cargo")))
+        );
+        // current_exe() succeeds in a normal test process, so the path marker
+        // is set too — the omission path only fires under sandboxes this test
+        // does not run in.
+        let launcher_path = envs
+            .get(std::ffi::OsStr::new("MANGOSTUDIO_LAUNCHER_PATH"))
+            .expect("current_exe() should succeed in the test process");
+        assert!(launcher_path.is_some());
     }
 }

@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
-import { createTurboBuildCommand, selectBuildWorkspaces } from './lib/build';
+import { binaryCompileDefines, createTurboBuildCommand, selectBuildWorkspaces } from './lib/build';
 import {
   bunCompiledRuntimes,
   bunCrossCompileChannel,
@@ -156,20 +156,13 @@ async function compileBinary(
     target.target,
     '--outfile',
     outfile,
-    '--define',
-    `process.env.BUILD_TIME=${JSON.stringify(context.buildTime)}`,
-    '--define',
-    `process.env.BUILD_BUILT_AT=${JSON.stringify(context.buildInfo.builtAt)}`,
-    '--define',
-    `process.env.BUILD_GIT_SHA=${JSON.stringify(context.buildInfo.gitSha)}`,
-    '--define',
-    `process.env.BUILD_GIT_DIRTY=${JSON.stringify(String(context.buildInfo.gitDirty))}`,
-    '--define',
-    `process.env.BUILD_TYPE=${JSON.stringify(options.buildType)}`,
-    '--define',
-    `process.env.VERSION=${JSON.stringify(options.version)}`,
-    '--define',
-    'process.env.NODE_ENV="production"',
+    ...binaryCompileDefines({
+      buildTime: context.buildTime,
+      buildInfo: context.buildInfo,
+      buildType: options.buildType,
+      version: options.version,
+      platformId: target.arch,
+    }),
     '--sourcemap=external',
   ];
 

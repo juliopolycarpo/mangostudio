@@ -104,6 +104,14 @@ export interface SafeFetchOptions {
   /** Wall-clock deadline covering redirects and the body read. */
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
+  /**
+   * Extra request headers, sent on every hop of the redirect chain — content
+   * negotiation (`Accept`) is the motivating case, and resending it across a
+   * same-origin redirect is harmless. Never a place for credentials: this
+   * module fetches addresses a caller chose, and a header repeated onto a
+   * redirect target the caller did not choose would leak it there.
+   */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 export interface SafeFetchResult {
@@ -230,7 +238,11 @@ async function requestOnce(
   signal: AbortSignal | undefined
 ): Promise<Response> {
   try {
-    return await deps.fetch(url, { redirect: 'manual', ...(signal && { signal }) });
+    return await deps.fetch(url, {
+      redirect: 'manual',
+      ...(signal && { signal }),
+      ...(options.headers && { headers: options.headers }),
+    });
   } catch (error) {
     if (options.signal?.aborted) throw new SafeFetchError('Request was cancelled.', 'cancelled');
     if (signal?.aborted) throw new SafeFetchError('Request timed out.');

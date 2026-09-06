@@ -10,6 +10,12 @@ import {
   MachineStatusSchema,
 } from '@mangostudio/shared/machine';
 import { USER_SERVICE_ERROR_MAX } from '@mangostudio/shared/runtime-home';
+import {
+  MachineUpdateStatusSchema,
+  type UpdateCheck,
+  type UpgradeReport,
+  type UpgradeStreamEvent,
+} from '@mangostudio/shared/updates';
 import Value from 'typebox/value';
 import { tailLines } from '../../../../src/cli/log-tail';
 import type { ServerState } from '../../../../src/lib/server-state';
@@ -19,7 +25,13 @@ import {
   MachineActionBlockedError,
   MachineActionUnavailableError,
   type MachineServiceDeps,
+  UpgradeUnavailableError,
 } from '../../../../src/modules/machine/application/machine-service';
+import type {
+  UpgradeRunRequest,
+  UpgradeService,
+} from '../../../../src/modules/updates/application/upgrade-service';
+import type { InstallOriginProbe } from '../../../../src/modules/updates/domain/install-origin';
 import { FakeProcessController } from '../../../support/mocks/fake-process-controller';
 import {
   FakeServiceManager,
@@ -456,5 +468,416 @@ describe('machineService.writeConfig', () => {
       MachineActionBlockedError
     );
     expect(fake.writes).toHaveLength(0);
+  });
+});
+
+/** Stands in for the release checker: no network, an answer scripted per test. */
+class FakeUpdateChecker {
+  checkCalls = 0;
+
+  constructor(private readonly cached: UpdateCheck | null) {}
+
+  readCached = (): UpdateCheck | null => this.cached;
+
+  check = (): Promise<UpdateCheck | null> => {
+    this.checkCalls += 1;
+    return Promise.resolve(this.cached);
+  };
+}
+
+function installOriginProbe(overrides: Partial<InstallOriginProbe> = {}): InstallOriginProbe {
+  return {
+    platform: 'linux',
+    env: {},
+    execPath: '/home/j/.mango/dist/current/mangostudio',
+    version: '0.1.1',
+    standalone: true,
+    container: false,
+    home: '/home/j',
+    readFile: () => null,
+    ...overrides,
+  };
+}
+
+describe('machineService.update', () => {
+  it('reports a delegate plan and does not offer to upgrade for a bun-launched hub', async () => {
+    const checker = new FakeUpdateChecker({
+      channel: 'stable',
+      currentVersion: '0.1.1',
+      latestVersion: '0.1.1',
+      updateAvailable: false,
+      checkedAt: 6_000,
+    });
+    const { service } = makeService({
+      installOriginProbe: () =>
+        installOriginProbe({
+          execPath: '/home/j/.bun/install/global/node_modules/mangostudio/bin/mangostudio',
+        }),
+      updatesConfig: () => ({ check: true, channel: null }),
+      checker,
+    });
+
+    const status = await service.update(LOCAL);
+
+    expect(Value.Check(MachineUpdateStatusSchema, status)).toBe(true);
+    expect(status.installedVia.manager).toBe('bun');
+    expect(status.canUpgrade).toBe(false);
+    expect(status.reason).toBe('package-manager');
+    expect(status.command).toBe('bun add -g mangostudio@latest');
+    expect(checker.checkCalls).toBe(1);
+  });
+
+  it('reports an available update for a self-managed hub', async () => {
+    const checker = new FakeUpdateChecker({
+      channel: 'stable',
+      currentVersion: '0.1.1',
+      latestVersion: '0.2.0',
+      updateAvailable: true,
+      checkedAt: 6_000,
+    });
+    const { service } = makeService({
+      installOriginProbe: () => installOriginProbe(),
+      updatesConfig: () => ({ check: true, channel: null }),
+      checker,
+    });
+
+    const status = await service.update(LOCAL);
+
+    expect(status.installedVia.manager).toBe('self-managed');
+    expect(status.canUpgrade).toBe(true);
+    expect(status.reason).toBeUndefined();
+    expect(status.command).toBe('mangostudio upgrade');
+    expect(status.check).toMatchObject({ latestVersion: '0.2.0', updateAvailable: true });
+  });
+
+  it('reports checks disabled without reading or refreshing the cache', async () => {
+    const checker = new FakeUpdateChecker({
+      channel: 'stable',
+      currentVersion: '0.1.1',
+      updateAvailable: false,
+      checkedAt: 6_000,
+    });
+    const { service } = makeService({
+      installOriginProbe: () => installOriginProbe(),
+      updatesConfig: () => ({ check: false, channel: null }),
+      checker,
+    });
+
+    const status = await service.update(LOCAL);
+
+    expect(status.checksEnabled).toBe(false);
+    expect(status.check).toBeNull();
+    expect(checker.checkCalls).toBe(0);
+  });
+
+  it('reports the configured channel, not installedVia’s build-origin channel', async () => {
+    // installOriginProbe() below reports a build whose own channel is
+    // 'stable' (the default fixture); [updates] channel configures canary.
+    // The two must not be conflated — a stable build configured for canary
+    // shows canary here, the channel an upgrade would actually target.
+    const checker = new FakeUpdateChecker({
+      channel: 'canary',
+      currentVersion: '0.1.1',
+      latestVersion: '0.1.1-canary.deadbee',
+      updateAvailable: true,
+      checkedAt: 6_000,
+    });
+    const { service } = makeService({
+      installOriginProbe: () => installOriginProbe(),
+      updatesConfig: () => ({ check: true, channel: 'canary' }),
+      checker,
+    });
+
+    const status = await service.update(LOCAL);
+
+    expect(status.installedVia.channel).toBe('stable');
+    expect(status.channel).toBe('canary');
+  });
+
+  it('folds the local-surface guard into canUpgrade, so a remote reader sees the command block, not a button', async () => {
+    const checker = new FakeUpdateChecker({
+      channel: 'stable',
+      currentVersion: '0.1.1',
+      latestVersion: '0.2.0',
+      updateAvailable: true,
+      checkedAt: 6_000,
+    });
+    const { service } = makeService({
+      installOriginProbe: () => installOriginProbe(),
+      updatesConfig: () => ({ check: true, channel: null }),
+      checker,
+    });
+
+    const remote = await service.update({ clientIp: '203.0.113.5' });
+    expect(remote.canUpgrade).toBe(false);
+    // Still the command a signed-in-but-remote reader can copy and run
+    // themselves — this is a self-managed plan, unlike the delegate case
+    // above, which already carries its own command for a different reason.
+    expect(remote.command).toBe('mangostudio upgrade');
+
+    const local = await service.update(LOCAL);
+    expect(local.canUpgrade).toBe(true);
+  });
+});
+
+/** Emits a fixed event list synchronously, then settles with a fixed report — enough to drive the SSE bridge. */
+class FakeUpgradeService implements UpgradeService {
+  readonly runCalls: UpgradeRunRequest[] = [];
+
+  constructor(
+    private readonly events: readonly UpgradeStreamEvent[],
+    private readonly report: UpgradeReport
+  ) {}
+
+  run(
+    request: UpgradeRunRequest,
+    emit: (event: UpgradeStreamEvent) => void
+  ): Promise<UpgradeReport> {
+    this.runCalls.push(request);
+    for (const event of this.events) emit(event);
+    return Promise.resolve(this.report);
+  }
+
+  rollback(): Promise<UpgradeReport> {
+    return Promise.resolve(this.report);
+  }
+}
+
+const UPGRADED_SCHEDULED: UpgradeReport = {
+  outcome: 'upgraded',
+  installedVia: { manager: 'self-managed', channel: 'stable', executable: '/x' },
+  currentVersion: '0.1.1',
+  restart: 'scheduled',
+  exitCode: 0,
+};
+
+describe('machineService.upgrade', () => {
+  it('refuses a blocked caller before ever asking the engine anything', async () => {
+    const upgradeService = new FakeUpgradeService([], UPGRADED_SCHEDULED);
+    const { service } = makeService({ upgradeService });
+
+    await expect(service.upgrade({}, { clientIp: '203.0.113.5' })).rejects.toThrow(
+      MachineActionBlockedError
+    );
+    expect(upgradeService.runCalls).toEqual([]);
+  });
+
+  it('refuses a non-self plan with the reason and command, never streaming anything', async () => {
+    const upgradeService = new FakeUpgradeService([], UPGRADED_SCHEDULED);
+    const { service } = makeService({
+      installOriginProbe: () =>
+        installOriginProbe({
+          execPath: '/home/j/.bun/install/global/node_modules/mangostudio/bin/mangostudio',
+        }),
+      updatesConfig: () => ({ check: true, channel: null }),
+      upgradeService,
+    });
+
+    let error: unknown;
+    try {
+      await service.upgrade({}, LOCAL);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(UpgradeUnavailableError);
+    expect((error as UpgradeUnavailableError).reason).toBe('package-manager');
+    expect((error as UpgradeUnavailableError).command).toBe('bun add -g mangostudio@latest');
+    expect(upgradeService.runCalls).toEqual([]);
+  });
+
+  it('streams the engine’s events, ends with done, and schedules a scheduled restart afterward', async () => {
+    const upgradeService = new FakeUpgradeService(
+      [{ type: 'stage', stage: 'resolve', done: false }],
+      UPGRADED_SCHEDULED
+    );
+    const { service, recorder } = makeService({
+      installOriginProbe: () => installOriginProbe(),
+      updatesConfig: () => ({ check: true, channel: null }),
+      upgradeService,
+    });
+
+    const source = await service.upgrade({ restart: true }, LOCAL);
+    const events: UpgradeStreamEvent[] = [];
+    for await (const event of source) events.push(event);
+
+    expect(events).toEqual([
+      { type: 'stage', stage: 'resolve', done: false },
+      { type: 'done', done: true, ...UPGRADED_SCHEDULED },
+    ]);
+    expect(upgradeService.runCalls).toEqual([{ restart: true }]);
+
+    expect(recorder.scheduled).toHaveLength(1);
+    await recorder.flush();
+    expect(recorder.spawned).toEqual([DETACHED]);
+    expect(recorder.shutdowns).toBe(1);
+  });
+
+  it('restarts through the supervisor, not spawn+shutdown, when the hub is service-launched', async () => {
+    const upgradeService = new FakeUpgradeService(
+      [{ type: 'stage', stage: 'resolve', done: false }],
+      UPGRADED_SCHEDULED
+    );
+    const { service, recorder, manager } = makeService(
+      {
+        installOriginProbe: () => installOriginProbe(),
+        updatesConfig: () => ({ check: true, channel: null }),
+        upgradeService,
+      },
+      SERVICE
+    );
+
+    const source = await service.upgrade({ restart: true }, LOCAL);
+    for await (const _event of source) {
+      // Drain to completion.
+    }
+
+    expect(recorder.scheduled).toHaveLength(1);
+    await recorder.flush();
+    expect(manager.calls).toEqual(['restart']);
+    expect(recorder.spawned).toEqual([]);
+    expect(recorder.shutdowns).toBe(0);
+  });
+
+  it('never schedules a restart when the report says not-running', async () => {
+    const report: UpgradeReport = { ...UPGRADED_SCHEDULED, restart: 'not-running' };
+    const upgradeService = new FakeUpgradeService([], report);
+    const { service, recorder } = makeService({
+      installOriginProbe: () => installOriginProbe(),
+      updatesConfig: () => ({ check: true, channel: null }),
+      upgradeService,
+    });
+
+    const source = await service.upgrade({}, LOCAL);
+    for await (const _event of source) {
+      // Drain to completion.
+    }
+
+    expect(recorder.scheduled).toEqual([]);
+  });
+
+  it('still schedules a scheduled restart when the client disconnects before draining the done event', async () => {
+    const upgradeService = new FakeUpgradeService(
+      [{ type: 'stage', stage: 'resolve', done: false }],
+      UPGRADED_SCHEDULED
+    );
+    const { service, recorder } = makeService({
+      installOriginProbe: () => installOriginProbe(),
+      updatesConfig: () => ({ check: true, channel: null }),
+      upgradeService,
+    });
+
+    const source = await service.upgrade({}, LOCAL);
+    const iterator = source[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.return?.();
+
+    expect(recorder.scheduled).toHaveLength(1);
+  });
+
+  it('schedules a scheduled restart after the engine settles, even when the client disconnected while it was still running', async () => {
+    // Unlike the fixture above (whose fake settles synchronously), this one
+    // holds `run()` open past the disconnect — reproducing a client leaving
+    // mid-download, not just mid-stream-drain. `bridge.result()` is still
+    // undefined when `finally` runs; only `bridge.settled` can catch this.
+    let resolveRun: ((report: UpgradeReport) => void) | undefined;
+    const upgradeService: UpgradeService = {
+      run(_request, emit) {
+        emit({ type: 'stage', stage: 'download', done: false });
+        return new Promise<UpgradeReport>((resolve) => {
+          resolveRun = resolve;
+        });
+      },
+      rollback: () => Promise.resolve(UPGRADED_SCHEDULED),
+    };
+    const { service, recorder } = makeService({
+      installOriginProbe: () => installOriginProbe(),
+      updatesConfig: () => ({ check: true, channel: null }),
+      upgradeService,
+    });
+
+    const source = await service.upgrade({}, LOCAL);
+    const iterator = source[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.return?.();
+
+    // The disconnect happened before the engine had anything to report.
+    expect(recorder.scheduled).toEqual([]);
+
+    resolveRun?.(UPGRADED_SCHEDULED);
+    // The restart is scheduled a few microtask hops after `run()` resolves
+    // (bridge settlement, then `scheduleRestartIfNeeded`'s own `await
+    // liveState()`) — a macrotask tick is a simpler wait than counting them.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(recorder.scheduled).toHaveLength(1);
+  });
+
+  it('refuses a second concurrent upgrade with in-progress, then accepts a new one once the first stream ends', async () => {
+    // `upgradeNow` sets the lock synchronously, before the returned async
+    // generator is ever iterated — so the second call below is refused
+    // without the fake engine needing to pause mid-run.
+    const upgradeService = new FakeUpgradeService(
+      [{ type: 'stage', stage: 'resolve', done: false }],
+      UPGRADED_SCHEDULED
+    );
+    const { service } = makeService({
+      installOriginProbe: () => installOriginProbe(),
+      updatesConfig: () => ({ check: true, channel: null }),
+      upgradeService,
+    });
+
+    const first = await service.upgrade({}, LOCAL);
+    // The generator body — and with it the engine's `run()` — only starts on
+    // first pull; the lock itself was already set by `upgradeNow` above.
+    const firstIterator = first[Symbol.asyncIterator]();
+    await firstIterator.next();
+
+    let error: unknown;
+    try {
+      await service.upgrade({}, LOCAL);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(UpgradeUnavailableError);
+    expect((error as UpgradeUnavailableError).reason).toBe('in-progress');
+    expect((error as UpgradeUnavailableError).command).toBe('mangostudio status');
+    // The lock, not a second call to the engine, is what refused it.
+    expect(upgradeService.runCalls).toHaveLength(1);
+
+    for (let step = await firstIterator.next(); !step.done; step = await firstIterator.next()) {
+      // Drain the first stream to its `done` event, which frees the lock.
+    }
+
+    const second = await service.upgrade({}, LOCAL);
+    for await (const _event of second) {
+      // A third call is accepted once the first has fully ended.
+    }
+    expect(upgradeService.runCalls).toHaveLength(2);
+  });
+
+  it('frees the lock when the client disconnects before the stream reaches done', async () => {
+    const upgradeService = new FakeUpgradeService(
+      [{ type: 'stage', stage: 'resolve', done: false }],
+      UPGRADED_SCHEDULED
+    );
+    const { service } = makeService({
+      installOriginProbe: () => installOriginProbe(),
+      updatesConfig: () => ({ check: true, channel: null }),
+      upgradeService,
+    });
+
+    const first = await service.upgrade({}, LOCAL);
+    const iterator = first[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.return?.();
+
+    // A cancelled stream still runs the generator's `finally`, so the lock
+    // is not held forever.
+    const second = await service.upgrade({}, LOCAL);
+    for await (const _event of second) {
+      // Drain to completion.
+    }
+    expect(upgradeService.runCalls).toHaveLength(2);
   });
 });

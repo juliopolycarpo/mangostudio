@@ -54,6 +54,19 @@ interface RawBinaryAssetPlan {
   readonly kind: 'hub' | 'runtime';
 }
 
+/**
+ * The install scripts, copied byte for byte into every release: `install.sh`
+ * and `install.ps1` are never renamed, so the canonical
+ * `releases/latest/download/<name>` URL is stable across versions.
+ */
+export interface InstallerScriptPlan {
+  readonly sourcePath: string;
+  readonly assetName: string;
+  readonly assetPath: string;
+}
+
+const INSTALLER_SCRIPT_NAMES = ['install.sh', 'install.ps1'] as const;
+
 export interface ReleaseAssetPlan {
   readonly rootDir: string;
   readonly outDir: string;
@@ -61,6 +74,7 @@ export interface ReleaseAssetPlan {
   readonly platformArchives: readonly PlatformArchivePlan[];
   readonly rawBinaries: readonly RawBinaryAssetPlan[];
   readonly frontendArchive: FrontendArchivePlan;
+  readonly installerScripts: readonly InstallerScriptPlan[];
   readonly checksummedAssetPaths: readonly string[];
   readonly checksumPath: string;
 }
@@ -83,10 +97,12 @@ export function createReleaseAssetPlan(options: ReleaseAssetPlanOptions): Releas
     createRawBinaryPlans(archive, options.version, assetsDir)
   );
   const frontendArchive = createFrontendArchivePlan(rootDir, options.version, assetsDir);
+  const installerScripts = createInstallerScriptPlans(rootDir, assetsDir);
   const checksummedAssetPaths = [
     ...platformArchives.map((asset) => asset.archivePath),
     ...rawBinaries.map((asset) => asset.assetPath),
     frontendArchive.archivePath,
+    ...installerScripts.map((asset) => asset.assetPath),
   ];
 
   return {
@@ -96,9 +112,21 @@ export function createReleaseAssetPlan(options: ReleaseAssetPlanOptions): Releas
     platformArchives,
     rawBinaries,
     frontendArchive,
+    installerScripts,
     checksummedAssetPaths,
     checksumPath: join(assetsDir, 'SHA256SUMS'),
   };
+}
+
+function createInstallerScriptPlans(
+  rootDir: string,
+  assetsDir: string
+): readonly InstallerScriptPlan[] {
+  return INSTALLER_SCRIPT_NAMES.map((name) => ({
+    sourcePath: join(rootDir, 'scripts', 'install', name),
+    assetName: name,
+    assetPath: join(assetsDir, name),
+  }));
 }
 
 function createPlatformArchivePlan(
@@ -173,6 +201,8 @@ export interface CanaryAssetSelection {
   readonly archives: readonly string[];
   /** Raw hub+runtime pairs, curated to {@link CANARY_PAIR_PLATFORMS}. */
   readonly rawBinaries: readonly string[];
+  /** The install scripts, staged under their own names — never renamed. */
+  readonly scripts: readonly string[];
 }
 
 /**
@@ -212,6 +242,7 @@ export function selectCanaryAssets(
       plan.frontendArchive.assetName,
     ],
     rawBinaries,
+    scripts: plan.installerScripts.map((script) => script.assetName),
   };
 }
 

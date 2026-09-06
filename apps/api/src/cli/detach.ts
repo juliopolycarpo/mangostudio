@@ -4,12 +4,14 @@
  * file, and confirming it actually came up before reporting success.
  */
 
-import { closeSync, openSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import { RUNTIME_CONFIG_ENV_KEYS } from '../lib/config';
 import { ensureRuntimeDirs, getServerLogPath } from '../lib/mango-paths';
 import { isStandaloneExecutable } from '../lib/runtime-paths';
 import { readState } from '../lib/server-state';
+import type { HubExecutable } from '../modules/machine/domain/hub-executable';
 import { CliError } from './errors';
 import { confirmsHealthy } from './health';
 import { createProcessController, type ProcessController } from './process-control';
@@ -28,6 +30,38 @@ export interface DetachOptions {
    * is spawned while the old server is still shutting down.
    */
   waitForPid?: number;
+  /**
+   * Run this argv instead of re-execing the current binary. A restart after
+   * an installer upgrade passes the `current` pointer here, so the successor
+   * launches the new version rather than the build that is restarting it.
+   */
+  executable?: readonly string[];
+}
+
+/**
+ * Spawn options that route a restart through the launcher a package manager
+ * owns, when there is one, or the installer's `current` pointer when this
+ * process resolves to it. Every other pointer kind keeps today's behaviour
+ * (re-exec this binary), so an upgrade never changes what a non-installer
+ * restart does.
+ * // Usage: spawnDetached(port, host, {}, { waitForPid, ...restartExecutableOptions(currentHubExecutable(), origin.launcherPath) })
+ */
+export function restartExecutableOptions(
+  executable: Pick<HubExecutable, 'pointer' | 'argv'>,
+  launcherPath?: string
+): Pick<DetachOptions, 'executable'> {
+  // A manager-owned install is launched through a stable shim
+  // (`~/.cargo/bin/mangostudio`) whose whole job is to run the version that
+  // manager has installed. `process.execPath` names the version directory
+  // this process came from, so after a delegated upgrade re-execing it starts
+  // the *old* build again — and Homebrew may have removed that directory
+  // outright when it cleaned the Cellar. The shim is the only path that
+  // survives the manager replacing what is underneath it. Callers pass the
+  // path through `restartLauncher`, which drops every launcher that spawns
+  // the binary as a child instead of becoming it — `confirmStarted` below
+  // matches pids, and a supervising launcher hands back the wrong one.
+  if (launcherPath) return { executable: [launcherPath] };
+  return executable.pointer === 'current' ? { executable: executable.argv } : {};
 }
 
 export interface DetachDeps {
@@ -97,12 +131,54 @@ async function confirmStarted(
 }
 
 /**
+ * Flags every PowerShell host this project starts is given, whether it runs a
+ * script file (`installer-invocation.ts`'s `installerArgv`) or a command
+ * string (`spawnDetachedWaiter` below). `-ExecutionPolicy Bypass` is not only
+ * about the script we wrote: with the machine on the default `Restricted`
+ * policy, `npm`/`pnpm` resolve to their `.ps1` shim ahead of the `.cmd` one,
+ * and the host refuses to run it — so a delegated upgrade would fail for
+ * anyone who installed through CMD without ever enabling scripts.
+ * // Usage: ['powershell.exe', ...POWERSHELL_HOST_FLAGS, '-Command', script]
+ */
+export const POWERSHELL_HOST_FLAGS: readonly string[] = [
+  '-NoProfile',
+  '-NonInteractive',
+  '-ExecutionPolicy',
+  'Bypass',
+];
+
+/**
+ * Windows system variables a spawned child needs to resolve executables
+ * (COMSPEC/PATHEXT), locate its data directories, and detect host
+ * architecture (PROCESSOR_ARCHITECTURE/PROCESSOR_ARCHITEW6432 — set by a
+ * 32-bit process running under WOW64). Shared by `DETACH_ENV_ALLOWLIST`
+ * below and `installer-invocation.ts`'s `SCRIPT_ENV_PASSTHROUGH` (the env the
+ * embedded install script runs with), so a key added for one reaches the
+ * other instead of drifting between two copied lists.
+ */
+export const WINDOWS_SYSTEM_ENV_KEYS: readonly string[] = [
+  'SystemRoot',
+  'windir',
+  'SystemDrive',
+  'COMSPEC',
+  'PATHEXT',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'ProgramData',
+  'ProgramFiles',
+  'ProgramW6432',
+  'NUMBER_OF_PROCESSORS',
+  'PROCESSOR_ARCHITECTURE',
+  'PROCESSOR_ARCHITEW6432',
+];
+
+/**
  * Runtime env keys forwarded to detached child processes.
  * Connector secrets and other injectable credentials are excluded; only the
  * runtime configuration (mirrors config.ts `ENV_KEY_MAP`) plus the system and
  * networking variables the server actually needs to run are forwarded.
  */
-const DETACH_ENV_ALLOWLIST = new Set<string>([
+export const DETACH_ENV_ALLOWLIST = new Set<string>([
   // Runtime configuration — sourced from config.ts so a new ENV_KEY_MAP key
   // reaches detached children without editing two lists.
   ...RUNTIME_CONFIG_ENV_KEYS,
@@ -110,6 +186,19 @@ const DETACH_ENV_ALLOWLIST = new Set<string>([
   'MANGO_LOG_FILE',
   'VERSION',
   'MANGOSTUDIO_DIAGNOSTIC_LOGS',
+  // Who launched this hub, so a `serve -d` child still knows how it was
+  // installed — detectInstallOrigin reads these, and an upgrade started from
+  // the detached child needs the same answer the foreground process had.
+  'MANGOSTUDIO_LAUNCHER',
+  'MANGOSTUDIO_LAUNCHER_PATH',
+  // The update check's own opt-outs (update-check.ts's
+  // `updateCheckSkipReason`). Dropping them turns `NO_UPDATE_NOTIFIER=1
+  // mangostudio serve -d` into a hub that reaches the release host anyway —
+  // the privacy choice has to survive the spawn, not just the CLI process
+  // that made it.
+  'NO_UPDATE_NOTIFIER',
+  'DO_NOT_TRACK',
+  'CI',
   // System and networking essentials. Bun.spawn replaces (not merges) the
   // child's environment, so omitting these would leave the detached server
   // without executable lookup (breaking the shell-exec tool), home-dir
@@ -144,18 +233,36 @@ const DETACH_ENV_ALLOWLIST = new Set<string>([
   // ProgramW6432 — wsl-executable.ts's MSI lookup, which falls back to the
   // System32 launcher stub and reintroduces the console-window flash this hub
   // spawns wsl.exe directly to avoid (see wsl-executable.ts).
-  'SystemRoot',
-  'windir',
-  'SystemDrive',
-  'COMSPEC',
-  'PATHEXT',
-  'APPDATA',
-  'LOCALAPPDATA',
-  'ProgramData',
-  'ProgramFiles',
-  'ProgramW6432',
-  'NUMBER_OF_PROCESSORS',
+  ...WINDOWS_SYSTEM_ENV_KEYS,
 ]);
+
+/**
+ * The subset of `source` whose keys are in `allowlist` or start with one of
+ * `prefixes`, dropping anything unset. Exported for callers outside this
+ * module that need a narrower env than the hub's full one but cannot name
+ * every key up front — a package-manager delegate, for instance, needs
+ * `npm_config_*`/`HOMEBREW_*` without enumerating every value npm or
+ * Homebrew might set.
+ * // Usage: pickAllowedEnv(process.env, ['PATH'], ['npm_config_'])
+ */
+export function pickAllowedEnv(
+  source: NodeJS.ProcessEnv,
+  allowlist: ReadonlySet<string> | readonly string[],
+  prefixes: readonly string[] = []
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of allowlist) {
+    const value = source[key];
+    if (value !== undefined) env[key] = value;
+  }
+  if (prefixes.length > 0) {
+    for (const [key, value] of Object.entries(source)) {
+      if (value === undefined) continue;
+      if (prefixes.some((prefix) => key.startsWith(prefix))) env[key] = value;
+    }
+  }
+  return env;
+}
 
 /**
  * Build a minimal env for a detached `__serve` child, forwarding only
@@ -168,14 +275,7 @@ export function buildDetachedEnv(
   logFile: string,
   options: DetachOptions = {}
 ): Record<string, string> {
-  const env: Record<string, string> = {};
-
-  for (const key of DETACH_ENV_ALLOWLIST) {
-    const value = process.env[key];
-    if (value !== undefined) {
-      env[key] = value;
-    }
-  }
+  const env = pickAllowedEnv(process.env, DETACH_ENV_ALLOWLIST);
 
   // Always apply the explicit spawn parameters as overrides.
   env.API_HOST = host;
@@ -204,7 +304,7 @@ export function spawnServeChild(
   const logFd = openSync(logFile, 'a');
   try {
     const proc = Bun.spawn({
-      cmd: buildServeCommand(host, port),
+      cmd: buildServeCommand(host, port, options.executable),
       env: buildDetachedEnv(host, port, logFile, options),
       detached: true,
       stdin: 'ignore',
@@ -220,9 +320,172 @@ export function spawnServeChild(
   }
 }
 
-/** In a compiled binary, re-exec it directly; in dev, run the entry via bun. */
-function buildServeCommand(host: string, port: number): string[] {
+export interface SpawnDetachedWaiterInput {
+  /** The package manager command to run once the wait is over, e.g. `['npm', 'install', '-g', 'mangostudio@latest']`. */
+  readonly argv: readonly string[];
+  /**
+   * The pid(s) to wait on before running the manager. A single pid for the
+   * common case; a list when the process invoking the upgrade (the CLI) is
+   * not the same process holding `mangostudio.exe` open (a live hub) — the
+   * manager cannot replace the file until both have exited.
+   */
+  readonly waitForPid: number | readonly number[];
+  /** Where the manager's combined output is appended. */
+  readonly logFile: string;
+  /**
+   * What to run once the manager step has run — the command that brings a
+   * hub the caller stopped for this upgrade back up, through the launcher on
+   * PATH (never this process's realpath: scoop's is versioned and changes
+   * with the upgrade). Runs unconditionally, not gated on the manager's exit:
+   * a hub already stopped for the upgrade needs recovering either way, and a
+   * fresh `powershell.exe`'s `$LASTEXITCODE` cannot be trusted to reflect it.
+   * Its output goes to the same log.
+   */
+  readonly afterSuccess?: readonly string[];
+  /**
+   * The env the PowerShell host runs with. The caller curates it — the upgrade
+   * engine hands over the same delegate env the POSIX path uses, never this
+   * process's full environment, plus whatever `hiddenFromManager` names.
+   */
+  readonly env: Record<string, string>;
+  /**
+   * Keys of `env` the manager step must not see, cleared before it runs and
+   * restored before `afterSuccess`. The hub's own runtime configuration
+   * (`BETTER_AUTH_SECRET`, `DATABASE_PATH`, …) has to reach the comeback
+   * command or the hub restarts unconfigured — but a package manager and its
+   * postinstall hooks have no business reading it. Values travel in this
+   * process's environment, never on a command line.
+   */
+  readonly hiddenFromManager?: readonly string[];
+}
+
+/** Single-quotes a PowerShell string literal, doubling any embedded quote. */
+function powerShellQuote(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+/** `& 'program' 'arg'… *>> 'log'`: run argv, appending every stream to the log. */
+function loggedInvocation(argv: readonly string[], logFile: string): string {
+  const [program, ...args] = argv;
+  const invocation = ['&', powerShellQuote(program ?? ''), ...args.map(powerShellQuote)].join(' ');
+  return `${invocation} *>> ${powerShellQuote(logFile)}`;
+}
+
+/**
+ * `hiddenFromManager` as two script fragments: stash the named variables into
+ * a hashtable and clear them, then put back whichever were set. Only the key
+ * names are written into the script text — the values stay in the host's own
+ * environment, out of the process listing.
+ */
+function hideForManagerSteps(keys: readonly string[]): { before: string; after: string } {
+  const list = keys.map(powerShellQuote).join(', ');
+  return {
+    before: `$mgHidden = @{}; foreach ($k in @(${list})) { $mgHidden[$k] = [Environment]::GetEnvironmentVariable($k); Remove-Item -LiteralPath ('Env:' + $k) -ErrorAction SilentlyContinue }`,
+    after: `foreach ($k in @(${list})) { if ($null -ne $mgHidden[$k]) { Set-Item -LiteralPath ('Env:' + $k) -Value $mgHidden[$k] } }`,
+  };
+}
+
+/**
+ * The `-Command` script text a detached waiter runs: wait out one or more
+ * pids, invoke the package manager appending its output to the log, and —
+ * when an `afterSuccess` step is given — run it unconditionally afterward.
+ *
+ * The wait has no timeout on purpose: the caller has already confirmed every
+ * pid it names is exiting (its own, and a hub it stopped), so giving up early
+ * could only start the manager against a file still held open.
+ *
+ * `afterSuccess` is only ever set once a live hub has already been stopped
+ * for this upgrade (see `runWindowsDelegate`), so it is not actually gated on
+ * the manager's exit code: a failed or crashed manager still leaves the old
+ * binary on disk, and bringing that hub back is the recovery, not a reward
+ * for success. Gating it would also be unreliable in practice — a fresh
+ * `powershell.exe` starts with `$LASTEXITCODE` as `$null`, `Wait-Process`
+ * never touches it, and `npm`/`scoop` on Windows are `.cmd` shims — so
+ * `$LASTEXITCODE` cannot be trusted to reflect the manager's own exit.
+ * // Usage: buildWaiterCommand({ argv: ['npm', 'install', '-g', 'x'], waitForPid: [123, 456], logFile: 'C:\\log.txt', afterSuccess: ['mangostudio', 'restart'] })
+ */
+export function buildWaiterCommand(
+  input: Pick<
+    SpawnDetachedWaiterInput,
+    'argv' | 'waitForPid' | 'logFile' | 'afterSuccess' | 'hiddenFromManager'
+  >
+): string {
+  const ids = Array.isArray(input.waitForPid) ? input.waitForPid.join(', ') : input.waitForPid;
+  const hidden =
+    input.hiddenFromManager && input.hiddenFromManager.length > 0
+      ? hideForManagerSteps(input.hiddenFromManager)
+      : undefined;
+  const steps = [
+    `Wait-Process -Id ${ids} -ErrorAction SilentlyContinue`,
+    ...(hidden ? [hidden.before] : []),
+    loggedInvocation(input.argv, input.logFile),
+    ...(hidden ? [hidden.after] : []),
+  ];
+  if (input.afterSuccess) {
+    steps.push(loggedInvocation(input.afterSuccess, input.logFile));
+  }
+  return steps.join('; ');
+}
+
+/**
+ * PowerShell's `*>>` redirect does not create a missing parent directory, and
+ * nothing guarantees the run dir exists before an upgrade that never started
+ * a hub in this session (`ensureRuntimeDirs` is otherwise `serve`'s job).
+ * // Usage: ensureLogDir('/home/j/.mango/run/upgrade-1.log')
+ */
+export function ensureLogDir(logFile: string): void {
+  mkdirSync(dirname(logFile), { recursive: true });
+}
+
+/**
+ * The full `powershell.exe` argv the waiter is spawned as. Split out from
+ * `spawnDetachedWaiter` so the host flags — `-ExecutionPolicy Bypass` above
+ * all, which is what lets a Restricted machine run `npm.ps1` — are assertable
+ * off Windows, where the spawn itself cannot run.
+ * // Usage: waiterArgv({ argv: ['npm', 'install', '-g', 'mangostudio@latest'], waitForPid: 1, logFile })
+ */
+export function waiterArgv(
+  input: Pick<
+    SpawnDetachedWaiterInput,
+    'argv' | 'waitForPid' | 'logFile' | 'afterSuccess' | 'hiddenFromManager'
+  >
+): string[] {
+  return ['powershell.exe', ...POWERSHELL_HOST_FLAGS, '-Command', buildWaiterCommand(input)];
+}
+
+/**
+ * Windows-only: spawn a detached PowerShell that waits for this process (and
+ * a hub the caller stopped) to exit, then runs a package-manager upgrade,
+ * logs its output, and optionally brings the hub back — used when the
+ * manager that owns the binary would otherwise try to replace a file a
+ * running process still holds open.
+ * // Usage: spawnDetachedWaiter({ argv: ['npm', 'install', '-g', 'mangostudio@latest'], waitForPid: process.pid, logFile, env })
+ */
+export function spawnDetachedWaiter(input: SpawnDetachedWaiterInput): number {
+  ensureLogDir(input.logFile);
+  const proc = Bun.spawn({
+    cmd: waiterArgv(input),
+    env: input.env,
+    detached: true,
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'ignore',
+    ...HIDDEN_WINDOW,
+  });
+  proc.unref();
+  return proc.pid;
+}
+
+/**
+ * In a compiled binary, re-exec it directly; in dev, run the entry via bun.
+ * An explicit `executable` (the installer's `current` pointer) wins over
+ * either default.
+ */
+function buildServeCommand(host: string, port: number, executable?: readonly string[]): string[] {
   const target = `${host}:${port}`;
+  if (executable && executable.length > 0) {
+    return [...executable, '__serve', target];
+  }
   if (isStandaloneExecutable()) {
     return [process.execPath, '__serve', target];
   }

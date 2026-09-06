@@ -13,6 +13,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import { TERMINAL_SCROLLBACK_MAX_BYTES } from '@mangostudio/shared/terminal';
+import type { UpdateChannel } from '@mangostudio/shared/updates';
 import { parse as parseToml } from 'smol-toml';
 import { CliError } from '../cli/errors';
 
@@ -125,6 +126,16 @@ export interface MangoConfig {
      */
     allowDirectLoopback: boolean;
   };
+  updates: {
+    /** Whether the hub checks the release host for a newer build. */
+    check: boolean;
+    /**
+     * Force a channel instead of the one this build came from. Null means
+     * "this build's own channel" — resolved with `versionChannel(getVersion())`
+     * at the point of use, never here.
+     */
+    channel: UpdateChannel | null;
+  };
   environments: {
     /** Opt in to refreshing Node release metadata from nodejs.org. */
     ltsRefresh: boolean;
@@ -185,6 +196,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   checkpoints: { dir: '' },
   auth: { secret: '', url: '' },
   security: { trustProxy: false, allowDirectLoopback: true },
+  updates: { check: true, channel: null },
   environments: { ltsRefresh: false, installsEnabled: false, container: false, wslExecutable: '' },
   terminal: { enabled: true, idleTimeoutMinutes: 30, maxSessionsPerUser: 8, scrollbackKib: 256 },
   chatgpt: {
@@ -291,6 +303,13 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   ALLOW_DIRECT_LOOPBACK: (cfg, v) => {
     cfg.security.allowDirectLoopback = parseBooleanFlag(v);
+  },
+  MANGO_UPDATES_CHECK: (cfg, v) => {
+    cfg.updates.check = parseBooleanFlag(v);
+  },
+  MANGO_UPDATES_CHANNEL: (cfg, v) => {
+    assertValidUpdatesChannel('MANGO_UPDATES_CHANNEL', v);
+    cfg.updates.channel = v;
   },
   MANGO_ENV_LTS_REFRESH: (cfg, v) => {
     cfg.environments.ltsRefresh = parseBooleanFlag(v);
@@ -451,6 +470,24 @@ function getAllowedOriginValidationMessage(origin: string): string | null {
   return null;
 }
 
+/**
+ * Fails immediately on an unrecognized `[updates] channel` / `MANGO_UPDATES_CHANNEL`
+ * value, naming what was received and the two it must be one of. Without
+ * this, both call sites below silently kept the build's own channel instead
+ * — an operator who mistypes "cannary" would see no error at all, just an
+ * update behavior that never matches the config they wrote.
+ */
+function assertValidUpdatesChannel(
+  source: string,
+  value: unknown
+): asserts value is 'stable' | 'canary' {
+  if (value === 'stable' || value === 'canary') return;
+  throw new CliError(
+    `Invalid updates.channel (${source}): "${String(value)}" is not a channel. ` +
+      'It must be "stable" or "canary".'
+  );
+}
+
 /** Fails before the server binds with an origin no browser request can match. */
 function assertValidAllowedOrigins(origins: string[]): void {
   const messages = origins
@@ -598,6 +635,7 @@ function cloneDefaults(): MangoConfig {
     checkpoints: { ...DEFAULT_CONFIG.checkpoints },
     auth: { ...DEFAULT_CONFIG.auth },
     security: { ...DEFAULT_CONFIG.security },
+    updates: { ...DEFAULT_CONFIG.updates },
     environments: { ...DEFAULT_CONFIG.environments },
     terminal: { ...DEFAULT_CONFIG.terminal },
     chatgpt: { ...DEFAULT_CONFIG.chatgpt },
@@ -693,6 +731,15 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
     if (typeof security.trustProxy === 'boolean') cfg.security.trustProxy = security.trustProxy;
     if (typeof security.allowDirectLoopback === 'boolean') {
       cfg.security.allowDirectLoopback = security.allowDirectLoopback;
+    }
+  }
+
+  const updates = parsed.updates as Record<string, unknown> | undefined;
+  if (updates) {
+    if (typeof updates.check === 'boolean') cfg.updates.check = updates.check;
+    if (updates.channel !== undefined) {
+      assertValidUpdatesChannel('config.toml', updates.channel);
+      cfg.updates.channel = updates.channel;
     }
   }
 
@@ -851,9 +898,12 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
 
 /**
  * True when running under the Bun test runner, which sets NODE_ENV=test.
+ * The one seam production code may branch on: background work that must
+ * never run against a real network or filesystem during `bun test` checks
+ * this instead of reading `NODE_ENV` itself.
  * // Usage: if (isTestRuntime()) { ... }
  */
-function isTestRuntime(): boolean {
+export function isTestRuntime(): boolean {
   // allow-node-env: selects the isolated test config path; moving this seam
   // risks clobbering a real user file.
   return process.env.NODE_ENV === 'test';
@@ -930,15 +980,24 @@ export function loadConfig(overridePath?: string): MangoConfig {
   // 1. Determine and read config.toml
   const tomlPath = overridePath ?? resolveConfigTomlPath();
   if (existsSync(tomlPath)) {
+    let parsed: Record<string, unknown> | null = null;
     try {
       const content = readFileSync(tomlPath, 'utf8');
-      const parsed = parseToml(content) as Record<string, unknown>;
+      parsed = parseToml(content) as Record<string, unknown>;
+    } catch (err) {
+      console.warn(`[config] Failed to parse ${tomlPath}:`, err);
+    }
+    // Outside the try/catch above on purpose: that one is for a file that
+    // does not parse as TOML at all, which falls back to defaults. A value
+    // this hub understands as TOML but rejects on its own terms — an
+    // updates.channel it does not recognize — is a `CliError` the operator
+    // needs to see, not a warning next to a config that silently kept
+    // running on some other channel.
+    if (parsed) {
       // Either key: host is as deprecated (and as ignored) as port.
       const frontendTable = parsed.frontend as Record<string, unknown> | undefined;
       frontendPortInToml = frontendTable?.port !== undefined || frontendTable?.host !== undefined;
       applyToml(cfg, parsed);
-    } catch (err) {
-      console.warn(`[config] Failed to parse ${tomlPath}:`, err);
     }
   }
 
@@ -1004,6 +1063,7 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (partial.checkpoints) Object.assign(cfg.checkpoints, partial.checkpoints);
   if (partial.auth) Object.assign(cfg.auth, partial.auth);
   if (partial.security) Object.assign(cfg.security, partial.security);
+  if (partial.updates) Object.assign(cfg.updates, partial.updates);
   if (partial.environments) Object.assign(cfg.environments, partial.environments);
   if (partial.terminal) Object.assign(cfg.terminal, partial.terminal);
   if (partial.chatgpt) Object.assign(cfg.chatgpt, partial.chatgpt);

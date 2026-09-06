@@ -9,6 +9,11 @@ import {
   type UserServiceAction,
 } from '@mangostudio/runtime';
 import type { ResourceKind } from '@mangostudio/shared/library';
+import {
+  UPGRADE_SHA_PATTERN,
+  UPGRADE_VERSION_PATTERN,
+  type UpdateChannel,
+} from '@mangostudio/shared/updates';
 import { CliError } from './errors';
 
 export interface ServeArgs {
@@ -67,6 +72,21 @@ export interface ServiceArgs {
 export interface LogsArgs {
   follow: boolean;
   lines: number;
+}
+
+export interface UpgradeArgs {
+  /** Preview only: resolve and report, never download or run anything. */
+  check: boolean;
+  /** Skip every confirmation prompt. */
+  yes: boolean;
+  channel?: UpdateChannel;
+  /** Stable only: an exact version instead of the latest. */
+  version?: string;
+  /** Canary only: a pinned source commit instead of the rolling latest. */
+  sha?: string;
+  rollback: boolean;
+  noRestart: boolean;
+  json: boolean;
 }
 
 export const DEFAULT_LOG_LINES = 100;
@@ -242,6 +262,116 @@ export function parseLogsArgs(rest: string[]): LogsArgs {
   }
 
   return { follow, lines };
+}
+
+// The shared pattern is unflagged for the wire; the `i` here is load-bearing —
+// the CLI accepts an uppercase sha off a terminal and lowercases it below.
+const CANARY_SHA_PATTERN = new RegExp(UPGRADE_SHA_PATTERN, 'i');
+const UPGRADE_VERSION_REGEX = new RegExp(UPGRADE_VERSION_PATTERN);
+
+/**
+ * Parse `upgrade`/`update` args: --check, --yes, one of --stable/--canary
+ * [sha]/--version <x.y.z>, --rollback, --no-restart, --json.
+ * // Usage: parseUpgradeArgs(['--canary', 'abc1234', '--yes'])
+ */
+export function parseUpgradeArgs(rest: string[]): UpgradeArgs {
+  let check = false;
+  let yes = false;
+  let channel: UpdateChannel | undefined;
+  let version: string | undefined;
+  let sha: string | undefined;
+  let rollback = false;
+  let noRestart = false;
+  let json = false;
+  let channelFlags = 0;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === '--check') {
+      check = true;
+      continue;
+    }
+    if (arg === '--yes') {
+      yes = true;
+      continue;
+    }
+    if (arg === '--stable') {
+      channel = 'stable';
+      channelFlags += 1;
+      continue;
+    }
+    if (arg === '--canary') {
+      channel = 'canary';
+      channelFlags += 1;
+      const next = rest[index + 1];
+      if (next !== undefined && CANARY_SHA_PATTERN.test(next)) {
+        sha = next.toLowerCase();
+        index += 1;
+      }
+      continue;
+    }
+    if (arg === '--version') {
+      const value = rest[index + 1];
+      if (!value || value.startsWith('-')) {
+        throw new CliError('Missing value for upgrade --version.');
+      }
+      // The engine builds a staging directory name from this value
+      // (`.staging-<version>-<pid>`), so it has to look like a version — not
+      // a path segment such as `../../x` — before it ever reaches a join.
+      if (!UPGRADE_VERSION_REGEX.test(value)) {
+        throw new CliError(
+          `Invalid value for upgrade --version: ${value} | expected shape: ${UPGRADE_VERSION_PATTERN}`
+        );
+      }
+      // --version names a stable release by definition; the rolling canary
+      // has no notion of an exact version to pin without a --canary <sha>.
+      channel = 'stable';
+      version = value;
+      channelFlags += 1;
+      index += 1;
+      continue;
+    }
+    if (arg === '--rollback') {
+      rollback = true;
+      continue;
+    }
+    if (arg === '--no-restart') {
+      noRestart = true;
+      continue;
+    }
+    if (arg === '--json') {
+      json = true;
+      continue;
+    }
+    throw new CliError(`Unknown option for upgrade: ${arg}`);
+  }
+
+  if (channelFlags > 1) {
+    throw new CliError(
+      'Choose one of --stable, --canary, or --version for upgrade — they are mutually exclusive.'
+    );
+  }
+
+  // `--check` previews a *resolution*; a rollback has nothing to resolve — it
+  // swaps the pointer to the version already on disk. Accepting the pair would
+  // run the rollback for real (moving the pointer, restarting the hub), which
+  // is the opposite of what --check promises everywhere else.
+  if (rollback && check) {
+    throw new CliError(
+      'upgrade --rollback has nothing to preview; drop --check, or run "mangostudio status" to see the version it would roll back to.'
+    );
+  }
+
+  return {
+    check,
+    yes,
+    rollback,
+    noRestart,
+    json,
+    ...(channel !== undefined ? { channel } : {}),
+    ...(version !== undefined ? { version } : {}),
+    ...(sha !== undefined ? { sha } : {}),
+  };
 }
 
 /** `env` options that take the next argument as their value, and where it lands. */

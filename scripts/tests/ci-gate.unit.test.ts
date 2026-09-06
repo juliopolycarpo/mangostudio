@@ -222,10 +222,15 @@ describe('release-dry-run.yml always-reporting gate', () => {
 
   test('each dry-run lane runs only when its relevance predicate is true', () => {
     const linuxBlock = extractJobBlock(workflow, 'dry-run-linux');
+    const windowsBlock = extractJobBlock(workflow, 'dry-run-windows');
     const cargoBlock = extractJobBlock(workflow, 'dry-run-cargo');
 
     expect(parseNeedsList(linuxBlock)).toEqual(['changes']);
     expect(linuxBlock).toContain("if: needs.changes.outputs.release == 'true'");
+    // Also needs `changes` directly (not just transitively through
+    // dry-run-linux) so its own `if:` can read `needs.changes.outputs`.
+    expect(parseNeedsList(windowsBlock)).toEqual(['changes', 'dry-run-linux']);
+    expect(windowsBlock).toContain("if: needs.changes.outputs.release == 'true'");
     expect(parseNeedsList(cargoBlock)).toEqual(['changes']);
     expect(cargoBlock).toContain("if: needs.changes.outputs.cargo_shim == 'true'");
   });
@@ -240,7 +245,7 @@ describe('release-dry-run.yml always-reporting gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} format('{0} {1}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.cargo_shim == 'false' && 'dry-run-cargo' || '') }}`
+      `ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.cargo_shim == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '') }}`
     );
   });
 });

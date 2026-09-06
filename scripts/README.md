@@ -23,7 +23,7 @@ scripts/
 ├── ci/               Dependency-free workflow steps (gate evaluation, distribution identity, cross-runtime fetch, test-shard and timings merge)
 ├── lib/              Shared toolkit (see below)
 ├── examples/         Runnable maintainer samples (dependency-free Bun scripts)
-├── install/          Archive-install smoke fixture for the release dry-run (install.sh, not shipped; canonical installers live at mangostudio.dev)
+├── install/          Canonical installers (install.sh, install.ps1): shipped as release assets on both channels and embedded in the hub binary
 ├── qa-gate/          PR metrics collector, comment renderers + comment publisher
 ├── release/          Release-time packaging + publication (see below)
 ├── vendor/           Regenerate + drift-check committed vendor contracts (bun run vendor-contracts:regen)

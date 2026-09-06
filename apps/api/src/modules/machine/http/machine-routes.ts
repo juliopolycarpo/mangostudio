@@ -15,10 +15,12 @@ import {
   MachineServiceBodySchema,
   MachineStatusSchema,
 } from '@mangostudio/shared/machine';
+import { MachineUpdateStatusSchema, MachineUpgradeBodySchema } from '@mangostudio/shared/updates';
 import { Elysia, t } from 'elysia';
 import Value from 'typebox/value';
 import type { GuardIpPolicy } from '../../../lib/client-ip';
 import { getConfig } from '../../../lib/config';
+import { sseResponse } from '../../../lib/sse-stream';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { guardClientIp } from '../../../plugins/guard-client-ip';
 import {
@@ -26,6 +28,7 @@ import {
   MachineActionUnavailableError,
   type MachineService,
   machineService,
+  UpgradeUnavailableError,
 } from '../application/machine-service';
 
 function mapMachineError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
@@ -38,6 +41,14 @@ function mapMachineError(error: unknown, set: { status?: number | string }): Api
     };
   }
   if (error instanceof MachineActionUnavailableError) {
+    set.status = 409;
+    return {
+      error: error.message,
+      code: ERROR_CODES.UNSUPPORTED,
+      details: { reason: error.reason, command: error.command },
+    };
+  }
+  if (error instanceof UpgradeUnavailableError) {
     set.status = 409;
     return {
       error: error.message,
@@ -70,6 +81,9 @@ export function createMachineRoutes(
     .use(guardClientIp(policy))
     .get('/machine/status', { response: { 200: MachineStatusSchema } }, ({ guardClientIp }) =>
       service.status({ clientIp: guardClientIp })
+    )
+    .get('/machine/update', { response: { 200: MachineUpdateStatusSchema } }, ({ guardClientIp }) =>
+      service.update({ clientIp: guardClientIp })
     )
     .get(
       '/machine/doctor',
@@ -158,6 +172,24 @@ export function createMachineRoutes(
       async ({ body, guardClientIp, set }) => {
         try {
           return await service.writeConfig(body, { clientIp: guardClientIp });
+        } catch (error) {
+          return mapMachineError(error, set);
+        }
+      }
+    )
+    .post(
+      '/machine/upgrade',
+      {
+        body: MachineUpgradeBodySchema,
+        response: {
+          403: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+        },
+      },
+      async ({ body, guardClientIp, set }) => {
+        try {
+          const source = await service.upgrade(body, { clientIp: guardClientIp });
+          return sseResponse(source, 'Upgrade stream failed.');
         } catch (error) {
           return mapMachineError(error, set);
         }

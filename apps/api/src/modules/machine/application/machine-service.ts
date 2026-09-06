@@ -9,6 +9,7 @@ import { RuntimeServiceManagementError, type UserServiceManager } from '@mangost
 import type { InstallGuard } from '@mangostudio/shared/environments';
 import type {
   HubHealth,
+  HubLaunchMode,
   MachineActionReason,
   MachineActionResponse,
   MachineCheck,
@@ -31,8 +32,21 @@ import {
   USER_SERVICE_ERROR_MAX,
   type UserServiceStatus,
 } from '@mangostudio/shared/runtime-home';
+import {
+  type MachineUpdateStatus,
+  type MachineUpgradeBody,
+  SOURCE_SHA_MAX,
+  UPDATE_ERROR_MAX,
+  UPDATE_VERSION_MAX,
+  UPGRADE_COMMAND_MAX,
+  type UpdateChannel,
+  type UpdateCheck,
+  type UpgradeRefusalReason,
+  type UpgradeReport,
+  type UpgradeStreamEvent,
+} from '@mangostudio/shared/updates';
 import { stringify as stringifyToml } from 'smol-toml';
-import { spawnServeChild } from '../../../cli/detach';
+import { restartExecutableOptions, spawnServeChild } from '../../../cli/detach';
 import { canProbeHealth, probeHealth, probeHubHealth } from '../../../cli/health';
 import {
   type LogTail,
@@ -50,13 +64,25 @@ import {
   getVersion,
   resetConfig,
 } from '../../../lib/config';
+import { bridgeEmitter } from '../../../lib/emit-bridge';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getLogsDir, getServerLogPath } from '../../../lib/mango-paths';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
 import { writeFileAtomic } from '../../../lib/safe-file';
-import { isStateLive, readState, type ServerState } from '../../../lib/server-state';
+import { readLiveState, readState, type ServerState } from '../../../lib/server-state';
 import { readTomlDocument, setTomlSectionValue } from '../../../lib/toml';
 import { requestShutdown } from '../../../server/shutdown-request';
+import {
+  resolveInstallStatus,
+  upgradeRefusalReason,
+} from '../../updates/application/install-status';
+import { type UpdateChecker, updateChecker } from '../../updates/application/update-check';
+import {
+  createUpgradeService,
+  type UpgradeRunRequest,
+  type UpgradeService,
+} from '../../updates/application/upgrade-service';
+import { fitInstalledVia, type InstallOriginProbe } from '../../updates/domain/install-origin';
 import type { HubExecutable } from '../domain/hub-executable';
 import { describeHubProcess, hubLaunchMode } from '../domain/hub-process';
 import { hubServiceUnitName } from '../domain/hub-service-identity';
@@ -77,6 +103,7 @@ import {
   buildHubServiceDefinition,
   createHubServiceManager,
   currentHubExecutable,
+  currentInstallOriginProbe,
   hubServiceLogPath,
   hubServiceTargetFor,
   isAuthSecretPersisted,
@@ -103,6 +130,26 @@ export class MachineActionUnavailableError extends Error {
     this.name = 'MachineActionUnavailableError';
   }
 }
+
+/**
+ * `POST /machine/upgrade` was asked for a plan this hub does not carry out
+ * itself. Its own error type, not `MachineActionUnavailableError`: an
+ * upgrade refusal reason (`package-manager`, `container`, ...) is a
+ * different enum than `MachineActionReason`, and widening that shared schema
+ * for one route is not warranted when a second error type does the job.
+ */
+export class UpgradeUnavailableError extends Error {
+  constructor(
+    readonly reason: UpgradeRefusalReason,
+    readonly command: string
+  ) {
+    super(`This action is not available here (${reason}). Run "${command}" in a terminal instead.`);
+    this.name = 'UpgradeUnavailableError';
+  }
+}
+
+/** What a caller refused with `'in-progress'` should run instead, to see how the running upgrade ends. */
+const STATUS_COMMAND = 'mangostudio status';
 
 export interface MachineRequestContext {
   readonly clientIp: string | undefined;
@@ -164,6 +211,17 @@ export interface MachineServiceDeps {
   readonly schedule: (work: () => Promise<void> | void) => void;
   readonly now: () => number;
   readonly env: NodeJS.ProcessEnv;
+  /** How this binary was installed, freshly probed each call. */
+  readonly installOriginProbe: () => InstallOriginProbe;
+  /** `config.updates`, re-read each call so a reload takes effect immediately. */
+  readonly updatesConfig: () => { readonly check: boolean; readonly channel: UpdateChannel | null };
+  readonly checker: Pick<UpdateChecker, 'readCached' | 'check'>;
+  /**
+   * The upgrade engine, wired with a no-op `restartHub`: this route defers
+   * the actual restart until after the SSE stream has ended (see `upgrade`
+   * below), the same way `restart()` above defers through `schedule`.
+   */
+  readonly upgradeService: UpgradeService;
 }
 
 export interface MachineService {
@@ -179,6 +237,17 @@ export interface MachineService {
     body: MachineConfigWriteBody,
     context: MachineRequestContext
   ): Promise<MachineConfigWriteResponse>;
+  update(context: MachineRequestContext): Promise<MachineUpdateStatus>;
+  /**
+   * Stream an upgrade. The guard and the plan check both happen before the
+   * promise resolves, so a caller can `await` this and map a thrown
+   * `MachineActionBlockedError`/`UpgradeUnavailableError` to 403/409 before
+   * ever opening the response stream.
+   */
+  upgrade(
+    body: MachineUpgradeBody,
+    context: MachineRequestContext
+  ): Promise<AsyncIterable<UpgradeStreamEvent>>;
 }
 
 const AFTER_RESPONSE_MS = 50;
@@ -188,11 +257,17 @@ const logger = createDiagnosticLogger('machine');
 export function createMachineService(deps: Partial<MachineServiceDeps> = {}): MachineService {
   const d = resolveDeps(deps);
 
-  const liveState = async (): Promise<ServerState | null> => {
-    const state = await d.readState();
-    if (!state) return null;
-    return isStateLive(state, (pid) => d.controller.isAlive(pid)) ? state : null;
-  };
+  // A page can hold a banner and a card that both offer Upgrade, and a second
+  // tab is free to open the same page: without this, two concurrent
+  // `upgrade()` calls would both stage into the same
+  // `.staging-<version>-<pid>` directory (the engine keys it off this
+  // process's own pid) and race the download and the install script. One
+  // flag is enough — the service is a singleton and only one upgrade at a
+  // time makes sense for it to run.
+  let upgradeInFlight = false;
+
+  const liveState = (): Promise<ServerState | null> =>
+    readLiveState(d.readState, (pid) => d.controller.isAlive(pid));
 
   /** Assemble the action inputs around a service status already in hand. */
   const actionsInputFrom = (
@@ -299,21 +374,14 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       refuse(restartReason(input), input.guard, RESTART_COMMAND);
       if (!state) throw new MachineActionUnavailableError('foreground', RESTART_COMMAND);
 
-      if (input.launch === 'service') {
-        d.schedule(() => d.manager.restart());
-        return {
-          accepted: true,
-          outcome: 'restarting-service',
-          ...(state.service && { unit: state.service }),
-        };
-      }
-      d.schedule(() => {
-        // Only let go once a successor exists; a failed spawn followed by a
-        // shutdown would leave nothing serving.
-        d.spawnSuccessor(state);
-        d.shutdown();
-      });
-      return { accepted: true, outcome: 'restarting-detached' };
+      scheduleRestart(state, input.launch, d);
+      return input.launch === 'service'
+        ? {
+            accepted: true,
+            outcome: 'restarting-service',
+            ...(state.service && { unit: state.service }),
+          }
+        : { accepted: true, outcome: 'restarting-detached' };
     },
 
     async service(action, context) {
@@ -354,7 +422,79 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
         return Promise.reject(error);
       }
     },
+
+    // Every read here is synchronous; `check()` below is deliberately not
+    // awaited, so nothing in this method actually suspends. `Promise`-returning
+    // for the same reason `writeConfig` is: callers never have to know that.
+    update(context) {
+      const { check: checksEnabled, channel: configuredChannel } = d.updatesConfig();
+      // The probe already carries the running version; building a whole
+      // `MachineEnvironment` (config, home/logs dirs, runtime slot dir) to read
+      // one string off it is work this request has no other use for.
+      const probe = d.installOriginProbe();
+      const status = resolveInstallStatus(probe, configuredChannel, probe.version);
+      if (checksEnabled) {
+        // The cache the response reads below; the checker itself decides
+        // whether it is still fresh enough to skip the network.
+        void d.checker.check().catch(() => undefined);
+      }
+      const check = checksEnabled ? d.checker.readCached() : null;
+      const reason = upgradeRefusalReason(status.plan);
+      // A remote signed-in reader can see this page but must not be offered
+      // the button: `canUpgrade` folds the same loopback guard `upgrade()`
+      // itself enforces, so a stale "can upgrade" answer never survives past
+      // the guard that would actually refuse the POST.
+      const canUpgrade = status.plan.kind === 'self' && d.evaluateGuard(context.clientIp).allowed;
+      return Promise.resolve({
+        installedVia: fitInstalledVia(status.installedVia),
+        channel: status.channel,
+        check: check ? fitUpdateCheck(check) : null,
+        checksEnabled,
+        canUpgrade,
+        ...(reason !== undefined ? { reason } : {}),
+        command: fitToLimit(status.command, UPGRADE_COMMAND_MAX),
+      });
+    },
+
+    // The guard and the plan lookup are both synchronous; wrapping in
+    // Promise.resolve/reject (rather than declaring this async, which would
+    // trip the no-idle-await lint) keeps every failure a rejection the same
+    // way writeConfig above does, so a caller `await`ing this never has to
+    // tell a thrown guard error apart from a rejected one.
+    upgrade(body, context) {
+      try {
+        return Promise.resolve(upgradeNow(body, context));
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
   };
+
+  function upgradeNow(
+    body: MachineUpgradeBody,
+    context: MachineRequestContext
+  ): AsyncIterable<UpgradeStreamEvent> {
+    const guard = d.evaluateGuard(context.clientIp);
+    if (!guard.allowed) throw new MachineActionBlockedError(guard);
+    if (upgradeInFlight) throw new UpgradeUnavailableError('in-progress', STATUS_COMMAND);
+
+    const { channel: configuredChannel } = d.updatesConfig();
+    const probe = d.installOriginProbe();
+    const status = resolveInstallStatus(probe, configuredChannel, probe.version, {
+      channel: body.channel,
+      version: body.version,
+      sha: body.sha,
+    });
+    if (status.plan.kind !== 'self') {
+      const reason = upgradeRefusalReason(status.plan) ?? 'unknown-origin';
+      throw new UpgradeUnavailableError(reason, status.command);
+    }
+
+    upgradeInFlight = true;
+    return upgradeEvents(body, d, liveState, () => {
+      upgradeInFlight = false;
+    });
+  }
 
   function writeConfigNow(
     body: MachineConfigWriteBody,
@@ -449,6 +589,94 @@ function refuse(reason: MachineActionReason | null, guard: InstallGuard, command
 }
 
 /**
+ * Bridges the engine's `emit` callback into the SSE source `upgrade()`
+ * returns, then — once the caller has drained it — schedules the real
+ * restart in a `finally`, so a client that disconnects mid-stream (`cancel()`
+ * → the generator never resumes past its last `yield`) still gets the
+ * restart it was promised, not just one that completed normally.
+ */
+async function* upgradeEvents(
+  body: MachineUpgradeBody,
+  d: MachineServiceDeps,
+  liveState: () => Promise<ServerState | null>,
+  onDone: () => void
+): AsyncGenerator<UpgradeStreamEvent> {
+  const request: UpgradeRunRequest = {
+    ...(body.channel !== undefined ? { channel: body.channel } : {}),
+    ...(body.version !== undefined ? { version: body.version } : {}),
+    ...(body.sha !== undefined ? { sha: body.sha } : {}),
+    restart: body.restart ?? true,
+  };
+  const bridge = bridgeEmitter<UpgradeStreamEvent, UpgradeReport>((emit) =>
+    d.upgradeService.run(request, emit)
+  );
+
+  try {
+    yield* bridge.items;
+    const report = bridge.result();
+    if (report) yield { type: 'done', done: true, ...report };
+  } finally {
+    // Frees a second `upgrade()` call to start the moment this one stops
+    // being watched — whether the stream ran to its `done` event or the
+    // client disconnected mid-way. The engine itself may still be finishing
+    // up in the background (see below); `upgrade-service.ts`'s own
+    // in-flight guard is what keeps that from racing a second `run()`.
+    onDone();
+    // Runs whether the stream ended normally or the client disconnected
+    // mid-way (`cancel()` stops `bridge.items` short of its last `yield`,
+    // which would otherwise skip scheduling a restart the upgrade already
+    // earned). `bridge.result()` is only set once the engine has actually
+    // settled; still undefined here means the client left before the engine
+    // finished. The engine keeps running regardless (it never reads from
+    // this generator), so wait for `bridge.settled` instead of giving up —
+    // fire-and-forget, so a slow download does not hold `iterator.return()`
+    // open for the caller.
+    const report = bridge.result();
+    if (report !== undefined) {
+      await scheduleRestartIfNeeded(report, d, liveState);
+    } else {
+      void bridge.settled.then(
+        (finalReport) => scheduleRestartIfNeeded(finalReport, d, liveState),
+        () => undefined
+      );
+    }
+  }
+}
+
+/**
+ * Bring the hub back the way whoever owns this process expects. A
+ * service-supervised hub must ask its supervisor to restart it rather than
+ * spawn a successor and exit — a systemd unit with `KillMode=control-group`
+ * would tear down the successor along with this process, and launchd would
+ * lose track of it as an orphan. Deferred through `schedule` either way, so
+ * the response is written before this process goes anywhere.
+ * // Usage: scheduleRestart(state, hubLaunchMode(state), d)
+ */
+function scheduleRestart(state: ServerState, launch: HubLaunchMode, d: MachineServiceDeps): void {
+  if (launch === 'service') {
+    d.schedule(() => d.manager.restart());
+    return;
+  }
+  d.schedule(() => {
+    // Only let go once a successor exists; a failed spawn followed by a
+    // shutdown would leave nothing serving.
+    d.spawnSuccessor(state);
+    d.shutdown();
+  });
+}
+
+async function scheduleRestartIfNeeded(
+  report: UpgradeReport,
+  d: MachineServiceDeps,
+  liveState: () => Promise<ServerState | null>
+): Promise<void> {
+  if (report.restart !== 'scheduled') return;
+  const state = await liveState();
+  if (!state) return;
+  scheduleRestart(state, hubLaunchMode(state), d);
+}
+
+/**
  * Whether the recorded process is answering. This process is answering by
  * definition — it is serving the request; anything else goes through the shared
  * probe rule.
@@ -484,6 +712,7 @@ function realEnvironment(): MachineEnvironment {
 
 function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
   const environment = deps.environment ?? realEnvironment;
+  const executable = deps.executable ?? (() => currentHubExecutable());
   return {
     manager: deps.manager ?? createHubServiceManager(),
     controller: deps.controller ?? createProcessController(),
@@ -514,7 +743,7 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
         });
       }),
     environment,
-    executable: deps.executable ?? (() => currentHubExecutable()),
+    executable,
     serviceLogFile: deps.serviceLogFile ?? hubServiceLogPath,
     secretPersisted: deps.secretPersisted ?? (() => isAuthSecretPersisted()),
     configFilePath: deps.configFilePath ?? (() => getConfig().configFilePath),
@@ -532,6 +761,7 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
       ((state) => {
         spawnServeChild(state.port, state.host, getServerLogPath(Date.now()), {
           waitForPid: state.pid,
+          ...restartExecutableOptions(executable()),
         });
       }),
     shutdown: deps.shutdown ?? requestShutdown,
@@ -553,6 +783,31 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
       }),
     now: deps.now ?? Date.now,
     env: deps.env ?? process.env,
+    installOriginProbe: deps.installOriginProbe ?? currentInstallOriginProbe,
+    updatesConfig: deps.updatesConfig ?? (() => getConfig().updates),
+    checker: deps.checker ?? updateChecker,
+    // A no-op restartHub: this process is the hub the upgrade would restart,
+    // so the actual restart is scheduled by upgradeEvents() above, after the
+    // SSE stream has ended — never by the engine itself mid-request.
+    upgradeService:
+      deps.upgradeService ?? createUpgradeService({ restartHub: () => Promise.resolve() }),
+  };
+}
+
+/** `UpdateCheck` cut to the wire caps — the release host's own answer is untrusted length. */
+function fitUpdateCheck(check: UpdateCheck): UpdateCheck {
+  return {
+    channel: check.channel,
+    currentVersion: fitToLimit(check.currentVersion, UPDATE_VERSION_MAX),
+    ...(check.latestVersion !== undefined
+      ? { latestVersion: fitToLimit(check.latestVersion, UPDATE_VERSION_MAX) }
+      : {}),
+    ...(check.latestSourceSha !== undefined
+      ? { latestSourceSha: fitToLimit(check.latestSourceSha, SOURCE_SHA_MAX) }
+      : {}),
+    updateAvailable: check.updateAvailable,
+    checkedAt: check.checkedAt,
+    ...(check.error !== undefined ? { error: fitToLimit(check.error, UPDATE_ERROR_MAX) } : {}),
   };
 }
 
