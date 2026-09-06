@@ -15,7 +15,7 @@
   },
   "type": "module",
   "workspaces": ["apps/*", "packages/*"],
-  "packageManager": "bun@1.4.0",
+  "packageManager": "bun@1.4.2",
   "scripts": {
     "dev": "bun ./scripts/dev.ts",
     "build": "bun ./scripts/build.ts",
@@ -48,7 +48,7 @@
     "@dprint/toml": "^0.7.0",
     "@mangostudio/shared": "workspace:*",
     "@playwright/test": "^1.62.1",
-    "@types/bun": "^1.4.0",
+    "@types/bun": "^1.4.1",
     "@typescript/typescript6": "6.0.2",
     "dprint": "^0.55.2",
     "git-cliff": "^2.13.1",

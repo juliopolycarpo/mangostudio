@@ -30,7 +30,7 @@ runs:
       name: Resolve Bun revision
       shell: bash
       # `--revision`, not `--version`: `--revision` appends the commit that
-      # built this Bun (`1.4.0+34cbb9a40`), so it stays a correct key even when
+      # built this Bun (`1.4.2+744846f84`), so it stays a correct key even when
       # `.bun-version` names something whose `--version` is not unique — a
       # channel, or a rebuilt tag. Keying on `--version` was what handed one
       # Bun build's extracted packages to a different one under `canary`; on a
