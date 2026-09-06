@@ -5,6 +5,7 @@ import {
   fitInstalledVia,
   npmFamilyFromPath,
   parseInstallOriginRecord,
+  restartLauncher,
   versionChannel,
 } from '../../../../src/modules/updates/domain/install-origin';
 import { probe } from './support/install-origin-probes';
@@ -199,6 +200,38 @@ describe('npmFamilyFromPath', () => {
       npmFamilyFromPath('C:\\Users\\j\\AppData\\Local\\pnpm\\global\\5\\node_modules\\x.js')
     ).toBe('pnpm');
     expect(npmFamilyFromPath('/usr/local/lib/node_modules/mangostudio/bin/x.js')).toBe('npm');
+  });
+});
+
+describe('restartLauncher', () => {
+  const CARGO = '/home/j/.cargo/bin/mangostudio';
+  const NPM = '/usr/local/lib/node_modules/mangostudio/bin/mangostudio.js';
+
+  it("names cargo's Unix shim, the one launcher that execs in place", () => {
+    // packages/cargo-shim calls CommandExt::exec on Unix, so the pid the
+    // restart spawned is the pid the hub writes to its state file.
+    expect(restartLauncher({ manager: 'cargo', launcherPath: CARGO }, 'linux')).toBe(CARGO);
+    expect(restartLauncher({ manager: 'cargo', launcherPath: CARGO }, 'darwin')).toBe(CARGO);
+  });
+
+  it('refuses the same shim on Windows, where it spawns the binary and waits', () => {
+    // The Windows arm calls .status(): the hub is a grandchild, so
+    // confirmStarted never sees its own child's pid in the state file.
+    expect(restartLauncher({ manager: 'cargo', launcherPath: CARGO }, 'win32')).toBeUndefined();
+  });
+
+  it('refuses the npm wrapper, which spawnSyncs the platform binary', () => {
+    // Same pid split, plus the path is a .js file CreateProcess cannot start
+    // at all. Re-execing process.execPath is correct for npm anyway: the
+    // platform package's path carries no version, so npm replaced it in place.
+    for (const manager of ['npm', 'bun', 'pnpm'] as const) {
+      expect(restartLauncher({ manager, launcherPath: NPM }, 'linux')).toBeUndefined();
+    }
+  });
+
+  it('has nothing to name for a manager that leaves no marker', () => {
+    expect(restartLauncher({ manager: 'homebrew' }, 'darwin')).toBeUndefined();
+    expect(restartLauncher({ manager: 'self-managed' }, 'linux')).toBeUndefined();
   });
 });
 

@@ -50,13 +50,16 @@ export function restartExecutableOptions(
   executable: Pick<HubExecutable, 'pointer' | 'argv'>,
   launcherPath?: string
 ): Pick<DetachOptions, 'executable'> {
-  // A manager-owned install is launched through a stable shim (the npm
-  // wrapper, `~/.cargo/bin/mangostudio`) whose whole job is to run the version
-  // that manager has installed. `process.execPath` names the version
-  // directory this process came from, so after a delegated upgrade re-execing
-  // it starts the *old* build again — and Homebrew may have removed that
-  // directory outright when it cleaned the Cellar. The shim is the only path
-  // that survives the manager replacing what is underneath it.
+  // A manager-owned install is launched through a stable shim
+  // (`~/.cargo/bin/mangostudio`) whose whole job is to run the version that
+  // manager has installed. `process.execPath` names the version directory
+  // this process came from, so after a delegated upgrade re-execing it starts
+  // the *old* build again — and Homebrew may have removed that directory
+  // outright when it cleaned the Cellar. The shim is the only path that
+  // survives the manager replacing what is underneath it. Callers pass the
+  // path through `restartLauncher`, which drops every launcher that spawns
+  // the binary as a child instead of becoming it — `confirmStarted` below
+  // matches pids, and a supervising launcher hands back the wrong one.
   if (launcherPath) return { executable: [launcherPath] };
   return executable.pointer === 'current' ? { executable: executable.argv } : {};
 }

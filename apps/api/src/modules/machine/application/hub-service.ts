@@ -23,7 +23,11 @@ import {
 import { getLogsDir } from '../../../lib/mango-paths';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
 import { readTomlDocument } from '../../../lib/toml';
-import { detectInstallOrigin, type InstallOriginProbe } from '../../updates/domain/install-origin';
+import {
+  detectInstallOrigin,
+  type InstallOriginProbe,
+  restartLauncher,
+} from '../../updates/domain/install-origin';
 import {
   type HubExecutable,
   type HubExecutableProbe,
@@ -209,17 +213,17 @@ export function realPathOrSelf(path: string): string {
 }
 
 /**
- * The package manager's own launcher for this install, when one left a marker
- * (`~/.cargo/bin/mangostudio`, the npm wrapper). A restart has to come back
- * through it: the version directory this process runs from is the manager's
- * to replace, so re-execing that path after a delegated upgrade starts the
- * build that was just replaced — or nothing at all, once Homebrew has cleaned
- * the Cellar. Undefined for a self-managed install, which the `current`
- * pointer already covers.
+ * The launcher a restart may come back through for this install, when there is
+ * one. The version directory this process runs from is the manager's to
+ * replace, so re-execing that path after a delegated upgrade starts the build
+ * that was just replaced — but only a launcher that execs in place can carry
+ * the restart's pid handshake, which is `restartLauncher`'s call to make.
+ * Undefined for a self-managed install, which the `current` pointer covers.
  * // Usage: restartExecutableOptions(currentHubExecutable(), currentLauncherPath())
  */
 export function currentLauncherPath(): string | undefined {
-  return detectInstallOrigin(currentInstallOriginProbe()).launcherPath;
+  const probe = currentInstallOriginProbe();
+  return restartLauncher(detectInstallOrigin(probe), probe.platform);
 }
 
 /**

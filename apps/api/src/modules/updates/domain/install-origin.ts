@@ -209,6 +209,30 @@ export function detectInstallOrigin(probe: InstallOriginProbe): InstallOrigin {
 }
 
 /**
+ * The launcher a restart is allowed to re-exec, which is only a launcher that
+ * *becomes* the binary rather than supervising it. `spawnDetached` confirms a
+ * restart by matching the pid it spawned against the pid the hub writes to its
+ * state file, so a launcher that runs the binary as a child hands back its own
+ * pid and the handshake times out at 20s even though the hub came up — the
+ * same split that made a `.cmd` shim unusable as a restart target.
+ *
+ * Only cargo's Unix shim qualifies: it replaces itself through `execve`. The
+ * npm wrapper `spawnSync`s a grandchild and is a `.js` file that `CreateProcess`
+ * cannot start at all, and cargo on Windows spawns and waits. Those re-exec
+ * `process.execPath` instead, which is the right answer for npm — the platform
+ * package's path does not carry a version, so the manager replaced the binary
+ * in place. See #1024 for the managers this leaves pointing at the old build.
+ * // Usage: restartLauncher(detectInstallOrigin(probe), probe.platform)
+ */
+export function restartLauncher(
+  via: Pick<InstalledVia, 'manager' | 'launcherPath'>,
+  platform: NodeJS.Platform
+): string | undefined {
+  if (platform === 'win32' || via.manager !== 'cargo') return undefined;
+  return via.launcherPath;
+}
+
+/**
  * `InstalledVia` cut to the wire caps — a launcher path or dist root can be
  * arbitrarily long. Shared by the machine API's `GET /machine/update` and
  * the upgrade engine's report, so the two surfaces cannot disagree about how

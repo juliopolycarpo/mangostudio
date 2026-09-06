@@ -45,10 +45,19 @@ export function selfManagedProbe(overrides: Partial<InstallOriginProbe> = {}): I
   });
 }
 
-/** A globally installed npm package — the delegate case. */
+/**
+ * A globally installed npm package — the delegate case. The wrapper announces
+ * itself with both markers and points `MANGOSTUDIO_LAUNCHER_PATH` at its own
+ * `.js` file, exactly as `packages/cli/bin/mangostudio.js` does: it is a Node
+ * script that `spawnSync`s the platform binary, not a path anything can exec.
+ */
 export function npmProbe(overrides: Partial<InstallOriginProbe> = {}): InstallOriginProbe {
   return probe({
-    execPath: '/usr/local/lib/node_modules/mangostudio/bin/mangostudio.js',
+    execPath: '/usr/local/lib/node_modules/@mangostudio/cli-linux-x64/mangostudio',
+    env: {
+      MANGOSTUDIO_LAUNCHER: 'npm',
+      MANGOSTUDIO_LAUNCHER_PATH: '/usr/local/lib/node_modules/mangostudio/bin/mangostudio.js',
+    },
     ...overrides,
   });
 }

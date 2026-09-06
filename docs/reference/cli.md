@@ -97,8 +97,10 @@ The unit runs `serve` through whichever program survives an upgrade:
   on Windows — the junction, never the `bin` shim: a `.cmd` would make the
   supervisor supervise `cmd.exe`), so a new version is picked up without
   touching the unit.
-- **Package manager** — the launcher the manager keeps stable (`~/.cargo/bin/mangostudio`,
-  the npm wrapper) when one announced itself, otherwise the resolved executable.
+- **Package manager** — the resolved executable, wherever the manager put it.
+  Not the manager's own launcher: the npm wrapper and the Cargo shim on Windows
+  spawn the binary as a child, so a supervisor pointed at one would track the
+  wrapper and not the hub.
 - **Source checkout** — the workspace entry through Bun, with the directory
   `install` was run from as the unit's working directory.
 - **Installer layout with no launcher yet** — this version's own directory. The
@@ -273,9 +275,11 @@ move the pointer.
 Delegated commands (the package-manager rows) are **printed** by default. With
 `--yes` they are **run** on macOS and Linux with the hub's allowlisted env
 (never its secrets), and a live hub is then restarted the same way a
-self-managed upgrade restarts it — through the package manager's own launcher
-when one announced itself, since the manager has just replaced what this
-process's own path points at. On Windows the npm managers delete the
+self-managed upgrade restarts it. Cargo's Unix shim is the restart target when
+it announced itself, since `cargo install` has just replaced what this process's
+own path points at and the shim `exec`s the new binary in place. Every other
+manager re-execs this process's path: their launchers run the binary as a child,
+whose pid the restart handshake would never match. On Windows the npm managers delete the
 package that holds the running `mangostudio.exe`, so `--yes` there stops a live
 hub first (a foreground hub is refused: press Ctrl-C in its terminal), then
 hands the command to a detached waiter (`Wait-Process` on this pid and the

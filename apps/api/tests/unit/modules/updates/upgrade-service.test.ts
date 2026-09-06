@@ -734,6 +734,30 @@ describe('upgrade-service delegate plans', () => {
     expect(restarted).toEqual(['/home/j/.cargo/bin/mangostudio']);
   });
 
+  it('re-execs this binary rather than the npm wrapper it was launched from', async () => {
+    // packages/cli/bin/mangostudio.js is a Node script that spawnSyncs the
+    // platform binary, so spawning it hands the restart handshake the
+    // wrapper's pid while the hub writes the grandchild's — a 20s timeout on
+    // an upgrade that actually worked. Re-execing this process's path is also
+    // the right target here: the platform package's path carries no version,
+    // so npm replaced the binary in place.
+    const restarted: (string | undefined)[] = [];
+    const service = createUpgradeService(
+      baseDeps({
+        probe: () => npmProbe(),
+        runScript: fakeRunScript(0).runScript,
+        restartHub: (input) => {
+          restarted.push(input.launcherPath);
+          return Promise.resolve();
+        },
+      })
+    );
+
+    await collect(service);
+
+    expect(restarted).toEqual([undefined]);
+  });
+
   it('reports failed with exit 2 when the package manager exits non-zero', async () => {
     const script = fakeRunScript(1);
     const service = createUpgradeService(

@@ -65,6 +65,7 @@ import {
   fitInstalledVia,
   type InstallOrigin,
   type InstallOriginProbe,
+  restartLauncher,
 } from '../domain/install-origin';
 import { type ReleasePlatformId, resolveBuildPlatformId } from '../domain/platform-id';
 import {
@@ -363,12 +364,13 @@ async function withRestart(
   if (decision.restart === 'scheduled' && state && launch) {
     try {
       // A delegated upgrade replaced what the manager's launcher points at,
-      // not this process's own path: come back through the launcher or the
-      // restart re-execs the version that was just replaced.
+      // not this process's own path: come back through the launcher, where the
+      // launcher is one a restart can actually hand its pid handshake to.
+      const launcherPath = restartLauncher(installedVia, d.platform);
       await d.restartHub({
         state,
         launch,
-        ...(installedVia.launcherPath ? { launcherPath: installedVia.launcherPath } : {}),
+        ...(launcherPath ? { launcherPath } : {}),
       });
     } catch (error) {
       restart = 'manual';
