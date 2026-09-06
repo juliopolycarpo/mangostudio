@@ -216,7 +216,7 @@ describe('streamGeminiAgentTurn — request shape', () => {
     ]);
   });
 
-  it('maps structured output to top-level response_format', async () => {
+  it('maps structured output to a tagged top-level response_format', async () => {
     const req = baseRequest({
       modelName: 'gemini-3-flash-preview',
       generationConfig: {
@@ -234,8 +234,12 @@ describe('streamGeminiAgentTurn — request shape', () => {
 
     await collectAgentEvents(streamGeminiAgentTurn(req, fakeClient as never));
 
-    expect(captured?.response_mime_type).toBe('application/json');
-    expect(captured?.response_format).toEqual({ type: 'object' });
+    expect(captured?.response_mime_type).toBeUndefined();
+    expect(captured?.response_format).toEqual({
+      type: 'text',
+      mime_type: 'application/json',
+      schema: { type: 'object' },
+    });
     expect(captured?.generation_config).toEqual({
       thinking_level: 'high',
       thinking_summaries: 'auto',

@@ -152,10 +152,15 @@ function buildGeminiInteractionParams(
     params.generation_config = thinkingConfig;
   }
 
+  // `@google/genai` 2.x made `response_format` a tagged object that carries its
+  // own mime type, and deprecated the sibling `response_mime_type`.
   const structured = req.generationConfig?.structuredOutput;
   if (structured) {
-    params.response_mime_type = 'application/json';
-    params.response_format = structured.schema;
+    params.response_format = {
+      type: 'text',
+      mime_type: 'application/json',
+      schema: structured.schema,
+    };
   }
 
   return params;
