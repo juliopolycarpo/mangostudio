@@ -377,6 +377,7 @@ as the main binary — that is how MangoStudio finds it. On another machine you 
 | `mangostudio-runtime --stdio` | Serve the runtime protocol over stdin/stdout (NDJSON frames). |
 | `mangostudio-runtime connect` | Dial a MangoStudio hub over WebSocket and serve it.           |
 | `mangostudio-runtime serve`   | Listen for a hub over WebSocket (Direct URL).                 |
+| `mangostudio-runtime install` | Copy this binary into a runtime slot and publish it.          |
 | `mangostudio-runtime --help`  | Print usage. Bare invocation does the same.                   |
 | `--version`, `-v`             | Print the runtime version.                                    |
 
@@ -423,10 +424,12 @@ the environment variable, which keeps the secret out of argv the same way:
 $env:MANGOSTUDIO_RUNTIME_TOKEN='<token>'; mangostudio-runtime connect --hub wss://hub.example.com/api/runtime
 ```
 
-The stored credential is owner-only on POSIX. On Windows `chmod` can only set the
-read-only attribute, so `connect` reports that owner-only access was **not**
-established rather than claiming a restriction it did not apply — restrict the
-file yourself if other accounts use that machine.
+The stored credential is owner-only on both. POSIX uses mode `0600`; Windows has
+no mode to set — `chmod` there only flips the read-only attribute — so the file
+gets an ACL instead, `icacls <file> /inheritance:r /grant:r <user>:(M)`. When
+that call cannot be made, `connect` says the file is **not** restricted rather
+than claiming a restriction it did not apply, and you should restrict it
+yourself if other accounts use that machine.
 
 Release drift is not a connection gate here: a remote runtime is not part of the
 hub's own distribution, so only the protocol version has to match. A release that
@@ -458,12 +461,39 @@ mangostudio-runtime serve   # afterwards: reuses stored listen address and token
 printf %s "$TOKEN" | mangostudio-runtime serve --listen 0.0.0.0:8787 --token -
 ```
 
+### `install`
+
+Copies the binary you are running into a runtime slot and points the slot's
+`current` at it. This is the step a hand-downloaded runtime is missing: `setup`,
+`connect` and `serve` all work from wherever the file landed, but `service
+install` writes a unit that runs `current`, and until something publishes bytes
+there it refuses.
+
+| Flag                         | Description                                                        |
+| ---------------------------- | ------------------------------------------------------------------ |
+| `--slot <host\|wsl\|remote>` | Which slot to fill. Defaults to `remote`, the paired-runtime slot. |
+| `--json`                     | Print what was installed instead of prose.                         |
+
+```bash
+mangostudio-runtime install                 # then follow the printed next steps
+mangostudio-runtime install --slot remote --json
+```
+
+It refuses a binary that already runs from a slot — the copy would truncate its
+own source, and a runtime already in a slot is upgraded from its environment
+card. A re-run with the same version and the same bytes does nothing and says
+so; different bytes under the same version reinstall, which is how a partial
+download is repaired.
+
+The version it just replaced is kept, because a service may still be executing
+out of it. Everything older is removed.
+
 ### `service`
 
 Install a user-level unit so `connect` or `serve` survives logout and reboot.
-`ExecStart` points at the slot's `current` link, so the runtime has to be
-installed into the slot first — `install` refuses rather than write a unit that
-cannot start. See
+`ExecStart` points at the slot's `current` pointer, so the runtime has to be in
+the slot first — run [`install`](#install) or push it from the hub; `service
+install` refuses rather than write a unit that cannot start. See
 [`docs/operations/remote-runtimes.md`](../operations/remote-runtimes.md) for
 that prerequisite, linger, SSH session-bus workarounds, macOS launchd verbs, and
 what the Windows Scheduled Task looks like.

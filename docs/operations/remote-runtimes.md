@@ -134,15 +134,25 @@ configured, and names the missing step.
 
 ### The binary has to live in the slot
 
-`current` is published by an install — a push over ssh, a WSL provision, or an
-upgrade from the environment card. A binary you downloaded by hand and ran from
-your home directory works fine for `setup`, `connect` and `serve`, but it never
-puts anything in the slot, so `current` does not exist yet.
+`current` is published by an install — `mangostudio-runtime install`, a push over
+ssh, a WSL provision, or an upgrade from the environment card. A binary you
+downloaded by hand and ran from your home directory works fine for `setup`,
+`connect` and `serve`, but it never puts anything in the slot on its own, so
+`current` does not exist yet.
 
-`install` refuses in that state rather than writing a unit that would fail to
-start at every boot. Pair the runtime first, then upgrade it from its
-environment card — that publishes `current` — and install the service after.
-`doctor` reports the same gap as a `fail` naming the missing path.
+`service install` refuses in that state rather than writing a unit that would
+fail to start at every boot, and `doctor` reports the same gap as a `fail`. Both
+name the command that fixes it:
+
+```bash
+mangostudio-runtime install          # copies this binary into ~/.mango/runtime/remote
+mangostudio-runtime setup --slot remote
+mangostudio-runtime connect --hub wss://hub.example.com/api/runtime
+mangostudio-runtime service install
+```
+
+`install` keeps the version it replaced, because a running service is still
+executing out of it, and removes everything older.
 
 `status --json` returns a stable document for environment cards (`schemaVersion`,
 `installed`, `enabled`, `running`, optional `linger` and `execUsesCurrent`).
@@ -199,15 +209,37 @@ launchctl bootout gui/$UID/com.mangostudio.runtime   # uninstall
 
 `KeepAlive` restarts the job after crashes with a throttle interval.
 
-### Windows: Scheduled Task
+### Windows: from a download to a supervised runtime
 
-`service install` handles Windows too. It registers a per-user **Scheduled Task**
-named `MangoStudio runtime` through PowerShell — no admin, and the same
-preconditions as Linux and macOS: setup answered, the chosen mode configured, and
-a binary published at `current`.
+Windows is not an SSH target, so nothing pushes a runtime there for you. The
+whole flow runs on the machine itself, from the `mangostudio-runtime.exe` you
+downloaded:
 
 ```powershell
+.\mangostudio-runtime.exe install
+mangostudio-runtime setup --slot remote
+$env:MANGOSTUDIO_RUNTIME_TOKEN='<token from the environment card>'
+mangostudio-runtime connect --hub wss://hub.example.com/api/runtime
 mangostudio-runtime service install --mode connect
+```
+
+`install` copies the binary into `%USERPROFILE%\.mango\runtime\remote\<version>\`
+and points `current` at it as a **directory junction**, which needs no elevation
+and no Developer Mode. A file symlink would need one of the two, and a `.cmd`
+shim would put `cmd.exe` between the supervisor and the runtime.
+
+From then on the environment card can upgrade it in place like any other peer:
+new bytes land in a new version directory beside the running one, the junction
+moves, and the runtime exits `75` for its supervisor to restart. The version it
+came from is kept until the upgrade after that, because Windows will not delete a
+directory holding a running executable.
+
+`service install` registers a per-user **Scheduled Task** named
+`MangoStudio runtime` through PowerShell — no admin, and the same preconditions
+as Linux and macOS: setup answered, the chosen mode configured, and a binary
+published at `current`.
+
+```powershell
 mangostudio-runtime service status --json
 ```
 
@@ -221,7 +253,11 @@ What the CLI registers:
   re-entered after a password change.
 - **Settings** no execution time limit (the default three days would stop the
   runtime on the fourth), `-MultipleInstances IgnoreNew`, `-StartWhenAvailable`,
-  the battery flags, and `-RestartCount 3 -RestartInterval 1 minute`.
+  the battery flags, and `-RestartCount 3 -RestartInterval 1 minute`. That last
+  pair is what brings the runtime back on new bytes after a live update: the
+  wrapper propagates the runtime's exit code, and `75` is a failure as far as
+  Task Scheduler is concerned. One minute is its minimum interval, so expect the
+  card to show the peer disconnected for about that long after a commit.
 - **Action** a hidden `powershell.exe` wrapper that invokes the binary. The
   wrapper is where a unit's environment, working directory and log redirection
   would be set; the runtime's unit asks for none of the three, so it is a bare

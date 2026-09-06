@@ -197,19 +197,41 @@ Every runtime keeps its state in one place on the machine it runs on:
     └── 0.1.1/mangostudio-runtime
 ```
 
+On Windows the same slot is spelled with a directory junction and an `.exe`:
+
+```text
+%USERPROFILE%\.mango\runtime\remote\
+├── runtime.json
+├── credentials.json               # owner-only by ACL, not by mode
+├── current                        # junction -> ...\remote\0.1.1
+└── 0.1.1\mangostudio-runtime.exe
+```
+
 A **slot** names who put the runtime there, not which transport talks to it. One machine
 reachable by ssh *and* a dialled-in WebSocket shares one slot, one consent file, and one
 binary. Config lives at the slot root and bytes under `<version>/`, so an upgrade replaces
 bytes and never consent. `current` is what keeps an ssh launch argument and a service
-unit's `ExecStart` from embedding a version that dangles after the next upgrade; it is
-published with `ln -sfn`, which creates a temporary link and renames it over the old one.
+unit's `ExecStart` from embedding a version that dangles after the next upgrade.
+
+How it is published is the one thing that differs by platform. POSIX writes a relative
+symlink beside the live one and renames it over, which is atomic. Windows writes a
+**directory junction** — no privilege needed, unlike a file symlink there — and cannot
+swap it in one call, because `rename` refuses an existing directory as its destination:
+the old junction is unlinked first and the staged one renamed over the gap, with the old
+target put back if that second step fails. A `.cmd` shim was considered and rejected: it
+puts `cmd.exe` between a supervisor and the runtime, so the pid a launcher sees is not the
+runtime's. Every one of these writes waits out `EPERM`, which is what a virus scanner
+holding a freshly written executable looks like.
 
 `host` holds no bytes. A release ships `mangostudio-runtime` beside the hub binary and
 `host/runtime.json` records where that resolved to; `source` says whether a reader is
 looking at a bundled binary, a source checkout with none, or one an install provisioned.
 
 `runtime.json` must stay safe to paste into a bug report, which is why pairing and serve
-tokens live in `credentials.json` at 0600 instead. Writes are atomic, because two hubs can
+tokens live in `credentials.json` at 0600 instead — or, on Windows, under an ACL written
+with `icacls`, since `chmod` there only flips the read-only attribute. The grant is
+`modify` and not read/write: every credential write publishes by renaming over the old
+file, which needs delete permission on it. Writes are atomic, because two hubs can
 provision one machine at once. Every field past `schemaVersion` and `slot` is optional and
 unknown keys are ignored: a runtime and a hub on different versions share this file, so a
 field written by a newer one must not brick an older one. The schema is
@@ -253,7 +275,7 @@ so "not set up yet" is never reported as "no binary there".
 
 ### Live binary updates
 
-A connected, provisioned POSIX runtime can replace its own slot bytes through three paced
+A connected, provisioned runtime can replace its own slot bytes through three paced
 protocol methods: `runtime.update.begin`, `runtime.update.chunk`, and `runtime.update.commit`.
 Bundled and source-checkout processes are not slot owners and therefore never adopt a
 downloaded binary. WSL and SSH keep using their out-of-band provision/push paths, which also
@@ -282,8 +304,18 @@ longer has to be a person: one user-level service manager
 runtime through `mangostudio-runtime service` and the hub through `mangostudio service` —
 across systemd user units, launchd agents and per-user Scheduled Tasks. A runtime that a
 unit owns exits with the update code on commit and the supervisor's restart-on-failure
-brings it back on the new bytes, without touching the wire contract. Windows publication is deliberately refused until a Windows
-runtime slot exists and can implement rename-aside plus antivirus retry semantics safely.
+brings it back on the new bytes, without touching the wire contract. On Windows that is
+`-RestartCount 3 -RestartInterval 1 minute`, whose one-minute floor is Task Scheduler's,
+so the card shows a supervised Windows peer disconnected for about that long after a
+commit.
+
+Windows never replaces a running executable. The new version is a new directory beside the
+old one, the junction moves, and the directory the old process is executing out of is kept
+until the publication after next — which is also why the prune only ever removes a version
+directory or a staged pointer, and never walks through one. The hub asks before offering
+any of this: a win32 peer has to declare `publishesWindowsSlot` on its manifest, because a
+build from before this existed refuses the transfer and nothing else on the health report
+tells the two apart.
 
 ### Enforcement
 

@@ -104,3 +104,13 @@ ambiente permitidas, a passagem de bastão na instalação, linger no Linux),
 `restart`, `logs`, modo background, instância única, arquivos de runtime, códigos
 de saída, a seção **Doctor** e configuração, consulte a
 [versão completa em inglês](../../reference/cli.md).
+
+O segundo binário, `mangostudio-runtime`, tem os próprios comandos —
+`connect`, `serve`, `setup`, `install`, `service`, `health`, `doctor` e `audit`.
+`install` copia o binário que você baixou para dentro do slot
+(`~/.mango/runtime/<slot>/`) e publica o ponteiro `current`, que é o pré-requisito
+de `service install`: no Windows esse ponteiro é uma junção de diretório, então
+não exige elevação nem o Modo de Desenvolvedor. A credencial guardada é restrita
+ao seu usuário — por modo `0600` no POSIX e por ACL (`icacls`) no Windows, onde
+`chmod` só altera o atributo somente-leitura. Detalhes na
+[versão em inglês](../../reference/cli.md#mangostudio-runtime).
