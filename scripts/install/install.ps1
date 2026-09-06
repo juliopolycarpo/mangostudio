@@ -430,26 +430,41 @@ function Resolve-CurrentVersion([string]$InstallRoot, [string]$CmdPath) {
 
 # Never Remove-Item -Recurse a junction: PowerShell 5.1 follows the reparse
 # point and deletes the *target's* contents instead of just the link.
+# Best-effort by contract — the caller decides what a leftover means. The
+# native rmdir fallback needs its own catch because a native command writing
+# to stderr is a terminating error under $ErrorActionPreference = 'Stop'.
 function Remove-Junction([string]$Path) {
-  if (-not (Test-Path $Path)) { return }
+  if (-not (Test-Path -LiteralPath $Path)) { return }
   try {
     [System.IO.Directory]::Delete($Path)
   } catch {
-    cmd /c rmdir "$Path" | Out-Null
+    try { cmd /c rmdir "$Path" 2>&1 | Out-Null } catch { }
   }
 }
 
-# Courtesy only: a human or another tool browsing the install root can follow
-# "current" without knowing the version. Nothing in this script reads it back
-# — Get-CurrentVersionFromCmd is the real pointer — so a failure here is a
-# warning, not a fatal error.
+# The hub resolves a detached restart and a service unit through this junction
+# (pointerPathForRoot in hub-executable.ts), so it is load-bearing, not a
+# browsing shortcut: without it resolveHubExecutable falls back to the
+# versioned path of the process doing the restarting — the build this install
+# just replaced — and the restart silently brings the old exe back.
+#
+# So: create the replacement beside the old one and rename it over, and fail
+# the install if any of that does not work. A creation failure then leaves the
+# previous pointer intact rather than no pointer at all. Verified on Windows
+# PowerShell 5.1: Rename-Item moves the reparse point itself, leaving both
+# version directories untouched.
 function Set-CurrentJunction([string]$InstallRoot, [string]$Version) {
   $junctionPath = Join-Path $InstallRoot 'current'
+  $stagePath = Join-Path $InstallRoot ".current.$PID"
+
   try {
+    Remove-Junction $stagePath
+    New-Item -ItemType Junction -Path $stagePath -Target (Join-Path $InstallRoot $Version) -ErrorAction Stop | Out-Null
     Remove-Junction $junctionPath
-    New-Item -ItemType Junction -Path $junctionPath -Target (Join-Path $InstallRoot $Version) -ErrorAction Stop | Out-Null
+    Rename-Item -LiteralPath $stagePath -NewName 'current' -ErrorAction Stop
   } catch {
-    Write-Host "Could not create ${junctionPath}: $($_.Exception.Message)"
+    Remove-Junction $stagePath
+    Fail "cannot point $junctionPath at ${Version}: $($_.Exception.Message)"
   }
 }
 
@@ -604,8 +619,11 @@ function Complete-Install([string]$InstallRoot, [string]$BinDir, [string]$Origin
 
   $oldVersion = Resolve-CurrentVersion $InstallRoot (Get-BinCmdPath $BinDir)
 
-  $shimPath = Write-Shim $InstallRoot $InstallVersion $BinDir
+  # Junction first: it is the pointer a restart resolves through, so a failure
+  # there has to stop the install while the shim and the origin record still
+  # name the previous version.
   Set-CurrentJunction $InstallRoot $InstallVersion
+  $shimPath = Write-Shim $InstallRoot $InstallVersion $BinDir
   Save-OriginRecord -InstallRoot $InstallRoot -OriginKind $OriginKind -NewVersion $InstallVersion `
     -OldVersion $oldVersion -SourceKind $SourceKind -SourceSha $SourceSha -BinDir $BinDir
 
@@ -719,8 +737,8 @@ function Invoke-Use([string]$InstallRoot, [string]$BinDir, [string]$OriginKind, 
 
   $oldVersion = Resolve-CurrentVersion $InstallRoot (Get-BinCmdPath $BinDir)
 
-  Write-Shim $InstallRoot $requested $BinDir | Out-Null
   Set-CurrentJunction $InstallRoot $requested
+  Write-Shim $InstallRoot $requested $BinDir | Out-Null
   Save-OriginRecord -InstallRoot $InstallRoot -OriginKind $OriginKind -NewVersion $requested `
     -OldVersion $oldVersion -SourceKind '' -SourceSha '' -BinDir $BinDir
   Add-UserPath $BinDir | Out-Null

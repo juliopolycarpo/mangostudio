@@ -524,6 +524,84 @@ describe('install.ps1 shim target', () => {
   );
 });
 
+describe('install.ps1 current junction', () => {
+  // Not a browsing shortcut: hub-executable.ts resolves a restart and a
+  // service unit through <root>\\current\\mangostudio.exe, so a pointer that
+  // is missing or left on the old version silently re-execs the build the
+  // install just replaced.
+  function seedVersions(l: Layout, versions: readonly string[]): void {
+    mkdirSync(l.rootLinux, { recursive: true });
+    for (const version of versions) {
+      mkdirSync(join(l.rootLinux, version), { recursive: true });
+      writeFileSync(join(l.rootLinux, version, 'keep.txt'), version);
+    }
+  }
+
+  test.skipIf(!POWERSHELL)('moves the pointer without touching either version', () => {
+    const l = layout();
+    seedVersions(l, ['0.1.0', '0.2.0']);
+
+    const result = runDotSourced(
+      l.scriptPath,
+      [
+        `Set-CurrentJunction ${psQuote(l.root)} '0.1.0'`,
+        `Set-CurrentJunction ${psQuote(l.root)} '0.2.0'`,
+        `$cur = Get-Item (Join-Path ${psQuote(l.root)} 'current') -Force`,
+        "Write-Output ('linkType=' + $cur.LinkType)",
+        `Write-Output ('reads=' + (Get-Content -Raw (Join-Path ${psQuote(l.root)} 'current\\keep.txt')).Trim())`,
+      ].join('; ')
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('linkType=Junction');
+    expect(result.stdout).toContain('reads=0.2.0');
+    // Rename-Item moves the reparse point; the old target keeps its contents.
+    expect(readFileSync(join(l.rootLinux, '0.1.0', 'keep.txt'), 'utf8')).toBe('0.1.0');
+    expect(readFileSync(join(l.rootLinux, '0.2.0', 'keep.txt'), 'utf8')).toBe('0.2.0');
+  });
+
+  test.skipIf(!POWERSHELL)('leaves no staging junction behind', () => {
+    const l = layout();
+    seedVersions(l, ['0.1.0']);
+
+    const result = runDotSourced(l.scriptPath, `Set-CurrentJunction ${psQuote(l.root)} '0.1.0'`);
+
+    expect(result.exitCode).toBe(0);
+    const leftovers = sh(['sh', '-c', `ls -1A "${l.rootLinux}" | grep '^\\.current' || true`]);
+    expect(leftovers.stdout.trim()).toBe('');
+  });
+
+  test.skipIf(!POWERSHELL)('fails the install when the pointer cannot be replaced', () => {
+    // A plain file squatting at <root>\\current: the swap must stop here
+    // rather than report success with the pointer still on the old version.
+    const l = layout();
+    seedVersions(l, ['0.1.0']);
+    writeFileSync(join(l.rootLinux, 'current'), 'not a junction');
+
+    const result = runDotSourced(l.scriptPath, `Set-CurrentJunction ${psQuote(l.root)} '0.1.0'`);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('cannot point');
+    expect(result.stderr).toContain('current at 0.1.0');
+    expect(readFileSync(join(l.rootLinux, 'current'), 'utf8')).toBe('not a junction');
+  });
+
+  test.skipIf(!POWERSHELL)('points at the new version before the shim is written', () => {
+    // Ordering, not decoration: if the shim moved first, a junction failure
+    // would leave the shim on the new version and the pointer on the old one.
+    const script = readFileSync(INSTALL_PS1, 'utf8');
+    const junction = script.indexOf('Set-CurrentJunction $InstallRoot $InstallVersion');
+    const shim = script.indexOf('$shimPath = Write-Shim $InstallRoot $InstallVersion $BinDir');
+    const useJunction = script.indexOf('Set-CurrentJunction $InstallRoot $requested');
+    const useShim = script.indexOf('Write-Shim $InstallRoot $requested $BinDir');
+
+    expect(junction).toBeGreaterThan(0);
+    expect(junction).toBeLessThan(shim);
+    expect(useJunction).toBeGreaterThan(0);
+    expect(useJunction).toBeLessThan(useShim);
+  });
+});
+
 describe('install.ps1 layout (real windows-x64 exe required)', () => {
   // Every case below is individually gated with test.skipIf(!POWERSHELL ||
   // !WINDOWS_BINARY); this one surfaces *why* they're skipped as a named,
