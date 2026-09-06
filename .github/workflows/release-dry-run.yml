@@ -320,10 +320,41 @@ jobs:
           MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}\mango-dist
           MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}\mango-bin
         run: |
-          $expected = "$env:MANGOSTUDIO_INSTALL_DIR\$env:DRY_RUN_VERSION\mangostudio.exe"
-          $content = Get-Content -Raw "$env:MANGOSTUDIO_BIN_DIR\mangostudio.cmd"
-          if ($content -notmatch [regex]::Escape($expected)) {
-            Write-Error "mangostudio.cmd does not point at the installed version"
+          $expected = [System.IO.Path]::GetFullPath("$env:MANGOSTUDIO_INSTALL_DIR\$env:DRY_RUN_VERSION")
+
+          # The shim names the version directory relative to itself when that
+          # path is ascii ("%~dp0..\<version>"), because cmd.exe decodes a .cmd
+          # in the console code page but resolves %~dp0 itself in Unicode.
+          # Resolve it the way cmd does before comparing, and read it as Oem —
+          # the encoding Write-Shim writes.
+          $cmdPath = "$env:MANGOSTUDIO_BIN_DIR\mangostudio.cmd"
+          $content = Get-Content -Raw -Encoding Oem $cmdPath
+          $match = [regex]::Match($content, '"([^"]+)\\mangostudio\.exe"\s+%\*')
+          if (-not $match.Success) {
+            Write-Error "mangostudio.cmd does not run a quoted mangostudio.exe: $content"
+            exit 1
+          }
+          $target = $match.Groups[1].Value
+          if ($target.StartsWith('%~dp0')) {
+            $target = Join-Path (Split-Path $cmdPath -Parent) $target.Substring(5)
+          }
+          $target = [System.IO.Path]::GetFullPath($target)
+          if ($target -ne $expected) {
+            Write-Error "mangostudio.cmd points at $target, expected $expected"
+            exit 1
+          }
+
+          # hub-executable.ts resolves a detached restart and a service unit
+          # through this junction, so a missing or stale one silently re-execs
+          # the version an upgrade just replaced.
+          $current = Get-Item "$env:MANGOSTUDIO_INSTALL_DIR\current" -Force
+          if ($current.LinkType -ne 'Junction') {
+            Write-Error "current is $($current.LinkType), expected Junction"
+            exit 1
+          }
+          $currentTarget = [System.IO.Path]::GetFullPath((@($current.Target)[0]))
+          if ($currentTarget -ne $expected) {
+            Write-Error "current points at $currentTarget, expected $expected"
             exit 1
           }
 
