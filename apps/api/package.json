@@ -32,7 +32,7 @@
     "@elysia/cors": "2.0.0-beta.1",
     "@elysia/openapi": "2.0.0-beta.1",
     "@elysia/static": "2.0.0-beta.2",
-    "@google/genai": "^1.52.0",
+    "@google/genai": "^2.19.0",
     "@mangostudio/runtime": "workspace:*",
     "@mangostudio/shared": "workspace:*",
     "ai": "^7.0.55",
