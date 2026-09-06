@@ -54,6 +54,7 @@ function sseBody(frames: Array<Record<string, unknown>>): string {
 class RecordingInteractionsServer {
   requestBodies: Array<Record<string, unknown>> = [];
   private server: ReturnType<typeof Bun.serve> | undefined;
+  private cachedClient: ReturnType<typeof createGeminiClient> | undefined;
 
   start(): void {
     this.server = Bun.serve({
@@ -74,13 +75,14 @@ class RecordingInteractionsServer {
 
   get client(): ReturnType<typeof createGeminiClient> {
     if (!this.server) throw new Error('Server was not started.');
-    return new GoogleGenAI({
+    this.cachedClient ??= new GoogleGenAI({
       apiKey: 'test-key',
       httpOptions: {
         apiVersion: 'v1beta',
         baseUrl: `http://127.0.0.1:${this.server.port}`,
       },
     });
+    return this.cachedClient;
   }
 
   get lastBody(): Record<string, unknown> {
@@ -97,7 +99,11 @@ class RecordingInteractionsServer {
 const servers: RecordingInteractionsServer[] = [];
 
 afterEach(async () => {
-  await Promise.allSettled(servers.splice(0).map((server) => server.stop()));
+  const outcomes = await Promise.allSettled(servers.splice(0).map((server) => server.stop()));
+  const failed = outcomes.filter((outcome) => outcome.status === 'rejected');
+  // A server that never closed keeps a listener for the rest of the lane, so
+  // the teardown has to report rather than swallow.
+  expect(failed.map((outcome) => String(outcome.reason))).toEqual([]);
 });
 
 function startServer(): RecordingInteractionsServer {
@@ -165,6 +171,20 @@ describe('Gemini Interactions wire contract', () => {
     expect(server.lastBody.stream).toBe(true);
     expect(server.lastBody.store).toBe(true);
     expect(server.lastBody.system_instruction).toBe('Be concise');
+    // `Tool_2` / `FunctionT` are unchanged across the 2.x bump; this is what
+    // holds that claim to the wire rather than to the changelog.
+    expect(server.lastBody.tools).toEqual([
+      {
+        type: 'function',
+        name: 'search',
+        description: 'Search indexed content',
+        parameters: {
+          type: 'object',
+          properties: { query: { type: 'string' } },
+          required: ['query'],
+        },
+      },
+    ]);
     expect(server.lastBody.input).toEqual([
       { type: 'user_input', content: [{ type: 'text', text: 'Any cat facts?' }] },
       { type: 'model_output', content: [{ type: 'text', text: 'Checking.' }] },
