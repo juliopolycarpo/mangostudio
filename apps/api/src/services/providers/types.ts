@@ -116,7 +116,7 @@ export interface AgentTurnRequest {
   userId: string;
   /** Chat-owned runtime environment for provider-routed tool execution. */
   environmentId?: string;
-  /** Owning chat — required for provider-routed tool execution (e.g. Cursor sidecar RPC). */
+  /** Owning chat — required for provider-routed tool execution and continuation logging. */
   chatId?: string;
   /** Assistant message of the turn — file mutations run by the provider join its checkpoint. */
   assistantMessageId?: string;
@@ -171,7 +171,7 @@ export interface TextGenerationRequest {
   userId: string;
   /** Chat-owned runtime environment for provider-routed tool execution. */
   environmentId?: string;
-  /** Owning chat — required for provider-routed tool execution (e.g. Cursor sidecar RPC). */
+  /** Owning chat — required for provider-routed tool execution and continuation logging. */
   chatId?: string;
   /** Assistant message of the turn — file mutations run by the provider join its checkpoint. */
   assistantMessageId?: string;

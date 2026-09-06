@@ -1,5 +1,5 @@
 /**
- * Rolling tail buffer for child-process output. A crashing sidecar can be very
+ * Rolling tail buffer for child-process output. A crashing child can be very
  * chatty, so diagnostics keep the end of the stream rather than all of it.
  */
 

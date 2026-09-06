@@ -18,8 +18,7 @@ produces a bug where MangoStudio executes or authorizes a tool the vendor was su
 
 This was not an outage and not a Cursor failure. The external path is better on every axis that
 matters: it uses the user's own Cursor login instead of an API key MangoStudio stores, it inherits
-their rules and MCP configuration, it needs no Node.js on the host, and it ships none of Cursor's
-bytes in the MangoStudio binary.
+their rules and MCP configuration, and it ships none of Cursor's bytes in the MangoStudio binary.
 
 **This says nothing about the ChatGPT connector.** The two look parallel and are not: the ChatGPT
 connector serves ChatGPT *models* through MangoStudio's own agent loop, which is an internal
@@ -87,20 +86,9 @@ questions the removal of the connector and its secret depends on: is anything st
 
 ## What was removed
 
-The provider's implementation is gone, along with the Node sidecar it ran on:
-
-| Removed                                              | What it was                                  |
-| ---------------------------------------------------- | -------------------------------------------- |
-| `apps/api/src/services/providers/cursor/sidecar/`    | the Node sidecar entrypoint and runtime      |
-| `apps/api/src/services/providers/core/node-sidecar/` | spawn plumbing; Cursor was its only consumer |
-| `apps/shared/src/catalog/cursor-native-packages.ts`  | native-package catalog                       |
-| `scripts/lib/cursor-sidecar.ts`                      | build-time SDK tree staging                  |
-| `@cursor/sdk`                                        | dependency and lockfile entries              |
-
-With them went the vendored SDK tree in every release archive and npm platform package, the
-`[cursor]` section of `config.toml` (`workspace_dir`, `sidecar_script`, `node_path`), the
-`CURSOR_WORKSPACE_DIR` / `MANGO_CURSOR_SIDECAR_SCRIPT` / `MANGO_NODE_PATH` environment variables,
-and `doctor --cursor-probe`.
+The provider's implementation is gone, and with it the `[cursor]` section of `config.toml`, the
+`CURSOR_WORKSPACE_DIR` environment variable, and `doctor --cursor-probe`. A leftover `[cursor]`
+section in an existing `config.toml` is ignored, not rejected.
 
 `apps/api/src/services/providers/cursor/index.ts` remains as a registration with no implementation.
 It exists so a stored `cursor/*` id resolves to a provider that can be named rather than to an

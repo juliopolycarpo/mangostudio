@@ -110,12 +110,3 @@ url = ""
 # replaces native Bun.secrets storage. Leave empty in normal use.
 [secret_store]
 # unsafe_file_fallback_dir = ""
-
-# Optional workspace directory for Cursor SDK local agents.
-# Empty = current working directory when MangoStudio starts.
-[cursor]
-# workspace_dir = "/path/to/your/project"
-# sidecar_script = "/absolute/path/to/run-agent.mjs"
-# Node.js binary used to run the sidecar (also settable via MANGO_NODE_PATH).
-# Empty = auto-detect from PATH and well-known install locations.
-# node_path = "/usr/local/bin/node"

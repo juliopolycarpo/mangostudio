@@ -44,7 +44,7 @@ describe('runPlainSubagentText', () => {
   test('throws provider error chunks instead of returning partial text', async () => {
     const session = createPlainTextSession([
       { type: 'text', text: 'partial', done: false },
-      { type: 'error', content: 'Cursor sidecar failed.', done: true },
+      { type: 'error', content: 'Provider stream failed.', done: true },
     ]);
 
     let caught: unknown;
@@ -55,7 +55,7 @@ describe('runPlainSubagentText', () => {
     }
 
     expect(caught).toBeInstanceOf(SubagentDelegationError);
-    expect((caught as SubagentDelegationError).message).toBe('Cursor sidecar failed.');
+    expect((caught as SubagentDelegationError).message).toBe('Provider stream failed.');
     expect((caught as SubagentDelegationError).code).toBe(SUBAGENT_FAILED_CODE);
   });
 });
