@@ -204,8 +204,8 @@ describe('Gemini Interactions wire contract', () => {
       {
         type: 'function_result',
         call_id: 'call_prior',
-        name: '',
-        result: { output: '{"hits":1}' },
+        name: 'search',
+        result: '{"hits":1}',
         is_error: false,
       },
       { type: 'user_input', content: [{ type: 'text', text: 'Find me cats.' }] },

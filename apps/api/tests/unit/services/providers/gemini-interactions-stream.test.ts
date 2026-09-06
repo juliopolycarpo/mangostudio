@@ -272,7 +272,7 @@ describe('streamGeminiAgentTurn — request shape', () => {
       type: 'function_result',
       call_id: 'call_1',
       name: 'search',
-      result: { output: '{"hits":[]}' },
+      result: '{"hits":[]}',
       is_error: false,
     });
   });

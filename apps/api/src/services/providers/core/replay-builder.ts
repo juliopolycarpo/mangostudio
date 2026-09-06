@@ -18,13 +18,6 @@ import type { MessagePart } from '@mangostudio/shared/types';
 import type OpenAI from 'openai';
 import type { ChatTurnContext } from '../types';
 
-export function toGeminiFunctionResultPayload(
-  output: string,
-  isError?: boolean
-): Record<string, string> {
-  return isError ? { error: output } : { output };
-}
-
 // ---------------------------------------------------------------------------
 // OpenAI Responses API replay
 // ---------------------------------------------------------------------------
@@ -177,12 +170,13 @@ export function buildGeminiInteractionsReplay(
       });
     }
 
+    const toolNameByCallId = new Map(toolCallParts.map((call) => [call.toolCallId, call.name]));
     for (const toolResult of toolResultParts) {
       steps.push({
         type: 'function_result',
         call_id: toolResult.toolCallId,
-        name: '',
-        result: toGeminiFunctionResultPayload(toolResult.content, toolResult.isError),
+        name: toolNameByCallId.get(toolResult.toolCallId) ?? '',
+        result: toolResult.content,
         is_error: toolResult.isError ?? false,
       });
     }

@@ -147,14 +147,14 @@ describe('buildGeminiInteractionsReplay', () => {
       {
         type: 'function_result',
         call_id: 'call_1',
-        name: '',
-        result: { output: '{"temp":22}' },
+        name: 'get_weather',
+        result: '{"temp":22}',
         is_error: false,
       },
     ]);
   });
 
-  it('wraps tool_result content as function output', () => {
+  it('sends tool_result content as a raw string, matched to its call name', () => {
     const history: ChatTurnContext[] = [
       aiTurn('1', '', [
         { type: 'tool_call', toolCallId: 'tc_x', name: 'fetch', args: {} },
@@ -164,10 +164,11 @@ describe('buildGeminiInteractionsReplay', () => {
     const result = buildGeminiInteractionsReplay(history);
     const resultStep = result.find((step) => step.type === 'function_result');
     expect(resultStep).toBeDefined();
-    expect(resultStep?.result).toEqual({ output: '{"ok":true}' });
+    expect(resultStep?.result).toBe('{"ok":true}');
+    expect(resultStep?.name).toBe('fetch');
   });
 
-  it('wraps plain tool_result content as function output', () => {
+  it('sends plain tool_result content as a raw string', () => {
     const history: ChatTurnContext[] = [
       aiTurn('1', '', [
         { type: 'tool_call', toolCallId: 'tc_y', name: 'cmd', args: {} },
@@ -176,7 +177,7 @@ describe('buildGeminiInteractionsReplay', () => {
     ];
     const result = buildGeminiInteractionsReplay(history);
     const resultStep = result.find((step) => step.type === 'function_result');
-    expect(resultStep?.result).toEqual({ output: 'plain text output' });
+    expect(resultStep?.result).toBe('plain text output');
   });
 
   it('handles mixed history (some turns have parts, some do not)', () => {

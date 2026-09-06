@@ -20,10 +20,7 @@ import {
   serializeContinuationEnvelope,
 } from '../core/continuation-envelope';
 import { logProviderDegrade } from '../core/continuation-logger';
-import {
-  buildGeminiInteractionsReplay,
-  toGeminiFunctionResultPayload,
-} from '../core/replay-builder';
+import { buildGeminiInteractionsReplay } from '../core/replay-builder';
 import { toolDefsToGeminiInteractions } from '../core/tool-mapper';
 import type { AgentEvent, AgentTurnRequest } from '../types';
 import { createGeminiClient } from './client';
@@ -218,7 +215,7 @@ export async function* streamGeminiAgentTurn(
         type: 'function_result' as const,
         call_id: tr.callId,
         name: tr.name,
-        result: toGeminiFunctionResultPayload(tr.result, tr.isError),
+        result: tr.result,
         is_error: tr.isError ?? false,
       })),
     };
