@@ -8,26 +8,11 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import {
-  chmod,
-  type FileHandle,
-  mkdir,
-  open,
-  readFile,
-  readlink,
-  rename,
-  rm,
-  rmdir,
-  stat,
-  symlink,
-  unlink,
-} from 'node:fs/promises';
-import { hostname } from 'node:os';
+import { chmod, type FileHandle, mkdir, open, rm, rmdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-  RUNTIME_BINARY_BASENAME,
-  RUNTIME_CURRENT_LINK_NAME,
   type RuntimeSlot,
+  runtimeBinaryName,
   SOURCE_SHA_PATTERN,
 } from '@mangostudio/shared/runtime-home';
 import { RuntimeUpdateError } from '../errors';
@@ -40,16 +25,30 @@ import type {
   RuntimeUpdateCommitResult,
 } from '../methods';
 import { runtimeSlotDir, writeRuntimeSlotConfig } from '../runtime-home';
+import {
+  isLockedFileError,
+  isSafeSlotVersion,
+  moveSlotFile,
+  pruneSlotVersions,
+  publishSlotCurrent,
+  readSlotCurrentTarget,
+  restoreSlotCurrent,
+  type SlotPublishOptions,
+  slotVersionFromPointer,
+} from './slot-publish';
+import {
+  acquireSlotUpdateLock,
+  releaseSlotUpdateLock,
+  type SlotUpdateLock,
+} from './slot-update-lock';
+import { type WriteChunk, writeAllBytes } from './write-all-bytes';
 
 const RUNTIME_UPDATE_MAX_BYTES = 256 * 1024 * 1024;
 const RUNTIME_UPDATE_MAX_CHUNK_BYTES = 32 * 1024;
 const RUNTIME_UPDATE_SESSION_TIMEOUT_MS = 120_000;
-const RUNTIME_UPDATE_LOCK_FILE = 'runtime-update.lock';
-const RUNTIME_UPDATE_LOCK_STALE_FLOOR_MS = 5 * 60_000;
 /** Distinct from ordinary failure so a supervisor can identify an intentional restart. */
 export const RUNTIME_UPDATE_EXIT_CODE = 75;
 
-const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
 const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
 
 export interface RuntimeUpdateServiceOptions {
@@ -62,12 +61,12 @@ export interface RuntimeUpdateServiceOptions {
   readonly sessionTimeoutMs?: number;
   readonly platform?: NodeJS.Platform;
   /** Writes one bounded slice and reports only bytes confirmed by the filesystem. */
-  readonly writeChunk?: (handle: FileHandle, bytes: Uint8Array) => Promise<number>;
-}
-
-interface UpdateLock {
-  readonly path: string;
-  readonly token: string;
+  readonly writeChunk?: WriteChunk;
+  /**
+   * Pointer filesystem and backoff, so a test can drive the Windows branch off
+   * Windows — a junction is the one operation a Linux runner cannot perform.
+   */
+  readonly slotPublish?: Omit<SlotPublishOptions, 'platform'>;
 }
 
 interface UpdateSession {
@@ -81,7 +80,7 @@ interface UpdateSession {
   readonly incomingPath: string;
   readonly livePath: string;
   readonly handle: FileHandle;
-  readonly lock: UpdateLock;
+  readonly lock: SlotUpdateLock;
   readonly hash: ReturnType<typeof createHash>;
   nextSeq: number;
   receivedBytes: number;
@@ -102,6 +101,9 @@ export function createRuntimeUpdateService(
   let session: UpdateSession | null = null;
   let pendingOperations = 0;
   let operationTail = Promise.resolve();
+  const platform = options.platform ?? process.platform;
+  const publish: SlotPublishOptions = { ...options.slotPublish, platform };
+  const binaryName = runtimeBinaryName(platform);
 
   const serialize = <T>(operation: () => Promise<T>): Promise<T> => {
     pendingOperations += 1;
@@ -140,7 +142,27 @@ export function createRuntimeUpdateService(
     await rm(active.incomingPath, { force: true }).catch(() => undefined);
     await rmdir(active.versionDir).catch(() => undefined);
     if (session === active) session = null;
-    await releaseUpdateLock(active.lock);
+    await releaseSlotUpdateLock(active.lock);
+  };
+
+  /**
+   * Moves the verified stage onto the version's live name.
+   *
+   * POSIX replaces the file under any reader; Windows refuses while anything
+   * holds it open, which after a fresh write is usually a scanner and passes.
+   * When it does not, the honest answer names the lock rather than surfacing a
+   * bare `EPERM` from a path nobody can place.
+   */
+  const publishLiveBinary = async (active: UpdateSession): Promise<void> => {
+    try {
+      await moveSlotFile(active.incomingPath, active.livePath, publish);
+    } catch (error) {
+      if (platform !== 'win32' || !isLockedFileError(error)) throw error;
+      throw fail(
+        `Runtime update could not replace ${active.livePath}: the file is locked. A virus scanner or a process still running that exact version holds it; stop the service for this slot and retry.`,
+        { reason: 'binary_locked', path: active.livePath }
+      );
+    }
   };
 
   const touch = (active: UpdateSession): void => {
@@ -166,13 +188,7 @@ export function createRuntimeUpdateService(
             sessionId: session.id,
           });
         }
-        if ((options.platform ?? process.platform) === 'win32') {
-          throw fail(
-            'Runtime self-update is not available on Windows until slot publication supports safe running-executable replacement.',
-            { reason: 'platform_unsupported', platform: 'win32' }
-          );
-        }
-        if (!VERSION_PATTERN.test(params.version)) {
+        if (!isSafeSlotVersion(params.version)) {
           throw fail('Runtime update version is not a safe slot directory name.', {
             reason: 'invalid_version',
           });
@@ -208,14 +224,17 @@ export function createRuntimeUpdateService(
         const slotDir = runtimeSlotDir(options.slot, options.env);
         await mkdir(slotDir, { recursive: true });
         const id = randomUUID();
-        const lock = await acquireUpdateLock(
+        const lock = await acquireSlotUpdateLock(
           slotDir,
           id,
           options.sessionTimeoutMs ?? RUNTIME_UPDATE_SESSION_TIMEOUT_MS
         );
         const versionDir = join(slotDir, params.version);
-        const incomingPath = join(versionDir, `${RUNTIME_BINARY_BASENAME}.incoming`);
-        const livePath = join(versionDir, RUNTIME_BINARY_BASENAME);
+        // The live name carries the platform's suffix, because `current` is a
+        // link to this directory and the launcher resolves through it: a
+        // Windows slot holding an extensionless file is a slot nothing can run.
+        const incomingPath = join(versionDir, `${binaryName}.incoming`);
+        const livePath = join(versionDir, binaryName);
         let handle: FileHandle;
         try {
           await mkdir(versionDir, { recursive: true });
@@ -224,7 +243,7 @@ export function createRuntimeUpdateService(
         } catch (error) {
           await rm(incomingPath, { force: true }).catch(() => undefined);
           await rmdir(versionDir).catch(() => undefined);
-          await releaseUpdateLock(lock);
+          await releaseSlotUpdateLock(lock);
           throw error;
         }
         session = {
@@ -271,26 +290,20 @@ export function createRuntimeUpdateService(
           });
         }
 
-        const writeChunk =
-          options.writeChunk ??
-          (async (handle: FileHandle, chunk: Uint8Array) =>
-            (await handle.write(chunk)).bytesWritten);
-        let offset = 0;
         try {
-          while (offset < bytes.byteLength) {
-            const remaining = bytes.subarray(offset);
-            const written = await writeChunk(active.handle, remaining);
-            if (!Number.isSafeInteger(written) || written <= 0 || written > remaining.byteLength) {
-              throw fail('Runtime update write did not report a valid byte count.', {
+          await writeAllBytes(active.handle, bytes, {
+            writeChunk: options.writeChunk,
+            onWritten: (confirmed) => {
+              active.hash.update(confirmed);
+              active.receivedBytes += confirmed.byteLength;
+            },
+            invalidWrite: (written, remainingBytes) =>
+              fail('Runtime update write did not report a valid byte count.', {
                 reason: 'invalid_write_count',
                 written,
-                remainingBytes: remaining.byteLength,
-              });
-            }
-            active.hash.update(remaining.subarray(0, written));
-            active.receivedBytes += written;
-            offset += written;
-          }
+                remainingBytes,
+              }),
+          });
         } catch (error) {
           await discard(active);
           throw error;
@@ -341,16 +354,17 @@ export function createRuntimeUpdateService(
         }
 
         const slotDir = runtimeSlotDir(options.slot, options.env);
-        const currentPath = join(slotDir, RUNTIME_CURRENT_LINK_NAME);
-        const previous = await readlink(currentPath).catch(() => null);
-        const nextLink = join(slotDir, `.${RUNTIME_CURRENT_LINK_NAME}.${active.id}`);
+        // Two readings of one pointer. The raw target is what a rollback has to
+        // write back — a version name on POSIX, an absolute directory on
+        // Windows — and the version inside it is what the prune must spare.
+        const previousTarget = await readSlotCurrentTarget(slotDir, publish);
+        const previousVersion = slotVersionFromPointer(previousTarget);
         let currentSwapped = false;
         try {
           try {
             await chmod(active.incomingPath, 0o755);
-            await rename(active.incomingPath, active.livePath);
-            await symlink(active.version, nextLink);
-            await rename(nextLink, currentPath);
+            await publishLiveBinary(active);
+            await publishSlotCurrent(slotDir, active.version, active.id, publish);
             currentSwapped = true;
             await writeRuntimeSlotConfig(
               options.slot,
@@ -367,15 +381,18 @@ export function createRuntimeUpdateService(
             );
           } catch (error) {
             if (currentSwapped) {
-              await restoreCurrentLink(currentPath, previous, active.id).catch(() => undefined);
+              await restoreSlotCurrent(slotDir, previousTarget, active.id, publish).catch(
+                () => undefined
+              );
             }
-            await rm(nextLink, { force: true }).catch(() => undefined);
             throw error;
           }
-          await pruneSlotVersions(slotDir, active.version, previous).catch(() => undefined);
+          await pruneSlotVersions(slotDir, active.version, previousVersion, publish).catch(
+            () => undefined
+          );
         } finally {
           session = null;
-          await releaseUpdateLock(active.lock);
+          await releaseSlotUpdateLock(active.lock);
         }
 
         const restart = options.supervised ? 'scheduled' : 'manual';
@@ -408,141 +425,4 @@ function decodeBase64(encoded: string): Uint8Array {
     });
   }
   return bytes;
-}
-
-async function restoreCurrentLink(
-  currentPath: string,
-  previous: string | null,
-  sessionId: string
-): Promise<void> {
-  if (!previous) {
-    await rm(currentPath, { force: true });
-    return;
-  }
-  const rollback = `${currentPath}.rollback.${sessionId}`;
-  await symlink(previous, rollback);
-  await rename(rollback, currentPath);
-}
-
-async function pruneSlotVersions(
-  slotDir: string,
-  currentVersion: string,
-  previousVersion: string | null
-): Promise<void> {
-  const entries = await Array.fromAsync(new Bun.Glob('*').scan({ cwd: slotDir, onlyFiles: false }));
-  await Promise.all(
-    entries
-      .filter(
-        (entry) =>
-          entry !== currentVersion &&
-          entry !== previousVersion &&
-          entry !== RUNTIME_CURRENT_LINK_NAME &&
-          !entry.endsWith('.json') &&
-          !entry.endsWith('.lock') &&
-          // `runtime-update.lock.reclaim` ends in neither, and unlinking another
-          // process's reclaim guard mid-flight lets two of them reclaim the same
-          // lock. Prefix rather than suffix so every file the lock owns is kept.
-          !entry.startsWith(RUNTIME_UPDATE_LOCK_FILE)
-      )
-      .map((entry) => rm(join(slotDir, entry), { recursive: true, force: true }))
-  );
-}
-
-/**
- * Claims a slot across runtime processes for the full transfer and publication.
- *
- * A host-local live pid is authoritative. Homes mounted across machines fall
- * back to age, with a floor well beyond the normal session timeout. The token
- * prevents an expired holder from unlinking a replacement holder's lock.
- */
-async function acquireUpdateLock(
-  slotDir: string,
-  token: string,
-  sessionTimeoutMs: number
-): Promise<UpdateLock> {
-  const path = join(slotDir, RUNTIME_UPDATE_LOCK_FILE);
-  const reclaimPath = `${path}.reclaim`;
-  const staleMs = Math.max(RUNTIME_UPDATE_LOCK_STALE_FLOOR_MS, sessionTimeoutMs * 2);
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    if (
-      await stat(reclaimPath).then(
-        () => true,
-        () => false
-      )
-    ) {
-      throw new RuntimeUpdateError('Another slot update is already active.', {
-        reason: 'slot_update_active',
-      });
-    }
-    let handle: FileHandle;
-    try {
-      handle = await open(path, 'wx', 0o600);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      if (attempt === 0 && (await reclaimAbandonedUpdateLock(path, staleMs))) continue;
-      throw new RuntimeUpdateError('Another slot update is already active.', {
-        reason: 'slot_update_active',
-      });
-    }
-
-    try {
-      await handle.writeFile(JSON.stringify({ token, pid: process.pid, host: hostname() }));
-    } catch (error) {
-      await handle.close().catch(() => undefined);
-      await unlink(path).catch(() => undefined);
-      throw error;
-    }
-    await handle.close();
-    return { path, token };
-  }
-
-  throw new RuntimeUpdateError('Another slot update is already active.', {
-    reason: 'slot_update_active',
-  });
-}
-
-async function releaseUpdateLock(lock: UpdateLock): Promise<void> {
-  try {
-    const owner = JSON.parse(await readFile(lock.path, 'utf8')) as { readonly token?: string };
-    if (owner.token === lock.token) await unlink(lock.path);
-  } catch {
-    // Gone, replaced, or unreadable: never remove a lock we cannot identify.
-  }
-}
-
-async function reclaimAbandonedUpdateLock(path: string, staleMs: number): Promise<boolean> {
-  const reclaimPath = `${path}.reclaim`;
-  let reclaimHandle: FileHandle;
-  try {
-    reclaimHandle = await open(reclaimPath, 'wx', 0o600);
-  } catch {
-    return false;
-  }
-
-  try {
-    const [raw, stats] = await Promise.all([readFile(path, 'utf8'), stat(path)]);
-    const owner = raw ? (JSON.parse(raw) as { readonly pid?: number; readonly host?: string }) : {};
-    const ownedHere = owner.host === hostname() && typeof owner.pid === 'number';
-    const abandoned = ownedHere
-      ? !isProcessAlive(owner.pid as number)
-      : Date.now() - stats.mtimeMs > staleMs;
-    if (!abandoned) return false;
-    await unlink(path).catch(() => undefined);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ENOENT';
-  } finally {
-    await reclaimHandle.close().catch(() => undefined);
-    await unlink(reclaimPath).catch(() => undefined);
-  }
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
 }

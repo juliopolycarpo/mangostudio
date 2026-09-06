@@ -57,6 +57,7 @@ import {
   type RuntimeSetupArgs,
   runRuntimeSetup,
 } from './setup';
+import { installRuntimeIntoSlot } from './slot-install';
 import { createStdioFramePort, type StdioFramePortClosure } from './transports/stdio';
 
 /**
@@ -106,6 +107,10 @@ export type RuntimeCliInvocation =
         readonly json: boolean;
       };
     }
+  | {
+      readonly command: 'install';
+      readonly args: { readonly slot: RuntimeSlot; readonly json: boolean };
+    }
   | { readonly command: 'audit'; readonly args: RuntimeAuditArgs }
   | { readonly command: 'version' }
   | { readonly command: 'help' }
@@ -119,6 +124,7 @@ Commands:
   --stdio      Serve the runtime protocol over stdin/stdout (NDJSON frames)
   connect      Dial a hub over WebSocket and serve it until stopped
   serve        Listen for a hub over WebSocket (Direct URL)
+  install      Copy this binary into a runtime slot and publish it as current
   setup        Say what a hub may do on this machine
   health       Print this runtime's slot, version, and permissions
   doctor       health, plus what is wrong and the command that fixes it
@@ -143,6 +149,12 @@ serve options:
                neither is given, a stored token is reused, or one is generated
                and printed once. Never pass the secret as an argument.
                MANGOSTUDIO_RUNTIME_TOKEN is for connect only.
+
+install options:
+  --slot <host|wsl|remote>
+               Which slot to install into. Defaults to "remote", the slot for
+               a runtime you downloaded and pair with "connect" or "serve".
+  --json       Print what was installed instead of prose.
 
 setup options:
   --profile <full|readonly|none>
@@ -199,6 +211,7 @@ export function parseRuntimeCliArgs(args: readonly string[]): RuntimeCliInvocati
   if (first === 'connect') return parseConnectArgs(rest);
   if (first === 'serve') return parseServeArgs(rest);
   if (first === 'setup') return parseSetupArgs(rest);
+  if (first === 'install') return parseInstallArgs(rest);
   if (first === 'health' || first === 'doctor') return parseReportArgs(first, rest);
   if (first === 'service') return parseServiceArgs(rest);
   if (first === 'audit') return parseAuditArgs(rest);
@@ -291,6 +304,33 @@ function parseSetupArgs(args: readonly string[]): RuntimeCliInvocation {
   }
 
   return { command: 'setup', args: setup };
+}
+
+function parseInstallArgs(args: readonly string[]): RuntimeCliInvocation {
+  let slot: RuntimeSlot = PAIRED_SLOT;
+  let json = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    if (flag === '--slot') {
+      const value = args[++index];
+      if (!value || !isRuntimeSlot(value)) {
+        return {
+          command: 'invalid',
+          reason: `--slot takes host, wsl, or remote${value ? `, not "${value}"` : ''}.`,
+        };
+      }
+      slot = value;
+      continue;
+    }
+    if (flag === '--json') {
+      json = true;
+      continue;
+    }
+    return { command: 'unknown', argument: flag ?? '--' };
+  }
+
+  return { command: 'install', args: { slot, json } };
 }
 
 function parseOnOff(value: string): boolean | null {
@@ -457,6 +497,8 @@ export async function runRuntimeCli(args: readonly string[]): Promise<number> {
       return await runServe(invocation.args, runtimeVersion);
     case 'setup':
       return await runSetup(invocation.args, runtimeVersion);
+    case 'install':
+      return await runInstall(invocation.args, runtimeVersion);
     case 'health':
       return await runHealth(invocation.args.json, runtimeVersion);
     case 'doctor':
@@ -529,7 +571,7 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
   if (!restricted) {
     log(
       process.platform === 'win32'
-        ? 'Warning: the pairing token file is not restricted to this account. Windows needs an ACL this runtime does not set; restrict it yourself if other accounts use this machine.'
+        ? 'Warning: the pairing token file is not restricted to this account. icacls could not write its ACL; restrict it yourself if other accounts use this machine.'
         : 'Warning: the pairing token file could not be restricted to this user.'
     );
   }
@@ -612,7 +654,7 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
     if (!resolved.restricted) {
       log(
         process.platform === 'win32'
-          ? 'Warning: the serve token file is not restricted to this account. Windows needs an ACL this runtime does not set; restrict it yourself if other accounts use this machine.'
+          ? 'Warning: the serve token file is not restricted to this account. icacls could not write its ACL; restrict it yourself if other accounts use this machine.'
           : 'Warning: the serve token file could not be restricted to this user.'
       );
     }
@@ -925,6 +967,52 @@ const SERVICE_VERB_MESSAGES: Record<'start' | 'stop' | 'restart', string> = {
   stop: 'Stopped mangostudio-runtime service.',
   restart: 'Restart of mangostudio-runtime service requested.',
 };
+
+/**
+ * Publishes this binary into a slot, then says what is still missing.
+ *
+ * The next two commands are printed rather than run: `setup` is the machine
+ * owner's answer about consent and `service install` needs a mode that only
+ * a configured `connect` or `serve` can imply. Naming the slot in both matters
+ * — without it they edit whichever slot this binary happens to sit in, which
+ * after this command is a different one than before.
+ */
+async function runInstall(
+  args: { readonly slot: RuntimeSlot; readonly json: boolean },
+  runtimeVersion: string
+): Promise<number> {
+  try {
+    const result = await installRuntimeIntoSlot({ slot: args.slot, version: runtimeVersion });
+    if (args.json) {
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+      return 0;
+    }
+    process.stdout.write(
+      [
+        result.unchanged
+          ? `Slot ${result.slot} already holds ${result.version}.`
+          : `Installed ${result.version} into the ${result.slot} slot at ${result.binaryPath}.`,
+        ...(result.replacedVersion ? [`Replaced ${result.replacedVersion}.`] : []),
+        `Launch it through ${result.currentBinaryPath}, which survives every upgrade.`,
+        '',
+        'Next:',
+        `  mangostudio-runtime setup --slot ${result.slot}`,
+        '  mangostudio-runtime connect --hub <url>   # or: serve --listen <host:port>',
+        '  mangostudio-runtime service install',
+        '',
+      ].join('\n')
+    );
+    return 0;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (args.json) {
+      process.stdout.write(`${JSON.stringify({ error: message })}\n`);
+    } else {
+      process.stderr.write(`mangostudio-runtime: ${message}\n`);
+    }
+    return 1;
+  }
+}
 
 async function runService(args: {
   readonly action: UserServiceAction;

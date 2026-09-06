@@ -824,6 +824,12 @@ Where a runtime lives and what it is allowed to do — `~/.mango/runtime/<slot>/
 
 - `apps/shared/src/runtime-home/` (schemas, presets, path layout — the contract)
 - `apps/runtime/src/runtime-home.ts` (the half that touches disk), `src/setup.ts`, `src/health.ts`
+- `apps/runtime/src/services/slot-publish.ts` (the `current` pointer per platform — POSIX
+  symlink, Windows junction — plus the version prune and the lock-retry every slot write
+  goes through), `src/services/slot-update-lock.ts` (one writer per slot, across processes)
+- `apps/runtime/src/slot-install.ts` (`mangostudio-runtime install`: the same publication a
+  live update performs, minus the transfer), `src/services/runtime-update.ts` (the transfer)
+- `apps/runtime/src/services/owner-only.ts` (`chmod 0600`, or `icacls` where there is no mode)
 - `apps/runtime/src/consent-gate.ts`, `src/consent-source.ts` (dispatch refusal + per-call re-read)
 - `apps/runtime/src/audit-log.ts` (local NDJSON receipt; never on the wire)
 - `apps/api/src/modules/generation/application/resolve-capability-candidates.ts` (hub withholds

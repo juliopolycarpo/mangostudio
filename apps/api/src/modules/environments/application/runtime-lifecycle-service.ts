@@ -521,6 +521,7 @@ export function createRuntimeLifecycleService(
           ? {
               enforcesPathPolicy: status.manifest?.enforcesPathPolicy === true,
               directoryHashDomain: directoryHashDomainOf(status.manifest?.directoryHashDomain),
+              publishesWindowsSlot: status.manifest?.publishesWindowsSlot === true,
             }
           : {}),
       });
@@ -568,6 +569,7 @@ export function createRuntimeLifecycleService(
           health: cached.health,
           connected: status.state === 'connected',
           managedPush: !sshCustomPath,
+          publishesWindowsSlot: status.manifest?.publishesWindowsSlot === true,
         });
 
       if (!canPushOutOfBand && !canUpdateLive) {
@@ -628,6 +630,7 @@ export function createRuntimeLifecycleService(
               environmentId,
               transportKind: record.transportKind,
               health: cached.health,
+              publishesWindowsSlot: status.manifest?.publishesWindowsSlot === true,
               manager,
               loadRuntimeAsset,
               stream,
@@ -846,6 +849,8 @@ interface LiveUpdateInput {
   readonly environmentId: string;
   readonly transportKind: EnvironmentTransportKind;
   readonly health: RuntimeHealthReport;
+  /** Whether the connected peer declared Windows slot publication. */
+  readonly publishesWindowsSlot: boolean;
   readonly manager: RuntimeConnectionManager;
   readonly loadRuntimeAsset: (
     platformId: string,
@@ -856,9 +861,9 @@ interface LiveUpdateInput {
 }
 
 async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
-  if (input.health.platform === 'win32') {
+  if (input.health.platform === 'win32' && !input.publishesWindowsSlot) {
     throw new RuntimeLifecycleUnavailableError(
-      'Live runtime update is currently available only for POSIX runtime slots.',
+      'This Windows runtime is too old to publish a slot in place. Upgrade it with "mangostudio-runtime install" from a newer download, then live updates work from here.',
       409
     );
   }
@@ -920,10 +925,14 @@ async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
       return;
     }
 
+    const budgetMs = restartBudgetMs(input.health.platform);
     input.stream.publish({
       type: 'log',
       stream: 'system',
-      line: `Runtime ${version} is installed; waiting for the supervised restart…`,
+      line:
+        input.health.platform === 'win32'
+          ? `Runtime ${version} is installed; waiting for the supervised restart, which Task Scheduler holds for about a minute…`
+          : `Runtime ${version} is installed; waiting for the supervised restart…`,
       done: false,
     });
     await waitForRuntimeDisconnect(input.manager, input.userId, input.environmentId, input.signal);
@@ -933,10 +942,17 @@ async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
         input.userId,
         input.environmentId,
         version,
-        input.signal
+        input.signal,
+        budgetMs
       );
     } else {
-      await input.manager.connect(input.userId, input.environmentId, { force: true });
+      await reconnectWithinBudget(
+        input.manager,
+        input.userId,
+        input.environmentId,
+        input.signal,
+        budgetMs
+      );
     }
     await input.manager.refreshManifest(input.userId, input.environmentId);
     const status = input.manager.getStatus(input.userId, input.environmentId);
@@ -993,13 +1009,63 @@ async function waitForRuntimeDisconnect(
   }
 }
 
+const RESTART_BUDGET_MS = 60_000;
+const WINDOWS_RESTART_BUDGET_MS = 240_000;
+
+/**
+ * How long a committed peer has to come back before the run calls it failed.
+ *
+ * A supervised Windows runtime is a Scheduled Task with `-RestartInterval 1
+ * minute` — Task Scheduler's own floor, not a number this repo picked — so a
+ * win32 peer that exits for its restart is deliberately gone for about that
+ * minute before the supervisor even tries. The POSIX budget of one minute is
+ * exactly that interval with nothing left for the boot and hello after it, so
+ * win32 gets four: the interval, a retry of it if the first launch loses a
+ * race with the swap, and room to hand shake.
+ *
+ * @example
+ * restartBudgetMs('win32'); // 240_000
+ * restartBudgetMs('linux'); // 60_000
+ */
+export function restartBudgetMs(platform: string | undefined): number {
+  return platform === 'win32' ? WINDOWS_RESTART_BUDGET_MS : RESTART_BUDGET_MS;
+}
+
+/**
+ * Dials the peer until it answers or the budget runs out.
+ *
+ * The hub-dialled transports have to reach out themselves, and the first reach
+ * lands inside the supervisor's restart interval — on Windows always, and on a
+ * slow boot anywhere. One attempt reports a peer that is merely not back yet
+ * as an upgrade that failed, with `current` already pointing at the new bytes.
+ */
+async function reconnectWithinBudget(
+  manager: RuntimeConnectionManager,
+  userId: string,
+  environmentId: string,
+  signal: AbortSignal,
+  timeoutMs: number
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    signal.throwIfAborted();
+    try {
+      await manager.connect(userId, environmentId, { force: true });
+      return;
+    } catch (error) {
+      if (Date.now() >= deadline) throw error;
+      await Bun.sleep(1_000);
+    }
+  }
+}
+
 async function waitForRuntimeVersion(
   manager: RuntimeConnectionManager,
   userId: string,
   environmentId: string,
   version: string,
   signal: AbortSignal,
-  timeoutMs = 60_000
+  timeoutMs = RESTART_BUDGET_MS
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

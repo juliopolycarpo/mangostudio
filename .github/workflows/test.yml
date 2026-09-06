@@ -310,6 +310,35 @@ jobs:
           path: coverage-run.log
           retention-days: 7
 
+  runtime-slot-windows:
+    # The one lane that runs on Windows. Junctions, `icacls` and a rename over
+    # a live reparse point have no Linux equivalent, so everywhere else those
+    # paths are exercised through a recording fake and this job is the only
+    # thing that proves the fake describes the real filesystem. Scoped to the
+    # slot suite on purpose: the rest of the runtime's tests build POSIX
+    # fixtures and have never claimed to run here.
+    #
+    # Deliberately outside the shard matrix and uploading no `test-shard-*`
+    # artifact, which is what the merge job counts.
+    name: Tests (runtime slot, Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run the Windows runtime slot suite
+        working-directory: apps/runtime
+        run: bun test --timeout 15000 tests/unit/services/slot-publish.windows.test.ts
+
   merge:
     # Reassembles what the fan-out split. LCOV needs a real merge (Bun's
     # per-file line totals are run-dependent — see

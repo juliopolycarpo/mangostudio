@@ -10,6 +10,7 @@ import {
   rm,
   stat,
   symlink,
+  unlink,
   writeFile,
 } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
@@ -21,6 +22,8 @@ import {
   writeRuntimeSlotConfig,
 } from '../../../src/runtime-home';
 import { createRuntimeUpdateService } from '../../../src/services/runtime-update';
+import type { SlotPublishFs } from '../../../src/services/slot-publish';
+import { junctionFs, lockedError } from './support/junction-fs';
 
 const homes: string[] = [];
 
@@ -55,6 +58,26 @@ async function fixture() {
 
 function digestOf(value: string | Uint8Array): `sha256:${string}` {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+}
+
+/** One whole begin/chunk/commit cycle for a small payload. */
+async function transfer(
+  service: ReturnType<typeof createRuntimeUpdateService>,
+  version: string,
+  contents: string
+): Promise<void> {
+  const bytes = new TextEncoder().encode(contents);
+  const begun = await service.begin({
+    version,
+    digest: digestOf(bytes),
+    totalBytes: bytes.byteLength,
+  });
+  await service.chunk({
+    sessionId: begun.sessionId,
+    seq: 0,
+    bytesBase64: Buffer.from(bytes).toString('base64'),
+  });
+  await service.commit({ sessionId: begun.sessionId });
 }
 
 describe('runtime self-update', () => {
@@ -501,12 +524,113 @@ describe('runtime self-update', () => {
     ).toBeNull();
   });
 
-  it('refuses Windows before creating a stage', async () => {
-    const { env } = await fixture();
-    const service = createRuntimeUpdateService({ slot: 'remote', env, platform: 'win32' });
+  it('keeps the previous version directory when the pointer target is absolute', async () => {
+    // The Windows pointer is a junction, so `readlink` hands back the whole
+    // directory rather than the version name a POSIX symlink stores. Comparing
+    // that raw target against a directory entry never matches, and the previous
+    // version — the one the running process is still executing — gets pruned.
+    const { env, slotDir } = await fixture();
+    await unlink(join(slotDir, 'current'));
+    await symlink(join(slotDir, '1.0.0'), join(slotDir, 'current'));
+    const service = createRuntimeUpdateService({ slot: 'remote', env });
 
-    await expect(
-      service.begin({ version: '1.1.0', digest: digestOf('next'), totalBytes: 4 })
-    ).rejects.toThrow('not available on Windows');
+    await transfer(service, '1.1.0', 'new-runtime');
+
+    expect(
+      await stat(join(slotDir, '1.0.0')).then(
+        () => true,
+        () => false
+      )
+    ).toBe(true);
+  });
+});
+
+describe('runtime self-update on Windows', () => {
+  it('publishes through a junction, keeping the running version directory', async () => {
+    const { env, slotDir } = await fixture();
+    const pointer = junctionFs();
+    const service = createRuntimeUpdateService({
+      slot: 'remote',
+      env,
+      platform: 'win32',
+      slotPublish: { fs: pointer.fs, sleep: () => Promise.resolve() },
+    });
+
+    await transfer(service, '1.1.0', 'new-runtime');
+
+    // Never `rename` onto a live junction: Windows refuses that outright, so
+    // the old pointer has to come out first. The order is the contract.
+    expect(pointer.ops()).toEqual([
+      'rename', // the verified bytes onto mangostudio-runtime.exe
+      'rmdir', // a staged pointer left by an earlier attempt
+      'symlink',
+      'rmdir', // the live junction, so the rename below has somewhere to land
+      'rename',
+    ]);
+    expect(pointer.calls[2]?.args[0]).toBe(join(slotDir, '1.1.0'));
+    expect(pointer.calls[2]?.args[2]).toBe('junction');
+    expect(pointer.calls[3]?.args[0]).toBe(join(slotDir, 'current'));
+    expect(await readFile(join(slotDir, 'current', 'mangostudio-runtime.exe'), 'utf8')).toBe(
+      'new-runtime'
+    );
+    expect(await readRuntimeSlotConfig('remote', env)).toMatchObject({
+      version: '1.1.0',
+      binaryPath: join(slotDir, '1.1.0', 'mangostudio-runtime.exe'),
+    });
+    expect(
+      await stat(join(slotDir, '1.0.0')).then(
+        () => true,
+        () => false
+      )
+    ).toBe(true);
+  });
+
+  it('waits out a scanner holding the freshly written binary', async () => {
+    const { env, slotDir } = await fixture();
+    const pointer = junctionFs();
+    let refusals = 2;
+    const locking: SlotPublishFs = {
+      ...pointer.fs,
+      rename: async (from, to) => {
+        if (from.endsWith('.incoming') && refusals > 0) {
+          refusals -= 1;
+          throw lockedError();
+        }
+        await pointer.fs.rename(from, to);
+      },
+    };
+    const service = createRuntimeUpdateService({
+      slot: 'remote',
+      env,
+      platform: 'win32',
+      slotPublish: { fs: locking, sleep: () => Promise.resolve() },
+    });
+
+    await transfer(service, '1.1.0', 'new-runtime');
+
+    expect(refusals).toBe(0);
+    expect(await readFile(join(slotDir, 'current', 'mangostudio-runtime.exe'), 'utf8')).toBe(
+      'new-runtime'
+    );
+  });
+
+  it('names the lock when the binary never becomes writable', async () => {
+    const { env } = await fixture();
+    const pointer = junctionFs();
+    const locked: SlotPublishFs = {
+      ...pointer.fs,
+      rename: (from, to) => {
+        if (from.endsWith('.incoming')) return Promise.reject(lockedError());
+        return pointer.fs.rename(from, to);
+      },
+    };
+    const service = createRuntimeUpdateService({
+      slot: 'remote',
+      env,
+      platform: 'win32',
+      slotPublish: { fs: locked, sleep: () => Promise.resolve() },
+    });
+
+    await expect(transfer(service, '1.1.0', 'new-runtime')).rejects.toThrow('the file is locked');
   });
 });

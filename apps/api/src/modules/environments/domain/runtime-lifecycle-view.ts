@@ -51,6 +51,12 @@ export interface BuildRuntimeLifecycleViewInput {
    * is connected; an older connected peer that omits the field is v2.
    */
   readonly directoryHashDomain?: number | undefined;
+  /**
+   * Whether the connected peer said it can publish a Windows slot. Read only
+   * for a win32 peer, and false for anything that did not say so — including
+   * every build from before the capability existed.
+   */
+  readonly publishesWindowsSlot?: boolean | undefined;
 }
 
 export function buildRuntimeLifecycleView(
@@ -91,7 +97,7 @@ export function buildRuntimeLifecycleView(
 export function canUpdateOverLiveConnection(
   input: Pick<
     BuildRuntimeLifecycleViewInput,
-    'transportKind' | 'health' | 'connected' | 'managedPush'
+    'transportKind' | 'health' | 'connected' | 'managedPush' | 'publishesWindowsSlot'
   >
 ): boolean {
   return (
@@ -107,7 +113,10 @@ export function canUpdateOverLiveConnection(
     input.health !== null &&
     input.health.source === 'provisioned' &&
     input.health.platformId !== undefined &&
-    input.health.platform !== 'win32' &&
+    // A Windows peer has to say it can publish a slot. Nothing else on the
+    // report distinguishes a build that can from one that refuses win32
+    // outright, and the version cannot: a peer is routinely older than its hub.
+    (input.health.platform !== 'win32' || input.publishesWindowsSlot === true) &&
     input.health.runtimeVersion !== getVersion()
   );
 }

@@ -191,7 +191,8 @@ export function createRuntimeServiceManager(
       [
         `No runtime binary at ${binaryPath}.`,
         'A unit pointing there would fail to start at every boot.',
-        'Install this runtime into the slot first — upgrade it from its environment card, or push it over ssh — then install the service.',
+        `Publish this binary into the slot first: mangostudio-runtime install --slot ${PAIRED_SLOT}`,
+        'A hub can do it instead — upgrade from the environment card, or push over ssh.',
         `See ${RUNTIME_SERVICE_DOCS_URL}`,
       ].join('\n')
     );

@@ -408,13 +408,15 @@ export async function diagnoseRuntimeServiceHealth(
     });
   }
 
-  // No `fix` on purpose: nothing this machine can run puts the bytes there.
-  // The install comes from the hub, so the path is what a reader needs.
+  // The fix used to be absent, because only a hub push could put bytes there
+  // and this machine could do nothing about it. `install` is that command now:
+  // it copies the binary already running this check into the slot.
   if (status.currentBinaryPresent === false) {
     findings.push({
       severity: 'fail',
       title: 'Service',
       detail: `no runtime binary at ${currentBinaryPath} — the unit cannot start until the slot is installed`,
+      fix: `mangostudio-runtime install --slot ${report.slot}`,
     });
   }
 

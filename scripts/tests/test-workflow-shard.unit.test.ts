@@ -153,13 +153,28 @@ describe('Test workflow merge job', () => {
 });
 
 describe('Test workflow shape', () => {
-  test('declares exactly the resolve-timings, shard, frontend, and merge jobs', () => {
+  // The merge job counts one artifact per unsharded lane, so a job that uploads
+  // a `test-shard-*` artifact is not free to appear here — which is what makes
+  // the exact list worth pinning.
+  test('declares exactly the jobs the merge job knows how to account for', () => {
     expect(extractJobBlocks(workflow).map(({ job }) => job)).toEqual([
       'resolve-timings',
       'shard',
       'frontend',
+      'runtime-slot-windows',
       'merge',
     ]);
+  });
+
+  // The only lane that does not run on Linux. Everywhere else the Windows slot
+  // paths go through a recording fake, so removing this leaves the fake with
+  // nothing checking that it describes the real filesystem.
+  test('runs the runtime slot suite on a Windows runner', () => {
+    const windows = extractJobBlock(workflow, 'runtime-slot-windows');
+    expect(windows).toContain('runs-on: windows-latest');
+    expect(windows).toContain('tests/unit/services/slot-publish.windows.test.ts');
+    // No artifact at all, so the merge job's per-lane count stays right.
+    expect(windows).not.toContain('upload-artifact');
   });
 
   // ci.yml calls this as one `test` job, so the aggregate gate's `needs` list
