@@ -85,16 +85,15 @@ describe('assertPlatformPackageAssets', () => {
     expect(() => assertPlatformPackageAssets(packageDir, LINUX_X64)).not.toThrow();
   });
 
-  test('accepts a windows-arm64 package, which shipped no sidecar even before', () => {
+  test('accepts a windows-arm64 package, whose binaries carry the .exe suffix', () => {
     const packageDir = makeTempDir();
     writePlatformPackage(packageDir, WINDOWS_ARM64);
 
     expect(() => assertPlatformPackageAssets(packageDir, WINDOWS_ARM64)).not.toThrow();
   });
 
-  // The vendored Cursor SDK tree is gone, so a platform package is the two
-  // binaries and a manifest. Asserted from the other side — that nothing
-  // demands `cursor-sidecar` any more — because a leftover requirement would
+  // A platform package is the two binaries and a manifest, nothing else.
+  // Asserted from the manifest side too, because an extra required entry would
   // fail every release rather than any test.
   test('requires nothing beyond the two binaries in the manifest files list', () => {
     const packageDir = makeTempDir();

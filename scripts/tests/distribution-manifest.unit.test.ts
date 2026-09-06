@@ -121,9 +121,9 @@ describe('distribution manifest', () => {
     ]);
   });
 
-  // Every target now promises the same three members. This used to vary with
-  // whether the build produced a vendored Cursor SDK tree for the arch, so it
-  // is asserted across two targets rather than one.
+  // Every target promises the same three members, so this is asserted across
+  // two targets rather than one — a per-arch member list is exactly the drift
+  // an archive-member manifest exists to catch.
   test('promises the same archive members on every target', () => {
     const { manifest } = fixture();
 

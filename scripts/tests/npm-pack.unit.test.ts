@@ -70,9 +70,9 @@ describe('buildPlatformManifest', () => {
     expect(manifest.files).toEqual(['mangostudio', 'mangostudio-runtime']);
   });
 
-  // Every platform now ships the same two files. It used to depend on whether a
-  // vendored Cursor SDK existed for the arch, which is why this is asserted for
-  // a second platform rather than folded into the case above.
+  // Every platform ships the same two files, which is why this is asserted for
+  // a second platform rather than folded into the case above — only the `.exe`
+  // suffix may differ.
   test('ships the same file list on every platform', () => {
     const manifest = buildPlatformManifest(WIN_ARM64, '1.2.3');
     expect(manifest.files).toEqual(['mangostudio.exe', 'mangostudio-runtime.exe']);
