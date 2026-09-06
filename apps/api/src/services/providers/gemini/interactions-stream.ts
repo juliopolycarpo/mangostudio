@@ -369,8 +369,10 @@ export async function* processGeminiInteractionStream(
 
   // `interaction.created` captures the id before any output, so an interaction
   // the API then abandons would otherwise mint a cursor and report a successful
-  // turn. Failing here keeps the partial output and leaves the previous cursor
-  // in place instead of chaining onto a dead interaction.
+  // turn. Failing here keeps the partial output the stream already yielded and
+  // sends the turn down the loop's error path, which clears the chat's stored
+  // state — so the next turn degrades to a full replay rather than chaining
+  // onto a dead interaction.
   if (accumulator.abandonedReason) {
     yield { type: 'turn_error', error: accumulator.abandonedReason };
     return;

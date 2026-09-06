@@ -45,6 +45,14 @@ const V2_EVENT_FRAMES = [
   },
 ];
 
+/** A v2 SSE body whose interaction is abandoned rather than completed. */
+const ABANDONED_EVENT_FRAMES = [
+  { event_type: 'interaction.created', interaction: { id: 'int_gone', status: 'in_progress' } },
+  { event_type: 'step.start', index: 0, step: { type: 'model_output', content: [] } },
+  { event_type: 'step.delta', index: 0, delta: { type: 'text', text: 'Half an ans' } },
+  { event_type: 'interaction.status_update', interaction_id: 'int_gone', status: 'failed' },
+];
+
 function sseBody(frames: Array<Record<string, unknown>>): string {
   const events = frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join('');
   return `${events}data: [DONE]\n\n`;
@@ -56,6 +64,8 @@ class RecordingInteractionsServer {
   private server: ReturnType<typeof Bun.serve> | undefined;
   private cachedClient: ReturnType<typeof createGeminiClient> | undefined;
 
+  constructor(private readonly responseFrames: Array<Record<string, unknown>>) {}
+
   start(): void {
     this.server = Bun.serve({
       port: 0,
@@ -66,7 +76,7 @@ class RecordingInteractionsServer {
         }
 
         this.requestBodies.push((await request.json()) as Record<string, unknown>);
-        return new Response(sseBody(V2_EVENT_FRAMES), {
+        return new Response(sseBody(this.responseFrames), {
           headers: { 'content-type': 'text/event-stream' },
         });
       },
@@ -106,8 +116,10 @@ afterEach(async () => {
   expect(failed.map((outcome) => String(outcome.reason))).toEqual([]);
 });
 
-function startServer(): RecordingInteractionsServer {
-  const server = new RecordingInteractionsServer();
+function startServer(
+  responseFrames: Array<Record<string, unknown>> = V2_EVENT_FRAMES
+): RecordingInteractionsServer {
+  const server = new RecordingInteractionsServer(responseFrames);
   server.start();
   servers.push(server);
   return server;
@@ -243,6 +255,22 @@ describe('Gemini Interactions wire contract', () => {
         arguments: '{"query":"cats"}',
       },
       { type: 'turn_completed', providerState: expect.any(String) },
+    ]);
+  });
+
+  it('fails the turn when the SDK parser delivers an abandoned status', async () => {
+    // The rest of this fix is covered against hand-written fakes, which by
+    // construction cannot show that the SDK's own parser hands
+    // `interaction.status_update` to the accumulator rather than filtering it.
+    const server = startServer(ABANDONED_EVENT_FRAMES);
+
+    const events: AgentEvent[] = await collectAgentEvents(
+      streamGeminiAgentTurn(baseRequest(), server.client)
+    );
+
+    expect(events).toEqual([
+      { type: 'assistant_text_delta', text: 'Half an ans' },
+      { type: 'turn_error', error: 'Gemini reported that the interaction failed.' },
     ]);
   });
 });
