@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   isLockedFileError,
+  pruneSlotVersions,
   publishSlotCurrent,
   readSlotCurrentTarget,
   restoreSlotCurrent,
@@ -11,6 +12,7 @@ import {
   slotVersionFromPointer,
   withSlotWriteRetry,
 } from '../../../src/services/slot-publish';
+import { junctionFs, lockedError } from './support/junction-fs';
 
 const roots: string[] = [];
 
@@ -64,6 +66,96 @@ describe('publishSlotCurrent', () => {
     await publishSlotCurrent(slotDir, '1.1.0', 'stale', posix);
 
     expect(await readSlotCurrentTarget(slotDir, posix)).toBe('1.1.0');
+  });
+});
+
+// Windows cannot rename onto an existing directory, so the live junction is
+// unlinked first and there is a moment where the slot has no pointer at all.
+// Nothing above this layer can put it back: the caller only rolls back what it
+// knows was swapped, and a failure here never got that far.
+describe('publishSlotCurrent on Windows', () => {
+  const windows = { platform: 'win32' } as const;
+
+  it('puts the old junction back when the swap fails mid-gap', async () => {
+    const slotDir = await slot();
+    await publishSlotCurrent(slotDir, '1.0.0', 'first', { ...windows, fs: junctionFs().fs });
+    const pointer = junctionFs((call) =>
+      call.op === 'rename' && call.args[1] === slotCurrentPath(slotDir) ? lockedError() : null
+    );
+
+    await expect(
+      publishSlotCurrent(slotDir, '1.1.0', 'second', {
+        ...windows,
+        fs: pointer.fs,
+        sleep: () => Promise.resolve(),
+      })
+    ).rejects.toMatchObject({ code: 'EPERM' });
+
+    expect(await readSlotCurrentTarget(slotDir, windows)).toBe(join(slotDir, '1.0.0'));
+  });
+
+  it('leaves no pointer when there was none to put back', async () => {
+    const slotDir = await slot();
+    const pointer = junctionFs((call) =>
+      call.op === 'rename' && call.args[1] === slotCurrentPath(slotDir) ? lockedError() : null
+    );
+
+    await expect(
+      publishSlotCurrent(slotDir, '1.1.0', 'second', {
+        ...windows,
+        fs: pointer.fs,
+        sleep: () => Promise.resolve(),
+      })
+    ).rejects.toMatchObject({ code: 'EPERM' });
+
+    expect(await readSlotCurrentTarget(slotDir, windows)).toBeNull();
+  });
+});
+
+describe('pruneSlotVersions', () => {
+  it('keeps the current and previous versions and drops the rest', async () => {
+    const slotDir = await slot();
+    await mkdir(join(slotDir, '0.9.0'), { recursive: true });
+    await publishSlotCurrent(slotDir, '1.1.0', 'first', posix);
+
+    await pruneSlotVersions(slotDir, '1.1.0', '1.0.0', posix);
+
+    expect(await lstat(join(slotDir, '1.1.0')).catch(() => null)).not.toBeNull();
+    expect(await lstat(join(slotDir, '1.0.0')).catch(() => null)).not.toBeNull();
+    expect(await lstat(join(slotDir, '0.9.0')).catch(() => null)).toBeNull();
+    expect(await readSlotCurrentTarget(slotDir, posix)).toBe('1.1.0');
+  });
+
+  // The slot root is not only version directories, and the prune used to keep
+  // a denylist of two suffixes: anything else was removed, which included this
+  // slot's own record of what a hub asked it to do.
+  it('keeps the files that live beside the versions', async () => {
+    const slotDir = await slot();
+    await Bun.write(join(slotDir, 'audit.log'), '{"method":"fs.read"}\n');
+    await Bun.write(join(slotDir, 'runtime.json'), '{}');
+    await Bun.write(join(slotDir, 'credentials.json'), '{}');
+
+    await pruneSlotVersions(slotDir, '1.1.0', '1.0.0', posix);
+
+    expect(await Bun.file(join(slotDir, 'audit.log')).text()).toBe('{"method":"fs.read"}\n');
+    expect(await lstat(join(slotDir, 'runtime.json')).catch(() => null)).not.toBeNull();
+    expect(await lstat(join(slotDir, 'credentials.json')).catch(() => null)).not.toBeNull();
+  });
+
+  // A crash between staging a pointer and renaming it leaves `.current.<id>`
+  // pointing into a version directory that is still in use. Deleting it
+  // recursively would empty that directory instead of dropping the link.
+  it('unlinks a leaked staged pointer without following it', async () => {
+    const slotDir = await slot();
+    await Bun.write(join(slotDir, '1.0.0', 'mangostudio-runtime'), 'old-runtime');
+    await symlink(join(slotDir, '1.0.0'), join(slotDir, '.current.stale'));
+
+    await pruneSlotVersions(slotDir, '1.1.0', '1.0.0', posix);
+
+    expect(await lstat(join(slotDir, '.current.stale')).catch(() => null)).toBeNull();
+    expect(await Bun.file(join(slotDir, '1.0.0', 'mangostudio-runtime')).text()).toBe(
+      'old-runtime'
+    );
   });
 });
 

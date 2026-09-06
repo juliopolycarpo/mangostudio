@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { RuntimeUpdateError } from '../errors';
 
 /** Kept under the original name: an older build's lock must still be recognised. */
-export const RUNTIME_UPDATE_LOCK_FILE = 'runtime-update.lock';
+const RUNTIME_UPDATE_LOCK_FILE = 'runtime-update.lock';
 const RUNTIME_UPDATE_LOCK_STALE_FLOOR_MS = 5 * 60_000;
 
 export interface SlotUpdateLock {

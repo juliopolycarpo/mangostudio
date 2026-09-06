@@ -17,10 +17,17 @@
  * two and every write against it fails with `EPERM` until it lets go.
  */
 
-import { rename, rm, rmdir, symlink, readlink as systemReadlink, unlink } from 'node:fs/promises';
+import {
+  lstat,
+  rename,
+  rm,
+  rmdir,
+  symlink,
+  readlink as systemReadlink,
+  unlink,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import { RUNTIME_CURRENT_LINK_NAME } from '@mangostudio/shared/runtime-home';
-import { RUNTIME_UPDATE_LOCK_FILE } from './slot-update-lock';
 
 /** Attempts, and the backoff between them, for a write a scanner may be blocking. */
 const SLOT_WRITE_RETRY_ATTEMPTS = 5;
@@ -201,36 +208,53 @@ export async function restoreSlotCurrent(
  * executing out of it — on Windows the filesystem enforces that, and on POSIX
  * the open inode survives a delete but the directory a `doctor` reports would
  * not. Everything else is a version an earlier publication superseded.
- * // Usage: await pruneSlotVersions(slotDir, '1.2.0', '1.1.0')
+ *
+ * Only directories and leaked staged pointers are ever removed. The slot root
+ * also holds `runtime.json`, `credentials.json`, `audit.log` and the locks, and
+ * naming what may go is the only rule that stays right when a later version
+ * puts another file there.
+ * // Usage: await pruneSlotVersions(slotDir, '1.2.0', '1.1.0', { platform: 'linux' })
  */
 export async function pruneSlotVersions(
   slotDir: string,
   currentVersion: string,
-  previousVersion: string | null
+  previousVersion: string | null,
+  options: SlotPublishOptions
 ): Promise<void> {
-  const entries = await Array.fromAsync(new Bun.Glob('*').scan({ cwd: slotDir, onlyFiles: false }));
-  await Promise.all(
-    entries
-      .filter(
-        (entry) =>
-          entry !== currentVersion &&
-          entry !== previousVersion &&
-          entry !== RUNTIME_CURRENT_LINK_NAME &&
-          !entry.endsWith('.json') &&
-          !entry.endsWith('.lock') &&
-          // `runtime-update.lock.reclaim` ends in neither, and unlinking another
-          // process's reclaim guard mid-flight lets two of them reclaim the same
-          // lock. Prefix rather than suffix so every file the lock owns is kept.
-          !entry.startsWith(RUNTIME_UPDATE_LOCK_FILE)
-      )
-      // Per entry, not per batch: Windows refuses to delete a directory holding
-      // a running executable, and one refusal used to abandon every other
-      // removal in the same `Promise.all`. Pruning is housekeeping — the next
-      // publication sweeps whatever this leaves behind.
-      .map((entry) =>
-        rm(join(slotDir, entry), { recursive: true, force: true }).catch(() => undefined)
-      )
+  // `dot: true`, because a publication interrupted between staging a pointer
+  // and renaming it leaves `.current.<id>` behind and nothing else sweeps it.
+  const entries = await Array.fromAsync(
+    new Bun.Glob('*').scan({ cwd: slotDir, onlyFiles: false, dot: true })
   );
+  const keep = new Set([currentVersion, previousVersion, RUNTIME_CURRENT_LINK_NAME]);
+  await Promise.all(
+    // Per entry, not per batch: Windows refuses to delete a directory holding a
+    // running executable, and one refusal in a shared `Promise.all` used to
+    // abandon every other removal. Pruning is housekeeping — the next
+    // publication sweeps whatever this leaves behind.
+    entries.map((entry) => pruneSlotEntry(slotDir, entry, keep, options).catch(() => undefined))
+  );
+}
+
+async function pruneSlotEntry(
+  slotDir: string,
+  entry: string,
+  keep: ReadonlySet<string | null>,
+  options: SlotPublishOptions
+): Promise<void> {
+  const path = join(slotDir, entry);
+  const stats = await lstat(path).catch(() => null);
+  if (!stats) return;
+  // A link is either `current` — which `keep` holds — or a staged pointer an
+  // interrupted publication left. Unlinked, never walked: on Windows it is a
+  // junction into a version directory that is still in use, and a recursive
+  // delete through it would empty that directory instead of dropping the link.
+  if (stats.isSymbolicLink()) {
+    if (entry.startsWith(`.${RUNTIME_CURRENT_LINK_NAME}.`)) await removePointer(path, options);
+    return;
+  }
+  if (!stats.isDirectory() || keep.has(entry)) return;
+  await rm(path, { recursive: true, force: true });
 }
 
 /**
@@ -259,11 +283,19 @@ async function writePointer(
     () => fs.symlink(target, stagePath, windows ? 'junction' : undefined),
     options
   );
+  // Only Windows opens a gap, so only Windows has one to close. The caller
+  // cannot: it rolls back what it knows was swapped, and a failure inside this
+  // window never got that far — it would be left with no pointer at all, which
+  // is a slot no service unit and no launcher can start from.
+  const replaced = windows ? await fs.readlink(currentPath).catch(() => null) : null;
   try {
     if (windows) await removePointer(currentPath, options);
     await withSlotWriteRetry(() => fs.rename(stagePath, currentPath), options);
   } catch (error) {
     await removePointer(stagePath, options).catch(() => undefined);
+    if (replaced !== null) {
+      await fs.symlink(replaced, currentPath, 'junction').catch(() => undefined);
+    }
     throw error;
   }
 }

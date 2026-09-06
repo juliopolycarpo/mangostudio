@@ -97,7 +97,9 @@ export async function installRuntimeIntoSlot(
       digest,
       binaryPath,
       currentBinaryPath,
-      replacedVersion: previousVersion,
+      // Nothing was replaced: this branch is only reached because `current`
+      // already names this version.
+      replacedVersion: null,
       unchanged: true,
     };
   }
@@ -134,7 +136,9 @@ export async function installRuntimeIntoSlot(
       if (!published) await rmdir(versionDir).catch(() => undefined);
       throw error;
     }
-    await pruneSlotVersions(slotDir, options.version, previousVersion).catch(() => undefined);
+    await pruneSlotVersions(slotDir, options.version, previousVersion, publish).catch(
+      () => undefined
+    );
   } finally {
     await releaseSlotUpdateLock(lock);
   }

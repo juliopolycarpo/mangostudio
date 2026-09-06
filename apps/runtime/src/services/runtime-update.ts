@@ -392,7 +392,9 @@ export function createRuntimeUpdateService(
             }
             throw error;
           }
-          await pruneSlotVersions(slotDir, active.version, previousVersion).catch(() => undefined);
+          await pruneSlotVersions(slotDir, active.version, previousVersion, publish).catch(
+            () => undefined
+          );
         } finally {
           session = null;
           await releaseSlotUpdateLock(active.lock);

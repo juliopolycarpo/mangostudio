@@ -8,7 +8,16 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { lstat, mkdir, mkdtemp, readFile, readlink, rm, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readlink,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -17,6 +26,7 @@ import {
   writePairingToken,
 } from '../../../src/runtime-home';
 import {
+  pruneSlotVersions,
   publishSlotCurrent,
   readSlotCurrentTarget,
   restoreSlotCurrent,
@@ -86,6 +96,21 @@ describe.skipIf(process.platform !== 'win32')('slot publication on Windows', () 
     expect(await readFile(join(slotDir, 'current', 'mangostudio-runtime.exe'), 'utf8')).toBe(
       '1.0.0'
     );
+  });
+
+  // A crash between staging a junction and renaming it leaves one pointing
+  // into a version directory that is still in use. Whether a recursive delete
+  // drops the reparse point or walks through it is the one prune question a
+  // POSIX symlink cannot answer for Windows.
+  it('sweeps a leaked staged junction without emptying what it points at', async () => {
+    const slotDir = await slot();
+    await publishSlotCurrent(slotDir, '1.1.0', 'live', windows);
+    await symlink(join(slotDir, '1.0.0'), join(slotDir, '.current.stale'), 'junction');
+
+    await pruneSlotVersions(slotDir, '1.1.0', '1.0.0', windows);
+
+    expect(await lstat(join(slotDir, '.current.stale')).catch(() => null)).toBeNull();
+    expect(await readFile(join(slotDir, '1.0.0', 'mangostudio-runtime.exe'), 'utf8')).toBe('1.0.0');
   });
 
   it('leaves no staged junction behind', async () => {

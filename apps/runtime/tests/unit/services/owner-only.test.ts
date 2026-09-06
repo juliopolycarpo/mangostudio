@@ -32,7 +32,12 @@ describe('restrictToOwner', () => {
 
     const restricted = await restrictToOwner(
       '/home/ada/credentials.json',
-      deps({ chmod: (_path, mode) => (modes.push(mode), Promise.resolve()) })
+      deps({
+        chmod: (_path, mode) => {
+          modes.push(mode);
+          return Promise.resolve();
+        },
+      })
     );
 
     expect(restricted).toBe(true);

@@ -7,7 +7,6 @@ import {
   open,
   readFile,
   readlink,
-  rename,
   rm,
   stat,
   symlink,
@@ -24,6 +23,7 @@ import {
 } from '../../../src/runtime-home';
 import { createRuntimeUpdateService } from '../../../src/services/runtime-update';
 import type { SlotPublishFs } from '../../../src/services/slot-publish';
+import { junctionFs, lockedError } from './support/junction-fs';
 
 const homes: string[] = [];
 
@@ -560,7 +560,7 @@ describe('runtime self-update on Windows', () => {
 
     // Never `rename` onto a live junction: Windows refuses that outright, so
     // the old pointer has to come out first. The order is the contract.
-    expect(pointer.calls.map((call) => call.op)).toEqual([
+    expect(pointer.ops()).toEqual([
       'rename', // the verified bytes onto mangostudio-runtime.exe
       'rmdir', // a staged pointer left by an earlier attempt
       'symlink',
@@ -594,7 +594,7 @@ describe('runtime self-update on Windows', () => {
       rename: async (from, to) => {
         if (from.endsWith('.incoming') && refusals > 0) {
           refusals -= 1;
-          throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' });
+          throw lockedError();
         }
         await pointer.fs.rename(from, to);
       },
@@ -620,11 +620,7 @@ describe('runtime self-update on Windows', () => {
     const locked: SlotPublishFs = {
       ...pointer.fs,
       rename: (from, to) => {
-        if (from.endsWith('.incoming')) {
-          return Promise.reject(
-            Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' })
-          );
-        }
+        if (from.endsWith('.incoming')) return Promise.reject(lockedError());
         return pointer.fs.rename(from, to);
       },
     };
@@ -638,42 +634,3 @@ describe('runtime self-update on Windows', () => {
     await expect(transfer(service, '1.1.0', 'new-runtime')).rejects.toThrow('the file is locked');
   });
 });
-
-/**
- * A Linux stand-in for the Windows pointer calls. Junctions do not exist here,
- * so a directory symlink stands in for one and `rmdir` unlinks it; what the
- * test is checking is the sequence of operations and the target they name.
- */
-function junctionFs(): { readonly fs: SlotPublishFs; readonly calls: RecordedCall[] } {
-  const calls: RecordedCall[] = [];
-  const record = (op: string, ...args: (string | undefined)[]): void => {
-    calls.push({ op, args });
-  };
-  return {
-    calls,
-    fs: {
-      symlink: async (target, path, type) => {
-        record('symlink', target, path, type);
-        await symlink(target, path);
-      },
-      rename: async (from, to) => {
-        record('rename', from, to);
-        await rename(from, to);
-      },
-      unlink: async (path) => {
-        record('unlink', path);
-        await unlink(path);
-      },
-      rmdir: async (path) => {
-        record('rmdir', path);
-        await unlink(path);
-      },
-      readlink: (path) => readlink(path),
-    },
-  };
-}
-
-interface RecordedCall {
-  readonly op: string;
-  readonly args: readonly (string | undefined)[];
-}

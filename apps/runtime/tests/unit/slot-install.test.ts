@@ -16,8 +16,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readRuntimeSlotConfig, runtimeSlotDir } from '../../src/runtime-home';
-import type { SlotPublishFs } from '../../src/services/slot-publish';
 import { installRuntimeIntoSlot } from '../../src/slot-install';
+import { junctionFs } from './services/support/junction-fs';
 
 const roots: string[] = [];
 
@@ -125,6 +125,8 @@ describe('installRuntimeIntoSlot', () => {
     });
 
     expect(again.unchanged).toBe(true);
+    // Nothing was replaced, so the CLI must not print "Replaced 1.2.0."
+    expect(again.replacedVersion).toBeNull();
   });
 
   // A re-download of the same version is a repair, not a no-op: the bytes
@@ -156,23 +158,7 @@ describe('installRuntimeIntoSlot', () => {
 
   it('writes an .exe and a junction on Windows', async () => {
     const { env, sourcePath, slotDir } = await fixture();
-    const calls: string[] = [];
-    const junction: SlotPublishFs = {
-      symlink: async (target, path, type) => {
-        calls.push(`symlink:${type}`);
-        await symlink(target, path);
-      },
-      rename: async (from, to) => {
-        calls.push('rename');
-        await rename(from, to);
-      },
-      unlink: (path) => unlink(path),
-      rmdir: async (path) => {
-        calls.push('rmdir');
-        await unlink(path);
-      },
-      readlink: (path) => readlink(path),
-    };
+    const pointer = junctionFs();
 
     const result = await installRuntimeIntoSlot({
       slot: 'remote',
@@ -180,12 +166,14 @@ describe('installRuntimeIntoSlot', () => {
       env,
       platform: 'win32',
       sourcePath,
-      slotPublish: { fs: junction, sleep: () => Promise.resolve() },
+      slotPublish: { fs: pointer.fs, sleep: () => Promise.resolve() },
     });
 
     expect(result.binaryPath).toBe(join(slotDir, '1.2.0', 'mangostudio-runtime.exe'));
     expect(result.currentBinaryPath).toBe(join(slotDir, 'current', 'mangostudio-runtime.exe'));
-    expect(calls).toContain('symlink:junction');
+    expect(pointer.calls.some((call) => call.op === 'symlink' && call.args[2] === 'junction')).toBe(
+      true
+    );
     expect(await readlink(join(slotDir, 'current'))).toBe(join(slotDir, '1.2.0'));
     expect(await readFile(result.currentBinaryPath, 'utf8')).toBe('runtime-bytes');
   });
