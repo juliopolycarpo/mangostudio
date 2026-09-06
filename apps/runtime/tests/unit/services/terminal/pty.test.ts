@@ -21,18 +21,28 @@ describe('createBunPtyPort', () => {
       const port: PtyPort = createBunPtyPort();
       const chunks: Uint8Array[] = [];
       const exited = Promise.withResolvers<{ exitCode: number | null; signal: string | null }>();
+      // The resize has to land after the first `stty size` has already run and
+      // before the second. A timer cannot say when that is: a loaded runner
+      // spawns the shell late, the resize wins the race, and both reads report
+      // the size after it. The shell's own first line is the signal.
+      const firstRead = Promise.withResolvers<void>();
       const input: PtySpawnInput = {
         argv: ['sh', '-c', 'stty size; sleep 0.2; stty size'],
         cwd: process.cwd(),
         env: { PATH: process.env.PATH ?? '', TERM: 'xterm-256color' },
         cols: 100,
         rows: 30,
-        onData: (chunk) => chunks.push(chunk),
+        onData: (chunk) => {
+          chunks.push(chunk);
+          if (new TextDecoder().decode(Buffer.concat(chunks)).includes('\n')) firstRead.resolve();
+        },
         onExit: (exitCode, signal) => exited.resolve({ exitCode, signal }),
       };
       const handle: PtyHandle = port.spawn(input);
       expect(handle.pid).toBeGreaterThan(0);
-      await Bun.sleep(80);
+      // Raced with the exit so a shell that never printed fails on the
+      // assertions below with what it did produce, rather than hanging here.
+      await Promise.race([firstRead.promise, exited.promise]);
       handle.resize(80, 24);
       const exit = await exited.promise;
       handle.close();
