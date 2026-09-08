@@ -494,7 +494,16 @@ export function libraryLocationsFor(
   );
 }
 
-/** Return a copy of settings with library locations updated for one profile. */
+/**
+ * Return a copy of settings with library locations updated for one profile.
+ *
+ * Builds a whole `AppSettings` value, so it is what a fixture wants and no
+ * longer what a save wants: the settings screen sends `libraryLocationsPatch`
+ * instead, because a full object would also carry — and so overwrite — every
+ * sibling setting the screen never showed anyone.
+ *
+ * // Usage: const settings = withLibraryLocations(DEFAULT_APP_SETTINGS, 'default', locations);
+ */
 export function withLibraryLocations(
   settings: AppSettings,
   profileId: ProfileId,
