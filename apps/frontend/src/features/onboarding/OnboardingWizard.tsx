@@ -131,7 +131,10 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
         </header>
 
         <div className="grid gap-5 sm:grid-cols-[13rem_1fr]">
-          <nav aria-label={s.stepList}>
+          {/* `min-w-0` on both tracks: a grid item defaults to `min-width:
+              auto`, so the horizontally scrolling step list below would widen
+              its own column past the viewport and take the panel with it. */}
+          <nav aria-label={s.stepList} className="min-w-0">
             <ol className="flex gap-1.5 overflow-x-auto sm:flex-col sm:overflow-visible">
               {ONBOARDING_STEP_IDS.map((candidate, position) => (
                 <li key={candidate} className="shrink-0 sm:shrink">
@@ -159,7 +162,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
             </ol>
           </nav>
 
-          <section className="space-y-6 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-5 sm:p-7">
+          <section className="min-w-0 space-y-6 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-5 sm:p-7">
             <p className="font-label text-on-surface-variant/60 text-xs uppercase tracking-widest">
               {formatMessage(s.progress, {
                 step: String(index + 1),
