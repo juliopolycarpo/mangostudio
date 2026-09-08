@@ -37,9 +37,19 @@ Quick start with the shell installer:
 
 ```bash
 curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh | bash
-mangostudio serve           # start on http://localhost:3001
-mangostudio service install # or hand it to your user's service manager
+mangostudio setup           # secret, service, start, and open a browser
 ```
+
+`setup` is the one command a fresh install needs: it generates an auth secret if
+none exists, asks whether to keep the hub running across logout, starts it (or
+reuses one already running), and opens it. Over SSH it prints the address and a
+port-forward line instead of pretending to open a window. `mangostudio serve`
+and `mangostudio service install` remain the direct equivalents.
+
+The first time you sign in, the browser opens a short setup flow — folder,
+toolchain, who answers, and one real question in your own project. Every step is
+skippable and re-runnable from **Settings → General**. See
+[`docs/guides/first-run.md`](docs/guides/first-run.md).
 
 On Windows, run the PowerShell installer:
 

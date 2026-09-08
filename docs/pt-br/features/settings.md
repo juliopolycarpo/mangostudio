@@ -29,8 +29,32 @@ Controlam preferências globais que valem para todos os provedores e tools.
 
 ```
 GET  /api/settings/app    → Retorna AppSettings
-PUT  /api/settings/app    → Atualiza e retorna AppSettings normalizado
+PUT  /api/settings/app    → Mescla um patch e retorna AppSettings normalizado
 ```
+
+**O corpo do PUT é um patch, não um snapshot.** Todo campo é opcional; o
+servidor sobrepõe o que chega ao registro que já tem e depois normaliza. Duas
+consequências, e ambas são o objetivo: um cliente sobrevive a todo campo que o
+schema ganhar depois, em vez de ser recusado por omitir um que nunca conheceu, e
+duas telas editando configurações diferentes param de sobrescrever uma à outra
+porque nenhuma carrega o campo da outra.
+
+A regra, por inteiro:
+
+- uma chave omitida mantém o que está guardado;
+- objetos mesclam recursivamente, então um patch que toca um campo aninhado
+  deixa os irmãos em paz;
+- arrays substituem — mesclar por índice tornaria "remova a segunda regra"
+  inexprimível;
+- `null` em uma chave que o aceita reseta aquela subárvore para o padrão. É a
+  única forma de limpar algo, e funciona porque a normalização roda *depois* da
+  mesclagem.
+
+A unidade de um patch é um campo de topo inteiro: envie `contextSettings` e você
+envia tudo dele, e meia subárvore é recusada em vez de completada com padrões.
+Um campo só é endereçável mais fundo onde suas partes têm donos independentes —
+`profileSettings.<id>.libraryLocations` e `.onboarding` são escritos por telas
+diferentes, então cada um é opcional por conta própria.
 
 As settings ficam em um único blob JSON na coluna `settingsJson`. Na leitura, `normalizeAppSettings()` trata dados parciais ou inválidos, caindo para defaults em qualquer campo ausente ou incorreto.
 

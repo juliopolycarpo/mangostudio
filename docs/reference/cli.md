@@ -25,6 +25,7 @@ copy-paste commands, or:
 | Command                                                                                                               | Description                                                                                  |
 | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `mangostudio`                                                                                                         | Print help and the command list.                                                             |
+| `setup [host\|port\|host:port] [--service\|--no-service] [--no-open]`                                                 | Take a fresh install to a running hub and open it in a browser.                              |
 | `serve [host\|port\|host:port]`                                                                                       | Start the server in the foreground (default `localhost:3001`).                               |
 | `serve [host\|port\|host:port] -d`                                                                                    | Start the server in the background (detached) and return.                                    |
 | `status`                                                                                                              | Show whether a server is running, its URL, launch mode, and health.                          |
@@ -520,9 +521,35 @@ mangostudio-runtime service status --json
 mangostudio-runtime service restart
 ```
 
+### setup
+
+The first command on a fresh install, and the terminal half of the browser's
+first-run flow. It ensures an auth secret exists, optionally installs the
+background service, starts the hub (or reuses one already serving), and opens
+the address in a browser.
+
+- `--service` / `--no-service` answer the service question up front. Without a
+  terminal to prompt at, one of them is **required**: installing a unit outlives
+  the command, and skipping one silently would leave a scripted install with a
+  hub that dies at logout while reporting success.
+- `--no-open` prints the URL instead of opening anything.
+- Where no browser can be opened — a Linux session with no `DISPLAY`, typically
+  over SSH — the URL and an `ssh -L` port-forward line are printed instead of a
+  claim that a window appeared.
+- A hub already answering its health check is reused, never restarted. A state
+  file left by a crashed one is cleared first.
+- It exits non-zero if the hub it started never answers within 30 seconds.
+
+`setup` cannot sign a vendor CLI in, choose a repository, or send a first
+message; those are the browser flow's, and it says so by opening it rather than
+by claiming they are done. See
+[`docs/guides/first-run.md`](../guides/first-run.md).
+
 ## Examples
 
 ```bash
+mangostudio setup              # fresh install: secret, service, start, open
+mangostudio setup --no-service --no-open  # scripted, prints the URL
 mangostudio serve              # foreground on localhost:3001
 mangostudio serve 3000         # foreground on localhost:3000
 mangostudio serve 127.0.0.1 -d # background on 127.0.0.1:3001

@@ -1,9 +1,7 @@
-import { useNavigate } from '@tanstack/react-router';
 import { Menu, Plus, Search, Settings } from 'lucide-react';
-import { type ReactNode, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/Button';
 import { KbdHint } from '@/components/ui/KbdHint';
-import { useToast } from '@/components/ui/Toast';
 import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { useI18n } from '@/hooks/use-i18n';
 import { useSignOut } from '@/hooks/use-sign-out';

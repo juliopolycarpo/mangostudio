@@ -179,6 +179,19 @@ Abra estes arquivos primeiro:
 - `apps/frontend/src/features/settings/providers/`
 - `apps/frontend/src/features/settings/tools/`
 
+## Configuração Inicial
+
+Abra estes primeiro:
+
+- `apps/shared/src/onboarding/` (ids dos passos, o registro persistido e as regras puras de retomada)
+- `apps/shared/src/app-settings/patch.ts` (o contrato de patch das configurações e seus três construtores)
+- `apps/frontend/src/routes/welcome.tsx` (irmã de `_authenticated`, deliberadamente — veja o arquivo)
+- `apps/frontend/src/routes/_authenticated.tsx` (`beforeLoad` é o portão; `errorComponent` é a nova tentativa)
+- `apps/frontend/src/features/onboarding/` (`use-onboarding-progress` lembra, `use-onboarding-facts` lê a máquina)
+- `apps/frontend/src/features/external-agents/send-with-consent.ts` (uma regra de consentimento, dois caminhos de envio)
+- `apps/api/src/cli/commands/setup.ts` (o gêmeo em terminal)
+- `docs/pt-br/guides/first-run.md`
+
 ## Geração De Imagem
 
 Abra estes arquivos primeiro:
