@@ -4064,6 +4064,13 @@ export const messages = {
     textGenerationFailed: 'Falha ao obter uma resposta. Tente novamente.',
     imageGenerationFailed: 'Falha ao gerar imagem. Tente novamente.',
     imageGenerationInterrupted: 'O turno foi interrompido antes desta imagem ser gerada.',
+    bootstrap: {
+      title: 'O MangoStudio não conseguiu terminar de carregar',
+      lead: 'Uma das requisições de que toda página depende foi recusada.',
+      rateLimited: 'Vieram requisições demais deste endereço. Espere um momento e tente de novo.',
+      retry: 'Tentar de novo',
+      detail: 'Detalhes: {message}',
+    },
   },
 
   models: {
@@ -4079,5 +4086,119 @@ export const messages = {
 
   generation: {
     toolLoopExhausted: 'O modelo excedeu o número máximo de interações com ferramentas.',
+  },
+
+  onboarding: {
+    title: 'Boas-vindas ao MangoStudio',
+    subtitle:
+      'Alguns passos curtos e um agente vai responder dentro do seu próprio projeto. Pule o que você já tem.',
+    progress: 'Passo {step} de {total}',
+    stepList: 'Passos da configuração',
+    back: 'Voltar',
+    continue: 'Continuar',
+    skipStep: 'Pular por enquanto',
+    skipAll: 'Pular a configuração',
+    finish: 'Abrir o MangoStudio',
+    deciding: 'Verificando o que esta máquina já tem...',
+    saveFailed: 'Não foi possível salvar seu progresso. Nada foi perdido — tente de novo.',
+    status: {
+      satisfied: 'Pronto',
+      skipped: 'Pulado',
+      pending: 'A fazer',
+      unknown: 'Verificando',
+      unavailable: 'Indisponível aqui',
+    },
+    steps: {
+      welcome: 'Boas-vindas',
+      folder: 'Pasta',
+      toolchain: 'Toolchain',
+      agents: 'Agentes',
+      service: 'Sempre ativo',
+      chat: 'Primeiro chat',
+    },
+    welcome: {
+      title: 'O MangoStudio roda agentes de código na sua própria máquina',
+      lead: 'Seus arquivos ficam aqui, o agente roda aqui, e nada acontece até você pedir.',
+      folderPoint: 'Você aponta para uma pasta. Essa pasta é o projeto que o agente lê e edita.',
+      runnerPoint:
+        'Você escolhe quem responde: um modelo com a sua chave de API, ou uma CLI de agente já instalada neste computador.',
+      controlPoint:
+        'Todo passo aqui pode ser pulado e refeito depois em Configurações. Nenhum deles é sem volta.',
+      action: 'Começar',
+    },
+    folder: {
+      title: 'Escolha a pasta de trabalho',
+      lead: 'É o projeto que o agente lê e edita. A raiz de um repositório costuma ser a escolha certa.',
+      hint: 'Cada chat pode usar uma pasta diferente depois; isto define só onde o primeiro começa.',
+      machineLabel: 'Máquina',
+      machineHint:
+        'Local é o computador que está rodando o MangoStudio. Máquinas adicionadas depois também aparecem aqui.',
+      choose: 'Escolher uma pasta',
+      change: 'Trocar de pasta',
+      selected: 'Trabalhando em',
+      empty: 'Nenhuma pasta escolhida ainda.',
+    },
+    toolchain: {
+      title: 'Confira o toolchain',
+      lead: 'Agentes rodam comandos no seu projeto — testes, builds, scripts. Isso precisa de Node ou Bun nesta máquina.',
+      hint: 'Faltar um não é fatal: o chat continua funcionando, e só os comandos que dependem dele falham.',
+      ready: 'Pronto',
+      missing: 'Não encontrado',
+      openManager: 'Abrir o gerenciador de ambientes',
+      remote: 'Toolchains de uma máquina adicionada são gerenciados na página dela.',
+    },
+    agents: {
+      title: 'Escolha quem responde',
+      lead: 'Um chat é respondido por um modelo configurado com a sua chave de API, ou por uma CLI de agente já instalada aqui.',
+      hint: 'CLIs de agente entram com a conta do próprio fornecedor, no terminal delas. O MangoStudio nunca vê essas credenciais.',
+      cliHeading: 'CLIs de agente nesta máquina',
+      modelHeading: 'Modelos do MangoStudio',
+      modelDescription:
+        'As respostas vêm de um provider configurado com a sua chave de API. Não há mais nada a instalar.',
+      noneFound: 'Nenhuma CLI de agente foi encontrada aqui.',
+      signedIn: 'Conectado',
+      signedOut: 'Não conectado',
+      signInHint: 'Entre pelo terminal desta máquina e volte aqui.',
+      selected: 'Selecionado',
+      select: 'Usar este',
+      openSettings: 'Abrir configurações de providers',
+      isolated:
+        'Outra conta já está usando os logins de agente deste computador, então eles não são oferecidos aqui. Adicione uma máquina sua, ou use um modelo.',
+      addMachine: 'Adicionar uma máquina',
+    },
+    service: {
+      title: 'Mantenha rodando',
+      lead: 'Como serviço em segundo plano, o MangoStudio volta sozinho depois de você sair da sessão ou reiniciar.',
+      hint: 'Opcional. Sem isso, o MangoStudio roda só enquanto o terminal que o iniciou continuar aberto.',
+      installed: 'Instalado',
+      notInstalled: 'Não instalado',
+      install: 'Instalar o serviço',
+      installing: 'Instalando...',
+      commandTitle: 'Rode isto no computador que hospeda o MangoStudio:',
+      unavailable: 'Isto não pode ser feito daqui.',
+    },
+    chat: {
+      title: 'Faça a primeira pergunta',
+      lead: 'Isto abre um chat na pasta escolhida e envia a primeira mensagem, para você ver o ciclo inteiro funcionando.',
+      hint: 'A mensagem abaixo é só uma sugestão — edite, ou escreva a sua.',
+      promptLabel: 'Primeira mensagem',
+      defaultPrompt:
+        'Dê uma olhada neste projeto e me diga, em um parágrafo curto, o que ele faz e como está organizado.',
+      send: 'Enviar',
+      sending: 'Abrindo o chat...',
+      answered: 'Respondeu. Configuração concluída.',
+      waiting: 'Esperando a resposta...',
+      failed: 'A resposta não chegou. Abra o chat e tente de novo por lá.',
+      openChat: 'Abrir o chat',
+      resume: 'Esta configuração já começou um chat. Enviar de novo continua nele.',
+      needsFolder: 'Escolha uma pasta antes, ou pule aquele passo.',
+      summary: 'Enviando para {runner} em {workdir}',
+    },
+    reenter: {
+      title: 'Configuração inicial',
+      description:
+        'Percorra os passos iniciais de novo. Nada é removido — seus chats, logins e configurações de máquina continuam exatamente como estão.',
+      action: 'Refazer a configuração',
+    },
   },
 } as const;

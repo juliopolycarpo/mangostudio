@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   type ListDirectoryResponse,
   ListDirectoryResponseSchema,
@@ -113,5 +114,69 @@ describe('workspace routes', () => {
 
     expect(browse.status).toBe(401);
     expect(validate.status).toBe(401);
+  });
+});
+
+describe('workspace routes environment scope', () => {
+  it('browses the hub when an explicit local environment is named', async () => {
+    const root = await createTempDir();
+    await mkdir(join(root, 'project'));
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, workspaceRoutes);
+    restoreAuth = restore;
+
+    const url = new URL('http://localhost/workspace/fs');
+    url.searchParams.set('path', root);
+    url.searchParams.set('environmentId', LOCAL_ENVIRONMENT_ID);
+    const response = await app.handle(new Request(url.toString()));
+    const payload = (await response.json()) as ListDirectoryResponse;
+
+    expect(response.status).toBe(200);
+    expect(payload.entries.map((entry) => entry.name)).toContain('project');
+  });
+
+  it('does not answer with the hub filesystem when another machine is named', async () => {
+    const root = await createTempDir();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, workspaceRoutes);
+    restoreAuth = restore;
+
+    const url = new URL('http://localhost/workspace/fs');
+    url.searchParams.set('path', root);
+    url.searchParams.set('environmentId', 'env-that-does-not-exist');
+    const response = await app.handle(new Request(url.toString()));
+
+    // Silently listing the hub under another machine's name is the failure
+    // this guards: the caller asked about a machine it cannot reach, and any
+    // answer other than an error would be about the wrong computer.
+    expect(response.status).not.toBe(200);
+  });
+
+  it('validates a path against an explicitly named environment', async () => {
+    const root = await createTempDir();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, workspaceRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/workspace/fs/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: root, environmentId: LOCAL_ENVIRONMENT_ID }),
+      })
+    );
+    const payload = (await response.json()) as { ok: boolean };
+
+    expect(response.status).toBe(200);
+    expect(payload.ok).toBe(true);
+  });
+
+  it('refuses a browse that names both a chat and an environment', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, workspaceRoutes);
+    restoreAuth = restore;
+
+    const url = new URL('http://localhost/workspace/fs');
+    url.searchParams.set('chatId', 'chat-1');
+    url.searchParams.set('environmentId', LOCAL_ENVIRONMENT_ID);
+    const response = await app.handle(new Request(url.toString()));
+
+    expect(response.status).toBe(400);
   });
 });

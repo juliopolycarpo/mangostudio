@@ -296,8 +296,10 @@ describe('settings app settings partial updates', () => {
 
     // A settings tab that loaded before the wizard finished still holds the
     // pre-completion object. Its next save must carry only what it edits.
-    const staleSnapshot = { ...DEFAULT_APP_SETTINGS, thinkingEnabled: true };
-    delete (staleSnapshot as { profileSettings?: unknown }).profileSettings;
+    const { profileSettings: _staleProfiles, ...staleSnapshot } = {
+      ...DEFAULT_APP_SETTINGS,
+      thinkingEnabled: true,
+    };
 
     await put(app, {
       profileSettings: {

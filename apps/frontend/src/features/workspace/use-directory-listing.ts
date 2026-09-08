@@ -5,17 +5,37 @@ import { ApiError } from '@/lib/utils';
 
 const workspaceDirectoryKeys = {
   all: ['workspace-directories'] as const,
-  listing: (path?: string, chatId?: string) =>
-    [...workspaceDirectoryKeys.all, chatId ?? null, path ?? null] as const,
+  listing: (path?: string, scope?: DirectoryScope) =>
+    [
+      ...workspaceDirectoryKeys.all,
+      scope?.chatId ?? null,
+      scope?.environmentId ?? null,
+      path ?? null,
+    ] as const,
 };
 
-function directoryListingQueryOptions(path?: string, chatId?: string) {
+/**
+ * Which machine to browse. A chat names it through its own environment; an
+ * environment names it directly, for a picker opened before any chat exists.
+ * The endpoint refuses both at once, so callers pass one.
+ */
+export interface DirectoryScope {
+  readonly chatId?: string;
+  readonly environmentId?: string;
+}
+
+function scopeQuery(scope: DirectoryScope | undefined): DirectoryScope {
+  if (scope?.chatId) return { chatId: scope.chatId };
+  return scope?.environmentId ? { environmentId: scope.environmentId } : {};
+}
+
+function directoryListingQueryOptions(path?: string, scope?: DirectoryScope) {
   return queryOptions({
-    queryKey: workspaceDirectoryKeys.listing(path, chatId),
+    queryKey: workspaceDirectoryKeys.listing(path, scope),
     queryFn: async () => {
       const query = {
         ...(path ? { path } : {}),
-        ...(chatId ? { chatId } : {}),
+        ...scopeQuery(scope),
       };
       const { data, error } = await client.api.workspace.fs.get({ query });
       if (error) throw new ApiError(error.value);
@@ -24,17 +44,21 @@ function directoryListingQueryOptions(path?: string, chatId?: string) {
   });
 }
 
-export function useDirectoryListing(path: string | undefined, enabled: boolean, chatId?: string) {
-  return useQuery({ ...directoryListingQueryOptions(path, chatId), enabled });
+export function useDirectoryListing(
+  path: string | undefined,
+  enabled: boolean,
+  scope?: DirectoryScope
+) {
+  return useQuery({ ...directoryListingQueryOptions(path, scope), enabled });
 }
 
 export async function validateWorkspacePath(
   path: string,
-  chatId?: string
+  scope?: DirectoryScope
 ): Promise<ValidatePathResponse> {
   const { data, error } = await client.api.workspace.fs.validate.post({
     path,
-    ...(chatId ? { chatId } : {}),
+    ...scopeQuery(scope),
   });
   if (error) throw new ApiError(error.value);
   return data as ValidatePathResponse;

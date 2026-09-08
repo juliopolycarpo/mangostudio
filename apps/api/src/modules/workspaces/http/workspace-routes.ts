@@ -39,12 +39,26 @@ function handleDirectoryBrowserError(
   return { error: 'Unexpected directory browsing error.', code: ERROR_CODES.INTERNAL };
 }
 
+/** Raised when a request names a chat and an environment at once. */
+class ConflictingScopeError extends Error {}
+
+/**
+ * Which machine to read, from whichever of the two ways the caller named it.
+ *
+ * `null` means "the caller named a chat that does not exist" — the route turns
+ * that into a 404. Naming neither keeps the historical answer: the hub's own
+ * filesystem.
+ */
 async function resolveRuntimeSelection(
   userId: string,
-  chatId: string | undefined
-): Promise<RuntimeSelection | null> {
-  if (!chatId) return null;
-  const chat = await getOwnedChat(chatId, userId, getDb());
+  scope: { readonly chatId?: string; readonly environmentId?: string }
+): Promise<RuntimeSelection | null | undefined> {
+  if (scope.chatId && scope.environmentId) {
+    throw new ConflictingScopeError('Name either a chat or an environment, not both.');
+  }
+  if (scope.environmentId) return { userId, environmentId: scope.environmentId };
+  if (!scope.chatId) return undefined;
+  const chat = await getOwnedChat(scope.chatId, userId, getDb());
   return chat ? { userId, environmentId: chat.environmentId } : null;
 }
 
@@ -57,13 +71,17 @@ export const workspaceRoutes = new Elysia().use(requireAuth).group('/workspace/f
       },
       async ({ query, set, user }): Promise<ListDirectoryResponse | ApiErrorResponse> => {
         try {
-          const selection = await resolveRuntimeSelection(user?.id ?? '', query.chatId);
-          if (query.chatId && !selection) {
+          const selection = await resolveRuntimeSelection(user?.id ?? '', query);
+          if (selection === null) {
             set.status = 404;
             return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
           }
-          return await listDirectory(query.path, selection ?? undefined);
+          return await listDirectory(query.path, selection);
         } catch (error) {
+          if (error instanceof ConflictingScopeError) {
+            set.status = 400;
+            return { error: error.message, code: ERROR_CODES.VALIDATION };
+          }
           return handleDirectoryBrowserError(error, set);
         }
       }
@@ -73,14 +91,14 @@ export const workspaceRoutes = new Elysia().use(requireAuth).group('/workspace/f
       { body: ValidatePathBodySchema },
       async ({ body, set, user }): Promise<ValidatePathResponse | ApiErrorResponse> => {
         try {
-          const selection = await resolveRuntimeSelection(user?.id ?? '', body.chatId);
-          if (body.chatId && !selection) {
+          const selection = await resolveRuntimeSelection(user?.id ?? '', body);
+          if (selection === null) {
             set.status = 404;
             return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
           }
-          return await validateWorkdir(body.path, selection ?? undefined);
+          return await validateWorkdir(body.path, selection);
         } catch (error) {
-          if (error instanceof WorkspacePathError) {
+          if (error instanceof WorkspacePathError || error instanceof ConflictingScopeError) {
             set.status = 400;
             return { error: error.message, code: ERROR_CODES.VALIDATION };
           }

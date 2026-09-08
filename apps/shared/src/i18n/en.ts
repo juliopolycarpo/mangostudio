@@ -4077,6 +4077,13 @@ export const messages: Messages = {
     textGenerationFailed: 'Failed to get a response. Please try again.',
     imageGenerationFailed: 'Failed to generate image. Please try again.',
     imageGenerationInterrupted: 'The turn was interrupted before this image was generated.',
+    bootstrap: {
+      title: 'MangoStudio could not finish loading',
+      lead: 'One of the requests every page depends on was refused.',
+      rateLimited: 'Too many requests came from this address. Wait a moment and try again.',
+      retry: 'Try again',
+      detail: 'Details: {message}',
+    },
   },
 
   models: {
@@ -4092,5 +4099,120 @@ export const messages: Messages = {
 
   generation: {
     toolLoopExhausted: 'The model exceeded the maximum number of tool interactions.',
+  },
+
+  onboarding: {
+    title: 'Welcome to MangoStudio',
+    subtitle:
+      'A few short steps and an agent will be answering inside your own project. Skip anything you already have.',
+    progress: 'Step {step} of {total}',
+    stepList: 'Setup steps',
+    back: 'Back',
+    continue: 'Continue',
+    skipStep: 'Skip for now',
+    skipAll: 'Skip setup',
+    finish: 'Open MangoStudio',
+    deciding: 'Checking what this machine already has...',
+    saveFailed: 'Your progress could not be saved. Nothing was lost — try again.',
+    status: {
+      satisfied: 'Done',
+      skipped: 'Skipped',
+      pending: 'To do',
+      unknown: 'Checking',
+      unavailable: 'Not available here',
+    },
+    steps: {
+      welcome: 'Welcome',
+      folder: 'Folder',
+      toolchain: 'Toolchain',
+      agents: 'Agents',
+      service: 'Always on',
+      chat: 'First chat',
+    },
+    welcome: {
+      title: 'MangoStudio runs coding agents on your own machine',
+      lead: 'Your files stay here, the agent runs here, and nothing happens until you ask for it.',
+      folderPoint:
+        'You point it at a folder. That folder is the project the agent reads and edits.',
+      runnerPoint:
+        'You choose who answers: a model you bring an API key for, or a coding agent CLI already installed on this computer.',
+      controlPoint:
+        'Every step here can be skipped and redone later from Settings. None of them is a one-way door.',
+      action: 'Get started',
+    },
+    folder: {
+      title: 'Choose the folder to work in',
+      lead: 'This is the project the agent reads and edits. The root of a repository is usually the right choice.',
+      hint: 'Each chat can use a different folder later; this only sets where the first one starts.',
+      machineLabel: 'Machine',
+      machineHint:
+        'Local is the computer running MangoStudio. Machines you add later appear here too.',
+      choose: 'Choose a folder',
+      change: 'Change folder',
+      selected: 'Working in',
+      empty: 'No folder chosen yet.',
+    },
+    toolchain: {
+      title: 'Check the toolchain',
+      lead: 'Agents run commands in your project — tests, builds, scripts. Those need Node or Bun on this machine.',
+      hint: 'Missing one is not fatal: chat still works, and only the commands that need it will fail.',
+      ready: 'Ready',
+      missing: 'Not found',
+      openManager: 'Open the environment manager',
+      remote: 'Toolchains on a machine you added are managed from its own page.',
+    },
+    agents: {
+      title: 'Choose who answers',
+      lead: 'A chat is answered either by a model you configure with an API key, or by a coding agent CLI already installed here.',
+      hint: 'Agent CLIs sign in with their own vendor account, in their own terminal. MangoStudio never sees those credentials.',
+      cliHeading: 'Agent CLIs on this machine',
+      modelHeading: 'MangoStudio models',
+      modelDescription:
+        'Answers come from a provider you configure with an API key. Nothing else to install.',
+      noneFound: 'No agent CLI was found here.',
+      signedIn: 'Signed in',
+      signedOut: 'Not signed in',
+      signInHint: 'Sign in from a terminal on this machine, then come back.',
+      selected: 'Selected',
+      select: 'Use this',
+      openSettings: 'Open provider settings',
+      isolated:
+        'Another account is already using this computer’s agent sign-ins, so they are not offered to you here. Add a machine of your own, or use a model instead.',
+      addMachine: 'Add a machine',
+    },
+    service: {
+      title: 'Keep it running',
+      lead: 'As a background service, MangoStudio comes back on its own after you log out or restart.',
+      hint: 'Optional. Without it, MangoStudio runs only while the terminal that started it stays open.',
+      installed: 'Installed',
+      notInstalled: 'Not installed',
+      install: 'Install the service',
+      installing: 'Installing...',
+      commandTitle: 'Run this on the computer hosting MangoStudio:',
+      unavailable: 'This cannot be done from here.',
+    },
+    chat: {
+      title: 'Ask your first question',
+      lead: 'This opens one chat in the folder you chose and sends a first message, so you can watch the whole loop work.',
+      hint: 'The message below is only a suggestion — edit it, or write your own.',
+      promptLabel: 'First message',
+      defaultPrompt:
+        'Take a look at this project and tell me in a short paragraph what it does and how it is organised.',
+      send: 'Send it',
+      sending: 'Opening the chat...',
+      answered: 'It answered. Setup is done.',
+      waiting: 'Waiting for the answer...',
+      failed: 'The answer did not arrive. Open the chat and try again there.',
+      openChat: 'Open the chat',
+      resume: 'This setup already started a chat. Sending again continues that one.',
+      needsFolder: 'Choose a folder first, or skip that step.',
+      summary: 'Sending to {runner} in {workdir}',
+    },
+    reenter: {
+      title: 'First-run setup',
+      description:
+        'Walk through the first-run steps again. Nothing is removed — your chats, sign-ins and machine settings stay exactly as they are.',
+      action: 'Run setup again',
+    },
   },
 };
