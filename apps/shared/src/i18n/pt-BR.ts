@@ -4106,7 +4106,7 @@ export const messages = {
       skipped: 'Pulado',
       pending: 'A fazer',
       unknown: 'Verificando',
-      unavailable: 'Indisponível aqui',
+      unavailable: 'Não aqui',
     },
     steps: {
       welcome: 'Boas-vindas',
@@ -4144,8 +4144,6 @@ export const messages = {
       hint: 'Faltar um não é fatal: o chat continua funcionando, e só os comandos que dependem dele falham.',
       ready: 'Pronto',
       missing: 'Não encontrado',
-      openManager: 'Abrir o gerenciador de ambientes',
-      remote: 'Toolchains de uma máquina adicionada são gerenciados na página dela.',
     },
     agents: {
       title: 'Escolha quem responde',
@@ -4156,12 +4154,13 @@ export const messages = {
       modelDescription:
         'As respostas vêm de um provider configurado com a sua chave de API. Não há mais nada a instalar.',
       noneFound: 'Nenhuma CLI de agente foi encontrada aqui.',
+      noModels:
+        'Nenhum provider de modelo está configurado, então o MangoStudio não consegue responder sozinho. Adicione uma chave em Configura\u00e7\u00f5es \u2192 Providers depois da configura\u00e7\u00e3o, ou escolha uma CLI de agente abaixo.',
       signedIn: 'Conectado',
       signedOut: 'Não conectado',
       signInHint: 'Entre pelo terminal desta máquina e volte aqui.',
       selected: 'Selecionado',
       select: 'Usar este',
-      openSettings: 'Abrir configurações de providers',
       isolated:
         'Outra conta já está usando os logins de agente deste computador, então eles não são oferecidos aqui. Adicione uma máquina sua, ou use um modelo.',
       addMachine: 'Adicionar uma máquina',
@@ -4175,12 +4174,11 @@ export const messages = {
       install: 'Instalar o serviço',
       installing: 'Instalando...',
       commandTitle: 'Rode isto no computador que hospeda o MangoStudio:',
-      unavailable: 'Isto não pode ser feito daqui.',
     },
     chat: {
       title: 'Faça a primeira pergunta',
       lead: 'Isto abre um chat na pasta escolhida e envia a primeira mensagem, para você ver o ciclo inteiro funcionando.',
-      hint: 'A mensagem abaixo é só uma sugestão — edite, ou escreva a sua.',
+      hint: 'A mensagem inicial é só uma sugestão — edite, ou escreva a sua.',
       promptLabel: 'Primeira mensagem',
       defaultPrompt:
         'Dê uma olhada neste projeto e me diga, em um parágrafo curto, o que ele faz e como está organizado.',

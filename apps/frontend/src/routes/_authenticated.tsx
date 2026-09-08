@@ -1,3 +1,5 @@
+import { onboardingFor } from '@mangostudio/shared/app-settings';
+import { isOnboardingComplete } from '@mangostudio/shared/onboarding';
 import {
   createFileRoute,
   Outlet,
@@ -7,6 +9,7 @@ import {
 } from '@tanstack/react-router';
 import { motion } from 'motion/react';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { BootstrapErrorPanel } from '@/components/layout/BootstrapErrorPanel';
 import { Header } from '@/components/layout/Header';
 import { Layout } from '@/components/layout/Layout';
 import { Spinner } from '@/components/ui/Spinner';
@@ -34,13 +37,33 @@ import { isNewChatShortcut } from '@/lib/keyboard';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 
 export const Route = createFileRoute('/_authenticated')({
-  beforeLoad: ({ context, location }) => {
+  /**
+   * Two gates, in order, before any of the application's own data is asked for.
+   *
+   * Authentication first, then setup: someone who has not finished first-run
+   * setup is sent to `/welcome` with the page they wanted preserved, so
+   * finishing (or skipping) puts them exactly where they were going. The check
+   * lives here rather than in the loader because a redirect decided after the
+   * loader would have paid for the whole bootstrap first — and because the
+   * loader's data is what setup exists to make work.
+   *
+   * `/welcome` is a sibling route, not a child, so this cannot redirect to
+   * itself. A settings request that fails throws instead of redirecting: the
+   * `errorComponent` below offers a retry, and guessing "not set up" from a
+   * failed read would restart a wizard the person already finished.
+   */
+  beforeLoad: async ({ context, location }) => {
     if (!context.auth.isAuthenticated) {
       redirect({
         to: '/login',
         search: { redirect: location.href },
         throw: true,
       });
+    }
+
+    const settings = await context.queryClient.ensureQueryData(appSettingsQueryOptions());
+    if (!isOnboardingComplete(onboardingFor(settings))) {
+      redirect({ to: '/welcome', search: { redirect: location.href }, throw: true });
     }
   },
   loader: async ({ context: { queryClient } }) => {
@@ -60,6 +83,7 @@ export const Route = createFileRoute('/_authenticated')({
     }
   },
   component: AuthenticatedLayout,
+  errorComponent: BootstrapErrorPanel,
 });
 
 function AuthenticatedLayout() {
@@ -232,7 +256,7 @@ function AuthenticatedLayout() {
             the composer on any of them, and the answer belongs to the workspace
             rather than to the view. */}
         <ExternalWorkspaceTrustGate />
-        <ExternalDisclosureGate />
+        <ExternalDisclosureGate permissionLevel={app.runnerPermissions.level} />
         <CommandPaletteHost open={commandPalette.isOpen} onClose={commandPalette.close} />
       </Layout>
     </AppContext>

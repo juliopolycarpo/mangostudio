@@ -8,16 +8,17 @@
  * surface as a 403 on send, and without something here the message is accepted,
  * refused and lost to a bare error.
  *
- * Mounted once in the authenticated layout. It renders nothing until a send is
- * refused.
+ * Mounted once per surface that can send — the authenticated layout, and
+ * first-run setup, which sends its first chat from outside that layout. It
+ * renders nothing until a send is refused.
  */
 
+import type { ExternalPermissionLevel } from '@mangostudio/shared/external-agents';
 import { normalizePermissionLevel } from '@mangostudio/shared/external-agents';
 import { useCallback, useEffect, useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
 import { ExternalDisclosureDialog } from '@/features/chat/components/ExternalDisclosureDialog';
 import { useI18n } from '@/hooks/use-i18n';
-import { useApp } from '@/lib/app-context';
 import {
   type ExternalDisclosureRequest,
   onExternalDisclosurePrompt,
@@ -25,10 +26,21 @@ import {
 } from './disclosure-prompt';
 import { useExternalDisclosures } from './useExternalDisclosures';
 
-export function ExternalDisclosureGate() {
+interface ExternalDisclosureGateProps {
+  /**
+   * What the chat would let the vendor do, so the notice can say it.
+   *
+   * A prop rather than a read of the app's current chat: this gate is also
+   * mounted where there is no current chat at all. Omitted resolves to the
+   * restrictive end, which is what an unmade choice already means everywhere
+   * else.
+   */
+  readonly permissionLevel?: ExternalPermissionLevel | undefined;
+}
+
+export function ExternalDisclosureGate({ permissionLevel }: ExternalDisclosureGateProps = {}) {
   const { t } = useI18n();
   const { toast } = useToast();
-  const app = useApp();
   const disclosures = useExternalDisclosures();
   const [request, setRequest] = useState<ExternalDisclosureRequest | null>(null);
   const [isSaving, setSaving] = useState(false);
@@ -61,7 +73,7 @@ export function ExternalDisclosureGate() {
       // Normalized, because the stored value is whatever a chat was last saved
       // with and an unrecognized one resolves to the restrictive level rather
       // than to a label this dialog has no string for.
-      permissionLevel={normalizePermissionLevel(app.runnerPermissions.level).value}
+      permissionLevel={normalizePermissionLevel(permissionLevel).value}
       busy={isSaving}
       onAccept={accept}
       onCancel={decline}

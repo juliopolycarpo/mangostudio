@@ -4119,7 +4119,7 @@ export const messages: Messages = {
       skipped: 'Skipped',
       pending: 'To do',
       unknown: 'Checking',
-      unavailable: 'Not available here',
+      unavailable: 'Not here',
     },
     steps: {
       welcome: 'Welcome',
@@ -4158,8 +4158,6 @@ export const messages: Messages = {
       hint: 'Missing one is not fatal: chat still works, and only the commands that need it will fail.',
       ready: 'Ready',
       missing: 'Not found',
-      openManager: 'Open the environment manager',
-      remote: 'Toolchains on a machine you added are managed from its own page.',
     },
     agents: {
       title: 'Choose who answers',
@@ -4170,12 +4168,13 @@ export const messages: Messages = {
       modelDescription:
         'Answers come from a provider you configure with an API key. Nothing else to install.',
       noneFound: 'No agent CLI was found here.',
+      noModels:
+        'No model provider is configured yet, so MangoStudio cannot answer on its own. Add a key under Settings \u2192 Providers once setup is done, or pick an agent CLI below.',
       signedIn: 'Signed in',
       signedOut: 'Not signed in',
       signInHint: 'Sign in from a terminal on this machine, then come back.',
       selected: 'Selected',
       select: 'Use this',
-      openSettings: 'Open provider settings',
       isolated:
         'Another account is already using this computer’s agent sign-ins, so they are not offered to you here. Add a machine of your own, or use a model instead.',
       addMachine: 'Add a machine',
@@ -4189,12 +4188,11 @@ export const messages: Messages = {
       install: 'Install the service',
       installing: 'Installing...',
       commandTitle: 'Run this on the computer hosting MangoStudio:',
-      unavailable: 'This cannot be done from here.',
     },
     chat: {
       title: 'Ask your first question',
       lead: 'This opens one chat in the folder you chose and sends a first message, so you can watch the whole loop work.',
-      hint: 'The message below is only a suggestion — edit it, or write your own.',
+      hint: 'The starting message is only a suggestion — edit it, or write your own.',
       promptLabel: 'First message',
       defaultPrompt:
         'Take a look at this project and tell me in a short paragraph what it does and how it is organised.',
