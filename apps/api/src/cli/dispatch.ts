@@ -10,6 +10,7 @@ import {
   parseLogsArgs,
   parseServeArgs,
   parseServiceArgs,
+  parseSetupArgs,
   parseStatusArgs,
   parseUpgradeArgs,
 } from './args';
@@ -24,6 +25,7 @@ import { runRestart } from './commands/restart';
 import { runServe } from './commands/serve';
 import { runServeInternal } from './commands/serve-internal';
 import { runService } from './commands/service';
+import { runSetup } from './commands/setup';
 import { runStatus } from './commands/status';
 import { runStop } from './commands/stop';
 import { runUpgrade } from './commands/upgrade';
@@ -54,6 +56,9 @@ async function route(command: string | undefined, rest: string[]): Promise<void>
     case '-h':
     case '--help':
       printHelp();
+      return;
+    case 'setup':
+      await runSetup(parseSetupArgs(rest));
       return;
     case 'serve':
       await runServe(parseServeArgs(rest));

@@ -6,6 +6,7 @@ import {
   parseLogsArgs,
   parseServeArgs,
   parseServiceArgs,
+  parseSetupArgs,
   parseStatusArgs,
   parseUpgradeArgs,
 } from '../../../src/cli/args';
@@ -364,5 +365,35 @@ describe('parseUpgradeArgs', () => {
 
   it('rejects an unknown option', () => {
     expect(() => parseUpgradeArgs(['--bogus'])).toThrow(/Unknown option for upgrade: --bogus/);
+  });
+});
+
+describe('parseSetupArgs', () => {
+  it('opens a browser and leaves the service undecided by default', () => {
+    expect(parseSetupArgs([])).toEqual({
+      host: undefined,
+      port: undefined,
+      service: undefined,
+      open: true,
+    });
+  });
+
+  it('reads an explicit answer about the service in both directions', () => {
+    expect(parseSetupArgs(['--service']).service).toBe(true);
+    expect(parseSetupArgs(['--no-service']).service).toBe(false);
+  });
+
+  it('takes the same target spellings serve does', () => {
+    expect(parseSetupArgs(['3000'])).toMatchObject({ port: 3000 });
+    expect(parseSetupArgs(['lan:8080'])).toMatchObject({ host: '0.0.0.0', port: 8080 });
+  });
+
+  it('turns off opening a browser', () => {
+    expect(parseSetupArgs(['--no-open']).open).toBe(false);
+  });
+
+  it('rejects an unknown option and a second target', () => {
+    expect(() => parseSetupArgs(['--nope'])).toThrow(CliError);
+    expect(() => parseSetupArgs(['3000', '4000'])).toThrow(CliError);
   });
 });

@@ -22,6 +22,17 @@ export interface ServeArgs {
   detached: boolean;
 }
 
+/**
+ * `setup` args. `service` is deliberately tri-state: absent means "ask", and
+ * with nobody to ask the command refuses rather than choosing for the user.
+ */
+export interface SetupArgs {
+  host?: string;
+  port?: number;
+  service?: boolean;
+  open: boolean;
+}
+
 export interface DoctorArgs {
   all: boolean;
   chatgptRefresh: boolean;
@@ -143,6 +154,38 @@ export function parseServeArgs(rest: string[]): ServeArgs {
   }
 
   return { host, port, detached };
+}
+
+/** Parse `setup` args: an optional target, --service/--no-service, --no-open. // Usage: parseSetupArgs(['--service']) */
+export function parseSetupArgs(rest: string[]): SetupArgs {
+  let host: string | undefined;
+  let port: number | undefined;
+  let service: boolean | undefined;
+  let open = true;
+
+  for (const arg of rest) {
+    if (arg === '--service') {
+      service = true;
+      continue;
+    }
+    if (arg === '--no-service') {
+      service = false;
+      continue;
+    }
+    if (arg === '--no-open') {
+      open = false;
+      continue;
+    }
+    if (arg.startsWith('-')) {
+      throw new CliError(`Unknown option for setup: ${arg}`);
+    }
+    if (host !== undefined || port !== undefined) {
+      throw new CliError(`Unexpected argument: ${arg}`);
+    }
+    ({ host, port } = parseServeTarget(arg));
+  }
+
+  return { host, port, service, open };
 }
 
 /** Parse `doctor` args: optional --all, --chatgpt-refresh, and --probe flags. */

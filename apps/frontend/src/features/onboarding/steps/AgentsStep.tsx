@@ -30,6 +30,17 @@ interface AgentsStepProps {
 
 const MANGOSTUDIO_RUNNER: ChatRunnerConfiguration = { kind: 'mangostudio', agentId: 'default' };
 
+/**
+ * Whether every agent here is refused for want of an isolated OS identity.
+ *
+ * All of them or none: isolation is a property of the machine, not of one
+ * vendor, so a mix means something else is wrong with the ones that are
+ * refused and the ordinary per-agent rendering is the honest answer.
+ */
+function isolationWithdrawn(agents: readonly ExternalAgentDescriptor[]): boolean {
+  return agents.every((agent) => agent.unavailableReason === 'isolation-unproven');
+}
+
 function sameRunner(a: ChatRunnerConfiguration | undefined, b: ChatRunnerConfiguration): boolean {
   if (!a || a.kind !== b.kind) return false;
   return a.kind === 'mangostudio' ? true : a.targetId === (b as { targetId: string }).targetId;
@@ -76,6 +87,14 @@ export function AgentsStep({ environmentId, state, onChange }: AgentsStepProps) 
           </div>
         ) : external.agents.length === 0 ? (
           <p className="text-on-surface-variant/70 text-sm">{s.noneFound}</p>
+        ) : isolationWithdrawn(external.agents) ? (
+          // Local's agent sign-ins belong to the OS account the hub runs as.
+          // Once a second person has an account here they are no longer this
+          // person's to use, and pretending otherwise would offer a runner
+          // every send would refuse.
+          <p className="text-on-surface-variant text-sm" data-testid="onboarding-agents-isolated">
+            {s.isolated}
+          </p>
         ) : (
           external.agents.map((agent) => (
             <AgentOption

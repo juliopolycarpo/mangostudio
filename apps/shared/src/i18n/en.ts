@@ -4176,8 +4176,7 @@ export const messages: Messages = {
       selected: 'Selected',
       select: 'Use this',
       isolated:
-        'Another account is already using this computer’s agent sign-ins, so they are not offered to you here. Add a machine of your own, or use a model instead.',
-      addMachine: 'Add a machine',
+        'Another account is already using this computer’s agent sign-ins, so they are not offered to you here. Use a model instead, or skip this step and add a machine of your own from Environments afterwards.',
     },
     service: {
       title: 'Keep it running',

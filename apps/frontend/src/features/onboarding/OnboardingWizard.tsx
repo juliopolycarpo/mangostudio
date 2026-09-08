@@ -26,6 +26,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { ExternalDisclosureGate } from '@/features/external-agents/ExternalDisclosureGate';
 import { ExternalWorkspaceTrustGate } from '@/features/external-agents/ExternalWorkspaceTrustGate';
 import { useI18n } from '@/hooks/use-i18n';
+import { useSignOut } from '@/hooks/use-sign-out';
 import { formatMessage } from '@/lib/i18n-format';
 import { StepStatusChip } from './StepStatusChip';
 import { AgentsStep } from './steps/AgentsStep';
@@ -46,6 +47,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
   const { t } = useI18n();
   const s = t.onboarding;
   const progress = useOnboardingProgress();
+  const { signOut, isSigningOut } = useSignOut();
   const facts = useOnboardingFacts(progress.state);
   const [step, setStep] = useState<OnboardingStepId | null>(null);
 
@@ -110,6 +112,19 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
     <div className="min-h-screen bg-surface-dim px-4 py-8 sm:py-12">
       <div className="mx-auto w-full max-w-3xl space-y-6">
         <header className="space-y-2 text-center">
+          {/* The only page a not-yet-configured account can reach, so the way
+              back out of the wrong account has to be on it. */}
+          <div className="flex justify-end">
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid="logout-button"
+              loading={isSigningOut}
+              onClick={() => void signOut()}
+            >
+              {isSigningOut ? t.auth.logoutLoading : t.auth.logoutButton}
+            </Button>
+          </div>
           <Logo className="mx-auto size-14" />
           <h1 className="font-headline font-bold text-2xl text-on-surface">{s.title}</h1>
           <p className="mx-auto max-w-xl text-on-surface-variant text-sm">{s.subtitle}</p>

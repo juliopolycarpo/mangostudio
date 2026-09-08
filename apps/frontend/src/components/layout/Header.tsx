@@ -6,6 +6,7 @@ import { KbdHint } from '@/components/ui/KbdHint';
 import { useToast } from '@/components/ui/Toast';
 import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { useI18n } from '@/hooks/use-i18n';
+import { useSignOut } from '@/hooks/use-sign-out';
 import { authClient } from '@/lib/auth-client';
 import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
 import { commandPaletteShortcutHint } from '@/lib/keyboard';
@@ -50,34 +51,9 @@ export function Header({
   onOpenCommandPalette,
   onMobileMenuToggle,
 }: HeaderProps) {
-  const navigate = useNavigate();
   const { data: session } = authClient.useSession();
-  const { toast } = useToast();
   const { t } = useI18n();
-  const [loggingOut, setLoggingOut] = useState(false);
-
-  // Navigate to /login only once Better Auth has actually cleared the session.
-  // signOut runs fetchOptions.onSuccess *before* it refetches the session (the
-  // client toggles the session signal in a deferred setTimeout), so navigating
-  // from onSuccess races a stale session and login.tsx bounces the user back
-  // into the app. Gating on the cleared session removes the race entirely.
-  useEffect(() => {
-    if (loggingOut && !session?.user) {
-      void navigate({ to: '/login' });
-    }
-  }, [loggingOut, session?.user, navigate]);
-
-  const handleLogout = async () => {
-    setLoggingOut(true);
-    await authClient.signOut({
-      fetchOptions: {
-        onError: () => {
-          setLoggingOut(false);
-          toast(t.auth.logoutError, 'error');
-        },
-      },
-    });
-  };
+  const { signOut, isSigningOut } = useSignOut();
 
   return (
     <header className="bg-surface-dim flex justify-between items-center px-3 sm:px-4 md:px-6 py-3 md:py-4 w-full sticky top-0 z-40 border-b border-outline-variant/10">
@@ -152,16 +128,16 @@ export function Header({
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => void handleLogout()}
-              loading={loggingOut}
+              onClick={() => void signOut()}
+              loading={isSigningOut}
               data-testid="logout-button"
               className="font-medium shrink-0"
             >
               <span className="hidden sm:inline">
-                {loggingOut ? t.auth.logoutLoading : t.auth.logoutButton}
+                {isSigningOut ? t.auth.logoutLoading : t.auth.logoutButton}
               </span>
               <span className="sm:hidden">
-                {loggingOut ? t.auth.logoutLoading : t.auth.logoutButton.slice(0, 4)}
+                {isSigningOut ? t.auth.logoutLoading : t.auth.logoutButton.slice(0, 4)}
               </span>
             </Button>
           </div>

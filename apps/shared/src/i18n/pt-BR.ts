@@ -4162,8 +4162,7 @@ export const messages = {
       selected: 'Selecionado',
       select: 'Usar este',
       isolated:
-        'Outra conta já está usando os logins de agente deste computador, então eles não são oferecidos aqui. Adicione uma máquina sua, ou use um modelo.',
-      addMachine: 'Adicionar uma máquina',
+        'Outra conta já está usando os logins de agente deste computador, então eles não são oferecidos aqui. Use um modelo, ou pule este passo e adicione uma máquina sua em Ambientes depois.',
     },
     service: {
       title: 'Mantenha rodando',
