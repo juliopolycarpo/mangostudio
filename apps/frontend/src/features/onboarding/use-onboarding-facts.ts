@@ -67,7 +67,7 @@ export function useOnboardingFacts(state: OnboardingState): OnboardingMachineFac
     )
   );
 
-  const agentFact = factOf(agents.isLoading, false, () => {
+  const agentFact = factOf(agents.isLoading, agents.isError, () => {
     const runner = state.runner;
     if (!runner) return false;
     // A MangoStudio runner needs no CLI, so choosing one settles this step.
