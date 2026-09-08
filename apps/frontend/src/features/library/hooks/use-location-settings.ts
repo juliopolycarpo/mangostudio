@@ -15,8 +15,8 @@ import {
   type AppSettings,
   DEFAULT_APP_SETTINGS,
   libraryLocationsFor,
+  libraryLocationsPatch,
   normalizeAppSettings,
-  withLibraryLocations,
 } from '@mangostudio/shared/app-settings';
 import {
   ALWAYS_ENABLED_LIBRARY_LOCATIONS,
@@ -25,7 +25,6 @@ import {
   type LibraryLocationStatus,
   type ResourceKind,
 } from '@mangostudio/shared/library';
-import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { updateAppSettings } from '@/features/settings/app/api';
@@ -77,10 +76,11 @@ export function useLocationSettings(environmentId?: string): LocationSettingsSta
         queryClient.getQueryData<AppSettings>(appSettingsKeys.current()) ??
         (await queryClient.fetchQuery(appSettingsQueryOptions())) ??
         DEFAULT_APP_SETTINGS;
-      const current = normalizeAppSettings(cached);
-      const locations = libraryLocationsFor(current);
+      const locations = libraryLocationsFor(normalizeAppSettings(cached));
+      // Only the locations travel: a settings tab editing an unrelated
+      // preference must not have its value rolled back by this toggle.
       return updateAppSettings(
-        withLibraryLocations(current, DEFAULT_PROFILE_ID, {
+        libraryLocationsPatch({
           ...locations,
           // Every location defined today is home-scoped; the workspace map is
           // carried through untouched rather than rebuilt from nothing.

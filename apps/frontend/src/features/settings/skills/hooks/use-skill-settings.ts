@@ -6,11 +6,10 @@ import {
   type AppSettings,
   DEFAULT_APP_SETTINGS,
   libraryLocationsFor,
+  libraryLocationsPatch,
   normalizeAppSettings,
-  withLibraryLocations,
 } from '@mangostudio/shared/app-settings';
 import type { LibraryLocationId } from '@mangostudio/shared/library';
-import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import type { SkillDescriptor, SkillListResponse } from '@mangostudio/shared/skills';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { invalidateChatCapabilities } from '@/features/chat/hooks/capability-invalidation';
@@ -82,11 +81,11 @@ export function useToggleSkillSource() {
         queryClient.getQueryData<AppSettings>(appSettingsKeys.current()) ??
         (await queryClient.fetchQuery(appSettingsQueryOptions())) ??
         DEFAULT_APP_SETTINGS;
-      const current = normalizeAppSettings(cached);
-      const locations = libraryLocationsFor(current);
+      const locations = libraryLocationsFor(normalizeAppSettings(cached));
 
+      // Only the locations travel — see `libraryLocationsPatch`.
       return updateAppSettings(
-        withLibraryLocations(current, DEFAULT_PROFILE_ID, {
+        libraryLocationsPatch({
           ...locations,
           // Both sources are home directories; the workspace scope is untouched.
           home: { ...locations.home, [LOCATION_BY_SOURCE[source]]: enabled },

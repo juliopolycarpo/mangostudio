@@ -2,6 +2,7 @@ import type { ReasoningEffort } from '@mangostudio/shared';
 import type { ChatDisplaySettings, DiffPreviewMode } from '@mangostudio/shared/app-settings';
 import {
   type AppSettings,
+  appSettingsPatchExcludingProfiles,
   type ChatTitleSettings,
   type ChatTitleStrategy,
   clampMaxToolIterations,
@@ -59,10 +60,11 @@ function createCustomRule(): RuleFileSetting {
  * trailing debounce carry the whole object to the server, so a burst of edits
  * costs one PUT.
  *
- * The PUT replaces the full settings object, which makes concurrent edits from
- * two tabs last-writer-wins on the whole object rather than per field. That is
- * accepted for a local-first, single-user app; a realtime `app` invalidation
- * brings the loser back in sync as soon as its own write window closes.
+ * The PUT carries only the fields this surface owns, so a concurrent edit to a
+ * setting it does not show — a library toggle, first-run progress — survives.
+ * Within those fields two tabs are still last-writer-wins on the whole burst; a
+ * realtime `app` invalidation brings the loser back in sync as soon as its own
+ * write window closes.
  */
 export function useGlobalSettings() {
   const queryClient = useQueryClient();
@@ -155,7 +157,10 @@ export function useGlobalSettings() {
     if (!pendingSettings) return;
 
     pendingSaveRef.current = null;
-    mutate(pendingSettings);
+    // The settings surface owns none of `profileSettings` — library locations
+    // and first-run progress are written by their own screens — so the snapshot
+    // it read at mount must not travel with the edit.
+    mutate(appSettingsPatchExcludingProfiles(pendingSettings));
   }, [mutate]);
 
   useEffect(
@@ -217,7 +222,7 @@ export function useGlobalSettings() {
       const pendingSettings = pendingSaveRef.current;
       if (!pendingSettings) return;
       pendingSaveRef.current = null;
-      await mutateAsync(pendingSettings);
+      await mutateAsync(appSettingsPatchExcludingProfiles(pendingSettings));
     },
     [mutateAsync, saveSettings]
   );

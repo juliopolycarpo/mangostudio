@@ -1,8 +1,4 @@
-import {
-  type AppSettings,
-  AppSettingsPutBodySchema,
-  normalizeAppSettings,
-} from '@mangostudio/shared/app-settings';
+import { type AppSettings, AppSettingsPutBodySchema } from '@mangostudio/shared/app-settings';
 import { Elysia } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -21,8 +17,11 @@ export const appSettingsRoutes = new Elysia()
     {
       body: AppSettingsPutBodySchema,
     },
+    // The body is a patch: what it omits keeps its stored value, and merging
+    // happens against the row rather than against whatever the caller last
+    // read. Normalization belongs after that merge, so it runs in the service.
     // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     async ({ body, user }): Promise<AppSettings> => {
-      return updateAppSettings(getDb(), user?.id ?? '', normalizeAppSettings(body));
+      return updateAppSettings(getDb(), user?.id ?? '', body);
     }
   );

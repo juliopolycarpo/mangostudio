@@ -594,6 +594,26 @@ describe('useGlobalSettings', () => {
 
     await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
 
-    expect(mockPut.mock.calls[0]?.[0]).toEqual(DEFAULT_APP_SETTINGS);
+    // Profile-scoped settings are deliberately absent: this screen resets the
+    // preferences it shows, and library locations and first-run progress are
+    // owned — and reset — by their own surfaces.
+    const { profileSettings: _profileSettings, ...defaultsThisScreenOwns } = DEFAULT_APP_SETTINGS;
+    expect(mockPut.mock.calls[0]?.[0]).toEqual(defaultsThisScreenOwns);
+  });
+
+  it('leaves profile-scoped settings out of every save', async () => {
+    mockGet.mockResolvedValue(mockQueryResult({ ...DEFAULT_APP_SETTINGS, thinkingEnabled: false }));
+
+    const { result } = renderHook(() => useGlobalSettings());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      result.current.setThinkingEnabled(true);
+    });
+
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+
+    expect(mockPut.mock.calls[0]?.[0]).not.toHaveProperty('profileSettings');
+    expect(mockPut.mock.calls[0]?.[0]).toMatchObject({ thinkingEnabled: true });
   });
 });
