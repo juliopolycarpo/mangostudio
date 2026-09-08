@@ -30,11 +30,19 @@ export {
   normalizeProfileSettings,
   normalizePromptSettings,
   normalizeWorkspaceSettings,
+  onboardingFor,
   SUBAGENT_MAX_TURNS_DEFAULT,
   SUBAGENT_MAX_TURNS_MAX,
   SUBAGENT_MAX_TURNS_MIN,
   withLibraryLocations,
+  withOnboarding,
 } from './defaults';
+export {
+  appSettingsPatchExcludingProfiles,
+  libraryLocationsPatch,
+  mergeAppSettingsPatch,
+  onboardingPatch,
+} from './patch';
 export {
   type AppSettings,
   type AppSettingsPutBody,

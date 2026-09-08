@@ -15,6 +15,7 @@ import {
   COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
 } from '../git/commit-message';
 import { LibraryLocationIdSchema, LibraryScopeSchema } from '../library';
+import { OnboardingStateSchema } from '../onboarding/schemas';
 import { ProfileIdSchema } from '../profiles';
 import { PromptSettingsSchema } from '../prompt-rules';
 import { ReasoningEffortSchema } from '../provider-settings';
@@ -84,10 +85,19 @@ const LibraryLocationSettingsPutSchema = Type.Union([
  */
 export const ProfileScopedSettingsSchema = Type.Object({
   libraryLocations: LibraryLocationSettingsSchema,
+  /**
+   * First-run progress. Profile-scoped rather than global because it is a
+   * record of what *this person* has answered, and a second profile would
+   * answer for itself.
+   */
+  onboarding: OnboardingStateSchema,
 });
 
 const ProfileScopedSettingsPutSchema = Type.Object({
-  libraryLocations: LibraryLocationSettingsPutSchema,
+  libraryLocations: Type.Optional(LibraryLocationSettingsPutSchema),
+  // `null` is the defined clear: it resets progress to "never started", which
+  // is what "Run setup again" asks for. Omission means "leave it alone".
+  onboarding: Type.Optional(Type.Union([OnboardingStateSchema, Type.Null()])),
 });
 
 export const ProfileSettingsMapSchema = Type.Record(ProfileIdSchema, ProfileScopedSettingsSchema);
@@ -149,10 +159,35 @@ export const AppSettingsSchema = Type.Object({
   profileSettings: ProfileSettingsMapSchema,
 });
 
-export const AppSettingsPutBodySchema = Type.Object({
-  ...AppSettingsFieldsSchema,
-  profileSettings: ProfileSettingsMapPutSchema,
-});
+/**
+ * A settings *patch*, not a snapshot.
+ *
+ * Every field is optional and the server merges what arrives over what it
+ * already stores (see `mergeAppSettingsPatch`), so a client sends the edit it
+ * made rather than round-tripping the whole object. Two things follow, and both
+ * are the point:
+ *
+ * - a hand-built client survives every field this schema grows later, instead
+ *   of being rejected for omitting one it has never heard of;
+ * - two writers editing different settings stop overwriting each other, because
+ *   neither one carries the other's field at all.
+ *
+ * Clearing is explicit, never implicit: omitting a key preserves it, and `null`
+ * on a key that admits it resets that subtree to its default.
+ *
+ * The unit of a patch is a whole top-level field: send `contextSettings` and
+ * you send all of it. A field is addressable more finely only where its parts
+ * are independently owned — `profileSettings.<id>.libraryLocations` and
+ * `.onboarding` are written by different surfaces, so each is optional on its
+ * own. Half a subtree is rejected rather than backfilled with defaults, so a
+ * client can never reset a sibling setting it did not mean to touch.
+ */
+export const AppSettingsPutBodySchema = Type.Partial(
+  Type.Object({
+    ...AppSettingsFieldsSchema,
+    profileSettings: ProfileSettingsMapPutSchema,
+  })
+);
 
 export type ImageQuality = Static<typeof ImageQualitySchema>;
 export type DiffPreviewMode = Static<typeof DiffPreviewModeSchema>;

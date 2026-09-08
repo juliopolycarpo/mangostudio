@@ -28,6 +28,11 @@ import {
   DEFAULT_COMMIT_MESSAGE_PROMPT,
 } from '../git/commit-message';
 import { LIBRARY_SCOPES } from '../library';
+import {
+  DEFAULT_ONBOARDING_STATE,
+  normalizeOnboardingState,
+  type OnboardingState,
+} from '../onboarding';
 import { DEFAULT_PROFILE_ID, type ProfileId } from '../profiles';
 import type {
   PromptInjectionRole,
@@ -59,6 +64,7 @@ import type {
   LibraryLocationSettings,
   LibraryLocationToggles,
   MultiAgentSettings,
+  ProfileScopedSettings,
   ProfileSettingsMap,
 } from './schemas';
 
@@ -136,6 +142,7 @@ export const DEFAULT_LIBRARY_LOCATION_SETTINGS: LibraryLocationSettings = {
 export const DEFAULT_PROFILE_SETTINGS: ProfileSettingsMap = {
   [DEFAULT_PROFILE_ID]: {
     libraryLocations: DEFAULT_LIBRARY_LOCATION_SETTINGS,
+    onboarding: DEFAULT_ONBOARDING_STATE,
   },
 };
 
@@ -468,6 +475,9 @@ export function normalizeProfileSettings(
         libraryLocationsSource,
         libraryLocationDefaults
       ),
+      onboarding: normalizeOnboardingState(
+        isRecord(defaultScoped) ? defaultScoped.onboarding : undefined
+      ),
     },
   };
 }
@@ -490,22 +500,62 @@ export function withLibraryLocations(
   profileId: ProfileId,
   libraryLocations: LibraryLocationSettings
 ): AppSettings {
-  const normalizedLocations = normalizeLibraryLocationSettings(libraryLocations);
-  if (!isProfileIdShape(profileId) || profileId !== DEFAULT_PROFILE_ID) {
+  return withProfileScopedSettings(settings, profileId, (scoped) => ({
+    ...scoped,
+    libraryLocations: normalizeLibraryLocationSettings(libraryLocations),
+  }));
+}
+
+/** Read first-run progress for a profile; falls back to the default profile. */
+export function onboardingFor(
+  settings: AppSettings,
+  profileId: ProfileId = DEFAULT_PROFILE_ID
+): OnboardingState {
+  return (
+    settings.profileSettings[profileId]?.onboarding ??
+    settings.profileSettings[DEFAULT_PROFILE_ID]?.onboarding ??
+    DEFAULT_ONBOARDING_STATE
+  );
+}
+
+/** Return a copy of settings with first-run progress updated for one profile. */
+export function withOnboarding(
+  settings: AppSettings,
+  onboarding: OnboardingState,
+  profileId: ProfileId = DEFAULT_PROFILE_ID
+): AppSettings {
+  return withProfileScopedSettings(settings, profileId, (scoped) => ({
+    ...scoped,
+    onboarding: normalizeOnboardingState(onboarding),
+  }));
+}
+
+/**
+ * Rewrite one field of one profile's settings, keeping every other field it
+ * holds. Every profile-scoped writer goes through here: replacing the whole
+ * scoped object instead would mean a library toggle silently erasing first-run
+ * progress, which is exactly the class of bug an overlay of independent
+ * settings invites.
+ */
+function withProfileScopedSettings(
+  settings: AppSettings,
+  profileId: ProfileId,
+  update: (scoped: ProfileScopedSettings) => ProfileScopedSettings
+): AppSettings {
+  const targetId =
     // Unknown profiles are not selectable yet; write into the default profile
     // so a future selector cannot accidentally create orphan keys.
-    return {
-      ...settings,
-      profileSettings: {
-        [DEFAULT_PROFILE_ID]: { libraryLocations: normalizedLocations },
-      },
-    };
-  }
+    isProfileIdShape(profileId) && profileId === DEFAULT_PROFILE_ID
+      ? profileId
+      : DEFAULT_PROFILE_ID;
+  const current =
+    settings.profileSettings[targetId] ?? DEFAULT_PROFILE_SETTINGS[DEFAULT_PROFILE_ID];
+
   return {
     ...settings,
     profileSettings: {
       ...settings.profileSettings,
-      [profileId]: { libraryLocations: normalizedLocations },
+      [targetId]: update(current),
     },
   };
 }
