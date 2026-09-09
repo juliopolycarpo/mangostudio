@@ -71,16 +71,28 @@ describe('scripts/lib/runtime-handshake', () => {
       expect(resolveHandshakeBudgetMs()).toBe(DEFAULT_HANDSHAKE_BUDGET_MS);
     });
 
-    test('is what a probe with no budget of its own waits for', async () => {
-      // The smoke passes no `timeoutMs`, so a default that stopped being read
-      // would silently put every platform back on the same budget.
-      restorePlatform = stubProcessPlatform('linux');
-      const startedAt = Date.now();
-      const probe = await probeRuntimeHandshake({ command: standIn(NEVER_RESOLVES) });
+    // The smoke passes no `timeoutMs`, so a probe that stopped reading the
+    // resolver would silently put every platform back on one budget. Asserted
+    // through `budgetMs` against a child that exits at once rather than by
+    // waiting a budget out: the `win32` branch is the one that discriminates —
+    // a hardcoded `10_000` default reports 10000 here — and waiting it out
+    // would cost the lane a minute to learn the same thing.
+    test.each([
+      ['win32', WIN32_HANDSHAKE_BUDGET_MS],
+      ['linux', DEFAULT_HANDSHAKE_BUDGET_MS],
+    ] as const)(
+      'is the budget a probe with no budget of its own uses on %s',
+      async (platform, expected) => {
+        restorePlatform = stubProcessPlatform(platform);
 
-      expect(probe.failure).toContain(`within ${DEFAULT_HANDSHAKE_BUDGET_MS}ms`);
-      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(DEFAULT_HANDSHAKE_BUDGET_MS);
-    }, 30_000);
+        const probe = await probeRuntimeHandshake({
+          command: standIn('process.exit(0);'),
+          exitGraceMs: 200,
+        });
+
+        expect(probe.budgetMs).toBe(expected);
+      }
+    );
   });
 
   describe('probeRuntimeHandshake', () => {
@@ -99,27 +111,32 @@ describe('scripts/lib/runtime-handshake', () => {
       expect(probe.stderr).toContain('warming up');
     });
 
-    test('times how long the child took to speak, not how long cleanup took', async () => {
-      // This child greets at once and then refuses to die on SIGTERM, so the
-      // probe pays the whole exit grace *after* it already has its answer. A
-      // number taken at the return would fold that wait into what is meant to
-      // be evidence about how long the runtime took to start talking.
-      const startedAt = Date.now();
-      const probe = await probeRuntimeHandshake({
-        command: standIn(
-          `process.on('SIGTERM', () => {});` +
-            `await Bun.write(Bun.stdout, ${JSON.stringify(`${HELLO_FRAME}\n`)});` +
-            `setTimeout(() => process.exit(0), 1_200);` +
-            NEVER_RESOLVES
-        ),
-        timeoutMs: ANSWERING_TIMEOUT_MS,
-        exitGraceMs: 800,
-      });
-      const callMs = Date.now() - startedAt;
+    test.skipIf(process.platform === 'win32')(
+      'times how long the child took to speak, not how long cleanup took',
+      async () => {
+        // This child greets at once and then refuses to die on SIGTERM, so the
+        // probe pays the whole exit grace *after* it already has its answer. A
+        // number taken at the return would fold that wait into what is meant to
+        // be evidence about how long the runtime took to start talking.
+        // Skipped on Windows, where `kill()` is `TerminateProcess` and no
+        // handler can decline it, so there is no cleanup wait to exclude.
+        const startedAt = performance.now();
+        const probe = await probeRuntimeHandshake({
+          command: standIn(
+            `process.on('SIGTERM', () => {});` +
+              `await Bun.write(Bun.stdout, ${JSON.stringify(`${HELLO_FRAME}\n`)});` +
+              `setTimeout(() => process.exit(0), 1_200);` +
+              NEVER_RESOLVES
+          ),
+          timeoutMs: ANSWERING_TIMEOUT_MS,
+          exitGraceMs: 800,
+        });
+        const callMs = performance.now() - startedAt;
 
-      expect(probe.hello).toBe(HELLO_FRAME);
-      expect(callMs - probe.elapsedMs).toBeGreaterThanOrEqual(500);
-    });
+        expect(probe.hello).toBe(HELLO_FRAME);
+        expect(callMs - probe.elapsedMs).toBeGreaterThanOrEqual(500);
+      }
+    );
 
     test('names the child exit and carries its code and stderr', async () => {
       const probe = await probeRuntimeHandshake({
