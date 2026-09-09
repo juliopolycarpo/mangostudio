@@ -341,6 +341,34 @@ describe('OnboardingWizard', () => {
     await waitFor(() => expect(screen.getByTestId('onboarding-choose-folder')).toBeDisabled());
   });
 
+  it('holds the exits while the first-chat step is storing the chat it created', async () => {
+    // The step writes `chatId` built on the record as it read it. A Finish or a
+    // Skip landing inside that window would be overwritten, and the account
+    // would be bounced back through the gate it just left.
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true, workdir: '/home/dev/project' }),
+    });
+    if (!respondFromScenario) throw new Error('scenario fetch mock has no implementation');
+    const respond = respondFromScenario;
+    scenario.fetchMock.mockImplementation((input, init) => {
+      // Chat creation never answers: that is the whole window under test.
+      if (String(init?.method).toUpperCase() === 'POST' && String(input).includes('/api/chats')) {
+        return new Promise<Response>(() => undefined);
+      }
+      return respond(input, init);
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-chat')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-chat'));
+    await waitFor(() => expect(screen.getByTestId('onboarding-send-prompt')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByTestId('onboarding-send-prompt'));
+
+    await waitFor(() => expect(screen.getByTestId('onboarding-skip-all')).toBeDisabled());
+    expect(screen.getByTestId('onboarding-skip-step')).toBeDisabled();
+  });
+
   it('advances past a skipped step and remembers the skip', async () => {
     render(<OnboardingWizard onDone={() => undefined} />);
     await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument());

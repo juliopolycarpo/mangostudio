@@ -38,6 +38,13 @@ interface FirstChatStepProps {
   readonly answered: boolean;
   /** Leave for the chat itself. Finishes the run — see the button below. */
   readonly onOpenChat: () => Promise<void>;
+  /**
+   * Raised while this step is about to write the progress record itself, so the
+   * buttons that write it too can stand down. It covers creating the chat and
+   * storing its id — not the send that follows, which writes nothing here and
+   * can take a minute a person must be able to leave.
+   */
+  readonly onWritingChange: (writing: boolean) => void;
 }
 
 export function FirstChatStep({
@@ -46,6 +53,7 @@ export function FirstChatStep({
   onChange,
   answered,
   onOpenChat,
+  onWritingChange,
 }: FirstChatStepProps) {
   const { t } = useI18n();
   const s = t.onboarding.chat;
@@ -73,11 +81,20 @@ export function FirstChatStep({
     try {
       let chatId = state.chatId;
       if (!chatId) {
-        const chat = await createChat.mutateAsync({ title: prompt.slice(0, 60) });
-        chatId = chat.id;
-        // Persisted before a single byte of the prompt is sent. A crash on the
-        // next line then costs a retry, not a duplicate chat.
-        await onChange((current) => ({ ...current, chatId }));
+        // Held across the create *and* the write it leads to: the id is built
+        // on the record as it reads now, so a Finish or a Skip that lands in
+        // between would be overwritten by it — the run would report itself
+        // unfinished again and the gate would send the person back here.
+        onWritingChange(true);
+        try {
+          const chat = await createChat.mutateAsync({ title: prompt.slice(0, 60) });
+          chatId = chat.id;
+          // Persisted before a single byte of the prompt is sent. A crash on the
+          // next line then costs a retry, not a duplicate chat.
+          await onChange((current) => ({ ...current, chatId }));
+        } finally {
+          onWritingChange(false);
+        }
       }
 
       await updateChat.mutateAsync({

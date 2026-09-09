@@ -54,6 +54,11 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
   const { signOut, isSigningOut } = useSignOut();
   const facts = useOnboardingFacts(progress.state);
   const [step, setStep] = useState<OnboardingStepId | null>(null);
+  // A step can be about to write the same record these buttons write. `isSaving`
+  // only covers a write already in flight, and the first-chat step creates a
+  // chat before it stores the id — a window this closes.
+  const [isStepWriting, setStepWriting] = useState(false);
+  const isWriting = progress.isSaving || isStepWriting;
 
   const state = progress.state;
   const statuses = onboardingStepStatuses(state, facts);
@@ -193,7 +198,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
 
             {step === 'welcome' ? <WelcomeStep /> : null}
             {step === 'folder' ? (
-              <FolderStep state={state} onChange={progress.update} isSaving={progress.isSaving} />
+              <FolderStep state={state} onChange={progress.update} isSaving={isWriting} />
             ) : null}
             {step === 'toolchain' ? <ToolchainStep environmentId={environmentId} /> : null}
             {step === 'agents' ? (
@@ -201,7 +206,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                 environmentId={environmentId}
                 state={state}
                 onChange={progress.update}
-                isSaving={progress.isSaving}
+                isSaving={isWriting}
               />
             ) : null}
             {step === 'service' ? <ServiceStep /> : null}
@@ -212,6 +217,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                 onChange={progress.update}
                 answered={facts.chat === 'satisfied'}
                 onOpenChat={() => complete('/')}
+                onWritingChange={setStepWriting}
               />
             ) : null}
 
@@ -240,7 +246,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                     variant="ghost"
                     size="sm"
                     data-testid="onboarding-skip-step"
-                    disabled={progress.isSaving}
+                    disabled={isWriting}
                     onClick={() => void skipCurrent()}
                   >
                     {s.skipStep}
@@ -249,7 +255,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
 
                 <Button
                   data-testid="onboarding-continue"
-                  loading={progress.isSaving}
+                  loading={isWriting}
                   onClick={() => void continueFromStep()}
                 >
                   {step === 'welcome' ? s.welcome.action : isLast ? s.finish : s.continue}
@@ -272,7 +278,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
           <button
             type="button"
             data-testid="onboarding-skip-all"
-            disabled={progress.isSaving}
+            disabled={isWriting}
             onClick={() => void complete()}
             className="text-on-surface-variant/60 text-xs underline underline-offset-4 hover:text-on-surface-variant"
           >
