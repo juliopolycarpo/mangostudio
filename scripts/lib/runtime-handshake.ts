@@ -32,12 +32,18 @@ export const DEFAULT_HANDSHAKE_BUDGET_MS = 10_000;
  * runner routinely costs multiples of what Linux and macOS pay, and the runtime
  * pays it on `--stdio` rather than on `--version`, which short-circuits.
  *
+ * What a *passing* handshake costs, measured by the elapsed readout below on
+ * the run that introduced it: `linux-x64` 284ms, `darwin-arm64` 342ms,
+ * `windows-arm64` 3920ms, `windows-x64` 6288ms — already 63% of the old 10s on
+ * a good day, and measured after `--version` had already run against the same
+ * file. 60s restores roughly 10x headroom on the worst number observed.
+ *
  * The evidence this is timing and not a bad binary: on PR #1039 the runtime exe
  * with digest `443930e2…` timed out here on one run and handshook on the next,
  * byte-identical both times. Being generous costs a slower red on a genuinely
- * hung runtime and nothing at all on a healthy one, which greets in about a
- * second — so this matches `WIN32_READY_BUDGET_MS` rather than splitting the
- * difference and guessing again in a month.
+ * hung runtime and nothing at all on a healthy one — so this matches
+ * `WIN32_READY_BUDGET_MS` rather than splitting the difference and guessing
+ * again in a month.
  */
 export const WIN32_HANDSHAKE_BUDGET_MS = 60_000;
 
@@ -45,7 +51,8 @@ export const WIN32_HANDSHAKE_BUDGET_MS = 60_000;
  * The platform's default handshake budget. Exported separately from the probe
  * so a test can pin both branches without spawning anything.
  *
- * // Usage: const timeoutMs = resolveHandshakeBudgetMs();
+ * @example
+ * const timeoutMs = resolveHandshakeBudgetMs();
  */
 export function resolveHandshakeBudgetMs(): number {
   return pickPlatformBudgetMs(DEFAULT_HANDSHAKE_BUDGET_MS, WIN32_HANDSHAKE_BUDGET_MS);
