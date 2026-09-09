@@ -16,6 +16,7 @@ import {
   pumpStream,
   readFirstLine,
 } from './child-streams';
+import { pickPlatformBudgetMs } from './platform-budget';
 
 /** How long a child that closed stdout gets to exit before it is killed. */
 const DEFAULT_EXIT_GRACE_MS = 2_000;
@@ -47,7 +48,7 @@ export const WIN32_HANDSHAKE_BUDGET_MS = 60_000;
  * // Usage: const timeoutMs = resolveHandshakeBudgetMs();
  */
 export function resolveHandshakeBudgetMs(): number {
-  return process.platform === 'win32' ? WIN32_HANDSHAKE_BUDGET_MS : DEFAULT_HANDSHAKE_BUDGET_MS;
+  return pickPlatformBudgetMs(DEFAULT_HANDSHAKE_BUDGET_MS, WIN32_HANDSHAKE_BUDGET_MS);
 }
 
 export interface RuntimeHandshakeProbeOptions {

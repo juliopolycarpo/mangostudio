@@ -10,6 +10,8 @@
 // (see issue #377: the previous 15 × 500ms = 7.5s budget was tight enough to
 // flake the `Binary windows-x64` job on otherwise healthy cold starts).
 
+import { pickPlatformBudgetMs } from './platform-budget';
+
 /** Default readiness budget in milliseconds; matches wait-for-health.sh (30 × 1s). */
 export const DEFAULT_READY_BUDGET_MS = 30_000;
 
@@ -36,7 +38,7 @@ export interface WaitForServerReadyOptions {
  * without spinning up an HTTP loop.
  */
 export function resolveReadyBudgetMs(): number {
-  return process.platform === 'win32' ? WIN32_READY_BUDGET_MS : DEFAULT_READY_BUDGET_MS;
+  return pickPlatformBudgetMs(DEFAULT_READY_BUDGET_MS, WIN32_READY_BUDGET_MS);
 }
 
 /**
