@@ -465,9 +465,15 @@ export function normalizeProfileSettings(
   const defaultScoped = isRecord(source?.[DEFAULT_PROFILE_ID])
     ? source[DEFAULT_PROFILE_ID]
     : undefined;
-  const libraryLocationsSource = isRecord(defaultScoped)
-    ? defaultScoped.libraryLocations
-    : legacyLibraryLocations;
+  // The legacy mirror is the fallback whenever the nested value is missing, not
+  // only when the whole profile entry is. A patch writes one owned field at a
+  // time, so a row that predates the nesting migration reaches this with a
+  // `default` entry that carries `onboarding` and no `libraryLocations` — and
+  // reading that as "nothing stored" would reset the toggles the flat mirror
+  // still holds.
+  const libraryLocationsSource =
+    (isRecord(defaultScoped) ? defaultScoped.libraryLocations : undefined) ??
+    legacyLibraryLocations;
 
   return {
     [DEFAULT_PROFILE_ID]: {

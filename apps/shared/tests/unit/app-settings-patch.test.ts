@@ -5,6 +5,7 @@ import {
   DEFAULT_APP_SETTINGS,
   libraryLocationsPatch,
   mergeAppSettingsPatch,
+  normalizeAppSettings,
   onboardingPatch,
 } from '../../src/app-settings';
 import { DEFAULT_ONBOARDING_STATE } from '../../src/onboarding';
@@ -153,5 +154,38 @@ describe('patch builders', () => {
 
     expect(patch).not.toHaveProperty('profileSettings');
     expect(patch.thinkingEnabled).toBe(DEFAULT_APP_SETTINGS.thinkingEnabled);
+  });
+});
+
+describe('patching a row that predates the profileSettings nesting', () => {
+  /** Library locations as an old build stored them: one flat map, no profile entry. */
+  const legacyRow = {
+    thinkingEnabled: true,
+    libraryLocations: { 'claude-skills': true, 'agents-skills': true, 'claude-agents': true },
+  };
+
+  it('keeps the flat library mirror when a patch creates the profile entry without it', () => {
+    // The first thing an upgrading account does is finish (or skip) first-run
+    // setup, and that write names only `onboarding`. If creating the profile
+    // entry read as "no locations stored", every toggle the person had set
+    // would be silently replaced by this machine's detected defaults.
+    const merged = mergeAppSettingsPatch(
+      legacyRow,
+      onboardingPatch({ welcomeAcknowledged: true, skippedSteps: [] })
+    );
+
+    expect(normalizeAppSettings(merged).profileSettings.default.libraryLocations.home).toEqual(
+      normalizeAppSettings(legacyRow).profileSettings.default.libraryLocations.home
+    );
+  });
+
+  it('still lets the nested value win once one is written', () => {
+    const merged = mergeAppSettingsPatch(
+      legacyRow,
+      libraryLocationsPatch({ home: { 'claude-skills': false }, workspace: {} })
+    );
+    const home = normalizeAppSettings(merged).profileSettings.default.libraryLocations.home;
+
+    expect(home['claude-skills']).toBe(false);
   });
 });
