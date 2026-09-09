@@ -4154,6 +4154,8 @@ export const messages = {
       modelDescription:
         'As respostas vêm de um provider configurado com a sua chave de API. Não há mais nada a instalar.',
       noneFound: 'Nenhuma CLI de agente foi encontrada aqui.',
+      probeFailed:
+        'N\u00e3o foi poss\u00edvel perguntar a esta m\u00e1quina quais CLIs de agente ela tem. Isso n\u00e3o \u00e9 o mesmo que n\u00e3o ter nenhuma \u2014 tente de novo, ou pule este passo e escolha depois.',
       noModels:
         'Nenhum provider de modelo está configurado, então o MangoStudio não consegue responder sozinho. Adicione uma chave em Configura\u00e7\u00f5es \u2192 Providers depois da configura\u00e7\u00e3o, ou escolha uma CLI de agente abaixo.',
       signedIn: 'Conectado',

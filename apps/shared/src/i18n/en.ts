@@ -4168,6 +4168,8 @@ export const messages: Messages = {
       modelDescription:
         'Answers come from a provider you configure with an API key. Nothing else to install.',
       noneFound: 'No agent CLI was found here.',
+      probeFailed:
+        'This machine could not be asked which agent CLIs it has. That is not the same as having none \u2014 try again, or skip this step and pick a runner later.',
       noModels:
         'No model provider is configured yet, so MangoStudio cannot answer on its own. Add a key under Settings \u2192 Providers once setup is done, or pick an agent CLI below.',
       signedIn: 'Signed in',

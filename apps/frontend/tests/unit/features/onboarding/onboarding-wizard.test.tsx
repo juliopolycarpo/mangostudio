@@ -10,6 +10,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { DEFAULT_APP_SETTINGS, onboardingFor } from '@mangostudio/shared/app-settings';
+import { en } from '@mangostudio/shared/i18n';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../../support/harness/render';
@@ -253,6 +254,21 @@ describe('OnboardingWizard', () => {
       profileSettings: { default: { onboarding: { completedAt?: number } } };
     };
     expect(body.profileSettings.default.onboarding.completedAt).toBeGreaterThan(0);
+  });
+
+  it('says the machine could not be asked rather than that it has no agent CLIs', async () => {
+    // A refused probe and a machine with nothing installed both arrive as an
+    // empty list. Only one of them is an answer, and telling somebody who has
+    // Claude Code and Codex on this box that none were found sends them to
+    // install what they already have.
+    scenario.respondWithJson('GET', '/api/external-agents', { body: {}, status: 500 });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-agents')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-agents'));
+
+    await waitFor(() => expect(screen.getByTestId('onboarding-agents-failed')).toBeInTheDocument());
+    expect(screen.queryByText(en.onboarding.agents.noneFound)).not.toBeInTheDocument();
   });
 
   it('advances past a skipped step and remembers the skip', async () => {

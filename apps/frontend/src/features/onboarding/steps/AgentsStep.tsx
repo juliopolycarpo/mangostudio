@@ -85,6 +85,13 @@ export function AgentsStep({ environmentId, state, onChange }: AgentsStepProps) 
           <div className="flex justify-center py-4">
             <Spinner size="md" />
           </div>
+        ) : external.isError ? (
+          // A refused probe and a machine with no CLIs on it both arrive as an
+          // empty list. Only one of them is an answer, and telling the person
+          // "none found" about the other sends them to install what they have.
+          <p className="text-on-surface-variant text-sm" data-testid="onboarding-agents-failed">
+            {s.probeFailed}
+          </p>
         ) : external.agents.length === 0 ? (
           <p className="text-on-surface-variant/70 text-sm">{s.noneFound}</p>
         ) : isolationWithdrawn(external.agents) ? (
