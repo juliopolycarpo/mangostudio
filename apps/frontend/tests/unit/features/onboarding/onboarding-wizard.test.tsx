@@ -221,6 +221,40 @@ describe('OnboardingWizard', () => {
     );
   });
 
+  it('finishes the run before sending someone to the chat it created', async () => {
+    // `/` is behind the gate that sent this person here. Leaving for it without
+    // recording completion is a round trip straight back into this wizard, and
+    // it is the escape hatch a turn that failed server-side depends on.
+    const onDone = jest.fn();
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({
+        welcomeAcknowledged: true,
+        workdir: '/home/dev/project',
+        chatId: 'chat-1',
+      }),
+    });
+    scenario.respondWithJson('GET', '/api/chats/chat-1/messages?limit=50', {
+      body: { messages: [], nextCursor: null },
+    });
+
+    render(<OnboardingWizard onDone={onDone} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-chat')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-chat'));
+    await waitFor(() => expect(screen.getByTestId('onboarding-open-chat')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByTestId('onboarding-open-chat'));
+
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith('/'));
+    const put = scenario.fetchMock.mock.calls.find(
+      (call) => String(call[1]?.method).toUpperCase() === 'PUT'
+    );
+    expect(put).toBeDefined();
+    const body = JSON.parse(String(put?.[1]?.body)) as {
+      profileSettings: { default: { onboarding: { completedAt?: number } } };
+    };
+    expect(body.profileSettings.default.onboarding.completedAt).toBeGreaterThan(0);
+  });
+
   it('advances past a skipped step and remembers the skip', async () => {
     render(<OnboardingWizard onDone={() => undefined} />);
     await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument());

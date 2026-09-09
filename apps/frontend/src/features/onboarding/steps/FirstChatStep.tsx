@@ -14,7 +14,6 @@
 import { GENERATION_PROMPT_MAX_LENGTH } from '@mangostudio/shared/generation';
 import type { OnboardingState } from '@mangostudio/shared/onboarding';
 import { useQueryClient } from '@tanstack/react-query';
-import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
@@ -37,9 +36,17 @@ interface FirstChatStepProps {
   readonly state: OnboardingState;
   readonly onChange: (updater: (current: OnboardingState) => OnboardingState) => Promise<void>;
   readonly answered: boolean;
+  /** Leave for the chat itself. Finishes the run — see the button below. */
+  readonly onOpenChat: () => Promise<void>;
 }
 
-export function FirstChatStep({ environmentId, state, onChange, answered }: FirstChatStepProps) {
+export function FirstChatStep({
+  environmentId,
+  state,
+  onChange,
+  answered,
+  onOpenChat,
+}: FirstChatStepProps) {
   const { t } = useI18n();
   const s = t.onboarding.chat;
   const queryClient = useQueryClient();
@@ -161,16 +168,20 @@ export function FirstChatStep({ environmentId, state, onChange, answered }: Firs
         >
           {isSending ? s.sending : s.send}
         </Button>
-        {/* The chat list opens on its most recent entry, which is this one —
-            there is no per-chat URL to link to. */}
+        {/* A button rather than a link: `/` is behind the gate that sent this
+            person here, so leaving without recording completion lands them
+            back in this wizard. Finishing on the way out is also what makes the
+            documented escape from a turn that failed server-side — open the
+            chat, edit the prompt — a route that exists. The chat list opens on
+            its most recent entry, which is this one. */}
         {state.chatId ? (
-          <Link
-            to="/"
-            className="font-semibold text-primary text-sm hover:underline"
+          <Button
+            variant="ghost"
             data-testid="onboarding-open-chat"
+            onClick={() => void onOpenChat()}
           >
             {s.openChat}
-          </Link>
+          </Button>
         ) : null}
       </div>
 

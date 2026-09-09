@@ -39,8 +39,12 @@ import { useOnboardingFacts } from './use-onboarding-facts';
 import { useOnboardingProgress } from './use-onboarding-progress';
 
 interface OnboardingWizardProps {
-  /** Where the person was heading before setup interrupted them. */
-  readonly onDone: () => void;
+  /**
+   * Leave setup for the application: with no destination for the page the
+   * person was heading to when setup interrupted them, or with one when a step
+   * sends them somewhere of its own.
+   */
+  readonly onDone: (destination?: string) => void;
 }
 
 export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
@@ -84,9 +88,9 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
     if (next) setStep(next);
   };
 
-  const complete = async () => {
+  const complete = async (destination?: string) => {
     await progress.update((current) => ({ ...current, completedAt: Date.now() }));
-    onDone();
+    onDone(destination);
   };
 
   const skipCurrent = async () => {
@@ -200,6 +204,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                 state={state}
                 onChange={progress.update}
                 answered={facts.chat === 'satisfied'}
+                onOpenChat={() => complete('/')}
               />
             ) : null}
 

@@ -13,8 +13,9 @@ function WelcomePage() {
     <OnboardingWizard
       // `history.push` takes the full href the guard preserved; `navigate({ to })`
       // wants a typed route path, and the destination here is whatever page the
-      // person was originally asking for.
-      onDone={() => router.history.push(redirect ?? '/')}
+      // person was originally asking for — unless a step named one of its own,
+      // which is how "open the chat I just made" outranks where they were going.
+      onDone={(destination) => router.history.push(destination ?? redirect ?? '/')}
     />
   );
 }
