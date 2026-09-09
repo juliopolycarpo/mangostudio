@@ -13,7 +13,7 @@
  * // Usage: const facts = useOnboardingFacts(state);
  */
 
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID, type RuntimeStatus } from '@mangostudio/shared/environments';
 import type {
   OnboardingFact,
   OnboardingMachineFacts,
@@ -32,7 +32,19 @@ import {
 } from '@/features/external-agents/useExternalAgents';
 
 /** Runtimes a coding agent needs to run anything in a project. Either one is enough. */
-const PROJECT_RUNTIME_IDS = ['node', 'bun'] as const;
+export const PROJECT_RUNTIME_IDS = ['node', 'bun'] as const;
+
+/**
+ * Whether a probed runtime can be used. Exported so the step drawing the list
+ * and the fact deciding whether that step is done cannot disagree — a green
+ * tick beside a runtime the step list still calls "to do" is the bug this
+ * shared definition exists to prevent.
+ *
+ * // Usage: if (isRuntimeReady(runtime)) return;
+ */
+export function isRuntimeReady(runtime: RuntimeStatus | undefined): boolean {
+  return runtime?.health === 'ok' || runtime?.health === 'warn';
+}
 
 function factOf(isPending: boolean, isError: boolean, satisfied: () => boolean): OnboardingFact {
   if (isPending) return 'unknown';
@@ -62,8 +74,7 @@ export function useOnboardingFacts(state: OnboardingState): OnboardingMachineFac
   const toolchain = factOf(runtimes.isPending, runtimes.isError, () =>
     (runtimes.data ?? []).some(
       (runtime) =>
-        (PROJECT_RUNTIME_IDS as readonly string[]).includes(runtime.id) &&
-        (runtime.health === 'ok' || runtime.health === 'warn')
+        (PROJECT_RUNTIME_IDS as readonly string[]).includes(runtime.id) && isRuntimeReady(runtime)
     )
   );
 

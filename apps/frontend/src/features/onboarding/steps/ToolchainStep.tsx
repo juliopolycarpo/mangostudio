@@ -8,7 +8,6 @@
  * the streamed console — is `InstallAction`'s, unchanged.
  */
 
-import type { RuntimeStatus } from '@mangostudio/shared/environments';
 import { useQueries } from '@tanstack/react-query';
 import { CircleAlert, CircleCheck } from 'lucide-react';
 import { Spinner } from '@/components/ui/Spinner';
@@ -21,13 +20,7 @@ import {
 } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { StepFrame } from '../StepFrame';
-
-/** The two runtimes a project's own commands need; either one is enough to work. */
-const PROJECT_RUNTIME_IDS = ['node', 'bun'] as const;
-
-function isReady(runtime: RuntimeStatus | undefined): boolean {
-  return runtime?.health === 'ok' || runtime?.health === 'warn';
-}
+import { isRuntimeReady, PROJECT_RUNTIME_IDS } from '../use-onboarding-facts';
 
 export function ToolchainStep({ environmentId }: { readonly environmentId: string }) {
   const { t } = useI18n();
@@ -50,7 +43,7 @@ export function ToolchainStep({ environmentId }: { readonly environmentId: strin
         <ul className="space-y-2">
           {PROJECT_RUNTIME_IDS.map((id) => {
             const runtime = (runtimes.data ?? []).find((candidate) => candidate.id === id);
-            const ready = isReady(runtime);
+            const ready = isRuntimeReady(runtime);
             const name = resolve('runtime', id).name;
             return (
               <li
