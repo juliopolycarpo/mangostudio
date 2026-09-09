@@ -204,7 +204,7 @@ describe('scripts/lib/runtime-handshake', () => {
     });
 
     test('kills a child that closed stdout but never exits, without claiming its status', async () => {
-      const startedAt = Date.now();
+      const startedAt = performance.now();
       const probe = await probeRuntimeHandshake({
         command: standIn(
           `(await import('node:fs')).closeSync(1);` +
@@ -220,7 +220,7 @@ describe('scripts/lib/runtime-handshake', () => {
       expect(probe.exitCode).toBeNull();
       expect(probe.stderr).toContain('orphaned');
       // Cleanup is bounded: the handshake budget is 10s and must not be spent.
-      expect(Date.now() - startedAt).toBeLessThan(5_000);
+      expect(performance.now() - startedAt).toBeLessThan(5_000);
     });
 
     // The Windows shape this probe exists to name: the runtime died, but a

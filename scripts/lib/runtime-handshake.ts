@@ -100,7 +100,11 @@ export async function probeRuntimeHandshake(
     timeoutMs = resolveHandshakeBudgetMs(),
     exitGraceMs = DEFAULT_EXIT_GRACE_MS,
   } = options;
-  const startedAt = Date.now();
+  // `performance.now()`, not `Date.now()`: this is a duration, and a runner that
+  // steps its wall clock mid-handshake (NTP on a cold VM — the same cold start
+  // the budget above is for) would otherwise report a wrong or negative one.
+  // Matches how `scripts/lib/exec.ts` and `scripts/lib/summary.ts` time work.
+  const startedAt = performance.now();
 
   const child = Bun.spawn({
     cmd: [...command],
@@ -125,7 +129,7 @@ export async function probeRuntimeHandshake(
   }
   // Taken before any cleanup: what this is evidence of is how long the child
   // took to speak, not how long we then spent waiting for it to die.
-  const elapsedMs = Date.now() - startedAt;
+  const elapsedMs = Math.round(performance.now() - startedAt);
   child.stdin.end();
 
   if (read.kind === 'line') {
