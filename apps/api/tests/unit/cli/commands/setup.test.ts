@@ -115,6 +115,39 @@ describe('runSetup', () => {
     expect(opened).toEqual(['http://127.0.0.1:3001']);
   });
 
+  it('says the reused hub is not where the caller asked it to listen', async () => {
+    // Reuse is the right call, but silently opening a different address is how
+    // someone concludes the flag did nothing.
+    const lines: string[] = [];
+
+    await runSetup(
+      args({ port: 4000 }),
+      deps({
+        readState: () => Promise.resolve(LIVE),
+        log: (line) => lines.push(line),
+        openUrl: () => Promise.resolve(),
+      })
+    );
+
+    expect(lines.some((line) => line.includes('127.0.0.1:4000'))).toBe(true);
+    expect(lines.some((line) => line.includes('mangostudio stop'))).toBe(true);
+  });
+
+  it('says nothing about a target when the running hub already matches it', async () => {
+    const lines: string[] = [];
+
+    await runSetup(
+      args({ port: 3001 }),
+      deps({
+        readState: () => Promise.resolve(LIVE),
+        log: (line) => lines.push(line),
+        openUrl: () => Promise.resolve(),
+      })
+    );
+
+    expect(lines.some((line) => line.includes('not applied'))).toBe(false);
+  });
+
   it('clears a state file left by a crashed hub and starts a new one', async () => {
     // The file names a pid nothing is running under; the hub that replaces it
     // takes a live one.

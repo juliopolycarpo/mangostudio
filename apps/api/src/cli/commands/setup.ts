@@ -65,9 +65,34 @@ type HubProbe =
 export async function runSetup(args: SetupArgs, deps: Partial<SetupDeps> = {}): Promise<void> {
   const d = resolveDeps(deps);
 
-  const state = (await existingHub(d)) ?? (await startHub(args, d));
+  const reused = await existingHub(d);
+  if (reused) reportIgnoredTarget(args, reused, d);
+  const state = reused ?? (await startHub(args, d));
   const url = hubUrl(state.host, state.port);
   await offerBrowser(url, args, d);
+}
+
+/**
+ * Say when the hub being *reused* is not listening where the command was told
+ * to listen.
+ *
+ * `setup` never restarts what is already serving, so an explicit target can go
+ * unhonoured — and silently opening a different address is how someone ends up
+ * certain the flag did nothing. Only the reuse path can reach this: a hub this
+ * command started was started with the target, so there is nothing to warn
+ * about and "stop it first" would be advice about a process it just launched.
+ *
+ * The two addresses are compared as URLs so the bind-all aliases collapse
+ * together and `setup lan` on a hub already bound to `0.0.0.0` stays quiet.
+ */
+function reportIgnoredTarget(args: SetupArgs, state: ServerState, d: Required<SetupDeps>): void {
+  const requested = hubUrl(args.host ?? state.host, args.port ?? state.port);
+  const running = hubUrl(state.host, state.port);
+  if (requested === running) return;
+  d.log(
+    `Kept the hub already running at ${running}; the requested ${requested} was not applied. ` +
+      'Run "mangostudio stop" first to move it.'
+  );
 }
 
 /**
