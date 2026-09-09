@@ -7,6 +7,7 @@ import {
   resolveHandshakeBudgetMs,
   WIN32_HANDSHAKE_BUDGET_MS,
 } from '../lib/runtime-handshake';
+import { stubProcessPlatform } from './support/process-platform';
 
 /**
  * A generous budget for stand-ins that answer or exit on their own: only the
@@ -27,14 +28,6 @@ const HELLO_FRAME = JSON.stringify({
   peer: { name: 'mangostudio-runtime', version: '0.0.0-test', role: 'runtime' },
   capabilities: { platform: 'linux-x64' },
 });
-
-function stubProcessPlatform(platform: NodeJS.Platform): () => void {
-  const original = process.platform;
-  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
-  return () => {
-    Object.defineProperty(process, 'platform', { value: original, configurable: true });
-  };
-}
 
 /** Runs `source` as a stand-in runtime binary under the current Bun. */
 function standIn(source: string): readonly string[] {

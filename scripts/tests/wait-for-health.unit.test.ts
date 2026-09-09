@@ -9,14 +9,7 @@ import {
   WIN32_READY_BUDGET_MS,
   waitForServerReady,
 } from '../lib/wait-for-health';
-
-function stubProcessPlatform(platform: NodeJS.Platform): () => void {
-  const original = process.platform;
-  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
-  return () => {
-    Object.defineProperty(process, 'platform', { value: original, configurable: true });
-  };
-}
+import { stubProcessPlatform } from './support/process-platform';
 
 describe('scripts/lib/wait-for-health', () => {
   describe('budget constants', () => {
