@@ -280,6 +280,32 @@ describe('runSetup', () => {
     ).rejects.toThrow(/--service or --no-service/);
   });
 
+  it('refuses before it changes anything on this machine', async () => {
+    // `ensureAuthSecret` is the first call that can write: it persists a
+    // generated secret. Whatever the arguments alone can settle has to be
+    // settled before it, so a refusal never leaves half a change behind. The
+    // two interactivity signals agree in production; injecting them apart is
+    // how the ordering itself gets pinned.
+    const secretCalls: number[] = [];
+
+    await expect(
+      runSetup(
+        args(),
+        deps({
+          readState: () => Promise.resolve(null),
+          isInteractive: () => false,
+          ensureAuthSecret: () => {
+            secretCalls.push(1);
+            return Promise.resolve();
+          },
+          log: () => undefined,
+        })
+      )
+    ).rejects.toThrow(/--service or --no-service/);
+
+    expect(secretCalls).toEqual([]);
+  });
+
   it('asks about the service when a terminal is attached', async () => {
     const state = new FakeHubState(null);
     const launcher = new FakeLauncher();

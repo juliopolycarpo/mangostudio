@@ -144,9 +144,15 @@ async function existingHub(d: Required<SetupDeps>): Promise<ServerState | null> 
 }
 
 async function startHub(args: SetupArgs, d: Required<SetupDeps>): Promise<ServerState> {
-  // Before anything is started, and while a terminal is still attached: a unit
-  // has no stdin, and a hub that starts without a usable secret refuses every
-  // request it then accepts a connection for.
+  // Every refusal the arguments alone decide comes first, before the first call
+  // that changes anything: `ensureAuthSecret` can write a secret to disk, and a
+  // command that half-changes the machine and then reports failure leaves
+  // somebody guessing which half took.
+  assertServiceAnswerable(args, d);
+
+  // Then, and while a terminal is still attached: a unit has no stdin, and a
+  // hub that starts without a usable secret refuses every request it then
+  // accepts a connection for.
   await d.ensureAuthSecret({ log: d.log });
 
   const target = {
@@ -171,20 +177,32 @@ async function startHub(args: SetupArgs, d: Required<SetupDeps>): Promise<Server
 }
 
 /**
- * Whether to install the service unit.
+ * Refuse a run that has no way to answer the service question.
  *
  * With nobody at the keyboard this is refused rather than guessed in either
  * direction: installing one is a change to the machine that outlives the
  * command, and skipping one silently would leave a scripted install with a hub
  * that dies at logout while reporting success.
+ *
+ * It is separate from asking so that the refusal can be made before the first
+ * thing that changes this machine, rather than after it — the answer itself is
+ * still wanted at the point the unit is about to be installed.
+ *
+ * @example
+ * assertServiceAnswerable({ open: true }, d); // throws when no terminal is attached
  */
+function assertServiceAnswerable(args: SetupArgs, d: Required<SetupDeps>): void {
+  if (args.service !== undefined) return;
+  if (d.isInteractive()) return;
+  throw new CliError(
+    'Nothing is attached to answer whether to install the background service. Pass --service or --no-service.'
+  );
+}
+
+/** Whether to install the service unit, asking when there is somebody to ask. */
 function wantsService(args: SetupArgs, d: Required<SetupDeps>): Promise<boolean> {
   if (args.service !== undefined) return Promise.resolve(args.service);
-  if (!d.isInteractive()) {
-    throw new CliError(
-      'Nothing is attached to answer whether to install the background service. Pass --service or --no-service.'
-    );
-  }
+  assertServiceAnswerable(args, d);
   return d.promptYesNo(
     'Install MangoStudio as a background service, so it comes back after logout and reboot?'
   );
