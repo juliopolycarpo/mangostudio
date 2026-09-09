@@ -94,6 +94,16 @@ function machineStatus() {
   };
 }
 
+/** Leave every settings write open, so the window a guard covers stays open too. */
+function hangEveryPut(): void {
+  if (!respondFromScenario) throw new Error('scenario fetch mock has no implementation');
+  const respond = respondFromScenario;
+  scenario.fetchMock.mockImplementation((input, init) => {
+    if (String(init?.method).toUpperCase() === 'PUT') return new Promise<Response>(() => undefined);
+    return respond(input, init);
+  });
+}
+
 function settingsWith(onboarding: Record<string, unknown>) {
   return {
     ...DEFAULT_APP_SETTINGS,
@@ -283,13 +293,7 @@ describe('OnboardingWizard', () => {
     // Every write is built on the cached record, and nothing is cached until
     // the server answers: a second click during the first PUT would send the
     // state from before it, dropping the skip that is already in flight.
-    if (!respondFromScenario) throw new Error('scenario fetch mock has no implementation');
-    scenario.fetchMock.mockImplementation((input, init) => {
-      // A PUT that never answers is the whole window this guard covers.
-      if (String(init?.method).toUpperCase() === 'PUT')
-        return new Promise<Response>(() => undefined);
-      return respondFromScenario(input, init);
-    });
+    hangEveryPut();
 
     render(<OnboardingWizard onDone={() => undefined} />);
     await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument());
@@ -316,6 +320,25 @@ describe('OnboardingWizard', () => {
       expect(screen.getByTestId('onboarding-toolchain-failed')).toBeInTheDocument()
     );
     expect(screen.queryByTestId('onboarding-runtime-node')).not.toBeInTheDocument();
+  });
+
+  it('refuses to open the folder picker while a write is still open', async () => {
+    // The picker writes the chosen path onto the record it was opened against,
+    // so a path chosen during an earlier write would be built on the state that
+    // write is replacing.
+    hangEveryPut();
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true }),
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-folder')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-folder'));
+    await waitFor(() => expect(screen.getByTestId('onboarding-choose-folder')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByTestId('onboarding-skip-step'));
+
+    await waitFor(() => expect(screen.getByTestId('onboarding-choose-folder')).toBeDisabled());
   });
 
   it('advances past a skipped step and remembers the skip', async () => {

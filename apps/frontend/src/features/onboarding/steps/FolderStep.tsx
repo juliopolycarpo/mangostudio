@@ -90,6 +90,7 @@ export function FolderStep({ state, onChange, isSaving }: FolderStepProps) {
       <Button
         variant={state.workdir ? 'secondary' : 'primary'}
         data-testid="onboarding-choose-folder"
+        disabled={isSaving}
         onClick={() => setPickerOpen(true)}
       >
         <FolderOpen aria-hidden size={15} />
