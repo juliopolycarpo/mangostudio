@@ -132,7 +132,7 @@ async function existingHub(d: Required<SetupDeps>): Promise<ServerState | null> 
   }
 
   d.log(`MangoStudio is running (PID ${probe.state.pid}) but has not answered yet. Waiting.`);
-  const settled = await pollHub(d, (candidate) => candidate.kind === 'starting');
+  const settled = await pollHub(d, (candidate) => candidate.kind === 'starting', probe);
   if (settled.kind === 'healthy') return settled.state;
   // The process went away while we waited: nothing to reuse, and starting one is
   // now the right answer rather than an error about a hub that is no longer there.
@@ -200,10 +200,13 @@ function wantsService(args: SetupArgs, d: Required<SetupDeps>): Promise<boolean>
  */
 async function pollHub(
   d: Required<SetupDeps>,
-  keepWaiting: (probe: HubProbe) => boolean
+  keepWaiting: (probe: HubProbe) => boolean,
+  // The probe a caller has already taken. Re-reading the state file and
+  // re-asking `/health` in the same tick answers the question twice.
+  taken?: HubProbe
 ): Promise<HubProbe> {
   const deadline = d.now() + READY_TIMEOUT_MS;
-  let probe = await probeHub(d);
+  let probe = taken ?? (await probeHub(d));
   while (keepWaiting(probe) && d.now() < deadline) {
     await d.sleep(READY_POLL_MS);
     probe = await probeHub(d);
