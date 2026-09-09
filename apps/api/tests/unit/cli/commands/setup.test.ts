@@ -140,6 +140,78 @@ describe('runSetup', () => {
     expect(launcher.serveCalls).toEqual([{ detached: true }]);
   });
 
+  it('waits for a hub that is up but not yet answering instead of starting a second one', async () => {
+    // `serve` refuses to start beside a live pid, so guessing "nothing is
+    // there" from a health check that has not come good yet fails the command
+    // with an error about an instance the operator never started.
+    const launcher = new FakeLauncher();
+    let healthChecks = 0;
+
+    await runSetup(
+      args({ service: false }),
+      deps({
+        readState: () => Promise.resolve(LIVE),
+        confirmsHealthy: () => {
+          healthChecks += 1;
+          return Promise.resolve(healthChecks > 2);
+        },
+        log: () => undefined,
+        runService: launcher.runService,
+        runServe: launcher.runServe,
+      })
+    );
+
+    expect(launcher.serveCalls).toEqual([]);
+    expect(launcher.serviceCalls).toEqual([]);
+  });
+
+  it('names the process that is up but never answers', async () => {
+    const launcher = new FakeLauncher();
+
+    await expect(
+      runSetup(
+        args({ service: false }),
+        deps({
+          readState: () => Promise.resolve(LIVE),
+          confirmsHealthy: () => Promise.resolve(false),
+          log: () => undefined,
+          runService: launcher.runService,
+          runServe: launcher.runServe,
+        })
+      )
+    ).rejects.toThrow(/PID 42\).*not answering/);
+
+    expect(launcher.serveCalls).toEqual([]);
+  });
+
+  it('starts a replacement once the process it was waiting on is gone', async () => {
+    const launcher = new FakeLauncher();
+    let reads = 0;
+    let started = false;
+
+    await runSetup(
+      args({ service: false }),
+      deps({
+        // Up but silent, then gone: the state file stops naming anything while
+        // setup waits, which is the one case where starting one is right.
+        readState: () => {
+          reads += 1;
+          if (started) return Promise.resolve(LIVE);
+          return Promise.resolve(reads <= 2 ? LIVE : null);
+        },
+        confirmsHealthy: () => Promise.resolve(started),
+        log: () => undefined,
+        runService: launcher.runService,
+        runServe: (serveArgs) => {
+          started = true;
+          return launcher.runServe(serveArgs);
+        },
+      })
+    );
+
+    expect(launcher.serveCalls).toEqual([{ detached: true }]);
+  });
+
   it('installs the service when asked to, and starts nothing else', async () => {
     const state = new FakeHubState(null);
     const launcher = new FakeLauncher();

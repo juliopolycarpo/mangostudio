@@ -28,7 +28,7 @@ import { openUrl } from './open';
 import { runServe } from './serve';
 import { runService } from './service';
 
-/** How long to wait for a hub this command started to answer its own health check. */
+/** How long to wait for a hub — one this command started, or one already up — to answer. */
 const READY_TIMEOUT_MS = 30_000;
 const READY_POLL_MS = 250;
 
@@ -50,33 +50,72 @@ export interface SetupDeps {
   now: () => number;
 }
 
+/**
+ * What this machine's state file and a health check together say about a hub.
+ *
+ * `starting` is the member worth naming: a process that is alive but not yet
+ * answering is the hub this command wants, not a reason to launch a second one.
+ */
+type HubProbe =
+  | { readonly kind: 'healthy'; readonly state: ServerState }
+  | { readonly kind: 'starting'; readonly state: ServerState }
+  | { readonly kind: 'absent' };
+
 /** Take a fresh install to an open browser. // Usage: await runSetup({ open: true }) */
 export async function runSetup(args: SetupArgs, deps: Partial<SetupDeps> = {}): Promise<void> {
   const d = resolveDeps(deps);
 
-  const existing = await liveHub(d);
-  const state = existing ?? (await startHub(args, d));
-  if (existing) d.log(`MangoStudio is already running (PID ${existing.pid}).`);
-
+  const state = (await existingHub(d)) ?? (await startHub(args, d));
   const url = hubUrl(state.host, state.port);
   await offerBrowser(url, args, d);
 }
 
 /**
- * The hub already serving, or `null`.
+ * Read what is on this machine.
  *
  * A stale state file from a crashed process is cleared here rather than being
  * reported as a running instance, so `setup` on a machine that lost power is
  * the same one command as `setup` on a fresh one.
  */
-async function liveHub(d: Required<SetupDeps>): Promise<ServerState | null> {
+async function probeHub(d: Required<SetupDeps>): Promise<HubProbe> {
   const state = await d.readState();
-  if (!state) return null;
+  if (!state) return { kind: 'absent' };
   if (!isStateLive(state, (pid) => d.controller.isAlive(pid))) {
     await d.removeState();
-    return null;
+    return { kind: 'absent' };
   }
-  return (await d.confirmsHealthy(state.host, state.port)) ? state : null;
+  return (await d.confirmsHealthy(state.host, state.port))
+    ? { kind: 'healthy', state }
+    : { kind: 'starting', state };
+}
+
+/**
+ * The hub already on this machine, or `null` when there is none to reuse.
+ *
+ * A live process that has not answered yet is waited for rather than replaced.
+ * `serve` refuses to start beside a live pid, so treating "not healthy" as
+ * "nothing there" fails the command with an error about an instance the person
+ * never started — and a hub still booting, or one briefly failing `/health`, is
+ * exactly what `setup` runs into on a machine somebody just installed.
+ */
+async function existingHub(d: Required<SetupDeps>): Promise<ServerState | null> {
+  const probe = await probeHub(d);
+  if (probe.kind === 'absent') return null;
+  if (probe.kind === 'healthy') {
+    d.log(`MangoStudio is already running (PID ${probe.state.pid}).`);
+    return probe.state;
+  }
+
+  d.log(`MangoStudio is running (PID ${probe.state.pid}) but has not answered yet. Waiting.`);
+  const settled = await pollHub(d, (candidate) => candidate.kind === 'starting');
+  if (settled.kind === 'healthy') return settled.state;
+  // The process went away while we waited: nothing to reuse, and starting one is
+  // now the right answer rather than an error about a hub that is no longer there.
+  if (settled.kind === 'absent') return null;
+  throw new CliError(
+    `MangoStudio is running (PID ${settled.state.pid}) but is not answering its health check. ` +
+      'Run "mangostudio logs" to see why, or "mangostudio stop" to replace it.'
+  );
 }
 
 async function startHub(args: SetupArgs, d: Required<SetupDeps>): Promise<ServerState> {
@@ -97,13 +136,13 @@ async function startHub(args: SetupArgs, d: Required<SetupDeps>): Promise<Server
     await d.runServe({ detached: true, ...target });
   }
 
-  const state = await waitForHub(d);
-  if (!state) {
+  const ready = await pollHub(d, (candidate) => candidate.kind !== 'healthy');
+  if (ready.kind !== 'healthy') {
     throw new CliError(
       'MangoStudio was started but never answered its health check. Run "mangostudio logs" to see why.'
     );
   }
-  return state;
+  return ready.state;
 }
 
 /**
@@ -126,15 +165,25 @@ function wantsService(args: SetupArgs, d: Required<SetupDeps>): Promise<boolean>
   );
 }
 
-/** Poll until the hub this command started writes its state file and answers. */
-async function waitForHub(d: Required<SetupDeps>): Promise<ServerState | null> {
+/**
+ * Poll the hub until `keepWaiting` says to stop, or the deadline passes.
+ *
+ * The two callers are waiting for different things and say so: a hub this
+ * command just started has not written its state file yet, so `absent` is a
+ * normal early answer; a hub that was already up going `absent` means the
+ * process has gone, and there is nothing left to wait for.
+ */
+async function pollHub(
+  d: Required<SetupDeps>,
+  keepWaiting: (probe: HubProbe) => boolean
+): Promise<HubProbe> {
   const deadline = d.now() + READY_TIMEOUT_MS;
-  while (d.now() < deadline) {
-    const state = await liveHub(d);
-    if (state) return state;
+  let probe = await probeHub(d);
+  while (keepWaiting(probe) && d.now() < deadline) {
     await d.sleep(READY_POLL_MS);
+    probe = await probeHub(d);
   }
-  return null;
+  return probe;
 }
 
 /**

@@ -536,9 +536,12 @@ the address in a browser.
 - Where no browser can be opened — a Linux session with no `DISPLAY`, typically
   over SSH — the URL and an `ssh -L` port-forward line are printed instead of a
   claim that a window appeared.
-- A hub already answering its health check is reused, never restarted. A state
-  file left by a crashed one is cleared first.
-- It exits non-zero if the hub it started never answers within 30 seconds.
+- A hub already answering its health check is reused, never restarted. One that
+  is alive but not answering yet — still booting, or briefly failing `/health` —
+  is waited for rather than replaced, and if it dies while `setup` waits, a
+  replacement is started. A state file left by a crashed one is cleared first.
+- It exits non-zero if the hub it started never answers within 30 seconds, and
+  names the pid if the one already running is the one that stayed silent.
 
 `setup` cannot sign a vendor CLI in, choose a repository, or send a first
 message; those are the browser flow's, and it says so by opening it rather than

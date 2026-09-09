@@ -101,9 +101,12 @@ um já em execução) e abre o endereço no navegador.
   tipicamente por SSH — a URL e uma linha `ssh -L` são impressas em vez de uma
   afirmação de que uma janela apareceu.
 - Um hub que já responde ao health check é reaproveitado, nunca reiniciado. Um
-  arquivo de estado deixado por um que travou é limpo antes.
+  que está vivo mas ainda não responde — subindo, ou falhando o `/health` por um
+  instante — é esperado em vez de substituído, e se ele morrer durante a espera,
+  um substituto é iniciado. Um arquivo de estado deixado por um que travou é
+  limpo antes.
 - Sai com código diferente de zero se o hub que ele iniciou não responder em 30
-  segundos.
+  segundos, e nomeia o pid quando quem ficou calado foi o que já estava rodando.
 
 `setup` não consegue conectar uma CLI de fornecedor, escolher um repositório ou
 enviar a primeira mensagem; isso é do fluxo no navegador, e ele diz isso abrindo
