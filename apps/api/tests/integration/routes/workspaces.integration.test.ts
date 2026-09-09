@@ -146,8 +146,25 @@ describe('workspace routes environment scope', () => {
 
     // Silently listing the hub under another machine's name is the failure
     // this guards: the caller asked about a machine it cannot reach, and any
-    // answer other than an error would be about the wrong computer.
-    expect(response.status).not.toBe(200);
+    // answer other than an error would be about the wrong computer. It is a
+    // 404 rather than a 500 because the id is what was wrong, not the hub.
+    expect(response.status).toBe(404);
+  });
+
+  it('refuses a validate that names an environment this account does not have', async () => {
+    const root = await createTempDir();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, workspaceRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/workspace/fs/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: root, environmentId: 'env-that-does-not-exist' }),
+      })
+    );
+
+    expect(response.status).toBe(404);
   });
 
   it('validates a path against an explicitly named environment', async () => {
