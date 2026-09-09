@@ -33,6 +33,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Select } from '@/components/ui/Select';
+import { RerunSetupCard } from '@/features/onboarding/RerunSetupCard';
 import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
 import { useI18n } from '@/hooks/use-i18n';
 import { modelSelectOptions } from '@/lib/model-select-options';
@@ -510,6 +511,8 @@ export function GeneralSettings({
           />
         </div>
       </Card>
+
+      <RerunSetupCard />
     </div>
   );
 }

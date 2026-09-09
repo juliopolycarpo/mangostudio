@@ -28,6 +28,7 @@ pré-compilado e sidecar do frontend. Veja a
 | Comando                                                                                                               | Descrição                                                                                            |
 | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `mangostudio`                                                                                                         | Imprime ajuda e a lista de comandos.                                                                 |
+| `setup [host\|port\|host:port] [--service\|--no-service] [--no-open]`                                                 | Leva uma instalação nova até um hub rodando e abre no navegador.                                     |
 | `serve [host\|port\|host:port]`                                                                                       | Inicia o servidor em foreground (padrão `localhost:3001`).                                           |
 | `serve [host\|port\|host:port] -d`                                                                                    | Inicia o servidor em background (detached) e retorna.                                                |
 | `status`                                                                                                              | Mostra se um servidor está rodando, sua URL, modo de início e saúde.                                 |
@@ -84,9 +85,39 @@ de release nova (`[updates]` no `config.toml`, `MANGO_UPDATES_CHECK`,
 e `Update` de `status` e `doctor` e o aviso na página "Esta máquina". Detalhes
 na [versão em inglês](../../reference/cli.md#upgrade).
 
+### setup
+
+O primeiro comando de uma instalação nova, e a metade em terminal do fluxo de
+primeira execução do navegador. Garante que existe um segredo de autenticação,
+opcionalmente instala o serviço em segundo plano, inicia o hub (ou reaproveita
+um já em execução) e abre o endereço no navegador.
+
+- `--service` / `--no-service` respondem a pergunta do serviço de antemão. Sem
+  um terminal para perguntar, um deles é **obrigatório**: instalar uma unidade
+  sobrevive ao comando, e pular silenciosamente deixaria uma instalação
+  automatizada com um hub que morre no logout enquanto reporta sucesso.
+- `--no-open` imprime a URL em vez de abrir qualquer coisa.
+- Onde nenhum navegador pode ser aberto — uma sessão Linux sem `DISPLAY`,
+  tipicamente por SSH — a URL e uma linha `ssh -L` são impressas em vez de uma
+  afirmação de que uma janela apareceu.
+- Um hub que já responde ao health check é reaproveitado, nunca reiniciado. Um
+  que está vivo mas ainda não responde — subindo, ou falhando o `/health` por um
+  instante — é esperado em vez de substituído, e se ele morrer durante a espera,
+  um substituto é iniciado. Um arquivo de estado deixado por um que travou é
+  limpo antes.
+- Sai com código diferente de zero se o hub que ele iniciou não responder em 30
+  segundos, e nomeia o pid quando quem ficou calado foi o que já estava rodando.
+
+`setup` não consegue conectar uma CLI de fornecedor, escolher um repositório ou
+enviar a primeira mensagem; isso é do fluxo no navegador, e ele diz isso abrindo
+o fluxo em vez de alegar que estão prontos. Veja
+[`docs/pt-br/guides/first-run.md`](../guides/first-run.md).
+
 ## Exemplos
 
 ```bash
+mangostudio setup              # instalação nova: segredo, serviço, início, abrir
+mangostudio setup --no-service --no-open  # automatizado, imprime a URL
 mangostudio serve              # foreground em localhost:3001
 mangostudio serve 3000         # foreground em localhost:3000
 mangostudio serve 127.0.0.1 -d # background em 127.0.0.1:3001

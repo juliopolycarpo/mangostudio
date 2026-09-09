@@ -29,8 +29,35 @@ Controlam preferências globais que valem para todos os provedores e tools.
 
 ```
 GET  /api/settings/app    → Retorna AppSettings
-PUT  /api/settings/app    → Atualiza e retorna AppSettings normalizado
+PUT  /api/settings/app    → Mescla um patch e retorna AppSettings normalizado
 ```
+
+**O corpo do PUT é um patch, não um snapshot.** Todo campo é opcional; o
+servidor sobrepõe o que chega ao registro que já tem e depois normaliza. Duas
+consequências, e ambas são o objetivo: um cliente sobrevive a todo campo que o
+schema ganhar depois, em vez de ser recusado por omitir um que nunca conheceu, e
+duas telas editando configurações diferentes param de sobrescrever uma à outra
+porque nenhuma carrega o campo da outra.
+
+A regra, por inteiro:
+
+- uma chave omitida mantém o que está guardado;
+- um campo enviado substitui por inteiro o que estava guardado nele. Um membro
+  opcional que o patch deixa de fora é uma limpeza, não uma omissão — é assim
+  que "a máquina mudou, esqueça aquela pasta" se diz;
+- arrays substituem pelo mesmo motivo — mesclar por índice tornaria "remova a
+  segunda regra" inexprimível;
+- só os contêineres *acima* desses campos mesclam: `profileSettings` e o registro
+  de um perfil, cujos filhos têm donos diferentes;
+- `null` em uma chave que o aceita reseta aquela subárvore para o padrão. É assim
+  que uma subárvore inteira é limpa, e funciona porque a normalização roda
+  *depois* da mesclagem.
+
+A unidade de um patch é um campo de topo inteiro: envie `contextSettings` e você
+envia tudo dele, e meia subárvore é recusada em vez de completada com padrões.
+Um campo só é endereçável mais fundo onde suas partes têm donos independentes —
+`profileSettings.<id>.libraryLocations` e `.onboarding` são escritos por telas
+diferentes, então cada um é opcional por conta própria.
 
 As settings ficam em um único blob JSON na coluna `settingsJson`. Na leitura, `normalizeAppSettings()` trata dados parciais ou inválidos, caindo para defaults em qualquer campo ausente ou incorreto.
 

@@ -32,9 +32,11 @@ import {
   normalizeMultiAgentSettings,
   normalizePromptSettings,
   normalizeWorkspaceSettings,
+  onboardingFor,
   SUBAGENT_MAX_TURNS_MAX,
   SUBAGENT_MAX_TURNS_MIN,
   withLibraryLocations,
+  withOnboarding,
 } from '../../src/app-settings';
 import {
   DEFAULT_EXTERNAL_AGENT_SETTINGS,
@@ -42,6 +44,7 @@ import {
   externalCapabilitiesFingerprint,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '../../src/external-agents';
+import { DEFAULT_ONBOARDING_STATE } from '../../src/onboarding';
 import { DEFAULT_PROFILE_ID } from '../../src/profiles';
 import { CHAT_SIDEBAR_WIDTH_MAX, WORKSPACE_PANEL_WIDTH_MAX } from '../../src/workspaces';
 
@@ -754,6 +757,7 @@ describe('normalizeAppSettings', () => {
           },
           workspace: {},
         },
+        onboarding: DEFAULT_ONBOARDING_STATE,
       },
     });
     expect(libraryLocationsFor(result).home).toMatchObject({
@@ -783,6 +787,7 @@ describe('normalizeAppSettings', () => {
           home: { ...DEFAULT_LIBRARY_LOCATION_SETTINGS.home, 'agents-skills': true },
           workspace: {},
         },
+        onboarding: DEFAULT_ONBOARDING_STATE,
       },
     });
   });
@@ -830,6 +835,7 @@ describe('withLibraryLocations', () => {
     expect(updated.profileSettings).toEqual({
       [DEFAULT_PROFILE_ID]: {
         libraryLocations: homeLocations({ 'agents-skills': true, 'claude-skills': false }),
+        onboarding: DEFAULT_ONBOARDING_STATE,
       },
     });
     expect(libraryLocationsFor(updated).home).toMatchObject({
@@ -864,5 +870,71 @@ describe('AppSettingsPutBodySchema', () => {
 
     expect(Value.Check(AppSettingsPutBodySchema, body)).toBe(true);
     expect(Value.Check(AppSettingsSchema, body)).toBe(false);
+  });
+});
+
+describe('onboarding progress inside profile settings', () => {
+  it('defaults to a fresh, uncompleted record', () => {
+    const settings = normalizeAppSettings(undefined);
+
+    expect(onboardingFor(settings)).toEqual(DEFAULT_ONBOARDING_STATE);
+  });
+
+  it('reads persisted progress back out of the default profile', () => {
+    const settings = normalizeAppSettings({
+      profileSettings: {
+        default: {
+          libraryLocations: DEFAULT_LIBRARY_LOCATION_SETTINGS,
+          onboarding: { welcomeAcknowledged: true, skippedSteps: ['service'], chatId: 'chat-1' },
+        },
+      },
+    });
+
+    expect(onboardingFor(settings)).toEqual({
+      welcomeAcknowledged: true,
+      skippedSteps: ['service'],
+      chatId: 'chat-1',
+    });
+  });
+
+  it('keeps onboarding progress when library locations are rewritten', () => {
+    const withProgress = withOnboarding(DEFAULT_APP_SETTINGS, {
+      welcomeAcknowledged: true,
+      skippedSteps: [],
+      completedAt: 1_700_000_000_000,
+    });
+
+    const next = withLibraryLocations(withProgress, 'default', {
+      home: { 'claude-skills': false },
+      workspace: {},
+    } as LibraryLocationSettings);
+
+    expect(onboardingFor(next).completedAt).toBe(1_700_000_000_000);
+    expect(onboardingFor(next).welcomeAcknowledged).toBe(true);
+  });
+
+  it('keeps library locations when onboarding progress is rewritten', () => {
+    const withLocations = withLibraryLocations(DEFAULT_APP_SETTINGS, 'default', {
+      home: { 'claude-skills': false },
+      workspace: {},
+    } as LibraryLocationSettings);
+
+    const next = withOnboarding(withLocations, { welcomeAcknowledged: true, skippedSteps: [] });
+
+    expect(libraryLocationsFor(next).home['claude-skills']).toBe(false);
+  });
+
+  it('is accepted by the published settings schema', () => {
+    const settings = withOnboarding(DEFAULT_APP_SETTINGS, {
+      welcomeAcknowledged: true,
+      skippedSteps: ['chat'],
+      environmentId: 'local',
+      workdir: '/home/dev/project',
+      runner: { kind: 'mangostudio', agentId: 'default' },
+      chatId: 'chat-1',
+      completedAt: 5,
+    });
+
+    expect(Value.Check(AppSettingsSchema, settings)).toBe(true);
   });
 });

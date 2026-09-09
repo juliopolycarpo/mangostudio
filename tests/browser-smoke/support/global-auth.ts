@@ -79,6 +79,30 @@ export default async function globalAuth(config: FullConfig): Promise<void> {
       );
     }
 
+    // Every authenticated route sends an account that has not finished
+    // first-run setup to `/welcome`. This suite is about the surfaces behind
+    // that gate, so the shared account clears it here — through the same
+    // public endpoint the wizard uses, which also keeps this honest if the
+    // record's shape changes.
+    const completed = await context.put('/api/settings/app', {
+      data: {
+        profileSettings: {
+          default: {
+            onboarding: {
+              welcomeAcknowledged: true,
+              skippedSteps: [],
+              completedAt: Date.now(),
+            },
+          },
+        },
+      },
+    });
+    if (!completed.ok()) {
+      throw new Error(
+        `browser-smoke: marking setup complete failed with ${completed.status()}. ${await completed.text()}`
+      );
+    }
+
     await mkdir(dirname(STORAGE_STATE_PATH), { recursive: true });
     await context.storageState({ path: STORAGE_STATE_PATH });
   } finally {

@@ -21,6 +21,13 @@ import { externalAgentKeys, externalAgentsQueryOptions } from './queries';
 export interface ExternalAgentsView {
   readonly agents: readonly ExternalAgentDescriptor[];
   readonly isLoading: boolean;
+  /**
+   * Whether discovery itself failed. Separate from an empty list on purpose: a
+   * refused probe and a machine with no agents on it look identical in `agents`,
+   * and only a caller that can tell them apart may treat the empty one as an
+   * answer.
+   */
+  readonly isError: boolean;
   readonly find: (targetId: ExternalAgentTargetId) => ExternalAgentDescriptor | undefined;
 }
 
@@ -38,16 +45,17 @@ export function useExternalAgents(environmentId: string | null): ExternalAgentsV
   // permission picker — and this is what fills them in once the vendor answers.
   useRealtimeInvalidation(EXTERNAL_AGENTS_TOPIC, 'external-agents', invalidate);
 
-  const { data, isLoading } = useQuery(externalAgentsQueryOptions(environmentId));
+  const { data, isLoading, isError } = useQuery(externalAgentsQueryOptions(environmentId));
   const agents = useMemo(() => data?.agents ?? [], [data?.agents]);
 
   return useMemo(
     () => ({
       agents,
       isLoading,
+      isError,
       find: (targetId) => agents.find((agent) => agent.targetId === targetId),
     }),
-    [agents, isLoading]
+    [agents, isLoading, isError]
   );
 }
 

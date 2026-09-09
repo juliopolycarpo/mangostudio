@@ -1,8 +1,9 @@
-import type { AppSettings, LibraryLocationSettings } from '@mangostudio/shared/app-settings';
-import {
-  DEFAULT_LIBRARY_LOCATION_SETTINGS,
-  normalizeAppSettings,
+import type {
+  AppSettings,
+  AppSettingsPutBody,
+  LibraryLocationSettings,
 } from '@mangostudio/shared/app-settings';
+import { DEFAULT_LIBRARY_LOCATION_SETTINGS } from '@mangostudio/shared/app-settings';
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
 import { LIBRARY_SCOPES } from '@mangostudio/shared/library';
 import {
@@ -16,7 +17,7 @@ import {
   environmentProbingService,
   LOCAL_PROBE_SCOPE,
 } from '../../environments/application/probing-service';
-import { getSavedAppSettings, upsertAppSettings } from '../infrastructure/app-settings-repository';
+import { getSavedAppSettings, patchAppSettings } from '../infrastructure/app-settings-repository';
 
 /**
  * Agent CLI detection stats every registry location synchronously and reads
@@ -66,12 +67,32 @@ export async function getAppSettings(db: Kysely<Database>, userId: string): Prom
   return getSavedAppSettings(db, userId, await libraryLocationDefaults());
 }
 
+/**
+ * Apply a settings patch and tell every other client about it.
+ *
+ * Takes a patch rather than a whole settings object so a caller that changes
+ * one preference cannot overwrite one it never read — see
+ * `AppSettingsPutBodySchema`. A full object is still a valid patch, which is
+ * why every existing caller keeps working unchanged.
+ *
+ * @example
+ * await updateAppSettings(db, user.id, { thinkingEnabled: false });
+ */
 export async function updateAppSettings(
   db: Kysely<Database>,
   userId: string,
-  settings: AppSettings
+  patch: AppSettingsPutBody
 ): Promise<AppSettings> {
-  const persistedSettings = await upsertAppSettings(db, userId, normalizeAppSettings(settings));
+  // A patch that never mentions library locations still has to normalize
+  // against what this machine actually has installed: without the detected
+  // defaults, saving an unrelated preference on a fresh account would persist
+  // every location as off.
+  const persistedSettings = await patchAppSettings(
+    db,
+    userId,
+    patch,
+    await libraryLocationDefaults()
+  );
   publishSettingsInvalidation(userId, 'app');
   return persistedSettings;
 }

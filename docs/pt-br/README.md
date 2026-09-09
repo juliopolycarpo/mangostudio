@@ -32,9 +32,20 @@ Início rápido com o instalador shell:
 
 ```bash
 curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh | bash
-mangostudio serve           # inicia em http://localhost:3001
-mangostudio service install # ou entrega ao gerenciador de serviços do usuário
+mangostudio setup           # segredo, serviço, início e abre o navegador
 ```
+
+`setup` é o único comando de que uma instalação nova precisa: gera um segredo de
+autenticação se não houver, pergunta se o hub deve continuar rodando depois do
+logout, inicia (ou reaproveita um já em execução) e abre. Por SSH ele imprime o
+endereço e uma linha de encaminhamento de porta em vez de fingir que abriu uma
+janela. `mangostudio serve` e `mangostudio service install` continuam sendo os
+equivalentes diretos.
+
+Na primeira vez que você entra, o navegador abre um fluxo curto de configuração
+— pasta, toolchain, quem responde, e uma pergunta de verdade no seu próprio
+projeto. Todo passo é pulável e refazível em **Configurações → Geral**. Veja
+[`docs/pt-br/guides/first-run.md`](guides/first-run.md).
 
 No Windows, execute o instalador PowerShell:
 

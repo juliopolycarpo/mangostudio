@@ -16,14 +16,25 @@ export const ListDirectoryResponseSchema = Type.Object({
   truncated: Type.Optional(Type.Boolean()),
 });
 
+/**
+ * Which machine's filesystem to read.
+ *
+ * `chatId` names it indirectly, through the chat's own environment, and is what
+ * every in-chat picker uses. `environmentId` names it directly, for a caller
+ * that is choosing a folder *before* any chat exists — first-run setup is the
+ * one that does. Supplying both is a contradiction, not a precedence question,
+ * so it is refused rather than resolved.
+ */
 export const ListDirectoryQuerySchema = Type.Object({
   path: Type.Optional(Type.String()),
   chatId: Type.Optional(Type.String({ minLength: 1 })),
+  environmentId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
 });
 
 export const ValidatePathBodySchema = Type.Object({
   path: Type.String({ minLength: 1 }),
   chatId: Type.Optional(Type.String({ minLength: 1 })),
+  environmentId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
 });
 
 export const WorkdirValidationReasonSchema = Type.Union([

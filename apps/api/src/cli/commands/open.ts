@@ -37,7 +37,8 @@ export function browserCommand(platform: NodeJS.Platform, url: string): string[]
   return ['xdg-open', url];
 }
 
-function realOpenUrl(url: string): Promise<void> {
+/** Hand a URL to the platform's opener, detached so the CLI returns at once. */
+export function openUrl(url: string): Promise<void> {
   try {
     const child = Bun.spawn(browserCommand(process.platform, url), {
       stdin: 'ignore',
@@ -58,6 +59,6 @@ function resolveDeps(deps: Partial<OpenDeps>): Required<OpenDeps> {
     readState: deps.readState ?? readState,
     removeState: deps.removeState ?? removeState,
     log: deps.log ?? writeLine,
-    openUrl: deps.openUrl ?? realOpenUrl,
+    openUrl: deps.openUrl ?? openUrl,
   };
 }

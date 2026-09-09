@@ -685,6 +685,19 @@ Open these first:
 - `apps/frontend/src/features/settings/providers/`
 - `apps/frontend/src/features/settings/tools/`
 
+## First-Run Setup
+
+Open these first:
+
+- `apps/shared/src/onboarding/` (step ids, the persisted record, and the pure resume rules)
+- `apps/shared/src/app-settings/patch.ts` (the settings patch contract and its three builders)
+- `apps/frontend/src/routes/welcome.tsx` (a sibling of `_authenticated`, deliberately — see the file)
+- `apps/frontend/src/routes/_authenticated.tsx` (`beforeLoad` is the gate; `errorComponent` is the retry)
+- `apps/frontend/src/features/onboarding/` (`use-onboarding-progress` remembers, `use-onboarding-facts` reads the machine)
+- `apps/frontend/src/features/external-agents/send-with-consent.ts` (one consent-retry rule, two send paths)
+- `apps/api/src/cli/commands/setup.ts` (the terminal twin)
+- `docs/guides/first-run.md`
+
 ## Image Generation
 
 Open these first:

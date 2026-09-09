@@ -22,6 +22,17 @@ export interface ServeArgs {
   detached: boolean;
 }
 
+/**
+ * `setup` args. `service` is deliberately tri-state: absent means "ask", and
+ * with nobody to ask the command refuses rather than choosing for the user.
+ */
+export interface SetupArgs {
+  host?: string;
+  port?: number;
+  service?: boolean;
+  open: boolean;
+}
+
 export interface DoctorArgs {
   all: boolean;
   chatgptRefresh: boolean;
@@ -122,19 +133,31 @@ const HOST_ALIASES: Record<string, string> = {
   public: '0.0.0.0',
 };
 
-/** Parse `serve` args: optional host/port + -d/--detach. // Usage: parseServeArgs(['127.0.0.1:3000','-d']) */
-export function parseServeArgs(rest: string[]): ServeArgs {
+/**
+ * The bind target `serve` and `setup` both accept, read once.
+ *
+ * `takeFlag` is what each command's own options are: it answers whether it
+ * consumed the argument, and everything it does not consume is either the one
+ * positional target or an error. Sharing the loop is what keeps "a second
+ * target is an error" and "an unknown dash-argument is an error" true of both
+ * commands rather than of whichever one was edited last.
+ *
+ * @example
+ * parseTargetArgs(['3000', '-d'], 'serve', (arg) => arg === '-d');
+ * // => { host: undefined, port: 3000 }
+ */
+function parseTargetArgs(
+  rest: string[],
+  command: string,
+  takeFlag: (arg: string) => boolean
+): { host?: string; port?: number } {
   let host: string | undefined;
   let port: number | undefined;
-  let detached = false;
 
   for (const arg of rest) {
-    if (arg === '-d' || arg === '--detach') {
-      detached = true;
-      continue;
-    }
+    if (takeFlag(arg)) continue;
     if (arg.startsWith('-')) {
-      throw new CliError(`Unknown option for serve: ${arg}`);
+      throw new CliError(`Unknown option for ${command}: ${arg}`);
     }
     if (host !== undefined || port !== undefined) {
       throw new CliError(`Unexpected argument: ${arg}`);
@@ -142,7 +165,36 @@ export function parseServeArgs(rest: string[]): ServeArgs {
     ({ host, port } = parseServeTarget(arg));
   }
 
+  return { host, port };
+}
+
+/** Parse `serve` args: optional host/port + -d/--detach. // Usage: parseServeArgs(['127.0.0.1:3000','-d']) */
+export function parseServeArgs(rest: string[]): ServeArgs {
+  let detached = false;
+  const { host, port } = parseTargetArgs(rest, 'serve', (arg) => {
+    if (arg !== '-d' && arg !== '--detach') return false;
+    detached = true;
+    return true;
+  });
+
   return { host, port, detached };
+}
+
+/** Parse `setup` args: an optional target, --service/--no-service, --no-open. // Usage: parseSetupArgs(['--service']) */
+export function parseSetupArgs(rest: string[]): SetupArgs {
+  let service: boolean | undefined;
+  let open = true;
+  const { host, port } = parseTargetArgs(rest, 'setup', (arg) => {
+    if (arg === '--service' || arg === '--no-service') {
+      service = arg === '--service';
+      return true;
+    }
+    if (arg !== '--no-open') return false;
+    open = false;
+    return true;
+  });
+
+  return { host, port, service, open };
 }
 
 /** Parse `doctor` args: optional --all, --chatgpt-refresh, and --probe flags. */

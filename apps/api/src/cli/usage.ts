@@ -10,6 +10,14 @@ Usage:
   mangostudio <command> [options]
 
 Commands:
+  setup [host|port|host:port] [--service|--no-service] [--no-open]
+                      Get a fresh install to a working hub: set the auth
+                      secret if it has none, optionally install the
+                      background service, start the hub if one is not
+                      already running, and open it in a browser.
+                      Reuses a hub that is already running. Without a
+                      terminal to prompt, --service or --no-service is
+                      required. --no-open prints the URL instead.
   serve [host|port|host:port] [-d]
                       Start the server (default localhost:3001).
                       Host aliases: lan, all, any, public => 0.0.0.0; local => 127.0.0.1.

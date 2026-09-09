@@ -20,10 +20,11 @@ right depth quickly instead of scanning a flat list of files.
 ### New contributor
 
 1. [`../README.md`](../README.md)
-2. [`guides/contributor-quickstart.md`](./guides/contributor-quickstart.md)
-3. [`reference/testing.md`](./reference/testing.md)
-4. [`reference/agent-playbooks.md`](./reference/agent-playbooks.md) when you need a feature map
-5. [`reference/labels.md`](./reference/labels.md) before opening a PR or issue
+2. [`guides/first-run.md`](./guides/first-run.md)
+3. [`guides/contributor-quickstart.md`](./guides/contributor-quickstart.md)
+4. [`reference/testing.md`](./reference/testing.md)
+5. [`reference/agent-playbooks.md`](./reference/agent-playbooks.md) when you need a feature map
+6. [`reference/labels.md`](./reference/labels.md) before opening a PR or issue
 
 ### Backend or architecture work
 

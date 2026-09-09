@@ -15,10 +15,7 @@ import type {
   ExternalAgentUnavailableReason,
   ExternalReviewTarget,
 } from '@mangostudio/shared/external-agents';
-import {
-  EXTERNAL_AGENT_UNAVAILABLE_REASONS,
-  isExternalAgentTargetId,
-} from '@mangostudio/shared/external-agents';
+import { EXTERNAL_AGENT_UNAVAILABLE_REASONS } from '@mangostudio/shared/external-agents';
 import type {
   ExternalTurnRequest,
   ModelUnavailableDetails,
@@ -39,15 +36,11 @@ import { generateChatTitleSuggestion } from '@/features/chat/services/chat-title
 import { compactChat, summarizeToNewChat } from '@/features/chat/services/context-compaction';
 import { publishExternalCommands } from '@/features/external-agents/command-catalog';
 import {
-  type ExternalDisclosureRequest,
-  promptExternalDisclosure,
-} from '@/features/external-agents/disclosure-prompt';
-import {
   publishExternalAccountLimits,
   publishExternalCommandCatalog,
 } from '@/features/external-agents/queries';
+import { sendWithExternalConsent } from '@/features/external-agents/send-with-consent';
 import { externalUnavailableText } from '@/features/external-agents/useExternalAgents';
-import { promptExternalWorkspaceTrust } from '@/features/external-agents/workspace-trust-prompt';
 import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import {
   createTextGenerationStreamState,
@@ -68,63 +61,6 @@ import {
 } from '@/services/generation-service';
 
 /**
- * Runs a send, and gives each answerable refusal one chance to be answered.
- *
- * Both refusals are decided before any of the stream exists — the server answers
- * 403 rather than opening one — so a retry here re-sends a turn that never
- * started rather than resuming one that half did. Exactly one retry per
- * refusal: a second one after the answer was recorded is a real failure, and
- * looping on it would hide it behind a dialog the user keeps answering.
- *
- * The two are checked in sequence rather than in a loop, so a send cannot bounce
- * between them. A turn refused for a workspace and then for a disclosure is a
- * turn that asks the user two separate questions, which is the honest cost of
- * two independent consents; a turn refused twice for the same one is a failure
- * and surfaces as one.
- */
-async function sendWithExternalConsent(chatId: string, send: () => Promise<void>): Promise<void> {
-  try {
-    await send();
-  } catch (error) {
-    const answered = await answerExternalRefusal(chatId, error);
-    if (!answered) throw error;
-    try {
-      await send();
-    } catch (retryError) {
-      // The *other* consent, asked once. Reaching here means the first answer
-      // was recorded and accepted, and the server then refused for a different
-      // reason — a second question, not the same one again.
-      const secondAnswer = await answerExternalRefusal(chatId, retryError, answered);
-      if (!secondAnswer) throw retryError;
-      await send();
-    }
-  }
-}
-
-/**
- * Raises whichever consent dialog this refusal calls for.
- *
- * Returns the kind that was answered, or `undefined` when the error is not an
- * answerable refusal, is the kind already answered on this send, or when the
- * user declined.
- */
-async function answerExternalRefusal(
-  chatId: string,
-  error: unknown,
-  already?: 'workspace' | 'disclosure'
-): Promise<'workspace' | 'disclosure' | undefined> {
-  const scope = untrustedWorkspaceScope(error);
-  if (scope && already !== 'workspace') {
-    return (await promptExternalWorkspaceTrust({ chatId, ...scope })) ? 'workspace' : undefined;
-  }
-  const disclosure = requiredDisclosureScope(error);
-  if (disclosure && already !== 'disclosure') {
-    return (await promptExternalDisclosure(disclosure)) ? 'disclosure' : undefined;
-  }
-  return undefined;
-}
-
-/**
  * The deprecated-provider refusal, or `undefined` for any other failure.
  *
  * Read off the typed details rather than the server's sentence: the reason is
@@ -138,43 +74,6 @@ function deprecatedProviderRefusal(error: unknown): ModelUnavailableDetails | un
   const details = error.details as Partial<ModelUnavailableDetails> | undefined;
   if (details?.reason !== 'provider-deprecated' || !details.action) return undefined;
   return { ...details, reason: 'provider-deprecated', action: details.action };
-}
-
-/**
- * The vendor and machine a disclosure refusal named.
- *
- * Both fields or neither: the acknowledgement is stored per vendor and per
- * machine, so a partial scope could only be recorded partially. The chat's own
- * environment is deliberately not used as a fallback — it can differ from the
- * one the refused turn resolved against, and acknowledging the wrong machine
- * would leave the send refused with a consent recorded that nobody asked for.
- */
-function requiredDisclosureScope(error: unknown): ExternalDisclosureRequest | undefined {
-  if (!(error instanceof ApiError)) return undefined;
-  if (error.code !== ERROR_CODES.EXTERNAL_DISCLOSURE_REQUIRED) return undefined;
-  const { targetId, environmentId } = error.details ?? {};
-  if (!targetId || !environmentId || !isExternalAgentTargetId(targetId)) return undefined;
-  return { targetId, environmentId };
-}
-
-/**
- * The scope a refusal named, or `undefined` when it was some other failure.
- *
- * All three fields or none: the grant is checked against the scope this
- * disclosed, and a partial one could only be checked partially.
- */
-function untrustedWorkspaceScope(error: unknown):
-  | {
-      readonly workspacePath: string;
-      readonly targetId: string;
-      readonly environmentId: string;
-    }
-  | undefined {
-  if (!(error instanceof ApiError)) return undefined;
-  if (error.code !== ERROR_CODES.EXTERNAL_WORKSPACE_UNTRUSTED) return undefined;
-  const { workspacePath, targetId, environmentId } = error.details ?? {};
-  if (!workspacePath || !targetId || !environmentId) return undefined;
-  return { workspacePath, targetId, environmentId };
 }
 
 /**

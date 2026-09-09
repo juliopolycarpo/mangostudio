@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as SignupRouteImport } from './routes/signup'
+import { Route as WelcomeRouteImport } from './routes/welcome'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedEnvironmentsRouteImport } from './routes/_authenticated/environments'
 import { Route as AuthenticatedGalleryRouteImport } from './routes/_authenticated/gallery'
@@ -69,6 +70,11 @@ const SignupRoute = SignupRouteImport.update({
   path: '/signup',
   getParentRoute: () => rootRouteImport,
 } as any).lazy(() => import('./routes/signup.lazy').then((d) => d.Route))
+const WelcomeRoute = WelcomeRouteImport.update({
+  id: '/welcome',
+  path: '/welcome',
+  getParentRoute: () => rootRouteImport,
+} as any).lazy(() => import('./routes/welcome.lazy').then((d) => d.Route))
 const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -444,6 +450,7 @@ export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/welcome': typeof WelcomeRoute
   '/environments': typeof AuthenticatedEnvironmentsRouteWithChildren
   '/gallery': typeof AuthenticatedGalleryRoute
   '/home': typeof AuthenticatedHomeRoute
@@ -489,6 +496,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/welcome': typeof WelcomeRoute
   '/gallery': typeof AuthenticatedGalleryRoute
   '/home': typeof AuthenticatedHomeRoute
   '/studio': typeof AuthenticatedStudioRoute
@@ -533,6 +541,7 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/welcome': typeof WelcomeRoute
   '/_authenticated/environments': typeof AuthenticatedEnvironmentsRouteWithChildren
   '/_authenticated/gallery': typeof AuthenticatedGalleryRoute
   '/_authenticated/home': typeof AuthenticatedHomeRoute
@@ -582,6 +591,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/signup'
+    | '/welcome'
     | '/environments'
     | '/gallery'
     | '/home'
@@ -627,6 +637,7 @@ export interface FileRouteTypes {
   to:
     | '/login'
     | '/signup'
+    | '/welcome'
     | '/gallery'
     | '/home'
     | '/studio'
@@ -670,6 +681,7 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/login'
     | '/signup'
+    | '/welcome'
     | '/_authenticated/environments'
     | '/_authenticated/gallery'
     | '/_authenticated/home'
@@ -718,6 +730,7 @@ export interface RootRouteChildren {
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   LoginRoute: typeof LoginRoute
   SignupRoute: typeof SignupRoute
+  WelcomeRoute: typeof WelcomeRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -741,6 +754,13 @@ declare module '@tanstack/react-router' {
       path: '/signup'
       fullPath: '/signup'
       preLoaderRoute: typeof SignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/welcome': {
+      id: '/welcome'
+      path: '/welcome'
+      fullPath: '/welcome'
+      preLoaderRoute: typeof WelcomeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/': {
@@ -1201,6 +1221,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
   LoginRoute: LoginRoute,
   SignupRoute: SignupRoute,
+  WelcomeRoute: WelcomeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -3,7 +3,9 @@ import {
   type AppSettings,
   AppSettingsSchema,
   DEFAULT_APP_SETTINGS,
+  onboardingFor,
 } from '@mangostudio/shared/app-settings';
+import { DEFAULT_ONBOARDING_STATE } from '@mangostudio/shared/onboarding';
 import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { settingsRoutes } from '../../../src/routes/settings';
@@ -198,5 +200,206 @@ describe('settings app settings routes', () => {
     expect(payload.profileSettings.default.libraryLocations).toEqual(
       DEFAULT_APP_SETTINGS.profileSettings.default.libraryLocations
     );
+  });
+});
+
+describe('settings app settings partial updates', () => {
+  const put = (app: { handle: (request: Request) => Promise<Response> }, body: unknown) =>
+    app.handle(
+      new Request('http://localhost/settings/app', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    );
+
+  it('leaves omitted fields at their stored value', async () => {
+    const user = makeTestIdentity('partial-app-settings-user', 'Partial App Settings User');
+    const { app, restore } = createAuthenticatedApiTestApp(user, settingsRoutes);
+    restoreAuth = restore;
+
+    await put(app, { globalImageQuality: '4K', reasoningEffort: 'high' });
+    const response = await put(app, { thinkingEnabled: true });
+    const payload = (await response.json()) as AppSettings;
+
+    expect(response.status).toBe(200);
+    expect(payload.globalImageQuality).toBe('4K');
+    expect(payload.reasoningEffort).toBe('high');
+    expect(payload.thinkingEnabled).toBe(true);
+  });
+
+  it('requires a supplied subtree to be complete', async () => {
+    const user = makeTestIdentity('nested-app-settings-user', 'Nested App Settings User');
+    const { app, restore } = createAuthenticatedApiTestApp(user, settingsRoutes);
+    restoreAuth = restore;
+
+    // The unit of a patch is a whole top-level field. Half a subtree is
+    // refused rather than quietly defaulted, so "I only sent one threshold"
+    // can never silently reset the other three.
+    const response = await put(app, { contextSettings: { compactionBehavior: 'off' } });
+
+    expect(response.status).toBe(422);
+  });
+
+  it('replaces an array rather than merging it element by element', async () => {
+    const user = makeTestIdentity('array-app-settings-user', 'Array App Settings User');
+    const { app, restore } = createAuthenticatedApiTestApp(user, settingsRoutes);
+    restoreAuth = restore;
+
+    await put(app, {
+      workspaceSettings: {
+        ...DEFAULT_APP_SETTINGS.workspaceSettings,
+        recentWorkdirs: ['/a', '/b'],
+      },
+    });
+    const response = await put(app, {
+      workspaceSettings: { ...DEFAULT_APP_SETTINGS.workspaceSettings, recentWorkdirs: ['/c'] },
+    });
+    const payload = (await response.json()) as AppSettings;
+
+    expect(payload.workspaceSettings.recentWorkdirs).toEqual(['/c']);
+  });
+
+  it('persists onboarding progress on its own', async () => {
+    const user = makeTestIdentity('onboarding-app-settings-user', 'Onboarding App Settings User');
+    const { app, restore } = createAuthenticatedApiTestApp(user, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await put(app, {
+      profileSettings: {
+        default: {
+          onboarding: {
+            welcomeAcknowledged: true,
+            skippedSteps: ['service'],
+            workdir: '/home/dev/project',
+          },
+        },
+      },
+    });
+    const payload = (await response.json()) as AppSettings;
+
+    expect(response.status).toBe(200);
+    expect(onboardingFor(payload)).toEqual({
+      welcomeAcknowledged: true,
+      skippedSteps: ['service'],
+      workdir: '/home/dev/project',
+    });
+    expect(payload.profileSettings.default.libraryLocations).toEqual(
+      DEFAULT_APP_SETTINGS.profileSettings.default.libraryLocations
+    );
+  });
+
+  it('does not let a stale full snapshot roll back completed onboarding', async () => {
+    const user = makeTestIdentity('stale-app-settings-user', 'Stale App Settings User');
+    const { app, restore } = createAuthenticatedApiTestApp(user, settingsRoutes);
+    restoreAuth = restore;
+
+    // A settings tab that loaded before the wizard finished still holds the
+    // pre-completion object. Its next save must carry only what it edits.
+    const { profileSettings: _staleProfiles, ...staleSnapshot } = {
+      ...DEFAULT_APP_SETTINGS,
+      thinkingEnabled: true,
+    };
+
+    await put(app, {
+      profileSettings: {
+        default: { onboarding: { welcomeAcknowledged: true, skippedSteps: [], completedAt: 42 } },
+      },
+    });
+    const response = await put(app, staleSnapshot);
+    const payload = (await response.json()) as AppSettings;
+
+    expect(payload.thinkingEnabled).toBe(true);
+    expect(onboardingFor(payload).completedAt).toBe(42);
+  });
+
+  it('resets onboarding to "never started" when it is explicitly cleared', async () => {
+    const user = makeTestIdentity('reset-app-settings-user', 'Reset App Settings User');
+    const { app, restore } = createAuthenticatedApiTestApp(user, settingsRoutes);
+    restoreAuth = restore;
+
+    await put(app, {
+      profileSettings: {
+        default: { onboarding: { welcomeAcknowledged: true, skippedSteps: [], completedAt: 42 } },
+      },
+    });
+    const response = await put(app, {
+      profileSettings: { default: { onboarding: null } },
+    });
+    const payload = (await response.json()) as AppSettings;
+
+    expect(onboardingFor(payload)).toEqual(DEFAULT_ONBOARDING_STATE);
+  });
+
+  it('drops a folder the next onboarding write leaves out', async () => {
+    // Switching machines in the wizard rewrites the record without `workdir`.
+    // If that read as "not supplied", the previous computer's path would stay
+    // stored, resume would skip the folder step, and the first chat would run
+    // against a directory that does not exist on the chosen machine.
+    const user = makeTestIdentity('workdir-clear-user', 'Workdir Clear User');
+    const { app, restore } = createAuthenticatedApiTestApp(user, settingsRoutes);
+    restoreAuth = restore;
+
+    await put(app, {
+      profileSettings: {
+        default: {
+          onboarding: {
+            welcomeAcknowledged: true,
+            skippedSteps: [],
+            environmentId: 'local',
+            workdir: '/home/dev/on-the-old-machine',
+          },
+        },
+      },
+    });
+    const response = await put(app, {
+      profileSettings: {
+        default: {
+          onboarding: { welcomeAcknowledged: true, skippedSteps: [], environmentId: 'remote' },
+        },
+      },
+    });
+    const payload = (await response.json()) as AppSettings;
+
+    expect(onboardingFor(payload)).toEqual({
+      welcomeAcknowledged: true,
+      skippedSteps: [],
+      environmentId: 'remote',
+    });
+  });
+
+  it('rejects a step id that is not part of the flow', async () => {
+    const user = makeTestIdentity('bad-step-app-settings-user', 'Bad Step App Settings User');
+    const { app, restore } = createAuthenticatedApiTestApp(user, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await put(app, {
+      profileSettings: {
+        default: { onboarding: { welcomeAcknowledged: true, skippedSteps: ['not-a-step'] } },
+      },
+    });
+
+    expect(response.status).toBe(422);
+  });
+
+  it('keeps the progress of one user out of another account', async () => {
+    const first = makeTestIdentity('isolated-first-user', 'Isolated First User');
+    const second = makeTestIdentity('isolated-second-user', 'Isolated Second User');
+
+    const firstApp = createAuthenticatedApiTestApp(first, settingsRoutes);
+    restoreAuth = firstApp.restore;
+    await put(firstApp.app, {
+      profileSettings: {
+        default: { onboarding: { welcomeAcknowledged: true, skippedSteps: [], completedAt: 7 } },
+      },
+    });
+    firstApp.restore();
+
+    const secondApp = createAuthenticatedApiTestApp(second, settingsRoutes);
+    restoreAuth = secondApp.restore;
+    const response = await secondApp.app.handle(new Request('http://localhost/settings/app'));
+    const payload = (await response.json()) as AppSettings;
+
+    expect(onboardingFor(payload)).toEqual(DEFAULT_ONBOARDING_STATE);
   });
 });
