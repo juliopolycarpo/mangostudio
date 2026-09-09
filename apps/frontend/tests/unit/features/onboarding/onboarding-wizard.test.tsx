@@ -184,6 +184,43 @@ describe('OnboardingWizard', () => {
     );
   });
 
+  it('keeps the way out reachable while the machine has not answered', async () => {
+    // A refused probe reads as `unknown` for as long as it keeps failing, and
+    // resume will not guess past it. That must not take the page with it: skip
+    // and sign out are the only exits a half-configured account has.
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true }),
+    });
+    scenario.respondWithJson('GET', '/api/environments', { body: {}, status: 500 });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+
+    await waitFor(() => expect(screen.getByTestId('onboarding-deciding')).toBeInTheDocument());
+    expect(screen.getByTestId('onboarding-skip-all')).toBeInTheDocument();
+    expect(screen.getByTestId('logout-button')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('onboarding-step-folder').querySelector('[data-status]')
+    ).toHaveAttribute('data-status', 'unknown');
+  });
+
+  it('opens the step a person picks out of the list while the machine is still quiet', async () => {
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true }),
+    });
+    scenario.respondWithJson('GET', '/api/environments', { body: {}, status: 500 });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('onboarding-step-toolchain')).toBeInTheDocument()
+    );
+
+    await userEvent.click(screen.getByTestId('onboarding-step-toolchain'));
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/toolchain/i)
+    );
+  });
+
   it('advances past a skipped step and remembers the skip', async () => {
     render(<OnboardingWizard onDone={() => undefined} />);
     await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument());

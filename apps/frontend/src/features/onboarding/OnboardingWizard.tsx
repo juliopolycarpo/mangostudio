@@ -64,7 +64,11 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
     if (resume.kind === 'done') setStep('chat');
   }
 
-  if (step === null) {
+  // Progress is the one thing nothing can proceed without: no step can be
+  // judged against it, and no write can be built on top of it, until it is
+  // here. A machine fact that has not arrived is a different matter — see the
+  // panel below, which keeps the chrome standing around it.
+  if (progress.isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center gap-3 bg-surface-dim">
         <Spinner size="lg" />
@@ -73,7 +77,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
     );
   }
 
-  const index = ONBOARDING_STEP_IDS.indexOf(step);
+  const index = step === null ? -1 : ONBOARDING_STEP_IDS.indexOf(step);
   const isLast = index === ONBOARDING_STEP_IDS.length - 1;
   const advance = () => {
     const next = ONBOARDING_STEP_IDS[index + 1];
@@ -86,6 +90,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
   };
 
   const skipCurrent = async () => {
+    if (step === null) return;
     await progress.update((current) => ({
       ...current,
       skippedSteps: [...current.skippedSteps.filter((id) => id !== step), step],
@@ -98,6 +103,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
   };
 
   const continueFromStep = async () => {
+    if (step === null) return;
     if (step === 'welcome') {
       await progress.update((current) => ({ ...current, welcomeAcknowledged: true }));
     }
@@ -163,12 +169,23 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
           </nav>
 
           <section className="min-w-0 space-y-6 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-5 sm:p-7">
-            <p className="font-label text-on-surface-variant/60 text-xs uppercase tracking-widest">
-              {formatMessage(s.progress, {
-                step: String(index + 1),
-                total: String(ONBOARDING_STEP_IDS.length),
-              })}
-            </p>
+            {/* No step chosen means resume is still waiting on a fact. The
+                wizard says so here rather than in place of the whole page: a
+                probe that keeps failing never answers, and the only exits a
+                half-configured account has are the ones around this panel. */}
+            {step === null ? (
+              <div className="flex items-center gap-3 py-6" data-testid="onboarding-deciding">
+                <Spinner size="lg" />
+                <span className="text-on-surface-variant text-sm">{s.deciding}</span>
+              </div>
+            ) : (
+              <p className="font-label text-on-surface-variant/60 text-xs uppercase tracking-widest">
+                {formatMessage(s.progress, {
+                  step: String(index + 1),
+                  total: String(ONBOARDING_STEP_IDS.length),
+                })}
+              </p>
+            )}
 
             {step === 'welcome' ? <WelcomeStep /> : null}
             {step === 'folder' ? <FolderStep state={state} onChange={progress.update} /> : null}
@@ -192,38 +209,40 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
               </p>
             ) : null}
 
-            <div className="flex flex-wrap items-center justify-between gap-3 border-outline-variant/15 border-t pt-4">
-              <div className="flex items-center gap-2">
+            {step === null ? null : (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-outline-variant/15 border-t pt-4">
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={index === 0}
+                    data-testid="onboarding-back"
+                    onClick={() => {
+                      const previous = ONBOARDING_STEP_IDS[index - 1];
+                      if (previous) setStep(previous);
+                    }}
+                  >
+                    {s.back}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    data-testid="onboarding-skip-step"
+                    onClick={() => void skipCurrent()}
+                  >
+                    {s.skipStep}
+                  </Button>
+                </div>
+
                 <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={index === 0}
-                  data-testid="onboarding-back"
-                  onClick={() => {
-                    const previous = ONBOARDING_STEP_IDS[index - 1];
-                    if (previous) setStep(previous);
-                  }}
+                  data-testid="onboarding-continue"
+                  loading={progress.isSaving}
+                  onClick={() => void continueFromStep()}
                 >
-                  {s.back}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  data-testid="onboarding-skip-step"
-                  onClick={() => void skipCurrent()}
-                >
-                  {s.skipStep}
+                  {step === 'welcome' ? s.welcome.action : isLast ? s.finish : s.continue}
                 </Button>
               </div>
-
-              <Button
-                data-testid="onboarding-continue"
-                loading={progress.isSaving}
-                onClick={() => void continueFromStep()}
-              >
-                {step === 'welcome' ? s.welcome.action : isLast ? s.finish : s.continue}
-              </Button>
-            </div>
+            )}
           </section>
         </div>
 
