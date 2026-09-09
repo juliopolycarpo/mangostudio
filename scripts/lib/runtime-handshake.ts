@@ -80,6 +80,12 @@ export interface RuntimeHandshakeProbe {
    * argument about this budget has so far had to do without.
    */
   readonly elapsedMs: number;
+  /**
+   * The budget `elapsedMs` was spent against — the caller's `timeoutMs` when it
+   * gave one, the platform default otherwise. An elapsed with no denominator is
+   * half a measurement, and it is the half a reader cannot recover from the log.
+   */
+  readonly budgetMs: number;
 }
 
 /**
@@ -143,6 +149,7 @@ export async function probeRuntimeHandshake(
       exitCode: null,
       signal: null,
       elapsedMs,
+      budgetMs: timeoutMs,
     };
   }
 
@@ -168,6 +175,7 @@ export async function probeRuntimeHandshake(
       exitCode,
       signal,
       elapsedMs,
+      budgetMs: timeoutMs,
     };
   }
 
@@ -183,6 +191,7 @@ export async function probeRuntimeHandshake(
       exitCode: null,
       signal: null,
       elapsedMs,
+      budgetMs: timeoutMs,
     };
   }
 
@@ -197,6 +206,7 @@ export async function probeRuntimeHandshake(
     exitCode,
     signal,
     elapsedMs,
+    budgetMs: timeoutMs,
   };
 }
 

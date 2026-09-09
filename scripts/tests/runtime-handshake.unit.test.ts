@@ -145,6 +145,9 @@ describe('scripts/lib/runtime-handshake', () => {
         `wrote no handshake frame within ${HANGING_TIMEOUT_MS}ms and was killed`
       );
       expect(probe.stderr).toContain('stuck');
+      // An explicit budget still wins over the platform default, and is what
+      // the elapsed on the report is measured against.
+      expect(probe.budgetMs).toBe(HANGING_TIMEOUT_MS);
       // The kill is ours, so its status is not the failure cause (issue #957).
       expect(probe.exitCode).toBeNull();
       expect(probe.signal).toBeNull();

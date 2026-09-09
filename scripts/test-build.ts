@@ -356,8 +356,11 @@ async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Pro
   if (!frame.capabilities?.platform) fail('Handshake carried no capability manifest');
   // The elapsed time rides along on the green path on purpose: the budget above
   // it was argued about three times with no measurement of what a passing
-  // handshake actually costs on each runner.
-  pass(`${label} --stdio handshakes with a v${VERSION} manifest in ${probe.elapsedMs}ms`);
+  // handshake actually costs on each runner. The budget is printed with it —
+  // "6288ms" only says whether there is headroom once you know what of.
+  pass(
+    `${label} --stdio handshakes with a v${VERSION} manifest in ${probe.elapsedMs}ms of ${probe.budgetMs}ms`
+  );
 }
 
 /**
@@ -373,6 +376,10 @@ async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Pro
  */
 function reportFailedHandshake(label: string, probe: RuntimeHandshakeProbe): never {
   console.error(`  🔎 ${label} --stdio ${probe.failure}`);
+  // The half of the measurement the green line already carries. On the `eof`
+  // paths the failure text has no timing at all, so a runtime that died at
+  // 400ms and one that died at 55s read identically without this.
+  console.error(`     waited ${probe.elapsedMs}ms of a ${probe.budgetMs}ms budget`);
   if (probe.partial) console.error(`     partial stdout (no newline): ${probe.partial}`);
   if (probe.exitCode !== null) console.error(`     exit code: ${probe.exitCode}`);
   if (probe.signal) console.error(`     signal: ${probe.signal}`);
