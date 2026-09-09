@@ -1,15 +1,18 @@
 import Value from 'typebox/value';
 import { type ChatRunnerConfiguration, ChatRunnerConfigurationSchema } from '../chat/schemas';
-import { ONBOARDING_STEP_IDS, type OnboardingState, type OnboardingStepId } from './schemas';
+import {
+  ID_MAX_LENGTH,
+  ONBOARDING_STEP_IDS,
+  type OnboardingState,
+  type OnboardingStepId,
+  WORKDIR_MAX_LENGTH,
+} from './schemas';
 
 /** A person who has not started: nothing acknowledged, nothing skipped, nothing chosen. */
 export const DEFAULT_ONBOARDING_STATE: OnboardingState = {
   welcomeAcknowledged: false,
   skippedSteps: [],
 };
-
-const WORKDIR_MAX_LENGTH = 4096;
-const ID_MAX_LENGTH = 128;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

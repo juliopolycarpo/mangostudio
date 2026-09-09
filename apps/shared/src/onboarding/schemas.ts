@@ -28,8 +28,8 @@ export const OnboardingStepIdSchema = Type.Union([
 ]);
 
 /** Bounds a persisted path so a malformed client cannot grow the settings row without limit. */
-const WORKDIR_MAX_LENGTH = 4096;
-const ID_MAX_LENGTH = 128;
+export const WORKDIR_MAX_LENGTH = 4096;
+export const ID_MAX_LENGTH = 128;
 
 /**
  * What the wizard remembers between visits.
