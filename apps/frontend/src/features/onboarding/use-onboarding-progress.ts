@@ -53,8 +53,12 @@ export function useOnboardingProgress(): OnboardingProgress {
   const update = useCallback(
     async (updater: (current: OnboardingState) => OnboardingState) => {
       // Read at call time rather than from the render that created this
-      // callback: a step that saves twice in quick succession would otherwise
-      // build its second write on the state it saw before the first.
+      // callback, so a caller that awaits one write and then makes another
+      // builds the second on what the first confirmed. Two writes started
+      // *concurrently* are still last-one-wins: nothing is written to the cache
+      // until the server answers, deliberately, because a record this one gates
+      // navigation on must not be believed before it is stored. Callers that
+      // can fire twice take `isSaving` and disable while one is open.
       const current = onboardingFor(
         normalizeAppSettings(
           queryClient.getQueryData(appSettingsKeys.current()) ?? DEFAULT_APP_SETTINGS

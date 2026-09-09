@@ -26,6 +26,13 @@ const { OnboardingWizard } = await import('@/features/onboarding/OnboardingWizar
 
 const scenario = createFetchScenario();
 
+/**
+ * The scenario's own responder, taken before any test swaps it. A test that
+ * needs a request left hanging replaces the implementation on a mock the whole
+ * file shares, so `afterEach` has to be able to put this one back.
+ */
+const respondFromScenario = scenario.fetchMock.getMockImplementation();
+
 /** A machine with nothing on it, so every step's fact is a definite "no". */
 function emptyMachine() {
   scenario
@@ -107,6 +114,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  if (respondFromScenario) scenario.fetchMock.mockImplementation(respondFromScenario);
   scenario.restore();
 });
 
@@ -269,6 +277,27 @@ describe('OnboardingWizard', () => {
 
     await waitFor(() => expect(screen.getByTestId('onboarding-agents-failed')).toBeInTheDocument());
     expect(screen.queryByText(en.onboarding.agents.noneFound)).not.toBeInTheDocument();
+  });
+
+  it('refuses a second skip while the first write is still open', async () => {
+    // Every write is built on the cached record, and nothing is cached until
+    // the server answers: a second click during the first PUT would send the
+    // state from before it, dropping the skip that is already in flight.
+    if (!respondFromScenario) throw new Error('scenario fetch mock has no implementation');
+    scenario.fetchMock.mockImplementation((input, init) => {
+      // A PUT that never answers is the whole window this guard covers.
+      if (String(init?.method).toUpperCase() === 'PUT')
+        return new Promise<Response>(() => undefined);
+      return respondFromScenario(input, init);
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByTestId('onboarding-skip-step'));
+
+    await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeDisabled());
+    expect(screen.getByTestId('onboarding-skip-all')).toBeDisabled();
   });
 
   it('advances past a skipped step and remembers the skip', async () => {

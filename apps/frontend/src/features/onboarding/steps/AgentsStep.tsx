@@ -26,6 +26,11 @@ interface AgentsStepProps {
   readonly environmentId: string;
   readonly state: OnboardingState;
   readonly onChange: (updater: (current: OnboardingState) => OnboardingState) => Promise<void>;
+  /**
+   * A write is already open. Picking again before it lands would build the
+   * second update on the record the first has not replaced yet.
+   */
+  readonly isSaving: boolean;
 }
 
 const MANGOSTUDIO_RUNNER: ChatRunnerConfiguration = { kind: 'mangostudio', agentId: 'default' };
@@ -46,7 +51,7 @@ function sameRunner(a: ChatRunnerConfiguration | undefined, b: ChatRunnerConfigu
   return a.kind === 'mangostudio' ? true : a.targetId === (b as { targetId: string }).targetId;
 }
 
-export function AgentsStep({ environmentId, state, onChange }: AgentsStepProps) {
+export function AgentsStep({ environmentId, state, onChange, isSaving }: AgentsStepProps) {
   const { t } = useI18n();
   const s = t.onboarding.agents;
   const external = useExternalAgents(environmentId);
@@ -66,7 +71,7 @@ export function AgentsStep({ environmentId, state, onChange }: AgentsStepProps) 
         description={s.modelDescription}
         icon={<Sparkles aria-hidden size={16} className="text-primary" />}
         selected={sameRunner(state.runner, MANGOSTUDIO_RUNNER)}
-        disabled={!catalog.isPending && !hasModel}
+        disabled={isSaving || (!catalog.isPending && !hasModel)}
         testId="onboarding-runner-mangostudio"
         onSelect={() => choose(MANGOSTUDIO_RUNNER)}
       />
@@ -107,6 +112,7 @@ export function AgentsStep({ environmentId, state, onChange }: AgentsStepProps) 
             <AgentOption
               key={agent.targetId}
               agent={agent}
+              busy={isSaving}
               selected={sameRunner(state.runner, { kind: 'external', targetId: agent.targetId })}
               onSelect={() => choose({ kind: 'external', targetId: agent.targetId })}
             />
@@ -119,10 +125,12 @@ export function AgentsStep({ environmentId, state, onChange }: AgentsStepProps) 
 
 function AgentOption({
   agent,
+  busy,
   selected,
   onSelect,
 }: {
   readonly agent: ExternalAgentDescriptor;
+  readonly busy: boolean;
   readonly selected: boolean;
   readonly onSelect: () => void;
 }) {
@@ -137,7 +145,7 @@ function AgentOption({
         description={agent.authState === 'signed-out' ? s.signedOut : s.signedIn}
         icon={<Bot aria-hidden size={16} className="text-primary" />}
         selected={selected}
-        disabled={!selectable}
+        disabled={busy || !selectable}
         testId={`onboarding-runner-${agent.targetId}`}
         onSelect={onSelect}
       />

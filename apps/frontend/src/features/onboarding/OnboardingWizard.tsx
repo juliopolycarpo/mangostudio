@@ -192,10 +192,17 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
             )}
 
             {step === 'welcome' ? <WelcomeStep /> : null}
-            {step === 'folder' ? <FolderStep state={state} onChange={progress.update} /> : null}
+            {step === 'folder' ? (
+              <FolderStep state={state} onChange={progress.update} isSaving={progress.isSaving} />
+            ) : null}
             {step === 'toolchain' ? <ToolchainStep environmentId={environmentId} /> : null}
             {step === 'agents' ? (
-              <AgentsStep environmentId={environmentId} state={state} onChange={progress.update} />
+              <AgentsStep
+                environmentId={environmentId}
+                state={state}
+                onChange={progress.update}
+                isSaving={progress.isSaving}
+              />
             ) : null}
             {step === 'service' ? <ServiceStep /> : null}
             {step === 'chat' ? (
@@ -233,6 +240,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                     variant="ghost"
                     size="sm"
                     data-testid="onboarding-skip-step"
+                    disabled={progress.isSaving}
                     onClick={() => void skipCurrent()}
                   >
                     {s.skipStep}
@@ -258,9 +266,13 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
         <ExternalDisclosureGate />
 
         <div className="text-center">
+          {/* Guarded like Continue: both write the same record, and a second
+              click while the first write is open builds its update on the value
+              the first one has not replaced yet. */}
           <button
             type="button"
             data-testid="onboarding-skip-all"
+            disabled={progress.isSaving}
             onClick={() => void complete()}
             className="text-on-surface-variant/60 text-xs underline underline-offset-4 hover:text-on-surface-variant"
           >

@@ -21,9 +21,11 @@ import { StepFrame } from '../StepFrame';
 interface FolderStepProps {
   readonly state: OnboardingState;
   readonly onChange: (updater: (current: OnboardingState) => OnboardingState) => Promise<void>;
+  /** A write is already open; a second choice would be built on the record it replaces. */
+  readonly isSaving: boolean;
 }
 
-export function FolderStep({ state, onChange }: FolderStepProps) {
+export function FolderStep({ state, onChange, isSaving }: FolderStepProps) {
   const { t } = useI18n();
   const s = t.onboarding.folder;
   const [isPickerOpen, setPickerOpen] = useState(false);
@@ -49,6 +51,7 @@ export function FolderStep({ state, onChange }: FolderStepProps) {
           <Select
             id="onboarding-environment"
             testId="onboarding-environment"
+            disabled={isSaving}
             value={environmentId}
             options={options}
             onChange={(next) =>
