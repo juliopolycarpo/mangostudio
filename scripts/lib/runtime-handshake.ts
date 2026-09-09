@@ -73,6 +73,12 @@ export interface RuntimeHandshakeProbe {
   readonly exitCode: number | null;
   /** The signal the child died on, when it died on one of its own. */
   readonly signal: string | null;
+  /**
+   * How long the probe waited, in milliseconds. Reported on success too: what
+   * headroom a passing handshake actually leaves is the measurement every
+   * argument about this budget has so far had to do without.
+   */
+  readonly elapsedMs: number;
 }
 
 /**
@@ -93,6 +99,7 @@ export async function probeRuntimeHandshake(
     timeoutMs = resolveHandshakeBudgetMs(),
     exitGraceMs = DEFAULT_EXIT_GRACE_MS,
   } = options;
+  const startedAt = Date.now();
 
   const child = Bun.spawn({
     cmd: [...command],
@@ -115,6 +122,9 @@ export async function probeRuntimeHandshake(
     await finish(child, stderr, exitGraceMs);
     throw caught;
   }
+  // Taken before any cleanup: what this is evidence of is how long the child
+  // took to speak, not how long we then spent waiting for it to die.
+  const elapsedMs = Date.now() - startedAt;
   child.stdin.end();
 
   if (read.kind === 'line') {
@@ -127,6 +137,7 @@ export async function probeRuntimeHandshake(
       stderr: stderr.text(),
       exitCode: null,
       signal: null,
+      elapsedMs,
     };
   }
 
@@ -151,6 +162,7 @@ export async function probeRuntimeHandshake(
       stderr: stderr.text(),
       exitCode,
       signal,
+      elapsedMs,
     };
   }
 
@@ -165,6 +177,7 @@ export async function probeRuntimeHandshake(
       stderr: stderr.text(),
       exitCode: null,
       signal: null,
+      elapsedMs,
     };
   }
 
@@ -178,6 +191,7 @@ export async function probeRuntimeHandshake(
     stderr: stderr.text(),
     exitCode,
     signal,
+    elapsedMs,
   };
 }
 

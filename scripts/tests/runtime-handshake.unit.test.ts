@@ -106,6 +106,28 @@ describe('scripts/lib/runtime-handshake', () => {
       expect(probe.stderr).toContain('warming up');
     });
 
+    test('times how long the child took to speak, not how long cleanup took', async () => {
+      // This child greets at once and then refuses to die on SIGTERM, so the
+      // probe pays the whole exit grace *after* it already has its answer. A
+      // number taken at the return would fold that wait into what is meant to
+      // be evidence about how long the runtime took to start talking.
+      const startedAt = Date.now();
+      const probe = await probeRuntimeHandshake({
+        command: standIn(
+          `process.on('SIGTERM', () => {});` +
+            `await Bun.write(Bun.stdout, ${JSON.stringify(`${HELLO_FRAME}\n`)});` +
+            `setTimeout(() => process.exit(0), 1_200);` +
+            NEVER_RESOLVES
+        ),
+        timeoutMs: ANSWERING_TIMEOUT_MS,
+        exitGraceMs: 800,
+      });
+      const callMs = Date.now() - startedAt;
+
+      expect(probe.hello).toBe(HELLO_FRAME);
+      expect(callMs - probe.elapsedMs).toBeGreaterThanOrEqual(500);
+    });
+
     test('names the child exit and carries its code and stderr', async () => {
       const probe = await probeRuntimeHandshake({
         command: standIn(`await Bun.write(Bun.stderr, 'boom\\n'); process.exit(3);`),

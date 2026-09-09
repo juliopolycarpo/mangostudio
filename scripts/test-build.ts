@@ -354,7 +354,10 @@ async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Pro
     fail(`Handshake reported runtime ${frame.peer?.version}, expected ${VERSION}`);
   }
   if (!frame.capabilities?.platform) fail('Handshake carried no capability manifest');
-  pass(`${label} --stdio handshakes with a v${VERSION} manifest`);
+  // The elapsed time rides along on the green path on purpose: the budget above
+  // it was argued about three times with no measurement of what a passing
+  // handshake actually costs on each runner.
+  pass(`${label} --stdio handshakes with a v${VERSION} manifest in ${probe.elapsedMs}ms`);
 }
 
 /**
