@@ -33,12 +33,24 @@ export function RerunSetupCard() {
         data-testid="rerun-setup"
         loading={progress.isSaving}
         onClick={() => {
-          void progress.reset().then(() => navigate({ to: '/welcome' }));
+          // The navigation is inside the success branch, and the rejection is
+          // caught rather than left to float: opening the wizard on progress
+          // the server still holds would show a finished run and say nothing
+          // about the write that failed.
+          void progress
+            .reset()
+            .then(() => navigate({ to: '/welcome' }))
+            .catch(() => undefined);
         }}
       >
         <RotateCcw aria-hidden size={15} />
         {s.action}
       </Button>
+      {progress.saveFailed ? (
+        <p className="text-error text-sm" data-testid="rerun-setup-failed">
+          {t.onboarding.saveFailed}
+        </p>
+      ) : null}
     </Card>
   );
 }
