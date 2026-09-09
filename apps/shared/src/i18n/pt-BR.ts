@@ -4144,6 +4144,8 @@ export const messages = {
       hint: 'Faltar um não é fatal: o chat continua funcionando, e só os comandos que dependem dele falham.',
       ready: 'Pronto',
       missing: 'Não encontrado',
+      probeFailed:
+        'Não foi possível perguntar a esta máquina quais runtimes ela tem. Isso não é o mesmo que não ter nenhum — tente de novo, ou pule este passo e verifique o toolchain depois.',
     },
     agents: {
       title: 'Escolha quem responde',

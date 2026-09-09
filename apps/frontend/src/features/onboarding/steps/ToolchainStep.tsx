@@ -39,6 +39,13 @@ export function ToolchainStep({ environmentId }: { readonly environmentId: strin
         <div className="flex justify-center py-6">
           <Spinner size="md" />
         </div>
+      ) : runtimes.isError ? (
+        // A refused probe answers `[]`, exactly like a machine with neither
+        // runtime on it. Drawing the list from that tells somebody who has Node
+        // installed to install Node, and offers a button that would do it.
+        <p className="text-on-surface-variant text-sm" data-testid="onboarding-toolchain-failed">
+          {s.probeFailed}
+        </p>
       ) : (
         <ul className="space-y-2">
           {PROJECT_RUNTIME_IDS.map((id) => {

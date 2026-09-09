@@ -300,6 +300,24 @@ describe('OnboardingWizard', () => {
     expect(screen.getByTestId('onboarding-skip-all')).toBeDisabled();
   });
 
+  it('says the machine could not be asked rather than that it has no runtimes', async () => {
+    // The same lie the agents step stopped telling: a refused probe and a
+    // machine with neither runtime both arrive as an empty list, and only one
+    // of them is grounds for offering to install Node.
+    scenario.respondWithJson('GET', '/api/environments/runtimes', { body: {}, status: 500 });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('onboarding-step-toolchain')).toBeInTheDocument()
+    );
+    await userEvent.click(screen.getByTestId('onboarding-step-toolchain'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('onboarding-toolchain-failed')).toBeInTheDocument()
+    );
+    expect(screen.queryByTestId('onboarding-runtime-node')).not.toBeInTheDocument();
+  });
+
   it('advances past a skipped step and remembers the skip', async () => {
     render(<OnboardingWizard onDone={() => undefined} />);
     await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument());

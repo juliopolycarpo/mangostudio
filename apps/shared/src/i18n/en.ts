@@ -4158,6 +4158,8 @@ export const messages: Messages = {
       hint: 'Missing one is not fatal: chat still works, and only the commands that need it will fail.',
       ready: 'Ready',
       missing: 'Not found',
+      probeFailed:
+        'This machine could not be asked which runtimes it has. That is not the same as having none \u2014 try again, or skip this step and check the toolchain later.',
     },
     agents: {
       title: 'Choose who answers',
