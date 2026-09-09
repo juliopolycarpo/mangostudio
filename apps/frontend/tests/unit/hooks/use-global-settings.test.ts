@@ -3,7 +3,8 @@ import type { AppSettings, AppSettingsPutBody } from '@mangostudio/shared/app-se
 import { DEFAULT_APP_SETTINGS, MAX_TOOL_ITERATIONS_MAX } from '@mangostudio/shared/app-settings';
 import { en } from '@mangostudio/shared/i18n';
 import type { WorkspacePanelSettings } from '@mangostudio/shared/workspaces';
-import { act, renderHook, screen, waitFor } from '../../support/harness/render';
+import { useQuery } from '@tanstack/react-query';
+import { act, flushAsyncRender, renderHook, screen, waitFor } from '../../support/harness/render';
 import {
   advanceTimersByTimeAsync,
   restoreRealTimers,
@@ -31,6 +32,7 @@ mock.module('../../../src/lib/api-client', () => ({
 // Static imports are evaluated before any statement above runs, so the hook
 // has to come in afterwards or it binds the real api-client.
 const { useGlobalSettings } = await import('../../../src/hooks/use-global-settings');
+const { appSettingsQueryOptions } = await import('../../../src/features/settings/app/queries');
 
 type MockGetResult = Awaited<ReturnType<typeof mockGet>>;
 type MockPutResult = Awaited<ReturnType<typeof mockPut>>;
@@ -599,6 +601,39 @@ describe('useGlobalSettings', () => {
     // owned — and reset — by their own surfaces.
     const { profileSettings: _profileSettings, ...defaultsThisScreenOwns } = DEFAULT_APP_SETTINGS;
     expect(mockPut.mock.calls[0]?.[0]).toEqual(defaultsThisScreenOwns);
+  });
+
+  it('leaves profile-scoped settings standing in the cache a reset never sends', async () => {
+    // The first-run gate reads onboarding out of this cache entry. Resetting a
+    // subtree the PUT does not carry would make the gate act on a value the
+    // server never agreed to, and send the person back into the wizard.
+    const completed = {
+      ...DEFAULT_APP_SETTINGS,
+      profileSettings: {
+        default: {
+          ...DEFAULT_APP_SETTINGS.profileSettings.default,
+          onboarding: { welcomeAcknowledged: true, skippedSteps: [], completedAt: 42 },
+        },
+      },
+    };
+    mockGet.mockResolvedValue(mockQueryResult(completed));
+
+    // A second observer on the same key, in the same provider: what it sees is
+    // what every other surface reading these settings sees.
+    const { result } = renderHook(() => ({
+      global: useGlobalSettings(),
+      cached: useQuery(appSettingsQueryOptions()).data,
+    }));
+    await waitFor(() => expect(result.current.global.isLoading).toBe(false));
+
+    act(() => {
+      result.current.global.resetSettings();
+    });
+    // React Query announces a cache change on its own `setTimeout(0)`, so the
+    // second observer has not re-rendered yet when `act` returns.
+    await flushAsyncRender();
+
+    expect(result.current.cached?.profileSettings.default.onboarding.completedAt).toBe(42);
   });
 
   it('leaves profile-scoped settings out of every save', async () => {

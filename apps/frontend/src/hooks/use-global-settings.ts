@@ -432,7 +432,15 @@ export function useGlobalSettings() {
   );
 
   const resetSettings = useCallback(() => {
-    saveSettings(() => DEFAULT_APP_SETTINGS);
+    // `profileSettings` is carried through rather than reset with the rest.
+    // This screen no longer *sends* that subtree, so writing the defaults into
+    // the cache would be a lie the rest of the app reads: the first-run gate
+    // resolves onboarding out of this very entry, and a cache that says
+    // "never started" bounces the person into the wizard until the PUT answers.
+    saveSettings((current) => ({
+      ...DEFAULT_APP_SETTINGS,
+      profileSettings: current.profileSettings,
+    }));
   }, [saveSettings]);
 
   const globalTextSystemPrompt = settings.promptSettings.textSystemPrompt;
