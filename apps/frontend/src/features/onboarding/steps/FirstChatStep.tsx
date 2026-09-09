@@ -52,7 +52,7 @@ export function FirstChatStep({
   const queryClient = useQueryClient();
   const [prompt, setPrompt] = useState(s.defaultPrompt);
   const [isSending, setSending] = useState(false);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [hasFailed, setFailed] = useState(false);
   const createChat = useCreateChatMutation();
   const updateChat = useUpdateChatMutation();
   const messages = useMessagesQuery(state.chatId ?? null);
@@ -69,7 +69,7 @@ export function FirstChatStep({
 
   const send = async () => {
     setSending(true);
-    setFailure(null);
+    setFailed(false);
     try {
       let chatId = state.chatId;
       if (!chatId) {
@@ -118,8 +118,11 @@ export function FirstChatStep({
       // whether to send.
       await queryClient.invalidateQueries({ queryKey: messageKeys.list(chatId) });
       await queryClient.invalidateQueries({ queryKey: chatKeys.all });
-    } catch (error) {
-      setFailure(error instanceof Error ? error.message : s.failed);
+    } catch {
+      // The raw message is a stream or HTTP failure, and none of them tell this
+      // person anything they can act on: the step's own sentence — try again,
+      // or open the chat — is the whole remedy.
+      setFailed(true);
     } finally {
       setSending(false);
     }
@@ -198,7 +201,7 @@ export function FirstChatStep({
         </p>
       ) : null}
 
-      {failure ? (
+      {hasFailed ? (
         <p className="text-error text-sm" data-testid="onboarding-chat-failed">
           {s.failed}
         </p>
