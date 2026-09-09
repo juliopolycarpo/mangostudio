@@ -331,6 +331,43 @@ describe('settings app settings partial updates', () => {
     expect(onboardingFor(payload)).toEqual(DEFAULT_ONBOARDING_STATE);
   });
 
+  it('drops a folder the next onboarding write leaves out', async () => {
+    // Switching machines in the wizard rewrites the record without `workdir`.
+    // If that read as "not supplied", the previous computer's path would stay
+    // stored, resume would skip the folder step, and the first chat would run
+    // against a directory that does not exist on the chosen machine.
+    const user = makeTestIdentity('workdir-clear-user', 'Workdir Clear User');
+    const { app, restore } = createAuthenticatedApiTestApp(user, settingsRoutes);
+    restoreAuth = restore;
+
+    await put(app, {
+      profileSettings: {
+        default: {
+          onboarding: {
+            welcomeAcknowledged: true,
+            skippedSteps: [],
+            environmentId: 'local',
+            workdir: '/home/dev/on-the-old-machine',
+          },
+        },
+      },
+    });
+    const response = await put(app, {
+      profileSettings: {
+        default: {
+          onboarding: { welcomeAcknowledged: true, skippedSteps: [], environmentId: 'remote' },
+        },
+      },
+    });
+    const payload = (await response.json()) as AppSettings;
+
+    expect(onboardingFor(payload)).toEqual({
+      welcomeAcknowledged: true,
+      skippedSteps: [],
+      environmentId: 'remote',
+    });
+  });
+
   it('rejects a step id that is not part of the flow', async () => {
     const user = makeTestIdentity('bad-step-app-settings-user', 'Bad Step App Settings User');
     const { app, restore } = createAuthenticatedApiTestApp(user, settingsRoutes);

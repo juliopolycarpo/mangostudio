@@ -42,13 +42,16 @@ porque nenhuma carrega o campo da outra.
 A regra, por inteiro:
 
 - uma chave omitida mantém o que está guardado;
-- objetos mesclam recursivamente, então um patch que toca um campo aninhado
-  deixa os irmãos em paz;
-- arrays substituem — mesclar por índice tornaria "remova a segunda regra"
-  inexprimível;
-- `null` em uma chave que o aceita reseta aquela subárvore para o padrão. É a
-  única forma de limpar algo, e funciona porque a normalização roda *depois* da
-  mesclagem.
+- um campo enviado substitui por inteiro o que estava guardado nele. Um membro
+  opcional que o patch deixa de fora é uma limpeza, não uma omissão — é assim
+  que "a máquina mudou, esqueça aquela pasta" se diz;
+- arrays substituem pelo mesmo motivo — mesclar por índice tornaria "remova a
+  segunda regra" inexprimível;
+- só os contêineres *acima* desses campos mesclam: `profileSettings` e o registro
+  de um perfil, cujos filhos têm donos diferentes;
+- `null` em uma chave que o aceita reseta aquela subárvore para o padrão. É assim
+  que uma subárvore inteira é limpa, e funciona porque a normalização roda
+  *depois* da mesclagem.
 
 A unidade de um patch é um campo de topo inteiro: envie `contextSettings` e você
 envia tudo dele, e meia subárvore é recusada em vez de completada com padrões.

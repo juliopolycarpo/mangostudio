@@ -7,16 +7,22 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Overlay a settings patch on the value already stored, one key at a time.
+ * Overlay a settings patch on the value already stored, one owned field at a
+ * time.
  *
  * The rule, in full:
  *
  * - an omitted key keeps whatever is stored;
- * - two objects merge recursively, so a patch touching one nested field leaves
- *   its siblings alone;
- * - anything that is not an object — an array, a string, a number, `null` —
- *   replaces what was there. Arrays replace deliberately: merging them by index
- *   makes "remove the second rule" inexpressible.
+ * - a supplied field replaces what was stored under it, whole. A field is the
+ *   unit one surface owns and sends complete, so merging into it would make an
+ *   optional member the patch deliberately left out — "no folder chosen yet" —
+ *   indistinguishable from one it never mentioned, and a clear inexpressible.
+ *   Arrays replace for the same reason: merging by index makes "remove the
+ *   second rule" unsayable;
+ * - the containers *above* those fields do merge, because their children have
+ *   different owners: `profileSettings` holds one entry per profile, and each
+ *   entry holds `libraryLocations` and `onboarding`, written by different
+ *   screens. That is the whole reason this is a merge rather than an overwrite.
  *
  * The result is raw, untrusted shape, exactly like the row it came from.
  * `normalizeAppSettings` is what turns it back into settings; running it after
@@ -27,10 +33,23 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
  * // => { thinkingEnabled: false, reasoningEffort: 'high' }
  */
 export function mergeAppSettingsPatch(stored: unknown, patch: AppSettingsPutBody): unknown {
-  return mergeValue(stored, patch);
+  return mergeValue(stored, patch, []);
 }
 
-function mergeValue(stored: unknown, patch: unknown): unknown {
+/**
+ * Whether the value at this path holds children with separate owners, and so has
+ * to merge rather than replace.
+ *
+ * Exactly three do: the settings object itself, the profile map, and one
+ * profile's entry. Everything below is a field its one writer sends whole.
+ */
+function mergesChildren(path: readonly string[]): boolean {
+  if (path.length === 0) return true;
+  return path[0] === 'profileSettings' && path.length <= 2;
+}
+
+function mergeValue(stored: unknown, patch: unknown, path: readonly string[]): unknown {
+  if (!mergesChildren(path)) return patch;
   if (!isPlainRecord(patch)) return patch;
   if (!isPlainRecord(stored)) return patch;
 
@@ -40,7 +59,7 @@ function mergeValue(stored: unknown, patch: unknown): unknown {
     // literal; over the wire JSON drops the key entirely. Both mean "not
     // supplied", so both must leave the stored value alone.
     if (value === undefined) continue;
-    merged[key] = mergeValue(stored[key], value);
+    merged[key] = mergeValue(stored[key], value, [...path, key]);
   }
   return merged;
 }

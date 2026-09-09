@@ -44,12 +44,15 @@ carries the other's field at all.
 The rule, in full:
 
 - an omitted key keeps whatever is stored;
-- objects merge recursively, so a patch touching one nested field leaves its
-  siblings alone;
-- arrays replace — merging by index would make "remove the second rule"
-  inexpressible;
-- `null` on a key that admits it resets that subtree to its default. That is the
-  only way to clear something, and it works because normalization runs *after*
+- a supplied field replaces what was stored under it, whole. An optional member
+  the patch leaves out is a clear, not an omission — which is how "the machine
+  changed, forget that folder" is said at all;
+- arrays replace for the same reason — merging by index would make "remove the
+  second rule" inexpressible;
+- only the containers *above* those fields merge: `profileSettings` and one
+  profile's entry, whose children have different owners;
+- `null` on a key that admits it resets that subtree to its default. That is how
+  a whole subtree is cleared, and it works because normalization runs *after*
   the merge.
 
 The unit of a patch is a whole top-level field: send `contextSettings` and you

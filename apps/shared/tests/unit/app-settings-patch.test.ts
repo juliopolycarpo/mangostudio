@@ -18,11 +18,12 @@ describe('mergeAppSettingsPatch', () => {
     expect(merged).toEqual({ thinkingEnabled: false, reasoningEffort: 'high' });
   });
 
-  it('merges two objects field by field rather than replacing the outer one', () => {
+  it('merges the containers above an owned field so a sibling writer survives', () => {
     const merged = mergeAppSettingsPatch(
       {
         profileSettings: {
           default: { libraryLocations: { home: {} }, onboarding: { chatId: 'c' } },
+          second: { onboarding: { chatId: 'other' } },
         },
       },
       {
@@ -36,9 +37,56 @@ describe('mergeAppSettingsPatch', () => {
       profileSettings: {
         default: {
           libraryLocations: { home: {} },
-          onboarding: { chatId: 'c', welcomeAcknowledged: true, skippedSteps: [] },
+          onboarding: { welcomeAcknowledged: true, skippedSteps: [] },
+        },
+        second: { onboarding: { chatId: 'other' } },
+      },
+    });
+  });
+
+  it('replaces an owned field whole, so an absent optional member is a clear', () => {
+    // The wizard sends the record it holds. Dropping `workdir` from it is how
+    // "the machine changed, forget that path" is said, and merging into the
+    // stored record would make it indistinguishable from never mentioning it.
+    const merged = mergeAppSettingsPatch(
+      {
+        profileSettings: {
+          default: { onboarding: { welcomeAcknowledged: true, workdir: '/old/machine' } },
         },
       },
+      {
+        profileSettings: {
+          default: { onboarding: { welcomeAcknowledged: true, skippedSteps: [] } },
+        },
+      } as AppSettingsPutBody
+    );
+
+    expect(merged).toEqual({
+      profileSettings: {
+        default: { onboarding: { welcomeAcknowledged: true, skippedSteps: [] } },
+      },
+    });
+  });
+
+  it('replaces a top-level field whole rather than merging into it', () => {
+    const patch: AppSettingsPutBody = {
+      chatDisplaySettings: { diffPreviewsEnabled: false, diffPreviewMode: 'collapsed' },
+    };
+    const merged = mergeAppSettingsPatch(
+      {
+        chatDisplaySettings: {
+          diffPreviewsEnabled: true,
+          diffPreviewMode: 'expanded',
+          retiredOption: true,
+        },
+        thinkingEnabled: true,
+      },
+      patch
+    );
+
+    expect(merged).toEqual({
+      chatDisplaySettings: { diffPreviewsEnabled: false, diffPreviewMode: 'collapsed' },
+      thinkingEnabled: true,
     });
   });
 
