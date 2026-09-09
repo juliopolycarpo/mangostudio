@@ -540,6 +540,9 @@ the address in a browser.
   is alive but not answering yet — still booting, or briefly failing `/health` —
   is waited for rather than replaced, and if it dies while `setup` waits, a
   replacement is started. A state file left by a crashed one is cleared first.
+- A target given while a hub is reused is reported rather than applied: `setup`
+  names the address it kept and the one it was asked for, and points at
+  `mangostudio stop` as the way to move it.
 - It exits non-zero if the hub it started never answers within 30 seconds, and
   names the pid if the one already running is the one that stayed silent.
 
