@@ -58,7 +58,6 @@ const RELEASE_ASSETS_DIR = join(ROOT_DIR, 'release-assets');
 const DISTRIBUTION_MANIFEST_PATH =
   process.env.DISTRIBUTION_MANIFEST_PATH?.trim() || join(ROOT_DIR, DISTRIBUTION_MANIFEST_FILE);
 const CHATGPT_CALLBACK_PORT = 1455;
-const RUNTIME_HANDSHAKE_TIMEOUT_MS = 10_000;
 // Resolve via the canonical helper so the archive name we expect matches the one
 // archive-assets.ts produces (same VERSION override + semver validation).
 const VERSION = resolveReleaseVersion({ rootDir: ROOT_DIR });
@@ -328,10 +327,9 @@ async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Pro
   }
   pass(`${label} --version → ${VERSION}`);
 
-  const probe = await probeRuntimeHandshake({
-    command: [binaryPath, '--stdio'],
-    timeoutMs: RUNTIME_HANDSHAKE_TIMEOUT_MS,
-  });
+  // No budget passed: the platform default is the policy, and Windows needs a
+  // different one than Linux and macOS do.
+  const probe = await probeRuntimeHandshake({ command: [binaryPath, '--stdio'] });
 
   // `=== null`, not falsy: a child whose first record is a bare newline greets
   // with an empty line, and that belongs in the JSON check below with a real

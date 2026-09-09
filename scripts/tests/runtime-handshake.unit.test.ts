@@ -1,7 +1,12 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 
 import { findModuleResolutionFailure } from '../lib/module-resolution';
-import { probeRuntimeHandshake } from '../lib/runtime-handshake';
+import {
+  DEFAULT_HANDSHAKE_BUDGET_MS,
+  probeRuntimeHandshake,
+  resolveHandshakeBudgetMs,
+  WIN32_HANDSHAKE_BUDGET_MS,
+} from '../lib/runtime-handshake';
 
 /**
  * A generous budget for stand-ins that answer or exit on their own: only the
@@ -23,6 +28,14 @@ const HELLO_FRAME = JSON.stringify({
   capabilities: { platform: 'linux-x64' },
 });
 
+function stubProcessPlatform(platform: NodeJS.Platform): () => void {
+  const original = process.platform;
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  return () => {
+    Object.defineProperty(process, 'platform', { value: original, configurable: true });
+  };
+}
+
 /** Runs `source` as a stand-in runtime binary under the current Bun. */
 function standIn(source: string): readonly string[] {
   return [process.execPath, '-e', source];
@@ -31,6 +44,52 @@ function standIn(source: string): readonly string[] {
 const NEVER_RESOLVES = 'await new Promise(() => {});';
 
 describe('scripts/lib/runtime-handshake', () => {
+  describe('budget constants', () => {
+    test('Windows gets more headroom than everything else', () => {
+      // A cold `windows-*` runner pays process spawn plus first-run JIT and
+      // disk warmup on `--stdio`; `--version` short-circuits and answers in
+      // milliseconds, which is why a green `--version` says nothing about this.
+      expect(WIN32_HANDSHAKE_BUDGET_MS).toBeGreaterThan(DEFAULT_HANDSHAKE_BUDGET_MS);
+    });
+
+    test('the Windows budget stays within a smoke job people will wait for', () => {
+      // Generous on purpose — the cost of being wrong upwards is a slower red,
+      // not a missed one — but a runtime that never greets still has to fail
+      // inside a job somebody is watching.
+      expect(WIN32_HANDSHAKE_BUDGET_MS).toBeLessThanOrEqual(2 * 60_000);
+    });
+  });
+
+  describe('resolveHandshakeBudgetMs', () => {
+    let restorePlatform: (() => void) | undefined;
+
+    afterEach(() => {
+      restorePlatform?.();
+      restorePlatform = undefined;
+    });
+
+    test('returns the Windows budget on win32', () => {
+      restorePlatform = stubProcessPlatform('win32');
+      expect(resolveHandshakeBudgetMs()).toBe(WIN32_HANDSHAKE_BUDGET_MS);
+    });
+
+    test.each(['linux', 'darwin'] as const)('returns the default budget on %s', (platform) => {
+      restorePlatform = stubProcessPlatform(platform);
+      expect(resolveHandshakeBudgetMs()).toBe(DEFAULT_HANDSHAKE_BUDGET_MS);
+    });
+
+    test('is what a probe with no budget of its own waits for', async () => {
+      // The smoke passes no `timeoutMs`, so a default that stopped being read
+      // would silently put every platform back on the same budget.
+      restorePlatform = stubProcessPlatform('linux');
+      const startedAt = Date.now();
+      const probe = await probeRuntimeHandshake({ command: standIn(NEVER_RESOLVES) });
+
+      expect(probe.failure).toContain(`within ${DEFAULT_HANDSHAKE_BUDGET_MS}ms`);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(DEFAULT_HANDSHAKE_BUDGET_MS);
+    }, 30_000);
+  });
+
   describe('probeRuntimeHandshake', () => {
     test('returns the handshake line and still drains stderr', async () => {
       const probe = await probeRuntimeHandshake({

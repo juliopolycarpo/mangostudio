@@ -20,11 +20,41 @@ import {
 /** How long a child that closed stdout gets to exit before it is killed. */
 const DEFAULT_EXIT_GRACE_MS = 2_000;
 
+/** Budget for the first stdout record everywhere but Windows. */
+export const DEFAULT_HANDSHAKE_BUDGET_MS = 10_000;
+
+/**
+ * Windows-specific handshake budget.
+ *
+ * The same cold start `wait-for-health.ts` already bumps for (issue #377):
+ * process spawn plus first-run JIT and disk warmup on a GitHub `windows-*`
+ * runner routinely costs multiples of what Linux and macOS pay, and the runtime
+ * pays it on `--stdio` rather than on `--version`, which short-circuits.
+ *
+ * The evidence this is timing and not a bad binary: on PR #1039 the runtime exe
+ * with digest `443930e2…` timed out here on one run and handshook on the next,
+ * byte-identical both times. Being generous costs a slower red on a genuinely
+ * hung runtime and nothing at all on a healthy one, which greets in about a
+ * second — so this matches `WIN32_READY_BUDGET_MS` rather than splitting the
+ * difference and guessing again in a month.
+ */
+export const WIN32_HANDSHAKE_BUDGET_MS = 60_000;
+
+/**
+ * The platform's default handshake budget. Exported separately from the probe
+ * so a test can pin both branches without spawning anything.
+ *
+ * // Usage: const timeoutMs = resolveHandshakeBudgetMs();
+ */
+export function resolveHandshakeBudgetMs(): number {
+  return process.platform === 'win32' ? WIN32_HANDSHAKE_BUDGET_MS : DEFAULT_HANDSHAKE_BUDGET_MS;
+}
+
 export interface RuntimeHandshakeProbeOptions {
   /** Full argv, e.g. `[runtimeBinaryPath, '--stdio']`. */
   readonly command: readonly string[];
-  /** Budget for the first stdout record. */
-  readonly timeoutMs: number;
+  /** Budget for the first stdout record. Overrides the platform default. */
+  readonly timeoutMs?: number;
   /** How long a child that closed stdout gets to exit; defaults to 2s. */
   readonly exitGraceMs?: number;
 }
@@ -52,16 +82,17 @@ export interface RuntimeHandshakeProbe {
  * whole matrix of child behaviours is unit-testable.
  *
  * @example
- * const probe = await probeRuntimeHandshake({
- *   command: [runtimePath, '--stdio'],
- *   timeoutMs: 10_000,
- * });
+ * const probe = await probeRuntimeHandshake({ command: [runtimePath, '--stdio'] });
  * if (!probe.hello) console.error(probe.failure, probe.stderr);
  */
 export async function probeRuntimeHandshake(
   options: RuntimeHandshakeProbeOptions
 ): Promise<RuntimeHandshakeProbe> {
-  const { command, timeoutMs, exitGraceMs = DEFAULT_EXIT_GRACE_MS } = options;
+  const {
+    command,
+    timeoutMs = resolveHandshakeBudgetMs(),
+    exitGraceMs = DEFAULT_EXIT_GRACE_MS,
+  } = options;
 
   const child = Bun.spawn({
     cmd: [...command],
