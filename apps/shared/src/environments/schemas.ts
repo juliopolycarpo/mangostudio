@@ -6,11 +6,9 @@ import {
   MAX_DIRECTORY_HASH_DOMAIN_VERSION,
 } from '../library';
 import { ProfileIdSchema } from '../profiles';
+import { RuntimeErrorCodeSchema } from '../runtime-contract/errors';
+import { RuntimeCapabilityManifestSchema } from '../runtime-contract/manifest';
 import { RuntimeCapabilityAllowSchema, RuntimeHealthReportSchema } from '../runtime-home/schemas';
-import {
-  RuntimeCapabilityManifestSchema,
-  RuntimeErrorCodeSchema,
-} from '../runtime-protocol/schemas';
 import { ReadonlyArraySchema } from '../schema-helpers';
 import { ToolchainSelectionSchema } from './toolchain-schemas';
 

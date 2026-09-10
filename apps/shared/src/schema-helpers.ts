@@ -21,3 +21,21 @@ export function ReadonlyArraySchema<T extends TSchema>(
 ) {
   return Type.Unsafe<ReadonlyArray<Static<T>>>(Type.Array(item, options));
 }
+
+/**
+ * Object schema that validates "is a JSON object" while inferring `T`.
+ *
+ * A contract method whose parameters have no TypeBox schema yet still needs a
+ * schema entry, and the honest one is the check the dispatcher used to run by
+ * hand: an object, nothing more. Wrapping the declared TypeScript shape keeps
+ * the typed client and handler map exact without claiming a validation the
+ * schema does not perform — replace one with a real schema and nothing else
+ * has to move.
+ *
+ * Usage:
+ *   const ParamsSchema = UnsafeObjectSchema<RuntimeReadFileParams>();
+ *   type Params = Static<typeof ParamsSchema>; // RuntimeReadFileParams
+ */
+export function UnsafeObjectSchema<T>() {
+  return Type.Unsafe<T>({ type: 'object' });
+}

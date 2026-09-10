@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { MAX_DIRECTORY_HASH_DOMAIN_VERSION } from '@mangostudio/shared/library';
 import {
   assertRuntimeProtocolCompatible,
   decodeRuntimeFrameLine,
   encodeRuntimeFrame,
   narrowRuntimeErrorCode,
   RUNTIME_PROTOCOL_VERSION,
-  RuntimeCapabilityManifestSchema,
   RuntimeFrameCodecError,
   RuntimeFrameDecoder,
   RuntimeFrameSchema,
@@ -86,94 +84,6 @@ describe('runtime protocol compatibility', () => {
     ] as const) {
       expect(() => assertRuntimeProtocolCompatible(hub, runtime)).not.toThrow();
     }
-  });
-
-  it('accepts an old manifest that has no external-agent fields', () => {
-    expect(
-      Value.Check(RuntimeCapabilityManifestSchema, {
-        platform: 'linux',
-        arch: 'x64',
-        pathStyle: 'posix',
-        homeDir: '/home/peer',
-        shells: ['bash'],
-        git: { available: true },
-        features: {
-          tools: true,
-          git: true,
-          probing: true,
-          mcp: true,
-          library: true,
-          checkpoints: true,
-        },
-      })
-    ).toBe(true);
-  });
-
-  it('accepts an advertised directory-hash domain and treats its absence as valid', () => {
-    const base = {
-      platform: 'linux',
-      arch: 'x64',
-      pathStyle: 'posix' as const,
-      homeDir: '/home/peer',
-      shells: ['bash'],
-      git: { available: true },
-      features: {
-        tools: true,
-        git: true,
-        probing: true,
-        mcp: true,
-        library: true,
-        checkpoints: true,
-      },
-    };
-    expect(Value.Check(RuntimeCapabilityManifestSchema, base)).toBe(true);
-    expect(Value.Check(RuntimeCapabilityManifestSchema, { ...base, directoryHashDomain: 2 })).toBe(
-      true
-    );
-    expect(Value.Check(RuntimeCapabilityManifestSchema, { ...base, directoryHashDomain: 0 })).toBe(
-      false
-    );
-    // The bound the runtime enforces when deriving a version has to be the one
-    // the wire accepts, or a hash bump produces a manifest no peer can parse.
-    expect(
-      Value.Check(RuntimeCapabilityManifestSchema, {
-        ...base,
-        directoryHashDomain: MAX_DIRECTORY_HASH_DOMAIN_VERSION,
-      })
-    ).toBe(true);
-    expect(
-      Value.Check(RuntimeCapabilityManifestSchema, {
-        ...base,
-        directoryHashDomain: MAX_DIRECTORY_HASH_DOMAIN_VERSION + 1,
-      })
-    ).toBe(false);
-  });
-
-  it('accepts the optional external-agent capability and isolation attestation', () => {
-    expect(
-      Value.Check(RuntimeCapabilityManifestSchema, {
-        platform: 'linux',
-        arch: 'x64',
-        pathStyle: 'posix',
-        homeDir: '/home/peer',
-        shells: ['bash'],
-        git: { available: true },
-        features: {
-          tools: true,
-          git: true,
-          probing: true,
-          mcp: true,
-          library: true,
-          checkpoints: true,
-          externalAgents: true,
-        },
-        externalAgents: ['codex'],
-        identityIsolation: {
-          method: 'single-user-host',
-          credentialHomeFingerprint: 'sha256:credential-home',
-        },
-      })
-    ).toBe(true);
   });
 
   it('refuses a same-version peer that carries a field this build does not know on a frame envelope', () => {

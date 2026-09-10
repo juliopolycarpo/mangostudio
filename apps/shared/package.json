@@ -61,6 +61,8 @@
     "./realtime": "./src/realtime/index.ts",
     "./tool-identity": "./src/tool-identity/index.ts",
     "./runtime-protocol": "./src/runtime-protocol/index.ts",
+    "./runtime-contract": "./src/runtime-contract/index.ts",
+    "./runtime-contract/errors": "./src/runtime-contract/errors.ts",
     "./runtime-home": "./src/runtime-home/index.ts",
     "./machine": "./src/machine/index.ts",
     "./updates": "./src/updates/index.ts",
@@ -72,6 +74,7 @@
   },
   "dependencies": {
     "@faker-js/faker": "^10.5.0",
+    "@mangostudio/protocol": "^0.1.0",
     "typebox": "1.3.13"
   }
 }
