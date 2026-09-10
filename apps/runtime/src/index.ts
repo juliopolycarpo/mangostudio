@@ -1,5 +1,6 @@
 export type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 export { RuntimeProtocolClient, type RuntimeRequestOptions } from './client';
+export { loadRuntimeConfig } from './config';
 export {
   createSlotConsentSource,
   type RuntimeConsentSource,
@@ -297,6 +298,7 @@ export {
   createRuntimeSession,
   type RuntimeEventRelay,
   type RuntimeHostDefinition,
+  whenRuntimeReleased,
 } from './session';
 export {
   createInProcessPortPair,

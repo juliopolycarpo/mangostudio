@@ -1,3 +1,5 @@
+import { RUNTIME_UPDATE_REFUSED } from '@mangostudio/shared/runtime-contract';
+import { isDeniedCode } from '../../../services/runtime-client/remote-error-details';
 /**
  * Runtime install/upgrade/reinstall runs with an SSE log stream.
  *
@@ -8,7 +10,7 @@
 
 import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { RemoteError } from '@mangostudio/protocol';
 import type {
   EnvironmentTransportKind,
   InstallStreamEvent,
@@ -974,8 +976,8 @@ async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
     // cancel, a timeout or a dead transport all come back typed too, and none
     // of them says what the far side did with the transfer.
     const refused =
-      error instanceof RuntimeRemoteError &&
-      (error.code === 'RUNTIME_UPDATE_REFUSED' || error.code === 'RUNTIME_DENIED');
+      error instanceof RemoteError &&
+      (error.code === RUNTIME_UPDATE_REFUSED || isDeniedCode(error.code));
     if (expectedDisconnect && refused) {
       // The commit demonstrably did not land, so no handoff is coming and a
       // stale expectation would swallow the next real crash's backoff.

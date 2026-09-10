@@ -1,3 +1,4 @@
+import { RemoteError } from '@mangostudio/protocol';
 /**
  * The write half of library propagation: verify the preview still describes
  * reality, plan every operation, write with a backup and a post-write hash
@@ -16,7 +17,6 @@ import {
   LIBRARY_BACKUP_MISSING_KIND,
   LibraryBackupMissingError,
   type PropagationWriteEngineDeps,
-  RuntimeRemoteError,
 } from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
@@ -1204,8 +1204,8 @@ async function runUndo(
  * to match on — rewording or localising it would silently turn every stale
  * undo into a 500.
  */
-function isBackupMissingResponse(error: unknown): error is RuntimeRemoteError {
-  return error instanceof RuntimeRemoteError && error.details?.kind === LIBRARY_BACKUP_MISSING_KIND;
+function isBackupMissingResponse(error: unknown): error is RemoteError {
+  return error instanceof RemoteError && error.details?.kind === LIBRARY_BACKUP_MISSING_KIND;
 }
 
 /**

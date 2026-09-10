@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import {
   clientWebSocketSink,
   createWebSocketFramePort,
@@ -301,7 +302,7 @@ describe('runtime dial-in socket', () => {
     // no button and no redial could clear.
     for (let attempt = 0; attempt < 6; attempt += 1) {
       await expect(hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID)).rejects.toMatchObject({
-        code: 'RUNTIME_UNAVAILABLE',
+        code: RESERVED_ERROR_CODES.UNAVAILABLE,
       });
     }
     expect(hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID).state).toBe('disconnected');
@@ -364,7 +365,7 @@ describe('runtime dial-in socket', () => {
     await Bun.sleep(10);
 
     await expect(hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID)).rejects.toMatchObject({
-      code: 'RUNTIME_UNAVAILABLE',
+      code: RESERVED_ERROR_CODES.UNAVAILABLE,
     });
     expect(hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID).state).toBe('disconnected');
   });

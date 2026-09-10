@@ -1,3 +1,4 @@
+import { RemoteError } from '@mangostudio/protocol';
 /**
  * Hub-side facade over the runtime's `gh.exec` / `gh.mutate` methods.
  *
@@ -13,7 +14,6 @@
 
 import {
   type RuntimeGhExecResult,
-  RuntimeRemoteError,
   buildGhArgv as runtimeBuildGhArgv,
   buildGhEnvironment as runtimeBuildGhEnvironment,
 } from '@mangostudio/runtime';
@@ -372,7 +372,7 @@ function mapGhFailure(args: readonly string[], error: unknown): GhCliError {
   if (isAbortError(error)) {
     return new GhCliError(args, null, 'GitHub CLI command aborted.', true);
   }
-  if (error instanceof RuntimeRemoteError && detailString(error, 'kind') === 'gh_execution') {
+  if (error instanceof RemoteError && detailString(error, 'kind') === 'gh_execution') {
     return new GhCliError(
       detailStringArray(error, 'args') ?? args,
       detailExitCode(error),

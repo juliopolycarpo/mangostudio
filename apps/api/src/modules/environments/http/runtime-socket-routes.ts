@@ -30,6 +30,7 @@ import { createDiagnosticLogger } from '../../../lib/logger';
 import { extractClientIp } from '../../../plugins/rate-limit';
 import { RATE_LIMIT_BUCKETS } from '../../../plugins/rate-limit-policy';
 import { RateLimitStore } from '../../../plugins/rate-limit-store';
+import { legacyHubSession } from '../../../services/runtime-client/hub-session';
 import { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import {
   getRuntimeConnectionManager,
@@ -367,7 +368,7 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
       },
     });
     return {
-      client: new RuntimeClient(client, onUnavailable, peer.environmentId),
+      client: new RuntimeClient(legacyHubSession(client), onUnavailable, peer.environmentId),
       close(reason) {
         // The manager is releasing this connection, so the socket's own close
         // handler must not turn around and release it again — by then the

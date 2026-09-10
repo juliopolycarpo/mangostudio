@@ -1,3 +1,4 @@
+import { isUnavailableCode } from '../../../services/runtime-client/remote-error-details';
 /**
  * One error mapping for every library route.
  *
@@ -8,7 +9,7 @@
  * environment routes already return for that code — neither is logged.
  */
 
-import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { RemoteError } from '@mangostudio/protocol';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import { LibraryFeatureUnavailableError } from '../domain/library-feature-error';
 
@@ -22,7 +23,7 @@ export function handleLibraryError(
     set.status = 422;
     return { error: error.message, code: ERROR_CODES.VALIDATION };
   }
-  if (error instanceof RuntimeRemoteError && error.code === 'RUNTIME_UNAVAILABLE') {
+  if (error instanceof RemoteError && isUnavailableCode(error.code)) {
     set.status = 503;
     return { error: error.message, code: ERROR_CODES.PROVIDER_ERROR };
   }

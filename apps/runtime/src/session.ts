@@ -151,15 +151,45 @@ export function createRuntimeSession(
     () => undefined
   );
 
+  const released = Promise.withResolvers<void>();
+  RELEASED.set(session, released.promise);
   session.onClose(() => {
     unbind();
     // Flush only — the sink is process-scoped and shared across every
     // reconnect and supersede that passes through it. The CLI owns
     // `audit.close()` at process end.
-    void Promise.allSettled([definition.audit?.flush(), definition.onClose()]);
+    void Promise.allSettled([definition.audit?.flush(), definition.onClose()]).then(() =>
+      released.resolve()
+    );
   });
 
   return session;
+}
+
+/**
+ * Teardown promises, keyed by the session that owns them.
+ *
+ * Off the `Session` because it is the SDK's class: a session ends when the
+ * transport does, and what the definition still has to release afterwards is
+ * this application's business, not the protocol's.
+ */
+const RELEASED = new WeakMap<Session, Promise<void>>();
+
+/**
+ * Settles once `session` has closed *and* its definition finished releasing
+ * what the handlers held open — MCP sessions, terminals, spawned vendor
+ * processes.
+ *
+ * `session.onClose` fires as soon as the transport ends, which is earlier: a
+ * caller that has to know the child processes are reaped (a test, or a CLI
+ * about to drain its audit sink) waits on this instead.
+ *
+ * @example
+ * session.close(CLOSE_CODES.RELEASED);
+ * await whenRuntimeReleased(session);
+ */
+export function whenRuntimeReleased(session: Session): Promise<void> {
+  return RELEASED.get(session) ?? Promise.resolve();
 }
 
 /**

@@ -3,7 +3,7 @@
  * `workspace.validate`; this module preserves the typed errors callers expect.
  */
 
-import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { RemoteError } from '@mangostudio/protocol';
 import type { WorkdirValidationReason } from '@mangostudio/shared/workspaces';
 import { getRuntimeClient } from '../../../services/runtime-client';
 import { WorkspacePathError } from './workspace-path';
@@ -53,7 +53,7 @@ export async function requireValidWorkdir(
 }
 
 function mapValidateFailure(error: unknown): Error {
-  if (error instanceof RuntimeRemoteError && detailString(error, 'kind') === 'workdir_validation') {
+  if (error instanceof RemoteError && detailString(error, 'kind') === 'workdir_validation') {
     return new WorkspacePathError(error.message);
   }
   if (error instanceof WorkspacePathError) return error;
@@ -61,7 +61,7 @@ function mapValidateFailure(error: unknown): Error {
   return new Error(String(error));
 }
 
-function detailString(error: RuntimeRemoteError, key: string): string | undefined {
+function detailString(error: RemoteError, key: string): string | undefined {
   const value = error.details?.[key];
   return typeof value === 'string' ? value : undefined;
 }

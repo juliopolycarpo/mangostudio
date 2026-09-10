@@ -19,6 +19,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { RemoteError } from '@mangostudio/protocol';
 import { RuntimeRemoteError } from '@mangostudio/runtime';
 import type { ContainerEngine, ContainerFailureReason } from '@mangostudio/shared/environments';
 import {
@@ -28,6 +29,7 @@ import {
   containerName,
   describeContainerMountRefusal,
 } from '@mangostudio/shared/environments';
+import { narrowRuntimeErrorCode } from '@mangostudio/shared/runtime-contract';
 import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { throwIfAborted } from '../../modules/environments/domain/cancellation';
@@ -45,6 +47,7 @@ import {
   type ContainerEngineService,
   containerEngineService,
 } from '../../modules/environments/infrastructure/container-engine';
+import { legacyHubSession } from './hub-session';
 import { RuntimeClient } from './runtime-client';
 import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-child';
 
@@ -185,7 +188,7 @@ export async function connectContainerRuntime(
   }
 
   return {
-    client: new RuntimeClient(connection.client, onUnavailable, definition.id),
+    client: new RuntimeClient(legacyHubSession(connection.client), onUnavailable, definition.id),
     close: async () => {
       await connection.close();
       // Closing the child's stdin ends the runtime, which ends the container,
@@ -249,12 +252,13 @@ async function withFailureReason<T>(step: () => Promise<T>): Promise<T> {
  * manager latches on it, and a runtime too old to speak this protocol is not
  * fixed by retrying.
  */
-function attachReason(error: unknown, reason: ContainerFailureReason): RuntimeRemoteError {
-  if (reason === 'unknown' && error instanceof RuntimeRemoteError) return error;
-  const code = error instanceof RuntimeRemoteError ? error.code : 'RUNTIME_UNAVAILABLE';
+function attachReason(error: unknown, reason: ContainerFailureReason): RemoteError {
+  if (reason === 'unknown' && error instanceof RemoteError) return error;
+  const code =
+    error instanceof RemoteError ? narrowRuntimeErrorCode(error.code) : 'RUNTIME_UNAVAILABLE';
   const message = error instanceof Error ? error.message : String(error);
   return new RuntimeRemoteError(code, message, {
-    ...(error instanceof RuntimeRemoteError ? error.details : {}),
+    ...(error instanceof RemoteError ? error.details : {}),
     containerFailureReason: reason,
   });
 }

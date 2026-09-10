@@ -3,7 +3,7 @@
  * `workspace.browse`; this module preserves the HTTP error types routes expect.
  */
 
-import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { RemoteError } from '@mangostudio/protocol';
 import type {
   ListDirectoryResponse,
   WorkdirValidationReason,
@@ -41,7 +41,7 @@ export async function listDirectory(
 }
 
 function mapBrowseFailure(error: unknown): Error {
-  if (error instanceof RuntimeRemoteError && detailString(error, 'kind') === 'workspace_browser') {
+  if (error instanceof RemoteError && detailString(error, 'kind') === 'workspace_browser') {
     const code = detailString(error, 'code');
     const reason = detailString(error, 'reason');
     if ((code === 'VALIDATION' || code === 'FILESYSTEM') && isBrowserReason(reason)) {
@@ -61,7 +61,7 @@ function isBrowserReason(value: unknown): value is WorkdirValidationReason | 'in
   );
 }
 
-function detailString(error: RuntimeRemoteError, key: string): string | undefined {
+function detailString(error: RemoteError, key: string): string | undefined {
   const value = error.details?.[key];
   return typeof value === 'string' ? value : undefined;
 }

@@ -15,15 +15,18 @@
 
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { RemoteError } from '@mangostudio/protocol';
 import { RuntimeRemoteError } from '@mangostudio/runtime';
 import type { SshFailureReason } from '@mangostudio/shared/environments';
 import { expandUserPath, sshLaunchCommand } from '@mangostudio/shared/environments';
+import { narrowRuntimeErrorCode } from '@mangostudio/shared/runtime-contract';
 import { getVersion } from '../../lib/config';
 import { environmentConfigFor } from '../../modules/environments/domain/environment-config';
 import {
   classifySshFailure,
   describeSshFailure,
 } from '../../modules/environments/domain/ssh-failure';
+import { legacyHubSession } from './hub-session';
 import { RuntimeClient } from './runtime-client';
 import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-child';
 
@@ -98,7 +101,7 @@ export async function connectSshRuntime(
     });
 
     return {
-      client: new RuntimeClient(connection.client, onUnavailable, definition.id),
+      client: new RuntimeClient(legacyHubSession(connection.client), onUnavailable, definition.id),
       close: () => connection.close(),
     };
   } catch (error) {
@@ -112,12 +115,13 @@ export async function connectSshRuntime(
  * manager latches on it, and a runtime too old to speak this protocol is not
  * fixed by retrying.
  */
-function withFailureReason(error: unknown, reason: SshFailureReason): RuntimeRemoteError {
-  if (reason === 'unknown' && error instanceof RuntimeRemoteError) return error;
-  const code = error instanceof RuntimeRemoteError ? error.code : 'RUNTIME_UNAVAILABLE';
+function withFailureReason(error: unknown, reason: SshFailureReason): RemoteError {
+  if (reason === 'unknown' && error instanceof RemoteError) return error;
+  const code =
+    error instanceof RemoteError ? narrowRuntimeErrorCode(error.code) : 'RUNTIME_UNAVAILABLE';
   const message = error instanceof Error ? error.message : String(error);
   return new RuntimeRemoteError(code, message, {
-    ...(error instanceof RuntimeRemoteError ? error.details : {}),
+    ...(error instanceof RemoteError ? error.details : {}),
     sshFailureReason: reason,
   });
 }

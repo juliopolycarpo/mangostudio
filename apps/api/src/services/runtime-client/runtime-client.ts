@@ -1,3 +1,4 @@
+import { type EventFrame, RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import {
   type ExternalAgentAckResult,
   type ExternalAgentCancelParams,
@@ -92,10 +93,8 @@ import {
   type RuntimeProbeRuntimesResult,
   type RuntimeProbeVersionManagersParams,
   type RuntimeProbeVersionManagersResult,
-  type RuntimeProtocolClient,
   type RuntimeReadFileParams,
   type RuntimeReadFileResult,
-  RuntimeRemoteError,
   type RuntimeReplaceRangeParams,
   type RuntimeReplaceRangeResult,
   type RuntimeRequestOptions,
@@ -142,15 +141,14 @@ import {
   directoryHashDomainOf,
   type RuntimeSettingsSourcesResult,
 } from '@mangostudio/shared/library';
-import type {
-  RuntimeEventFrame,
-  RuntimePathPolicyParams,
-} from '@mangostudio/shared/runtime-protocol';
+import type { RuntimePathPolicyParams } from '@mangostudio/shared/runtime-contract';
 import Value from 'typebox/value';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { McpConnectionError } from '../mcp/types';
 import { ToolArgumentError } from '../tools/arg-parsing';
 import { ToolExecutionTimedOutError } from '../tools/execution-timeout';
+import type { HubSession } from './hub-session';
+import { isDeniedCode, isUnavailableCode } from './remote-error-details';
 import { createTargetPaths, type TargetPaths } from './target-paths';
 
 const logger = createDiagnosticLogger('runtime-client');
@@ -507,12 +505,21 @@ export class RuntimeClient {
   private unenforcedContainment = false;
   private pathPolicyEnforced = false;
 
+  /**
+   * The manifest this connection announced, replaced in place after a consent
+   * change. Owned here rather than read from the session because the session's
+   * `hello` is what the peer said once, and `refreshManifest` is the hub
+   * learning it changed without tearing the connection down.
+   */
+  private runtimeManifest: RuntimeCapabilityManifest;
+
   constructor(
-    private readonly protocol: RuntimeProtocolClient,
+    private readonly hub: HubSession,
     private readonly onUnavailable?: () => void,
     /** Named in the warning when this peer turns out not to enforce containment. */
     private readonly environmentId?: string
   ) {
+    this.runtimeManifest = hub.manifest;
     this.fs = {
       readFile: (params, options) => this.request('fs.read-file', params, options),
       writeFile: (params, options) => this.request('fs.write-file', params, options),
@@ -563,7 +570,7 @@ export class RuntimeClient {
       listSessions: (params, options) =>
         this.request('external-agent.list-sessions', params, options),
       onEvent: (sessionId, listener) =>
-        this.protocol.onEvent((frame) => {
+        this.hub.onEvent((frame) => {
           if (frame.topic !== RUNTIME_EXTERNAL_AGENT_TOPIC) return;
           // Every open session adds a listener on this topic, so the cheap
           // session match runs before the envelope validation: a delta stream
@@ -632,7 +639,7 @@ export class RuntimeClient {
       close: (params, options) => this.request('terminal.close', params, options),
       list: (options) => this.request('terminal.list', {}, options),
       onOutput: (sessionId, listener) =>
-        this.protocol.onEvent((frame) => {
+        this.hub.onEvent((frame) => {
           if (frame.topic !== RUNTIME_TERMINAL_OUTPUT_TOPIC) return;
           if (frame.streamId !== sessionId) return;
           listener(frame.payload as RuntimeTerminalOutputEvent);
@@ -641,7 +648,7 @@ export class RuntimeClient {
   }
 
   get manifest(): RuntimeCapabilityManifest {
-    return this.protocol.manifest;
+    return this.runtimeManifest;
   }
 
   /**
@@ -650,12 +657,12 @@ export class RuntimeClient {
    * manifest with another environment's connection.
    */
   get paths(): TargetPaths {
-    this.targetPaths ??= createTargetPaths(this.protocol.manifest);
+    this.targetPaths ??= createTargetPaths(this.runtimeManifest);
     return this.targetPaths;
   }
 
   get runtimeVersion(): string {
-    return this.protocol.runtimeVersion;
+    return this.hub.runtimeVersion;
   }
 
   /**
@@ -664,7 +671,7 @@ export class RuntimeClient {
    * declaration — the hub cannot read enforcement into silence.
    */
   get enforcesPathPolicy(): boolean {
-    return this.protocol.manifest.enforcesPathPolicy === true;
+    return this.runtimeManifest.enforcesPathPolicy === true;
   }
 
   /**
@@ -673,7 +680,7 @@ export class RuntimeClient {
    * version.
    */
   get directoryHashDomain(): number {
-    return directoryHashDomainOf(this.protocol.manifest.directoryHashDomain);
+    return directoryHashDomainOf(this.runtimeManifest.directoryHashDomain);
   }
 
   /** One health truth: same payload as `mangostudio-runtime health --json`. */
@@ -682,11 +689,13 @@ export class RuntimeClient {
   }
 
   /**
-   * Replaces the handshake manifest after a consent change (see
-   * {@link RuntimeProtocolClient.replaceManifest}).
+   * Replaces the handshake manifest after a consent change.
+   *
+   * Used when the hub re-reads `runtime.health` so the cosmetic filter and the
+   * environment card see the new allow set without tearing the connection down.
    */
   replaceManifest(manifest: RuntimeCapabilityManifest): void {
-    this.protocol.replaceManifest(manifest);
+    this.runtimeManifest = manifest;
     this.targetPaths = undefined;
     this.pathPolicyEnforced = false;
   }
@@ -696,8 +705,8 @@ export class RuntimeClient {
    * connection dropping clears every listener on its own, so a caller that
    * forgets one leaks nothing past the socket.
    */
-  onEvent(listener: (event: RuntimeEventFrame) => void): () => void {
-    return this.protocol.onEvent(listener);
+  onEvent(listener: (event: EventFrame) => void): () => void {
+    return this.hub.onEvent(listener);
   }
 
   /**
@@ -705,7 +714,7 @@ export class RuntimeClient {
    * connection cannot keep returning a handle whose session is already gone.
    */
   onClose(listener: () => void): () => void {
-    return this.protocol.onClose(listener);
+    return this.hub.onClose(listener);
   }
 
   private async request<K extends RuntimeMethod>(
@@ -715,9 +724,9 @@ export class RuntimeClient {
   ): Promise<RuntimeMethodMap[K]['result']> {
     this.noteUnenforcedContainment(method, params);
     try {
-      return await this.protocol.request(method, params, options);
+      return await this.hub.request(method, params, options);
     } catch (error) {
-      if (error instanceof RuntimeRemoteError && error.code === 'RUNTIME_UNAVAILABLE') {
+      if (error instanceof RemoteError && isUnavailableCode(error.code)) {
         this.onUnavailable?.();
       }
       throw translateRuntimeError(error);
@@ -764,14 +773,8 @@ export class RuntimeClient {
   }
 
   /** Both handshake facts, or nothing when the handshake has not settled. */
-  private peerIdentity():
-    | { manifest: RuntimeCapabilityManifest; runtimeVersion: string }
-    | undefined {
-    try {
-      return { manifest: this.protocol.manifest, runtimeVersion: this.protocol.runtimeVersion };
-    } catch {
-      return undefined;
-    }
+  private peerIdentity(): { manifest: RuntimeCapabilityManifest; runtimeVersion: string } {
+    return { manifest: this.runtimeManifest, runtimeVersion: this.hub.runtimeVersion };
   }
 }
 
@@ -790,16 +793,16 @@ function containmentRootOf(params: unknown): string | undefined {
 }
 
 function translateRuntimeError(error: unknown): Error {
-  if (!(error instanceof RuntimeRemoteError)) {
+  if (!(error instanceof RemoteError)) {
     return error instanceof Error ? error : new Error(String(error));
   }
-  if (error.code === 'CANCELLED') {
+  if (error.code === RESERVED_ERROR_CODES.CANCELLED) {
     return new DOMException(error.message, 'AbortError');
   }
-  if (error.code === 'TIMEOUT') {
+  if (error.code === RESERVED_ERROR_CODES.TIMEOUT) {
     return new ToolExecutionTimedOutError(error.message);
   }
-  if (error.code === 'RUNTIME_DENIED') {
+  if (isDeniedCode(error.code)) {
     const missing = error.details?.missing;
     return new RuntimeConsentDeniedError(error.message, {
       capability: detailString(error, 'capability'),
@@ -850,19 +853,19 @@ function translateRuntimeError(error: unknown): Error {
         slot: detailString(error, 'slot'),
       });
     default:
-      // `mcp_call` deliberately stays a RuntimeRemoteError: the turn pipeline
+      // `mcp_call` deliberately stays a RemoteError: the turn pipeline
       // classifies it from the `mcpFailure` detail the runtime attached, and
       // wrapping it here would drop that.
       return error;
   }
 }
 
-function detailString(error: RuntimeRemoteError, key: string): string | undefined {
+function detailString(error: RemoteError, key: string): string | undefined {
   const value = error.details?.[key];
   return typeof value === 'string' ? value : undefined;
 }
 
-function detailNumber(error: RuntimeRemoteError, key: string): number {
+function detailNumber(error: RemoteError, key: string): number {
   const value = error.details?.[key];
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }

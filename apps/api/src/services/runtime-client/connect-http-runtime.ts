@@ -7,6 +7,7 @@
  * that machine is not part of this hub's distribution.
  */
 
+import { RemoteError } from '@mangostudio/protocol';
 import {
   clientWebSocketSink,
   createWebSocketFramePort,
@@ -21,6 +22,7 @@ import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { environmentConfigFor } from '../../modules/environments/domain/environment-config';
 import { httpRuntimeBaseUrlToWebSocketUrl } from './http-runtime-url';
+import { legacyHubSession } from './hub-session';
 import { RuntimeClient } from './runtime-client';
 import { readRuntimeToken } from './runtime-token-secrets';
 
@@ -144,7 +146,7 @@ export async function connectHttpRuntime(
   });
 
   return {
-    client: new RuntimeClient(client, notifyGone, definition.id),
+    client: new RuntimeClient(legacyHubSession(client), notifyGone, definition.id),
     close(reason) {
       notified = true;
       stopLiveness();
@@ -161,8 +163,12 @@ export async function connectHttpRuntime(
   };
 }
 
-function asConnectError(error: unknown): RuntimeRemoteError {
-  if (error instanceof RuntimeRemoteError) return error;
+function asConnectError(error: unknown): RemoteError {
+  // Any `RemoteError`, not only this package's subclass: the same helper has to
+  // keep a `PROTOCOL_MISMATCH` intact whether it came from the hand-written
+  // client or from a protocol session, and downgrading one to
+  // `RUNTIME_UNAVAILABLE` would stop the manager latching on it.
+  if (error instanceof RemoteError) return error;
   if (error instanceof RuntimeProtocolError) {
     return new RuntimeRemoteError(error.code, error.message, error.details);
   }
