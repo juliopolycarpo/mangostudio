@@ -57,6 +57,7 @@ class FakeHub {
   readonly sessions: Session[] = [];
   readonly events: EventFrame[] = [];
   readonly #server: Server<HubSocketData>;
+  readonly #pending = new AbortController();
   #current: ServerWebSocket<HubSocketData> | null = null;
 
   constructor(options: { readonly token?: string; readonly upgrade?: boolean } = {}) {
@@ -68,8 +69,9 @@ class FakeHub {
         if (options.upgrade === false) {
           // Accept TCP and then say nothing: `connectWebSocket` only settles
           // on open, error, or close, so this is the stall a dial deadline
-          // has to end.
-          return new Promise<Response>(() => undefined);
+          // has to end. The promise is aborted in `stop` so it cannot keep
+          // the process alive after the fixture is gone.
+          return this.#neverRespond();
         }
         const authorized = request.headers.get('authorization') === expected;
         const upgraded = server.upgrade(request, {
@@ -127,7 +129,19 @@ class FakeHub {
   }
 
   stop(): void {
+    this.#pending.abort();
     void this.#server.stop(true);
+  }
+
+  #neverRespond(): Promise<Response> {
+    return new Promise<Response>((_resolve, reject) => {
+      const { signal } = this.#pending;
+      if (signal.aborted) {
+        reject(new Error('hub stopped'));
+        return;
+      }
+      signal.addEventListener('abort', () => reject(new Error('hub stopped')), { once: true });
+    });
   }
 
   #accept(socket: ServerWebSocket<HubSocketData>): void {
