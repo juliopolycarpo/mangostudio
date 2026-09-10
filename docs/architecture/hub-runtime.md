@@ -5,9 +5,9 @@ hub: it owns identity, chats, policy, and durable state. `apps/runtime` is an ex
 host behind a versioned protocol: it owns filesystem and shell effects plus disposable
 execution caches.
 
-The runtime is embedded in the API process today, but callers use the same frame protocol
-that a separate runtime process will use. This keeps transport placement out of tool
-executors.
+The Local runtime runs inside the API process, and even there a call crosses a real port
+pair and the same session, handlers and error mapping a runtime on another machine is reached
+through. This keeps transport placement out of tool executors.
 
 ## Ownership
 
@@ -35,40 +35,50 @@ executors.
 | Install recipes, guards, audit rows, and the SSE stream                          | Hub (`apps/api`)                | Whether a recipe may run — including the per-environment `allowInstalls` opt-in — and the system of record for what ran.                                                                                                                                                |
 | Interactive terminal sessions (`terminal.*`)                                     | Runtime (`apps/runtime`)        | The PTY, the shell, its env and its lifetime; output streams back on `terminal.output` under an ack window. See [terminal.md](../features/terminal.md).                                                                                                                 |
 | Terminal registry, limits, Local isolation gate, and the browser socket relay    | Hub (`apps/api`)                | Who may open one, how many, for how long idle; `/api/terminal/:id` relays bytes with its own flow control because `/api/ws` is invalidation-only.                                                                                                                       |
-| Frame schemas, compatibility, and NDJSON codec                                   | Shared (`apps/shared`)          | Both sides import the same framework-agnostic contract.                                                                                                                                                                                                                 |
+| Runtime contract: methods, capabilities, events, manifest, error vocabulary      | Shared (`apps/shared`)          | `apps/shared/src/runtime-contract/` defines it once; the hub's typed client and the runtime's handler map are both derived from that definition.                                                                                                                        |
+| Wire framing, negotiation, close codes, and liveness                             | `@mangostudio/protocol`         | The SDK owns the envelope and the transports. Both workspaces import it and neither restates it.                                                                                                                                                                        |
 
 The runtime must not import API modules or persist product state. The hub must not bypass
 the runtime client for execution that belongs to the runtime.
 
 ## Protocol
 
-Connection setup is runtime-led:
+Connection setup is symmetric. Both peers send one `hello` as soon as the transport opens,
+neither waits for the other's, and there is no acknowledgement frame:
 
 ```text
-Runtime                                      Hub
-  |-- hello(protocol, version, manifest) ----->|
-  |<----------- hello_ack(protocol, version) --|
-  |                                             |
-  |<------------ req(id, method, params) -------|
-  |------------- res(id, ok | err) ------------>|
-  |                                             |
-  |<---------------- cancel(id) ----------------|
+Runtime                                            Hub
+  |--- hello(peer, capabilities: manifest) -------->|
+  |<-- hello(peer, capabilities: contracts, hub) ---|
+  |                                                 |
+  |<------------ req(id, method, params) -----------|
+  |------------- res(id, result) | err(id, error) ->|
+  |                                                 |
+  |<------------------ cancel(id) ------------------|
+  |------------ evt(topic, seq, payload) ---------->|
 ```
 
-The `hello` manifest reports platform, architecture, path style, home directory, available
-shells, Git availability, and feature flags. Requests are accepted only after the handshake.
-Hub and runtime must agree on the protocol major/minor pair; patch-only protocol revisions
-remain compatible.
+The runtime's `hello.capabilities` **is** the manifest: platform, architecture, path style,
+home directory, available shells, Git and `gh` availability, feature flags, and the vendor
+adapters it carries — plus a `contracts` entry naming `mangostudio.runtime` and the contract
+version. The hub's carries the same `contracts` entry and, unless the connector passed one of
+its own, `hub: { host, user }`: who is asking, for the runtime's audit log. The protocol
+defines no member of `capabilities`, so deciding that what came back is a runtime manifest
+and not merely something that speaks the wire is the hub's own job, in `openHubSession`
+(`apps/api/src/services/runtime-client/hub-session.ts`).
 
-Every request has a unique id and exactly one success or typed error response. Cancellation
-travels as a `cancel` frame and aborts the runtime handler's local `AbortSignal`; an
-`AbortSignal` is never serialized in request parameters. Event and ping/pong frames are also
-part of the transport-neutral envelope for future streaming and liveness needs.
+Everything under the manifest belongs to the SDK, and the
+[wire specification](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/mango-protocol-1.md)
+is where it is written down rather than restated here: negotiation (§5.2 — the majors must
+match, and the effective minor is the lower of the two), requests and responses (§6),
+cancellation (§7), events and streams with their per-stream `seq` (§8), liveness (§9), close
+codes (§10), and frame limits (§11).
 
-Protocol errors use stable codes such as `RUNTIME_UNAVAILABLE`, `METHOD_UNSUPPORTED`,
-`PROTOCOL_MISMATCH`, `CANCELLED`, `TIMEOUT`, and `RUNTIME_DENIED`. Runtime service failures
-add a typed `details.kind`; the API facade translates those details back into its existing
-tool and checkpoint errors.
+The error vocabulary is the ten codes the protocol reserves (§6.3) plus this application's
+own — `RUNTIME_UPDATE_REFUSED` today — in `apps/shared/src/runtime-contract/errors.ts`. A
+consent refusal is `DENIED` with `details.kind = "consent_denied"`. Runtime service failures
+add a typed `details.kind` of their own; the API facade translates those details back into
+its existing tool and checkpoint errors.
 
 ### What a cancelled call is allowed to do
 
@@ -86,10 +96,10 @@ So the useful cancellation points are the ones with nothing to undo — on entry
 path lock before the first write, and inside the loops that only read: walking a directory in
 `fs.glob` and `fs.grep`, hashing the expected set in `snapshot.revert`. Once bytes start
 moving, the call finishes and reports what it did. `services/cancellation.ts` holds the one
-refusal every service raises; it carries the `AbortError` name the host maps to `CANCELLED`,
-so a cancelled call is never reported as a failed one. The host maps from that thrown name,
-not from the signal being aborted: a mutation that failed after it had already begun still
-reports as that failure, including any paths already changed.
+refusal every service raises; it carries the `AbortError` name the SDK session maps to
+`CANCELLED`, so a cancelled call is never reported as a failed one. The mapping reads that
+thrown name, not the signal being aborted: a mutation that failed after it had already begun
+still reports as that failure, including any paths already changed.
 
 Long-running calls are bounded on their own terms rather than left for a cancel to rescue: a
 shell command kills its process group and stops reading the pipes at its timeout, and `fs.grep`
@@ -98,26 +108,21 @@ supplied can hold the event loop and no signal can interrupt one.
 
 ### Protocol evolution
 
-Additive protocol changes stay on major/minor `1.0` while the wire stays compatible:
+The contract grows without moving the wire under it — `RUNTIME_CONTRACT_VERSION` is
+independent of the protocol version, and neither has to move for an additive method:
 
 - **Tolerant manifest.** Feature keys beyond the original six are optional. An absent value
   means the peer predates the key and should be treated as granted (`true`) so an older
   runtime is not silently stripped of tools the hub already trusted. Top-level keys that
-  describe what the peer's *build* can do read the other way — `acceptsHubIdentity` and
-  `enforcesPathPolicy` are false when absent, because assuming a capability nobody claimed
-  is what they exist to prevent. Those arrive only on `hello`, so a `runtime.health`
-  refresh carries them forward rather than recomputing them.
-- **A new frame field is gated on the manifest, never just added.** Frame envelopes are
-  `additionalProperties: false`, so an optional sibling on `req`, `hello` or `hello_ack` is
-  not ignored by a peer that predates it — it fails that peer's decode and drops the
-  socket, stranding exactly the runtimes nobody has updated yet, including from the live
-  update path that would have fixed them. The manifest is the tolerant surface and it
-  arrives on `hello` first, so the sender advertises support there and the other side
-  withholds the field until it sees the flag. `hello_ack.hub` behind `acceptsHubIdentity`
-  is the worked example.
-- **Open `err.code`.** Unknown error codes narrow to `INTERNAL` on decode so a newer peer
-  that invents a code (for example `RUNTIME_DENIED` before every hub learned it) still
-  produces a decodeable frame. Known codes stay typed.
+  describe what the peer's *build* can do read the other way — `enforcesPathPolicy` and
+  `publishesWindowsSlot` are false when absent, because assuming a capability nobody
+  claimed is what they exist to prevent. Those arrive only on `hello`, so a
+  `runtime.health` refresh carries them forward rather than recomputing them.
+- **Open `err.code`.** The SDK preserves an error code it has never heard of rather than
+  refusing the frame, because an unknown code is a refusal from a newer peer and not a
+  protocol violation. The hub narrows what it reads with `narrowRuntimeErrorCode`
+  (`apps/shared/src/runtime-contract/errors.ts`), which maps anything outside this build's
+  union to `INTERNAL`. Known codes stay typed.
 - **Hello features from consent.** The runtime derives advertised features from the slot
   allow set intersected with what is present (shells, git), and may include an optional
   `profile` field and the pre-intersection `allow` set. `features` alone cannot separate
@@ -142,17 +147,33 @@ Additive protocol changes stay on major/minor `1.0` while the wire stays compati
   that does not know the method never sees the topic. A future streaming topic owes the same
   handshake.
 
+A runtime built on the previous wire (`1.0.1`) is refused rather than half-understood. Its
+`hello` fails this decoder's schema, which §5.2 treats exactly as it treats a differing
+major, so the port closes with `4426` — over the paired socket and over stdio alike. Dialling
+in, the environment reads `disconnected` rather than failed
+(`apps/api/tests/integration/routes/runtime-socket.integration.test.ts`); spawned, the child
+is terminated with the launch it failed (`apps/runtime/tests/unit/cli.test.ts`). Both run
+against the frozen bytes in `legacy-hello-1-0-1.ts`. `4426` is in the old binary's own fatal
+set, so it stops rather than redialling and prints the message that names updating it.
+
+The other direction has no such handshake, and is worth stating plainly: a `1.0.1` hub
+dialling a Direct URL runtime on this wire waits for a greeting in a framing this runtime no
+longer writes, and its decoder refuses the one it gets. The attempt ends in that hub's own
+handshake timeout and whatever its retry policy does with one — no close code names the
+cause, because the peer that could name it is the one that cannot read the frame. Updating
+the hub is the fix.
+
 ## Transports
 
-| Transport                 | Status  | Direction        | Framing                                                                                      |
-| ------------------------- | ------- | ---------------- | -------------------------------------------------------------------------------------------- |
-| Embedded in-process ports | Current | —                | FIFO structured frames; development and tests round-trip every frame through the byte codec. |
-| Local runtime process     | Current | Hub spawns       | Bounded NDJSON over the child's pipes, using the same handshake and request ids.             |
-| WSL distribution          | Current | Hub spawns       | The stdio transport, launched through `wsl.exe`. A launcher, not a framing of its own.       |
-| Paired WebSocket          | Current | Runtime dials in | Chunked binary frames over one socket to `/api/runtime`, authenticated by a pairing token.   |
-| Direct URL                | Current | Hub dials out    | Same chunked WebSocket framing; the runtime listens and the hub presents a serve token.      |
-| SSH                       | Current | Hub spawns       | A launcher over stdio: the system `ssh` client, with the runtime on the far end of its pipe. |
-| Container                 | Current | Hub spawns       | A launcher over stdio: `docker`/`podman` run, with the runtime bind-mounted into the image.  |
+| Transport                 | Status  | Direction        | Framing                                                                                                                                                                                                                                                                                                                         |
+| ------------------------- | ------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Embedded in-process ports | Current | —                | [In-process](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/in-process.md): a real port pair. Production clones and schema-checks each frame; development and tests round-trip it through the byte codec (`validateInProcessFrames`), so a value a byte transport could not carry fails here first. |
+| Local runtime process     | Current | Hub spawns       | [Spawn](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/spawn.md) over [stdio](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/stdio.md): NDJSON on the child's own pipes.                                                                                                |
+| WSL distribution          | Current | Hub spawns       | The stdio transport, launched through `wsl.exe`. A launcher, not a framing of its own.                                                                                                                                                                                                                                          |
+| Paired WebSocket          | Current | Runtime dials in | [WebSocket](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/websocket.md): chunked binary messages under `mango.v1`, to `/api/runtime`, authenticated by a pairing token.                                                                                                                            |
+| Direct URL                | Current | Hub dials out    | The same WebSocket transport; the runtime listens and the hub presents a serve token.                                                                                                                                                                                                                                           |
+| SSH                       | Current | Hub spawns       | A launcher over stdio: the SDK's hardened `ssh` preset, with the runtime on the far end of its pipe.                                                                                                                                                                                                                            |
+| Container                 | Current | Hub spawns       | A launcher over stdio: `docker`/`podman` run, with the runtime bind-mounted into the image.                                                                                                                                                                                                                                     |
 
 Which one to reach for:
 
@@ -172,11 +193,6 @@ Which one to reach for:
 - **This machine, but the agent must not reach the rest of it** — Container. Tools run inside a
   disposable container started from an image you already have. This is the one transport whose
   purpose is what the agent *cannot* do, rather than where it runs.
-
-The shared NDJSON codec validates every frame, buffers partial lines, and rejects records
-larger than 16 MiB. Production in-process delivery uses structured cloning while retaining
-schema validation, so embedded execution cannot exchange values a byte transport could not
-represent during development and tests.
 
 ## The Runtime Home
 
@@ -323,30 +339,40 @@ tells the two apart.
 ### Enforcement
 
 The gate above decides whether a runtime serves at all. `allow` decides what it serves,
-and it is enforced at dispatch: every protocol method names the capabilities it needs
-(`apps/runtime/src/consent-gate.ts`), and a host built from a narrowed `allow` answers the
-ones it lacks with `RUNTIME_DENIED` instead of running them. The table is keyed by
-`RuntimeMethod`, so a new method with no capability decided for it is a type error.
+and it is enforced at dispatch. What a method needs is part of its definition in the
+contract — every row in `apps/shared/src/runtime-contract/contract.ts` carries a
+`capabilities` list keyed to the consent file's `allow` set, so a method defined without one
+is a compile error there, and naming a capability nobody can grant is a compile error too.
+
+`gateHandlers` (`apps/runtime/src/consent-gate.ts`) wraps every contract handler and reads
+that list, so a host built from a narrowed `allow` answers the ones it lacks with `DENIED`
+instead of running them. It is a wrapper and not the SDK's `ServeOptions.guard` on purpose:
+the guard is handed the same capability list, but it never sees the parameters the audit
+line summarises, cannot see how many requests are in flight — which is what update
+exclusivity is decided from — and runs before the contract validates parameters, so a
+refusal raised there would bypass everything below. One consequence is worth knowing: a
+payload that is not an object answers `INVALID_PARAMS` and writes no audit line, because no
+method call ever started.
 
 A denied method stays registered and refuses, rather than disappearing from the map. An
 absent method comes back as `METHOD_UNSUPPORTED`, which is also what an older runtime says
 about a method it has never heard of — a hub cannot tell those apart, and only one of them
-has a fix. The refusal carries `RUNTIME_DENIED`, `details.kind = "consent_denied"`, the
-capability that was missing, and the `setup` command that grants it.
+has a fix. The refusal carries `DENIED`, `details.kind = "consent_denied"`, the capabilities
+that were missing, and the `setup` command that grants them.
 
 The allow set is re-read on every gated call through the consent source, so a mid-connection
 `setup` takes effect without reconnecting.
 
 **Two refusal points.** The runtime is authoritative: every method that needs a denied
-capability answers `RUNTIME_DENIED` even if the hub asked anyway. The hub is cosmetic: it
-withholds tools and install affordances that the connected manifest refuses
+capability answers `DENIED` even if the hub asked anyway. The hub is cosmetic: it withholds
+tools and install affordances that the connected manifest refuses
 (`runtime-denied` in chat capabilities and install guards) so the UI matches what the
 machine will do. A hub that offered a tool the runtime will refuse would be lying; a hub
 that silently dropped one without naming the machine would be opaque.
 
 MCP is the one capability whose refusal the hub acts on before asking. Tool rows only exist
-once a session lists them, and `mcp.connect` on a refusing machine answers `RUNTIME_DENIED`
-— so a turn against such a machine snapshots the environment's enabled server rows without
+once a session lists them, and `mcp.connect` on a refusing machine answers `DENIED` — so a
+turn against such a machine snapshots the environment's enabled server rows without
 connecting and reports the refusal at the server level, naming the machine. Attempting the
 listing would spend the per-server budget to rediscover what the manifest already said, and
 would surface as `server-unavailable` — a connection failure the user cannot act on.
@@ -420,11 +446,13 @@ Defaults follow who reaches in: off for `host` (your machine, your hub — noise
 [--json]` reads the local file.
 
 The hub never reads this file. There is no protocol method for it, and adding one would
-defeat the point. `hello_ack` may carry optional `hub: { host, user }` so lines can name
-the asking machine — but only when the runtime advertised `acceptsHubIdentity` on its
-`hello` manifest, because frame envelopes are closed and an older peer would fail the
-decode rather than ignore the key (see Protocol evolution). A hub that stays silent, or
-one built before the field existed, is recorded as `unidentified hub`.
+defeat the point. What names the asking machine is `hub: { host, user }` in the hub's own
+`hello.capabilities`, announced on every session rather than on the ones a connector
+remembered to name: `resolveLocalHubIdentity`
+(`apps/api/src/services/runtime-client/hub-identity.ts`) reads this process's hostname and
+username, and a connector that wants to announce none passes `null`. The runtime learns it
+once both hellos have crossed, so a line written before that — or by a hub that stayed
+silent, or one whose OS would not say — is recorded as `unidentified hub`.
 
 A full disk or permissions failure degrades the log, not the runtime — requests keep
 serving and `doctor` warns. Honest limit: once `allow.shell` is granted, anything that
@@ -469,7 +497,8 @@ one that is absent.
 
 `mangostudio-runtime` is a second binary built from `apps/runtime/src/cli.ts` and shipped in
 every distribution channel beside the hub binary. `mangostudio-runtime --stdio` serves the
-protocol over the child's own pipes.
+protocol over the child's own pipes, one NDJSON frame per line
+([stdio](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/stdio.md)).
 
 **stdout is the protocol stream.** Nothing else may write to it, which is why the stdio mode
 routes the stdout console methods to stderr. The hub keeps a bounded tail of the child's
@@ -484,15 +513,21 @@ do not reach it.
 
 `spawnRuntimeChild` takes an already-resolved command rather than a transport config, so a
 launcher that reaches its target through a wrapper — a WSL distro, an SSH host — supplies its
-own argv and reuses the spawn, handshake, and teardown path unchanged.
+own argv and reuses the spawn, handshake, and teardown path unchanged. The launcher under it
+is the SDK's `spawnPort`
+([spawn](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/spawn.md)),
+which observes and reports — the exit status, a bounded stderr tail, the
+stdin/`SIGTERM`/`SIGKILL` termination sequence — and never guesses why a child failed.
+Turning what it observed into a sentence somebody can act on is `spawn-runtime-child.ts`'s
+job, and a wrapper that knows more supplies its own classifier.
 
 Lifecycle:
 
 - **Connect** spawns the child and waits up to five seconds for its `hello`. A missing binary,
   a non-executable one, and a protocol mismatch each produce their own actionable message.
 - **Loss** (crash, killed process, broken pipe) fails every in-flight request with
-  `RUNTIME_UNAVAILABLE` and moves the environment to `disconnected` rather than `error`: the
-  target is usually still there, only the process is gone.
+  `UNAVAILABLE` and moves the environment to `disconnected` rather than `error`: the target
+  is usually still there, only the process is gone.
 - **Reconnection is a deadline, not a timer.** Nothing is scheduled; the next caller that needs
   the runtime pays for the retry, and while inside the exponential backoff window (1s, 2s, 4s,
   8s) the attempt fails fast. Five consecutive failures — or any protocol mismatch, which
@@ -514,12 +549,13 @@ cannot hold the call open. On Linux, descendants that left the group (`setsid` /
 are still signalled by parentage while the leader is alive. A hard kill of the runtime can
 still leave them.
 
-The hub and the runtime ship from one release. The handshake refuses a major/minor protocol
-mismatch, and for stdio it also refuses a runtime whose release version differs from the hub's
-— the protocol version only moves when the wire format does, so it cannot catch a binary an
-older install left behind. `mango doctor` reports whether the sibling binary is present and
-whether its version matches. It reports a warning rather than a failure: a hub without it still serves
-chats through the embedded Local runtime, it just cannot start stdio environments.
+The hub and the runtime ship from one release. The handshake refuses a wire major it does not
+share, and for stdio `requireMatchingRelease` also refuses a runtime whose release version
+differs from the hub's — the wire version only moves when the frame format does, so it cannot
+catch a binary an older install left behind. `mango doctor` reports whether the sibling
+binary is present and whether its version matches. It reports a warning rather than a
+failure: a hub without it still serves chats through the embedded Local runtime, it just
+cannot start stdio environments.
 
 ## WSL Transport
 
@@ -710,28 +746,35 @@ Nothing derives it from a request header: that is a value the caller controls.
 
 ### Framing
 
-WebSocket payload limits are a property of the server, not of a route. Bun takes one
-`websocket` option object per `Bun.serve`, and the browser bus pins `maxPayloadLength` to
-16 KiB. Raising that to fit a 16 MiB protocol frame would apply to every browser socket
-too, and Bun buffers a whole message before anything validates it — a denial-of-service
-regression on the bus, not a simplification. So frames are **chunked** above the socket:
-each message carries a nine-byte header (format version, chunk index, chunk count), and
-reassembly is bounded by the same 16 MiB limit the codec enforces on a whole frame.
+The framing is the SDK's
+([WebSocket](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/websocket.md)):
+frames are **chunked** across messages that fit under a 16 KiB ceiling, each chunk carrying a
+nine-byte header, with
+reassembly bounded by the frame limit and by the number of messages one frame can need. That
+ceiling is not a preference. WebSocket payload limits are a property of the server, not of a
+route: Bun takes one `websocket` option object per `Bun.serve`, and the browser bus pins
+`maxPayloadLength` to 16 KiB. Raising it to fit a whole protocol frame would apply to every
+browser socket too, and Bun buffers a whole message before anything validates it — a
+denial-of-service regression on the bus, not a simplification.
 
-Every chunk leaves through **one queue per connection**. The host resolves requests
-concurrently, so without it two oversized responses would interleave their chunks into a
-stream neither peer can reassemble. The queue also carries the backpressure discipline the
-hub's `closeOnBackpressureLimit: true` demands: it pauses when a send is buffered and
-resumes on drain.
+Both ends build their port with `createWebSocketPort` from `@mangostudio/protocol/ws`, which
+carries the send queue and the backpressure discipline the hub's
+`closeOnBackpressureLimit: true` demands.
+
+The upgrade names the `mango.v1` subprotocol, and the acceptor
+(`apps/api/src/modules/environments/http/runtime-socket-routes.ts`) echoes it **only when the
+dialer offered it**. A runtime from before the subprotocol existed offers nothing, and naming
+one it did not ask for makes it drop the upgrade — before it could be told, with `4426`, that
+its binary is the thing to fix.
 
 ### Liveness and reconnection
 
-Liveness is protocol `ping`/`pong` in both directions on a twenty-second cadence, well
-under the server-wide sixty-second idle timeout. WebSocket control frames are not used:
-Bun's `sendPings` with `idleTimeout: 0` has an open defect (oven-sh/bun#26554), and the
-idle timeout is a shared setting the browser bus owns. The runtime also publishes a
-`runtime.heartbeat` event, which is what the hub records `lastSeenAt` from without writing
-on every ping.
+Liveness is the SDK's protocol `ping`/`pong` in both directions on its twenty-second default
+cadence, well under the server-wide sixty-second idle timeout. WebSocket control frames are
+not used: Bun's `sendPings` with `idleTimeout: 0` has an open defect (oven-sh/bun#26554), and
+the idle timeout is a shared setting the browser bus owns. The runtime also publishes a
+`runtime.heartbeat` event once a minute, which is what the route records `lastSeenAt` from
+(`pairing.markSeen`) without writing on every ping.
 
 The runtime owns the reconnect, because the hub cannot dial it:
 
@@ -742,8 +785,8 @@ The runtime owns the reconnect, because the hub cannot dial it:
   rack of runtimes does not reconnect in step.
 - A connection that served resets the curve.
 - A second dial for the same environment **supersedes** the first, with a close code saying
-  so. In-flight calls on the loser fail `RUNTIME_UNAVAILABLE`; the next call routes to the
-  survivor. The loser then **stops**, rather than redialing: two processes holding one
+  so. In-flight calls on the loser fail `UNAVAILABLE`; the next call routes to the survivor.
+  The loser then **stops**, rather than redialing: two processes holding one
   pairing token would otherwise take the environment from each other on every reconnect,
   dropping in-flight calls at each handover. Which of the two should be running is a
   decision only an operator has, so the runtime says which two are fighting and exits.
@@ -760,8 +803,8 @@ failed, because that is what it is.
 ### Version drift
 
 `requireMatchingRelease` is not set for this transport. A remote runtime is not part of the
-hub's own distribution, so release equality cannot be a connection gate; the protocol
-major/minor pair still is.
+hub's own distribution, so release equality cannot be a connection gate; the wire major still
+is.
 
 That leaves a runtime a release or two behind connecting and working, which is the intent.
 Drift that is allowed and invisible is drift nobody fixes, so the handshake's
@@ -770,10 +813,12 @@ and the card says so. The comparison happens hub-side because the hub is the onl
 holding both strings; shipping its own version on every environment row so the browser could
 compare would repeat one constant to answer one question.
 
-The window that tolerance implies is also narrower than it sounds. Every frame schema sets
-`additionalProperties: false`, so two peers on the same major/minor still refuse each
-other's frames the moment one of them adds a field. Until the protocol adopts tolerant
-decoding, "compatible" means the same build of the schema, not the same version of it.
+The window that tolerance implies is wider than release equality suggests. Frame objects are
+open at every level and a decoder ignores members it does not know, so two peers that share a
+major keep talking while one of them grows a member; what bounds them is the effective minor,
+the lower of the two the hellos announced, which neither side may send past. The
+manifest is open in the same way, so a newer runtime's extra feature flags reach an older hub
+as keys it drops rather than as a refused frame.
 
 ### TLS
 
@@ -800,10 +845,18 @@ upgrade costs one socket and buys a close code the peer can act on.
 ## Direct URL Transport
 
 `transportKind: 'http'` is the transport for a machine the hub can already reach. The
-runtime listens with `mangostudio-runtime serve`; the hub dials the configured `baseUrl`
-over WebSocket with a bearer token from the OS secret store. Framing is the same chunked
-binary protocol as paired WebSocket — the 16 KiB message ceiling is mandatory even though
-Bun.serve could raise its payload limit.
+runtime listens with `mangostudio-runtime serve` (`apps/runtime/src/serve.ts`); the hub
+dials the configured `baseUrl` over WebSocket with a bearer token from the OS secret store.
+Framing, liveness and close codes are the same as the paired socket — the 16 KiB message
+ceiling is mandatory even though `Bun.serve` could raise its payload limit — and the listener
+echoes `mango.v1` only when the dialer offered it, for the same reason the paired acceptor
+does.
+
+A dial that neither opens nor fails is bounded here rather than by the connection manager: a
+host that accepts the TCP connection and then says nothing produces no `open`, no `error` and
+no `close`, so `connect-http-runtime.ts` carries a `dialDeadline`
+(`apps/api/src/services/runtime-client/dial-deadline.ts`) that aborts the dial with the
+message the card will show.
 
 Config is `{ baseUrl }` (`http://` or `https://`). The serve token is write-only: it is
 never returned by the API, only whether one is stored (`hasRuntimeToken`). Private and
@@ -835,38 +888,23 @@ of its own for that machine.
 
 ### Argv
 
-```text
-ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15
-    -o ServerAliveCountMax=3 -o StrictHostKeyChecking=yes
-    -o ControlMaster=no -o ControlPath=none
-    [-o IdentitiesOnly=yes -i <identityFile>] [-p <port>]
-    -T -- <[user@]host> <quoted remoteRuntimePath>
-```
+The option list is the SDK's hardened `ssh` preset
+([spawn](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/spawn.md),
+*SSH preset*) rather than one this repository maintains: `BatchMode=yes`, so a connection
+that would prompt fails rather than hanging until the handshake times out; a bounded
+`ConnectTimeout` and server keepalives;
+`StrictHostKeyChecking=yes` set explicitly, so an unknown host key is refused rather than
+accepted — the first trust decision belongs to a person at a terminal, and the card prints the
+`ssh <host> true` that makes it; multiplexing and `RemoteCommand` forced off, because a user's
+own config could otherwise enable either under a long-lived pipe; `-T`, because stdout carries
+frames a tty would translate; `--` before the destination and a refusal of any host or user
+beginning with a dash, so a host spelled `-oProxyCommand=…` cannot become an option; and the
+remote path single-quoted with a leading `~/` left outside the quotes, because `ssh` hands
+everything after the destination to the target's login shell.
 
-The stdio spawn appends its own `--stdio`, exactly as it does for WSL. Every forced option is
-load-bearing:
-
-- `BatchMode=yes` — nothing on the hub can answer a prompt, so a connection that would ask must
-  fail rather than hang until the handshake times out.
-- `StrictHostKeyChecking=yes` is set explicitly rather than left at the default `ask`, which
-  fails under batch mode anyway and which ambient config could relax to `no`. An unknown host
-  key is refused, not accepted: the first trust decision belongs to a human at a terminal. The
-  card prints the `ssh <host> true` that makes it, and says why.
-- `ControlMaster=no ControlPath=none` — multiplexing is unsupported by Windows OpenSSH and a
-  user's config could otherwise enable it under a long-lived pipe. Reusing a master connection
-  would speed reconnects; it is deliberately out of scope.
-- `-T` — no pseudo-terminal, because stdout carries protocol frames a tty would translate.
-
-**A host named `-oProxyCommand=...` would be remote code execution on the hub.** Three layers
-stop it and all three are load-bearing: the schema refuses any value starting with a dash, `--`
-ends option parsing before the destination, and argv is an array rather than a command string.
-
-The remote side plays by OpenSSH's rules, not ours. `ssh` joins everything after the
-destination with spaces and hands the result to the target's **login shell** — which is why `~`
-expands at all — so `remoteRuntimePath` is single-quoted by the argv builder: a path with a
-space would otherwise arrive as two words, and one holding `;` or a backtick as a second
-command. A leading `~/` is left outside the quotes, because no shell expands a tilde inside
-them.
+`sshLaunch` (`apps/api/src/services/runtime-client/connect-ssh-runtime.ts`) supplies the one
+MangoStudio decision the preset does not have: where a runtime our installer placed lives. The
+stdio spawn appends its own `--stdio` afterwards, exactly as it does for WSL.
 
 `remoteRuntimePath` defaults to `~/.mango/runtime/remote/current/mangostudio-runtime`, whose
 last directory is a symlink an installer swaps, so the default never embeds a version. Targets
@@ -900,7 +938,7 @@ as a closed pipe within about forty-five seconds.
 
 `requireMatchingRelease` is off here, as for the other remote transports: the binary on that
 machine is not part of this hub's distribution, so release equality cannot gate the connection
-and the protocol major/minor pair is what does. Drift is reported on the card.
+and the wire major is what does. Drift is reported on the card.
 
 Provisioning is not part of this transport. The runtime has to be installed on the target
 already, and the card prints the commands that check what is there.
@@ -1053,15 +1091,24 @@ the declaration is what keeps the gap legible rather than silent.
 
 Add a runtime operation as one coherent change:
 
-1. Define its serializable parameters and result in `apps/runtime/src/methods.ts`, and add the
-   method to `RuntimeMethodMap`.
-2. Register a runtime handler and keep host effects inside `apps/runtime/src/services/`.
-3. Decide what governs it in `RUNTIME_METHOD_CAPABILITIES` (`apps/runtime/src/consent-gate.ts`).
-   The table is keyed by `RuntimeMethod`, so this is a type error rather than an option — and
-   the answer is a *set*: a method that both reads a domain and causes effects names both
-   capabilities, or the profile that refuses the second still runs it. The gate dispatches on
-   the method name and never sees params, so a read/write split has to be two methods.
-4. Expose the typed call through `apps/api/src/services/runtime-client/`.
+1. Define its serializable parameters and result in
+   `apps/shared/src/runtime-contract/methods.ts` (`apps/runtime/src/methods.ts` is a
+   re-export, so the runtime's own services keep their import path), then add the row to the
+   method table in `apps/shared/src/runtime-contract/contract.ts` with the capabilities it
+   needs. A row without a capability list is a compile error, and so is a capability the
+   consent file cannot grant. The answer is a *set*: a method that both reads a domain and
+   causes effects names both capabilities, or the profile that refuses the second still runs
+   it. The gate decides on the method's list and never on its params, so a read/write split
+   has to be two methods.
+2. Give the row real TypeBox schemas if the shapes have them. Most rows carry
+   `UnsafeObjectSchema`: the type is exact and the validation `serve` runs before a handler
+   sees the payload is "is a JSON object". Replacing one with a real schema is a local change
+   and nothing else moves.
+3. Register the handler in `apps/runtime/src/registry.ts` — the map is typed by the contract,
+   so a missing one is a compile error there rather than a method that answers
+   `METHOD_UNSUPPORTED` at runtime — and keep host effects inside `apps/runtime/src/services/`.
+4. Expose the typed call through the `RuntimeClient` facade in
+   `apps/api/src/services/runtime-client/`.
 5. Keep authorization, product policy, and durable persistence in the API.
 6. Test the handler directly and test any cancellation or error translation at the API
    boundary.
@@ -1070,7 +1117,7 @@ A method that also announces a **capability** — a binary it needs, a feature i
 offer on some machines — has two more legs, and forgetting either ships green:
 
 7. Add the field to `RuntimeCapabilityManifestSchema`
-   (`apps/shared/src/runtime-protocol/schemas.ts`) as `Type.Optional`, and populate it from
+   (`apps/shared/src/runtime-contract/manifest.ts`) as `Type.Optional`, and populate it from
    `createLocalRuntimeManifest` (`apps/runtime/src/manifest.ts`). Required would fail decode
    for every older peer; document whether absent means granted or unavailable, because the
    two readings already coexist in that schema — the original `features` keys mean granted,
@@ -1083,6 +1130,6 @@ offer on some machines — has two more legs, and forgetting either ships green:
    `hello` disappears on the first refresh — with nothing logged and every test still passing.
    Assert it in `manifest-from-health.test.ts`.
 
-`RUNTIME_PROTOCOL_VERSION` does not move for an additive method. Only major and minor are
-compared, and an older runtime answers `METHOD_UNSUPPORTED` — a normal decodeable outcome.
-Frame envelopes are closed (`additionalProperties: false`), so nothing may be added to them.
+Neither version moves for an additive method. `RUNTIME_CONTRACT_VERSION` is announced, not
+compared, and the wire version only changes when the frame format does; an older runtime
+answers `METHOD_UNSUPPORTED`, which is a normal decodeable outcome.

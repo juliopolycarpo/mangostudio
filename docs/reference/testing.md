@@ -1116,10 +1116,11 @@ The CI test lanes set the flag (`.github/workflows/test.yml`); unset, nothing is
 installed and nothing is paid for.
 
 > **Local is in-process.** There is no runtime child process for the `local`
-> environment — `createLocalRuntimeConnector` builds a `RuntimeHost` inside the
-> hub. A test suite that connects Local per test does spin one host per test,
-> and each host probes `git --version` synchronously. Connect once per file
-> instead; the checkpoint suites are the worked example.
+> environment — `createLocalRuntimeConnector` builds a runtime host definition
+> inside the hub and connects it through an in-process port pair. A test suite
+> that connects Local per test does spin one host per test, and each host probes
+> `git --version` synchronously. Connect once per file instead; the checkpoint
+> suites are the worked example.
 
 ## CI Artifact Retention
 

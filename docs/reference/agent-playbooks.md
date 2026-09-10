@@ -641,8 +641,10 @@ Rules that are easy to get wrong:
   `TERMINAL_INFLIGHT_WINDOW_BYTES` unacknowledged. Change a limit in
   `apps/shared/src/terminal/schemas.ts`, never in one hop; the shared test pins that every
   hop's limit fits the next.
-- `RuntimeHost.emit` throws once the socket port is closed. The session wraps emit and
-  treats a throw as "viewer gone".
+- The runtime's event relay (`apps/runtime/src/session.ts`) drops an emit when no session
+  is bound, and `Session.emit` answers `false` unless the session is ready. The
+  terminal session wraps its emitter and treats a throw — a frame past the limit — as
+  "viewer gone".
 - Exit status comes from `proc.exited`; the `Bun.Terminal` `exit` callback reports `1, null`
   for a clean exit and a SIGKILL alike on Bun 1.4.0.
 - The relay never lets the socket throttle: it stops sending under
@@ -934,16 +936,16 @@ A paired WebSocket inverts the direction — the runtime dials the hub — so no
 in the spawn path applies and the manager is entered through `adopt()` rather than
 `connect()`:
 
-- `apps/shared/src/runtime-protocol/chunk.ts` (frames split across 16 KiB messages)
-- `apps/shared/src/runtime-protocol/close-codes.ts` (why a socket ended, and whether to redial)
-- `apps/runtime/src/transports/websocket.ts` (frame port, send queue, backpressure)
-- `apps/runtime/src/connect.ts` (dial loop, backoff, liveness), `apps/runtime/src/runtime-home.ts`
+- `@mangostudio/protocol/ws` — `createWebSocketPort` (frames chunked across 16 KiB
+  messages, send queue, backpressure) and the `mango.v1` subprotocol; `CLOSE_CODES` says why
+  a socket ended and whether redialing can change it
+- `apps/runtime/src/connect.ts` (dial loop, backoff, heartbeat), `apps/runtime/src/runtime-home.ts`
 - `apps/api/src/modules/environments/http/runtime-socket-routes.ts` (`/api/runtime`)
 - `apps/api/src/modules/environments/domain/pairing-token.ts` (selector + verifier, dial endpoint)
 - `apps/api/src/modules/environments/application/runtime-pairing-service.ts`
 - `apps/frontend/src/features/environments/components/RuntimePairingPanel.tsx`
-- Conformance: `apps/runtime/tests/support/transport-conformance.ts` — a new transport
-  supplies a fixture there rather than a suite of its own.
+- Conformance: `itBehavesLikeAMangoTransport` from `@mangostudio/protocol/testing` — a new
+  transport supplies a fixture to the SDK's suite rather than writing one of its own.
 
 Direct URL inverts it again — the hub dials a listening runtime — so it is a connector
 on `connect()`, not `adopt()`, and is not in the dial-in transport set:
