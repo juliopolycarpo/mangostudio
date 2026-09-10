@@ -27,6 +27,7 @@ import Value from 'typebox/value';
 import type { RuntimeAuditSink } from './audit-log';
 import { gateHandlers } from './consent-gate';
 import type { RuntimeConsentSource } from './consent-source';
+import { writeRuntimeDiagnostic } from './diagnostics';
 import type { RuntimeHandlers } from './handlers';
 
 /** Name this peer announces itself under; the hub's audit log records it. */
@@ -96,6 +97,11 @@ export function createRuntimeEventRelay(): RuntimeEventRelay {
 interface RuntimeSessionOptions {
   readonly handshakeTimeoutMs?: number;
   readonly livenessIntervalMs?: number | false;
+  /**
+   * Where a teardown failure is reported. Defaults to the runtime's stderr
+   * diagnostics, which is where every transport already collects them.
+   */
+  readonly log?: (message: string) => void;
 }
 
 /**
@@ -103,6 +109,9 @@ interface RuntimeSessionOptions {
  *
  * Handlers are registered inside this call, before the constructor returns, so
  * a request that arrives in the same tick as the handshake still finds them.
+ *
+ * A teardown that fails once the transport is already gone is reported through
+ * `log` rather than swallowed, and never keeps the session from ending.
  *
  * @example
  * const session = createRuntimeSession(stdioPort(), definition);
@@ -153,17 +162,45 @@ export function createRuntimeSession(
 
   const released = Promise.withResolvers<void>();
   RELEASED.set(session, released.promise);
+  const log = options.log ?? writeRuntimeDiagnostic;
   session.onClose(() => {
     unbind();
-    // Flush only — the sink is process-scoped and shared across every
-    // reconnect and supersede that passes through it. The CLI owns
-    // `audit.close()` at process end.
-    void Promise.allSettled([definition.audit?.flush(), definition.onClose()]).then(() =>
-      released.resolve()
-    );
+    void releaseDefinition(definition, log).then(() => released.resolve());
   });
 
   return session;
+}
+
+/**
+ * Drains the audit sink and releases what the handlers held open, reporting
+ * whichever step failed.
+ *
+ * Both steps run whatever the other does, and neither can stop the session
+ * ending — the transport is gone by the time this runs, so the operator is the
+ * only party left to tell. A vendor process tree that will not reap is exactly
+ * the kind of failure that has to reach a log rather than vanish.
+ *
+ * Only a flush — the sink is process-scoped and shared across every reconnect
+ * and supersede that passes through it. The CLI owns `audit.close()` at process
+ * end.
+ */
+async function releaseDefinition(
+  definition: RuntimeHostDefinition,
+  log: (message: string) => void
+): Promise<void> {
+  const steps = [
+    { label: 'audit flush', run: async () => await definition.audit?.flush() },
+    { label: 'host cleanup', run: async () => await definition.onClose() },
+  ] as const;
+  const outcomes = await Promise.allSettled(steps.map((step) => step.run()));
+  for (const [index, outcome] of outcomes.entries()) {
+    if (outcome.status === 'fulfilled') continue;
+    log(`runtime ${steps[index]?.label} failed: ${asError(outcome.reason).message}`);
+  }
+}
+
+function asError(reason: unknown): Error {
+  return reason instanceof Error ? reason : new Error(String(reason));
 }
 
 /**
