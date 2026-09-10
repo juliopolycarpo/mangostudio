@@ -43,7 +43,8 @@ export const TEST_RUNTIME_MANIFEST: RuntimeCapabilityManifest = {
   },
 };
 
-type TestHandler = (params: never, context: { readonly signal: AbortSignal }) => unknown;
+/** One method of a fixture runtime; `params` is the contract's, unnarrowed. */
+export type TestHandler = (params: never, context: { readonly signal: AbortSignal }) => unknown;
 
 /**
  * A host definition whose methods are the test's, and whose unnamed methods
@@ -52,8 +53,16 @@ type TestHandler = (params: never, context: { readonly signal: AbortSignal }) =>
  * The contract requires a handler for all 67 methods, and a default that
  * answered `{}` would let a test pass while calling something it never meant
  * to — so the default throws with the method name in it.
+ *
+ * @example
+ * const definition = new FakeRuntimeDefinition({
+ *   runtimeVersion: 'runtime-test',
+ *   manifest: TEST_RUNTIME_MANIFEST,
+ *   consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'host'),
+ *   handlers: { 'shell.run': () => ({ exitCode: 0 }) },
+ * });
  */
-class FakeRuntimeDefinition implements RuntimeHostDefinition {
+export class FakeRuntimeDefinition implements RuntimeHostDefinition {
   readonly runtimeVersion: string;
   readonly manifest: () => RuntimeCapabilityManifest;
   readonly handlers: RuntimeHandlers;

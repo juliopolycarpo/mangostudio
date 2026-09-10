@@ -10,27 +10,27 @@
  * together.
  */
 
+import { CLOSE_CODES, RemoteError } from '@mangostudio/protocol';
 import {
-  createWebSocketFramePort,
-  livenessIntervalFor,
-  RuntimeProtocolClient,
-  serverWebSocketSink,
-  startProtocolLiveness,
-  type WebSocketFramePort,
-} from '@mangostudio/runtime';
-import { REALTIME_IDLE_TIMEOUT_SECONDS } from '@mangostudio/shared/realtime';
+  createWebSocketPort,
+  outcomeOfBunSend,
+  WEBSOCKET_SUBPROTOCOL,
+  type WebSocketPortHandle,
+} from '@mangostudio/protocol/ws';
 import {
-  RUNTIME_CLOSE_CODES,
+  narrowRuntimeErrorCode,
   RUNTIME_HEARTBEAT_TOPIC,
-  RuntimeProtocolError,
-} from '@mangostudio/shared/runtime-protocol';
+} from '@mangostudio/shared/runtime-contract';
 import { Elysia } from 'elysia';
 import { getConfig, getVersion } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { extractClientIp } from '../../../plugins/rate-limit';
 import { RATE_LIMIT_BUCKETS } from '../../../plugins/rate-limit-policy';
 import { RateLimitStore } from '../../../plugins/rate-limit-store';
-import { legacyHubSession } from '../../../services/runtime-client/hub-session';
+import {
+  openHubSession,
+  type ProtocolHubSession,
+} from '../../../services/runtime-client/hub-session';
 import { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import {
   getRuntimeConnectionManager,
@@ -59,25 +59,21 @@ interface RuntimeSocketState {
   peer: VerifiedPeer | null;
   /** Why the upgrade will be refused in `open`, if it will be. */
   rejection: 'unauthorized' | 'internal' | 'rate-limited' | null;
-  port: WebSocketFramePort | null;
-  stopLiveness: (() => void) | null;
-  detachEvents: (() => void) | null;
+  /** The port's handle: what the socket's own callbacks feed. */
+  feed: WebSocketPortHandle | null;
+  /** The handshaked runtime, once there is one. */
+  hub: ProtocolHubSession | null;
   /** Set once the manager owns this connection, so close can release it. */
   adopted: boolean;
   /** Set by the close handler, which can run while adoption is still in flight. */
   socketClosed: boolean;
   /**
-   * Set when the handshake failed on protocol version rather than on the
-   * environment. The manager reports both as "unavailable", and the two need
-   * different close codes: one is fixed by enabling an environment, the other
-   * only by updating the binary on that machine.
+   * Set the first time anything closes the transport. Three parties can: the
+   * port on a frame it refused, the session on release, and this route on a
+   * refusal of its own. The first code is the one that says why, and a second
+   * close would replace "your binary is too old" with something vaguer.
    */
-  protocolMismatch: boolean;
-}
-
-/** True for the one handshake failure a different close code has to name. */
-function isProtocolMismatch(error: unknown): boolean {
-  return error instanceof RuntimeProtocolError && error.code === 'PROTOCOL_MISMATCH';
+  transportClosed: boolean;
 }
 
 /**
@@ -111,11 +107,15 @@ function bearerToken(header: string | null): string | null {
   return value.length > 0 ? value : null;
 }
 
+/** RFC 6455: an acceptor may only name a subprotocol the dialler offered. */
+function offersMangoSubprotocol(header: string | null): boolean {
+  return (header ?? '').split(',').some((protocol) => protocol.trim() === WEBSOCKET_SUBPROTOCOL);
+}
+
 export interface RuntimeSocketRouteDependencies {
   readonly pairing?: RuntimePairingService;
   readonly manager?: RuntimeConnectionManager;
   readonly hubVersion?: () => string;
-  readonly idleTimeoutSeconds?: number;
   /** Upgrades one address may open per window; the shared bucket by default. */
   readonly upgradeLimit?: { readonly max: number; readonly windowMs: number };
 }
@@ -125,9 +125,6 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
   const resolveManager = (): RuntimeConnectionManager =>
     dependencies.manager ?? getRuntimeConnectionManager();
   const hubVersion = dependencies.hubVersion ?? getVersion;
-  const livenessMs = livenessIntervalFor(
-    dependencies.idleTimeoutSeconds ?? REALTIME_IDLE_TIMEOUT_SECONDS
-  );
   const upgradeLimit = dependencies.upgradeLimit ?? RATE_LIMIT_BUCKETS.runtimeSocket;
   // Counted here rather than in the global HTTP hook so the refusal can be a
   // close code. One store per route instance, sized like the shared one: the
@@ -151,11 +148,16 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
     return entry.count <= upgradeLimit.max;
   }
 
-  function teardown(state: RuntimeSocketState): void {
-    state.stopLiveness?.();
-    state.stopLiveness = null;
-    state.detachEvents?.();
-    state.detachEvents = null;
+  /** Closes the socket, unless something already closed it with a better code. */
+  function closeTransport(
+    socket: RuntimeSocket,
+    state: RuntimeSocketState,
+    code: number,
+    reason: string
+  ): void {
+    if (state.transportClosed) return;
+    state.transportClosed = true;
+    socket.raw.close(code, reason);
   }
 
   return new Elysia({ name: 'runtime-socket-routes' })
@@ -189,69 +191,69 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
         runtimeSocket: {
           peer,
           rejection,
-          port: null,
-          stopLiveness: null,
-          detachEvents: null,
+          feed: null,
+          hub: null,
           adopted: false,
           socketClosed: false,
-          protocolMismatch: false,
+          transportClosed: false,
         } satisfies RuntimeSocketState,
       };
     })
     .ws(RUNTIME_SOCKET_PATH, {
+      // Returns the response headers of the upgrade, and names the subprotocol
+      // only when the dialer offered it: a runtime on the previous wire offers
+      // nothing, and naming one it did not ask for makes it drop the upgrade —
+      // before it could be told, with close 4426, that its binary is the thing
+      // to fix.
+      upgrade({ request }) {
+        const offered = request.headers.get('sec-websocket-protocol');
+        if (!offersMangoSubprotocol(offered)) return undefined;
+        return { 'Sec-WebSocket-Protocol': WEBSOCKET_SUBPROTOCOL };
+      },
       open(rawSocket) {
         const socket = rawSocket as unknown as RuntimeSocket;
         const state = socket.runtimeSocket;
 
         if (state.rejection === 'internal') {
-          socket.close(RUNTIME_CLOSE_CODES.INTERNAL, 'Internal error');
+          socket.close(CLOSE_CODES.INTERNAL, 'Internal error');
           return;
         }
         if (state.rejection === 'rate-limited') {
-          socket.close(RUNTIME_CLOSE_CODES.RATE_LIMITED, 'Too many upgrades');
+          socket.close(CLOSE_CODES.RATE_LIMITED, 'Too many upgrades');
           return;
         }
         if (state.rejection || !state.peer) {
-          socket.close(RUNTIME_CLOSE_CODES.UNAUTHORIZED, 'Unauthorized');
+          socket.close(CLOSE_CODES.UNAUTHORIZED, 'Unauthorized');
           return;
         }
 
-        const peer = state.peer;
-        const port = createWebSocketFramePort({
-          sink: serverWebSocketSink(socket.raw),
-          onClosed: (closure) => {
-            if (closure.kind === 'protocol-error') {
-              logger.error('frame_rejected', {
-                environmentId: peer.environmentId,
-                error: closure.error.message,
-              });
-              socket.close(RUNTIME_CLOSE_CODES.PROTOCOL_ERROR, 'Protocol error');
-            }
-            teardown(state);
-          },
+        state.feed = createWebSocketPort({
+          send: (bytes) => outcomeOfBunSend(socket.raw.send(bytes)),
+          close: (code, reason) => closeTransport(socket, state, code, reason ?? ''),
         });
-        state.port = port;
-
-        void adopt(socket, state, peer, port);
+        void adopt(socket, state, state.peer);
       },
       message(rawSocket, message) {
         const socket = rawSocket as unknown as RuntimeSocket;
-        socket.runtimeSocket.port?.receive(message as ArrayBufferView | string);
+        // Text reaches the port too: it is the one that has to call a text
+        // frame a protocol error, and close with the code that says so.
+        socket.runtimeSocket.feed?.onMessage(message as Uint8Array | ArrayBuffer | string);
       },
       drain(rawSocket) {
         const socket = rawSocket as unknown as RuntimeSocket;
-        socket.runtimeSocket.port?.handleDrain();
+        socket.runtimeSocket.feed?.onDrain();
       },
-      close(rawSocket) {
+      close(rawSocket, code, reason) {
         const socket = rawSocket as unknown as RuntimeSocket;
         const state = socket.runtimeSocket;
         state.socketClosed = true;
-        teardown(state);
-        state.port?.handleSocketClosed();
-        state.port = null;
-        // Releasing here rather than in the port's `onClosed` covers the codes
-        // the port never sees — a supersede, a revoked token, a peer that
-        // simply vanished — so the card stops claiming a connection that ended.
+        state.transportClosed = true;
+        state.feed?.onClose(code ?? CLOSE_CODES.RELEASED, reason);
+        state.feed = null;
+        // Releasing here rather than on the session's own close covers the
+        // codes no frame ever announced — a supersede, a revoked token, a peer
+        // that simply vanished — so the card stops claiming a connection that
+        // ended.
         if (state.adopted && state.peer) {
           state.adopted = false;
           resolveManager().disconnect(state.peer.userId, state.peer.environmentId);
@@ -262,8 +264,7 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
   async function adopt(
     socket: RuntimeSocket,
     state: RuntimeSocketState,
-    peer: VerifiedPeer,
-    port: WebSocketFramePort
+    peer: VerifiedPeer
   ): Promise<void> {
     // Before adoption, not after, and awaited: adoption is what publishes the
     // environments topic, and a UI that refetches on that signal must not read
@@ -278,24 +279,22 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
 
     try {
       await resolveManager().adopt(peer.userId, peer.environmentId, (onUnavailable) =>
-        openConnection(socket, state, peer, port, onUnavailable)
+        openConnection(state, peer, onUnavailable)
       );
       state.adopted = true;
     } catch (error) {
       logger.warn('adoption_refused', {
         environmentId: peer.environmentId,
+        ...(error instanceof RemoteError ? { code: narrowRuntimeErrorCode(error.code) } : {}),
         error: error instanceof Error ? error.message : String(error),
       });
-      teardown(state);
-      // The manager reports every adoption failure as an unavailable runtime,
-      // so the distinction the peer needs is carried out of `openConnection`
-      // rather than read back off the error: "enable this environment" and
-      // "update this binary" are different jobs for different people.
-      if (state.protocolMismatch) {
-        socket.close(RUNTIME_CLOSE_CODES.PROTOCOL_MISMATCH, 'Protocol version unsupported');
-      } else {
-        socket.close(RUNTIME_CLOSE_CODES.FORBIDDEN, 'Environment unavailable');
-      }
+      // A handshake the wire itself refused has already closed the socket with
+      // the code that names the fault — 4426 for a runtime whose `hello` this
+      // version cannot read. `closeTransport` keeps that first code, so this
+      // line speaks only for the refusals the manager raises before a session
+      // exists: "enable this environment" and "update this binary" are
+      // different jobs for different people.
+      closeTransport(socket, state, CLOSE_CODES.FORBIDDEN, 'Environment unavailable');
       return;
     }
 
@@ -318,66 +317,52 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
     if (!(await pairing.isActive(peer.tokenId))) {
       logger.warn('credential_retired_during_adoption', { environmentId: peer.environmentId });
       state.adopted = false;
-      teardown(state);
       // Closed before the manager is told, and that order is the point: the
       // manager's own release closes with `RELEASED`, which reads as "the hub
       // let you go, come back". A retired credential must say `UNAUTHORIZED`
       // or the runtime redials forever against a token that no longer exists.
-      // Through `raw` rather than the handler context: this runs after `open`
-      // returned, and the context's own `close` does not land before the
-      // manager's `disconnect` below closes with `RELEASED` — which is exactly
-      // the "come back" signal this branch exists to avoid sending.
-      socket.raw.close(RUNTIME_CLOSE_CODES.UNAUTHORIZED, 'Unauthorized');
+      state.hub?.close(CLOSE_CODES.UNAUTHORIZED, 'Unauthorized');
       resolveManager().disconnect(peer.userId, peer.environmentId);
     }
   }
 
   async function openConnection(
-    socket: RuntimeSocket,
     state: RuntimeSocketState,
     peer: VerifiedPeer,
-    port: WebSocketFramePort,
     onUnavailable: () => void
   ): Promise<ManagedRuntimeConnection> {
-    // `requireMatchingRelease` is deliberately unset: a remote runtime is not
+    const feed = state.feed;
+    if (!feed) {
+      throw new Error(
+        `Runtime socket for environment "${peer.environmentId}" has no port; expected one built in the open handler.`
+      );
+    }
+    // `requireMatchingRelease` is deliberately off: a remote runtime is not
     // part of the hub's own distribution, so release equality cannot be a
-    // connection gate. The protocol major/minor still is, and release drift
-    // becomes visible card state instead of a refused socket.
-    const client = new RuntimeProtocolClient(port, {
+    // connection gate. The wire major still is, and release drift becomes
+    // visible card state instead of a refused socket.
+    const hub = await openHubSession(feed.port, {
       hubVersion: hubVersion(),
       handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
+      requireMatchingRelease: false,
     });
-    try {
-      await client.waitUntilReady();
-    } catch (error) {
-      state.protocolMismatch = isProtocolMismatch(error);
-      throw error;
-    }
+    state.hub = hub;
 
-    state.detachEvents = client.onEvent((event) => {
+    // No liveness of this route's own: the session pings on its own cadence,
+    // which is well inside the socket's idle timeout in both directions.
+    hub.onEvent((event) => {
       if (event.topic !== RUNTIME_HEARTBEAT_TOPIC) return;
       void pairing.markSeen(peer.tokenId).catch(() => undefined);
     });
-    state.stopLiveness = startProtocolLiveness({
-      ping: () => client.ping(),
-      onPong: (listener) => client.onPong(listener),
-      intervalMs: livenessMs,
-      onTimeout: () => {
-        logger.warn('liveness_timeout', { environmentId: peer.environmentId });
-        socket.close(RUNTIME_CLOSE_CODES.RELEASED, 'Liveness timeout');
-      },
-    });
     return {
-      client: new RuntimeClient(legacyHubSession(client), onUnavailable, peer.environmentId),
+      client: new RuntimeClient(hub, onUnavailable, peer.environmentId),
       close(reason) {
         // The manager is releasing this connection, so the socket's own close
         // handler must not turn around and release it again — by then the
         // entry may already belong to the runtime that superseded this one.
         state.adopted = false;
-        teardown(state);
-        client.close();
-        socket.close(
-          reason === 'superseded' ? RUNTIME_CLOSE_CODES.SUPERSEDED : RUNTIME_CLOSE_CODES.RELEASED,
+        hub.close(
+          reason === 'superseded' ? CLOSE_CODES.SUPERSEDED : CLOSE_CODES.RELEASED,
           reason === 'superseded' ? 'Superseded' : 'Released'
         );
       },

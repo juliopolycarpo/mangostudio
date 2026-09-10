@@ -591,16 +591,14 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
     const outcome = await connectToHub({
       hubUrl,
       token,
-      createHost: () =>
-        legacyRuntimeHost(
-          createLocalRuntimeHost({
-            runtimeVersion,
-            consent: createSlotConsentSource({ slot: PAIRED_SLOT, initial: consent.allow }),
-            audit,
-            externalAgents: externalAgentIsolationOptions(),
-            ...supervisedRestart.hostOptions,
-          })
-        ),
+      createDefinition: () =>
+        createLocalRuntimeHost({
+          runtimeVersion,
+          consent: createSlotConsentSource({ slot: PAIRED_SLOT, initial: consent.allow }),
+          audit,
+          externalAgents: externalAgentIsolationOptions(),
+          ...supervisedRestart.hostOptions,
+        }),
       log,
       signal: controller.signal,
     });
