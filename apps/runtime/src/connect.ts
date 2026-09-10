@@ -46,6 +46,12 @@ export interface RuntimeConnectOptions {
   /** Stops the loop. A signal handler aborts it. */
   readonly signal?: AbortSignal;
   readonly sleep?: (ms: number) => Promise<void>;
+  /**
+   * Bound on the WebSocket upgrade and on the hello exchange. A hub that
+   * accepts TCP and never finishes the upgrade produces no open, error, or
+   * close, so without this the reconnect loop never starts.
+   */
+  readonly handshakeTimeoutMs?: number;
 }
 
 export interface RuntimeConnectOutcome {
@@ -110,26 +116,42 @@ async function runOneConnection(
   options: RuntimeConnectOptions,
   log: (message: string) => void
 ): Promise<ConnectionAttempt> {
+  const handshakeTimeoutMs = options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS;
+  // `connectWebSocket` settles on open, error, close, or abort. A host that
+  // accepts TCP and never finishes the upgrade produces none of the first
+  // three, so the process signal alone is not a bound — it only fires when
+  // someone stops the runtime. The Direct URL dialler carries the same
+  // deadline for the same stall.
+  const deadline = dialDeadline(
+    handshakeTimeoutMs,
+    `The hub did not accept a WebSocket at ${options.hubUrl} within ${handshakeTimeoutMs}ms.`
+  );
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, deadline.signal])
+    : deadline.signal;
   let port: Port;
   try {
     port = await connectWebSocket(options.hubUrl, {
       headers: { authorization: `Bearer ${options.token}` },
-      ...(options.signal ? { signal: options.signal } : {}),
+      signal,
     });
   } catch (error) {
     // Nothing was accepted, so there is no close code to read: the hub is
-    // down, the address is wrong, or the dial was aborted. All three are the
-    // loop's own business, and none of them is fatal on its own.
+    // down, the address is wrong, the upgrade stalled, or the dial was
+    // aborted. All four are the loop's own business, and none of them is
+    // fatal on its own.
     return {
       retry: true,
       served: false,
       message: `Could not reach the hub: ${asError(error).message}`,
     };
+  } finally {
+    deadline.clear();
   }
 
   const definition = options.createDefinition();
   const session = createRuntimeSession(port, definition, {
-    handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
+    handshakeTimeoutMs,
   });
   const abort = (): void => session.close(CLOSE_CODES.RELEASED, 'Runtime stopping');
   options.signal?.addEventListener('abort', abort, { once: true });
@@ -262,6 +284,25 @@ function defaultSleep(ms: number): Promise<void> {
     const timer = setTimeout(resolve, ms);
     (timer as { unref?: () => void }).unref?.();
   });
+}
+
+/**
+ * A deadline for a dial that neither opens nor fails.
+ *
+ * The timer is unreferenced, so an armed deadline never keeps a process alive
+ * on its own. `clear` is safe after the deadline has already fired.
+ */
+function dialDeadline(
+  timeoutMs: number,
+  message: string
+): { readonly signal: AbortSignal; clear(): void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error(message)), timeoutMs);
+  (timer as { unref?: () => void }).unref?.();
+  return {
+    signal: controller.signal,
+    clear: () => clearTimeout(timer),
+  };
 }
 
 function asError(error: unknown): Error {

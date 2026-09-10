@@ -59,12 +59,18 @@ class FakeHub {
   readonly #server: Server<HubSocketData>;
   #current: ServerWebSocket<HubSocketData> | null = null;
 
-  constructor(options: { readonly token?: string } = {}) {
+  constructor(options: { readonly token?: string; readonly upgrade?: boolean } = {}) {
     const expected = `Bearer ${options.token ?? VALID_TOKEN}`;
     this.#server = Bun.serve<HubSocketData, never>({
       port: 0,
       hostname: '127.0.0.1',
       fetch: (request, server) => {
+        if (options.upgrade === false) {
+          // Accept TCP and then say nothing: `connectWebSocket` only settles
+          // on open, error, or close, so this is the stall a dial deadline
+          // has to end.
+          return new Promise<Response>(() => undefined);
+        }
         const authorized = request.headers.get('authorization') === expected;
         const upgraded = server.upgrade(request, {
           data: { authorized },
@@ -168,7 +174,9 @@ afterEach(() => {
   for (const hub of running.splice(0)) hub.stop();
 });
 
-function startFakeHub(options: { readonly token?: string } = {}): FakeHub {
+function startFakeHub(
+  options: { readonly token?: string; readonly upgrade?: boolean } = {}
+): FakeHub {
   const hub = new FakeHub(options);
   running.push(hub);
   return hub;
@@ -349,6 +357,30 @@ describe('runtime connect loop', () => {
     const outcome = await loop;
     expect(outcome.reason).toBe('refused');
     expect(outcome.message).toContain('Update the runtime');
+  });
+
+  it('aborts a dial that never upgrades so the reconnect loop can start', async () => {
+    const hub = startFakeHub({ upgrade: false });
+    const controller = new AbortController();
+    const delays: number[] = [];
+    const logs: string[] = [];
+    const loop = connectToHub({
+      hubUrl: hub.url,
+      token: VALID_TOKEN,
+      createDefinition,
+      signal: controller.signal,
+      handshakeTimeoutMs: 50,
+      log: (message) => logs.push(message),
+      sleep: (ms) => {
+        delays.push(ms);
+        controller.abort();
+        return Promise.resolve();
+      },
+    });
+
+    await loop;
+    expect(delays).toHaveLength(1);
+    expect(logs.join('\n')).toContain('did not accept a WebSocket');
   });
 
   it('gives up the backoff as soon as the signal aborts', async () => {

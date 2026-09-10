@@ -778,6 +778,11 @@ the idle timeout is a shared setting the browser bus owns. The runtime also publ
 
 The runtime owns the reconnect, because the hub cannot dial it:
 
+- A dial that neither opens nor fails is bounded by the same handshake timeout the session
+  uses. `connectWebSocket` settles on `open`, `error` or `close`; a host that accepts TCP
+  and never finishes the upgrade produces none of the three, so without a deadline the
+  reconnect loop never starts. The Direct URL dialler carries the same bound
+  (`apps/api/src/services/runtime-client/dial-deadline.ts`).
 - Close codes say why. A refused credential or a disabled environment ends the process with
   the command that fixes it — retrying those is a machine hammering an endpoint that will
   never say yes. A rate-limited close waits out the window rather than returning on the
