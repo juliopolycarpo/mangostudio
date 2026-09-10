@@ -14,6 +14,8 @@ import { resolve as resolvePath } from 'node:path';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type {
   LibraryLocationId,
+  PreparedPropagationFile,
+  PreparedPropagationOperation,
   PropagationApplied,
   PropagationApply,
   PropagationFailure,
@@ -38,7 +40,6 @@ import {
   writeDirectoryResource,
   writeFileResource,
 } from './resource-writer';
-import type { PreparedPropagationFile, PreparedPropagationOperation } from './write-shapes';
 
 export interface PropagationWriteEngineDeps {
   writeDirectory(input: {

@@ -15,8 +15,6 @@ import {
   executePropagationWrites,
   LIBRARY_BACKUP_MISSING_KIND,
   LibraryBackupMissingError,
-  type PreparedPropagationFile,
-  type PreparedPropagationOperation,
   type PropagationWriteEngineDeps,
   RuntimeRemoteError,
 } from '@mangostudio/runtime';
@@ -26,6 +24,8 @@ import {
   hashLibraryFile,
   type LibraryDivergenceAckRequest,
   type LibraryUndoResult,
+  type PreparedPropagationFile,
+  type PreparedPropagationOperation,
   type PropagationApplied,
   type PropagationApply,
   type PropagationApplyRequest,

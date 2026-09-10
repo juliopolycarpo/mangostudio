@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import type { RuntimeSettingsSource, RuntimeSettingsSourcesResult } from '@mangostudio/runtime';
+import type {
+  RuntimeSettingsSource,
+  RuntimeSettingsSourcesResult,
+} from '@mangostudio/shared/library';
 
 import {
   inspectAllSettings,

@@ -41,9 +41,13 @@ import type {
   LibraryTargetId,
   LibraryUndoResult,
   LibraryUnreadableEntry,
+  PreparedPropagationAdaptation,
+  PreparedPropagationOperation,
+  PreparedRemovalOperation,
   PropagationApply,
   RemovalApply,
   ResourceKind,
+  RuntimeSettingsSourcesResult,
 } from '@mangostudio/shared/library';
 import type {
   McpElicitationAction,
@@ -63,12 +67,6 @@ import type {
   ListDirectoryResponse,
   WorkdirValidationReason,
 } from '@mangostudio/shared/workspaces';
-import type { RuntimeSettingsSourcesResult } from './services/library/settings-sources';
-import type {
-  PreparedPropagationAdaptation,
-  PreparedPropagationOperation,
-  PreparedRemovalOperation,
-} from './services/library/write-shapes';
 
 export const RUNTIME_ABSENT_HASH = 'absent';
 

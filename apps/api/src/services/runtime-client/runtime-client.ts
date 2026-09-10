@@ -99,7 +99,6 @@ import {
   type RuntimeReplaceRangeParams,
   type RuntimeReplaceRangeResult,
   type RuntimeRequestOptions,
-  type RuntimeSettingsSourcesResult,
   type RuntimeShellResult,
   type RuntimeShellRunParams,
   type RuntimeSnapshotCaptureParams,
@@ -139,7 +138,10 @@ import {
   UnobservedLineNumbersError,
 } from '@mangostudio/runtime';
 import { ExternalAgentEventEnvelopeFrameSchema } from '@mangostudio/shared/external-agents';
-import { directoryHashDomainOf } from '@mangostudio/shared/library';
+import {
+  directoryHashDomainOf,
+  type RuntimeSettingsSourcesResult,
+} from '@mangostudio/shared/library';
 import type {
   RuntimeEventFrame,
   RuntimePathPolicyParams,

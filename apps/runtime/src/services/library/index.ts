@@ -88,11 +88,7 @@ export {
   libraryService,
   scanLibraryInstancesForPathEnv,
 } from './service';
-export {
-  type RuntimeSettingsSource,
-  type RuntimeSettingsSourcesResult,
-  readSettingsSources,
-} from './settings-sources';
+export { readSettingsSources } from './settings-sources';
 export {
   findStagedRemovalLeftovers,
   findStagedRemovalsForLocations,
@@ -109,9 +105,3 @@ export {
   LibraryBackupMissingError,
   type LibraryUndoEngineDeps,
 } from './undo-writes';
-export type {
-  PreparedPropagationAdaptation,
-  PreparedPropagationFile,
-  PreparedPropagationOperation,
-  PreparedRemovalOperation,
-} from './write-shapes';

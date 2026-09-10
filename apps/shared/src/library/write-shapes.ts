@@ -2,10 +2,9 @@
  * The shapes a prepared library write is described by, on either side of the
  * protocol.
  *
- * Their own module because both ends need them and neither may own them: the
- * engines act on these operations, `methods.ts` declares the wire types as
- * these plus an encoding, and `methods.ts` is already reachable from the
- * engines' own dependencies. Declared once, so a field added here cannot
+ * Shared because both ends need them and neither may own them: the runtime's
+ * engines act on these operations, and the runtime contract declares the wire
+ * types as these plus an encoding. Declared once, so a field added here cannot
  * compile on one side and be dropped on the other.
  *
  * Types only — nothing here imports a filesystem.
@@ -17,7 +16,7 @@ import type {
   AdaptProvenance,
   LibraryLocationId,
   PropagationApplied,
-} from '@mangostudio/shared/library';
+} from './schemas';
 
 export interface PreparedPropagationAdaptation {
   readonly strategy: AdapterStrategy;
