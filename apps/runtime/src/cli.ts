@@ -33,7 +33,6 @@ import {
   type RuntimeDoctorFinding,
   worstSeverity,
 } from './health';
-import { legacyRuntimeHost } from './host';
 import { createLocalRuntimeHost, createSlotRuntimeHost } from './runtime';
 import {
   bootstrapServeToken,

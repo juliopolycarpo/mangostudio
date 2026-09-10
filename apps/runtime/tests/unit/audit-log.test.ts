@@ -3,7 +3,6 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import {
   auditLogRotatedPath,
   createRuntimeAuditSink,
@@ -15,27 +14,8 @@ import {
   summarizeAuditArgs,
 } from '../../src/audit-log';
 import { staticConsentSource } from '../../src/consent-source';
-import { legacyRuntimeHost, RuntimeHost } from '../../src/host';
 import { createLocalRuntimeHost } from '../../src/runtime';
-import { connectInProcessRuntime } from '../../src/transports/in-process';
-
-/** A peer built before `hello_ack` carried `hub` — no `acceptsHubIdentity`. */
-const PRE_AUDIT_MANIFEST: RuntimeCapabilityManifest = {
-  platform: 'linux',
-  arch: 'x64',
-  pathStyle: 'posix',
-  homeDir: '/home/peer',
-  shells: [],
-  git: { available: false },
-  features: {
-    tools: true,
-    git: false,
-    probing: false,
-    mcp: false,
-    library: false,
-    checkpoints: true,
-  },
-};
+import { connectRuntimeDefinition } from '../support/hub-connection';
 
 const homes: string[] = [];
 
@@ -387,20 +367,17 @@ describe('dispatch audit hook', () => {
       path,
       flushIntervalMs: 10_000,
     });
-    const host = legacyRuntimeHost(
+    const connection = await connectRuntimeDefinition(
       createLocalRuntimeHost({
         runtimeVersion: '0.0.0-test',
         consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.readonly, 'remote'),
         audit: sink,
-      })
+      }),
+      { hub: { host: 'desk', user: 'bob' } }
     );
-    const connection = await connectInProcessRuntime(host, {
-      hubVersion: 'hub-test',
-      hub: { host: 'desk', user: 'bob' },
-    });
     try {
       await expect(
-        connection.client.request('shell.run', {
+        connection.request('shell.run', {
           kind: 'bash',
           command: 'true',
           timeoutMs: 1_000,
@@ -418,12 +395,12 @@ describe('dispatch audit hook', () => {
         hub: 'bob@desk',
       });
     } finally {
-      connection.close();
+      await connection.close();
       await sink.close();
     }
   });
 
-  it('tolerates an older hub with no identity field', async () => {
+  it('tolerates a hub that announces no identity', async () => {
     const { home, env } = await tempHome();
     const path = join(home, 'audit.log');
     const sink = createRuntimeAuditSink({
@@ -433,24 +410,20 @@ describe('dispatch audit hook', () => {
       path,
       flushIntervalMs: 10_000,
     });
-    const host = legacyRuntimeHost(
+    const connection = await connectRuntimeDefinition(
       createLocalRuntimeHost({
         runtimeVersion: '0.0.0-test',
         consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'wsl'),
         audit: sink,
       })
     );
-    const connection = await connectInProcessRuntime(host, {
-      hubVersion: 'hub-test',
-      hub: null,
-    });
     try {
-      await connection.client.request('runtime.health', {});
+      await connection.request('runtime.health', {});
       await sink.flush();
       const lines = await readRuntimeAuditLog({ path });
       expect(lines.some((line) => line.hub === 'unidentified hub')).toBe(true);
     } finally {
-      connection.close();
+      await connection.close();
       await sink.close();
     }
   });
@@ -465,18 +438,15 @@ describe('dispatch audit hook', () => {
       path,
       flushIntervalMs: 10_000,
     });
-    const host = legacyRuntimeHost(
+    const connection = await connectRuntimeDefinition(
       createLocalRuntimeHost({
         runtimeVersion: '0.0.0-test',
         consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'remote'),
         audit: sink,
-      })
+      }),
+      { hub: { host: 'desk', user: 'bob' } }
     );
-    const connection = await connectInProcessRuntime(host, {
-      hubVersion: 'hub-test',
-      hub: { host: 'desk', user: 'bob' },
-    });
-    connection.close();
+    await connection.close();
     // Host teardown must flush, not close, so reconnect/supersede can keep
     // writing through the process-scoped sink.
     sink.setHub({ host: 'desk', user: 'carol' });
@@ -489,75 +459,6 @@ describe('dispatch audit hook', () => {
     const lines = await readRuntimeAuditLog({ path });
     expect(lines.some((line) => line.hub === 'carol@desk')).toBe(true);
     await sink.close();
-  });
-
-  it('withholds hub identity from a peer that does not advertise the field', async () => {
-    // `hello_ack` is a closed envelope: a runtime built before `hub` existed
-    // fails the decode and drops the socket rather than ignoring the key. So
-    // the hub reads the manifest — the tolerant surface, and it arrives first —
-    // and stays silent when the peer has not said it can read the field.
-    const { home, env } = await tempHome();
-    const path = join(home, 'audit.log');
-    const sink = createRuntimeAuditSink({
-      slot: 'remote',
-      enabled: true,
-      env,
-      path,
-      flushIntervalMs: 10_000,
-    });
-    const host = new RuntimeHost({
-      runtimeVersion: 'runtime-test',
-      manifest: PRE_AUDIT_MANIFEST,
-      handlers: new Map([['runtime.health', async () => ({})]]),
-      audit: sink,
-    });
-    const connection = await connectInProcessRuntime(host, {
-      hubVersion: 'hub-test',
-      hub: { host: 'desk', user: 'bob' },
-      validateFrames: true,
-    });
-    try {
-      await connection.client.request('runtime.health', {});
-      await sink.flush();
-      const lines = await readRuntimeAuditLog({ path });
-      expect(lines).not.toHaveLength(0);
-      expect(lines.every((line) => line.hub === 'unidentified hub')).toBe(true);
-    } finally {
-      connection.close();
-      await sink.close();
-    }
-  });
-
-  it('names the hub once the peer advertises that it reads the field', async () => {
-    const { home, env } = await tempHome();
-    const path = join(home, 'audit.log');
-    const sink = createRuntimeAuditSink({
-      slot: 'remote',
-      enabled: true,
-      env,
-      path,
-      flushIntervalMs: 10_000,
-    });
-    const host = new RuntimeHost({
-      runtimeVersion: 'runtime-test',
-      manifest: { ...PRE_AUDIT_MANIFEST, acceptsHubIdentity: true },
-      handlers: new Map([['runtime.health', async () => ({})]]),
-      audit: sink,
-    });
-    const connection = await connectInProcessRuntime(host, {
-      hubVersion: 'hub-test',
-      hub: { host: 'desk', user: 'bob' },
-      validateFrames: true,
-    });
-    try {
-      await connection.client.request('runtime.health', {});
-      await sink.flush();
-      const lines = await readRuntimeAuditLog({ path });
-      expect(lines.every((line) => line.hub === 'bob@desk')).toBe(true);
-    } finally {
-      connection.close();
-      await sink.close();
-    }
   });
 
   it('never writes MCP secrets or pairing-shaped tokens into the log', async () => {

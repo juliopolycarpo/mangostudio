@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, mock, setSystemTime } from 'bun:test';
 import * as realChildProcess from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
-import { RuntimeRemoteError } from '@mangostudio/runtime';
 import type {
   EnvironmentConnectionState,
   EnvironmentTransportKind,
@@ -478,7 +477,7 @@ describe('RuntimeConnectionManager', () => {
       connectors: {
         stdio: () => {
           attempts += 1;
-          return Promise.reject(new RuntimeRemoteError('PROTOCOL_MISMATCH', 'stale runtime'));
+          return Promise.reject(new RemoteError('PROTOCOL_MISMATCH', 'stale runtime'));
         },
       },
     });
@@ -742,7 +741,7 @@ describe('RuntimeConnectionManager', () => {
       resolveEnvironment: () => Promise.resolve(definition()),
       connectors: {
         stdio: () =>
-          Promise.reject(new RuntimeRemoteError('PROTOCOL_MISMATCH', 'hub is newer than runtime')),
+          Promise.reject(new RemoteError('PROTOCOL_MISMATCH', 'hub is newer than runtime')),
       },
     });
 
@@ -1165,7 +1164,7 @@ describe('RuntimeConnectionManager', () => {
 
   it('does not re-ask a peer that just failed to answer', async () => {
     const probe = healthProbe(TEST_MANIFEST, () =>
-      Promise.reject(new RuntimeRemoteError('TIMEOUT', 'no answer'))
+      Promise.reject(new RemoteError('TIMEOUT', 'no answer'))
     );
     const manager = new RuntimeConnectionManager({
       resolveEnvironment: () => Promise.resolve(definition()),

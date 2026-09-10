@@ -4,13 +4,12 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  connectInProcessRuntime,
   createLocalRuntimeHost,
   createLocalRuntimeManifest,
+  createRuntimeEventRelay,
   createRuntimeMethodHandlers,
-  legacyRuntimeHandlerMap,
-  legacyRuntimeHost,
-  RuntimeHost,
+  type RuntimeHostDefinition,
+  staticConsentSource,
 } from '@mangostudio/runtime';
 import type {
   CreateEnvironmentBody,
@@ -19,7 +18,11 @@ import type {
   UpdateEnvironmentBody,
 } from '@mangostudio/shared/environments';
 import { RuntimeLifecycleViewSchema } from '@mangostudio/shared/environments';
-import type { RuntimeHealthReport, RuntimePlatformId } from '@mangostudio/shared/runtime-home';
+import {
+  RUNTIME_CONSENT_PRESETS,
+  type RuntimeHealthReport,
+  type RuntimePlatformId,
+} from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { getVersion } from '../../../src/lib/config';
@@ -42,6 +45,7 @@ import {
   createRealtimeBus,
   setRealtimeBusForTests,
 } from '../../../src/services/realtime/realtime-bus';
+import { connectInProcessRuntime } from '../../../src/services/runtime-client/connect-in-process-runtime';
 import { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
   RuntimeConnectionManager,
@@ -114,40 +118,46 @@ function createTestApp(
   return { app, repository, manager };
 }
 
-/** A real update-capable host whose health matches installed release bytes. */
-function createProvisionedRuntimeHost(
+/** A real update-capable runtime whose health matches installed release bytes. */
+function createProvisionedRuntimeDefinition(
   options: Parameters<typeof createLocalRuntimeHost>[0],
   platformId?: RuntimePlatformId,
   // Simulates a peer whose runtime predates the `platformId` field: `platform`
   // and `arch` still arrive, but nothing names the exact release identity.
   stripPlatformId = false
-): RuntimeHost {
-  let host: RuntimeHost | undefined;
+): RuntimeHostDefinition {
+  const events = createRuntimeEventRelay();
   const registry = createRuntimeMethodHandlers({
     runtimeVersion: options.runtimeVersion,
-    emit: (event) => host?.emit(event),
+    emit: events.emit,
     ...(options.slot ? { slot: options.slot } : {}),
     ...(options.update ? { update: options.update } : {}),
   });
   const health = registry.handlers['runtime.health'];
-  const handlers = new Map(legacyRuntimeHandlerMap(registry.handlers));
-  handlers.set('runtime.health', async (params, context) => {
-    const report = (await health(params as never, context)) as RuntimeHealthReport;
-    const { platformId: _omitted, ...withoutPlatformId } = report;
-    return {
-      ...(stripPlatformId ? withoutPlatformId : report),
-      source: 'provisioned',
-      ...(platformId ? { platformId } : {}),
-    } satisfies RuntimeHealthReport;
-  });
-  host = new RuntimeHost({
+
+  return {
     runtimeVersion: options.runtimeVersion,
-    manifest: createLocalRuntimeManifest(options.allow),
-    handlers,
+    manifest: () => createLocalRuntimeManifest(options.allow),
+    handlers: {
+      ...registry.handlers,
+      'runtime.health': async (params, context) => {
+        const report = (await health(params, context)) as RuntimeHealthReport;
+        const { platformId: _omitted, ...withoutPlatformId } = report;
+        return {
+          ...(stripPlatformId ? withoutPlatformId : report),
+          source: 'provisioned',
+          ...(platformId ? { platformId } : {}),
+        } satisfies RuntimeHealthReport;
+      },
+    },
+    consent: staticConsentSource(
+      options.allow ?? RUNTIME_CONSENT_PRESETS.full,
+      options.slot ?? 'host'
+    ),
     isUpdateActive: registry.updateActive,
-    onClose: () => void registry.close(),
-  });
-  return host;
+    onClose: () => registry.close(),
+    events,
+  };
 }
 
 function jsonRequest(method: string, body?: unknown): RequestInit {
@@ -634,16 +644,16 @@ describe('environment entity routes', () => {
     const originalVersion = process.env.VERSION;
     process.env.VERSION = '9.9.9-test';
     try {
-      const host = createProvisionedRuntimeHost(
+      const definition = createProvisionedRuntimeDefinition(
         { runtimeVersion: '0.0.1-old', slot: 'wsl' },
         undefined,
         true
       );
       const { app, repository, manager } = createTestApp({
         wsl: async (_definition, onUnavailable) => {
-          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
           return {
-            client: new RuntimeClient(connection.client, onUnavailable),
+            client: new RuntimeClient(connection.hub, onUnavailable),
             close: () => connection.close(),
           };
         },
@@ -723,15 +733,13 @@ describe('environment entity routes', () => {
 
   it('keeps a connected WSL upgrade on the out-of-band provisioner path', async () => {
     let ensured = false;
-    const host = legacyRuntimeHost(
-      createLocalRuntimeHost({ runtimeVersion: '0.0.1-legacy', slot: 'wsl' })
-    );
+    const definition = createLocalRuntimeHost({ runtimeVersion: '0.0.1-legacy', slot: 'wsl' });
     const { app, repository, manager } = createTestApp(
       {
         wsl: async (_definition, onUnavailable) => {
-          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
           return {
-            client: new RuntimeClient(connection.client, onUnavailable),
+            client: new RuntimeClient(connection.hub, onUnavailable),
             close: () => connection.close(),
           };
         },
@@ -792,16 +800,16 @@ describe('environment entity routes', () => {
     try {
       let ensured = false;
       let loadedPlatformId: string | undefined;
-      const host = createProvisionedRuntimeHost(
+      const definition = createProvisionedRuntimeDefinition(
         { runtimeVersion: '0.0.1-old', slot: 'wsl' },
         'linux-x64-musl'
       );
       const { app, repository, manager } = createTestApp(
         {
           wsl: async (_definition, onUnavailable) => {
-            const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+            const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
             return {
-              client: new RuntimeClient(connection.client, onUnavailable),
+              client: new RuntimeClient(connection.hub, onUnavailable),
               close: () => connection.close(),
             };
           },
@@ -883,16 +891,16 @@ describe('environment entity routes', () => {
     try {
       const bytes = new TextEncoder().encode('verified-platform-archive');
       const hash = createHash('sha256').update(bytes).digest('hex');
-      const host = createProvisionedRuntimeHost(
+      const definition = createProvisionedRuntimeDefinition(
         { runtimeVersion: '0.0.1-old', slot: 'wsl' },
         'linux-x64-musl'
       );
       const { app, repository, manager } = createTestApp(
         {
           wsl: async (_definition, onUnavailable) => {
-            const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+            const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
             return {
-              client: new RuntimeClient(connection.client, onUnavailable),
+              client: new RuntimeClient(connection.hub, onUnavailable),
               close: () => connection.close(),
             };
           },
@@ -984,16 +992,16 @@ describe('environment entity routes', () => {
     const originalVersion = process.env.VERSION;
     process.env.VERSION = '9.9.9-test';
     try {
-      const host = createProvisionedRuntimeHost(
+      const definition = createProvisionedRuntimeDefinition(
         { runtimeVersion: '0.0.1-old', slot: 'wsl' },
         'linux-x64-musl'
       );
       const { app, repository, manager } = createTestApp(
         {
           wsl: async (_definition, onUnavailable) => {
-            const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+            const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
             return {
-              client: new RuntimeClient(connection.client, onUnavailable),
+              client: new RuntimeClient(connection.hub, onUnavailable),
               close: () => connection.close(),
             };
           },
@@ -1061,7 +1069,7 @@ describe('environment entity routes', () => {
     process.env.VERSION = '9.9.9-test';
     try {
       let sawSignal: AbortSignal | undefined;
-      const host = createProvisionedRuntimeHost(
+      const definition = createProvisionedRuntimeDefinition(
         { runtimeVersion: '0.0.1-old', slot: 'wsl' },
         'linux-x64-musl'
       );
@@ -1069,9 +1077,9 @@ describe('environment entity routes', () => {
       const { app, repository, manager } = createTestApp(
         {
           wsl: async (_definition, onUnavailable) => {
-            const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+            const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
             return {
-              client: new RuntimeClient(connection.client, onUnavailable),
+              client: new RuntimeClient(connection.hub, onUnavailable),
               close: () => connection.close(),
             };
           },
@@ -1148,7 +1156,7 @@ describe('environment entity routes', () => {
     process.env.VERSION = '9.9.9-test';
     try {
       let sawSignal: AbortSignal | undefined;
-      const host = createProvisionedRuntimeHost(
+      const definition = createProvisionedRuntimeDefinition(
         { runtimeVersion: '0.0.1-old', slot: 'wsl' },
         'linux-x64-musl'
       );
@@ -1156,9 +1164,9 @@ describe('environment entity routes', () => {
       const { app, repository, manager } = createTestApp(
         {
           wsl: async (_definition, onUnavailable) => {
-            const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+            const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
             return {
-              client: new RuntimeClient(connection.client, onUnavailable),
+              client: new RuntimeClient(connection.hub, onUnavailable),
               close: () => connection.close(),
             };
           },
@@ -1249,7 +1257,7 @@ describe('environment entity routes', () => {
   // The other half of #798: a real install still writes to that machine, so it
   // still holds the environment against an edit or a delete.
   it('keeps refusing an edit or a delete while a real install runs', async () => {
-    const host = createProvisionedRuntimeHost(
+    const definition = createProvisionedRuntimeDefinition(
       { runtimeVersion: '0.0.1-old', slot: 'wsl' },
       'linux-x64-musl'
     );
@@ -1257,9 +1265,9 @@ describe('environment entity routes', () => {
     const { app, repository, manager } = createTestApp(
       {
         wsl: async (_definition, onUnavailable) => {
-          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
           return {
-            client: new RuntimeClient(connection.client, onUnavailable),
+            client: new RuntimeClient(connection.hub, onUnavailable),
             close: () => connection.close(),
           };
         },
@@ -1340,7 +1348,7 @@ describe('environment entity routes', () => {
     const bytes = new TextEncoder().encode('verified-runtime-binary');
     const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
     let loadedPlatformId: string | undefined;
-    const host = createProvisionedRuntimeHost(
+    const definition = createProvisionedRuntimeDefinition(
       {
         runtimeVersion: '0.0.1-old',
         slot: 'host',
@@ -1351,9 +1359,9 @@ describe('environment entity routes', () => {
     const { app, repository, manager } = createTestApp(
       {
         http: async (_definition, onUnavailable) => {
-          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
           return {
-            client: new RuntimeClient(connection.client, onUnavailable),
+            client: new RuntimeClient(connection.hub, onUnavailable),
             close: () => connection.close(),
           };
         },
@@ -1433,7 +1441,7 @@ describe('environment entity routes', () => {
     });
     let stalled = false;
 
-    const host = createProvisionedRuntimeHost(
+    const definition = createProvisionedRuntimeDefinition(
       {
         runtimeVersion: '0.0.1-old',
         slot: 'host',
@@ -1454,9 +1462,9 @@ describe('environment entity routes', () => {
     const { app, repository, manager } = createTestApp(
       {
         http: async (_definition, onUnavailable) => {
-          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
           return {
-            client: new RuntimeClient(connection.client, onUnavailable),
+            client: new RuntimeClient(connection.hub, onUnavailable),
             close: () => connection.close(),
           };
         },
@@ -1537,16 +1545,16 @@ describe('environment entity routes', () => {
     const env = { MANGO_HOME: mangoHome };
     const bytes = new TextEncoder().encode('tampered-runtime-binary');
     const wrongDigest = `sha256:${'0'.repeat(64)}`;
-    const host = createProvisionedRuntimeHost(
+    const definition = createProvisionedRuntimeDefinition(
       { runtimeVersion: '0.0.1-old', slot: 'host', update: { env } },
       'linux-x64'
     );
     const { app, repository, manager } = createTestApp(
       {
         http: async (_definition, onUnavailable) => {
-          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
           return {
-            client: new RuntimeClient(connection.client, onUnavailable),
+            client: new RuntimeClient(connection.hub, onUnavailable),
             close: () => connection.close(),
           };
         },
@@ -1623,7 +1631,7 @@ describe('environment entity routes', () => {
         http: async (_definition, onUnavailable) => {
           connectionCount += 1;
           const firstConnection = connectionCount === 1;
-          const host = createProvisionedRuntimeHost({
+          const definition = createProvisionedRuntimeDefinition({
             runtimeVersion: firstConnection ? '0.0.1-old' : targetVersion,
             ...(firstConnection
               ? {
@@ -1639,10 +1647,10 @@ describe('environment entity routes', () => {
                 }
               : {}),
           });
-          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
           activeConnection = connection;
           return {
-            client: new RuntimeClient(connection.client, onUnavailable),
+            client: new RuntimeClient(connection.hub, onUnavailable),
             close: () => connection.close(),
           };
         },
@@ -1721,7 +1729,7 @@ describe('environment entity routes', () => {
             throw new Error('connect ECONNREFUSED runtime.test:443');
           }
           const firstConnection = connectionCount === 1;
-          const host = createProvisionedRuntimeHost({
+          const definition = createProvisionedRuntimeDefinition({
             runtimeVersion: firstConnection ? '0.0.1-old' : targetVersion,
             ...(firstConnection
               ? {
@@ -1737,10 +1745,10 @@ describe('environment entity routes', () => {
                 }
               : {}),
           });
-          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
           activeConnection = connection;
           return {
-            client: new RuntimeClient(connection.client, onUnavailable),
+            client: new RuntimeClient(connection.hub, onUnavailable),
             close: () => connection.close(),
           };
         },
@@ -1810,7 +1818,7 @@ describe('environment entity routes', () => {
     const { app, repository, manager } = createTestApp(
       {
         http: async (_definition, onUnavailable) => {
-          const host = createProvisionedRuntimeHost({
+          const definition = createProvisionedRuntimeDefinition({
             runtimeVersion: replacement ? targetVersion : '0.0.1-old',
             ...(!replacement
               ? {
@@ -1823,9 +1831,9 @@ describe('environment entity routes', () => {
                 }
               : {}),
           });
-          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
           return {
-            client: new RuntimeClient(connection.client, onUnavailable),
+            client: new RuntimeClient(connection.hub, onUnavailable),
             close: () => connection.close(),
           };
         },

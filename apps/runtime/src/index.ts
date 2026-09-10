@@ -1,6 +1,5 @@
 export type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 export type { RuntimeAuditSink } from './audit-log';
-export { RuntimeProtocolClient, type RuntimeRequestOptions } from './client';
 export { loadRuntimeConfig } from './config';
 export {
   createSlotConsentSource,
@@ -11,19 +10,11 @@ export {
   LIBRARY_BACKUP_MISSING_KIND,
   PathAccessError,
   RuntimeConsentDeniedError,
-  RuntimeRemoteError,
   RuntimeServiceError,
   RuntimeServiceManagementError,
   RuntimeToolArgumentError,
 } from './errors';
 export type { RuntimeHandlerContext, RuntimeHandlers } from './handlers';
-export {
-  legacyRuntimeHandlerMap,
-  legacyRuntimeHost,
-  RuntimeHost,
-  type RuntimeMethodHandler,
-} from './host';
-export { livenessIntervalFor, startProtocolLiveness } from './liveness';
 export { createLocalRuntimeManifest } from './manifest';
 export type * from './methods';
 export {
@@ -301,27 +292,3 @@ export {
   type RuntimeHostDefinition,
   whenRuntimeReleased,
 } from './session';
-export {
-  createInProcessPortPair,
-  type InProcessPortPair,
-  type RuntimeFramePort,
-} from './transport';
-export {
-  connectInProcessRuntime,
-  type InProcessRuntimeConnection,
-} from './transports/in-process';
-export {
-  createStdioFramePort,
-  type StdioFramePortClosure,
-} from './transports/stdio';
-export {
-  type ClientWebSocketLike,
-  clientWebSocketSink,
-  createWebSocketFramePort,
-  type ServerWebSocketLike,
-  serverWebSocketSink,
-  type WebSocketFramePort,
-  type WebSocketFramePortClosure,
-  type WebSocketFrameSink,
-  type WebSocketSendResult,
-} from './transports/websocket';

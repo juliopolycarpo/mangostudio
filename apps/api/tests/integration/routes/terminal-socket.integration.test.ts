@@ -1,11 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import {
-  connectInProcessRuntime,
-  createLocalRuntimeHost,
-  createSlotConsentSource,
-  type InProcessRuntimeConnection,
-  legacyRuntimeHost,
-} from '@mangostudio/runtime';
+import { createLocalRuntimeHost, createSlotConsentSource } from '@mangostudio/runtime';
 import {
   decodeTerminalServerMessage,
   encodeTerminalClientMessage,
@@ -21,6 +15,10 @@ import {
   type TerminalSessionService,
 } from '../../../src/modules/terminals/application/terminal-session-service';
 import { createTerminalSocketRoutes } from '../../../src/modules/terminals/http/terminal-socket-routes';
+import {
+  connectInProcessRuntime,
+  type InProcessRuntimeConnection,
+} from '../../../src/services/runtime-client/connect-in-process-runtime';
 import { insertTestUser } from '../../support/factories';
 import { FakeTerminalRuntimeClient } from '../../support/mocks/fake-terminal-runtime-client';
 
@@ -473,24 +471,22 @@ describe('terminal socket relay', () => {
  * with a stated reason rather than letting that surface as a failure.
  */
 async function probeLocalTerminalSupport(): Promise<{ ok: boolean; reason: string }> {
-  const host = legacyRuntimeHost(
-    createLocalRuntimeHost({
-      runtimeVersion: 'terminal-probe',
-      consent: createSlotConsentSource({ slot: 'host' }),
-    })
-  );
+  const definition = createLocalRuntimeHost({
+    runtimeVersion: 'terminal-probe',
+    consent: createSlotConsentSource({ slot: 'host' }),
+  });
   let connection: InProcessRuntimeConnection | undefined;
   try {
-    connection = await connectInProcessRuntime(host, { hubVersion: 'hub-test' });
-    if (connection.client.manifest.terminal !== true) {
+    connection = await connectInProcessRuntime(definition, { hubVersion: 'hub-test' });
+    if (connection.hub.manifest.terminal !== true) {
       return {
         ok: false,
         reason: 'this machine reports no PTY/shell consent (manifest.terminal !== true)',
       };
     }
     const sessionId = crypto.randomUUID();
-    await connection.client.request('terminal.open', { sessionId, cols: 80, rows: 24 });
-    await connection.client.request('terminal.close', { sessionId });
+    await connection.hub.request('terminal.open', { sessionId, cols: 80, rows: 24 });
+    await connection.hub.request('terminal.close', { sessionId });
     return { ok: true, reason: '' };
   } catch (error) {
     return {

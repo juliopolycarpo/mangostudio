@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { RemoteError } from '@mangostudio/protocol';
 import { DEFAULT_APP_SETTINGS, withLibraryLocations } from '@mangostudio/shared/app-settings';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
@@ -454,7 +454,7 @@ describe('library routes', () => {
     const { service } = createService();
     service.discover = () =>
       Promise.reject(
-        new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'Environment "remote-box" was not found.')
+        new RemoteError('RUNTIME_UNAVAILABLE', 'Environment "remote-box" was not found.')
       );
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
     restoreAuth = restore;

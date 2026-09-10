@@ -18,9 +18,10 @@ import {
   type Port,
   RESERVED_ERROR_CODES,
   RemoteError,
+  type RequestOptions,
   Session,
+  type SessionClosure,
 } from '@mangostudio/protocol';
-import type { RuntimeProtocolClient, RuntimeRequestOptions } from '@mangostudio/runtime';
 import {
   type HubIdentity,
   RUNTIME_CONTRACT,
@@ -42,8 +43,8 @@ const HUB_PEER_NAME = 'mangostudio';
  *
  * Narrower than the SDK session on purpose: `RuntimeClient` needs a request
  * surface, the two announcement facts and two subscriptions, and nothing else.
- * That is also what keeps the transports that have not moved to the SDK yet
- * expressible — see {@link legacyHubSession}.
+ * The closure reaches the listener because why a connection was lost is what a
+ * connector logs and an environment card reports.
  */
 export interface HubSession {
   /** The manifest the runtime announced, as it arrived. */
@@ -52,10 +53,10 @@ export interface HubSession {
   request<K extends RuntimeMethod>(
     method: K,
     params: RuntimeMethodMap[K]['params'],
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMethodMap[K]['result']>;
   onEvent(listener: (event: EventFrame) => void): () => void;
-  onClose(listener: () => void): () => void;
+  onClose(listener: (closure: SessionClosure) => void): () => void;
   close(code?: number, reason?: string): void;
 }
 
@@ -147,33 +148,8 @@ export async function openHubSession(
     runtimeVersion: remote.peer.version,
     request: (method, params, requestOptions) => client.request(method, params, requestOptions),
     onEvent: (listener) => session.onEvent(listener),
-    onClose: (listener) => session.onClose(() => listener()),
+    onClose: (listener) => session.onClose(listener),
     close: (code, reason) => session.close(code ?? CLOSE_CODES.RELEASED, reason),
-  };
-}
-
-/**
- * The hand-written protocol client, wearing the same shape.
- *
- * Temporary: stdio, ssh, container, WSL and the Direct URL dialler still build
- * a `RuntimeProtocolClient`, and each moves to `openHubSession` on its own
- * commit. Until then this is the one place that bridges the two, so
- * `RuntimeClient` never has to know which wire it is on.
- *
- * @example
- * const hub = legacyHubSession(connection.client);
- * const client = new RuntimeClient(hub, onUnavailable, definition.id);
- */
-export function legacyHubSession(client: RuntimeProtocolClient): HubSession {
-  return {
-    manifest: client.manifest,
-    runtimeVersion: client.runtimeVersion,
-    request: (method, params, options) => client.request(method, params, options),
-    // The two event frames are the same members under two names; the old codec
-    // rejects anything else on arrival.
-    onEvent: (listener) => client.onEvent((event) => listener(event as EventFrame)),
-    onClose: (listener) => client.onClose(listener),
-    close: () => client.close(),
   };
 }
 

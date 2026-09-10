@@ -1,4 +1,9 @@
-import { type EventFrame, RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import {
+  type EventFrame,
+  RESERVED_ERROR_CODES,
+  RemoteError,
+  type RequestOptions,
+} from '@mangostudio/protocol';
 import {
   type ExternalAgentAckResult,
   type ExternalAgentCancelParams,
@@ -97,7 +102,6 @@ import {
   type RuntimeReadFileResult,
   type RuntimeReplaceRangeParams,
   type RuntimeReplaceRangeResult,
-  type RuntimeRequestOptions,
   type RuntimeShellResult,
   type RuntimeShellRunParams,
   type RuntimeSnapshotCaptureParams,
@@ -154,55 +158,49 @@ import { createTargetPaths, type TargetPaths } from './target-paths';
 const logger = createDiagnosticLogger('runtime-client');
 
 interface RuntimeFsClient {
-  readFile(
-    params: RuntimeReadFileParams,
-    options?: RuntimeRequestOptions
-  ): Promise<RuntimeReadFileResult>;
+  readFile(params: RuntimeReadFileParams, options?: RequestOptions): Promise<RuntimeReadFileResult>;
   writeFile(
     params: RuntimeWriteFileParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMutationResult<RuntimeWriteFileResult>>;
   createFile(
     params: RuntimeCreateFileParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMutationResult<RuntimeCreateFileResult>>;
   editFile(
     params: RuntimeEditFileParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMutationResult<RuntimeEditFileResult>>;
   replaceRange(
     params: RuntimeReplaceRangeParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMutationResult<RuntimeReplaceRangeResult>>;
   deleteFile(
     params: RuntimeDeleteFileParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMutationResult<RuntimeDeleteFileResult>>;
   moveFile(
     params: RuntimeMoveFileParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMutationResult<RuntimeMoveFileResult>>;
   listDirectory(
     params: RuntimeListDirectoryParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeListDirectoryResult>;
-  glob(params: RuntimeGlobParams, options?: RuntimeRequestOptions): Promise<RuntimeGlobResult>;
-  grep(params: RuntimeGrepParams, options?: RuntimeRequestOptions): Promise<RuntimeGrepResult>;
+  glob(params: RuntimeGlobParams, options?: RequestOptions): Promise<RuntimeGlobResult>;
+  grep(params: RuntimeGrepParams, options?: RequestOptions): Promise<RuntimeGrepResult>;
   applyPatch(
     params: RuntimeApplyPatchParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMutationResult<RuntimeApplyPatchResult>>;
 }
 
 interface RuntimeShellClient {
-  run(params: RuntimeShellRunParams, options?: RuntimeRequestOptions): Promise<RuntimeShellResult>;
+  run(params: RuntimeShellRunParams, options?: RequestOptions): Promise<RuntimeShellResult>;
 }
 
 interface RuntimeGitClient {
-  exec(
-    params: RuntimeGitExecParams,
-    options?: RuntimeRequestOptions
-  ): Promise<RuntimeGitExecResult>;
+  exec(params: RuntimeGitExecParams, options?: RequestOptions): Promise<RuntimeGitExecResult>;
 }
 
 /**
@@ -213,40 +211,37 @@ interface RuntimeGitClient {
  * own allowlist per method and refuses the mismatch.
  */
 interface RuntimeGhClient {
-  exec(params: RuntimeGhExecParams, options?: RuntimeRequestOptions): Promise<RuntimeGhExecResult>;
-  mutate(
-    params: RuntimeGhExecParams,
-    options?: RuntimeRequestOptions
-  ): Promise<RuntimeGhExecResult>;
+  exec(params: RuntimeGhExecParams, options?: RequestOptions): Promise<RuntimeGhExecResult>;
+  mutate(params: RuntimeGhExecParams, options?: RequestOptions): Promise<RuntimeGhExecResult>;
 }
 
 interface RuntimeSnapshotClient {
   capture(
     params: RuntimeSnapshotCaptureParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeBeforeSnapshot>;
   hash(
     params: RuntimeSnapshotHashParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeSnapshotHashResult>;
   revert(
     params: RuntimeSnapshotRevertParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeSnapshotRevertResult>;
 }
 
 interface RuntimeWorkspaceClient {
   browse(
     params?: RuntimeWorkspaceBrowseParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeWorkspaceBrowseResult>;
   validate(
     params: RuntimeWorkspaceValidateParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeWorkspaceValidateResult>;
   resolveContained(
     params: RuntimeWorkspaceResolveContainedParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeWorkspaceResolveContainedResult>;
 }
 
@@ -257,33 +252,30 @@ interface RuntimeWorkspaceClient {
 interface RuntimeTerminalClient {
   open(
     params: RuntimeTerminalOpenParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeTerminalOpenResult>;
   attach(
     params: RuntimeTerminalAttachParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeTerminalAttachResult>;
   detach(
     params: RuntimeTerminalDetachParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<{ readonly ok: true }>;
   write(
     params: RuntimeTerminalWriteParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<{ readonly ok: true }>;
   resize(
     params: RuntimeTerminalResizeParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<{ readonly ok: true }>;
-  ack(
-    params: RuntimeTerminalAckParams,
-    options?: RuntimeRequestOptions
-  ): Promise<{ readonly ok: true }>;
+  ack(params: RuntimeTerminalAckParams, options?: RequestOptions): Promise<{ readonly ok: true }>;
   close(
     params: RuntimeTerminalCloseParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<{ readonly ok: true }>;
-  list(options?: RuntimeRequestOptions): Promise<RuntimeTerminalListResult>;
+  list(options?: RequestOptions): Promise<RuntimeTerminalListResult>;
   /**
    * Subscribes to one session's output frames, filtered by `streamId` the way
    * `RuntimeExternalAgentsClient.onEvent` filters by `sessionId`.
@@ -305,39 +297,39 @@ interface RuntimeTerminalClient {
 interface RuntimeMcpClient {
   connect(
     params: RuntimeMcpConnectParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpConnectResult>;
   listTools(
     params: RuntimeMcpServerParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpListToolsResult>;
   callTool(
     params: RuntimeMcpCallToolParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpCallResult>;
   listResources(
     params: RuntimeMcpServerParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpListResourcesResult>;
   readResource(
     params: RuntimeMcpReadResourceParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpReadResourceResult>;
   listPrompts(
     params: RuntimeMcpServerParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpListPromptsResult>;
   getPrompt(
     params: RuntimeMcpGetPromptParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpPromptResult>;
   respondToElicitation(
     params: RuntimeMcpElicitResponseParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpAckResult>;
   disconnect(
     params: RuntimeMcpServerParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpAckResult>;
 }
 
@@ -345,45 +337,39 @@ interface RuntimeMcpClient {
 interface RuntimeExternalAgentsClient {
   discover(
     params: ExternalAgentDiscoverParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<ExternalAgentDiscoverResult>;
-  open(
-    params: ExternalAgentOpenParams,
-    options?: RuntimeRequestOptions
-  ): Promise<ExternalAgentOpenResult>;
-  turn(
-    params: ExternalAgentTurnParams,
-    options?: RuntimeRequestOptions
-  ): Promise<ExternalAgentTurnResult>;
+  open(params: ExternalAgentOpenParams, options?: RequestOptions): Promise<ExternalAgentOpenResult>;
+  turn(params: ExternalAgentTurnParams, options?: RequestOptions): Promise<ExternalAgentTurnResult>;
   respond(
     params: ExternalAgentRespondParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<ExternalAgentAckResult>;
   steer(
     params: ExternalAgentSteerParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<ExternalAgentSteerResult>;
   /** A vendor-native review, delivered on the session's own event stream. */
   startReview(
     params: ExternalAgentStartReviewParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<ExternalAgentStartReviewResult>;
   cancel(
     params: ExternalAgentCancelParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<ExternalAgentAckResult>;
   close(
     params: ExternalAgentCloseParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<ExternalAgentAckResult>;
   refreshAccountUsage(
     params: ExternalAgentRefreshAccountUsageParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<ExternalAgentRefreshAccountUsageResult>;
   /** The vendor's own conversation history on that machine, one page at a time. */
   listSessions(
     params: ExternalAgentListSessionsParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<ExternalAgentListSessionsResult>;
   /**
    * Subscribes to one hub-owned session's events. Only the envelope frame is
@@ -397,28 +383,25 @@ interface RuntimeExternalAgentsClient {
  * row and the decision to run at all; only the child process is over there.
  */
 interface RuntimeInstallClient {
-  run(
-    params: RuntimeInstallRunParams,
-    options?: RuntimeRequestOptions
-  ): Promise<RuntimeInstallRunResult>;
+  run(params: RuntimeInstallRunParams, options?: RequestOptions): Promise<RuntimeInstallRunResult>;
   cancel(
     params: RuntimeInstallCancelParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<{ readonly ok: true }>;
 }
 
 interface RuntimeUpdateClient {
   begin(
     params: RuntimeUpdateBeginParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeUpdateBeginResult>;
   chunk(
     params: RuntimeUpdateChunkParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeUpdateChunkResult>;
   commit(
     params: RuntimeUpdateCommitParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeUpdateCommitResult>;
 }
 
@@ -431,59 +414,56 @@ interface RuntimeUpdateClient {
 interface RuntimeProbingClient {
   runtimes(
     params: RuntimeProbeRuntimesParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeProbeRuntimesResult>;
   versionManagers(
     params: RuntimeProbeVersionManagersParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeProbeVersionManagersResult>;
   agentClis(
     params: RuntimeProbeAgentClisParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeProbeAgentClisResult>;
 }
 
 interface RuntimeLibraryClient {
   scan(
     params: RuntimeLibraryScanParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeLibraryScanResult>;
   read(
     params: RuntimeLibraryReadParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeLibraryReadResult>;
   readTree(
     params: RuntimeLibraryReadTreeParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeLibraryReadTreeResult>;
   locations(
     params?: RuntimeLibraryLocationsParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeLibraryLocationsResult>;
   settingsSources(
     params?: RuntimeLibrarySettingsSourcesParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeSettingsSourcesResult>;
   apply(
     params: RuntimeLibraryApplyParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeLibraryApplyResult>;
   remove(
     params: RuntimeLibraryRemoveParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeLibraryRemoveResult>;
   undo(
     params: RuntimeLibraryUndoParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeLibraryUndoResult>;
   backups(
     params: RuntimeLibraryBackupsParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeLibraryBackupsResult>;
-  gc(
-    params: RuntimeLibraryGcParams,
-    options?: RuntimeRequestOptions
-  ): Promise<RuntimeLibraryGcResult>;
+  gc(params: RuntimeLibraryGcParams, options?: RequestOptions): Promise<RuntimeLibraryGcResult>;
 }
 
 /** Typed API-side facade over the transport-level runtime request multiplexer. */
@@ -684,7 +664,7 @@ export class RuntimeClient {
   }
 
   /** One health truth: same payload as `mangostudio-runtime health --json`. */
-  health(options?: RuntimeRequestOptions) {
+  health(options?: RequestOptions) {
     return this.request('runtime.health', {}, options);
   }
 
@@ -720,7 +700,7 @@ export class RuntimeClient {
   private async request<K extends RuntimeMethod>(
     method: K,
     params: RuntimeMethodMap[K]['params'],
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMethodMap[K]['result']> {
     this.noteUnenforcedContainment(method, params);
     try {

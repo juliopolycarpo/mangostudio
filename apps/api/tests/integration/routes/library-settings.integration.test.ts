@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { RemoteError } from '@mangostudio/protocol';
 import type {
   ConceptComparison,
   LibraryTargetId,
@@ -130,7 +130,7 @@ describe('library settings routes', () => {
       createSettingsRoutes({
         ...service,
         compare: () =>
-          Promise.reject(new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'Environment offline.')),
+          Promise.reject(new RemoteError('RUNTIME_UNAVAILABLE', 'Environment offline.')),
       })
     );
     restoreAuth = restore;

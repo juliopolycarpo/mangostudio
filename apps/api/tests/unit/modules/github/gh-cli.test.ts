@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { RemoteError } from '@mangostudio/protocol';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import {
   buildGhArgv,
@@ -201,7 +201,7 @@ describe('hub gh CLI facade', () => {
   it('maps a remote gh_execution failure back onto GhCliError', async () => {
     const runtime = new FakeGhRuntime(TEST_MANIFEST, () =>
       Promise.reject(
-        new RuntimeRemoteError('INTERNAL', 'gh failed', {
+        new RemoteError('INTERNAL', 'gh failed', {
           kind: 'gh_execution',
           exitCode: 1,
           stderr: 'no git remotes found',

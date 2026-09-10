@@ -1,9 +1,5 @@
 import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
-import {
-  CONSENT_DENIED_KIND,
-  RUNTIME_UPDATE_REFUSED,
-  type RuntimeErrorCode,
-} from '@mangostudio/shared/runtime-contract';
+import { CONSENT_DENIED_KIND, RUNTIME_UPDATE_REFUSED } from '@mangostudio/shared/runtime-contract';
 
 export type RuntimeServiceErrorKind =
   /** The machine's owner did not grant a capability the method needs. */
@@ -117,32 +113,6 @@ export class RuntimeServiceManagementError extends RuntimeServiceError {
  */
 export const LIBRARY_BACKUP_MISSING_KIND =
   'library_backup_missing' satisfies RuntimeServiceErrorKind;
-
-/**
- * Hub-side mirror of a remote `err` payload from a transport still on the
- * hand-written framing. `code` is always a known literal after the protocol
- * client narrows the open wire form.
- *
- * It extends the SDK's `RemoteError` so one `instanceof` covers both wires
- * while the transports move across: a hub that only recognised the SDK class
- * would read a legacy `RUNTIME_UNAVAILABLE` refusal as an ordinary fault and
- * answer 400 where it used to answer 503.
- */
-export class RuntimeRemoteError extends RemoteError {
-  // Redeclared to narrow, never to re-assign: an own field here would be
-  // defined after `super()` and overwrite the code the base already set.
-  declare readonly code: RuntimeErrorCode;
-  declare readonly details?: Readonly<Record<string, unknown>>;
-
-  constructor(
-    code: RuntimeErrorCode,
-    message: string,
-    details?: Readonly<Record<string, unknown>>
-  ) {
-    super(code, message, details);
-    this.name = 'RuntimeRemoteError';
-  }
-}
 
 /**
  * Maps what a runtime handler threw onto the wire error the peer receives.

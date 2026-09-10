@@ -4,20 +4,17 @@
  * is the point of this transport.
  */
 
-import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { RemoteError } from '@mangostudio/protocol';
 
 export function parseHttpRuntimeBaseUrl(baseUrl: string): URL {
   let url: URL;
   try {
     url = new URL(baseUrl);
   } catch {
-    throw new RuntimeRemoteError(
-      'RUNTIME_UNAVAILABLE',
-      `The Direct URL "${baseUrl}" is not a valid URL.`
-    );
+    throw new RemoteError('RUNTIME_UNAVAILABLE', `The Direct URL "${baseUrl}" is not a valid URL.`);
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new RuntimeRemoteError(
+    throw new RemoteError(
       'RUNTIME_UNAVAILABLE',
       `The Direct URL must use http: or https:, not ${url.protocol}`
     );

@@ -1,13 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import { realpath } from 'node:fs/promises';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
-import {
-  connectInProcessRuntime,
-  createLocalRuntimeHost,
-  legacyRuntimeHost,
-  RUNTIME_EXTERNAL_AGENT_TOPIC,
-} from '../../../src';
+import { createLocalRuntimeHost, RUNTIME_EXTERNAL_AGENT_TOPIC } from '../../../src';
 import { FakeExternalAgentAdapter } from '../../support/fake-external-agent-adapter';
+import { connectRuntimeDefinition } from '../../support/hub-connection';
 
 describe('external-agent runtime protocol wiring', () => {
   it('drives a fake adapter through the real framed host and reaps it before close resolves', async () => {
@@ -15,7 +11,7 @@ describe('external-agent runtime protocol wiring', () => {
       events: [{ type: 'text_delta', text: 'from fixture' }, { type: 'completed' }],
     });
     const workspacePath = await realpath(import.meta.dir);
-    const host = legacyRuntimeHost(
+    const connection = await connectRuntimeDefinition(
       createLocalRuntimeHost({
         runtimeVersion: 'runtime-test',
         allow: RUNTIME_CONSENT_PRESETS.full,
@@ -26,23 +22,19 @@ describe('external-agent runtime protocol wiring', () => {
         },
       })
     );
-    const connection = await connectInProcessRuntime(host, {
-      hubVersion: 'hub-test',
-      validateFrames: true,
-    });
     const events: unknown[] = [];
-    connection.client.onEvent((frame) => {
+    connection.onEvent((frame) => {
       if (frame.topic === RUNTIME_EXTERNAL_AGENT_TOPIC) events.push(frame.payload);
     });
 
-    expect(connection.client.manifest.externalAgents).toEqual(['codex']);
+    expect(connection.manifest.externalAgents).toEqual(['codex']);
     await expect(
-      connection.client.request('external-agent.discover', {
+      connection.request('external-agent.discover', {
         targetIds: ['codex'],
         timeoutMs: 1_000,
       })
     ).resolves.toMatchObject({ descriptors: [{ targetId: 'codex', installed: true }] });
-    await connection.client.request('external-agent.open', {
+    await connection.request('external-agent.open', {
       sessionId: 'session-1',
       targetId: 'codex',
       workspacePath,
@@ -50,7 +42,7 @@ describe('external-agent runtime protocol wiring', () => {
       resumeMode: 'fallback',
       timeoutMs: 1_000,
     });
-    await connection.client.request('external-agent.turn', {
+    await connection.request('external-agent.turn', {
       sessionId: 'session-1',
       clientMessageId: 'message-1',
       input: 'hello',

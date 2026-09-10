@@ -124,10 +124,9 @@ export async function spawnRuntimeChild(
       requireMatchingRelease: options.requireMatchingRelease ?? true,
     });
   } catch (error) {
-    // Asked of the launcher rather than left to the session: a port that closed
-    // on its own has already put the session in `closed`, which makes the
-    // session's own `close()` — and the terminate behind it — a no-op.
-    void peer.terminate();
+    // No compensating terminate: `openHubSession` closes the port on the way
+    // out, and the launcher terminates the child whenever its port closes —
+    // including when the port closed on its own and took the session with it.
     const failure = await observeLaunchFailure(peer, launch.command, error);
     throw asRemoteFailure(
       error,
@@ -158,7 +157,7 @@ export async function spawnRuntimeChild(
   // A child that dies before the handshake is reported by the rejected connect
   // attempt above; only a connection the hub already handed out needs the loss
   // pushed back to it.
-  hub.session.onClose((closure) => {
+  hub.onClose((closure) => {
     void release(true, describeSessionClosure(closure));
   });
 

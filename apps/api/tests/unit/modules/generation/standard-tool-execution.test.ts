@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { RemoteError } from '@mangostudio/protocol';
 import {
   classifyMcpElicitationCancelReason,
   executeStandardToolCallsWithProgress,
@@ -16,8 +16,8 @@ import type { RegisteredTool } from '../../../../src/services/tools/types';
 const hasBash = isShellAvailable('bash');
 
 /** The shape an MCP failure reaches the hub in: classified by the runtime. */
-function mcpFailure(failure: 'timeout' | 'server_closed', message: string): RuntimeRemoteError {
-  return new RuntimeRemoteError('INTERNAL', message, {
+function mcpFailure(failure: 'timeout' | 'server_closed', message: string): RemoteError {
+  return new RemoteError('INTERNAL', message, {
     kind: 'mcp_call',
     serverSlug: 'fixture',
     mcpFailure: failure,
@@ -38,7 +38,7 @@ describe('classifyMcpElicitationCancelReason', () => {
   it('reports a runtime lost mid-call as a closed session, never a bare failure', () => {
     expect(
       classifyMcpElicitationCancelReason(
-        new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'Runtime connection was closed.')
+        new RemoteError('RUNTIME_UNAVAILABLE', 'Runtime connection was closed.')
       )
     ).toBe('server_closed');
   });

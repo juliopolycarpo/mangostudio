@@ -1,7 +1,7 @@
 /** Hub-side sender for the runtime.update begin/chunk/commit protocol. */
 
+import type { RequestOptions } from '@mangostudio/protocol';
 import type {
-  RuntimeRequestOptions,
   RuntimeUpdateBeginParams,
   RuntimeUpdateBeginResult,
   RuntimeUpdateChunkParams,
@@ -18,15 +18,15 @@ const UPDATE_COMMIT_TIMEOUT_MS = 300_000;
 export interface RuntimeUpdateProtocol {
   begin(
     params: RuntimeUpdateBeginParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeUpdateBeginResult>;
   chunk(
     params: RuntimeUpdateChunkParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeUpdateChunkResult>;
   commit(
     params: RuntimeUpdateCommitParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeUpdateCommitResult>;
 }
 

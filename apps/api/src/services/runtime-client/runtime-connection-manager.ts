@@ -1261,7 +1261,7 @@ function advanceChainAfter(attempt: Promise<unknown>, deadlineMs: number): Promi
 /**
  * Binds the hub process's OS credential home to one MangoStudio user.
  *
- * Separate Local RuntimeHost instances still share the same OS account. The
+ * Separate Local runtime sessions still share the same OS account. The
  * first authenticated owner may be attested while it is the only owner the
  * process has served. If a second owner appears, every attested connection is
  * closed before that owner connects and this connector permanently falls back

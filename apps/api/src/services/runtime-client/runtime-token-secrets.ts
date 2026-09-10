@@ -7,7 +7,7 @@
  * only hide a misconfigured machine.
  */
 
-import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { RemoteError } from '@mangostudio/protocol';
 import { createDiagnosticLogger } from '../../lib/logger';
 import type { SecretDescriptor, SecretStore } from '../secret-store/store';
 import { bunSecretStore, SecretStorageUnavailableError } from '../secret-store/store';
@@ -29,19 +29,19 @@ function resolveStore(store?: SecretStore): SecretStore {
   return store ?? storeForTests ?? bunSecretStore;
 }
 
-function unavailableStore(cause: unknown): RuntimeRemoteError {
+function unavailableStore(cause: unknown): RemoteError {
   const detail =
     cause instanceof Error && cause.message.trim().length > 0
       ? cause.message
       : 'OS secret storage (keychain / credential manager) is unavailable.';
-  return new RuntimeRemoteError(
+  return new RemoteError(
     'RUNTIME_UNAVAILABLE',
     `The runtime token could not be read from the secret store: ${detail}`
   );
 }
 
-function missingToken(environmentId: string): RuntimeRemoteError {
-  return new RuntimeRemoteError(
+function missingToken(environmentId: string): RemoteError {
+  return new RemoteError(
     'RUNTIME_UNAVAILABLE',
     `No runtime token is configured for environment "${environmentId}". Set one on the environment card.`
   );

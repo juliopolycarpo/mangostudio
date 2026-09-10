@@ -111,6 +111,26 @@ describe('gateHandlers dispatch', () => {
     expect((refusal as RemoteError).details).toMatchObject({ reason: 'update_in_progress' });
   });
 
+  it('refuses an ordinary call from the moment an update starts dispatching', async () => {
+    // Not `isUpdateActive`: that flag only turns on once `runtime.update.begin`
+    // has answered. The window this closes is the one before that — the update
+    // has claimed its slot and is still running, and an ordinary call landing
+    // there would overlap the bytes being rewritten.
+    const release = Promise.withResolvers<void>();
+    const handlers = new FakeRuntimeHandlers({ 'runtime.update.begin': () => release.promise });
+    const gated = gateHandlers(handlers.map, deps({ isUpdateActive: () => false }));
+
+    const begin = call(gated, 'runtime.update.begin');
+    const refusal = await call(gated, 'fs.read-file').catch((thrown: unknown) => thrown);
+
+    expect(refusal).toBeInstanceOf(RemoteError);
+    expect((refusal as RemoteError).code).toBe('RUNTIME_UPDATE_REFUSED');
+    expect((refusal as RemoteError).details).toMatchObject({ reason: 'update_in_progress' });
+
+    release.resolve();
+    await begin;
+  });
+
   it('turns a service error into INTERNAL carrying its kind', async () => {
     // The class does not survive the wire; `details.kind` is what lets the hub
     // rebuild the right error instead of matching on message text.

@@ -277,6 +277,32 @@ describe('spawnRuntimeChild', () => {
     expect(error.message).toContain('Reinstall MangoStudio');
   }, 30_000);
 
+  it.skipIf(!hasPosixShell)(
+    'reaps a child that started but never handshaked',
+    async () => {
+      // The launcher terminates the child whenever its port closes, and a
+      // failed handshake closes it — so nothing here asks for a termination.
+      // A child that outlived its rejected connection would be a runtime this
+      // hub can no longer reach and no longer stop.
+      const child =
+        'process.stderr.write("pid=" + process.pid + "\\n"); setInterval(() => {}, 1_000);';
+      const error = (await rejectionOf(
+        spawnRuntimeChild({
+          environmentId: 'devbox',
+          launch: { command: process.execPath, args: ['-e', child] },
+          hubVersion: 'hub-test',
+          handshakeTimeoutMs: 1_000,
+          onClosed: () => undefined,
+        })
+      )) as RemoteError;
+
+      const pid = Number(/pid=(\d+)/.exec(error.message)?.[1]);
+      expect(Number.isInteger(pid)).toBe(true);
+      await expect(whenProcessGone(pid)).resolves.toBeUndefined();
+    },
+    30_000
+  );
+
   it('fails on handshake when the spawned child does not speak the protocol', async () => {
     // Bun rejects `--stdio`, so the child starts and exits without a hello.
     const error = await spawnRuntimeChild({
@@ -291,3 +317,23 @@ describe('spawnRuntimeChild', () => {
     expect(error.message).toContain('handshake');
   }, 30_000);
 });
+
+/**
+ * Settles once `pid` is gone, and rejects naming it when it is still running
+ * after the launcher's own terminate grace has had time to escalate.
+ *
+ * @example
+ * await whenProcessGone(child.pid);
+ */
+async function whenProcessGone(pid: number, timeoutMs = 15_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    await Bun.sleep(50);
+  }
+  throw new Error(`Process ${pid} is still running ${timeoutMs}ms after its launch failed.`);
+}

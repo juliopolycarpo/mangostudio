@@ -33,11 +33,11 @@ describe('runtime token secrets', () => {
     store.available = false;
 
     await expect(persistRuntimeToken(USER, 'lan-box', 'secret', store)).rejects.toMatchObject({
-      name: 'RuntimeRemoteError',
+      name: 'RemoteError',
       code: 'RUNTIME_UNAVAILABLE',
     });
     await expect(readRuntimeToken(USER, 'lan-box', store)).rejects.toMatchObject({
-      name: 'RuntimeRemoteError',
+      name: 'RemoteError',
     });
     expect(await hasRuntimeToken(USER, 'lan-box', store)).toBe(false);
   });

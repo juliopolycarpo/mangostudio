@@ -985,9 +985,10 @@ async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
     }
     if (transferStarted && !refused && !expectedDisconnect) {
       // There is deliberately no fourth protocol method. Dropping the
-      // connection makes RuntimeHost.close discard the staged file, so a
-      // transfer that died mid-stream does not leave a session refusing every
-      // ordinary call until it expires. Dial-in runtimes redial on their own.
+      // connection releases the runtime's definition, which discards the
+      // staged file, so a transfer that died mid-stream does not leave a
+      // session refusing every ordinary call until it expires. Dial-in
+      // runtimes redial on their own.
       input.manager.disconnectIfCurrent(input.userId, input.environmentId, client);
     }
     throw error;
