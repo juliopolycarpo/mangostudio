@@ -88,8 +88,11 @@ export interface TerminalService {
 }
 
 export interface TerminalServiceOptions {
-  /** Publishes a `terminal.output` frame; only ever called once a session has been attached. */
-  readonly emit: (event: EventInput) => void;
+  /**
+   * Publishes a `terminal.output` frame; only ever called once a session has
+   * been attached. `false` means no session was there to carry it.
+   */
+  readonly emit: (event: EventInput) => boolean;
   readonly deps?: Partial<TerminalServiceDeps>;
 }
 
@@ -97,14 +100,13 @@ export function createTerminalService(options: TerminalServiceOptions): Terminal
   const deps: TerminalServiceDeps = { ...DEFAULT_DEPS, ...options.deps };
   const sessions = new Map<string, TerminalSession>();
 
-  const publish = (sessionId: string, payload: RuntimeTerminalOutputEvent, end?: true): void => {
+  const publish = (sessionId: string, payload: RuntimeTerminalOutputEvent, end?: true): boolean =>
     options.emit({
       topic: RUNTIME_TERMINAL_OUTPUT_TOPIC,
       streamId: sessionId,
       payload,
       ...(end ? { end } : {}),
     });
-  };
 
   const requireSession = (sessionId: string): TerminalSession => {
     const session = sessions.get(sessionId);

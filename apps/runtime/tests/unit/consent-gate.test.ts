@@ -32,7 +32,7 @@ describe('the contract capability table', () => {
     // contract does not declare would reach a hub ungoverned.
     const registry = createRuntimeMethodHandlers({
       runtimeVersion: '0.0.0-test',
-      emit: () => undefined,
+      emit: () => true,
     });
     try {
       for (const method of Object.keys(registry.handlers)) {

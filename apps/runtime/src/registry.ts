@@ -35,8 +35,11 @@ import {
 export interface RuntimeMethodRegistryOptions {
   /** Release string this host reports to the MCP servers it initializes. */
   readonly runtimeVersion: string;
-  /** Publishes an `evt` frame; the MCP methods stream elicitations through it. */
-  readonly emit: (event: EventInput) => void;
+  /**
+   * Publishes an `evt` frame; the MCP methods stream elicitations through it.
+   * `false` means no session is bound to carry it.
+   */
+  readonly emit: (event: EventInput) => boolean;
   /**
    * Slot whose `runtime.json` this host answers for. Health reads it so a
    * dialled-in peer reports the same consent the CLI's `health --json` would.

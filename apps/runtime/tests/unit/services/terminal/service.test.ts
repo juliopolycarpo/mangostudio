@@ -31,7 +31,10 @@ function createService(
   const port = overrides.port ?? new FakePtyPort();
   const events: EventInput[] = [];
   const service = createTerminalService({
-    emit: (event) => events.push(event),
+    emit: (event) => {
+      events.push(event);
+      return true;
+    },
     deps: {
       pty: port,
       sourceEnv:

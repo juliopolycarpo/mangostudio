@@ -25,6 +25,7 @@ describe('createTerminalService over a real pty', () => {
       const service = createTerminalService({
         emit: (event: EventInput) => {
           frames.push(event.payload as RuntimeTerminalOutputEvent);
+          return true;
         },
       });
 
