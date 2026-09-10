@@ -10,6 +10,8 @@
 
 import { Console } from 'node:console';
 import { createInterface } from 'node:readline/promises';
+import { CLOSE_CODES, type Session, type SessionClosure } from '@mangostudio/protocol';
+import { stdioPort } from '@mangostudio/protocol/stdio';
 import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
 import {
   isRuntimeSlot,
@@ -52,6 +54,7 @@ import { resolveExternalAgentIsolation } from './services/external-agents/isolat
 import { createRuntimeServiceManager, resolveInstallMode } from './services/runtime-service';
 import { RUNTIME_UPDATE_EXIT_CODE } from './services/runtime-update';
 import { isUserServiceAction, type UserServiceAction } from './services/user-service-manager';
+import { createRuntimeSession, whenRuntimeReleased } from './session';
 import {
   isRuntimeSetupProfile,
   parseAllowOverrides,
@@ -59,7 +62,6 @@ import {
   runRuntimeSetup,
 } from './setup';
 import { installRuntimeIntoSlot } from './slot-install';
-import { createStdioFramePort, type StdioFramePortClosure } from './transports/stdio';
 
 /**
  * The slot `connect` and `serve` answer for.
@@ -744,6 +746,15 @@ async function resolveServeToken(source: RuntimeServeArgs['tokenSource']): Promi
   };
 }
 
+/**
+ * How long the hub has to answer this runtime's `hello`.
+ *
+ * Shorter than the SDK's default: a launcher that reached this process has
+ * already opened the pipe, so a hub that has not greeted within five seconds is
+ * not slow, it is something that started the binary without speaking to it.
+ */
+const STDIO_HANDSHAKE_TIMEOUT_MS = 5_000;
+
 async function serveStdio(runtimeVersion: string): Promise<number> {
   redirectConsoleToStderr();
 
@@ -756,10 +767,10 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
     return 1;
   }
 
-  let stop: (closure: StdioFramePortClosure) => void = () => undefined;
-  const finished = new Promise<StdioFramePortClosure>((resolve) => {
-    stop = resolve;
-  });
+  // Bound below, once the session exists. Nothing can call it before then: the
+  // update service defers its restart request past the commit response, and a
+  // signal arriving this early kills a process with no hub attached anyway.
+  let release: (reason: string) => void = () => undefined;
   let updateCommitted = false;
   const { host: definition, audit } = await createSlotRuntimeHost({
     runtimeVersion,
@@ -772,46 +783,71 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
       supervised: resolveRuntimeSource() === 'provisioned',
       requestRestart: () => {
         updateCommitted = true;
-        stop({ kind: 'eof' });
+        release('runtime update committed');
       },
     },
   });
+
+  const session = createRuntimeSession(stdioPort(), definition, {
+    handshakeTimeoutMs: STDIO_HANDSHAKE_TIMEOUT_MS,
+  });
+  release = (reason) => session.close(CLOSE_CODES.RELEASED, reason);
   // A hub shutdown signals the child before closing the pipe; unwind the same
   // way an EOF would so in-flight handlers see their abort.
-  const stopOnSignal = () => stop({ kind: 'eof' });
-
-  const host = legacyRuntimeHost(definition);
-  host.attach(
-    createStdioFramePort({ input: process.stdin, output: process.stdout, onClosed: stop })
-  );
-  host.start();
+  const stopOnSignal = (): void => release('the host signalled this runtime');
   process.once('SIGINT', stopOnSignal);
   process.once('SIGTERM', stopOnSignal);
 
-  const closure = await finished.finally(async () => {
-    process.off('SIGINT', stopOnSignal);
-    process.off('SIGTERM', stopOnSignal);
-    // A host close that rejects — a vendor process tree that would not reap —
-    // is reported, not propagated: the audit sink still has to drain and the
-    // closure below still has to produce an exit code.
-    try {
-      await host.close();
-    } catch (error) {
-      process.stderr.write(
-        `mangostudio-runtime: runtime host cleanup failed: ${error instanceof Error ? error.message : String(error)}\n`
-      );
-    }
-    // The process-scoped audit sink outlives every host connection and drains
-    // after the host has reaped all session-owned resources.
-    await audit.close();
-  });
+  const closure = await whenSessionClosed(session);
+  process.off('SIGINT', stopOnSignal);
+  process.off('SIGTERM', stopOnSignal);
+  // Not just "the transport ended": the MCP sessions, terminals and vendor
+  // processes the handlers held open are reaped here, and the process-scoped
+  // audit sink drains only after they are.
+  await whenRuntimeReleased(session);
+  await audit.close();
 
-  if (closure.kind === 'protocol-error') {
-    process.stderr.write(`mangostudio-runtime: ${closure.error.message}\n`);
+  return stdioExitCode(closure, updateCommitted);
+}
+
+/**
+ * Settles with the closure that ended `session`.
+ *
+ * @example
+ * const closure = await whenSessionClosed(createRuntimeSession(stdioPort(), definition));
+ */
+function whenSessionClosed(session: Session): Promise<SessionClosure> {
+  return new Promise((resolve) => {
+    session.onClose(resolve);
+  });
+}
+
+/**
+ * The process exit status a finished stdio session earns.
+ *
+ * A hub that released this runtime is a clean shutdown, and a released session
+ * that had committed an update tells the supervisor to start the new binary.
+ * Anything else — a refused frame, a handshake nobody answered, a hub that
+ * closed on a fault — is a failure worth a non-zero status and a line on
+ * stderr, which is the only channel the hub reads for diagnostics.
+ *
+ * @example
+ * stdioExitCode({ code: 4000, fatal: false }, false); // 0
+ */
+function stdioExitCode(closure: SessionClosure, updateCommitted: boolean): number {
+  if (closure.error || closure.code !== CLOSE_CODES.RELEASED) {
+    process.stderr.write(`mangostudio-runtime: ${describeSessionClosure(closure)}\n`);
     return 1;
   }
   if (updateCommitted) return RUNTIME_UPDATE_EXIT_CODE;
   return 0;
+}
+
+/** One sentence naming why a session ended, for the hub's stderr log. */
+function describeSessionClosure(closure: SessionClosure): string {
+  if (closure.error) return closure.error.message;
+  const reason = closure.reason ? `: ${closure.reason}` : '';
+  return `the hub closed this session with ${closure.code}${reason}.`;
 }
 
 /** What a launched runtime may do here, and why it may not when it may not. */

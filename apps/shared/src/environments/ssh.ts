@@ -1,15 +1,16 @@
 /**
  * How the hub reaches a runtime over the system `ssh` client.
  *
- * SSH is a launcher, not a fifth protocol: what comes out of here is fed to the
- * same stdio spawn every other hub-started runtime uses, which appends its own
- * `--stdio`. Everything OpenSSH already solved — keys, agents, `~/.ssh/config`,
- * `ProxyJump`, `known_hosts` — is reused rather than reimplemented in JS.
+ * SSH is a launcher, not a fifth protocol: the runtime runs on the far side of
+ * a pipe `ssh` opens, and the stdio transport speaks through it. Everything
+ * OpenSSH already solved — keys, agents, `~/.ssh/config`, `ProxyJump`,
+ * `known_hosts` — is reused rather than reimplemented in JS.
  *
- * The builder lives in shared because two callers need one answer: the hub
- * spawns this argv, and the Add Environment dialog prints the reachability test
- * a user runs by hand. A second copy of the option list would drift the moment
- * one of them changed.
+ * The launch argv itself is the protocol SDK's hardened preset. What lives here
+ * is what MangoStudio owns and two callers need one answer for: where the
+ * installer puts a remote runtime, the option list the ssh command runner
+ * reuses, and the reachability test the Add Environment dialog prints for a
+ * user to run by hand.
  */
 
 import { mangoHomeDir, runtimeSlotCurrentBinaryPath } from '../runtime-home';
@@ -68,11 +69,6 @@ export const SSH_FORCED_OPTIONS: readonly string[] = [
   'RemoteCommand=none',
 ];
 
-export interface SshLaunchCommand {
-  readonly command: string;
-  readonly args: readonly string[];
-}
-
 /** `user@host` or bare `host`. Both halves are argv entries, never interpolated. */
 export function sshDestination(config: SshEnvironmentConfig): string {
   return config.user ? `${config.user}@${config.host}` : config.host;
@@ -80,39 +76,6 @@ export function sshDestination(config: SshEnvironmentConfig): string {
 
 export function sshRuntimePath(config: SshEnvironmentConfig): string {
   return config.remoteRuntimePath?.trim() || DEFAULT_SSH_RUNTIME_PATH;
-}
-
-/**
- * argv that starts a runtime on an SSH host.
- *
- * Two different quoting worlds meet here. Hub-side, every value is a discrete
- * argv entry and nothing is interpolated — a host named `-oProxyCommand=…`
- * would otherwise be remote code execution on the hub, which is why the schema
- * refuses a leading dash, `--` ends option parsing, and the argv is an array.
- * Remote-side the rules are OpenSSH's, not ours: ssh joins everything after the
- * destination with spaces and hands the result to the target's login shell.
- * That is why `~` expands at all — and why the runtime path has to be quoted
- * here, or a path containing a space would arrive as two words and one holding
- * `;` or a backtick would arrive as a command.
- */
-export function sshLaunchCommand(config: SshEnvironmentConfig): SshLaunchCommand {
-  return {
-    command: 'ssh',
-    args: [
-      ...SSH_FORCED_OPTIONS,
-      // `IdentitiesOnly` keeps the agent from offering every key it holds
-      // before the one that was configured, which is what exhausts a server's
-      // `MaxAuthTries` and reads back as an authentication failure.
-      ...(config.identityFile ? ['-o', 'IdentitiesOnly=yes', '-i', config.identityFile] : []),
-      ...(config.port ? ['-p', String(config.port)] : []),
-      // No pseudo-terminal: stdout carries protocol frames, and a tty would
-      // translate them.
-      '-T',
-      '--',
-      sshDestination(config),
-      quoteForRemoteShell(sshRuntimePath(config)),
-    ],
-  };
 }
 
 /**

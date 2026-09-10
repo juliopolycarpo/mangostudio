@@ -18,8 +18,9 @@ const HANGING_TIMEOUT_MS = 1_000;
 
 const HELLO_FRAME = JSON.stringify({
   type: 'hello',
-  runtimeVersion: '0.0.0-test',
-  manifest: { platform: 'linux-x64' },
+  protocol: { major: 1, minor: 0 },
+  peer: { name: 'mangostudio-runtime', version: '0.0.0-test', role: 'runtime' },
+  capabilities: { platform: 'linux-x64' },
 });
 
 /** Runs `source` as a stand-in runtime binary under the current Bun. */

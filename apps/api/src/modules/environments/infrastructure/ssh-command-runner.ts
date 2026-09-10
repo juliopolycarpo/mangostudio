@@ -53,7 +53,7 @@ function runOverSsh(
     '--',
     sshDestination(config),
     // OpenSSH joins argv after the destination into one remote command; pass a
-    // single already-quoted string the way {@link sshLaunchCommand} does.
+    // single already-quoted string the way the launch argv does.
     buildSshRemoteCommand(script, options.args ?? []),
   ];
 

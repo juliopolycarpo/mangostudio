@@ -15,18 +15,18 @@
 
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { RemoteError } from '@mangostudio/protocol';
-import { RuntimeRemoteError } from '@mangostudio/runtime';
-import type { SshFailureReason } from '@mangostudio/shared/environments';
-import { expandUserPath, sshLaunchCommand } from '@mangostudio/shared/environments';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { sshArgv } from '@mangostudio/protocol/spawn';
+import type { SshEnvironmentConfig, SshFailureReason } from '@mangostudio/shared/environments';
+import { expandUserPath, sshRuntimePath } from '@mangostudio/shared/environments';
 import { narrowRuntimeErrorCode } from '@mangostudio/shared/runtime-contract';
 import { getVersion } from '../../lib/config';
+import type { RuntimeLaunchCommand } from '../../lib/runtime-paths';
 import { environmentConfigFor } from '../../modules/environments/domain/environment-config';
 import {
   classifySshFailure,
   describeSshFailure,
 } from '../../modules/environments/domain/ssh-failure';
-import { legacyHubSession } from './hub-session';
 import { RuntimeClient } from './runtime-client';
 import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-child';
 
@@ -36,6 +36,9 @@ import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-ch
  * before the first frame, and a busy host on a slow link uses all of it.
  */
 const HANDSHAKE_TIMEOUT_MS = 20_000;
+
+/** How long `ssh` may spend reaching the host before it gives up. */
+const CONNECT_TIMEOUT_SECONDS = 10;
 
 /** Minimal definition shape — kept local to avoid a cycle with the manager. */
 export interface SshRuntimeDefinition {
@@ -65,8 +68,8 @@ export async function connectSshRuntime(
   // fail authentication, which reads back as "the host refused your key" —
   // true, and useless. Checking first names the file instead.
   if (identityFile && !existsSync(identityFile)) {
-    throw new RuntimeRemoteError(
-      'RUNTIME_UNAVAILABLE',
+    throw new RemoteError(
+      RESERVED_ERROR_CODES.UNAVAILABLE,
       `The identity file ${config.identityFile} configured on environment "${definition.id}" does not exist.`,
       { sshFailureReason: 'auth-refused' satisfies SshFailureReason }
     );
@@ -80,7 +83,7 @@ export async function connectSshRuntime(
   try {
     const connection = await spawnRuntimeChild({
       environmentId: definition.id,
-      launch: sshLaunchCommand(launchConfig),
+      launch: sshLaunch(launchConfig),
       hubVersion: getVersion(),
       handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
       requireMatchingRelease: false,
@@ -101,7 +104,7 @@ export async function connectSshRuntime(
     });
 
     return {
-      client: new RuntimeClient(legacyHubSession(connection.client), onUnavailable, definition.id),
+      client: new RuntimeClient(connection.hub, onUnavailable, definition.id),
       close: () => connection.close(),
     };
   } catch (error) {
@@ -118,10 +121,36 @@ export async function connectSshRuntime(
 function withFailureReason(error: unknown, reason: SshFailureReason): RemoteError {
   if (reason === 'unknown' && error instanceof RemoteError) return error;
   const code =
-    error instanceof RemoteError ? narrowRuntimeErrorCode(error.code) : 'RUNTIME_UNAVAILABLE';
+    error instanceof RemoteError
+      ? narrowRuntimeErrorCode(error.code)
+      : RESERVED_ERROR_CODES.UNAVAILABLE;
   const message = error instanceof Error ? error.message : String(error);
-  return new RuntimeRemoteError(code, message, {
+  return new RemoteError(code, message, {
     ...(error instanceof RemoteError ? error.details : {}),
     sshFailureReason: reason,
   });
+}
+
+/**
+ * The argv that starts a runtime on the far machine, as the launcher wants it.
+ *
+ * The option list is the SDK's hardened `ssh` preset rather than one this
+ * repository maintains: BatchMode, a bounded connect timeout, forced host-key
+ * checking, multiplexing and `RemoteCommand` off, and remote-shell quoting for
+ * the path. What stays here is the one MangoStudio decision — where a runtime
+ * placed by our installer lives.
+ *
+ * @example
+ * sshLaunch({ host: 'build-01.internal', port: 2222 });
+ */
+export function sshLaunch(config: SshEnvironmentConfig): RuntimeLaunchCommand {
+  const [command = 'ssh', ...args] = sshArgv({
+    host: config.host,
+    ...(config.user ? { user: config.user } : {}),
+    ...(config.port ? { port: config.port } : {}),
+    ...(config.identityFile ? { identityFile: config.identityFile } : {}),
+    command: [sshRuntimePath(config)],
+    connectTimeoutSeconds: CONNECT_TIMEOUT_SECONDS,
+  });
+  return { command, args };
 }

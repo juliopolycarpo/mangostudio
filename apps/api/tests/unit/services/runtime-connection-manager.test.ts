@@ -353,14 +353,14 @@ describe('RuntimeConnectionManager', () => {
   });
 
   it('carries an ssh failure reason onto the status, where the card can act on it', async () => {
-    // Every ssh failure arrives as RUNTIME_UNAVAILABLE, so the code alone
-    // cannot tell "install a runtime there" from "trust the host key".
+    // Every ssh failure arrives as UNAVAILABLE, so the code alone cannot tell
+    // "install a runtime there" from "trust the host key".
     const manager = new RuntimeConnectionManager({
       resolveEnvironment: () => Promise.resolve(definition('ssh', { host: 'build-01' })),
       connectors: {
         ssh: () =>
           Promise.reject(
-            new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'no runtime there', {
+            new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'no runtime there', {
               sshFailureReason: 'runtime-missing',
             })
           ),
@@ -371,7 +371,7 @@ describe('RuntimeConnectionManager', () => {
 
     expect(manager.getStatus('user-1', 'devbox')).toEqual({
       state: 'error',
-      errorCode: 'RUNTIME_UNAVAILABLE',
+      errorCode: 'UNAVAILABLE',
       sshFailureReason: 'runtime-missing',
     });
   });
@@ -384,7 +384,9 @@ describe('RuntimeConnectionManager', () => {
       connectors: {
         ssh: () =>
           Promise.reject(
-            new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'nope', { sshFailureReason: 'nonsense' })
+            new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'nope', {
+              sshFailureReason: 'nonsense',
+            })
           ),
       },
     });
@@ -393,7 +395,7 @@ describe('RuntimeConnectionManager', () => {
 
     expect(manager.getStatus('user-1', 'devbox')).toEqual({
       state: 'error',
-      errorCode: 'RUNTIME_UNAVAILABLE',
+      errorCode: 'UNAVAILABLE',
     });
   });
 
@@ -1253,8 +1255,8 @@ describe('connectWslRuntime', () => {
    * A `ChildProcess`-shaped `EventEmitter` that fails the way a spawn of a
    * missing executable does: an `error` event carrying `ENOENT`, followed by
    * the pipe closing with nothing said. `stdout.pause` and `stdin.write`/`end`
-   * are the minimum `createStdioFramePort` and `spawnRuntimeChild` need to
-   * tear the connection down without throwing on a missing method.
+   * are the minimum the SDK's launcher and `spawnRuntimeChild` need to tear the
+   * connection down without throwing on a missing method.
    */
   function enoentChild(): unknown {
     const stdout = Object.assign(new EventEmitter(), { pause: () => undefined });
@@ -1308,13 +1310,13 @@ describe('connectWslRuntime', () => {
       },
       () => undefined
     ).catch((caught: unknown) => caught);
-    const error = outcome as RuntimeRemoteError;
+    const error = outcome as RemoteError;
 
     // Before this fix, a missing wsl.exe surfaced as "The runtime binary was
     // not found at wsl.exe. Reinstall MangoStudio…" — true of a missing
     // sibling runtime binary, not of WSL itself being absent, and it sent the
     // user to the wrong fix.
-    expect(error).toBeInstanceOf(RuntimeRemoteError);
+    expect(error).toBeInstanceOf(RemoteError);
     expect(error.message).toContain('WSL could not be started');
     expect(error.message).not.toContain('Reinstall MangoStudio');
   });

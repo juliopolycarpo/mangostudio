@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { RemoteError } from '@mangostudio/protocol';
 import type { ContainerEnvironmentConfig } from '@mangostudio/shared/environments';
 import { ContainerRuntimeSourceError } from '../../../../src/modules/environments/domain/container-runtime-source';
 import {
@@ -96,9 +96,9 @@ describe('connectContainerRuntime failure reporting', () => {
       });
       throw new Error('expected the connect to fail');
     } catch (error) {
-      expect(error).toBeInstanceOf(RuntimeRemoteError);
-      const remote = error as RuntimeRemoteError;
-      expect(remote.code).toBe('RUNTIME_UNAVAILABLE');
+      expect(error).toBeInstanceOf(RemoteError);
+      const remote = error as RemoteError;
+      expect(remote.code).toBe('UNAVAILABLE');
       expect(remote.details?.containerFailureReason).toBe('engine-unreachable');
     }
   });
@@ -112,9 +112,7 @@ describe('connectContainerRuntime failure reporting', () => {
       });
       throw new Error('expected the connect to fail');
     } catch (error) {
-      expect((error as RuntimeRemoteError).details?.containerFailureReason).toBe(
-        'runtime-unavailable'
-      );
+      expect((error as RemoteError).details?.containerFailureReason).toBe('runtime-unavailable');
       expect((error as Error).message).toMatch(/no build to mount/);
     }
   });
@@ -142,7 +140,7 @@ describe('connectContainerRuntime failure reporting', () => {
       throw new Error('expected the connect to fail');
     } catch (error) {
       expect(preparedWith).toBe('podman');
-      expect((error as RuntimeRemoteError).details?.containerFailureReason).toBe('engine-missing');
+      expect((error as RemoteError).details?.containerFailureReason).toBe('engine-missing');
     }
   });
 });

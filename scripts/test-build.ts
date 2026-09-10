@@ -343,17 +343,19 @@ async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Pro
   assertNoModuleResolutionFailures(probe.stderr, `${label} stderr`);
 
   const hello = probe.hello;
-  let frame: { type?: string; runtimeVersion?: string; manifest?: { platform?: string } };
+  // The peer's release and its capability object, which is where the runtime
+  // announces its manifest.
+  let frame: { type?: string; peer?: { version?: string }; capabilities?: { platform?: string } };
   try {
     frame = JSON.parse(hello) as typeof frame;
   } catch {
     fail(`${label} --stdio wrote a non-JSON line to stdout: ${hello}`);
   }
   if (frame.type !== 'hello') fail(`Expected a hello frame, got: ${hello}`);
-  if (frame.runtimeVersion !== VERSION) {
-    fail(`Handshake reported runtime ${frame.runtimeVersion}, expected ${VERSION}`);
+  if (frame.peer?.version !== VERSION) {
+    fail(`Handshake reported runtime ${frame.peer?.version}, expected ${VERSION}`);
   }
-  if (!frame.manifest?.platform) fail('Handshake carried no capability manifest');
+  if (!frame.capabilities?.platform) fail('Handshake carried no capability manifest');
   pass(`${label} --stdio handshakes with a v${VERSION} manifest`);
 }
 

@@ -8,62 +8,47 @@ import {
   type SshEnvironmentConfig,
   SshEnvironmentConfigSchema,
   sshDestination,
-  sshLaunchCommand,
   sshPreflightCommands,
+  sshRuntimePath,
 } from '../../src/environments';
 
 function config(overrides: Partial<SshEnvironmentConfig> = {}): SshEnvironmentConfig {
   return { host: 'build-01.internal', ...overrides };
 }
 
-describe('ssh launch command', () => {
+describe('ssh launch inputs', () => {
   it('forces every option the hub depends on, whatever ssh_config says', () => {
-    const { command, args } = sshLaunchCommand(config());
-
-    expect(command).toBe('ssh');
-    for (let index = 0; index < SSH_FORCED_OPTIONS.length; index += 2) {
-      const flag = SSH_FORCED_OPTIONS[index] as string;
-      const value = SSH_FORCED_OPTIONS[index + 1] as string;
-      expect(args.indexOf(value)).toBeGreaterThan(-1);
-      expect(args[args.indexOf(value) - 1]).toBe(flag);
-    }
-    expect(args).toContain('BatchMode=yes');
-    expect(args).toContain('StrictHostKeyChecking=yes');
-    expect(args).toContain('ControlMaster=no');
-    expect(args).toContain('ControlPath=none');
-    expect(args).toContain('RemoteCommand=none');
-  });
-
-  it('ends option parsing before the destination and the remote command', () => {
-    const { args } = sshLaunchCommand(config({ user: 'deploy', port: 2222 }));
-
-    expect(args.at(-3)).toBe('--');
-    expect(args.at(-2)).toBe('deploy@build-01.internal');
-    expect(args.at(-1)).toBe(`~/${"'"}.mango/runtime/remote/current/mangostudio-runtime'`);
-    expect(args).toContain('-T');
-    expect(args[args.indexOf('-p') + 1]).toBe('2222');
-  });
-
-  it('passes an identity file as argv and pins ssh to it', () => {
-    const { args } = sshLaunchCommand(config({ identityFile: '/home/j/.ssh/build_ed25519' }));
-
-    expect(args[args.indexOf('-i') + 1]).toBe('/home/j/.ssh/build_ed25519');
-    expect(args).toContain('IdentitiesOnly=yes');
-  });
-
-  it('omits the optional flags entirely when nothing configured them', () => {
-    const { args } = sshLaunchCommand(config());
-
-    expect(args).not.toContain('-i');
-    expect(args).not.toContain('-p');
-    expect(args).not.toContain('IdentitiesOnly=yes');
+    // The launch argv is the SDK's preset; these are the same options as flags,
+    // reused verbatim by the ssh command runner and asserted here so the two
+    // cannot drift into disagreeing about what the hub insists on.
+    expect(SSH_FORCED_OPTIONS).toEqual([
+      '-o',
+      'BatchMode=yes',
+      '-o',
+      'ConnectTimeout=10',
+      '-o',
+      'ServerAliveInterval=15',
+      '-o',
+      'ServerAliveCountMax=3',
+      '-o',
+      'StrictHostKeyChecking=yes',
+      '-o',
+      'ControlMaster=no',
+      '-o',
+      'ControlPath=none',
+      '-o',
+      'RemoteCommand=none',
+    ]);
   });
 
   it('defaults the runtime path to the installer symlink, never a version', () => {
-    const { args } = sshLaunchCommand(config());
-
     expect(DEFAULT_SSH_RUNTIME_PATH).toBe('~/.mango/runtime/remote/current/mangostudio-runtime');
-    expect(args.at(-1)).toContain('.mango/runtime/remote/current/mangostudio-runtime');
+    expect(sshRuntimePath(config())).toBe(DEFAULT_SSH_RUNTIME_PATH);
+  });
+
+  it('prefers a configured remote path, ignoring one that is only whitespace', () => {
+    expect(sshRuntimePath(config({ remoteRuntimePath: '~/bin/runtime' }))).toBe('~/bin/runtime');
+    expect(sshRuntimePath(config({ remoteRuntimePath: '   ' }))).toBe(DEFAULT_SSH_RUNTIME_PATH);
   });
 
   it('builds the destination from user and host without interpolating either', () => {

@@ -2,11 +2,19 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { CLOSE_CODES, type Frame, RemoteError, Session } from '@mangostudio/protocol';
+import { type SpawnedPeer, spawnPort } from '@mangostudio/protocol/spawn';
+import { rejectionOf } from '@mangostudio/protocol/testing';
+import {
+  RUNTIME_CONTRACT_NAME,
+  RUNTIME_CONTRACT_VERSION,
+  type RuntimeCapabilityManifest,
+} from '@mangostudio/shared/runtime-contract';
+import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import {
   encodeRuntimeFrame,
+  type RuntimeCapabilityManifest as LegacyRuntimeManifest,
   RUNTIME_PROTOCOL_VERSION,
-  type RuntimeFrame,
-  RuntimeFrameDecoder,
 } from '@mangostudio/shared/runtime-protocol';
 import { parseRuntimeCliArgs, RUNTIME_CLI_USAGE } from '../../src/cli';
 
@@ -361,60 +369,154 @@ describe('mangostudio-runtime binary', () => {
   it(
     'serves a handshake and a request over its pipes, then exits on EOF',
     async () => {
+      const peer = launchStdioRuntime([CLI_ENTRY, '--stdio'], {
+        env: { VERSION: '9.9.9-test' },
+      });
+      const session = hubSession(peer);
+
+      try {
+        const remote = await session.ready;
+        expect(remote.peer).toMatchObject({ name: 'mangostudio-runtime', version: '9.9.9-test' });
+        const manifest = remote.capabilities as unknown as RuntimeCapabilityManifest;
+        expect(manifest.pathStyle).toBe(process.platform === 'win32' ? 'win32' : 'posix');
+
+        // A real contract call, not a ping: it proves the handlers are behind
+        // the gate and answering on the same pipe the handshake crossed.
+        const health = (await session.request('runtime.health', {})) as RuntimeHealthReport;
+        expect(health.runtimeVersion).toBe('9.9.9-test');
+      } finally {
+        session.close(CLOSE_CODES.RELEASED, 'test finished');
+      }
+
+      expect(await peer.exited).toEqual({ code: 0, signal: null });
+    },
+    SPAWN_TIMEOUT_MS
+  );
+
+  it(
+    'exits non-zero and says why when the hub sends a record it cannot decode',
+    async () => {
+      // The stream cannot be resynchronised after a refused record, so the
+      // session ends on one — and the hub reads stderr for the reason, since
+      // stdout is the frame stream and has nothing left to say.
       const child = Bun.spawn({
         cmd: ['bun', CLI_ENTRY, '--stdio'],
         env: { ...process.env, VERSION: '9.9.9-test' },
         stdin: 'pipe',
         stdout: 'pipe',
-        // Inherited rather than piped: nothing here reads stderr, and a runtime
-        // that logged more than the pipe buffer holds would block on the write
-        // and hang this test until the spawn timeout.
-        stderr: 'inherit',
+        stderr: 'pipe',
       });
+      child.stdin.write('not json\n');
+      child.stdin.flush();
 
-      const decoder = new RuntimeFrameDecoder();
-      const pending: RuntimeFrame[] = [];
-      const reader = child.stdout.getReader();
-      const nextFrame = async (): Promise<RuntimeFrame> => {
-        while (pending.length === 0) {
-          const { done, value } = await reader.read();
-          if (done) throw new Error('Runtime closed stdout before answering.');
-          pending.push(...decoder.push(value));
-        }
-        return pending.shift() as RuntimeFrame;
-      };
-      const write = (frame: RuntimeFrame): void => {
-        child.stdin.write(encodeRuntimeFrame(frame));
-        child.stdin.flush();
-      };
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
 
-      try {
-        const hello = await nextFrame();
-        expect(hello).toMatchObject({
-          type: 'hello',
-          protocolVersion: RUNTIME_PROTOCOL_VERSION,
-          runtimeVersion: '9.9.9-test',
-        });
-        expect((hello as { manifest: { pathStyle: string } }).manifest.pathStyle).toBe(
-          process.platform === 'win32' ? 'win32' : 'posix'
-        );
+      expect(exitCode).toBe(1);
+      // The hello, then a close naming the refusal, and nothing else: the
+      // stream cannot carry an answer over a decoder that has lost its place.
+      const written = stdout
+        .trimEnd()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Frame);
+      expect(written.map((frame) => frame.type)).toEqual(['hello', 'close']);
+      expect(written[1]).toMatchObject({ code: CLOSE_CODES.PROTOCOL_ERROR });
+      expect(stderr).toContain('line is not JSON');
+    },
+    SPAWN_TIMEOUT_MS
+  );
 
-        write({
-          type: 'hello_ack',
-          protocolVersion: RUNTIME_PROTOCOL_VERSION,
-          hubVersion: 'hub-test',
-        });
-        write({ type: 'ping' });
-        expect(await nextFrame()).toEqual({ type: 'pong' });
+  it(
+    'refuses a runtime that greets in the 1.0.1 framing instead of decoding it',
+    async () => {
+      // A runtime left over from before the protocol move writes a frame this
+      // wire version has no reading of. The hub must not try: a hello it cannot
+      // decode is 4426, and the child it started has to go with it.
+      const legacyHello = encodeRuntimeFrame({
+        type: 'hello',
+        protocolVersion: RUNTIME_PROTOCOL_VERSION,
+        runtimeVersion: '9.9.9-legacy',
+        manifest: LEGACY_MANIFEST,
+      });
+      const peer = launchStdioRuntime(
+        ['-e', `process.stdout.write(${JSON.stringify(legacyHello)}); setInterval(() => {}, 1e6);`],
+        // This child is meant to be signalled rather than to unwind, so the
+        // reference graces would only make the test wait out both of them.
+        { terminateGraceMs: 250, killGraceMs: 1_000 }
+      );
+      const session = hubSession(peer);
 
-        write({ type: 'req', id: 'r1', method: 'workspace.validate', params: { path: '' } });
-        expect(await nextFrame()).toMatchObject({ type: 'res', id: 'r1' });
-      } finally {
-        child.stdin.end();
-      }
+      const error = await rejectionOf(session.ready);
+      expect(error).toBeInstanceOf(RemoteError);
+      expect((error as RemoteError).code).toBe('PROTOCOL_MISMATCH');
+      expect(session.closure?.code).toBe(CLOSE_CODES.PROTOCOL_MISMATCH);
 
-      expect(await child.exited).toBe(0);
+      // Nothing ends a child that ignores end of stdin but the launcher, and a
+      // refused handshake must not leave one behind. The status it ends with is
+      // platform-shaped — POSIX names the signal, Windows only terminates — so
+      // what is asserted is that it is not still the unstarted one.
+      expect(peer.pid).toBeDefined();
+      expect(await peer.terminate()).not.toEqual({ code: 0, signal: null });
     },
     SPAWN_TIMEOUT_MS
   );
 });
+
+/** A manifest in the shape a 1.0.1 runtime announced, so the line is a real one. */
+const LEGACY_MANIFEST: LegacyRuntimeManifest = {
+  platform: 'linux',
+  arch: 'x64',
+  pathStyle: 'posix',
+  homeDir: '/home/test',
+  shells: ['bash'],
+  git: { available: false },
+  features: {
+    tools: true,
+    git: false,
+    probing: false,
+    mcp: false,
+    library: false,
+    checkpoints: true,
+  },
+};
+
+interface StdioRuntimeOptions {
+  readonly env?: Readonly<Record<string, string>>;
+  /** Left at the SDK's reference graces unless a child is meant to be killed. */
+  readonly terminateGraceMs?: number;
+  readonly killGraceMs?: number;
+}
+
+/** Runs a child under the current Bun and speaks stdio through its pipes. */
+function launchStdioRuntime(
+  args: readonly string[],
+  options: StdioRuntimeOptions = {}
+): SpawnedPeer {
+  return spawnPort({
+    argv: [process.execPath, ...args],
+    env: { ...inheritedEnv(), ...options.env },
+    ...(options.terminateGraceMs !== undefined
+      ? { terminateGraceMs: options.terminateGraceMs }
+      : {}),
+    ...(options.killGraceMs !== undefined ? { killGraceMs: options.killGraceMs } : {}),
+  });
+}
+
+/** The hub half of the handshake, announcing what a real hub announces. */
+function hubSession(peer: SpawnedPeer): Session {
+  return new Session(peer.port, {
+    peer: { name: 'mangostudio', version: 'hub-test', role: 'hub' },
+    capabilities: { contracts: { [RUNTIME_CONTRACT_NAME]: RUNTIME_CONTRACT_VERSION } },
+    handshakeTimeoutMs: 10_000,
+  });
+}
+
+/** `process.env` without the holes, which the launcher's env does not accept. */
+function inheritedEnv(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)
+  );
+}

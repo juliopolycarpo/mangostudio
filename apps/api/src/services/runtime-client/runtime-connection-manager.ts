@@ -44,7 +44,6 @@ import { connectContainerRuntime } from './connect-container-runtime';
 import { connectHttpRuntime } from './connect-http-runtime';
 import { connectInProcessRuntime } from './connect-in-process-runtime';
 import { connectSshRuntime } from './connect-ssh-runtime';
-import { legacyHubSession } from './hub-session';
 import { capabilityManifestFromHealth } from './manifest-from-health';
 import { isUnavailableCode } from './remote-error-details';
 import { RuntimeClient } from './runtime-client';
@@ -1374,7 +1373,7 @@ async function connectStdioRuntime(
     // a child that dies mid-request reporting through both costs nothing. Neither
     // covers the other: the pipe closing catches a death with no request in
     // flight, and a request failing catches a child that answers but is gone.
-    client: new RuntimeClient(legacyHubSession(connection.client), onUnavailable, definition.id),
+    client: new RuntimeClient(connection.hub, onUnavailable, definition.id),
     close: () => connection.close(),
   };
 }
@@ -1422,7 +1421,7 @@ export async function connectWslRuntime(
     onClosed: onUnavailable,
   });
   return {
-    client: new RuntimeClient(legacyHubSession(connection.client), onUnavailable, definition.id),
+    client: new RuntimeClient(connection.hub, onUnavailable, definition.id),
     close: () => connection.close(),
   };
 }
