@@ -6,7 +6,11 @@ import { supportsPty } from '../../src/services/terminal/pty';
 
 describe('createLocalRuntimeManifest', () => {
   it('derives a full profile from the full allow set', () => {
+    const started = Date.now();
     const manifest = createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.full);
+    // Version probes are spawnSync; a hung git used to freeze this call past
+    // bun's 15s test timeout and the hub's 10s in-process connect deadline.
+    expect(Date.now() - started).toBeLessThan(5_000);
     expect(manifest.profile).toBe('full');
     expect(manifest.features.fsRead).toBe(true);
     expect(manifest.features.fsWrite).toBe(true);

@@ -15,6 +15,18 @@ import { isShellAvailable } from './services/shell';
 import { supportsPty } from './services/terminal/pty';
 
 /**
+ * Bound on `git --version` / `gh --version`.
+ *
+ * These probes run inside {@link createLocalRuntimeManifest}, which is called
+ * synchronously while an in-process session is opening. `Bun.spawnSync` blocks
+ * the event loop, so a child that never exits also freezes the hub's 10s
+ * in-process connect deadline (a timer) and, in tests, bun's 15s per-test
+ * timeout. A `--version` that cannot answer in two seconds is not a git this
+ * machine can use.
+ */
+const VERSION_PROBE_TIMEOUT_MS = 2_000;
+
+/**
  * Announces what this runtime may execute under the recorded consent.
  *
  * Effective features are the intersection of what the machine's owner granted
@@ -126,6 +138,7 @@ function inspectGh(): NonNullable<RuntimeCapabilityManifest['gh']> {
   const result = Bun.spawnSync([executable, '--version'], {
     stdout: 'pipe',
     stderr: 'ignore',
+    timeout: VERSION_PROBE_TIMEOUT_MS,
     ...HIDDEN_WINDOW,
   });
   if (!result.success) return { available: false };
@@ -149,6 +162,7 @@ function inspectGit(): RuntimeCapabilityManifest['git'] {
   const result = Bun.spawnSync([executable, '--version'], {
     stdout: 'pipe',
     stderr: 'ignore',
+    timeout: VERSION_PROBE_TIMEOUT_MS,
     ...HIDDEN_WINDOW,
   });
   if (!result.success) return { available: false };
