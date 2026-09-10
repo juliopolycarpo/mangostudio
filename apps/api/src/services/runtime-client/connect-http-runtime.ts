@@ -2,27 +2,20 @@
  * Hub dial-out to a Direct URL runtime (`transportKind: 'http'`).
  *
  * The runtime listens with `mangostudio-runtime serve`; the hub opens a
- * WebSocket with the stored bearer token and speaks the same chunked framing
- * as the paired dial-in path. Release equality is not a gate — the binary on
- * that machine is not part of this hub's distribution.
+ * WebSocket with the stored bearer token and speaks wire 1.0 under the
+ * `mango.v1` subprotocol, the same as the paired dial-in path. Release equality
+ * is not a gate — the binary on that machine is not part of this hub's
+ * distribution.
  */
 
-import { RemoteError } from '@mangostudio/protocol';
-import {
-  clientWebSocketSink,
-  createWebSocketFramePort,
-  livenessIntervalFor,
-  RuntimeProtocolClient,
-  RuntimeRemoteError,
-  startProtocolLiveness,
-} from '@mangostudio/runtime';
-import { REALTIME_IDLE_TIMEOUT_SECONDS } from '@mangostudio/shared/realtime';
-import { RUNTIME_CLOSE_CODES, RuntimeProtocolError } from '@mangostudio/shared/runtime-protocol';
+import { CLOSE_CODES, type Port, RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { connectWebSocket } from '@mangostudio/protocol/ws';
 import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { environmentConfigFor } from '../../modules/environments/domain/environment-config';
+import { dialDeadline } from './dial-deadline';
 import { httpRuntimeBaseUrlToWebSocketUrl } from './http-runtime-url';
-import { legacyHubSession } from './hub-session';
+import { openHubSession, type ProtocolHubSession } from './hub-session';
 import { RuntimeClient } from './runtime-client';
 import { readRuntimeToken } from './runtime-token-secrets';
 
@@ -50,12 +43,12 @@ export async function connectHttpRuntime(
   const wsUrl = httpRuntimeBaseUrlToWebSocketUrl(baseUrl);
   const token = await readRuntimeToken(definition.userId, definition.id);
 
-  // Bun accepts an options object with headers; the DOM `WebSocket` typings in
-  // this workspace only list the protocol-array overload, so the cast is local.
-  const socket = new WebSocket(wsUrl, {
-    headers: { Authorization: `Bearer ${token}` },
-  } as unknown as string[]);
-  socket.binaryType = 'arraybuffer';
+  let hub: ProtocolHubSession;
+  try {
+    hub = await openRuntimeSession(wsUrl, token);
+  } catch (error) {
+    throw asConnectError(error, definition.id, baseUrl);
+  }
 
   let notified = false;
   const notifyGone = (): void => {
@@ -64,123 +57,70 @@ export async function connectHttpRuntime(
     onUnavailable();
   };
 
-  const port = createWebSocketFramePort({
-    sink: clientWebSocketSink({
-      send: (message) => {
-        socket.send(message as Uint8Array<ArrayBuffer>);
-      },
-      get bufferedAmount() {
-        return socket.bufferedAmount;
-      },
-    }),
-    onClosed: (closure) => {
-      if (closure.kind === 'protocol-error') {
-        logger.error('frame_rejected', {
-          environmentId: definition.id,
-          error: closure.error.message,
-        });
-      }
-      notifyGone();
-    },
-  });
-
-  socket.addEventListener('message', (event) => port.receive(event.data as ArrayBuffer));
-  socket.addEventListener('close', () => {
-    port.handleSocketClosed();
+  // The listening runtime disables Bun's idle timeout; the session's own pings
+  // are what notice a frozen peer and close the cached connection. A close the
+  // hub asked for is not worth a line — `notified` is already set by then.
+  hub.session.onClose((closure) => {
+    if (!notified) {
+      logger.warn('connection_closed', {
+        environmentId: definition.id,
+        code: closure.code ?? null,
+        reason: closure.reason ?? null,
+      });
+    }
     notifyGone();
   });
 
-  // Subscribe before the upgrade completes: the runtime starts its host in
-  // `open` and the hello can race a listener attached only after `open` fires.
-  const client = new RuntimeProtocolClient(port, {
-    hubVersion: getVersion(),
-    handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
-    requireMatchingRelease: false,
-  });
-
-  const opened = await Promise.race([
-    new Promise<boolean>((resolve) => {
-      socket.addEventListener('open', () => resolve(true), { once: true });
-      socket.addEventListener('close', () => resolve(false), { once: true });
-      socket.addEventListener('error', () => resolve(false), { once: true });
-    }),
-    sleepMs(HANDSHAKE_TIMEOUT_MS).then(() => false),
-  ]);
-  if (!opened) {
-    notified = true;
-    client.close();
-    try {
-      socket.close(1000, 'Handshake timed out');
-    } catch {
-      // Already closed.
-    }
-    throw new RuntimeRemoteError(
-      'RUNTIME_UNAVAILABLE',
-      `Environment "${definition.id}" did not accept a WebSocket at ${baseUrl}.`
-    );
-  }
-
-  try {
-    await client.waitUntilReady();
-  } catch (error) {
-    notified = true;
-    socket.close(1000, 'Handshake failed');
-    client.close();
-    throw asConnectError(error);
-  }
-
-  // The listening runtime disables Bun's idle timeout; hub-side protocol
-  // pings are what notice a frozen peer and drop the cached connection.
-  const stopLiveness = startProtocolLiveness({
-    ping: () => client.ping(),
-    onPong: (listener) => client.onPong(listener),
-    intervalMs: livenessIntervalFor(REALTIME_IDLE_TIMEOUT_SECONDS),
-    onTimeout: () => {
-      logger.warn('liveness_timeout', { environmentId: definition.id });
-      try {
-        socket.close(RUNTIME_CLOSE_CODES.RELEASED, 'Liveness timeout');
-      } catch {
-        // Already closed.
-      }
-    },
-  });
-
   return {
-    client: new RuntimeClient(legacyHubSession(client), notifyGone, definition.id),
+    client: new RuntimeClient(hub, notifyGone, definition.id),
     close(reason) {
       notified = true;
-      stopLiveness();
-      client.close();
-      try {
-        socket.close(
-          reason === 'superseded' ? RUNTIME_CLOSE_CODES.SUPERSEDED : RUNTIME_CLOSE_CODES.RELEASED,
-          reason === 'superseded' ? 'Superseded' : 'Released'
-        );
-      } catch {
-        // Already closed.
-      }
+      hub.close(
+        reason === 'superseded' ? CLOSE_CODES.SUPERSEDED : CLOSE_CODES.RELEASED,
+        reason === 'superseded' ? 'Superseded' : 'Released'
+      );
     },
   };
 }
 
-function asConnectError(error: unknown): RemoteError {
-  // Any `RemoteError`, not only this package's subclass: the same helper has to
-  // keep a `PROTOCOL_MISMATCH` intact whether it came from the hand-written
-  // client or from a protocol session, and downgrading one to
-  // `RUNTIME_UNAVAILABLE` would stop the manager latching on it.
-  if (error instanceof RemoteError) return error;
-  if (error instanceof RuntimeProtocolError) {
-    return new RuntimeRemoteError(error.code, error.message, error.details);
-  }
-  return new RuntimeRemoteError(
-    'RUNTIME_UNAVAILABLE',
-    error instanceof Error ? error.message : String(error)
+/** Dials the runtime under a deadline and exchanges hellos over what comes back. */
+async function openRuntimeSession(wsUrl: string, token: string): Promise<ProtocolHubSession> {
+  const deadline = dialDeadline(
+    HANDSHAKE_TIMEOUT_MS,
+    `The runtime did not accept a WebSocket at ${wsUrl} within ${HANDSHAKE_TIMEOUT_MS}ms.`
   );
+  let port: Port;
+  try {
+    port = await connectWebSocket(wsUrl, {
+      headers: { authorization: `Bearer ${token}` },
+      signal: deadline.signal,
+    });
+  } finally {
+    deadline.clear();
+  }
+  return await openHubSession(port, {
+    hubVersion: getVersion(),
+    handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
+    requireMatchingRelease: false,
+  });
 }
 
-function sleepMs(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    (timer as { unref?: () => void }).unref?.();
-  });
+/**
+ * The rejection the connection manager reads.
+ *
+ * A `RemoteError` passes through untouched: `openHubSession` already answers
+ * `UNAVAILABLE` for a peer that never spoke, and downgrading its
+ * `PROTOCOL_MISMATCH` would stop the manager latching a retry deadline on it.
+ * Everything else is a dial that never became a session, which is the same
+ * `UNAVAILABLE` with the transport's own sentence kept intact.
+ */
+function asConnectError(error: unknown, environmentId: string, baseUrl: string): RemoteError {
+  if (error instanceof RemoteError) return error;
+  return new RemoteError(
+    RESERVED_ERROR_CODES.UNAVAILABLE,
+    `Environment "${environmentId}" could not open a runtime session at ${baseUrl}: ${
+      error instanceof Error ? error.message : String(error)
+    }`,
+    { environmentId, baseUrl }
+  );
 }

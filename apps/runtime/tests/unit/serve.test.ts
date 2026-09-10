@@ -2,16 +2,20 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { CLOSE_CODES, type Port, Session, type SessionClosure } from '@mangostudio/protocol';
+import { connectWebSocket, WEBSOCKET_SUBPROTOCOL } from '@mangostudio/protocol/ws';
 import {
-  RUNTIME_CLOSE_CODES,
+  RUNTIME_CONTRACT_NAME,
+  RUNTIME_CONTRACT_VERSION,
+  type RuntimeCapabilityManifest,
+} from '@mangostudio/shared/runtime-contract';
+import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+import {
+  encodeRuntimeFrameChunks,
   RUNTIME_PROTOCOL_VERSION,
 } from '@mangostudio/shared/runtime-protocol';
-import {
-  clientWebSocketSink,
-  createWebSocketFramePort,
-  RuntimeHost,
-  RuntimeProtocolClient,
-} from '../../src';
+import { staticConsentSource } from '../../src/consent-source';
+import type { RuntimeHandlers } from '../../src/handlers';
 import {
   bootstrapServeToken,
   readServeToken,
@@ -26,11 +30,93 @@ import {
   serveRuntime,
   tokensEqual,
 } from '../../src/serve';
+import { createRuntimeEventRelay, type RuntimeHostDefinition } from '../../src/session';
+import { FakeRuntimeHandlers } from '../support/fake-runtime-handlers';
+
+const TOKEN = 'serve-secret';
+
+const SERVE_TEST_MANIFEST: RuntimeCapabilityManifest = {
+  platform: 'test',
+  arch: 'test',
+  pathStyle: 'posix',
+  homeDir: '/tmp',
+  shells: ['bash'],
+  git: { available: false },
+  features: {
+    tools: true,
+    git: false,
+    probing: false,
+    mcp: false,
+    library: false,
+    checkpoints: false,
+  },
+};
+
+/**
+ * A host definition with no services behind it.
+ *
+ * `serve` only ever binds a definition to a socket, so what the handlers do is
+ * irrelevant here; what matters is that the definition announces a manifest and
+ * that its teardown is observable, which is what every supersede and stop case
+ * below waits on.
+ */
+class FakeRuntimeDefinition implements RuntimeHostDefinition {
+  readonly runtimeVersion = 'serve-test';
+  readonly handlers: RuntimeHandlers = new FakeRuntimeHandlers().map;
+  readonly consent = staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'host');
+  readonly events = createRuntimeEventRelay();
+  readonly isUpdateActive = (): boolean => false;
+  readonly #release: () => void | Promise<void>;
+
+  constructor(release?: () => void | Promise<void>) {
+    this.#release = release ?? ((): void => undefined);
+  }
+
+  manifest(): RuntimeCapabilityManifest {
+    return SERVE_TEST_MANIFEST;
+  }
+
+  onClose(): void | Promise<void> {
+    return this.#release();
+  }
+}
+
+/** The hub half of a Direct URL connection, over a real loopback socket. */
+class FakeHubPeer {
+  readonly session: Session;
+  readonly #closure = Promise.withResolvers<SessionClosure>();
+
+  constructor(port: Port) {
+    this.session = new Session(port, {
+      peer: { name: 'serve-test-hub', version: 'hub-test', role: 'hub' },
+      capabilities: { contracts: { [RUNTIME_CONTRACT_NAME]: RUNTIME_CONTRACT_VERSION } },
+      handshakeTimeoutMs: 10_000,
+    });
+    this.session.onClose((closure) => this.#closure.resolve(closure));
+  }
+
+  static async dial(port: number): Promise<FakeHubPeer> {
+    return new FakeHubPeer(
+      await connectWebSocket(serveUrl(port), { headers: { authorization: `Bearer ${TOKEN}` } })
+    );
+  }
+
+  /** How the runtime ended the session. */
+  get closure(): Promise<SessionClosure> {
+    return this.#closure.promise;
+  }
+
+  close(): void {
+    this.session.close();
+  }
+}
 
 const homes: string[] = [];
 const handles: Array<{ close(): void | Promise<void> }> = [];
+const sockets: WebSocket[] = [];
 
 afterEach(async () => {
+  for (const socket of sockets.splice(0)) socket.close();
   await Promise.allSettled(handles.splice(0).map((handle) => handle.close()));
   for (const home of homes.splice(0)) await rm(home, { recursive: true, force: true });
 });
@@ -41,27 +127,36 @@ async function isolatedEnv(): Promise<NodeJS.ProcessEnv> {
   return { MANGO_HOME: home };
 }
 
-function createTestHost(onClose?: () => void | Promise<void>): RuntimeHost {
-  return new RuntimeHost({
-    runtimeVersion: 'serve-test',
-    manifest: {
-      platform: 'test',
-      arch: 'test',
-      pathStyle: 'posix',
-      homeDir: '/tmp',
-      shells: ['bash'],
-      git: { available: false },
-      features: {
-        tools: true,
-        git: false,
-        probing: false,
-        mcp: false,
-        library: false,
-        checkpoints: false,
-      },
-    },
-    handlers: new Map(),
-    ...(onClose ? { onClose } : {}),
+function serveUrl(port: number): string {
+  return `ws://127.0.0.1:${port}/`;
+}
+
+/** A hub socket that never speaks the protocol, for the transport-level cases. */
+function rawHubSocket(port: number, protocols?: readonly string[]): WebSocket {
+  const socket = new WebSocket(serveUrl(port), {
+    headers: { Authorization: `Bearer ${TOKEN}` },
+    ...(protocols ? { protocols } : {}),
+  } as unknown as string[]);
+  socket.binaryType = 'arraybuffer';
+  socket.addEventListener('error', () => undefined);
+  sockets.push(socket);
+  return socket;
+}
+
+function opened(socket: WebSocket): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    socket.addEventListener('open', () => resolve(), { once: true });
+    socket.addEventListener('close', () => reject(new Error('socket closed before it opened')), {
+      once: true,
+    });
+  });
+}
+
+function closeCodeOf(socket: WebSocket): Promise<number> {
+  return new Promise<number>((resolve) => {
+    socket.addEventListener('close', (event) => resolve((event as CloseEvent).code), {
+      once: true,
+    });
   });
 }
 
@@ -100,16 +195,22 @@ describe('loopback and bearer helpers', () => {
 });
 
 describe('serveRuntime', () => {
+  function listen(createHost: () => RuntimeHostDefinition, signal?: AbortSignal) {
+    const handle = serveRuntime({
+      listen: { hostname: '127.0.0.1', port: 0 },
+      token: TOKEN,
+      createHost,
+      ...(signal ? { signal } : {}),
+    });
+    handles.push(handle);
+    return handle;
+  }
+
   it('exposes only status and version on /health', async () => {
     const previousVersion = process.env.VERSION;
     process.env.VERSION = '1.2.3-serve';
     try {
-      const handle = serveRuntime({
-        listen: { hostname: '127.0.0.1', port: 0 },
-        token: 'serve-secret',
-        createHost: createTestHost,
-      });
-      handles.push(handle);
+      const handle = listen(() => new FakeRuntimeDefinition());
 
       const response = await fetch(`http://127.0.0.1:${handle.port}/health`);
       expect(response.status).toBe(200);
@@ -123,13 +224,7 @@ describe('serveRuntime', () => {
   it('stops immediately when the abort signal is already fired', async () => {
     const controller = new AbortController();
     controller.abort();
-    const handle = serveRuntime({
-      listen: { hostname: '127.0.0.1', port: 0 },
-      token: 'serve-secret',
-      createHost: createTestHost,
-      signal: controller.signal,
-    });
-    handles.push(handle);
+    const handle = listen(() => new FakeRuntimeDefinition(), controller.signal);
     await handle.stopped;
   });
 
@@ -137,26 +232,15 @@ describe('serveRuntime', () => {
     const closeStarted = Promise.withResolvers<void>();
     const releaseClose = Promise.withResolvers<void>();
     const hostCreated = Promise.withResolvers<void>();
-    const handle = serveRuntime({
-      listen: { hostname: '127.0.0.1', port: 0 },
-      token: 'serve-secret',
-      createHost: () => {
-        hostCreated.resolve();
-        return createTestHost(async () => {
-          closeStarted.resolve();
-          await releaseClose.promise;
-        });
-      },
+    const handle = listen(() => {
+      hostCreated.resolve();
+      return new FakeRuntimeDefinition(async () => {
+        closeStarted.resolve();
+        await releaseClose.promise;
+      });
     });
-    handles.push(handle);
 
-    const socket = new WebSocket(`ws://127.0.0.1:${handle.port}/`, {
-      headers: { Authorization: 'Bearer serve-secret' },
-    });
-    await new Promise<void>((resolve, reject) => {
-      socket.addEventListener('open', () => resolve(), { once: true });
-      socket.addEventListener('error', () => reject(new Error('socket failed')), { once: true });
-    });
+    await opened(rawHubSocket(handle.port));
     await hostCreated.promise;
 
     let stopped = false;
@@ -171,34 +255,24 @@ describe('serveRuntime', () => {
     releaseClose.resolve();
     await closing;
     expect(stopped).toBe(true);
-    socket.close();
   });
 
-  it('reaps a host created by an open callback that loses the stop race', async () => {
+  it('reaps a definition created by an open callback that loses the stop race', async () => {
     const controller = new AbortController();
     const hostCreated = Promise.withResolvers<void>();
     const closeStarted = Promise.withResolvers<void>();
     const releaseClose = Promise.withResolvers<void>();
-    const handle = serveRuntime({
-      listen: { hostname: '127.0.0.1', port: 0 },
-      token: 'serve-secret',
-      signal: controller.signal,
-      createHost: () => {
-        const host = createTestHost(async () => {
-          closeStarted.resolve();
-          await releaseClose.promise;
-        });
-        hostCreated.resolve();
-        controller.abort();
-        return host;
-      },
-    });
-    handles.push(handle);
+    const handle = listen(() => {
+      const definition = new FakeRuntimeDefinition(async () => {
+        closeStarted.resolve();
+        await releaseClose.promise;
+      });
+      hostCreated.resolve();
+      controller.abort();
+      return definition;
+    }, controller.signal);
 
-    const socket = new WebSocket(`ws://127.0.0.1:${handle.port}/`, {
-      headers: { Authorization: 'Bearer serve-secret' },
-    });
-    socket.addEventListener('error', () => undefined);
+    rawHubSocket(handle.port);
     await hostCreated.promise;
     await closeStarted.promise;
 
@@ -212,16 +286,10 @@ describe('serveRuntime', () => {
     releaseClose.resolve();
     await handle.stopped;
     expect(stopped).toBe(true);
-    socket.close();
   });
 
   it('refuses upgrades without a matching bearer token', async () => {
-    const handle = serveRuntime({
-      listen: { hostname: '127.0.0.1', port: 0 },
-      token: 'serve-secret',
-      createHost: createTestHost,
-    });
-    handles.push(handle);
+    const handle = listen(() => new FakeRuntimeDefinition());
 
     const missing = await fetch(`http://127.0.0.1:${handle.port}/`, {
       headers: { Upgrade: 'websocket', Connection: 'Upgrade' },
@@ -238,29 +306,21 @@ describe('serveRuntime', () => {
     expect(wrong.status).toBe(401);
   });
 
-  it('runs asynchronous host cleanup after the socket closes', async () => {
+  it('runs asynchronous definition cleanup after the socket closes', async () => {
     const closeStarted = Promise.withResolvers<void>();
     const releaseClose = Promise.withResolvers<void>();
     const closeFinished = Promise.withResolvers<void>();
-    const handle = serveRuntime({
-      listen: { hostname: '127.0.0.1', port: 0 },
-      token: 'serve-secret',
-      createHost: () =>
-        createTestHost(async () => {
+    const handle = listen(
+      () =>
+        new FakeRuntimeDefinition(async () => {
           closeStarted.resolve();
           await releaseClose.promise;
           closeFinished.resolve();
-        }),
-    });
-    handles.push(handle);
+        })
+    );
 
-    const socket = new WebSocket(`ws://127.0.0.1:${handle.port}/`, {
-      headers: { Authorization: 'Bearer serve-secret' },
-    });
-    await new Promise<void>((resolve, reject) => {
-      socket.addEventListener('open', () => resolve(), { once: true });
-      socket.addEventListener('error', () => reject(new Error('socket failed')), { once: true });
-    });
+    const socket = rawHubSocket(handle.port);
+    await opened(socket);
 
     socket.close();
     await closeStarted.promise;
@@ -276,141 +336,107 @@ describe('serveRuntime', () => {
     expect(finished).toBe(true);
   });
 
+  it('echoes the mango.v1 subprotocol only to a hub that offered it', async () => {
+    const handle = listen(() => new FakeRuntimeDefinition());
+
+    const offering = rawHubSocket(handle.port, [WEBSOCKET_SUBPROTOCOL]);
+    await opened(offering);
+    expect(offering.protocol).toBe(WEBSOCKET_SUBPROTOCOL);
+
+    // A 1.0.1 hub offers none, and an acceptor may not select one that was
+    // never listed: a WHATWG client fails the connection when it does.
+    const silent = rawHubSocket(handle.port);
+    await opened(silent);
+    expect(silent.protocol).toBe('');
+  });
+
+  it('closes a hub that announces itself on the 1.0.1 wire', async () => {
+    const handle = listen(() => new FakeRuntimeDefinition());
+
+    const socket = rawHubSocket(handle.port);
+    await opened(socket);
+    const closed = closeCodeOf(socket);
+    for (const chunk of encodeRuntimeFrameChunks({
+      type: 'hello',
+      protocolVersion: RUNTIME_PROTOCOL_VERSION,
+      runtimeVersion: '1.0.1',
+      manifest: SERVE_TEST_MANIFEST,
+    })) {
+      socket.send(chunk);
+    }
+
+    expect(await closed).toBe(CLOSE_CODES.PROTOCOL_MISMATCH);
+  });
+
   it('closes the previous hub connection as superseded', async () => {
-    const handle = serveRuntime({
-      listen: { hostname: '127.0.0.1', port: 0 },
-      token: 'serve-secret',
-      createHost: createTestHost,
-    });
-    handles.push(handle);
+    const handle = listen(() => new FakeRuntimeDefinition());
 
-    const first = new WebSocket(`ws://127.0.0.1:${handle.port}/`, {
-      headers: { Authorization: 'Bearer serve-secret' },
-    });
-    first.binaryType = 'arraybuffer';
-    await new Promise<void>((resolve, reject) => {
-      first.addEventListener('open', () => resolve(), { once: true });
-      first.addEventListener('error', () => reject(new Error('first socket failed')), {
-        once: true,
-      });
-    });
+    const first = await FakeHubPeer.dial(handle.port);
+    await first.session.ready;
 
-    const firstClosed = new Promise<number>((resolve) => {
-      first.addEventListener('close', (event) => resolve((event as CloseEvent).code), {
-        once: true,
-      });
-    });
+    const second = await FakeHubPeer.dial(handle.port);
+    await second.session.ready;
 
-    const second = new WebSocket(`ws://127.0.0.1:${handle.port}/`, {
-      headers: { Authorization: 'Bearer serve-secret' },
-    });
-    second.binaryType = 'arraybuffer';
-    await new Promise<void>((resolve, reject) => {
-      second.addEventListener('open', () => resolve(), { once: true });
-      second.addEventListener('error', () => reject(new Error('second socket failed')), {
-        once: true,
-      });
-    });
-
-    expect(await firstClosed).toBe(RUNTIME_CLOSE_CODES.SUPERSEDED);
+    expect(await first.closure).toMatchObject({ code: CLOSE_CODES.SUPERSEDED });
     second.close();
   });
 
-  it('waits for superseded host cleanup before starting the replacement host', async () => {
+  it('waits for superseded definition cleanup before the replacement says hello', async () => {
     const closeStarted = Promise.withResolvers<void>();
     const releaseClose = Promise.withResolvers<void>();
-    let hostNumber = 0;
-    const handle = serveRuntime({
-      listen: { hostname: '127.0.0.1', port: 0 },
-      token: 'serve-secret',
-      createHost: () => {
-        hostNumber += 1;
-        return createTestHost(
-          hostNumber === 1
-            ? async () => {
-                closeStarted.resolve();
-                await releaseClose.promise;
-              }
-            : undefined
-        );
-      },
-    });
-    handles.push(handle);
-
-    const first = new WebSocket(`ws://127.0.0.1:${handle.port}/`, {
-      headers: { Authorization: 'Bearer serve-secret' },
-    });
-    await new Promise<void>((resolve, reject) => {
-      first.addEventListener('open', () => resolve(), { once: true });
-      first.addEventListener('error', () => reject(new Error('first socket failed')), {
-        once: true,
-      });
+    let definitions = 0;
+    const handle = listen(() => {
+      definitions += 1;
+      return definitions === 1
+        ? new FakeRuntimeDefinition(async () => {
+            closeStarted.resolve();
+            await releaseClose.promise;
+          })
+        : new FakeRuntimeDefinition();
     });
 
-    const second = new WebSocket(`ws://127.0.0.1:${handle.port}/`, {
-      headers: { Authorization: 'Bearer serve-secret' },
-    });
-    second.binaryType = 'arraybuffer';
-    const port = createWebSocketFramePort({ sink: clientWebSocketSink(second) });
-    const client = new RuntimeProtocolClient(port, {
-      hubVersion: 'hub-test',
-      handshakeTimeoutMs: 5_000,
-    });
-    second.addEventListener('message', (event) => port.receive(event.data as ArrayBuffer));
-    second.addEventListener('close', () => port.handleSocketClosed());
-    await new Promise<void>((resolve, reject) => {
-      second.addEventListener('open', () => resolve(), { once: true });
-      second.addEventListener('error', () => reject(new Error('second socket failed')), {
-        once: true,
-      });
-    });
+    const first = await FakeHubPeer.dial(handle.port);
+    await first.session.ready;
+
+    const second = await FakeHubPeer.dial(handle.port);
     await closeStarted.promise;
 
     let replacementReady = false;
-    void client.waitUntilReady().then(() => {
+    void second.session.ready.then(() => {
       replacementReady = true;
     });
     await Bun.sleep(0);
     expect(replacementReady).toBe(false);
 
     releaseClose.resolve();
-    await client.waitUntilReady();
+    await second.session.ready;
     expect(replacementReady).toBe(true);
-    client.close();
     second.close();
-    first.close();
   });
 
   it('completes a hub handshake over the authenticated socket', async () => {
-    const handle = serveRuntime({
-      listen: { hostname: '127.0.0.1', port: 0 },
-      token: 'serve-secret',
-      createHost: createTestHost,
-    });
-    handles.push(handle);
+    const handle = listen(() => new FakeRuntimeDefinition());
 
-    const socket = new WebSocket(`ws://127.0.0.1:${handle.port}/`, {
-      headers: { Authorization: 'Bearer serve-secret' },
-    });
-    socket.binaryType = 'arraybuffer';
-    const port = createWebSocketFramePort({ sink: clientWebSocketSink(socket) });
-    const client = new RuntimeProtocolClient(port, {
-      hubVersion: 'hub-test',
-      handshakeTimeoutMs: 5_000,
-    });
-    socket.addEventListener('message', (event) => port.receive(event.data as ArrayBuffer));
-    socket.addEventListener('close', () => port.handleSocketClosed());
+    const hub = await FakeHubPeer.dial(handle.port);
+    const remote = await hub.session.ready;
 
-    await new Promise<void>((resolve, reject) => {
-      socket.addEventListener('open', () => resolve(), { once: true });
-      socket.addEventListener('error', () => reject(new Error('socket failed')), { once: true });
+    expect(remote.peer.version).toBe('serve-test');
+    expect(remote.peer.role).toBe('runtime');
+    expect(remote.capabilities).toMatchObject({
+      platform: 'test',
+      contracts: { [RUNTIME_CONTRACT_NAME]: RUNTIME_CONTRACT_VERSION },
     });
+    hub.close();
+  });
 
-    await client.waitUntilReady();
-    expect(client.runtimeVersion).toBe('serve-test');
-    expect(RUNTIME_PROTOCOL_VERSION).toBeTruthy();
-    client.close();
-    socket.close();
+  it('releases a connected hub with 4000 when the runtime stops', async () => {
+    const handle = listen(() => new FakeRuntimeDefinition());
+
+    const hub = await FakeHubPeer.dial(handle.port);
+    await hub.session.ready;
+
+    await handle.close();
+    expect(await hub.closure).toMatchObject({ code: CLOSE_CODES.RELEASED });
   });
 });
 

@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { realpath } from 'node:fs/promises';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { rejectionOf } from '@mangostudio/protocol/testing';
 import {
   createLocalRuntimeHost,
   type ExternalAgentAdapter,
   type ExternalAgentTurnStream,
-  legacyRuntimeHost,
   serveRuntime,
 } from '@mangostudio/runtime';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
@@ -51,16 +52,14 @@ describe('Direct URL http runtime', () => {
       listen: { hostname: '127.0.0.1', port: 0 },
       token,
       createHost: () =>
-        legacyRuntimeHost(
-          createLocalRuntimeHost({
-            runtimeVersion: 'http-integration',
-            externalAgents: {
-              adapters: [adapter],
-              authorizeWorkspace: (path) => path === workspacePath,
-              resolveExecutable: async () => ({ path: process.execPath }),
-            },
-          })
-        ),
+        createLocalRuntimeHost({
+          runtimeVersion: 'http-integration',
+          externalAgents: {
+            adapters: [adapter],
+            authorizeWorkspace: (path) => path === workspacePath,
+            resolveExecutable: async () => ({ path: process.execPath }),
+          },
+        }),
     });
     handles.push(serve);
 
@@ -132,8 +131,7 @@ describe('Direct URL http runtime', () => {
     const serve = serveRuntime({
       listen: { hostname: '127.0.0.1', port: 0 },
       token: secondToken,
-      createHost: () =>
-        legacyRuntimeHost(createLocalRuntimeHost({ runtimeVersion: 'http-rotation' })),
+      createHost: () => createLocalRuntimeHost({ runtimeVersion: 'http-rotation' }),
     });
     handles.push(serve);
 
@@ -158,6 +156,36 @@ describe('Direct URL http runtime', () => {
     await service.update(TEST_USER.id, 'rotate-box', { token: secondToken });
     const connected = await service.connect(TEST_USER.id, 'rotate-box');
     expect(connected.status.state).toBe('connected');
+  }, 20_000);
+
+  it('reports a refused upgrade as UNAVAILABLE, keeping the transport sentence', async () => {
+    await insertTestUser(TEST_USER);
+    const store = new InMemorySecretStore();
+    setRuntimeTokenStoreForTests(store);
+    const serve = serveRuntime({
+      listen: { hostname: '127.0.0.1', port: 0 },
+      token: 'the-only-token',
+      createHost: () => createLocalRuntimeHost({ runtimeVersion: 'http-refusal' }),
+    });
+    handles.push(serve);
+    const baseUrl = `http://127.0.0.1:${serve.port}`;
+    await persistRuntimeToken(TEST_USER.id, 'refused-box', 'wrong-token', store);
+
+    const error = await rejectionOf(
+      connectHttpRuntime(
+        { id: 'refused-box', userId: TEST_USER.id, config: { baseUrl } },
+        () => undefined
+      )
+    );
+
+    expect(error).toBeInstanceOf(RemoteError);
+    expect(error).toMatchObject({
+      code: RESERVED_ERROR_CODES.UNAVAILABLE,
+      message:
+        `Environment "refused-box" could not open a runtime session at ${baseUrl}: ` +
+        `WebSocket to ws://127.0.0.1:${serve.port}/ failed before it opened.`,
+      details: { environmentId: 'refused-box', baseUrl },
+    });
   }, 20_000);
 
   it('persists a rotated token without rewriting the row config', async () => {
