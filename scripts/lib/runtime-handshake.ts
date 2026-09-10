@@ -5,7 +5,7 @@
 // is the mechanics that used to be unobservable — the concurrent stderr drain,
 // the timeout-versus-exit discrimination, and the branch-specific cleanup.
 //
-// Deliberately hand-rolled rather than reusing `RuntimeFrameDecoder`: the smoke
+// Deliberately hand-rolled rather than reusing the SDK's codec: the smoke
 // script runs in the smoke matrix with `--no-install`, so everything reachable
 // from it must import nothing but `node:`/`bun` builtins and other `scripts/lib`
 // modules — `scripts/tests/smoke-dependencies.unit.test.ts` enforces that.

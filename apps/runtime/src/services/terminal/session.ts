@@ -15,7 +15,7 @@
  * silently truncated scrollback.
  */
 
-import type { RuntimeShellKind } from '@mangostudio/shared/runtime-protocol';
+import type { RuntimeShellKind } from '@mangostudio/shared/runtime-contract';
 import {
   TERMINAL_CHUNK_MAX_BYTES,
   TERMINAL_COLS_MAX,

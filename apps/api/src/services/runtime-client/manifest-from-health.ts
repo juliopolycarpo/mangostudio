@@ -13,11 +13,11 @@
  * on the first refresh of a connection it already completed.
  */
 
-import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import type {
   RuntimeCapabilityManifest,
   RuntimeShellKind,
-} from '@mangostudio/shared/runtime-protocol';
+} from '@mangostudio/shared/runtime-contract';
+import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 
 const SHELL_KINDS = new Set<string>(['bash', 'zsh', 'powershell']);
 
@@ -81,9 +81,6 @@ export function capabilityManifestFromHealth(
     ...(report.externalAgents?.identityIsolation
       ? { identityIsolation: report.externalAgents.identityIsolation }
       : {}),
-    ...(handshake?.acceptsHubIdentity === undefined
-      ? {}
-      : { acceptsHubIdentity: handshake.acceptsHubIdentity }),
     ...(handshake?.enforcesPathPolicy === undefined
       ? {}
       : { enforcesPathPolicy: handshake.enforcesPathPolicy }),

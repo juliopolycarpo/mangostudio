@@ -1,4 +1,4 @@
-import { RemoteError } from '@mangostudio/protocol';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import type {
   CreateEnvironmentBody,
   Environment,
@@ -6,7 +6,6 @@ import type {
 } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID, LOCAL_ENVIRONMENT_NAME } from '@mangostudio/shared/environments';
 import { publishEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation';
-import { isUnavailableCode } from '../../../services/runtime-client/remote-error-details';
 import {
   getRuntimeConnectionManager,
   type RuntimeConnectionManager,
@@ -33,7 +32,9 @@ import { type ToolchainService, toolchainService } from './toolchain-service';
 
 function statusForTokenPersistFailure(error: unknown): 400 | 503 {
   // Secret-store outages are server conditions; a malformed request stays 400.
-  return error instanceof RemoteError && isUnavailableCode(error.code) ? 503 : 400;
+  return error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.UNAVAILABLE
+    ? 503
+    : 400;
 }
 
 export interface EnvironmentService {

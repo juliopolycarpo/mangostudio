@@ -105,17 +105,6 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
    */
   terminal: Type.Optional(Type.Boolean()),
   /**
-   * Whether this runtime's frame decoder knows the `hub` field on `hello_ack`.
-   *
-   * Frame envelopes are closed, so a hub that sends `hub` to a runtime built
-   * before the field existed fails that peer's decode and drops the socket.
-   * The manifest is the tolerant surface, and it arrives on `hello` before the
-   * hub answers — so the hub asks here first and stays silent when the answer
-   * is absent. Absent means **false** (an older peer), unlike the `features`
-   * keys, where absent means granted.
-   */
-  acceptsHubIdentity: Type.Optional(Type.Boolean()),
-  /**
    * Whether this runtime re-checks the paths the hub names against the
    * {@link RuntimePathFilterSchema} the call carried.
    *
@@ -125,9 +114,9 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
    * enforced it. Declaring enforcement is what makes the difference legible, so
    * the hub can say which environment is running unchecked rather than assume.
    *
-   * Absent means **false** — like `acceptsHubIdentity` and unlike the `features`
-   * keys, where absent means granted. A peer that does not answer the question
-   * has not answered it in the affirmative.
+   * Absent means **false**, unlike the `features` keys, where absent means
+   * granted. A peer that does not answer the question has not answered it in
+   * the affirmative.
    */
   enforcesPathPolicy: Type.Optional(Type.Boolean()),
   /**

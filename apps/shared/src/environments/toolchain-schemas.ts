@@ -2,7 +2,7 @@
  * Which Node and Bun a spawned process runs with, per environment.
  *
  * Split out of `schemas.ts` on purpose: `schemas.ts` pulls in
- * `runtime-protocol/schemas` and `runtime-home/schemas`, and both of those pull
+ * `runtime-contract` and `runtime-home/schemas`, and both of those pull
  * in `external-agents/schemas` — which needs `ToolchainSelectionSchema` too
  * (`external-agent.open` carries a toolchain choice). Importing it from
  * `schemas.ts` would close that loop into a real import cycle; this file has no

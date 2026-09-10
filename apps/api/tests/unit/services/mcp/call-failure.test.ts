@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { RemoteError } from '@mangostudio/protocol';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import { classifyMcpCallFailure } from '../../../../src/services/mcp/call-failure';
 import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';
 
@@ -9,7 +9,7 @@ describe('classifyMcpCallFailure', () => {
   });
 
   it('treats a dead runtime as server_closed', () => {
-    expect(classifyMcpCallFailure(new RemoteError('RUNTIME_UNAVAILABLE', 'gone'))).toBe(
+    expect(classifyMcpCallFailure(new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'gone'))).toBe(
       'server_closed'
     );
   });

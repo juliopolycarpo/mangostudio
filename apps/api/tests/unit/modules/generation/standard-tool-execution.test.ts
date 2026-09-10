@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RemoteError } from '@mangostudio/protocol';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import {
   classifyMcpElicitationCancelReason,
   executeStandardToolCallsWithProgress,
@@ -38,7 +38,7 @@ describe('classifyMcpElicitationCancelReason', () => {
   it('reports a runtime lost mid-call as a closed session, never a bare failure', () => {
     expect(
       classifyMcpElicitationCancelReason(
-        new RemoteError('RUNTIME_UNAVAILABLE', 'Runtime connection was closed.')
+        new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'Runtime connection was closed.')
       )
     ).toBe('server_closed');
   });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import {
   hasRuntimeToken,
   persistRuntimeToken,
@@ -34,7 +35,7 @@ describe('runtime token secrets', () => {
 
     await expect(persistRuntimeToken(USER, 'lan-box', 'secret', store)).rejects.toMatchObject({
       name: 'RemoteError',
-      code: 'RUNTIME_UNAVAILABLE',
+      code: RESERVED_ERROR_CODES.UNAVAILABLE,
     });
     await expect(readRuntimeToken(USER, 'lan-box', store)).rejects.toMatchObject({
       name: 'RemoteError',

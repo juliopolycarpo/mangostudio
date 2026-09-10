@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { RemoteError } from '@mangostudio/protocol';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import {
   buildGhArgv,
   buildGhEnvironment,

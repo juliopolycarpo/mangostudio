@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { RemoteError } from '@mangostudio/protocol';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import { SubagentDelegationError } from '../../../../src/modules/generation/application/subagent-turn-types';
 import {
   classifyToolExecutionFailure,
@@ -43,7 +43,7 @@ describe('classifyToolExecutionFailure', () => {
   it('maps a runtime that went away mid-call to a closed session', () => {
     expect(
       classifyToolExecutionFailure(
-        new RemoteError('RUNTIME_UNAVAILABLE', 'Runtime connection was closed.')
+        new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'Runtime connection was closed.')
       )
     ).toEqual({ status: 'failed', reasonCode: 'server_closed' });
   });

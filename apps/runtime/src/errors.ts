@@ -109,7 +109,7 @@ export class RuntimeServiceManagementError extends RuntimeServiceError {
  * every service error to code `INTERNAL` plus its kind — so this constant is
  * what lets the hub answer 404 instead of matching on the message text. It goes
  * in `details`, which is an open record on the wire. Consent refusals are the
- * exception: they travel as the typed `RUNTIME_DENIED` code.
+ * exception: they travel as the reserved `DENIED` code.
  */
 export const LIBRARY_BACKUP_MISSING_KIND =
   'library_backup_missing' satisfies RuntimeServiceErrorKind;

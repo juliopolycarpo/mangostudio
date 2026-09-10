@@ -1,6 +1,6 @@
 import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import type { ProviderType } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
@@ -110,7 +110,7 @@ export async function resolveAgentRuntime(
 
 /**
  * The turn's MCP snapshots. A machine that refuses MCP is snapshotted without
- * connecting: every `mcp.connect` would come back `RUNTIME_DENIED`, so the
+ * connecting: every `mcp.connect` would come back `DENIED`, so the
  * listing can only cost the per-server budget. The rows still travel so the
  * inspector can attribute the refusal to the machine.
  */

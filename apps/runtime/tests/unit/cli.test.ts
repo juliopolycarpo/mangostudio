@@ -11,12 +11,8 @@ import {
   type RuntimeCapabilityManifest,
 } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
-import {
-  encodeRuntimeFrame,
-  type RuntimeCapabilityManifest as LegacyRuntimeManifest,
-  RUNTIME_PROTOCOL_VERSION,
-} from '@mangostudio/shared/runtime-protocol';
 import { parseRuntimeCliArgs, RUNTIME_CLI_USAGE } from '../../src/cli';
+import { LEGACY_HELLO_1_0_1_NDJSON_LINE } from '../fixtures/legacy-hello-1-0-1';
 
 const CLI_ENTRY = join(import.meta.dir, '../../src/cli.ts');
 const SPAWN_TIMEOUT_MS = 15_000;
@@ -435,14 +431,11 @@ describe('mangostudio-runtime binary', () => {
       // A runtime left over from before the protocol move writes a frame this
       // wire version has no reading of. The hub must not try: a hello it cannot
       // decode is 4426, and the child it started has to go with it.
-      const legacyHello = encodeRuntimeFrame({
-        type: 'hello',
-        protocolVersion: RUNTIME_PROTOCOL_VERSION,
-        runtimeVersion: '9.9.9-legacy',
-        manifest: LEGACY_MANIFEST,
-      });
       const peer = launchStdioRuntime(
-        ['-e', `process.stdout.write(${JSON.stringify(legacyHello)}); setInterval(() => {}, 1e6);`],
+        [
+          '-e',
+          `process.stdout.write(${JSON.stringify(LEGACY_HELLO_1_0_1_NDJSON_LINE)}); setInterval(() => {}, 1e6);`,
+        ],
         // This child is meant to be signalled rather than to unwind, so the
         // reference graces would only make the test wait out both of them.
         { terminateGraceMs: 250, killGraceMs: 1_000 }
@@ -464,24 +457,6 @@ describe('mangostudio-runtime binary', () => {
     SPAWN_TIMEOUT_MS
   );
 });
-
-/** A manifest in the shape a 1.0.1 runtime announced, so the line is a real one. */
-const LEGACY_MANIFEST: LegacyRuntimeManifest = {
-  platform: 'linux',
-  arch: 'x64',
-  pathStyle: 'posix',
-  homeDir: '/home/test',
-  shells: ['bash'],
-  git: { available: false },
-  features: {
-    tools: true,
-    git: false,
-    probing: false,
-    mcp: false,
-    library: false,
-    checkpoints: true,
-  },
-};
 
 interface StdioRuntimeOptions {
   readonly env?: Readonly<Record<string, string>>;

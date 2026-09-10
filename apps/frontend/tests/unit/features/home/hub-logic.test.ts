@@ -195,7 +195,7 @@ describe('environmentAlerts', () => {
       environment({ id: 'idle-box', status: { state: 'disconnected' } }),
       environment({
         id: 'broken-box',
-        status: { state: 'error', errorCode: 'RUNTIME_UNAVAILABLE' },
+        status: { state: 'error', errorCode: 'UNAVAILABLE' },
       }),
       environment({ id: 'waking-box', status: { state: 'connecting' } }),
     ];

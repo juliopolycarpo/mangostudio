@@ -21,20 +21,7 @@ export const CONSENT_DENIED_KIND = 'consent_denied';
 /** Application code: a live binary transfer was unsafe, malformed, busy, or out of sequence. */
 export const RUNTIME_UPDATE_REFUSED = 'RUNTIME_UPDATE_REFUSED';
 
-/**
- * Codes only the hand-written protocol still speaks.
- *
- * A hub in this release talks to both: transports already moved to the SDK
- * answer `DENIED`/`UNAVAILABLE`, the ones still on the old framing answer
- * these. They leave the union once every transport has moved.
- */
-const TRANSITIONAL_ERROR_CODES = ['RUNTIME_UNAVAILABLE', 'RUNTIME_DENIED'] as const;
-
-const RUNTIME_ERROR_CODES = [
-  ...Object.values(RESERVED_ERROR_CODES),
-  RUNTIME_UPDATE_REFUSED,
-  ...TRANSITIONAL_ERROR_CODES,
-];
+const RUNTIME_ERROR_CODES = [...Object.values(RESERVED_ERROR_CODES), RUNTIME_UPDATE_REFUSED];
 
 /** Every `err.code` this build recognises: the reserved ten plus the application's own. */
 export type RuntimeErrorCode = (typeof RUNTIME_ERROR_CODES)[number];

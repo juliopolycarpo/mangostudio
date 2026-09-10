@@ -80,7 +80,7 @@ export interface RuntimeMutationResult<T> {
 
 /**
  * Path policy the hub decided for a call, carried by every filesystem method.
- * Schema-first in `@mangostudio/shared/runtime-protocol`, because it is a wire
+ * Schema-first in `@mangostudio/shared/runtime-contract`, because it is a wire
  * shape rather than a runtime-local one; re-exported here so the filesystem
  * methods below read as one contract.
  */
@@ -949,7 +949,7 @@ export interface RuntimeLibraryApplyParams extends RuntimeLibraryBackupEnvelope 
    * Shared rather than inlined per operation because propagation fans one
    * resource out across destinations: N destinations of the same bytes used to
    * put N base64 copies in a single frame, and two 2 MiB resources across five
-   * locations already exceeded `RUNTIME_MAX_FRAME_BYTES`.
+   * locations already exceeded `DEFAULT_MAX_FRAME_BYTES`.
    */
   readonly contents?: Readonly<Record<string, string>>;
 }

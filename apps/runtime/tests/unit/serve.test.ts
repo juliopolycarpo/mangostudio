@@ -10,10 +10,6 @@ import {
   type RuntimeCapabilityManifest,
 } from '@mangostudio/shared/runtime-contract';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
-import {
-  encodeRuntimeFrameChunks,
-  RUNTIME_PROTOCOL_VERSION,
-} from '@mangostudio/shared/runtime-protocol';
 import { staticConsentSource } from '../../src/consent-source';
 import type { RuntimeHandlers } from '../../src/handlers';
 import {
@@ -31,6 +27,7 @@ import {
   tokensEqual,
 } from '../../src/serve';
 import { createRuntimeEventRelay, type RuntimeHostDefinition } from '../../src/session';
+import { LEGACY_HELLO_1_0_1_CHUNKS } from '../fixtures/legacy-hello-1-0-1';
 import { FakeRuntimeHandlers } from '../support/fake-runtime-handlers';
 
 const TOKEN = 'serve-secret';
@@ -356,14 +353,7 @@ describe('serveRuntime', () => {
     const socket = rawHubSocket(handle.port);
     await opened(socket);
     const closed = closeCodeOf(socket);
-    for (const chunk of encodeRuntimeFrameChunks({
-      type: 'hello',
-      protocolVersion: RUNTIME_PROTOCOL_VERSION,
-      runtimeVersion: '1.0.1',
-      manifest: SERVE_TEST_MANIFEST,
-    })) {
-      socket.send(chunk);
-    }
+    for (const chunk of LEGACY_HELLO_1_0_1_CHUNKS) socket.send(chunk);
 
     expect(await closed).toBe(CLOSE_CODES.PROTOCOL_MISMATCH);
   });

@@ -1,5 +1,4 @@
-import { RemoteError } from '@mangostudio/protocol';
-import { isUnavailableCode } from '../runtime-client/remote-error-details';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 /**
  * Opens an MCP session on the environment that owns the server row and hands
  * back the hub-side handle. Every request is a protocol call; the session, the
@@ -388,7 +387,9 @@ export function requestDeadline(mcpTimeoutMs: number | null | undefined): number
 /** True when the failure means the far end is gone, not that a call failed. */
 function isSessionGone(error: unknown): boolean {
   if (!(error instanceof RemoteError)) return false;
-  return isUnavailableCode(error.code) || error.details?.kind === 'mcp_session_missing';
+  return (
+    error.code === RESERVED_ERROR_CODES.UNAVAILABLE || error.details?.kind === 'mcp_session_missing'
+  );
 }
 
 function messageOf(error: unknown): string {

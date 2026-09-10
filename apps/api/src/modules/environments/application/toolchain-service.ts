@@ -18,7 +18,7 @@ import {
   DEFAULT_TOOLCHAIN_SELECTION,
   TOOLCHAIN_RUNTIME_IDS,
 } from '@mangostudio/shared/environments';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import { publishEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation';
 import { EnvironmentServiceError } from '../domain/environment-error';
 import {

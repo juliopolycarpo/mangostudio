@@ -486,7 +486,7 @@ function backupEnvelopeFrom(deps: PropagationApplyDeps): {
  * Raw bytes one `library.apply` frame may carry across all of its operations.
  *
  * Base64 inflates by 4/3, so this leaves roughly 5 MiB under
- * `RUNTIME_MAX_FRAME_BYTES` for the envelope, the operation list, and the
+ * `DEFAULT_MAX_FRAME_BYTES` for the envelope, the operation list, and the
  * skipped entries. Deliberately below the ceiling rather than at it: hitting
  * the codec limit throws inside `cloneFrame`, which only validates outside
  * production, so an apply that failed in dev would have gone out on the wire in

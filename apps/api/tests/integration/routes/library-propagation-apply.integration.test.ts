@@ -651,7 +651,7 @@ describe('propagation apply — file-backed resources', () => {
 
     // Two destinations, identical bytes: one payload in the frame, both
     // operations pointing at it. Inlining per operation is what puts a wide
-    // apply over RUNTIME_MAX_FRAME_BYTES.
+    // apply over DEFAULT_MAX_FRAME_BYTES.
     const operations = sent?.operations ?? [];
     expect(operations).toHaveLength(2);
     expect(Object.keys(sent?.contents ?? {})).toHaveLength(1);

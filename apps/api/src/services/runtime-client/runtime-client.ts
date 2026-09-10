@@ -152,7 +152,6 @@ import { McpConnectionError } from '../mcp/types';
 import { ToolArgumentError } from '../tools/arg-parsing';
 import { ToolExecutionTimedOutError } from '../tools/execution-timeout';
 import type { HubSession } from './hub-session';
-import { isDeniedCode, isUnavailableCode } from './remote-error-details';
 import { createTargetPaths, type TargetPaths } from './target-paths';
 
 const logger = createDiagnosticLogger('runtime-client');
@@ -706,7 +705,7 @@ export class RuntimeClient {
     try {
       return await this.hub.request(method, params, options);
     } catch (error) {
-      if (error instanceof RemoteError && isUnavailableCode(error.code)) {
+      if (error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.UNAVAILABLE) {
         this.onUnavailable?.();
       }
       throw translateRuntimeError(error);
@@ -782,7 +781,7 @@ function translateRuntimeError(error: unknown): Error {
   if (error.code === RESERVED_ERROR_CODES.TIMEOUT) {
     return new ToolExecutionTimedOutError(error.message);
   }
-  if (isDeniedCode(error.code)) {
+  if (error.code === RESERVED_ERROR_CODES.DENIED) {
     const missing = error.details?.missing;
     return new RuntimeConsentDeniedError(error.message, {
       capability: detailString(error, 'capability'),

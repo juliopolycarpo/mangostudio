@@ -4,12 +4,12 @@ import type {
   ExternalIdentityIsolation,
 } from '@mangostudio/shared/external-agents';
 import { directoryHashDomainVersion } from '@mangostudio/shared/library';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import {
   profileForAllow,
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,
 } from '@mangostudio/shared/runtime-home';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { HIDDEN_WINDOW } from './services/process-window';
 import { isShellAvailable } from './services/shell';
 import { supportsPty } from './services/terminal/pty';
@@ -85,9 +85,6 @@ export function createLocalRuntimeManifest(
     // false rather than advertising a panel that every open would refuse.
     terminal: allow.shell && shells.length > 0 && supportsPty(),
     profile: profileForAllow(allow),
-    // This build decodes `hello_ack.hub`. Frame envelopes are closed, so the
-    // hub withholds that field until a runtime says it will not choke on it.
-    acceptsHubIdentity: true,
     // Every filesystem method in this build re-checks its own targets against
     // the call's `pathPolicy` (see `services/fs.ts`). Stated rather than
     // inferred from the version, because the hub's alternative is to assume —

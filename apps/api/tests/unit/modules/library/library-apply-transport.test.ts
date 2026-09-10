@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { RemoteError } from '@mangostudio/protocol';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import {
   createLibraryService,
   createLocalRuntimeManifest,
@@ -76,7 +76,7 @@ describe('library.apply payload bounds', () => {
     let sent = false;
 
     // Five distinct 2 MiB payloads — the per-file cap — is 10 MiB of raw bytes
-    // and over 13 MiB once base64 inflates it, past RUNTIME_MAX_FRAME_BYTES.
+    // and over 13 MiB once base64 inflates it, past DEFAULT_MAX_FRAME_BYTES.
     // Refusing here beats throwing inside the codec, which only validates
     // outside production and so would diverge between dev and a real install.
     await expect(
@@ -181,7 +181,7 @@ describe('library.apply transport failures', () => {
         runtimeApply: () =>
           Promise.reject(
             new RemoteError(
-              'RUNTIME_UNAVAILABLE',
+              RESERVED_ERROR_CODES.UNAVAILABLE,
               'Environment "local" is unavailable; the next connection attempt is allowed in 5s.'
             )
           ),

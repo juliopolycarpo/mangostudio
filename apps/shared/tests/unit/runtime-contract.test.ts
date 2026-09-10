@@ -124,6 +124,21 @@ describe('RuntimeCapabilityManifestSchema', () => {
     ).toBe(false);
   });
 
+  it("keeps a newer peer's unknown manifest keys valid rather than refusing it", () => {
+    // Rollout is not atomic: a runtime one release ahead announces fields this
+    // build has never heard of, and a schema that refused them would strand the
+    // machine that was upgraded first — including the live-update path that
+    // would have brought the hub level with it.
+    expect(
+      Value.Check(RuntimeCapabilityManifestSchema, {
+        ...OLD_MANIFEST,
+        git: { ...OLD_MANIFEST.git, vendor: 'extra' },
+        features: { ...OLD_MANIFEST.features, futureFlag: false },
+        somethingFromTheFuture: 'ignored',
+      })
+    ).toBe(true);
+  });
+
   it('accepts the optional external-agent capability and isolation attestation', () => {
     expect(
       Value.Check(RuntimeCapabilityManifestSchema, {

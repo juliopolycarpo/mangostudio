@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { AgentProfile } from '@mangostudio/shared/agents';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import {
   effectiveToolDefinitions,
   type ResolveToolCandidatesInput,

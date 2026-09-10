@@ -1,4 +1,3 @@
-import { isUnavailableCode } from '../runtime-client/remote-error-details';
 /**
  * Why an MCP tool call failed, as the hub can tell. The SDK error types stop
  * at the runtime boundary, so the runtime classifies and attaches the answer
@@ -6,7 +5,7 @@ import { isUnavailableCode } from '../runtime-client/remote-error-details';
  * see — its own deadline expiring, and the runtime going away mid-call.
  */
 
-import { RemoteError } from '@mangostudio/protocol';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import { ToolExecutionTimedOutError } from '../tools/execution-timeout';
 
 export type McpCallFailure = 'timeout' | 'server_closed' | 'other';
@@ -28,7 +27,7 @@ export function classifyMcpCallFailure(error: unknown): McpCallFailure {
   if (!(error instanceof RemoteError)) return 'other';
   // A dead runtime took the MCP session down with it — indistinguishable, from
   // the turn's point of view, from the server itself closing.
-  if (isUnavailableCode(error.code)) return 'server_closed';
+  if (error.code === RESERVED_ERROR_CODES.UNAVAILABLE) return 'server_closed';
   // Runtime reports a missing session the same way; treat it as closed so the
   // turn does not surface it as a generic tool failure.
   if (error.details?.kind === 'mcp_session_missing') return 'server_closed';

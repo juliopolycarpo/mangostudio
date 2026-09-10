@@ -155,7 +155,7 @@ describe('labeler coverage', () => {
     expect(labeler).toContain('"area: runtime":');
     const runtimeSection = extractLabelSection(labeler, '"area: runtime":', '"area: git":');
     expect(runtimeSection).toContain('- "apps/runtime/**"');
-    expect(runtimeSection).toContain('- "apps/shared/src/runtime-protocol/**"');
+    expect(runtimeSection).toContain('- "apps/shared/src/runtime-contract/**"');
     expect(runtimeSection).toContain('- "apps/api/src/services/runtime-client/**"');
   });
 

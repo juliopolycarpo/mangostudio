@@ -9,8 +9,8 @@
 
 import { appendFile, mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import type { HubIdentity } from '@mangostudio/shared/runtime-contract';
 import { type RuntimeSlot, runtimeSlotAuditLogPath } from '@mangostudio/shared/runtime-home';
-import type { RuntimeHubIdentity } from '@mangostudio/shared/runtime-protocol';
 import { loadRuntimeConfig } from './config';
 import { summarizeGhSubcommand } from './services/gh';
 
@@ -25,7 +25,7 @@ export interface RuntimeAuditRecord {
   readonly durationMs: number;
   /** Identifying arguments only — paths, argv summaries, byte counts. */
   readonly args?: Readonly<Record<string, unknown>>;
-  /** Capability named by a `RUNTIME_DENIED` refusal. */
+  /** Capability named by a `DENIED` refusal. */
   readonly capability?: string;
   readonly code?: string;
 }
@@ -49,7 +49,7 @@ export interface RuntimeAuditSink {
   readonly path: string;
   /** Last write failure, if any — doctor reports this as unhealthy. */
   lastError(): string | null;
-  setHub(hub: RuntimeHubIdentity | null): void;
+  setHub(hub: HubIdentity | null): void;
   record(input: {
     readonly method: string;
     readonly outcome: RuntimeAuditOutcome;
@@ -256,7 +256,7 @@ function disabledSink(path: string): RuntimeAuditSink {
   };
 }
 
-function formatHubIdentity(hub: RuntimeHubIdentity): string {
+function formatHubIdentity(hub: HubIdentity): string {
   return `${hub.user}@${hub.host}`;
 }
 

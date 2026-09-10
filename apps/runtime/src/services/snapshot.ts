@@ -42,7 +42,7 @@ export class RuntimeSnapshotTooLargeError extends RuntimeServiceError {
 
 /**
  * Largest file a checkpoint snapshot may carry. Base64 inflates the payload by
- * 4/3, so this leaves headroom under RUNTIME_MAX_FRAME_BYTES (16 MiB) for the
+ * 4/3, so this leaves headroom under DEFAULT_MAX_FRAME_BYTES (16 MiB) for the
  * frame envelope and for the several mutations an apply_patch can return in one
  * response.
  */

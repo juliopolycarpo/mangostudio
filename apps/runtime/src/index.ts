@@ -1,4 +1,4 @@
-export type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+export type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 export type { RuntimeAuditSink } from './audit-log';
 export { loadRuntimeConfig } from './config';
 export {

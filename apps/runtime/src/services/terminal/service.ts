@@ -12,7 +12,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename } from 'node:path';
 import type { EventInput } from '@mangostudio/protocol';
-import type { RuntimeShellKind } from '@mangostudio/shared/runtime-protocol';
+import type { RuntimeShellKind } from '@mangostudio/shared/runtime-contract';
 import { RuntimeToolArgumentError } from '../../errors';
 import type {
   RuntimeTerminalAckParams,

@@ -103,7 +103,7 @@ describe('SshPanel', () => {
       sshEnvironment({
         status: {
           state: 'error',
-          errorCode: 'RUNTIME_UNAVAILABLE',
+          errorCode: 'UNAVAILABLE',
           sshFailureReason: 'host-key-unverified',
         },
       })

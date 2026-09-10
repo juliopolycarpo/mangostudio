@@ -13,7 +13,7 @@
  */
 
 import { posix, win32 } from 'node:path';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 
 type PathStyle = RuntimeCapabilityManifest['pathStyle'];
 

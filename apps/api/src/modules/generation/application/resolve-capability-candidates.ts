@@ -8,11 +8,11 @@
 
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { CapabilityReasonCode } from '@mangostudio/shared/capabilities';
-import type { RuntimeCapabilityAllow } from '@mangostudio/shared/runtime-home';
 import type {
   RuntimeCapabilityManifest,
   RuntimeShellKind,
-} from '@mangostudio/shared/runtime-protocol';
+} from '@mangostudio/shared/runtime-contract';
+import type { RuntimeCapabilityAllow } from '@mangostudio/shared/runtime-home';
 import type { ToolSettingsCategory } from '@mangostudio/shared/tool-settings';
 import type { McpBridgeServerSnapshot } from '../../../services/mcp/tool-bridge';
 import { parseMcpToolName, toolNameMatches } from '../../../services/mcp/tool-naming';

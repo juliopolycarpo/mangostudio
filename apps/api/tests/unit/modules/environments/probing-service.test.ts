@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import {
   createEnvironmentProbingService,
   type ProbeScope,

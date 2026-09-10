@@ -45,7 +45,6 @@ import { connectHttpRuntime } from './connect-http-runtime';
 import { connectInProcessRuntime } from './connect-in-process-runtime';
 import { connectSshRuntime } from './connect-ssh-runtime';
 import { capabilityManifestFromHealth } from './manifest-from-health';
-import { isUnavailableCode } from './remote-error-details';
 import { RuntimeClient } from './runtime-client';
 import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-child';
 
@@ -405,7 +404,7 @@ function unavailable(message: string): RemoteError {
  * status, which is what the Environments UI reads.
  */
 function normalizeUnavailable(error: unknown): RemoteError {
-  return error instanceof RemoteError && isUnavailableCode(error.code)
+  return error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.UNAVAILABLE
     ? error
     : unavailable(error instanceof Error ? error.message : String(error));
 }

@@ -20,7 +20,7 @@
   - changed-files:
       - any-glob-to-any-file:
           - "apps/runtime/**"
-          - "apps/shared/src/runtime-protocol/**"
+          - "apps/shared/src/runtime-contract/**"
           - "apps/api/src/services/runtime-client/**"
 
 "area: git":

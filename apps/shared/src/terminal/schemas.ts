@@ -16,7 +16,7 @@ import {
   HUB_WEBSOCKET_MAX_PAYLOAD_BYTES,
   REALTIME_CLOSE_CODES,
 } from '../realtime/schemas';
-import { RuntimeShellKindSchema } from '../runtime-protocol/schemas';
+import { RuntimeShellKindSchema } from '../runtime-contract/manifest';
 
 /** Largest raw byte run in one `terminal.output` frame and one socket data frame. */
 export const TERMINAL_CHUNK_MAX_BYTES = 8 * 1024;

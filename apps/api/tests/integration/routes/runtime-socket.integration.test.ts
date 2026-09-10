@@ -15,10 +15,6 @@ import {
   type RuntimeMethod,
 } from '@mangostudio/shared/runtime-contract';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
-import {
-  encodeRuntimeFrameChunks,
-  RUNTIME_PROTOCOL_VERSION,
-} from '@mangostudio/shared/runtime-protocol';
 import { Elysia } from 'elysia';
 import { websocket } from 'elysia/websocket';
 import { getDb } from '../../../src/db/database';
@@ -28,6 +24,7 @@ import { createEnvironmentRepository } from '../../../src/modules/environments/i
 import { createRuntimePairingRepository } from '../../../src/modules/environments/infrastructure/runtime-pairing-repository';
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
 import { RuntimeConnectionManager } from '../../../src/services/runtime-client/runtime-connection-manager';
+import { LEGACY_HELLO_1_0_1_CHUNKS } from '../../fixtures/legacy-hello-1-0-1';
 import { insertTestUser } from '../../support/factories';
 import { FakeRuntimeDefinition, type TestHandler } from '../../support/runtime-fixture';
 
@@ -459,14 +456,7 @@ describe('runtime dial-in socket', () => {
     const socket = await openRawSocket(hub.url, hub.issued.token);
     const closed = closureOfSocket(socket);
 
-    for (const chunk of encodeRuntimeFrameChunks({
-      type: 'hello',
-      protocolVersion: RUNTIME_PROTOCOL_VERSION,
-      runtimeVersion: 'runtime-legacy',
-      manifest: MANIFEST,
-    })) {
-      socket.send(chunk);
-    }
+    for (const chunk of LEGACY_HELLO_1_0_1_CHUNKS) socket.send(chunk);
 
     expect((await closed).code).toBe(CLOSE_CODES.PROTOCOL_MISMATCH);
     // Refused, not merely unfinished: a hello nobody could read never became a

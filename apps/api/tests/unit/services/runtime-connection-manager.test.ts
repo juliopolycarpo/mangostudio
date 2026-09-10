@@ -6,11 +6,11 @@ import type {
   EnvironmentConnectionState,
   EnvironmentTransportKind,
 } from '@mangostudio/shared/environments';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeHealthReport,
 } from '@mangostudio/shared/runtime-home';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { getDb } from '../../../src/db/database';
 import { getVersion } from '../../../src/lib/config';
 import type { EnvironmentStateTransition } from '../../../src/modules/environments/application/record-environment-activity';

@@ -8,7 +8,7 @@
  * `TypeError` thrown from an error handler — the worst place to throw.
  */
 
-import { RESERVED_ERROR_CODES, type RemoteError } from '@mangostudio/protocol';
+import type { RemoteError } from '@mangostudio/protocol';
 
 /**
  * The `details[key]` string, or undefined when the peer sent something else.
@@ -64,30 +64,4 @@ export function detailStringArray(error: RemoteError, key: string): string[] | u
  */
 export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
-}
-
-/**
- * Whether a refusal means "this runtime is not reachable".
- *
- * Two literals, not one, while the transports move across: the ones already on
- * the SDK answer `UNAVAILABLE`, the ones still on the hand-written framing
- * answer `RUNTIME_UNAVAILABLE`. A hub that recognised only one would report a
- * dead runtime as an ordinary tool failure on half its environments.
- *
- * @example
- * if (error instanceof RemoteError && isUnavailableCode(error.code)) markUnavailable();
- */
-export function isUnavailableCode(code: string): boolean {
-  return code === RESERVED_ERROR_CODES.UNAVAILABLE || code === 'RUNTIME_UNAVAILABLE';
-}
-
-/**
- * Whether a refusal means "this machine's owner did not grant it". Both
- * vocabularies, for the reason {@link isUnavailableCode} carries two.
- *
- * @example
- * if (isDeniedCode(error.code)) return new RuntimeConsentDeniedError(error.message);
- */
-export function isDeniedCode(code: string): boolean {
-  return code === RESERVED_ERROR_CODES.DENIED || code === 'RUNTIME_DENIED';
 }
