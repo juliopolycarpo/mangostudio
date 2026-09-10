@@ -1,4 +1,5 @@
 export type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+export type { RuntimeAuditSink } from './audit-log';
 export { RuntimeProtocolClient, type RuntimeRequestOptions } from './client';
 export { loadRuntimeConfig } from './config';
 export {

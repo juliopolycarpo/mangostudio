@@ -32,7 +32,6 @@ export interface ConnectInProcessRuntimeOptions {
   /** Defaults to the runtime host's own configuration. */
   readonly validateFrames?: boolean;
   readonly handshakeTimeoutMs?: number;
-  readonly hub?: { readonly host: string; readonly user: string } | null;
 }
 
 /**
@@ -56,7 +55,6 @@ export async function connectInProcessRuntime(
   try {
     hub = await openHubSession(ports.a, {
       hubVersion: options.hubVersion,
-      ...(options.hub !== undefined ? { hub: options.hub } : {}),
       ...(options.handshakeTimeoutMs !== undefined
         ? { handshakeTimeoutMs: options.handshakeTimeoutMs }
         : {}),

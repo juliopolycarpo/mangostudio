@@ -10,6 +10,7 @@
 import type { EventInput } from '@mangostudio/protocol';
 import {
   createRuntimeEventRelay,
+  type RuntimeAuditSink,
   type RuntimeConsentSource,
   type RuntimeHandlers,
   type RuntimeHostDefinition,
@@ -70,14 +71,18 @@ export class FakeRuntimeDefinition implements RuntimeHostDefinition {
   readonly isUpdateActive = () => false;
   readonly events = createRuntimeEventRelay();
   readonly onClose = () => undefined;
+  readonly audit: RuntimeAuditSink | undefined;
 
   constructor(options: {
     readonly runtimeVersion: string;
     readonly manifest: RuntimeCapabilityManifest;
     readonly consent: RuntimeConsentSource;
     readonly handlers: Partial<Record<RuntimeMethod, TestHandler>>;
+    /** Absent means auditing is off, the way the `host` slot ships. */
+    readonly audit?: RuntimeAuditSink;
   }) {
     this.runtimeVersion = options.runtimeVersion;
+    this.audit = options.audit;
     this.manifest = () => options.manifest;
     this.consent = options.consent;
     this.handlers = Object.fromEntries(
@@ -105,6 +110,8 @@ export interface TestRuntimeOptions {
   readonly consent?: RuntimeConsentSource;
   readonly runtimeVersion?: string;
   readonly hubVersion?: string;
+  /** Records what the runtime side saw, including who the hub said it is. */
+  readonly audit?: RuntimeAuditSink;
 }
 
 export interface TestRuntime {
@@ -131,6 +138,7 @@ export async function connectTestRuntime(options: TestRuntimeOptions): Promise<T
     manifest: options.manifest ?? TEST_RUNTIME_MANIFEST,
     consent: options.consent ?? staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'host'),
     handlers: options.handlers,
+    ...(options.audit ? { audit: options.audit } : {}),
   });
   const connection = await connectInProcessRuntime(definition, {
     hubVersion: options.hubVersion ?? 'hub-test',

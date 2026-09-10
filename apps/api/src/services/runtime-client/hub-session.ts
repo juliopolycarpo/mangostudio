@@ -22,6 +22,7 @@ import {
 } from '@mangostudio/protocol';
 import type { RuntimeProtocolClient, RuntimeRequestOptions } from '@mangostudio/runtime';
 import {
+  type HubIdentity,
   RUNTIME_CONTRACT,
   RUNTIME_CONTRACT_NAME,
   RUNTIME_CONTRACT_VERSION,
@@ -31,6 +32,7 @@ import {
   type RuntimeMethodMap,
 } from '@mangostudio/shared/runtime-contract';
 import Value from 'typebox/value';
+import { resolveLocalHubIdentity } from './hub-identity';
 
 /** Name this hub announces itself under; the runtime's audit log records it. */
 const HUB_PEER_NAME = 'mangostudio';
@@ -65,8 +67,11 @@ export interface ProtocolHubSession extends HubSession {
 export interface OpenHubSessionOptions {
   /** Release string this hub announces; the runtime records it. */
   readonly hubVersion: string;
-  /** Who is speaking for this hub, for the runtime's audit log. */
-  readonly hub?: { readonly host: string; readonly user: string } | null;
+  /**
+   * Who is speaking for this hub, for the runtime's audit log. Omit it to
+   * announce this process's own host and user; pass `null` to announce none.
+   */
+  readonly hub?: HubIdentity | null;
   readonly handshakeTimeoutMs?: number;
   /**
    * Refuse a runtime whose release differs from the hub's. Set by the
@@ -86,6 +91,9 @@ export interface OpenHubSessionOptions {
  * disagree — and closes the port on the way out, so a caller that only sees the
  * rejection leaks nothing.
  *
+ * Announces this hub's host and user unless the caller named a `hub` of its
+ * own, so every runtime's audit log can attribute what it served.
+ *
  * @example
  * const hub = await openHubSession(port, { hubVersion: getVersion() });
  * const health = await hub.request('runtime.health', {});
@@ -94,11 +102,12 @@ export async function openHubSession(
   port: Port,
   options: OpenHubSessionOptions
 ): Promise<ProtocolHubSession> {
+  const hub = options.hub === undefined ? resolveLocalHubIdentity() : options.hub;
   const session = new Session(port, {
     peer: { name: HUB_PEER_NAME, version: options.hubVersion, role: 'hub' },
     capabilities: {
       contracts: { [RUNTIME_CONTRACT_NAME]: RUNTIME_CONTRACT_VERSION },
-      ...(options.hub ? { hub: options.hub } : {}),
+      ...(hub ? { hub } : {}),
     },
     ...(options.handshakeTimeoutMs !== undefined
       ? { handshakeTimeoutMs: options.handshakeTimeoutMs }
