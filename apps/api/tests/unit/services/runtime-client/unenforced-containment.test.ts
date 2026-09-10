@@ -18,6 +18,7 @@ import {
   connectInProcessRuntime,
   createLocalRuntimeManifest,
   createRuntimeMethodHandlers,
+  legacyRuntimeHandlerMap,
   RuntimeHost,
 } from '@mangostudio/runtime';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
@@ -45,7 +46,7 @@ async function connect(
   host = new RuntimeHost({
     runtimeVersion: VERSION,
     manifest: reshapeManifest(createLocalRuntimeManifest()),
-    handlers: registry.handlers,
+    handlers: legacyRuntimeHandlerMap(registry.handlers),
     onClose: () => void registry.close(),
   });
   const connection = await connectInProcessRuntime(host, { hubVersion: VERSION });

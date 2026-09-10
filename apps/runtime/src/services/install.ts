@@ -11,8 +11,8 @@
 import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
+import type { EventInput } from '@mangostudio/protocol';
 import { RuntimeToolArgumentError } from '../errors';
-import type { RuntimeEventInput } from '../host';
 import type {
   RuntimeInstallCancelParams,
   RuntimeInstallOutputEvent,
@@ -185,7 +185,7 @@ export interface InstallService {
 
 export interface InstallServiceOptions {
   /** Publishes an `evt` frame; log lines stream through it as they arrive. */
-  readonly emit: (event: RuntimeEventInput) => void;
+  readonly emit: (event: EventInput) => void;
   readonly deps?: Partial<InstallHostDeps>;
 }
 

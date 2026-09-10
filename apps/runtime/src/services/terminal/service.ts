@@ -11,9 +11,9 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename } from 'node:path';
+import type { EventInput } from '@mangostudio/protocol';
 import type { RuntimeShellKind } from '@mangostudio/shared/runtime-protocol';
 import { RuntimeToolArgumentError } from '../../errors';
-import type { RuntimeEventInput } from '../../host';
 import type {
   RuntimeTerminalAckParams,
   RuntimeTerminalAttachParams,
@@ -89,7 +89,7 @@ export interface TerminalService {
 
 export interface TerminalServiceOptions {
   /** Publishes a `terminal.output` frame; only ever called once a session has been attached. */
-  readonly emit: (event: RuntimeEventInput) => void;
+  readonly emit: (event: EventInput) => void;
   readonly deps?: Partial<TerminalServiceDeps>;
 }
 

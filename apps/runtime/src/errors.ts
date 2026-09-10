@@ -1,4 +1,9 @@
-import type { RuntimeErrorCode } from '@mangostudio/shared/runtime-protocol';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import {
+  CONSENT_DENIED_KIND,
+  RUNTIME_UPDATE_REFUSED,
+  type RuntimeErrorCode,
+} from '@mangostudio/shared/runtime-contract';
 
 export type RuntimeServiceErrorKind =
   /** The machine's owner did not grant a capability the method needs. */
@@ -114,18 +119,66 @@ export const LIBRARY_BACKUP_MISSING_KIND =
   'library_backup_missing' satisfies RuntimeServiceErrorKind;
 
 /**
- * Hub-side mirror of a remote `err` payload. `code` is always a known literal
- * after the protocol client narrows the open wire form.
+ * Hub-side mirror of a remote `err` payload from a transport still on the
+ * hand-written framing. `code` is always a known literal after the protocol
+ * client narrows the open wire form.
+ *
+ * It extends the SDK's `RemoteError` so one `instanceof` covers both wires
+ * while the transports move across: a hub that only recognised the SDK class
+ * would read a legacy `RUNTIME_UNAVAILABLE` refusal as an ordinary fault and
+ * answer 400 where it used to answer 503.
  */
-export class RuntimeRemoteError extends Error {
+export class RuntimeRemoteError extends RemoteError {
+  // Redeclared to narrow, never to re-assign: an own field here would be
+  // defined after `super()` and overwrite the code the base already set.
+  declare readonly code: RuntimeErrorCode;
+  declare readonly details?: Readonly<Record<string, unknown>>;
+
   constructor(
-    readonly code: RuntimeErrorCode,
+    code: RuntimeErrorCode,
     message: string,
-    readonly details?: Readonly<Record<string, unknown>>
+    details?: Readonly<Record<string, unknown>>
   ) {
-    super(message);
+    super(code, message, details);
     this.name = 'RuntimeRemoteError';
   }
+}
+
+/**
+ * Maps what a runtime handler threw onto the wire error the peer receives.
+ *
+ * Consent refusals travel as the reserved `DENIED`, a refused live update as
+ * the application's own `RUNTIME_UPDATE_REFUSED`, and every other service
+ * error as `INTERNAL` carrying its `kind` — which is what lets a hub answer
+ * 404 for a missing backup set instead of matching on message text. An
+ * `AbortError` is left alone: the session maps it to `CANCELLED`.
+ *
+ * @example
+ * throw toRemoteError(new LibraryBackupMissingError('set "a1" is gone'));
+ * // RemoteError INTERNAL, details.kind === 'library_backup_missing'
+ */
+export function toRemoteError(error: unknown): unknown {
+  if (!(error instanceof RuntimeServiceError)) return error;
+  if (error.kind === CONSENT_DENIED_KIND) {
+    const missing = Array.isArray(error.data.missing)
+      ? error.data.missing.filter((entry): entry is string => typeof entry === 'string')
+      : [];
+    return new RemoteError(RESERVED_ERROR_CODES.DENIED, error.message, {
+      kind: error.kind,
+      ...error.data,
+      capability: typeof error.data.capability === 'string' ? error.data.capability : missing[0],
+    });
+  }
+  if (error.kind === 'runtime_update_refused') {
+    return new RemoteError(RUNTIME_UPDATE_REFUSED, error.message, {
+      kind: error.kind,
+      ...error.data,
+    });
+  }
+  return new RemoteError(RESERVED_ERROR_CODES.INTERNAL, error.message, {
+    kind: error.kind,
+    ...error.data,
+  });
 }
 
 /**

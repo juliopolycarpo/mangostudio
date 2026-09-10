@@ -1,11 +1,10 @@
+import type { EventInput } from '@mangostudio/protocol';
 import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
 import type { RuntimeSlot } from '@mangostudio/shared/runtime-home';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { type RuntimeConsentSource, staticConsentSource } from './consent-source';
-import { RuntimeToolArgumentError } from './errors';
+import type { RuntimeHandlers } from './handlers';
 import { collectRuntimeHealth } from './health';
-import type { RuntimeEventInput, RuntimeHandlerContext, RuntimeMethodHandler } from './host';
-import type { RuntimeMethod, RuntimeMethodMap } from './methods';
 import type { ExternalAgentAdapter } from './services/external-agents/adapter';
 import { ExternalAgentAdapterRegistry } from './services/external-agents/registry';
 import {
@@ -37,7 +36,7 @@ export interface RuntimeMethodRegistryOptions {
   /** Release string this host reports to the MCP servers it initializes. */
   readonly runtimeVersion: string;
   /** Publishes an `evt` frame; the MCP methods stream elicitations through it. */
-  readonly emit: (event: RuntimeEventInput) => void;
+  readonly emit: (event: EventInput) => void;
   /**
    * Slot whose `runtime.json` this host answers for. Health reads it so a
    * dialled-in peer reports the same consent the CLI's `health --json` would.
@@ -55,7 +54,7 @@ export interface RuntimeMethodRegistryOptions {
 }
 
 export interface RuntimeMethodRegistry {
-  readonly handlers: ReadonlyMap<string, RuntimeMethodHandler>;
+  readonly handlers: RuntimeHandlers;
   readonly updateActive: () => boolean;
   readonly externalAgentRegistry: ExternalAgentAdapterRegistry;
   /** Releases everything the handlers hold open — MCP sessions today. */
@@ -89,122 +88,87 @@ export function createRuntimeMethodHandlers(
   });
 
   return {
-    handlers: new Map<string, RuntimeMethodHandler>([
+    handlers: {
       // Handlers that can refuse take the call's `AbortSignal`. Forwarding it is
       // not the same as honouring it: each service decides where cancelling is
       // safe, and a mutation already under way is never abandoned. See
       // `services/cancellation.ts`. Short lookups and methods with their own
       // cancel RPC still ignore the request signal.
-      handler('fs.read-file', (params, context) =>
-        runtimeFsService.readFile(params, context.signal)
-      ),
-      handler('fs.write-file', (params, context) =>
-        runtimeFsService.writeFile(params, context.signal)
-      ),
-      handler('fs.create-file', (params, context) =>
-        runtimeFsService.createFile(params, context.signal)
-      ),
-      handler('fs.edit-file', (params, context) =>
-        runtimeFsService.editFile(params, context.signal)
-      ),
-      handler('fs.replace-range', (params, context) =>
-        runtimeFsService.replaceRange(params, context.signal)
-      ),
-      handler('fs.delete-file', (params, context) =>
-        runtimeFsService.deleteFile(params, context.signal)
-      ),
-      handler('fs.move-file', (params, context) =>
-        runtimeFsService.moveFile(params, context.signal)
-      ),
-      handler('fs.list-directory', (params, context) =>
-        runtimeFsService.listDirectory(params, context.signal)
-      ),
-      handler('fs.glob', (params, context) => runtimeFsService.glob(params, context.signal)),
-      handler('fs.grep', (params, context) => runtimeFsService.grep(params, context.signal)),
-      handler('fs.apply-patch', (params, context) =>
-        runtimeFsService.applyPatch(params, context.signal)
-      ),
-      handler('shell.run', (params, context) =>
-        runShellCommand({ ...params, signal: context.signal })
-      ),
-      handler('git.exec', (params, context) => execGit(params, context.signal)),
-      handler('gh.exec', (params, context) => execGh(params, context.signal)),
-      handler('gh.mutate', (params, context) => mutateGh(params, context.signal)),
-      handler('snapshot.capture', (params, context) =>
-        captureFileSnapshot(params.path, context.signal)
-      ),
-      handler('snapshot.hash', async (params, context) => ({
+      'fs.read-file': (params, context) => runtimeFsService.readFile(params, context.signal),
+      'fs.write-file': (params, context) => runtimeFsService.writeFile(params, context.signal),
+      'fs.create-file': (params, context) => runtimeFsService.createFile(params, context.signal),
+      'fs.edit-file': (params, context) => runtimeFsService.editFile(params, context.signal),
+      'fs.replace-range': (params, context) =>
+        runtimeFsService.replaceRange(params, context.signal),
+      'fs.delete-file': (params, context) => runtimeFsService.deleteFile(params, context.signal),
+      'fs.move-file': (params, context) => runtimeFsService.moveFile(params, context.signal),
+      'fs.list-directory': (params, context) =>
+        runtimeFsService.listDirectory(params, context.signal),
+      'fs.glob': (params, context) => runtimeFsService.glob(params, context.signal),
+      'fs.grep': (params, context) => runtimeFsService.grep(params, context.signal),
+      'fs.apply-patch': (params, context) => runtimeFsService.applyPatch(params, context.signal),
+      'shell.run': (params, context) => runShellCommand({ ...params, signal: context.signal }),
+      'git.exec': (params, context) => execGit(params, context.signal),
+      'gh.exec': (params, context) => execGh(params, context.signal),
+      'gh.mutate': (params, context) => mutateGh(params, context.signal),
+      'snapshot.capture': (params, context) => captureFileSnapshot(params.path, context.signal),
+      'snapshot.hash': async (params, context) => ({
         hash: await hashFileAtPath(params.path, context.signal),
-      })),
-      handler('snapshot.revert', (params, context) =>
-        revertRuntimeSnapshots(params, context.signal)
-      ),
-      handler('workspace.browse', (params, context) => browseWorkspace(params, context.signal)),
-      handler('workspace.validate', (params) =>
-        validateWorkdir(params.path, { requireAbsolute: params.requireAbsolute })
-      ),
-      handler('workspace.resolve-contained', (params) => resolveContainedWorkspacePath(params)),
-      handler('mcp.connect', (params, context) => mcp.connect(params, context)),
-      handler('mcp.list-tools', (params) => mcp.listTools(params)),
-      handler('mcp.call-tool', (params, context) => mcp.callTool(params, context)),
-      handler('mcp.list-resources', (params) => mcp.listResources(params)),
-      handler('mcp.read-resource', (params) => mcp.readResource(params)),
-      handler('mcp.list-prompts', (params) => mcp.listPrompts(params)),
-      handler('mcp.get-prompt', (params) => mcp.getPrompt(params)),
-      handler('mcp.elicit-response', (params) => mcp.respondToElicitation(params)),
-      handler('mcp.disconnect', (params) => mcp.disconnect(params)),
-      handler('external-agent.discover', (params, context) =>
-        externalAgents.discover(params, context.signal)
-      ),
-      handler('external-agent.open', (params, context) =>
-        externalAgents.open(params, context.signal)
-      ),
-      handler('external-agent.turn', (params) => externalAgents.turn(params)),
-      handler('external-agent.respond', (params) => externalAgents.respond(params)),
-      handler('external-agent.steer', (params) => externalAgents.steer(params)),
-      handler('external-agent.start-review', (params, context) =>
-        externalAgents.startReview(params, context.signal)
-      ),
-      handler('external-agent.cancel', (params) => externalAgents.cancel(params)),
-      handler('external-agent.close', (params) => externalAgents.closeSession(params)),
-      handler('external-agent.list-sessions', (params, context) =>
-        externalAgents.listSessions(params, context.signal)
-      ),
-      handler('external-agent.refresh-account-usage', (params, context) =>
-        externalAgents.refreshAccountUsage(params, context.signal)
-      ),
-      handler('probing.runtimes', (params, context) =>
-        probingService.probeRuntimes(params, context.signal)
-      ),
-      handler('probing.version-managers', (params, context) =>
-        probingService.probeVersionManagers(params, context.signal)
-      ),
-      handler('probing.agent-clis', (params, context) =>
-        probingService.probeAgentClis(params, context.signal)
-      ),
-      handler('install.run', (params) => install.run(params)),
-      handler('install.cancel', (params) => install.cancel(params)),
-      handler('terminal.open', (params) => terminal.open(params)),
-      handler('terminal.attach', (params) => terminal.attach(params)),
-      handler('terminal.detach', (params) => terminal.detach(params)),
-      handler('terminal.write', (params) => terminal.write(params)),
-      handler('terminal.resize', (params) => terminal.resize(params)),
-      handler('terminal.ack', (params) => terminal.ack(params)),
-      handler('terminal.close', (params) => terminal.closeSession(params)),
-      handler('terminal.list', () => terminal.list()),
-      handler('library.scan', (params, context) => libraryService.scan(params, context.signal)),
-      handler('library.read', (params) => libraryService.read(params)),
-      handler('library.read-tree', (params, context) =>
-        libraryService.readTree(params, context.signal)
-      ),
-      handler('library.locations', (params) => libraryService.locations(params)),
-      handler('library.settings-sources', (params) => libraryService.settingsSources(params)),
-      handler('library.apply', (params, context) => libraryService.apply(params, context.signal)),
-      handler('library.remove', (params, context) => libraryService.remove(params, context.signal)),
-      handler('library.undo', (params, context) => libraryService.undo(params, context.signal)),
-      handler('library.backups', (params) => libraryService.backups(params)),
-      handler('library.gc', (params) => libraryService.gc(params)),
-      handler('runtime.health', () =>
+      }),
+      'snapshot.revert': (params, context) => revertRuntimeSnapshots(params, context.signal),
+      'workspace.browse': (params, context) => browseWorkspace(params, context.signal),
+      'workspace.validate': (params) =>
+        validateWorkdir(params.path, { requireAbsolute: params.requireAbsolute }),
+      'workspace.resolve-contained': (params) => resolveContainedWorkspacePath(params),
+      'mcp.connect': (params, context) => mcp.connect(params, context),
+      'mcp.list-tools': (params) => mcp.listTools(params),
+      'mcp.call-tool': (params, context) => mcp.callTool(params, context),
+      'mcp.list-resources': (params) => mcp.listResources(params),
+      'mcp.read-resource': (params) => mcp.readResource(params),
+      'mcp.list-prompts': (params) => mcp.listPrompts(params),
+      'mcp.get-prompt': (params) => mcp.getPrompt(params),
+      'mcp.elicit-response': (params) => mcp.respondToElicitation(params),
+      'mcp.disconnect': (params) => mcp.disconnect(params),
+      'external-agent.discover': (params, context) =>
+        externalAgents.discover(params, context.signal),
+      'external-agent.open': (params, context) => externalAgents.open(params, context.signal),
+      'external-agent.turn': (params) => externalAgents.turn(params),
+      'external-agent.respond': (params) => externalAgents.respond(params),
+      'external-agent.steer': (params) => externalAgents.steer(params),
+      'external-agent.start-review': (params, context) =>
+        externalAgents.startReview(params, context.signal),
+      'external-agent.cancel': (params) => externalAgents.cancel(params),
+      'external-agent.close': (params) => externalAgents.closeSession(params),
+      'external-agent.list-sessions': (params, context) =>
+        externalAgents.listSessions(params, context.signal),
+      'external-agent.refresh-account-usage': (params, context) =>
+        externalAgents.refreshAccountUsage(params, context.signal),
+      'probing.runtimes': (params, context) => probingService.probeRuntimes(params, context.signal),
+      'probing.version-managers': (params, context) =>
+        probingService.probeVersionManagers(params, context.signal),
+      'probing.agent-clis': (params, context) =>
+        probingService.probeAgentClis(params, context.signal),
+      'install.run': (params) => install.run(params),
+      'install.cancel': (params) => install.cancel(params),
+      'terminal.open': (params) => terminal.open(params),
+      'terminal.attach': (params) => terminal.attach(params),
+      'terminal.detach': (params) => terminal.detach(params),
+      'terminal.write': (params) => terminal.write(params),
+      'terminal.resize': (params) => terminal.resize(params),
+      'terminal.ack': (params) => terminal.ack(params),
+      'terminal.close': (params) => terminal.closeSession(params),
+      'terminal.list': () => terminal.list(),
+      'library.scan': (params, context) => libraryService.scan(params, context.signal),
+      'library.read': (params) => libraryService.read(params),
+      'library.read-tree': (params, context) => libraryService.readTree(params, context.signal),
+      'library.locations': (params) => libraryService.locations(params),
+      'library.settings-sources': (params) => libraryService.settingsSources(params),
+      'library.apply': (params, context) => libraryService.apply(params, context.signal),
+      'library.remove': (params, context) => libraryService.remove(params, context.signal),
+      'library.undo': (params, context) => libraryService.undo(params, context.signal),
+      'library.backups': (params) => libraryService.backups(params),
+      'library.gc': (params) => libraryService.gc(params),
+      'runtime.health': () =>
         collectRuntimeHealth({
           runtimeVersion: options.runtimeVersion,
           ...(options.slot ? { slot: options.slot } : {}),
@@ -215,12 +179,11 @@ export function createRuntimeMethodHandlers(
               ? { identityIsolation: options.externalAgents.identityIsolation }
               : {}),
           },
-        })
-      ),
-      handler('runtime.update.begin', (params) => update.begin(params)),
-      handler('runtime.update.chunk', (params) => update.chunk(params)),
-      handler('runtime.update.commit', (params) => update.commit(params)),
-    ]),
+        }),
+      'runtime.update.begin': (params) => update.begin(params),
+      'runtime.update.chunk': (params) => update.chunk(params),
+      'runtime.update.commit': (params) => update.commit(params),
+    },
     updateActive: () => update.active,
     externalAgentRegistry,
     close: async () => {
@@ -249,29 +212,4 @@ export function createRuntimeMethodHandlers(
       }
     },
   };
-}
-
-function handler<K extends RuntimeMethod>(
-  method: K,
-  execute: (
-    params: RuntimeMethodMap[K]['params'],
-    context: RuntimeHandlerContext
-  ) => Promise<RuntimeMethodMap[K]['result']>
-): readonly [K, RuntimeMethodHandler] {
-  return [
-    method,
-    (params, context) => {
-      assertParamsObject(method, params);
-      return execute(params as RuntimeMethodMap[K]['params'], context);
-    },
-  ];
-}
-
-function assertParamsObject(method: string, params: unknown): asserts params is object {
-  if (typeof params === 'object' && params !== null && !Array.isArray(params)) return;
-  // A bare TypeError reaches the client as an unclassified INTERNAL error;
-  // errorPayloadFor only forwards `kind` for RuntimeServiceError instances.
-  throw new RuntimeToolArgumentError(
-    `Runtime method "${method}" requires an object params payload.`
-  );
 }

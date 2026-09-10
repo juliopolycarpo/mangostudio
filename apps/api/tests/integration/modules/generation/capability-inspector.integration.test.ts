@@ -14,9 +14,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   connectInProcessRuntime,
-  createLocalRuntimeManifest,
-  createRuntimeMethodHandlers,
-  RuntimeHost,
+  createLocalRuntimeHost,
+  legacyRuntimeHost,
 } from '@mangostudio/runtime';
 import { libraryLocationsFor, withLibraryLocations } from '@mangostudio/shared/app-settings';
 import { ChatCapabilitiesResponseSchema } from '@mangostudio/shared/capabilities';
@@ -191,17 +190,7 @@ async function withRuntimeConsent<T>(
       }),
     connectors: {
       'in-process': async (_definition, onUnavailable) => {
-        let host: RuntimeHost | undefined;
-        const registry = createRuntimeMethodHandlers({
-          runtimeVersion: 'test',
-          emit: (event) => host?.emit(event),
-        });
-        host = new RuntimeHost({
-          runtimeVersion: 'test',
-          manifest: createLocalRuntimeManifest(allow),
-          handlers: registry.handlers,
-          onClose: () => void registry.close(),
-        });
+        const host = legacyRuntimeHost(createLocalRuntimeHost({ runtimeVersion: 'test', allow }));
         const connection = await connectInProcessRuntime(host, { hubVersion: 'test' });
         return {
           client: new RuntimeClient(connection.client, onUnavailable),

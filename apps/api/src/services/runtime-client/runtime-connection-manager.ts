@@ -4,6 +4,7 @@ import {
   createSingleUserHostExternalAgentIsolation,
   createSlotConsentSource,
   type InProcessRuntimeConnection,
+  legacyRuntimeHost,
   RuntimeRemoteError,
 } from '@mangostudio/runtime';
 import type {
@@ -1146,17 +1147,19 @@ async function connectLocalRuntime(
   // being able to narrow it. Absence resolves to full, so the default is
   // unchanged and no install has to have run.
   const [probe] = (await probeRuntimeSlots()).filter((slot) => slot.slot === 'host');
-  const host = createLocalRuntimeHost({
-    runtimeVersion: version,
-    externalAgents: {
-      authorizeWorkspace: options.authorizeWorkspace,
-      ...(options.identityIsolation ? { identityIsolation: options.identityIsolation } : {}),
-    },
-    consent: createSlotConsentSource({
-      slot: 'host',
-      ...(probe && !probe.error ? { initial: probe.config.allow } : {}),
-    }),
-  });
+  const host = legacyRuntimeHost(
+    createLocalRuntimeHost({
+      runtimeVersion: version,
+      externalAgents: {
+        authorizeWorkspace: options.authorizeWorkspace,
+        ...(options.identityIsolation ? { identityIsolation: options.identityIsolation } : {}),
+      },
+      consent: createSlotConsentSource({
+        slot: 'host',
+        ...(probe && !probe.error ? { initial: probe.config.allow } : {}),
+      }),
+    })
+  );
   const connection: InProcessRuntimeConnection = await connectInProcessRuntime(host, {
     hubVersion: version,
   });

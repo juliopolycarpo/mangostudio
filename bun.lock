@@ -103,6 +103,7 @@
       "name": "@mangostudio/runtime",
       "version": "0.1.1",
       "dependencies": {
+        "@mangostudio/protocol": "^0.1.0",
         "@mangostudio/shared": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.30.0",
         "smol-toml": "^1.7.0",

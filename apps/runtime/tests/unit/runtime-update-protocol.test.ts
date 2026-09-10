@@ -7,6 +7,7 @@ import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import {
   connectInProcessRuntime,
   createLocalRuntimeHost,
+  legacyRuntimeHost,
   RuntimeHost,
   type RuntimeMethodHandler,
 } from '../../src';
@@ -35,19 +36,21 @@ function beginParams() {
 describe('runtime update protocol policy', () => {
   it('refuses before staging when the machine denied allow.update', async () => {
     const env = await isolatedEnv();
-    const host = createLocalRuntimeHost({
-      runtimeVersion: '1.0.0',
-      allow: { ...RUNTIME_CONSENT_PRESETS.full, update: false },
-      slot: 'remote',
-      update: { env },
-    });
+    const host = legacyRuntimeHost(
+      createLocalRuntimeHost({
+        runtimeVersion: '1.0.0',
+        allow: { ...RUNTIME_CONSENT_PRESETS.full, update: false },
+        slot: 'remote',
+        update: { env },
+      })
+    );
     const connection = await connectInProcessRuntime(host, { hubVersion: '1.1.0' });
 
     try {
       await expect(
         connection.client.request('runtime.update.begin', beginParams())
       ).rejects.toMatchObject({
-        code: 'RUNTIME_DENIED',
+        code: 'DENIED',
       });
       expect(await stat(join(runtimeSlotDir('remote', env), '1.1.0')).catch(() => null)).toBeNull();
     } finally {
@@ -107,12 +110,14 @@ describe('runtime update protocol policy', () => {
 
   it('refuses ordinary calls while an update session is open', async () => {
     const env = await isolatedEnv();
-    const host = createLocalRuntimeHost({
-      runtimeVersion: '1.0.0',
-      allow: RUNTIME_CONSENT_PRESETS.full,
-      slot: 'remote',
-      update: { env },
-    });
+    const host = legacyRuntimeHost(
+      createLocalRuntimeHost({
+        runtimeVersion: '1.0.0',
+        allow: RUNTIME_CONSENT_PRESETS.full,
+        slot: 'remote',
+        update: { env },
+      })
+    );
     const connection = await connectInProcessRuntime(host, { hubVersion: '1.1.0' });
 
     try {

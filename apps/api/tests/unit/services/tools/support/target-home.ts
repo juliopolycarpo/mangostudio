@@ -2,6 +2,7 @@ import {
   connectInProcessRuntime,
   createLocalRuntimeManifest,
   createRuntimeMethodHandlers,
+  legacyRuntimeHandlerMap,
   RuntimeHost,
 } from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
@@ -44,7 +45,7 @@ export async function withTargetHome<T>(home: string, body: () => Promise<T>): P
         host = new RuntimeHost({
           runtimeVersion: VERSION,
           manifest: { ...createLocalRuntimeManifest(), homeDir: home },
-          handlers: registry.handlers,
+          handlers: legacyRuntimeHandlerMap(registry.handlers),
           onClose: () => void registry.close(),
         });
         const connection = await connectInProcessRuntime(host, { hubVersion: VERSION });

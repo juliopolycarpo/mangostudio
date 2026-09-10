@@ -8,6 +8,8 @@ import {
   createLocalRuntimeHost,
   createLocalRuntimeManifest,
   createRuntimeMethodHandlers,
+  legacyRuntimeHandlerMap,
+  legacyRuntimeHost,
   RuntimeHost,
 } from '@mangostudio/runtime';
 import type {
@@ -127,11 +129,10 @@ function createProvisionedRuntimeHost(
     ...(options.slot ? { slot: options.slot } : {}),
     ...(options.update ? { update: options.update } : {}),
   });
-  const health = registry.handlers.get('runtime.health');
-  if (!health) throw new Error('runtime.health handler is missing');
-  const handlers = new Map(registry.handlers);
+  const health = registry.handlers['runtime.health'];
+  const handlers = new Map(legacyRuntimeHandlerMap(registry.handlers));
   handlers.set('runtime.health', async (params, context) => {
-    const report = (await health(params, context)) as RuntimeHealthReport;
+    const report = (await health(params as never, context)) as RuntimeHealthReport;
     const { platformId: _omitted, ...withoutPlatformId } = report;
     return {
       ...(stripPlatformId ? withoutPlatformId : report),
@@ -145,7 +146,6 @@ function createProvisionedRuntimeHost(
     handlers,
     isUpdateActive: registry.updateActive,
     onClose: () => void registry.close(),
-    ...(options.protocolVersion ? { protocolVersion: options.protocolVersion } : {}),
   });
   return host;
 }
@@ -723,7 +723,9 @@ describe('environment entity routes', () => {
 
   it('keeps a connected WSL upgrade on the out-of-band provisioner path', async () => {
     let ensured = false;
-    const host = createLocalRuntimeHost({ runtimeVersion: '0.0.1-legacy', slot: 'wsl' });
+    const host = legacyRuntimeHost(
+      createLocalRuntimeHost({ runtimeVersion: '0.0.1-legacy', slot: 'wsl' })
+    );
     const { app, repository, manager } = createTestApp(
       {
         wsl: async (_definition, onUnavailable) => {

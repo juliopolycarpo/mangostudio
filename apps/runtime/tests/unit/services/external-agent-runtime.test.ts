@@ -4,6 +4,7 @@ import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import {
   connectInProcessRuntime,
   createLocalRuntimeHost,
+  legacyRuntimeHost,
   RUNTIME_EXTERNAL_AGENT_TOPIC,
 } from '../../../src';
 import { FakeExternalAgentAdapter } from '../../support/fake-external-agent-adapter';
@@ -14,15 +15,17 @@ describe('external-agent runtime protocol wiring', () => {
       events: [{ type: 'text_delta', text: 'from fixture' }, { type: 'completed' }],
     });
     const workspacePath = await realpath(import.meta.dir);
-    const host = createLocalRuntimeHost({
-      runtimeVersion: 'runtime-test',
-      allow: RUNTIME_CONSENT_PRESETS.full,
-      externalAgents: {
-        adapters: [adapter],
-        authorizeWorkspace: () => true,
-        resolveExecutable: async () => ({ path: process.execPath }),
-      },
-    });
+    const host = legacyRuntimeHost(
+      createLocalRuntimeHost({
+        runtimeVersion: 'runtime-test',
+        allow: RUNTIME_CONSENT_PRESETS.full,
+        externalAgents: {
+          adapters: [adapter],
+          authorizeWorkspace: () => true,
+          resolveExecutable: async () => ({ path: process.execPath }),
+        },
+      })
+    );
     const connection = await connectInProcessRuntime(host, {
       hubVersion: 'hub-test',
       validateFrames: true,

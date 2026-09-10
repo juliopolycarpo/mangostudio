@@ -4,6 +4,7 @@ import {
   createLocalRuntimeHost,
   createSlotConsentSource,
   type InProcessRuntimeConnection,
+  legacyRuntimeHost,
 } from '@mangostudio/runtime';
 import {
   decodeTerminalServerMessage,
@@ -472,10 +473,12 @@ describe('terminal socket relay', () => {
  * with a stated reason rather than letting that surface as a failure.
  */
 async function probeLocalTerminalSupport(): Promise<{ ok: boolean; reason: string }> {
-  const host = createLocalRuntimeHost({
-    runtimeVersion: 'terminal-probe',
-    consent: createSlotConsentSource({ slot: 'host' }),
-  });
+  const host = legacyRuntimeHost(
+    createLocalRuntimeHost({
+      runtimeVersion: 'terminal-probe',
+      consent: createSlotConsentSource({ slot: 'host' }),
+    })
+  );
   let connection: InProcessRuntimeConnection | undefined;
   try {
     connection = await connectInProcessRuntime(host, { hubVersion: 'hub-test' });

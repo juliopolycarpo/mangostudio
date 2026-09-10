@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  CONSENT_DENIED_KIND,
   connectInProcessRuntime,
   RuntimeConsentDeniedError,
   RuntimeHost,
   type RuntimeMethodHandler,
   RuntimeServiceError,
 } from '@mangostudio/runtime';
+import { CONSENT_DENIED_KIND } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';

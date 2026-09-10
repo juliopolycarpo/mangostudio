@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { RuntimeEventInput } from '../../../../src/host';
+import type { EventInput } from '@mangostudio/protocol';
 import type { RuntimeTerminalOutputEvent } from '../../../../src/methods';
 import { isShellAvailable } from '../../../../src/services/shell';
 import { supportsPty } from '../../../../src/services/terminal/pty';
@@ -23,7 +23,7 @@ describe('createTerminalService over a real pty', () => {
     async () => {
       const frames: RuntimeTerminalOutputEvent[] = [];
       const service = createTerminalService({
-        emit: (event: RuntimeEventInput) => {
+        emit: (event: EventInput) => {
           frames.push(event.payload as RuntimeTerminalOutputEvent);
         },
       });

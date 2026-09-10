@@ -40,6 +40,7 @@ import {
 } from '@mangostudio/shared/runtime-protocol';
 import {
   createLocalRuntimeHost,
+  legacyRuntimeHost,
   RuntimeHost,
   type RuntimeMethodHandler,
   type RuntimeProtocolClient,
@@ -281,11 +282,13 @@ export function itBehavesLikeARuntimeTransport(fixture: ConformanceFixture): voi
     const env = { MANGO_HOME: mangoHome };
     const bytes = new Uint8Array(256 * 1024).fill(0xa5);
     const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
-    const host = createLocalRuntimeHost({
-      runtimeVersion: '1.0.0',
-      allow: RUNTIME_CONSENT_PRESETS.full,
-      update: { env },
-    });
+    const host = legacyRuntimeHost(
+      createLocalRuntimeHost({
+        runtimeVersion: '1.0.0',
+        allow: RUNTIME_CONSENT_PRESETS.full,
+        update: { env },
+      })
+    );
     const connection = await fixture.connect(host);
 
     try {

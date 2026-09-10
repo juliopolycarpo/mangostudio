@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { homedir } from 'node:os';
+import type { EventInput } from '@mangostudio/protocol';
 import type { RuntimeShellKind } from '@mangostudio/shared/runtime-protocol';
-import type { RuntimeEventInput } from '../../../../src/host';
 import { isShellAvailable } from '../../../../src/services/shell';
 import type { SpawnEnvFs } from '../../../../src/services/spawn-env';
 import { TerminalNotFoundError } from '../../../../src/services/terminal/errors';
@@ -29,7 +29,7 @@ function createService(
   } = {}
 ) {
   const port = overrides.port ?? new FakePtyPort();
-  const events: RuntimeEventInput[] = [];
+  const events: EventInput[] = [];
   const service = createTerminalService({
     emit: (event) => events.push(event),
     deps: {

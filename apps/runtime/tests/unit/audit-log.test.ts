@@ -15,7 +15,7 @@ import {
   summarizeAuditArgs,
 } from '../../src/audit-log';
 import { staticConsentSource } from '../../src/consent-source';
-import { RuntimeHost } from '../../src/host';
+import { legacyRuntimeHost, RuntimeHost } from '../../src/host';
 import { createLocalRuntimeHost } from '../../src/runtime';
 import { connectInProcessRuntime } from '../../src/transports/in-process';
 
@@ -387,11 +387,13 @@ describe('dispatch audit hook', () => {
       path,
       flushIntervalMs: 10_000,
     });
-    const host = createLocalRuntimeHost({
-      runtimeVersion: '0.0.0-test',
-      consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.readonly, 'remote'),
-      audit: sink,
-    });
+    const host = legacyRuntimeHost(
+      createLocalRuntimeHost({
+        runtimeVersion: '0.0.0-test',
+        consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.readonly, 'remote'),
+        audit: sink,
+      })
+    );
     const connection = await connectInProcessRuntime(host, {
       hubVersion: 'hub-test',
       hub: { host: 'desk', user: 'bob' },
@@ -404,7 +406,7 @@ describe('dispatch audit hook', () => {
           timeoutMs: 1_000,
           maxOutputBytes: 1_024,
         })
-      ).rejects.toMatchObject({ code: 'RUNTIME_DENIED' });
+      ).rejects.toMatchObject({ code: 'DENIED' });
       await sink.flush();
       const denied = await readRuntimeAuditLog({ path, deniedOnly: true });
       expect(denied).toHaveLength(1);
@@ -412,7 +414,7 @@ describe('dispatch audit hook', () => {
         method: 'shell.run',
         outcome: 'denied',
         capability: 'shell',
-        code: 'RUNTIME_DENIED',
+        code: 'DENIED',
         hub: 'bob@desk',
       });
     } finally {
@@ -431,11 +433,13 @@ describe('dispatch audit hook', () => {
       path,
       flushIntervalMs: 10_000,
     });
-    const host = createLocalRuntimeHost({
-      runtimeVersion: '0.0.0-test',
-      consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'wsl'),
-      audit: sink,
-    });
+    const host = legacyRuntimeHost(
+      createLocalRuntimeHost({
+        runtimeVersion: '0.0.0-test',
+        consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'wsl'),
+        audit: sink,
+      })
+    );
     const connection = await connectInProcessRuntime(host, {
       hubVersion: 'hub-test',
       hub: null,
@@ -461,11 +465,13 @@ describe('dispatch audit hook', () => {
       path,
       flushIntervalMs: 10_000,
     });
-    const host = createLocalRuntimeHost({
-      runtimeVersion: '0.0.0-test',
-      consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'remote'),
-      audit: sink,
-    });
+    const host = legacyRuntimeHost(
+      createLocalRuntimeHost({
+        runtimeVersion: '0.0.0-test',
+        consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'remote'),
+        audit: sink,
+      })
+    );
     const connection = await connectInProcessRuntime(host, {
       hubVersion: 'hub-test',
       hub: { host: 'desk', user: 'bob' },

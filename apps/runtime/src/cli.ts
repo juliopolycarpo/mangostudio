@@ -31,6 +31,7 @@ import {
   type RuntimeDoctorFinding,
   worstSeverity,
 } from './health';
+import { legacyRuntimeHost } from './host';
 import { createLocalRuntimeHost, createSlotRuntimeHost } from './runtime';
 import {
   bootstrapServeToken,
@@ -589,13 +590,15 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
       hubUrl,
       token,
       createHost: () =>
-        createLocalRuntimeHost({
-          runtimeVersion,
-          consent: createSlotConsentSource({ slot: PAIRED_SLOT, initial: consent.allow }),
-          audit,
-          externalAgents: externalAgentIsolationOptions(),
-          ...supervisedRestart.hostOptions,
-        }),
+        legacyRuntimeHost(
+          createLocalRuntimeHost({
+            runtimeVersion,
+            consent: createSlotConsentSource({ slot: PAIRED_SLOT, initial: consent.allow }),
+            audit,
+            externalAgents: externalAgentIsolationOptions(),
+            ...supervisedRestart.hostOptions,
+          })
+        ),
       log,
       signal: controller.signal,
     });
@@ -674,13 +677,15 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
       listen,
       token: resolved.token,
       createHost: () =>
-        createLocalRuntimeHost({
-          runtimeVersion,
-          consent: createSlotConsentSource({ slot: PAIRED_SLOT, initial: consent.allow }),
-          audit,
-          externalAgents: externalAgentIsolationOptions(),
-          ...supervisedRestart.hostOptions,
-        }),
+        legacyRuntimeHost(
+          createLocalRuntimeHost({
+            runtimeVersion,
+            consent: createSlotConsentSource({ slot: PAIRED_SLOT, initial: consent.allow }),
+            audit,
+            externalAgents: externalAgentIsolationOptions(),
+            ...supervisedRestart.hostOptions,
+          })
+        ),
       log,
       signal: controller.signal,
     });
@@ -756,7 +761,7 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
     stop = resolve;
   });
   let updateCommitted = false;
-  const { host, audit } = await createSlotRuntimeHost({
+  const { host: definition, audit } = await createSlotRuntimeHost({
     runtimeVersion,
     consent: createSlotConsentSource({ slot: consent.slot, initial: consent.allow }),
     externalAgents: externalAgentIsolationOptions(),
@@ -775,6 +780,7 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
   // way an EOF would so in-flight handlers see their abort.
   const stopOnSignal = () => stop({ kind: 'eof' });
 
+  const host = legacyRuntimeHost(definition);
   host.attach(
     createStdioFramePort({ input: process.stdin, output: process.stdout, onClosed: stop })
   );

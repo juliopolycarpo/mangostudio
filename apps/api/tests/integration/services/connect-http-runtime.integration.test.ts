@@ -4,6 +4,7 @@ import {
   createLocalRuntimeHost,
   type ExternalAgentAdapter,
   type ExternalAgentTurnStream,
+  legacyRuntimeHost,
   serveRuntime,
 } from '@mangostudio/runtime';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
@@ -50,14 +51,16 @@ describe('Direct URL http runtime', () => {
       listen: { hostname: '127.0.0.1', port: 0 },
       token,
       createHost: () =>
-        createLocalRuntimeHost({
-          runtimeVersion: 'http-integration',
-          externalAgents: {
-            adapters: [adapter],
-            authorizeWorkspace: (path) => path === workspacePath,
-            resolveExecutable: async () => ({ path: process.execPath }),
-          },
-        }),
+        legacyRuntimeHost(
+          createLocalRuntimeHost({
+            runtimeVersion: 'http-integration',
+            externalAgents: {
+              adapters: [adapter],
+              authorizeWorkspace: (path) => path === workspacePath,
+              resolveExecutable: async () => ({ path: process.execPath }),
+            },
+          })
+        ),
     });
     handles.push(serve);
 
@@ -129,7 +132,8 @@ describe('Direct URL http runtime', () => {
     const serve = serveRuntime({
       listen: { hostname: '127.0.0.1', port: 0 },
       token: secondToken,
-      createHost: () => createLocalRuntimeHost({ runtimeVersion: 'http-rotation' }),
+      createHost: () =>
+        legacyRuntimeHost(createLocalRuntimeHost({ runtimeVersion: 'http-rotation' })),
     });
     handles.push(serve);
 

@@ -1,6 +1,5 @@
 export type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 export { RuntimeProtocolClient, type RuntimeRequestOptions } from './client';
-export { CONSENT_DENIED_KIND, RUNTIME_METHOD_CAPABILITIES } from './consent-gate';
 export {
   createSlotConsentSource,
   type RuntimeConsentSource,
@@ -15,9 +14,10 @@ export {
   RuntimeServiceManagementError,
   RuntimeToolArgumentError,
 } from './errors';
+export type { RuntimeHandlerContext, RuntimeHandlers } from './handlers';
 export {
-  type RuntimeEventInput,
-  type RuntimeHandlerContext,
+  legacyRuntimeHandlerMap,
+  legacyRuntimeHost,
   RuntimeHost,
   type RuntimeMethodHandler,
 } from './host';
@@ -292,6 +292,12 @@ export {
   WorkspaceContainmentError,
 } from './services/workspace';
 export { resolveWorkspacePath, WorkspacePathError } from './services/workspace-path';
+export {
+  createRuntimeEventRelay,
+  createRuntimeSession,
+  type RuntimeEventRelay,
+  type RuntimeHostDefinition,
+} from './session';
 export {
   createInProcessPortPair,
   type InProcessPortPair,

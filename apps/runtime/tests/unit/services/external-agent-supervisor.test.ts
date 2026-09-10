@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import type { EventInput } from '@mangostudio/protocol';
 import type {
   ExternalAgentEvent,
   ExternalAgentRuntimeDescriptor,
@@ -11,7 +12,6 @@ import {
   EXTERNAL_TURN_PAYLOAD_MAX_BYTES,
 } from '@mangostudio/shared/external-agents';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
-import type { RuntimeEventInput } from '../../../src/host';
 import { createLocalRuntimeManifest } from '../../../src/manifest';
 import type { ExternalAgentAdapter } from '../../../src/services/external-agents/adapter';
 import { ExternalAgentAdapterRegistry } from '../../../src/services/external-agents/registry';
@@ -70,7 +70,7 @@ async function fixture(
 ) {
   const adapter = options.adapter ?? new FakeExternalAgentAdapter();
   const registry = new ExternalAgentAdapterRegistry([adapter]);
-  const events: RuntimeEventInput[] = [];
+  const events: EventInput[] = [];
   const workspacePath = await realpath(import.meta.dir);
   const consent = options.consent ?? {
     current: () => RUNTIME_CONSENT_PRESETS.full,

@@ -21,6 +21,7 @@ import {
   connectInProcessRuntime,
   createLocalRuntimeManifest,
   createRuntimeMethodHandlers,
+  legacyRuntimeHandlerMap,
   RuntimeHost,
   type RuntimeMethodHandler,
 } from '@mangostudio/runtime';
@@ -79,7 +80,7 @@ function startRecordingRuntime(): void {
           emit: (event) => host?.emit(event),
         });
         const handlers = new Map<string, RuntimeMethodHandler>();
-        for (const [method, handle] of registry.handlers) {
+        for (const [method, handle] of legacyRuntimeHandlerMap(registry.handlers)) {
           handlers.set(method, (params, context) => {
             sent.set(method, params as { pathPolicy?: RuntimePathFilter });
             return handle(params, context);

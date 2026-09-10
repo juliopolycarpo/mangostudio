@@ -4,11 +4,8 @@ import {
   type RuntimeCapabilityAllow,
   type RuntimeSlot,
 } from '@mangostudio/shared/runtime-home';
-import type { RuntimeProtocolVersion } from '@mangostudio/shared/runtime-protocol';
 import { createRuntimeAuditSink, type RuntimeAuditSink } from './audit-log';
-import { gateHandlersByConsent } from './consent-gate';
 import { type RuntimeConsentSource, staticConsentSource } from './consent-source';
-import { RuntimeHost } from './host';
 import { createLocalRuntimeManifest } from './manifest';
 import { createRuntimeMethodHandlers } from './registry';
 import { readRuntimeSlotState } from './runtime-home';
@@ -16,10 +13,10 @@ import type { ExternalAgentAdapter } from './services/external-agents/adapter';
 import { createDefaultExternalAgentAdapters } from './services/external-agents/adapters';
 import type { ExternalAgentSupervisorOptions } from './services/external-agents/supervisor';
 import type { RuntimeUpdateServiceOptions } from './services/runtime-update';
+import { createRuntimeEventRelay, type RuntimeHostDefinition } from './session';
 
 export function createLocalRuntimeHost(options: {
   readonly runtimeVersion: string;
-  readonly protocolVersion?: RuntimeProtocolVersion;
   /**
    * What this machine's owner agreed a hub may do here. Defaults to a static
    * full grant on the `host` slot: a caller that has not read a config is one
@@ -51,14 +48,14 @@ export function createLocalRuntimeHost(options: {
     readonly adapters?: readonly ExternalAgentAdapter[];
     readonly identityIsolation?: ExternalIdentityIsolation;
   };
-}): RuntimeHost {
-  // The registry needs an emitter and the host needs the registry, so the
-  // emitter closes over the host rather than being handed it: events raised
-  // before `attach` have nowhere to go anyway, and `emit` already drops them.
-  let host: RuntimeHost | undefined;
+}): RuntimeHostDefinition {
   const consent =
     options.consent ??
     staticConsentSource(options.allow ?? RUNTIME_CONSENT_PRESETS.full, options.slot ?? 'host');
+  // The services publish through the relay rather than through a session: they
+  // are built once and every reconnect binds a new session to the same
+  // definition, so the emitter has to be the thing that moves.
+  const events = createRuntimeEventRelay();
   // A caller that named its own adapters gets exactly those — that is how the
   // test suites drive a fake peer. Everyone else gets the production set, so a
   // real runtime advertises what it can host without every call site listing it.
@@ -68,14 +65,14 @@ export function createLocalRuntimeHost(options: {
   };
   const registry = createRuntimeMethodHandlers({
     runtimeVersion: options.runtimeVersion,
-    emit: (event) => host?.emit(event),
+    emit: events.emit,
     slot: consent.slot,
     ...(options.update ? { update: options.update } : {}),
     consent,
     externalAgents,
   });
 
-  host = new RuntimeHost({
+  return {
     runtimeVersion: options.runtimeVersion,
     manifest: () =>
       createLocalRuntimeManifest(consent.current(), {
@@ -84,18 +81,18 @@ export function createLocalRuntimeHost(options: {
           ? { identityIsolation: options.externalAgents.identityIsolation }
           : {}),
       }),
-    handlers: gateHandlersByConsent(registry.handlers, consent),
+    handlers: registry.handlers,
+    consent,
     isUpdateActive: registry.updateActive,
     onClose: () => registry.close(),
-    ...(options.protocolVersion ? { protocolVersion: options.protocolVersion } : {}),
+    events,
     ...(options.audit ? { audit: options.audit } : {}),
-  });
-  return host;
+  };
 }
 
-/** A host and the sink it writes through, so the caller can drain it on exit. */
+/** A host definition and the sink it writes through, so the caller can drain it on exit. */
 export interface SlotRuntimeHost {
-  readonly host: RuntimeHost;
+  readonly host: RuntimeHostDefinition;
   readonly audit: RuntimeAuditSink;
 }
 
@@ -103,13 +100,12 @@ export interface SlotRuntimeHost {
  * Builds a host whose audit enablement follows the slot's `runtime.json`, so
  * `setup --audit` takes effect on the next process start.
  *
- * The sink comes back with the host because closing it is the caller's job:
- * `RuntimeHost.close()` only flushes, since one process-scoped sink outlives
+ * The sink comes back with the definition because closing it is the caller's
+ * job: a session close only flushes, since one process-scoped sink outlives
  * every reconnect and supersede that passes through it.
  */
 export async function createSlotRuntimeHost(options: {
   readonly runtimeVersion: string;
-  readonly protocolVersion?: RuntimeProtocolVersion;
   readonly consent: RuntimeConsentSource;
   readonly update?: Omit<RuntimeUpdateServiceOptions, 'slot'>;
   readonly env?: NodeJS.ProcessEnv;
@@ -133,7 +129,6 @@ export async function createSlotRuntimeHost(options: {
     runtimeVersion: options.runtimeVersion,
     consent: options.consent,
     audit,
-    ...(options.protocolVersion ? { protocolVersion: options.protocolVersion } : {}),
     ...(options.update ? { update: options.update } : {}),
     ...(options.externalAgents ? { externalAgents: options.externalAgents } : {}),
   });

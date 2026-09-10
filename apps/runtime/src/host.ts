@@ -1,3 +1,4 @@
+import { type EventInput, RemoteError } from '@mangostudio/protocol';
 import {
   assertRuntimeProtocolCompatible,
   RUNTIME_PROTOCOL_VERSION,
@@ -8,12 +9,11 @@ import {
   type RuntimeRequestFrame,
 } from '@mangostudio/shared/runtime-protocol';
 import type { RuntimeAuditOutcome, RuntimeAuditSink } from './audit-log';
+import { gateHandlers } from './consent-gate';
 import { RuntimeServiceError, RuntimeUpdateError } from './errors';
+import type { RuntimeHandlerContext, RuntimeHandlers } from './handlers';
+import type { RuntimeHostDefinition } from './session';
 import type { RuntimeFramePort } from './transport';
-
-export interface RuntimeHandlerContext {
-  readonly signal: AbortSignal;
-}
 
 export type RuntimeMethodHandler = (
   params: unknown,
@@ -46,15 +46,6 @@ export interface RuntimeHostOptions {
    * the slot has auditing off (the `host` default).
    */
   readonly audit?: RuntimeAuditSink;
-}
-
-export interface RuntimeEventInput {
-  readonly topic: string;
-  readonly payload: unknown;
-  /** Correlates one multi-frame stream; sequence numbers are per stream. */
-  readonly streamId?: string;
-  /** Marks the last frame of a stream. */
-  readonly end?: true;
 }
 
 /** Dispatches protocol requests and owns the cancellation controller per call. */
@@ -132,7 +123,7 @@ export class RuntimeHost {
    * counter, which is what keeps a long-lived runtime from accumulating one
    * entry per tool call it ever streamed.
    */
-  emit(event: RuntimeEventInput): void {
+  emit(event: EventInput): void {
     // Nothing application-level travels before the handshake settles: the hub
     // has no listeners attached yet and could not attribute the frame.
     if (!this.#ready) return;
@@ -356,6 +347,14 @@ function deferredHandshake(): ReturnType<typeof Promise.withResolvers<void>> {
 }
 
 function errorPayloadFor(error: unknown, signal: AbortSignal): RuntimeErrorPayload {
+  // The gate throws the SDK's class, whatever the transport underneath is.
+  if (error instanceof RemoteError) {
+    return {
+      code: error.code,
+      message: error.message,
+      ...(error.details !== undefined ? { details: { ...error.details } } : {}),
+    };
+  }
   // CANCELLED is the refusal the handler threw, not a flag on the signal. A
   // mutation that continued past its last refusal point can still fail, and
   // that failure (a partial patch, a disk error) is what the caller has to
@@ -409,4 +408,88 @@ function errorPayloadFor(error: unknown, signal: AbortSignal): RuntimeErrorPaylo
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
+}
+
+/**
+ * Serves a {@link RuntimeHostDefinition} over the hand-written framing.
+ *
+ * Temporary: stdio, the paired WebSocket and the Direct URL server still speak
+ * the old frames, and each moves to `createRuntimeSession` on its own commit.
+ * Until then this is the one place that bridges the two, so no transport has to
+ * know both.
+ *
+ * The definition's handlers are already gated — consent, update exclusivity and
+ * the audit line are decided there — so the host is given a sink that records
+ * nothing and an update flag that is always false. Recording in both places
+ * would write every stdio call to the audit log twice.
+ *
+ * @example
+ * const host = legacyRuntimeHost(createLocalRuntimeHost({ runtimeVersion }));
+ * host.attach(port);
+ * host.start();
+ */
+export function legacyRuntimeHost(definition: RuntimeHostDefinition): RuntimeHost {
+  const unbind = definition.events.bind((event) => {
+    host.emit(event);
+    return true;
+  });
+  const host = new RuntimeHost({
+    runtimeVersion: definition.runtimeVersion,
+    manifest: definition.manifest,
+    handlers: legacyRuntimeHandlerMap(
+      gateHandlers(definition.handlers, {
+        consent: definition.consent,
+        isUpdateActive: definition.isUpdateActive,
+        ...(definition.audit ? { audit: definition.audit } : {}),
+      })
+    ),
+    onClose: () => {
+      unbind();
+      return definition.onClose();
+    },
+    ...(definition.audit ? { audit: hubIdentityOnlySink(definition.audit) } : {}),
+  });
+  return host;
+}
+
+/**
+ * The contract handler object, as the old dispatch loop wants to see it.
+ *
+ * Also what the in-process test fixtures use while they still build a
+ * {@link RuntimeHost} by hand; it goes when they move to a session.
+ *
+ * @example
+ * new RuntimeHost({ handlers: legacyRuntimeHandlerMap(registry.handlers), ... });
+ */
+export function legacyRuntimeHandlerMap(
+  handlers: RuntimeHandlers
+): ReadonlyMap<string, RuntimeMethodHandler> {
+  return new Map(
+    Object.entries(handlers).map(([method, handle]) => [
+      method,
+      async (params, context) =>
+        await (handle as (params: unknown, context: RuntimeHandlerContext) => unknown)(
+          params,
+          context
+        ),
+    ])
+  );
+}
+/**
+ * The audit sink minus `record`.
+ *
+ * The gate is the only recorder from here on; the host still needs `setHub` so
+ * a line names the asking machine, and `flush` so a close drains what the gate
+ * buffered.
+ */
+function hubIdentityOnlySink(audit: RuntimeAuditSink): RuntimeAuditSink {
+  return {
+    enabled: audit.enabled,
+    path: audit.path,
+    lastError: () => audit.lastError(),
+    setHub: (hub) => audit.setHub(hub),
+    record: () => undefined,
+    flush: () => audit.flush(),
+    close: () => audit.close(),
+  };
 }
