@@ -167,6 +167,34 @@ describe('createLocalRuntimeManifest', () => {
     }
   );
 
+  it.skipIf(process.platform === 'win32')(
+    'spawns again when the live PATH resolves to a different binary',
+    async () => {
+      // A cache keyed on the tool name (or on a constant like `"gh"`) would
+      // still pass the once-per-manifest test above without ever proving the
+      // key is the resolved path. Staging a second `gh`, at a different
+      // directory with a different reported version, is the case that only
+      // passes if the cache really is keyed on that path.
+      const first = await stageCountingGh('path-a', 'echo "gh version 1.0.0 (2026-01-01)"');
+      try {
+        const manifestA = createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly);
+        expect(manifestA.gh).toEqual({ available: true, version: '1.0.0' });
+        expect(await first.invocations()).toBe(1);
+      } finally {
+        first.restore();
+      }
+
+      const second = await stageCountingGh('path-b', 'echo "gh version 2.0.0 (2026-02-02)"');
+      try {
+        const manifestB = createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly);
+        expect(manifestB.gh).toEqual({ available: true, version: '2.0.0' });
+        expect(await second.invocations()).toBe(1);
+      } finally {
+        second.restore();
+      }
+    }
+  );
+
   it.skipIf(process.platform === 'win32')('re-probes after a probe that was killed', async () => {
     // Remembering this answer would announce the CLI as absent for the whole
     // life of the runtime over one transient hang — worse than re-spawning,
