@@ -21,9 +21,9 @@ import { type SpawnedPeer, spawnPort } from '@mangostudio/protocol/spawn';
 import { sanitizeShellEnv } from '@mangostudio/runtime';
 import { createDiagnosticLogger } from '../../lib/logger';
 import type { RuntimeLaunchCommand } from '../../lib/runtime-paths';
+import { resolveHandshakeTimeoutMs } from './handshake-budget';
 import { type HubSession, openHubSession, type ProtocolHubSession } from './hub-session';
 
-const HANDSHAKE_TIMEOUT_MS = 5_000;
 /** Grace between end of stdin and SIGTERM when a runtime does not unwind on its own. */
 const TERMINATE_GRACE_MS = 2_000;
 /** Further wait after SIGTERM before the launcher escalates to SIGKILL. */
@@ -117,7 +117,7 @@ export async function spawnRuntimeChild(
   try {
     hub = await openHubSession(peer.port, {
       hubVersion: options.hubVersion,
-      handshakeTimeoutMs: options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS,
+      handshakeTimeoutMs: options.handshakeTimeoutMs ?? resolveHandshakeTimeoutMs(),
       // Defaults to on: the runtime ships inside the hub's own distribution, so
       // a binary from another release is a stale install rather than a peer to
       // negotiate with.

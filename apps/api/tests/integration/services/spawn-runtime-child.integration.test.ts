@@ -18,7 +18,8 @@ import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-ru
 
 const RUNTIME_ENTRY = join(import.meta.dir, '../../../../runtime/src/cli.ts');
 const hasRuntimeEntry = existsSync(RUNTIME_ENTRY);
-const hasPosixShell = process.platform !== 'win32';
+const isWindows = process.platform === 'win32';
+const hasPosixShell = !isWindows;
 const canSpawnRuntime = hasRuntimeEntry && hasPosixShell;
 
 const SHELL_DEFAULTS = { kind: 'bash', timeoutMs: 10_000, maxOutputBytes: 65_536 } as const;
@@ -263,18 +264,28 @@ describe('spawnRuntimeChild', () => {
   );
 
   it('fails with an actionable message when the binary is missing', async () => {
+    // No `handshakeTimeoutMs`, so this runs on whatever the default budget is —
+    // 30s on a Windows hub. The elapsed assertion is what that budget rests on:
+    // a child that never starts closes its port at once, `openHubSession`
+    // rejects on the closure, and the handshake timer never fires. Take the
+    // override away and this test is also the proof that raising the Windows
+    // budget did not make a broken install wait it out.
     const missing = join(workdir, 'no-such-runtime');
+    const startedAt = performance.now();
     const error = await spawnRuntimeChild({
       environmentId: 'devbox',
       launch: resolveRuntimeLaunchCommand(missing),
       hubVersion: 'hub-test',
-      handshakeTimeoutMs: 5_000,
       onClosed: () => undefined,
     }).catch((caught) => caught);
+    const elapsedMs = performance.now() - startedAt;
 
     expect(error.code).toBe('UNAVAILABLE');
     expect(error.message).toContain(missing);
     expect(error.message).toContain('Reinstall MangoStudio');
+    // Generous against a loaded runner, and still far below every budget in
+    // play: 5s on this runner, up to 30s on a Windows one.
+    expect(elapsedMs).toBeLessThan(2_000);
   }, 30_000);
 
   it.skipIf(!hasPosixShell)(
@@ -299,6 +310,38 @@ describe('spawnRuntimeChild', () => {
       const pid = Number(/pid=(\d+)/.exec(error.message)?.[1]);
       expect(Number.isInteger(pid)).toBe(true);
       await expect(whenProcessGone(pid)).resolves.toBeUndefined();
+    },
+    30_000
+  );
+
+  // Skipped on Windows, and not for want of a shell — the child is
+  // `process.execPath -e`. The assertion is the *non*-win32 default, so a
+  // `win32` runner would be asserting 30_000 and waiting 30s to do it.
+  it.skipIf(isWindows)(
+    'bounds a never-greeting child by the default budget when no timeout is given',
+    async () => {
+      // What this buys over the unit test is the wiring, not the number. 5_000
+      // is what the old literal said too — but mutate the resolver's default and
+      // this test moves with it, which it can only do if `spawnRuntimeChild`
+      // reads the resolver instead of a constant of its own. That, plus the unit
+      // test's `win32` case, leaves only `process.platform === 'win32'` unproven
+      // on a Windows host.
+      // ~5.5s on purpose — the 5s budget, the 250ms exit-observation grace and
+      // the terminate escalation — and well inside this file's 30s per-test
+      // timeout. It is the cost of the assertion, not slack to trim.
+      const child = 'setInterval(() => {}, 1_000);';
+      const error = (await rejectionOf(
+        spawnRuntimeChild({
+          environmentId: 'devbox',
+          launch: { command: process.execPath, args: ['-e', child] },
+          hubVersion: 'hub-test',
+          onClosed: () => undefined,
+        })
+      )) as RemoteError;
+
+      // `spawnRuntimeChild` rewrites the message but keeps the protocol error's
+      // details, which is where the budget it actually waited on is recorded.
+      expect(error.details?.timeoutMs).toBe(5_000);
     },
     30_000
   );
