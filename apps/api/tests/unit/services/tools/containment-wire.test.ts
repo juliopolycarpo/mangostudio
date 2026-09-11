@@ -17,15 +17,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  connectInProcessRuntime,
-  createLocalRuntimeManifest,
-  createRuntimeMethodHandlers,
-  RuntimeHost,
-  type RuntimeMethodHandler,
-} from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import type { RuntimePathFilter } from '@mangostudio/shared/runtime-protocol';
+import type { RuntimePathFilter } from '@mangostudio/shared/runtime-contract';
+import { connectInProcessRuntime } from '../../../../src/services/runtime-client/connect-in-process-runtime';
 import { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 import {
   RuntimeConnectionManager,
@@ -44,6 +38,7 @@ import { executeReplaceRange } from '../../../../src/services/tools/builtin/repl
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
 import { clearFileFreshness } from '../../../../src/services/tools/file-freshness';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { createLocalRuntimeDefinition } from '../../../support/local-runtime';
 
 const VERSION = 'test';
 
@@ -73,27 +68,15 @@ function startRecordingRuntime(): void {
       }),
     connectors: {
       'in-process': async (_definition, onUnavailable) => {
-        let host: RuntimeHost | undefined;
-        const registry = createRuntimeMethodHandlers({
+        const definition = createLocalRuntimeDefinition({
           runtimeVersion: VERSION,
-          emit: (event) => host?.emit(event),
-        });
-        const handlers = new Map<string, RuntimeMethodHandler>();
-        for (const [method, handle] of registry.handlers) {
-          handlers.set(method, (params, context) => {
+          recordCall: (method, params) => {
             sent.set(method, params as { pathPolicy?: RuntimePathFilter });
-            return handle(params, context);
-          });
-        }
-        host = new RuntimeHost({
-          runtimeVersion: VERSION,
-          manifest: createLocalRuntimeManifest(),
-          handlers,
-          onClose: () => void registry.close(),
+          },
         });
-        const connection = await connectInProcessRuntime(host, { hubVersion: VERSION });
+        const connection = await connectInProcessRuntime(definition, { hubVersion: VERSION });
         return {
-          client: new RuntimeClient(connection.client, onUnavailable),
+          client: new RuntimeClient(connection.hub, onUnavailable),
           close: () => connection.close(),
         };
       },

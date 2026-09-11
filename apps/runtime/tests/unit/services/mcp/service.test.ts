@@ -5,10 +5,11 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+import type { EventInput } from '@mangostudio/protocol';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import type { RuntimeEventInput, RuntimeMcpServerConfig } from '../../../../src/index';
+import type { RuntimeMcpServerConfig } from '../../../../src/index';
 import {
   createMcpService,
   McpServiceError,
@@ -49,7 +50,7 @@ function installFixture(create: () => Server): void {
   });
 }
 
-function createService(events: RuntimeEventInput[]) {
+function createService(events: EventInput[]) {
   return createMcpService({
     runtimeVersion: 'service-test',
     emit: (event) => events.push(event),
@@ -72,7 +73,7 @@ describe('runtime MCP service', () => {
   });
 
   it('publishes an elicitation event carrying the hub-minted tool call id', async () => {
-    const events: RuntimeEventInput[] = [];
+    const events: EventInput[] = [];
     const service = createService(events);
     installFixture(() =>
       createFixtureServer(async (server) => {
@@ -107,7 +108,7 @@ describe('runtime MCP service', () => {
   });
 
   it('strands nothing when the host tears the service down mid-question', async () => {
-    const events: RuntimeEventInput[] = [];
+    const events: EventInput[] = [];
     const service = createService(events);
     let elicited: Promise<unknown> | undefined;
     installFixture(() =>
@@ -151,7 +152,7 @@ describe('runtime MCP service', () => {
   });
 
   it('serializes concurrent connects so only one session remains', async () => {
-    const events: RuntimeEventInput[] = [];
+    const events: EventInput[] = [];
     const service = createService(events);
     let connects = 0;
     installFixture(() => {
@@ -177,7 +178,7 @@ describe('runtime MCP service', () => {
   });
 
   it('ignores a closed notification from a session that was already replaced', async () => {
-    const events: RuntimeEventInput[] = [];
+    const events: EventInput[] = [];
     const service = createService(events);
     const closedServers: Server[] = [];
     installFixture(() => {
@@ -321,7 +322,7 @@ async function settles(promise: Promise<unknown> | undefined): Promise<boolean> 
   return outcome === 'settled';
 }
 
-async function waitForEvent(events: RuntimeEventInput[], topic: string): Promise<unknown> {
+async function waitForEvent(events: EventInput[], topic: string): Promise<unknown> {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     const found = events.find((event) => event.topic === topic);

@@ -4,3 +4,5 @@ export * from './keys';
 export * from './kind-rules';
 export * from './locations';
 export * from './schemas';
+export * from './settings-sources';
+export * from './write-shapes';

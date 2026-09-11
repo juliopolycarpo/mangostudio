@@ -14,14 +14,10 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:te
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  connectInProcessRuntime,
-  createLocalRuntimeManifest,
-  createRuntimeMethodHandlers,
-  RuntimeHost,
-} from '@mangostudio/runtime';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
+import { connectInProcessRuntime } from '../../../../src/services/runtime-client/connect-in-process-runtime';
 import { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
+import { createLocalRuntimeDefinition } from '../../../support/local-runtime';
 
 const VERSION = 'test';
 
@@ -37,20 +33,10 @@ let previousLogGate: string | undefined;
 async function connect(
   reshapeManifest: (manifest: RuntimeCapabilityManifest) => RuntimeCapabilityManifest
 ): Promise<RuntimeClient> {
-  let host: RuntimeHost | undefined;
-  const registry = createRuntimeMethodHandlers({
-    runtimeVersion: VERSION,
-    emit: (event) => host?.emit(event),
-  });
-  host = new RuntimeHost({
-    runtimeVersion: VERSION,
-    manifest: reshapeManifest(createLocalRuntimeManifest()),
-    handlers: registry.handlers,
-    onClose: () => void registry.close(),
-  });
-  const connection = await connectInProcessRuntime(host, { hubVersion: VERSION });
+  const definition = createLocalRuntimeDefinition({ runtimeVersion: VERSION, reshapeManifest });
+  const connection = await connectInProcessRuntime(definition, { hubVersion: VERSION });
   close = () => connection.close();
-  return new RuntimeClient(connection.client, undefined, 'env-legacy');
+  return new RuntimeClient(connection.hub, undefined, 'env-legacy');
 }
 
 /** A peer built before the declaration existed: the key is simply absent. */

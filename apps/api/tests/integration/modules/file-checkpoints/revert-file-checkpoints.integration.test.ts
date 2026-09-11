@@ -9,7 +9,8 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { faker } from '@faker-js/faker';
-import { PathAccessError, RuntimeRemoteError } from '@mangostudio/runtime';
+import { RemoteError } from '@mangostudio/protocol';
+import { PathAccessError } from '@mangostudio/runtime';
 import { getDb } from '../../../../src/db/database';
 import { deleteChatUseCase } from '../../../../src/modules/chats/application/delete-chat';
 import { listChatFileCheckpointSummaries } from '../../../../src/modules/file-checkpoints/application/list-chat-checkpoints';
@@ -409,7 +410,7 @@ describe('revert containment against the chat workdir', () => {
     // 'remote-box' is not a row this user owns, so it cannot be reached — the
     // point is that the local file is left alone rather than restored by a
     // matching hash that belongs to a different host.
-    await expect(revert()).rejects.toBeInstanceOf(RuntimeRemoteError);
+    await expect(revert()).rejects.toBeInstanceOf(RemoteError);
     expect(await readText(path)).toBe('rewritten\n');
   });
 });

@@ -7,36 +7,39 @@
  * peer of the hub process: it gets a sanitized environment with no connector
  * keys or auth secret, and an argv assembled from discrete arguments rather
  * than a command string.
+ *
+ * The launcher itself is the SDK's: it observes and reports — the exit status,
+ * a bounded stderr tail, the termination sequence — and never guesses why a
+ * child failed. Turning what it observed into a sentence somebody can act on is
+ * this file's job, and a wrapper that knows more says so through
+ * `describeFailure`.
  */
 
-import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
-import {
-  createStdioFramePort,
-  HIDDEN_WINDOW,
-  RuntimeProtocolClient,
-  RuntimeRemoteError,
-  sanitizeShellEnv,
-} from '@mangostudio/runtime';
-import { RuntimeProtocolError } from '@mangostudio/shared/runtime-protocol';
-import { appendBoundedTail } from '../../lib/bounded-tail';
+import { RESERVED_ERROR_CODES, RemoteError, type SessionClosure } from '@mangostudio/protocol';
+import { type SpawnedPeer, spawnPort } from '@mangostudio/protocol/spawn';
+import { sanitizeShellEnv } from '@mangostudio/runtime';
 import { createDiagnosticLogger } from '../../lib/logger';
 import type { RuntimeLaunchCommand } from '../../lib/runtime-paths';
+import { type HubSession, openHubSession, type ProtocolHubSession } from './hub-session';
 
 const HANDSHAKE_TIMEOUT_MS = 5_000;
-/** Grace between SIGTERM and SIGKILL when a runtime does not unwind on its own. */
+/** Grace between end of stdin and SIGTERM when a runtime does not unwind on its own. */
+const TERMINATE_GRACE_MS = 2_000;
+/** Further wait after SIGTERM before the launcher escalates to SIGKILL. */
 const KILL_GRACE_MS = 2_000;
-/** Further wait after SIGKILL before a waiting caller stops expecting an exit. */
-const KILL_DEADLINE_MS = 2_000;
-const MAX_STDERR_CHARS = 16_384;
+const MAX_STDERR_BYTES = 16_384;
 const STDERR_EXCERPT_MAX_CHARS = 2_000;
 /** How long a failed launch waits for the child's exit status before reporting. */
 const EXIT_OBSERVATION_GRACE_MS = 250;
 
+/** Spawn failures the built-in explanation can tell apart, read off the stderr tail. */
+const SPAWN_ERROR_CODES = ['ENOENT', 'EACCES'] as const;
+
 const logger = createDiagnosticLogger('runtime-stdio');
 
 export interface SpawnedRuntimeConnection {
-  readonly client: RuntimeProtocolClient;
+  readonly hub: HubSession;
   /** Resolves once the child process is gone, so shutdown can wait for it. */
   close(): Promise<void>;
 }
@@ -80,40 +83,57 @@ export interface SpawnRuntimeChildOptions {
   readonly onClosed: () => void;
 }
 
-/** Starts a runtime child over stdio and resolves once its handshake completes. */
+/**
+ * Starts a runtime child over stdio and resolves once its handshake completes.
+ *
+ * @example
+ * const connection = await spawnRuntimeChild({
+ *   environmentId: 'devbox',
+ *   launch: resolveRuntimeLaunchCommand(),
+ *   hubVersion: getVersion(),
+ *   onClosed: () => manager.markUnavailable(),
+ * });
+ * await connection.hub.request('runtime.health', {});
+ */
 export async function spawnRuntimeChild(
   options: SpawnRuntimeChildOptions
 ): Promise<SpawnedRuntimeConnection> {
   const { launch } = options;
-  const child = spawn(launch.command, [...launch.args, '--stdio'], {
+  const peer = spawnPort({
+    argv: [launch.command, ...launch.args, '--stdio'],
     ...(options.cwd ? { cwd: options.cwd } : {}),
+    // The hub's own denylist rather than the SDK's allowlist: this child is a
+    // MangoStudio runtime, and the allowlist would strip the VERSION and
+    // MANGO_HOME it resolves its release and its slot from. What it must not
+    // inherit is a credential, and `sanitizeShellEnv` is the stricter of the
+    // two about those — it also catches values that carry one in a URL.
     env: sanitizeShellEnv({}, process.env),
-    stdio: 'pipe',
-    ...HIDDEN_WINDOW,
+    stderrTailBytes: MAX_STDERR_BYTES,
+    terminateGraceMs: TERMINATE_GRACE_MS,
+    killGraceMs: KILL_GRACE_MS,
   });
 
-  let stderrTail = '';
-  let spawnError: Error | null = null;
-  let exitCode: number | null = null;
-  child.stderr.on('data', (chunk: Buffer) => {
-    stderrTail = appendBoundedTail(stderrTail, chunk.toString('utf8'), MAX_STDERR_CHARS);
-  });
-  child.on('error', (error: Error) => {
-    spawnError = error;
-  });
-  // A wrapper's exit status is part of the diagnosis: a login shell reports a
-  // command it could not find as 127, which no message it prints guarantees.
-  const exitObserved = new Promise<void>((resolve) => {
-    child.once('exit', (code) => {
-      exitCode = code;
-      resolve();
+  let hub: ProtocolHubSession;
+  try {
+    hub = await openHubSession(peer.port, {
+      hubVersion: options.hubVersion,
+      handshakeTimeoutMs: options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS,
+      // Defaults to on: the runtime ships inside the hub's own distribution, so
+      // a binary from another release is a stale install rather than a peer to
+      // negotiate with.
+      requireMatchingRelease: options.requireMatchingRelease ?? true,
     });
-  });
-  // A write racing the child's exit surfaces as EPIPE on stdin. The closed port
-  // already reports the loss, so this only keeps the error from going uncaught.
-  child.stdin.on('error', () => undefined);
+  } catch (error) {
+    // No compensating terminate: `openHubSession` closes the port on the way
+    // out, and the launcher terminates the child whenever its port closes —
+    // including when the port closed on its own and took the session with it.
+    const failure = await observeLaunchFailure(peer, launch.command, error);
+    throw asRemoteFailure(
+      error,
+      options.describeFailure?.(failure) ?? describeLaunchFailure(failure, options.cwd)
+    );
+  }
 
-  let connected = false;
   let released = false;
   let exited: Promise<void> = Promise.resolve();
   const release = (notify: boolean, reason: string): Promise<void> => {
@@ -123,136 +143,170 @@ export async function spawnRuntimeChild(
       logger.warn('connection_lost', {
         environmentId: options.environmentId,
         reason,
-        stderr: excerpt(stderrTail),
+        stderr: excerpt(peer.stderrTail()),
       });
     }
-    // Closing the client ends the child's stdin, which is how a healthy runtime
-    // is asked to unwind; the kill covers one that will not.
-    client.close();
-    exited = terminate(child);
+    // Closing the session ends the child's stdin, which is how a healthy
+    // runtime is asked to unwind; the launcher's escalation covers one that
+    // will not.
+    hub.close();
+    exited = peer.terminate().then(() => undefined);
     if (notify) options.onClosed();
     return exited;
   };
-
-  const client = new RuntimeProtocolClient(
-    createStdioFramePort({
-      input: child.stdout,
-      output: child.stdin,
-      onClosed: (closure) =>
-        // A child that dies before the handshake is reported by the rejected
-        // connect attempt; only a connection the hub already handed out needs
-        // the loss pushed back to it.
-        release(
-          connected,
-          closure.kind === 'protocol-error' ? closure.error.message : 'The runtime pipe closed.'
-        ),
-    }),
-    {
-      hubVersion: options.hubVersion,
-      handshakeTimeoutMs: options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS,
-      // Defaults to on: the runtime ships inside the hub's own distribution, so
-      // a binary from another release is a stale install rather than a peer to
-      // negotiate with.
-      requireMatchingRelease: options.requireMatchingRelease ?? true,
-    }
-  );
-
-  try {
-    await client.waitUntilReady();
-  } catch (error) {
-    release(false, 'handshake failed');
-    // The child is nearly always gone already — a wrapper that could not start
-    // its target exits at once — but the pipe closing and `exit` race, and a
-    // describer reading the status before it lands would see nothing. `release`
-    // has just signalled anything still alive, so this settles quickly either
-    // way, and the report goes out on the grace when it does not.
-    await Promise.race([exitObserved, sleepMs(EXIT_OBSERVATION_GRACE_MS)]);
-    const failure: RuntimeLaunchFailure = {
-      command: launch.command,
-      stderr: stderrTail,
-      exitCode,
-      spawnErrorCode: (spawnError as { code?: string } | null)?.code,
-      error,
-    };
-    throw asRuntimeError(
-      error,
-      options.describeFailure?.(failure) ??
-        describeLaunchFailure({
-          command: launch.command,
-          error,
-          spawnError,
-          stderr: stderrTail,
-          ...(options.cwd ? { cwd: options.cwd } : {}),
-        })
-    );
-  }
-  connected = true;
+  // A child that dies before the handshake is reported by the rejected connect
+  // attempt above; only a connection the hub already handed out needs the loss
+  // pushed back to it.
+  hub.onClose((closure) => {
+    void release(true, describeSessionClosure(closure));
+  });
 
   return {
-    client,
+    hub,
     close: () => release(false, 'closed by the hub'),
   };
+}
+
+/**
+ * Everything a describer needs about a launch that never handshaked, read once
+ * the child has had a moment to report how it ended.
+ *
+ * The child is nearly always gone already — a wrapper that could not start its
+ * target exits at once — but the pipe closing and the exit race, and a describer
+ * reading the status before it lands would see nothing. The termination the
+ * caller has just started settles this quickly either way, and the report goes
+ * out on the grace when it does not.
+ *
+ * @example
+ * const failure = await observeLaunchFailure(peer, 'ssh', error);
+ * classifySshFailure({ stderr: failure.stderr, exitCode: failure.exitCode });
+ */
+async function observeLaunchFailure(
+  peer: SpawnedPeer,
+  command: string,
+  error: unknown
+): Promise<RuntimeLaunchFailure> {
+  const status = await settledWithin(peer.exited, EXIT_OBSERVATION_GRACE_MS);
+  const stderr = peer.stderrTail();
+  return {
+    command,
+    stderr,
+    exitCode: status?.code ?? null,
+    spawnErrorCode: spawnErrorCodeOf(peer, stderr),
+    error,
+  };
+}
+
+/**
+ * The `code` of a spawn error, when the command could not be started at all.
+ *
+ * `pid` is undefined exactly when no process was created, and the launcher puts
+ * the spawn error's message — which always names its code — in the stderr tail.
+ * Reading both is what keeps a remote shell that happens to print `ENOENT` from
+ * being mistaken for a wrapper the hub could not start.
+ *
+ * @example
+ * spawnErrorCodeOf(peer, 'spawn wsl.exe ENOENT'); // 'ENOENT' when peer.pid is undefined
+ */
+function spawnErrorCodeOf(peer: SpawnedPeer, stderrTail: string): string | undefined {
+  if (peer.pid !== undefined) return undefined;
+  return SPAWN_ERROR_CODES.find((code) => stderrTail.includes(code));
 }
 
 /**
  * Turns a launch failure into a message that names the next step. A missing
  * binary and a runtime that started but never answered need different fixes,
  * and the child's stderr is usually the only place the reason appears.
+ *
+ * @example
+ * describeLaunchFailure(failure, '/srv/project');
  */
-function describeLaunchFailure(context: {
-  readonly command: string;
-  readonly error: unknown;
-  readonly spawnError: Error | null;
-  readonly stderr: string;
-  readonly cwd?: string;
-}): string {
-  if (context.error instanceof RuntimeProtocolError) return context.error.message;
-
-  const spawnCode = (context.spawnError as { code?: string } | null)?.code;
+function describeLaunchFailure(failure: RuntimeLaunchFailure, cwd: string | undefined): string {
+  const spawnCode = failure.spawnErrorCode;
   // A working directory the target cannot enter fails the spawn with the same
   // codes a bad executable does, so blame it before the binary: telling someone
   // to reinstall over a mistyped cwd sends them to the wrong fix entirely.
-  if (
-    (spawnCode === 'ENOENT' || spawnCode === 'EACCES') &&
-    context.cwd &&
-    !isUsableDir(context.cwd)
-  ) {
-    return `The working directory ${context.cwd} configured on this environment is missing or not readable.`;
+  if (spawnCode !== undefined && cwd && !isUsableDir(cwd)) {
+    return `The working directory ${cwd} configured on this environment is missing or not readable.`;
   }
   if (spawnCode === 'ENOENT') {
-    return `The runtime binary was not found at ${context.command}. Reinstall MangoStudio so it ships beside the hub, or set a binary path on this environment.`;
+    return `The runtime binary was not found at ${failure.command}. Reinstall MangoStudio so it ships beside the hub, or set a binary path on this environment.`;
   }
   if (spawnCode === 'EACCES') {
-    return `The runtime binary at ${context.command} is not executable.`;
+    return `The runtime binary at ${failure.command} is not executable.`;
+  }
+  if (isReleaseMismatch(failure.error)) {
+    return `${failure.error.message} Reinstall MangoStudio so the hub and runtime come from the same release.`;
+  }
+  // A wire major nobody shares: refused by a runtime that did answer, so the
+  // protocol said what disagreed better than a closed pipe ever could.
+  if (
+    failure.error instanceof RemoteError &&
+    failure.error.code === RESERVED_ERROR_CODES.PROTOCOL_MISMATCH
+  ) {
+    return failure.error.message;
   }
 
-  const base = context.spawnError
-    ? `The runtime at ${context.command} could not be started: ${context.spawnError.message}`
-    : `The runtime at ${context.command} did not complete its handshake: ${
-        context.error instanceof Error ? context.error.message : String(context.error)
-      }`;
-  const tail = excerpt(context.stderr);
+  const base = `The runtime at ${failure.command} did not complete its handshake: ${
+    failure.error instanceof Error ? failure.error.message : String(failure.error)
+  }`;
+  const tail = excerpt(failure.stderr);
   return tail ? `${base}\nRuntime stderr:\n${tail}` : base;
+}
+
+/**
+ * True when the peer speaks this wire version but ships a different release.
+ *
+ * That check is the launcher's own — it asked for release equality because it
+ * installed the binary — so the remediation is the launcher's to add. A wire
+ * major nobody shares is a different failure with a different fix, and
+ * `openHubSession` names the two versions only for the release case.
+ *
+ * @example
+ * isReleaseMismatch(new RemoteError('PROTOCOL_MISMATCH', '…', { runtimeVersion: '0.1.0' }));
+ */
+function isReleaseMismatch(error: unknown): error is RemoteError {
+  return (
+    error instanceof RemoteError &&
+    error.code === RESERVED_ERROR_CODES.PROTOCOL_MISMATCH &&
+    typeof error.details?.runtimeVersion === 'string'
+  );
+}
+
+/** One sentence naming why a live session ended, for the connection-lost log. */
+function describeSessionClosure(closure: SessionClosure): string {
+  if (closure.error) return closure.error.message;
+  return closure.reason ?? 'The runtime pipe closed.';
 }
 
 /**
  * Keeps a typed protocol code (a version mismatch, say) so the environment's
  * status can say why rather than reporting a generic outage.
  */
-function asRuntimeError(error: unknown, message: string): RuntimeRemoteError {
-  const typed =
-    error instanceof RuntimeProtocolError || error instanceof RuntimeRemoteError ? error : null;
-  return new RuntimeRemoteError(typed?.code ?? 'RUNTIME_UNAVAILABLE', message, typed?.details);
+function asRemoteFailure(error: unknown, message: string): RemoteError {
+  const typed = error instanceof RemoteError ? error : null;
+  return new RemoteError(typed?.code ?? RESERVED_ERROR_CODES.UNAVAILABLE, message, typed?.details);
 }
 
 function excerpt(stderr: string): string {
   return stderr.trim().slice(-STDERR_EXCERPT_MAX_CHARS);
 }
 
-function sleepMs(ms: number): Promise<void> {
+/** The promise's value when it settles inside the grace, undefined when it does not. */
+function settledWithin<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
+    const grace = setTimeout(() => resolve(undefined), ms);
+    grace.unref?.();
+    void promise.then(
+      (value: T) => {
+        clearTimeout(grace);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(grace);
+        resolve(undefined);
+      }
+    );
   });
 }
 
@@ -262,35 +316,4 @@ function isUsableDir(path: string): boolean {
   } catch {
     return false;
   }
-}
-
-/**
- * Resolves once the child is actually gone, so shutdown can wait for it: the
- * escalation below only helps if the hub is still alive to run it, and a caller
- * that exits first leaves a runtime that ignored SIGTERM orphaned. Bounded, so
- * a child that cannot be killed at all delays the exit rather than blocking it.
- *
- * Windows has no POSIX signals, so `kill` there terminates the runtime itself
- * but not shell children it already spawned. Those are reaped by the runtime's
- * own cancellation path in the normal case; a hard kill can still leave them.
- */
-function terminate(child: ChildProcessWithoutNullStreams): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-
-  return new Promise<void>((resolve) => {
-    const finish = (): void => {
-      clearTimeout(escalation);
-      clearTimeout(giveUp);
-      child.off('exit', finish);
-      resolve();
-    };
-    const escalation = setTimeout(() => {
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-    }, KILL_GRACE_MS);
-    const giveUp = setTimeout(finish, KILL_GRACE_MS + KILL_DEADLINE_MS);
-    escalation.unref?.();
-    giveUp.unref?.();
-    child.once('exit', finish);
-    child.kill('SIGTERM');
-  });
 }

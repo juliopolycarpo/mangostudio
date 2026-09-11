@@ -1,16 +1,16 @@
 import { afterEach, describe, expect, it, mock, setSystemTime } from 'bun:test';
 import * as realChildProcess from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import type {
   EnvironmentConnectionState,
   EnvironmentTransportKind,
 } from '@mangostudio/shared/environments';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeHealthReport,
 } from '@mangostudio/shared/runtime-home';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { getDb } from '../../../src/db/database';
 import { getVersion } from '../../../src/lib/config';
 import type { EnvironmentStateTransition } from '../../../src/modules/environments/application/record-environment-activity';
@@ -328,7 +328,7 @@ describe('RuntimeConnectionManager', () => {
     expect(await manager.getClient('user-1', 'devbox')).toBe(secondClient);
   });
 
-  it('maps connector failures to RUNTIME_UNAVAILABLE without caching a rejection', async () => {
+  it('maps connector failures to UNAVAILABLE without caching a rejection', async () => {
     let attempts = 0;
     const connector: RuntimeEnvironmentConnector = () => {
       attempts += 1;
@@ -340,11 +340,11 @@ describe('RuntimeConnectionManager', () => {
     });
 
     const firstError = await manager.connect('user-1', 'devbox').catch((error) => error);
-    expect(firstError).toBeInstanceOf(RuntimeRemoteError);
-    expect(firstError.code).toBe('RUNTIME_UNAVAILABLE');
+    expect(firstError).toBeInstanceOf(RemoteError);
+    expect(firstError.code).toBe(RESERVED_ERROR_CODES.UNAVAILABLE);
     expect(manager.getStatus('user-1', 'devbox')).toEqual({
       state: 'error',
-      errorCode: 'RUNTIME_UNAVAILABLE',
+      errorCode: RESERVED_ERROR_CODES.UNAVAILABLE,
     });
 
     await manager.connect('user-1', 'devbox', { force: true }).catch(() => undefined);
@@ -352,14 +352,14 @@ describe('RuntimeConnectionManager', () => {
   });
 
   it('carries an ssh failure reason onto the status, where the card can act on it', async () => {
-    // Every ssh failure arrives as RUNTIME_UNAVAILABLE, so the code alone
-    // cannot tell "install a runtime there" from "trust the host key".
+    // Every ssh failure arrives as UNAVAILABLE, so the code alone cannot tell
+    // "install a runtime there" from "trust the host key".
     const manager = new RuntimeConnectionManager({
       resolveEnvironment: () => Promise.resolve(definition('ssh', { host: 'build-01' })),
       connectors: {
         ssh: () =>
           Promise.reject(
-            new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'no runtime there', {
+            new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'no runtime there', {
               sshFailureReason: 'runtime-missing',
             })
           ),
@@ -370,7 +370,7 @@ describe('RuntimeConnectionManager', () => {
 
     expect(manager.getStatus('user-1', 'devbox')).toEqual({
       state: 'error',
-      errorCode: 'RUNTIME_UNAVAILABLE',
+      errorCode: 'UNAVAILABLE',
       sshFailureReason: 'runtime-missing',
     });
   });
@@ -383,7 +383,9 @@ describe('RuntimeConnectionManager', () => {
       connectors: {
         ssh: () =>
           Promise.reject(
-            new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'nope', { sshFailureReason: 'nonsense' })
+            new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'nope', {
+              sshFailureReason: 'nonsense',
+            })
           ),
       },
     });
@@ -392,7 +394,7 @@ describe('RuntimeConnectionManager', () => {
 
     expect(manager.getStatus('user-1', 'devbox')).toEqual({
       state: 'error',
-      errorCode: 'RUNTIME_UNAVAILABLE',
+      errorCode: 'UNAVAILABLE',
     });
   });
 
@@ -414,7 +416,7 @@ describe('RuntimeConnectionManager', () => {
     // A tool call arriving right after the failure must not respawn a process
     // that just died; it fails fast with the same code callers already handle.
     const held = await manager.getClient('user-1', 'devbox').catch((error) => error);
-    expect(held.code).toBe('RUNTIME_UNAVAILABLE');
+    expect(held.code).toBe(RESERVED_ERROR_CODES.UNAVAILABLE);
     expect(attempts).toBe(1);
 
     advanceSeconds(2);
@@ -475,7 +477,7 @@ describe('RuntimeConnectionManager', () => {
       connectors: {
         stdio: () => {
           attempts += 1;
-          return Promise.reject(new RuntimeRemoteError('PROTOCOL_MISMATCH', 'stale runtime'));
+          return Promise.reject(new RemoteError('PROTOCOL_MISMATCH', 'stale runtime'));
         },
       },
     });
@@ -512,7 +514,7 @@ describe('RuntimeConnectionManager', () => {
     // so the environment reads as disconnected rather than broken.
     expect(manager.getStatus('user-1', 'devbox')).toEqual({
       state: 'disconnected',
-      errorCode: 'RUNTIME_UNAVAILABLE',
+      errorCode: RESERVED_ERROR_CODES.UNAVAILABLE,
       manifest: TEST_MANIFEST,
     });
     expect(closeCalls).toBe(1);
@@ -734,18 +736,18 @@ describe('RuntimeConnectionManager', () => {
     expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
   });
 
-  it('reports the runtime error code on the status while still throwing RUNTIME_UNAVAILABLE', async () => {
+  it('reports the runtime error code on the status while still throwing UNAVAILABLE', async () => {
     const manager = new RuntimeConnectionManager({
       resolveEnvironment: () => Promise.resolve(definition()),
       connectors: {
         stdio: () =>
-          Promise.reject(new RuntimeRemoteError('PROTOCOL_MISMATCH', 'hub is newer than runtime')),
+          Promise.reject(new RemoteError('PROTOCOL_MISMATCH', 'hub is newer than runtime')),
       },
     });
 
     const error = await manager.connect('user-1', 'devbox').catch((caught) => caught);
-    // Tool callers branch on RUNTIME_UNAVAILABLE, so the thrown code is fixed…
-    expect(error.code).toBe('RUNTIME_UNAVAILABLE');
+    // Tool callers branch on the unavailable code, so the thrown code is fixed…
+    expect(error.code).toBe(RESERVED_ERROR_CODES.UNAVAILABLE);
     // …while the card can still tell a version mismatch from an unreachable host.
     expect(manager.getStatus('user-1', 'devbox')).toEqual({
       state: 'error',
@@ -790,7 +792,7 @@ describe('RuntimeConnectionManager', () => {
     });
 
     const error = await manager.connect('user-1', 'devbox').catch((caught) => caught);
-    expect(error.code).toBe('RUNTIME_UNAVAILABLE');
+    expect(error.code).toBe(RESERVED_ERROR_CODES.UNAVAILABLE);
     expect(connectorCalled).toBe(false);
   });
 
@@ -818,7 +820,7 @@ describe('RuntimeConnectionManager', () => {
         connectContext()
       )
     ).rejects.toMatchObject({
-      code: 'RUNTIME_UNAVAILABLE',
+      code: RESERVED_ERROR_CODES.UNAVAILABLE,
       message: expect.stringContaining('reserved for the Local environment'),
     });
     const systemProbe = await connector(
@@ -1004,14 +1006,14 @@ describe('RuntimeConnectionManager', () => {
       manager.getClient('user-1', 'local').catch((error: unknown) => error),
     ]);
     const timedOut = {
-      code: 'RUNTIME_UNAVAILABLE',
+      code: RESERVED_ERROR_CODES.UNAVAILABLE,
       message: 'Connecting to environment "local" timed out after 25ms.',
     };
     expect(wedged).toMatchObject(timedOut);
     expect(joined).toMatchObject(timedOut);
     expect(manager.getStatus('user-1', 'local')).toMatchObject({
       state: 'error',
-      errorCode: 'RUNTIME_UNAVAILABLE',
+      errorCode: RESERVED_ERROR_CODES.UNAVAILABLE,
     });
 
     // The entry is evicted, not held: the next caller is answered by the
@@ -1162,7 +1164,7 @@ describe('RuntimeConnectionManager', () => {
 
   it('does not re-ask a peer that just failed to answer', async () => {
     const probe = healthProbe(TEST_MANIFEST, () =>
-      Promise.reject(new RuntimeRemoteError('TIMEOUT', 'no answer'))
+      Promise.reject(new RemoteError('TIMEOUT', 'no answer'))
     );
     const manager = new RuntimeConnectionManager({
       resolveEnvironment: () => Promise.resolve(definition()),
@@ -1252,8 +1254,8 @@ describe('connectWslRuntime', () => {
    * A `ChildProcess`-shaped `EventEmitter` that fails the way a spawn of a
    * missing executable does: an `error` event carrying `ENOENT`, followed by
    * the pipe closing with nothing said. `stdout.pause` and `stdin.write`/`end`
-   * are the minimum `createStdioFramePort` and `spawnRuntimeChild` need to
-   * tear the connection down without throwing on a missing method.
+   * are the minimum the SDK's launcher and `spawnRuntimeChild` need to tear the
+   * connection down without throwing on a missing method.
    */
   function enoentChild(): unknown {
     const stdout = Object.assign(new EventEmitter(), { pause: () => undefined });
@@ -1307,13 +1309,13 @@ describe('connectWslRuntime', () => {
       },
       () => undefined
     ).catch((caught: unknown) => caught);
-    const error = outcome as RuntimeRemoteError;
+    const error = outcome as RemoteError;
 
     // Before this fix, a missing wsl.exe surfaced as "The runtime binary was
     // not found at wsl.exe. Reinstall MangoStudio…" — true of a missing
     // sibling runtime binary, not of WSL itself being absent, and it sent the
     // user to the wrong fix.
-    expect(error).toBeInstanceOf(RuntimeRemoteError);
+    expect(error).toBeInstanceOf(RemoteError);
     expect(error.message).toContain('WSL could not be started');
     expect(error.message).not.toContain('Reinstall MangoStudio');
   });

@@ -15,7 +15,7 @@
  * silently truncated scrollback.
  */
 
-import type { RuntimeShellKind } from '@mangostudio/shared/runtime-protocol';
+import type { RuntimeShellKind } from '@mangostudio/shared/runtime-contract';
 import {
   TERMINAL_CHUNK_MAX_BYTES,
   TERMINAL_COLS_MAX,
@@ -69,7 +69,8 @@ export interface CreateTerminalSessionOptions {
    * as "the viewer is gone" rather than letting it escape into the PTY's own
    * data callback.
    */
-  readonly emit: (payload: RuntimeTerminalOutputEvent, end?: true) => void;
+  /** Publishes one output frame; `false` means no session is there to carry it. */
+  readonly emit: (payload: RuntimeTerminalOutputEvent, end?: true) => boolean;
 }
 
 /**
@@ -126,17 +127,21 @@ export function createTerminalSession(options: CreateTerminalSessionOptions): Te
   let status: RuntimeTerminalSessionStatus = 'running';
   let exit: { exitCode: number | null; signal: string | null } | null = null;
 
+  // The hub's session closed under us. Nobody is listening, so stop
+  // pretending there is: further pushes would go nowhere, and whatever is
+  // still parked has no destination.
+  const viewerGone = (): false => {
+    attached = false;
+    pending.clear();
+    return false;
+  };
+
   const safeEmit = (payload: RuntimeTerminalOutputEvent, end?: true): boolean => {
     try {
-      emit(payload, end);
-      return true;
+      // A closed session answers `false` rather than throwing; both mean gone.
+      return emit(payload, end) || viewerGone();
     } catch {
-      // The hub's socket closed under us. Nobody is listening, so stop
-      // pretending there is: further pushes would just throw again, and
-      // whatever is still parked has no destination.
-      attached = false;
-      pending.clear();
-      return false;
+      return viewerGone();
     }
   };
 

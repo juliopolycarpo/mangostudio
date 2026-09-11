@@ -12,12 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  connectInProcessRuntime,
-  createLocalRuntimeManifest,
-  createRuntimeMethodHandlers,
-  RuntimeHost,
-} from '@mangostudio/runtime';
+import { createLocalRuntimeHost } from '@mangostudio/runtime';
 import { libraryLocationsFor, withLibraryLocations } from '@mangostudio/shared/app-settings';
 import { ChatCapabilitiesResponseSchema } from '@mangostudio/shared/capabilities';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
@@ -55,6 +50,7 @@ import {
   registerProvider,
 } from '../../../../src/services/providers/core/provider-registry';
 import type { AgentEvent, AIProvider } from '../../../../src/services/providers/types';
+import { connectInProcessRuntime } from '../../../../src/services/runtime-client/connect-in-process-runtime';
 import { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 import {
   RuntimeConnectionManager,
@@ -191,20 +187,10 @@ async function withRuntimeConsent<T>(
       }),
     connectors: {
       'in-process': async (_definition, onUnavailable) => {
-        let host: RuntimeHost | undefined;
-        const registry = createRuntimeMethodHandlers({
-          runtimeVersion: 'test',
-          emit: (event) => host?.emit(event),
-        });
-        host = new RuntimeHost({
-          runtimeVersion: 'test',
-          manifest: createLocalRuntimeManifest(allow),
-          handlers: registry.handlers,
-          onClose: () => void registry.close(),
-        });
-        const connection = await connectInProcessRuntime(host, { hubVersion: 'test' });
+        const definition = createLocalRuntimeHost({ runtimeVersion: 'test', allow });
+        const connection = await connectInProcessRuntime(definition, { hubVersion: 'test' });
         return {
-          client: new RuntimeClient(connection.client, onUnavailable),
+          client: new RuntimeClient(connection.hub, onUnavailable),
           close: () => connection.close(),
         };
       },

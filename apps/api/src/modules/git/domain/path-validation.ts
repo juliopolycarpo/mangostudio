@@ -1,5 +1,5 @@
 import { isAbsolute, relative, resolve, sep, win32 } from 'node:path';
-import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { RemoteError } from '@mangostudio/protocol';
 import { getRuntimeClient } from '../../../services/runtime-client';
 import type { GitRuntimeSelection } from '../infrastructure/git-cli';
 
@@ -70,7 +70,7 @@ export async function resolveContainedPath(
     const { relativePath } = await runtime.workspace.resolveContained({ root, path });
     return relativePath;
   } catch (error) {
-    if (error instanceof RuntimeRemoteError && error.details?.kind === 'workspace_containment') {
+    if (error instanceof RemoteError && error.details?.kind === 'workspace_containment') {
       throw new GitPathValidationError(path);
     }
     throw error;

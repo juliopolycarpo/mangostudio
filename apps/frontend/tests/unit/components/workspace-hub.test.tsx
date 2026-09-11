@@ -355,7 +355,7 @@ describe('WorkspaceHub', () => {
             id: 'wsl',
             name: 'WSL',
             virtual: false,
-            status: { state: 'error', errorCode: 'RUNTIME_UNAVAILABLE' },
+            status: { state: 'error', errorCode: 'UNAVAILABLE' },
           },
         ],
       }

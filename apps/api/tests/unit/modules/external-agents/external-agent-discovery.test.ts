@@ -9,7 +9,7 @@ import {
   ExternalAgentDescriptorSchema,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import Value from 'typebox/value';
 
 import type {

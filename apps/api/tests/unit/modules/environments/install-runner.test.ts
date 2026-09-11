@@ -5,8 +5,8 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import type { EventFrame } from '@mangostudio/protocol';
 import { RUNTIME_INSTALL_OUTPUT_TOPIC, type RuntimeInstallRunResult } from '@mangostudio/runtime';
-import type { RuntimeEventFrame } from '@mangostudio/shared/runtime-protocol';
 import {
   createInstallRunner,
   type InstallLogLine,
@@ -34,17 +34,17 @@ interface FakeClientOptions {
   readonly toolchainSupported?: boolean;
   readonly result?: RuntimeInstallRunResult | (() => Promise<RuntimeInstallRunResult>);
   /** Frames the runtime publishes once `install.run` has been called. */
-  readonly frames?: readonly Partial<RuntimeEventFrame>[];
+  readonly frames?: readonly Partial<EventFrame>[];
 }
 
 function fakeClient(options: FakeClientOptions = {}) {
-  const listeners = new Set<(event: RuntimeEventFrame) => void>();
+  const listeners = new Set<(event: EventFrame) => void>();
   const cancelled: string[] = [];
   const runParams: unknown[] = [];
 
   const client = {
     manifest: { features: { toolchain: options.toolchainSupported ?? true } },
-    onEvent: (listener: (event: RuntimeEventFrame) => void) => {
+    onEvent: (listener: (event: EventFrame) => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
@@ -59,7 +59,7 @@ function fakeClient(options: FakeClientOptions = {}) {
               topic: '',
               payload: {},
               ...frame,
-            } as RuntimeEventFrame);
+            } as EventFrame);
           }
         }
         const result = options.result ?? SUCCESS;

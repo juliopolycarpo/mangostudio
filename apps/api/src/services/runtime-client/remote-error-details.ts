@@ -8,7 +8,7 @@
  * `TypeError` thrown from an error handler — the worst place to throw.
  */
 
-import type { RuntimeRemoteError } from '@mangostudio/runtime';
+import type { RemoteError } from '@mangostudio/protocol';
 
 /**
  * The `details[key]` string, or undefined when the peer sent something else.
@@ -16,13 +16,13 @@ import type { RuntimeRemoteError } from '@mangostudio/runtime';
  * @example
  * detailString(error, 'stderr') ?? error.message
  */
-export function detailString(error: RuntimeRemoteError, key: string): string | undefined {
+export function detailString(error: RemoteError, key: string): string | undefined {
   const value = error.details?.[key];
   return typeof value === 'string' ? value : undefined;
 }
 
 /** True only for an explicit `true`; a missing or malformed flag is false. */
-export function detailBoolean(error: RuntimeRemoteError, key: string): boolean {
+export function detailBoolean(error: RemoteError, key: string): boolean {
   return error.details?.[key] === true;
 }
 
@@ -32,7 +32,7 @@ export function detailBoolean(error: RuntimeRemoteError, key: string): boolean {
  * Null is the honest answer for a process that never started, which is exactly
  * the case that also tends to send a malformed field.
  */
-export function detailExitCode(error: RuntimeRemoteError): number | null {
+export function detailExitCode(error: RemoteError): number | null {
   const value = error.details?.exitCode;
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   return null;
@@ -47,7 +47,7 @@ export function detailExitCode(error: RuntimeRemoteError): number | null {
  * @example
  * detailStringArray(error, 'args') ?? args
  */
-export function detailStringArray(error: RuntimeRemoteError, key: string): string[] | undefined {
+export function detailStringArray(error: RemoteError, key: string): string[] | undefined {
   const value = error.details?.[key];
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) return undefined;
   return value;

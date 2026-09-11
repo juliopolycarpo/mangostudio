@@ -1,15 +1,11 @@
-import {
-  connectInProcessRuntime,
-  createLocalRuntimeManifest,
-  createRuntimeMethodHandlers,
-  RuntimeHost,
-} from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { connectInProcessRuntime } from '../../../../../src/services/runtime-client/connect-in-process-runtime';
 import { RuntimeClient } from '../../../../../src/services/runtime-client/runtime-client';
 import {
   RuntimeConnectionManager,
   setRuntimeConnectionManagerForTests,
 } from '../../../../../src/services/runtime-client/runtime-connection-manager';
+import { createLocalRuntimeDefinition } from '../../../../support/local-runtime';
 
 const VERSION = 'test';
 
@@ -36,20 +32,13 @@ export async function withTargetHome<T>(home: string, body: () => Promise<T>): P
       }),
     connectors: {
       'in-process': async (_definition, onUnavailable) => {
-        let host: RuntimeHost | undefined;
-        const registry = createRuntimeMethodHandlers({
+        const definition = createLocalRuntimeDefinition({
           runtimeVersion: VERSION,
-          emit: (event) => host?.emit(event),
+          reshapeManifest: (manifest) => ({ ...manifest, homeDir: home }),
         });
-        host = new RuntimeHost({
-          runtimeVersion: VERSION,
-          manifest: { ...createLocalRuntimeManifest(), homeDir: home },
-          handlers: registry.handlers,
-          onClose: () => void registry.close(),
-        });
-        const connection = await connectInProcessRuntime(host, { hubVersion: VERSION });
+        const connection = await connectInProcessRuntime(definition, { hubVersion: VERSION });
         return {
-          client: new RuntimeClient(connection.client, onUnavailable),
+          client: new RuntimeClient(connection.hub, onUnavailable),
           close: () => connection.close(),
         };
       },

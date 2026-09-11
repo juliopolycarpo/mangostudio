@@ -9,10 +9,11 @@
  * not share a registry.
  */
 
+import type { EventInput } from '@mangostudio/protocol';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { writeRuntimeDiagnostic } from '../../diagnostics';
 import { RuntimeServiceError } from '../../errors';
-import type { RuntimeEventInput, RuntimeHandlerContext } from '../../host';
+import type { RuntimeHandlerContext } from '../../handlers';
 import type {
   RuntimeMcpAckResult,
   RuntimeMcpCallResult,
@@ -78,7 +79,7 @@ interface PendingElicitation {
 
 export interface McpServiceOptions {
   readonly runtimeVersion: string;
-  readonly emit: (event: RuntimeEventInput) => void;
+  readonly emit: (event: EventInput) => void;
 }
 
 export interface McpService {

@@ -10,7 +10,9 @@ import type { LibraryLocationSettings } from '@mangostudio/shared/app-settings';
 import type {
   LibraryLocationId,
   LibraryLocationStatus,
+  PreparedPropagationOperation,
   ResourceKind,
+  RuntimeSettingsSourcesResult,
 } from '@mangostudio/shared/library';
 import { describeLocation, LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
@@ -56,10 +58,9 @@ import {
 } from './instance-reader';
 import { LibraryReadDeniedError, libraryLocationRoot, readLibraryContent } from './read';
 import { executeRemovalWrites } from './remove-writes';
-import { type RuntimeSettingsSourcesResult, readSettingsSources } from './settings-sources';
+import { readSettingsSources } from './settings-sources';
 import { executeLibraryUndo, LibraryBackupMissingError } from './undo-writes';
 import { serializeRuntimeLibraryWrite } from './write-queue';
-import type { PreparedPropagationOperation } from './write-shapes';
 
 export interface LibraryHostAdapters {
   readonly createPathEnv: (overrides?: {

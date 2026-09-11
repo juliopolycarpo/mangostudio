@@ -1,18 +1,25 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { CLOSE_CODES, type EventFrame, Session } from '@mangostudio/protocol';
 import {
-  RUNTIME_CLOSE_CODES,
+  createWebSocketPort,
+  outcomeOfBunSend,
+  WEBSOCKET_SUBPROTOCOL,
+  type WebSocketPortHandle,
+} from '@mangostudio/protocol/ws';
+import {
+  RUNTIME_CONTRACT_NAME,
+  RUNTIME_CONTRACT_VERSION,
   RUNTIME_HEARTBEAT_TOPIC,
-  RUNTIME_MAX_TRANSPORT_MESSAGE_BYTES,
   type RuntimeCapabilityManifest,
-  type RuntimeEventFrame,
-} from '@mangostudio/shared/runtime-protocol';
-import { RuntimeHost, RuntimeProtocolClient } from '../../src';
+  RuntimeCapabilityManifestSchema,
+} from '@mangostudio/shared/runtime-contract';
+import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+import type { Server, ServerWebSocket } from 'bun';
+import Value from 'typebox/value';
 import { connectToHub } from '../../src/connect';
-import {
-  createWebSocketFramePort,
-  serverWebSocketSink,
-  type WebSocketFramePort,
-} from '../../src/transports/websocket';
+import { staticConsentSource } from '../../src/consent-source';
+import { createRuntimeEventRelay, type RuntimeHostDefinition } from '../../src/session';
+import { FakeRuntimeHandlers } from '../support/fake-runtime-handlers';
 
 const MANIFEST: RuntimeCapabilityManifest = {
   platform: 'test',
@@ -34,18 +41,145 @@ const MANIFEST: RuntimeCapabilityManifest = {
 const VALID_TOKEN = 'mrt_selector.secret';
 
 interface HubSocketData {
-  port?: WebSocketFramePort;
-  authorized: boolean;
+  readonly authorized: boolean;
+  handle?: WebSocketPortHandle;
 }
 
-interface FakeHub {
-  readonly url: string;
-  readonly accepted: number;
-  readonly clients: RuntimeProtocolClient[];
-  readonly events: RuntimeEventFrame[];
-  /** Close whatever is connected with a chosen code. */
-  closeCurrent(code: number, reason: string): void;
-  stop(): void;
+/**
+ * The hub half, small enough to script: a bearer check and the subprotocol
+ * echo on the upgrade, then one SDK session per accepted socket.
+ *
+ * @example
+ * const hub = new FakeHub();
+ * await hub.manifestOf(0);
+ */
+class FakeHub {
+  readonly sessions: Session[] = [];
+  readonly events: EventFrame[] = [];
+  readonly #server: Server<HubSocketData>;
+  readonly #pending = new AbortController();
+  #current: ServerWebSocket<HubSocketData> | null = null;
+
+  constructor(options: { readonly token?: string; readonly upgrade?: boolean } = {}) {
+    const expected = `Bearer ${options.token ?? VALID_TOKEN}`;
+    this.#server = Bun.serve<HubSocketData, never>({
+      port: 0,
+      hostname: '127.0.0.1',
+      fetch: (request, server) => {
+        if (options.upgrade === false) {
+          // Accept TCP and then say nothing: `connectWebSocket` only settles
+          // on open, error, or close, so this is the stall a dial deadline
+          // has to end. The promise is aborted in `stop` so it cannot keep
+          // the process alive after the fixture is gone.
+          return this.#neverRespond();
+        }
+        const authorized = request.headers.get('authorization') === expected;
+        const upgraded = server.upgrade(request, {
+          data: { authorized },
+          ...(offersMangoSubprotocol(request)
+            ? { headers: { 'Sec-WebSocket-Protocol': WEBSOCKET_SUBPROTOCOL } }
+            : {}),
+        });
+        return upgraded ? undefined : new Response('expected a websocket upgrade', { status: 400 });
+      },
+      websocket: {
+        open: (socket) => this.#accept(socket),
+        message: (socket, message) => socket.data.handle?.onMessage(message),
+        drain: (socket) => socket.data.handle?.onDrain(),
+        close: (socket, code, reason) => socket.data.handle?.onClose(code, reason),
+      },
+    });
+  }
+
+  get url(): string {
+    return `ws://127.0.0.1:${this.#server.port}`;
+  }
+
+  /** How many upgrades got past the bearer check. */
+  get accepted(): number {
+    return this.sessions.length;
+  }
+
+  /**
+   * The manifest the nth accepted runtime announced, once both hellos crossed.
+   *
+   * Checked rather than trusted: `hello.capabilities` is an open object, so a
+   * peer that speaks the wire without being a MangoStudio runtime has to fail
+   * here rather than at the first method call.
+   */
+  async manifestOf(index: number): Promise<RuntimeCapabilityManifest> {
+    const session = this.sessions[index];
+    if (!session) {
+      throw new Error(
+        `Hub accepted ${this.sessions.length} connections; expected at least ${index + 1}.`
+      );
+    }
+    const remote = await session.ready;
+    if (!Value.Check(RuntimeCapabilityManifestSchema, remote.capabilities)) {
+      throw new Error(
+        `Runtime announced ${JSON.stringify(remote.capabilities)}; expected a RuntimeCapabilityManifest in hello.capabilities.`
+      );
+    }
+    return remote.capabilities;
+  }
+
+  /** Closes whatever is connected with a chosen code, the way the hub would. */
+  closeCurrent(code: number, reason: string): void {
+    this.#current?.close(code, reason);
+  }
+
+  stop(): void {
+    this.#pending.abort();
+    void this.#server.stop(true);
+  }
+
+  #neverRespond(): Promise<Response> {
+    return new Promise<Response>((_resolve, reject) => {
+      const { signal } = this.#pending;
+      if (signal.aborted) {
+        reject(new Error('hub stopped'));
+        return;
+      }
+      signal.addEventListener('abort', () => reject(new Error('hub stopped')), { once: true });
+    });
+  }
+
+  #accept(socket: ServerWebSocket<HubSocketData>): void {
+    if (!socket.data.authorized) {
+      socket.close(CLOSE_CODES.UNAUTHORIZED, 'Unauthorized');
+      return;
+    }
+    this.#current = socket;
+    const handle = createWebSocketPort({
+      send: (bytes) => outcomeOfBunSend(socket.send(bytes)),
+      close: (code, reason) => socket.close(code, reason),
+    });
+    socket.data.handle = handle;
+    const session = new Session(handle.port, {
+      peer: { name: 'fake-hub', version: 'hub-test', role: 'hub' },
+      capabilities: { contracts: { [RUNTIME_CONTRACT_NAME]: RUNTIME_CONTRACT_VERSION } },
+    });
+    session.onEvent((event) => this.events.push(event));
+    this.sessions.push(session);
+  }
+}
+
+/** RFC 6455: an acceptor may only name a subprotocol the dialler offered. */
+function offersMangoSubprotocol(request: Request): boolean {
+  return (request.headers.get('sec-websocket-protocol') ?? '')
+    .split(',')
+    .some((protocol) => protocol.trim() === WEBSOCKET_SUBPROTOCOL);
+}
+
+/** A runtime that announces a manifest and answers nothing in particular. */
+class FakeRuntimeDefinition implements RuntimeHostDefinition {
+  readonly runtimeVersion = 'runtime-test';
+  readonly manifest = () => MANIFEST;
+  readonly handlers = new FakeRuntimeHandlers().map;
+  readonly consent = staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'host');
+  readonly isUpdateActive = () => false;
+  readonly events = createRuntimeEventRelay();
+  readonly onClose = () => undefined;
 }
 
 const running: FakeHub[] = [];
@@ -54,77 +188,16 @@ afterEach(() => {
   for (const hub of running.splice(0)) hub.stop();
 });
 
-/**
- * The hub half, small enough to script: a bearer check on the upgrade and the
- * same chunked framing the real endpoint speaks.
- */
-function startFakeHub(options: { readonly token?: string } = {}): FakeHub {
-  const expected = options.token ?? VALID_TOKEN;
-  const clients: RuntimeProtocolClient[] = [];
-  const events: RuntimeEventFrame[] = [];
-  let accepted = 0;
-  let current: { close(code: number, reason: string): void } | null = null;
-
-  const server = Bun.serve<HubSocketData, never>({
-    port: 0,
-    hostname: '127.0.0.1',
-    fetch(request, self) {
-      const authorized = request.headers.get('authorization') === `Bearer ${expected}`;
-      if (self.upgrade(request, { data: { authorized } })) return undefined;
-      return new Response('expected a websocket upgrade', { status: 400 });
-    },
-    websocket: {
-      maxPayloadLength: RUNTIME_MAX_TRANSPORT_MESSAGE_BYTES,
-      idleTimeout: 60,
-      open(socket) {
-        if (!socket.data.authorized) {
-          socket.close(RUNTIME_CLOSE_CODES.UNAUTHORIZED, 'Unauthorized');
-          return;
-        }
-        accepted += 1;
-        current = socket;
-        const port = createWebSocketFramePort({ sink: serverWebSocketSink(socket) });
-        socket.data.port = port;
-        const client = new RuntimeProtocolClient(port, { hubVersion: 'hub-test' });
-        client.onEvent((event) => events.push(event));
-        clients.push(client);
-      },
-      message(socket, message) {
-        socket.data.port?.receive(message);
-      },
-      drain(socket) {
-        socket.data.port?.handleDrain();
-      },
-      close(socket) {
-        socket.data.port?.handleSocketClosed();
-      },
-    },
-  });
-
-  const hub: FakeHub = {
-    url: `ws://127.0.0.1:${server.port}`,
-    get accepted() {
-      return accepted;
-    },
-    clients,
-    events,
-    closeCurrent(code, reason) {
-      current?.close(code, reason);
-    },
-    stop() {
-      server.stop(true);
-    },
-  };
+function startFakeHub(
+  options: { readonly token?: string; readonly upgrade?: boolean } = {}
+): FakeHub {
+  const hub = new FakeHub(options);
   running.push(hub);
   return hub;
 }
 
-function createHost(): RuntimeHost {
-  return new RuntimeHost({
-    runtimeVersion: 'runtime-test',
-    manifest: MANIFEST,
-    handlers: new Map(),
-  });
+function createDefinition(): RuntimeHostDefinition {
+  return new FakeRuntimeDefinition();
 }
 
 /** Resolves once `predicate` holds, so tests never race a real interval. */
@@ -143,12 +216,13 @@ describe('runtime connect loop', () => {
     const loop = connectToHub({
       hubUrl: hub.url,
       token: VALID_TOKEN,
-      createHost,
+      createDefinition,
       signal: controller.signal,
     });
 
-    await waitFor(() => hub.clients.length === 1, 'the hub to accept a connection');
-    await hub.clients[0]?.waitUntilReady();
+    await waitFor(() => hub.accepted === 1, 'the hub to accept a connection');
+    // `contracts` rides in the same open object; the manifest members are the point.
+    expect(await hub.manifestOf(0)).toMatchObject(MANIFEST);
     await waitFor(
       () => hub.events.some((event) => event.topic === RUNTIME_HEARTBEAT_TOPIC),
       'a heartbeat event'
@@ -165,7 +239,7 @@ describe('runtime connect loop', () => {
     const outcome = await connectToHub({
       hubUrl: hub.url,
       token: VALID_TOKEN,
-      createHost,
+      createDefinition,
       sleep: (ms) => {
         delays.push(ms);
         return Promise.resolve();
@@ -186,7 +260,7 @@ describe('runtime connect loop', () => {
     const loop = connectToHub({
       hubUrl: hub.url,
       token: VALID_TOKEN,
-      createHost,
+      createDefinition,
       signal: controller.signal,
       sleep: (ms) => {
         delays.push(ms);
@@ -194,12 +268,12 @@ describe('runtime connect loop', () => {
       },
     });
 
-    await waitFor(() => hub.clients.length === 1, 'the first connection');
-    await hub.clients[0]?.waitUntilReady();
-    hub.closeCurrent(RUNTIME_CLOSE_CODES.RELEASED, 'Released');
+    await waitFor(() => hub.accepted === 1, 'the first connection');
+    await hub.manifestOf(0);
+    hub.closeCurrent(CLOSE_CODES.RELEASED, 'Released');
 
-    await waitFor(() => hub.clients.length === 2, 'the redial');
-    await hub.clients[1]?.waitUntilReady();
+    await waitFor(() => hub.accepted === 2, 'the redial');
+    await hub.manifestOf(1);
 
     controller.abort();
     await loop;
@@ -216,7 +290,7 @@ describe('runtime connect loop', () => {
     const loop = connectToHub({
       hubUrl: hub.url,
       token: VALID_TOKEN,
-      createHost,
+      createDefinition,
       signal: controller.signal,
       sleep: (ms) => {
         delays.push(ms);
@@ -225,9 +299,9 @@ describe('runtime connect loop', () => {
       },
     });
 
-    await waitFor(() => hub.clients.length === 1, 'the first connection');
-    await hub.clients[0]?.waitUntilReady();
-    hub.closeCurrent(RUNTIME_CLOSE_CODES.RATE_LIMITED, 'Rate limited');
+    await waitFor(() => hub.accepted === 1, 'the first connection');
+    await hub.manifestOf(0);
+    hub.closeCurrent(CLOSE_CODES.RATE_LIMITED, 'Rate limited');
 
     await loop;
     expect(delays).toEqual([30_000]);
@@ -240,7 +314,7 @@ describe('runtime connect loop', () => {
     const loop = connectToHub({
       hubUrl: 'ws://127.0.0.1:1/api/runtime',
       token: VALID_TOKEN,
-      createHost,
+      createDefinition,
       signal: controller.signal,
       sleep: (ms) => {
         delays.push(ms);
@@ -266,16 +340,16 @@ describe('runtime connect loop', () => {
     const loop = connectToHub({
       hubUrl: hub.url,
       token: VALID_TOKEN,
-      createHost,
+      createDefinition,
       sleep: (ms) => {
         delays.push(ms);
         return Promise.resolve();
       },
     });
 
-    await waitFor(() => hub.clients.length === 1, 'the first connection');
-    await hub.clients[0]?.waitUntilReady();
-    hub.closeCurrent(RUNTIME_CLOSE_CODES.SUPERSEDED, 'Superseded');
+    await waitFor(() => hub.accepted === 1, 'the first connection');
+    await hub.manifestOf(0);
+    hub.closeCurrent(CLOSE_CODES.SUPERSEDED, 'Superseded');
 
     const outcome = await loop;
     // Redialing here is what makes two processes trade the environment back and
@@ -283,20 +357,44 @@ describe('runtime connect loop', () => {
     expect(outcome.reason).toBe('refused');
     expect(outcome.message).toContain('pairing token');
     expect(delays).toEqual([]);
-    expect(hub.clients).toHaveLength(1);
+    expect(hub.accepted).toBe(1);
   });
 
   it('names the binary, not the environment, when the protocol is refused', async () => {
     const hub = startFakeHub();
-    const loop = connectToHub({ hubUrl: hub.url, token: VALID_TOKEN, createHost });
+    const loop = connectToHub({ hubUrl: hub.url, token: VALID_TOKEN, createDefinition });
 
-    await waitFor(() => hub.clients.length === 1, 'the first connection');
-    await hub.clients[0]?.waitUntilReady();
-    hub.closeCurrent(RUNTIME_CLOSE_CODES.PROTOCOL_MISMATCH, 'Protocol version unsupported');
+    await waitFor(() => hub.accepted === 1, 'the first connection');
+    await hub.manifestOf(0);
+    hub.closeCurrent(CLOSE_CODES.PROTOCOL_MISMATCH, 'Protocol version unsupported');
 
     const outcome = await loop;
     expect(outcome.reason).toBe('refused');
     expect(outcome.message).toContain('Update the runtime');
+  });
+
+  it('aborts a dial that never upgrades so the reconnect loop can start', async () => {
+    const hub = startFakeHub({ upgrade: false });
+    const controller = new AbortController();
+    const delays: number[] = [];
+    const logs: string[] = [];
+    const loop = connectToHub({
+      hubUrl: hub.url,
+      token: VALID_TOKEN,
+      createDefinition,
+      signal: controller.signal,
+      handshakeTimeoutMs: 50,
+      log: (message) => logs.push(message),
+      sleep: (ms) => {
+        delays.push(ms);
+        controller.abort();
+        return Promise.resolve();
+      },
+    });
+
+    await loop;
+    expect(delays).toHaveLength(1);
+    expect(logs.join('\n')).toContain('did not accept a WebSocket');
   });
 
   it('gives up the backoff as soon as the signal aborts', async () => {
@@ -306,7 +404,7 @@ describe('runtime connect loop', () => {
       // Nothing listening, so the loop reaches its backoff immediately.
       hubUrl: 'ws://127.0.0.1:1/api/runtime',
       token: VALID_TOKEN,
-      createHost,
+      createDefinition,
       signal: controller.signal,
       // A sleep that never resolves on its own: only the abort can end it, so
       // a loop that does not race the signal hangs this test rather than

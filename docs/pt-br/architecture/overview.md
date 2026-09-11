@@ -222,6 +222,7 @@ shared/src/
   contracts/           → barrel export de todos os tipos de contrato
   <module>/            → contratos por módulo + schemas TypeBox
   realtime/            → mensagens de invalidação WebSocket, tópicos e códigos de fechamento
+  runtime-contract/    → métodos, capabilities, eventos, manifest e erros do hub/runtime
   streaming/           → tipos e schemas de eventos SSE
   types/               → tipos de domínio (provider, agent-events, gallery)
   i18n/                → dicionários em Português/Inglês + sistema de tipos

@@ -9,7 +9,7 @@ import type {
 } from '@mangostudio/shared/environments';
 import { DEFAULT_TOOLCHAIN_SELECTION } from '@mangostudio/shared/environments';
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import type {
   EnvironmentProbingService,
   ProbeOptions,

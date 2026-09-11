@@ -11,6 +11,8 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { RemoteError } from '@mangostudio/protocol';
+import { rejectionOf } from '@mangostudio/protocol/testing';
 import { resolveRuntimeLaunchCommand } from '../../../src/lib/runtime-paths';
 import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
 
@@ -50,21 +52,21 @@ describe('spawnRuntimeChild', () => {
       });
 
       try {
-        expect(connection.client.manifest.pathStyle).toBe(
+        expect(connection.hub.manifest.pathStyle).toBe(
           process.platform === 'win32' ? 'win32' : 'posix'
         );
-        expect(connection.client.manifest.features.tools).toBe(true);
+        expect(connection.hub.manifest.features.tools).toBe(true);
 
         const path = join(workdir, 'hello.txt');
         await writeFile(path, 'from the runtime\n');
-        const result = await connection.client.request('fs.read-file', {
+        const result = await connection.hub.request('fs.read-file', {
           chatId: 'chat-1',
           inputPath: path,
           resolvedPath: path,
         });
         expect(result.content).toContain('from the runtime');
       } finally {
-        connection.close();
+        await connection.close();
       }
     },
     30_000
@@ -82,13 +84,13 @@ describe('spawnRuntimeChild', () => {
       });
 
       try {
-        const result = await connection.client.request('shell.run', {
+        const result = await connection.hub.request('shell.run', {
           ...SHELL_DEFAULTS,
           command: 'pwd',
         });
         expect(result.stdout).toContain('mango-stdio-runtime-');
       } finally {
-        connection.close();
+        await connection.close();
       }
     },
     30_000
@@ -105,13 +107,13 @@ describe('spawnRuntimeChild', () => {
       });
 
       try {
-        const result = await connection.client.request('shell.run', {
+        const result = await connection.hub.request('shell.run', {
           ...SHELL_DEFAULTS,
           command: 'printenv BETTER_AUTH_SECRET || true',
         });
         expect(result.stdout.trim()).toBe('');
       } finally {
-        connection.close();
+        await connection.close();
       }
     },
     30_000
@@ -130,20 +132,20 @@ describe('spawnRuntimeChild', () => {
         },
       });
 
-      const inFlight = connection.client.request('shell.run', {
+      const inFlight = connection.hub.request('shell.run', {
         ...SHELL_DEFAULTS,
         command: 'sleep 5',
       });
       // Kill the runtime from inside itself: a crash mid-call, not a shutdown.
-      void connection.client
+      void connection.hub
         .request('shell.run', { ...SHELL_DEFAULTS, command: 'kill -9 $PPID' })
         .catch(() => undefined);
 
-      await expect(inFlight).rejects.toMatchObject({ code: 'RUNTIME_UNAVAILABLE' });
+      expect(await rejectionOf(inFlight)).toMatchObject({ code: 'UNAVAILABLE' });
       expect(closedCount).toBe(1);
 
       // A close after the loss must stay silent rather than reporting it twice.
-      connection.close();
+      await connection.close();
       expect(closedCount).toBe(1);
     },
     30_000
@@ -154,15 +156,23 @@ describe('spawnRuntimeChild', () => {
     async () => {
       // Same protocol, different release: the wire format still parses, so only
       // the release comparison can catch a binary an old install left behind.
-      const error = await spawnRuntimeChild({
-        environmentId: 'devbox',
-        launch: resolveRuntimeLaunchCommand(),
-        hubVersion: `${RUNTIME_VERSION}-other`,
-        onClosed: () => undefined,
-      }).catch((caught) => caught);
+      const error = (await rejectionOf(
+        spawnRuntimeChild({
+          environmentId: 'devbox',
+          launch: resolveRuntimeLaunchCommand(),
+          hubVersion: `${RUNTIME_VERSION}-other`,
+          onClosed: () => undefined,
+        })
+      )) as RemoteError;
 
       expect(error.code).toBe('PROTOCOL_MISMATCH');
-      expect(error.message).toContain('Reinstall MangoStudio');
+      // The protocol says what disagreed; the launcher adds the fix, because it
+      // is the one that asked for release equality in the first place.
+      expect(error.message).toBe(
+        `Runtime reports version ${RUNTIME_VERSION}; this hub is ${RUNTIME_VERSION}-other. ` +
+          'A hub-managed runtime must be the same release. ' +
+          'Reinstall MangoStudio so the hub and runtime come from the same release.'
+      );
     },
     30_000
   );
@@ -182,9 +192,9 @@ describe('spawnRuntimeChild', () => {
       });
 
       try {
-        expect(connection.client.runtimeVersion).toBe(RUNTIME_VERSION);
+        expect(connection.hub.runtimeVersion).toBe(RUNTIME_VERSION);
       } finally {
-        connection.close();
+        await connection.close();
       }
     },
     30_000
@@ -262,10 +272,36 @@ describe('spawnRuntimeChild', () => {
       onClosed: () => undefined,
     }).catch((caught) => caught);
 
-    expect(error.code).toBe('RUNTIME_UNAVAILABLE');
+    expect(error.code).toBe('UNAVAILABLE');
     expect(error.message).toContain(missing);
     expect(error.message).toContain('Reinstall MangoStudio');
   }, 30_000);
+
+  it.skipIf(!hasPosixShell)(
+    'reaps a child that started but never handshaked',
+    async () => {
+      // The launcher terminates the child whenever its port closes, and a
+      // failed handshake closes it — so nothing here asks for a termination.
+      // A child that outlived its rejected connection would be a runtime this
+      // hub can no longer reach and no longer stop.
+      const child =
+        'process.stderr.write("pid=" + process.pid + "\\n"); setInterval(() => {}, 1_000);';
+      const error = (await rejectionOf(
+        spawnRuntimeChild({
+          environmentId: 'devbox',
+          launch: { command: process.execPath, args: ['-e', child] },
+          hubVersion: 'hub-test',
+          handshakeTimeoutMs: 1_000,
+          onClosed: () => undefined,
+        })
+      )) as RemoteError;
+
+      const pid = Number(/pid=(\d+)/.exec(error.message)?.[1]);
+      expect(Number.isInteger(pid)).toBe(true);
+      await expect(whenProcessGone(pid)).resolves.toBeUndefined();
+    },
+    30_000
+  );
 
   it('fails on handshake when the spawned child does not speak the protocol', async () => {
     // Bun rejects `--stdio`, so the child starts and exits without a hello.
@@ -277,7 +313,27 @@ describe('spawnRuntimeChild', () => {
       onClosed: () => undefined,
     }).catch((caught) => caught);
 
-    expect(error.code).toBe('RUNTIME_UNAVAILABLE');
+    expect(error.code).toBe('UNAVAILABLE');
     expect(error.message).toContain('handshake');
   }, 30_000);
 });
+
+/**
+ * Settles once `pid` is gone, and rejects naming it when it is still running
+ * after the launcher's own terminate grace has had time to escalate.
+ *
+ * @example
+ * await whenProcessGone(child.pid);
+ */
+async function whenProcessGone(pid: number, timeoutMs = 15_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    await Bun.sleep(50);
+  }
+  throw new Error(`Process ${pid} is still running ${timeoutMs}ms after its launch failed.`);
+}

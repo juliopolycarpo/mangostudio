@@ -118,7 +118,7 @@ export async function listMcpBridgeServers(
 /**
  * Snapshots the in-scope servers without connecting to any of them, for a turn
  * whose target machine refuses MCP. The peer answers `mcp.connect` with
- * `RUNTIME_DENIED`, so attempting the listing would spend the per-server budget
+ * `DENIED`, so attempting the listing would spend the per-server budget
  * to learn what consent already told us; the rows exist so the inspector can
  * name the refusing machine instead of reporting a generic failure.
  *

@@ -342,7 +342,7 @@ describe('HomePage', () => {
             name: 'WSL',
             transportKind: 'wsl',
             virtual: false,
-            status: { state: 'error', errorCode: 'RUNTIME_UNAVAILABLE' },
+            status: { state: 'error', errorCode: 'UNAVAILABLE' },
           },
         ],
       }

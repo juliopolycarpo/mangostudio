@@ -4,15 +4,31 @@ import type {
   ExternalIdentityIsolation,
 } from '@mangostudio/shared/external-agents';
 import { directoryHashDomainVersion } from '@mangostudio/shared/library';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import {
   profileForAllow,
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,
 } from '@mangostudio/shared/runtime-home';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { HIDDEN_WINDOW } from './services/process-window';
 import { isShellAvailable } from './services/shell';
 import { supportsPty } from './services/terminal/pty';
+
+/**
+ * Bound on `git --version` / `gh --version`.
+ *
+ * These probes run inside {@link createLocalRuntimeManifest}, which is called
+ * synchronously while an in-process session is opening. `Bun.spawnSync` blocks
+ * the event loop, so a child that never exits also freezes the hub's 10s
+ * in-process connect deadline (a timer) and, in tests, bun's 15s per-test
+ * timeout. A `--version` that cannot answer in two seconds is not a git this
+ * machine can use.
+ *
+ * The kill is not graceful: `timeout` on its own sends SIGTERM, and a child
+ * that refuses it leaves `spawnSync` blocking for the child's whole life all
+ * the same. A `--version` has nothing to flush.
+ */
+const VERSION_PROBE_TIMEOUT_MS = 2_000;
 
 /**
  * Announces what this runtime may execute under the recorded consent.
@@ -85,9 +101,6 @@ export function createLocalRuntimeManifest(
     // false rather than advertising a panel that every open would refuse.
     terminal: allow.shell && shells.length > 0 && supportsPty(),
     profile: profileForAllow(allow),
-    // This build decodes `hello_ack.hub`. Frame envelopes are closed, so the
-    // hub withholds that field until a runtime says it will not choke on it.
-    acceptsHubIdentity: true,
     // Every filesystem method in this build re-checks its own targets against
     // the call's `pathPolicy` (see `services/fs.ts`). Stated rather than
     // inferred from the version, because the hub's alternative is to assume —
@@ -129,6 +142,8 @@ function inspectGh(): NonNullable<RuntimeCapabilityManifest['gh']> {
   const result = Bun.spawnSync([executable, '--version'], {
     stdout: 'pipe',
     stderr: 'ignore',
+    timeout: VERSION_PROBE_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
     ...HIDDEN_WINDOW,
   });
   if (!result.success) return { available: false };
@@ -152,6 +167,8 @@ function inspectGit(): RuntimeCapabilityManifest['git'] {
   const result = Bun.spawnSync([executable, '--version'], {
     stdout: 'pipe',
     stderr: 'ignore',
+    timeout: VERSION_PROBE_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
     ...HIDDEN_WINDOW,
   });
   if (!result.success) return { available: false };

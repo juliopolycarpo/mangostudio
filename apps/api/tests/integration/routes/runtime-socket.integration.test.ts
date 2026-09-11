@@ -1,18 +1,20 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
-  clientWebSocketSink,
-  createWebSocketFramePort,
-  RuntimeHost,
-  type RuntimeMethodHandler,
-} from '@mangostudio/runtime';
+  CLOSE_CODES,
+  RESERVED_ERROR_CODES,
+  type Session,
+  type SessionClosure,
+} from '@mangostudio/protocol';
+import { rejectionOf } from '@mangostudio/protocol/testing';
+import { connectWebSocket, WEBSOCKET_SUBPROTOCOL } from '@mangostudio/protocol/ws';
+import { createRuntimeSession, staticConsentSource } from '@mangostudio/runtime';
 import type { RuntimePairingIssue } from '@mangostudio/shared/environments';
-import { REALTIME_IDLE_TIMEOUT_SECONDS } from '@mangostudio/shared/realtime';
 import {
-  RUNTIME_CLOSE_CODES,
   RUNTIME_HEARTBEAT_TOPIC,
   type RuntimeCapabilityManifest,
-  type RuntimeProtocolVersion,
-} from '@mangostudio/shared/runtime-protocol';
+  type RuntimeMethod,
+} from '@mangostudio/shared/runtime-contract';
+import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { Elysia } from 'elysia';
 import { websocket } from 'elysia/websocket';
 import { getDb } from '../../../src/db/database';
@@ -22,7 +24,9 @@ import { createEnvironmentRepository } from '../../../src/modules/environments/i
 import { createRuntimePairingRepository } from '../../../src/modules/environments/infrastructure/runtime-pairing-repository';
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
 import { RuntimeConnectionManager } from '../../../src/services/runtime-client/runtime-connection-manager';
+import { LEGACY_HELLO_1_0_1_CHUNKS } from '../../fixtures/legacy-hello-1-0-1';
 import { insertTestUser } from '../../support/factories';
+import { FakeRuntimeDefinition, type TestHandler } from '../../support/runtime-fixture';
 
 const TEST_USER = {
   id: 'runtime-socket-user',
@@ -57,11 +61,14 @@ const SHELL_CALL = {
 } as const;
 
 const dialed = new Set<DialedRuntime>();
+const rawSockets = new Set<WebSocket>();
 let stopServer: (() => void) | undefined;
 
 afterEach(async () => {
   for (const runtime of dialed) runtime.close();
   dialed.clear();
+  for (const socket of rawSockets) socket.close();
+  rawSockets.clear();
   stopServer?.();
   stopServer = undefined;
   await getDb().deleteFrom('runtime_pairing_tokens').where('userId', '=', TEST_USER.id).execute();
@@ -109,6 +116,18 @@ async function startHub(options: StartHubOptions = {}) {
   });
   const issued = await pairing.issue(TEST_USER.id, ENVIRONMENT_ID);
 
+  // The runtime's handshake resolves as soon as the hub's `hello` arrives,
+  // several turns before the manager has installed an entry. A test that asked
+  // for the client on the next line would race the route and watch the hub try
+  // to dial back instead, so it waits on the adoption itself.
+  let adoptions = 0;
+  const counted = manager.adopt.bind(manager);
+  manager.adopt = async (userId, environmentId, open) => {
+    const client = await counted(userId, environmentId, open);
+    adoptions += 1;
+    return client;
+  };
+
   const gate = options.gateAdopt;
   if (gate) {
     const adopt = manager.adopt.bind(manager);
@@ -136,7 +155,6 @@ async function startHub(options: StartHubOptions = {}) {
           : pairing,
         manager,
         hubVersion: () => 'hub-test',
-        idleTimeoutSeconds: REALTIME_IDLE_TIMEOUT_SECONDS,
         ...(options.upgradeLimit ? { upgradeLimit: options.upgradeLimit } : {}),
       })
     )
@@ -154,79 +172,102 @@ async function startHub(options: StartHubOptions = {}) {
     environments,
     issued,
     url: `ws://127.0.0.1:${port}/api/runtime`,
+    /** Resolves once the manager has finished adopting `count` connections. */
+    whenAdopted: (count: number) =>
+      waitFor(() => adoptions >= count, `${count} adoption(s); the manager finished ${adoptions}`),
   };
 }
 
+/** Resolves once `predicate` holds, so a test never races the route's own turns. */
+async function waitFor(predicate: () => boolean, expected: string): Promise<void> {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    if (predicate()) return;
+    await Bun.sleep(5);
+  }
+  throw new Error(`Timed out; expected ${expected}.`);
+}
+
 interface DialedRuntime {
-  readonly host: RuntimeHost;
-  readonly socket: WebSocket;
-  readonly closed: Promise<CloseEvent>;
+  readonly session: Session;
+  readonly ready: Promise<unknown>;
+  readonly closed: Promise<SessionClosure>;
   close(): void;
 }
 
 /**
  * The runtime half of the connection, built the way the `connect` subcommand
- * builds it: chunked frame port over a dialing socket, bearer credential on the
- * upgrade, and the host attached once the socket opens.
+ * builds it: the SDK's dialer with a bearer credential on the upgrade, and a
+ * runtime session over the port it returns.
  */
 async function dialRuntime(
   url: string,
   token: string,
-  handlers: ReadonlyMap<string, RuntimeMethodHandler> = new Map(),
-  hostOptions: { readonly protocolVersion?: RuntimeProtocolVersion } = {}
+  handlers: Partial<Record<RuntimeMethod, TestHandler>> = {}
 ): Promise<DialedRuntime> {
-  const socket = new WebSocket(url, { headers: { Authorization: `Bearer ${token}` } });
-  socket.binaryType = 'arraybuffer';
-  const port = createWebSocketFramePort({ sink: clientWebSocketSink(socket) });
-  socket.addEventListener('message', (event) => port.receive(event.data as ArrayBuffer));
-  socket.addEventListener('close', () => port.handleSocketClosed());
-
-  const closed = new Promise<CloseEvent>((resolve) => {
-    socket.addEventListener('close', (event) => resolve(event as CloseEvent), { once: true });
+  const port = await connectWebSocket(url, {
+    headers: { authorization: `Bearer ${token}` },
   });
-  const opened = new Promise<boolean>((resolve) => {
-    socket.addEventListener('open', () => resolve(true), { once: true });
-    socket.addEventListener('close', () => resolve(false), { once: true });
-  });
-
-  const host = new RuntimeHost({
-    runtimeVersion: 'runtime-test',
-    manifest: MANIFEST,
-    handlers,
-    ...hostOptions,
-  });
+  const session = createRuntimeSession(
+    port,
+    new FakeRuntimeDefinition({
+      runtimeVersion: 'runtime-test',
+      manifest: MANIFEST,
+      consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'host'),
+      handlers,
+    })
+  );
   const runtime: DialedRuntime = {
-    host,
-    socket,
-    closed,
+    session,
+    // Attached here rather than at each call site: an unobserved rejection from
+    // a refused credential would surface as an unhandled rejection instead of
+    // the close code the test is about to read.
+    ready: session.ready.catch(() => undefined),
+    closed: new Promise<SessionClosure>((resolve) => session.onClose(resolve)),
     close() {
       dialed.delete(runtime);
-      host.close();
-      socket.close();
+      session.close(CLOSE_CODES.RELEASED, 'test over');
     },
   };
   dialed.add(runtime);
-
-  if (await opened) {
-    host.attach(port);
-    host.start();
-  }
   return runtime;
 }
 
-function echoHandlers(marker: string): ReadonlyMap<string, RuntimeMethodHandler> {
-  return new Map<string, RuntimeMethodHandler>([
-    ['shell.run', () => Promise.resolve({ marker })],
-    [
-      'git.exec',
-      (_params, context) =>
-        new Promise((_resolve, reject) => {
-          context.signal.addEventListener('abort', () => reject(new Error('aborted')), {
-            once: true,
-          });
-        }),
-    ],
-  ]);
+/** A socket that speaks no Mango: for the wire-level cases the SDK cannot express. */
+async function openRawSocket(
+  url: string,
+  token: string,
+  protocols: readonly string[] = []
+): Promise<WebSocket> {
+  const socket = new WebSocket(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    ...(protocols.length > 0 ? { protocols } : {}),
+  });
+  rawSockets.add(socket);
+  await new Promise<void>((resolve, reject) => {
+    socket.addEventListener('open', () => resolve(), { once: true });
+    socket.addEventListener('close', (event) => reject(new Error(`closed ${event.code}`)), {
+      once: true,
+    });
+  });
+  return socket;
+}
+
+function closureOfSocket(socket: WebSocket): Promise<CloseEvent> {
+  return new Promise<CloseEvent>((resolve) => {
+    socket.addEventListener('close', (event) => resolve(event as CloseEvent), { once: true });
+  });
+}
+
+function echoHandlers(marker: string): Partial<Record<RuntimeMethod, TestHandler>> {
+  return {
+    'shell.run': () => ({ marker }),
+    'git.exec': (_params, context) =>
+      new Promise((_resolve, reject) => {
+        context.signal.addEventListener('abort', () => reject(new Error('aborted')), {
+          once: true,
+        });
+      }),
+  };
 }
 
 describe('runtime dial-in socket', () => {
@@ -236,15 +277,16 @@ describe('runtime dial-in socket', () => {
     const missing = await dialRuntime(hub.url, '');
     const wrong = await dialRuntime(hub.url, 'mrt_nope.nothing');
 
-    expect((await missing.closed).code).toBe(RUNTIME_CLOSE_CODES.UNAUTHORIZED);
-    expect((await wrong.closed).code).toBe(RUNTIME_CLOSE_CODES.UNAUTHORIZED);
+    expect((await missing.closed).code).toBe(CLOSE_CODES.UNAUTHORIZED);
+    expect((await wrong.closed).code).toBe(CLOSE_CODES.UNAUTHORIZED);
     expect(hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID).state).toBe('disconnected');
   });
 
   it('adopts a paired runtime and routes calls to it', async () => {
     const hub = await startHub();
     const runtime = await dialRuntime(hub.url, hub.issued.token, echoHandlers('first'));
-    await runtime.host.waitUntilReady();
+    await runtime.ready;
+    await hub.whenAdopted(1);
 
     const client = await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
     expect(await client.shell.run(SHELL_CALL)).toEqual({ marker: 'first' } as never);
@@ -254,40 +296,56 @@ describe('runtime dial-in socket', () => {
     });
   });
 
+  it('selects the mango subprotocol only when the dialer offers it', async () => {
+    // RFC 6455 forbids naming a subprotocol the dialer did not offer, and the
+    // runtime that does not offer one is exactly the runtime that has to stay
+    // connected long enough to be told its binary is too old.
+    const hub = await startHub();
+
+    const offered = await openRawSocket(hub.url, hub.issued.token, [WEBSOCKET_SUBPROTOCOL]);
+    expect(offered.protocol).toBe(WEBSOCKET_SUBPROTOCOL);
+
+    const bare = await openRawSocket(hub.url, hub.issued.token);
+    expect(bare.protocol).toBe('');
+  });
+
   it('refuses a disabled environment rather than adopting it', async () => {
     const hub = await startHub({ enabled: false });
     const runtime = await dialRuntime(hub.url, hub.issued.token);
 
-    expect((await runtime.closed).code).toBe(RUNTIME_CLOSE_CODES.FORBIDDEN);
+    expect((await runtime.closed).code).toBe(CLOSE_CODES.FORBIDDEN);
   });
 
   it('closes a live socket when its token is revoked', async () => {
     const hub = await startHub();
     const runtime = await dialRuntime(hub.url, hub.issued.token, echoHandlers('first'));
-    await runtime.host.waitUntilReady();
+    await runtime.ready;
+    await hub.whenAdopted(1);
     await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
 
     await hub.pairing.revoke(TEST_USER.id, ENVIRONMENT_ID);
 
-    expect((await runtime.closed).code).toBe(RUNTIME_CLOSE_CODES.RELEASED);
+    expect((await runtime.closed).code).toBe(CLOSE_CODES.RELEASED);
     const redial = await dialRuntime(hub.url, hub.issued.token);
-    expect((await redial.closed).code).toBe(RUNTIME_CLOSE_CODES.UNAUTHORIZED);
+    expect((await redial.closed).code).toBe(CLOSE_CODES.UNAUTHORIZED);
   });
 
   it('lets a second dial supersede the first and fails the loser typed', async () => {
     const hub = await startHub();
     const first = await dialRuntime(hub.url, hub.issued.token, echoHandlers('first'));
-    await first.host.waitUntilReady();
+    await first.ready;
+    await hub.whenAdopted(1);
     const client = await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
     // Settled eagerly: the incumbent is closed the moment the second dial is
     // adopted, which is before an `await` further down could observe it.
-    const pending = client.git.exec({ args: ['status'], cwd: '/tmp' }).catch((error) => error);
+    const pending = rejectionOf(client.git.exec({ args: ['status'], cwd: '/tmp' }));
 
     const second = await dialRuntime(hub.url, hub.issued.token, echoHandlers('second'));
-    await second.host.waitUntilReady();
+    await second.ready;
+    await hub.whenAdopted(2);
 
-    expect((await first.closed).code).toBe(RUNTIME_CLOSE_CODES.SUPERSEDED);
-    expect(await pending).toMatchObject({ code: 'RUNTIME_UNAVAILABLE' });
+    expect((await first.closed).code).toBe(CLOSE_CODES.SUPERSEDED);
+    expect(await pending).toMatchObject({ code: RESERVED_ERROR_CODES.UNAVAILABLE });
 
     const survivor = await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
     expect(await survivor.shell.run(SHELL_CALL)).toEqual({ marker: 'second' } as never);
@@ -300,14 +358,15 @@ describe('runtime dial-in socket', () => {
     // must not latch this one: the hub cannot dial, so a latch would be a state
     // no button and no redial could clear.
     for (let attempt = 0; attempt < 6; attempt += 1) {
-      await expect(hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID)).rejects.toMatchObject({
-        code: 'RUNTIME_UNAVAILABLE',
+      expect(await rejectionOf(hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID))).toMatchObject({
+        code: RESERVED_ERROR_CODES.UNAVAILABLE,
       });
     }
     expect(hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID).state).toBe('disconnected');
 
     const runtime = await dialRuntime(hub.url, hub.issued.token, echoHandlers('late'));
-    await runtime.host.waitUntilReady();
+    await runtime.ready;
+    await hub.whenAdopted(1);
 
     const client = await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
     expect(await client.shell.run(SHELL_CALL)).toEqual({ marker: 'late' } as never);
@@ -316,15 +375,17 @@ describe('runtime dial-in socket', () => {
   it('fails an in-flight call when the runtime disappears, then accepts a redial', async () => {
     const hub = await startHub();
     const runtime = await dialRuntime(hub.url, hub.issued.token, echoHandlers('first'));
-    await runtime.host.waitUntilReady();
+    await runtime.ready;
+    await hub.whenAdopted(1);
     const client = await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
-    const pending = client.git.exec({ args: ['status'], cwd: '/tmp' }).catch((error) => error);
+    const pending = rejectionOf(client.git.exec({ args: ['status'], cwd: '/tmp' }));
 
     runtime.close();
-    expect(await pending).toMatchObject({ code: 'RUNTIME_UNAVAILABLE' });
+    expect(await pending).toMatchObject({ code: RESERVED_ERROR_CODES.UNAVAILABLE });
 
     const redial = await dialRuntime(hub.url, hub.issued.token, echoHandlers('second'));
-    await redial.host.waitUntilReady();
+    await redial.ready;
+    await hub.whenAdopted(2);
     const reconnected = await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
     expect(await reconnected.shell.run(SHELL_CALL)).toEqual({
       marker: 'second',
@@ -337,7 +398,8 @@ describe('runtime dial-in socket', () => {
     // handshaked and was ready to serve.
     const hub = await startHub({ failMarkSeen: true });
     const runtime = await dialRuntime(hub.url, hub.issued.token, echoHandlers('first'));
-    await runtime.host.waitUntilReady();
+    await runtime.ready;
+    await hub.whenAdopted(1);
 
     const client = await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
     expect(await client.shell.run(SHELL_CALL)).toEqual({ marker: 'first' } as never);
@@ -351,7 +413,7 @@ describe('runtime dial-in socket', () => {
     const released = Promise.withResolvers<void>();
     const hub = await startHub({ gateAdopt: released.promise });
     const runtime = await dialRuntime(hub.url, hub.issued.token, echoHandlers('first'));
-    await runtime.host.waitUntilReady();
+    await runtime.ready;
 
     runtime.close();
     await runtime.closed;
@@ -363,8 +425,8 @@ describe('runtime dial-in socket', () => {
     // And the route has to finish adopting before the entry can be judged.
     await Bun.sleep(10);
 
-    await expect(hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID)).rejects.toMatchObject({
-      code: 'RUNTIME_UNAVAILABLE',
+    expect(await rejectionOf(hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID))).toMatchObject({
+      code: RESERVED_ERROR_CODES.UNAVAILABLE,
     });
     expect(hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID).state).toBe('disconnected');
   });
@@ -377,22 +439,29 @@ describe('runtime dial-in socket', () => {
     const hub = await startHub({ upgradeLimit: { max: 1, windowMs: 60_000 } });
 
     const first = await dialRuntime(hub.url, hub.issued.token, echoHandlers('first'));
-    await first.host.waitUntilReady();
+    await first.ready;
+    await hub.whenAdopted(1);
     const second = await dialRuntime(hub.url, hub.issued.token);
 
-    expect((await second.closed).code).toBe(RUNTIME_CLOSE_CODES.RATE_LIMITED);
+    expect((await second.closed).code).toBe(CLOSE_CODES.RATE_LIMITED);
   });
 
   it('names an unsupported protocol rather than blaming the environment', async () => {
-    // Both refusals reach the route as "unavailable" from the manager, and the
-    // remediation is not the same: enabling an environment cannot fix a binary
-    // that speaks a protocol this hub does not.
+    // A runtime on the previous wire offers no subprotocol and opens its
+    // handshake with a frame this one cannot read. Both refusals reach the
+    // route as "unavailable" from the manager, and the remediation is not the
+    // same: enabling an environment cannot fix a binary that speaks a protocol
+    // this hub does not.
     const hub = await startHub();
-    const stale = await dialRuntime(hub.url, hub.issued.token, new Map(), {
-      protocolVersion: '0.9',
-    });
+    const socket = await openRawSocket(hub.url, hub.issued.token);
+    const closed = closureOfSocket(socket);
 
-    expect((await stale.closed).code).toBe(RUNTIME_CLOSE_CODES.PROTOCOL_MISMATCH);
+    for (const chunk of LEGACY_HELLO_1_0_1_CHUNKS) socket.send(chunk);
+
+    expect((await closed).code).toBe(CLOSE_CODES.PROTOCOL_MISMATCH);
+    // Refused, not merely unfinished: a hello nobody could read never became a
+    // connection the card could advertise.
+    expect(hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID).state).toBe('disconnected');
   });
 
   it('refuses a credential revoked while its adoption was in flight', async () => {
@@ -408,7 +477,7 @@ describe('runtime dial-in socket', () => {
     await hub.pairing.revoke(TEST_USER.id, ENVIRONMENT_ID);
     released.resolve();
 
-    expect((await runtime.closed).code).toBe(RUNTIME_CLOSE_CODES.UNAUTHORIZED);
+    expect((await runtime.closed).code).toBe(CLOSE_CODES.UNAUTHORIZED);
     expect(hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID).state).not.toBe('connected');
   });
 
@@ -418,7 +487,8 @@ describe('runtime dial-in socket', () => {
     // reach the card.
     const hub = await startHub();
     const runtime = await dialRuntime(hub.url, hub.issued.token, echoHandlers('first'));
-    await runtime.host.waitUntilReady();
+    await runtime.ready;
+    await hub.whenAdopted(1);
     await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
 
     const status = hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID);
@@ -432,15 +502,8 @@ describe('runtime dial-in socket', () => {
     // registered by different modules and only the shared root ties them
     // together — a per-route transport config would leave this one uncapped.
     const hub = await startHub();
-    const socket = new WebSocket(hub.url, {
-      headers: { Authorization: `Bearer ${hub.issued.token}` },
-    });
-    const closed = new Promise<CloseEvent>((resolve) => {
-      socket.addEventListener('close', (event) => resolve(event as CloseEvent), { once: true });
-    });
-    await new Promise<void>((resolve) => {
-      socket.addEventListener('open', () => resolve(), { once: true });
-    });
+    const socket = await openRawSocket(hub.url, hub.issued.token, [WEBSOCKET_SUBPROTOCOL]);
+    const closed = closureOfSocket(socket);
 
     // Text frames are a protocol error on this socket (binary chunks only), so
     // an oversized string would close with PROTOCOL_ERROR even if the payload
@@ -450,7 +513,7 @@ describe('runtime dial-in socket', () => {
 
     const close = await closed;
     expect(close.code).not.toBe(1000);
-    expect(close.code).not.toBe(RUNTIME_CLOSE_CODES.PROTOCOL_ERROR);
+    expect(close.code).not.toBe(CLOSE_CODES.PROTOCOL_ERROR);
   });
 
   it('carries the pre-upgrade credential decision into the opened socket', async () => {
@@ -463,14 +526,15 @@ describe('runtime dial-in socket', () => {
     const hub = await startHub();
 
     const wrong = await dialRuntime(`${hub.url}?environmentId=workshop`, 'mrt_nope.nothing');
-    expect((await wrong.closed).code).toBe(RUNTIME_CLOSE_CODES.UNAUTHORIZED);
+    expect((await wrong.closed).code).toBe(CLOSE_CODES.UNAUTHORIZED);
 
     const right = await dialRuntime(
       `${hub.url}?environmentId=someone-else&environmentId=again`,
       hub.issued.token,
       echoHandlers('queried')
     );
-    await right.host.waitUntilReady();
+    await right.ready;
+    await hub.whenAdopted(1);
 
     // The environment came from the verified token, never from the URL — a
     // route that started trusting the query would bind to `someone-else`.
@@ -495,9 +559,10 @@ describe('runtime dial-in socket', () => {
       await refused.closed;
 
       const runtime = await dialRuntime(hub.url, hub.issued.token, echoHandlers('first'));
-      await runtime.host.waitUntilReady();
+      await runtime.ready;
+      await hub.whenAdopted(1);
       await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
-      runtime.host.emit({ topic: RUNTIME_HEARTBEAT_TOPIC, payload: { at: Date.now() } });
+      runtime.session.emit({ topic: RUNTIME_HEARTBEAT_TOPIC, payload: { at: Date.now() } });
       await hub.manager
         .getClient(TEST_USER.id, ENVIRONMENT_ID)
         .then((client) => client.shell.run(SHELL_CALL));

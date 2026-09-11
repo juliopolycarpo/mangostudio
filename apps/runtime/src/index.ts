@@ -1,6 +1,6 @@
-export type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
-export { RuntimeProtocolClient, type RuntimeRequestOptions } from './client';
-export { CONSENT_DENIED_KIND, RUNTIME_METHOD_CAPABILITIES } from './consent-gate';
+export type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
+export type { RuntimeAuditSink } from './audit-log';
+export { loadRuntimeConfig } from './config';
 export {
   createSlotConsentSource,
   type RuntimeConsentSource,
@@ -10,18 +10,11 @@ export {
   LIBRARY_BACKUP_MISSING_KIND,
   PathAccessError,
   RuntimeConsentDeniedError,
-  RuntimeRemoteError,
   RuntimeServiceError,
   RuntimeServiceManagementError,
   RuntimeToolArgumentError,
 } from './errors';
-export {
-  type RuntimeEventInput,
-  type RuntimeHandlerContext,
-  RuntimeHost,
-  type RuntimeMethodHandler,
-} from './host';
-export { livenessIntervalFor, startProtocolLiveness } from './liveness';
+export type { RuntimeHandlerContext, RuntimeHandlers } from './handlers';
 export { createLocalRuntimeManifest } from './manifest';
 export type * from './methods';
 export {
@@ -170,10 +163,6 @@ export {
   MAX_LIBRARY_INSTANCE_BYTES,
   MAX_SKILL_ENTRYPOINT_BYTES,
   nodeTreeRemovalFs,
-  type PreparedPropagationAdaptation,
-  type PreparedPropagationFile,
-  type PreparedPropagationOperation,
-  type PreparedRemovalOperation,
   type PropagationWriteEngineDeps,
   pruneBackupSets,
   purgeBackupSet,
@@ -185,8 +174,6 @@ export {
   type ResourceWriteResult,
   type ResourceWriterDeps,
   type ResourceWriterFs,
-  type RuntimeSettingsSource,
-  type RuntimeSettingsSourcesResult,
   readBackupManifest,
   readLibraryContent,
   readLocationInstances,
@@ -299,26 +286,9 @@ export {
 } from './services/workspace';
 export { resolveWorkspacePath, WorkspacePathError } from './services/workspace-path';
 export {
-  createInProcessPortPair,
-  type InProcessPortPair,
-  type RuntimeFramePort,
-} from './transport';
-export {
-  connectInProcessRuntime,
-  type InProcessRuntimeConnection,
-} from './transports/in-process';
-export {
-  createStdioFramePort,
-  type StdioFramePortClosure,
-} from './transports/stdio';
-export {
-  type ClientWebSocketLike,
-  clientWebSocketSink,
-  createWebSocketFramePort,
-  type ServerWebSocketLike,
-  serverWebSocketSink,
-  type WebSocketFramePort,
-  type WebSocketFramePortClosure,
-  type WebSocketFrameSink,
-  type WebSocketSendResult,
-} from './transports/websocket';
+  createRuntimeEventRelay,
+  createRuntimeSession,
+  type RuntimeEventRelay,
+  type RuntimeHostDefinition,
+  whenRuntimeReleased,
+} from './session';

@@ -1,4 +1,10 @@
 import {
+  type EventFrame,
+  RESERVED_ERROR_CODES,
+  RemoteError,
+  type RequestOptions,
+} from '@mangostudio/protocol';
+import {
   type ExternalAgentAckResult,
   type ExternalAgentCancelParams,
   type ExternalAgentCloseParams,
@@ -92,14 +98,10 @@ import {
   type RuntimeProbeRuntimesResult,
   type RuntimeProbeVersionManagersParams,
   type RuntimeProbeVersionManagersResult,
-  type RuntimeProtocolClient,
   type RuntimeReadFileParams,
   type RuntimeReadFileResult,
-  RuntimeRemoteError,
   type RuntimeReplaceRangeParams,
   type RuntimeReplaceRangeResult,
-  type RuntimeRequestOptions,
-  type RuntimeSettingsSourcesResult,
   type RuntimeShellResult,
   type RuntimeShellRunParams,
   type RuntimeSnapshotCaptureParams,
@@ -139,70 +141,65 @@ import {
   UnobservedLineNumbersError,
 } from '@mangostudio/runtime';
 import { ExternalAgentEventEnvelopeFrameSchema } from '@mangostudio/shared/external-agents';
-import { directoryHashDomainOf } from '@mangostudio/shared/library';
-import type {
-  RuntimeEventFrame,
-  RuntimePathPolicyParams,
-} from '@mangostudio/shared/runtime-protocol';
+import {
+  directoryHashDomainOf,
+  type RuntimeSettingsSourcesResult,
+} from '@mangostudio/shared/library';
+import type { RuntimePathPolicyParams } from '@mangostudio/shared/runtime-contract';
 import Value from 'typebox/value';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { McpConnectionError } from '../mcp/types';
 import { ToolArgumentError } from '../tools/arg-parsing';
 import { ToolExecutionTimedOutError } from '../tools/execution-timeout';
+import type { HubSession } from './hub-session';
 import { createTargetPaths, type TargetPaths } from './target-paths';
 
 const logger = createDiagnosticLogger('runtime-client');
 
 interface RuntimeFsClient {
-  readFile(
-    params: RuntimeReadFileParams,
-    options?: RuntimeRequestOptions
-  ): Promise<RuntimeReadFileResult>;
+  readFile(params: RuntimeReadFileParams, options?: RequestOptions): Promise<RuntimeReadFileResult>;
   writeFile(
     params: RuntimeWriteFileParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMutationResult<RuntimeWriteFileResult>>;
   createFile(
     params: RuntimeCreateFileParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMutationResult<RuntimeCreateFileResult>>;
   editFile(
     params: RuntimeEditFileParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMutationResult<RuntimeEditFileResult>>;
   replaceRange(
     params: RuntimeReplaceRangeParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMutationResult<RuntimeReplaceRangeResult>>;
   deleteFile(
     params: RuntimeDeleteFileParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMutationResult<RuntimeDeleteFileResult>>;
   moveFile(
     params: RuntimeMoveFileParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMutationResult<RuntimeMoveFileResult>>;
   listDirectory(
     params: RuntimeListDirectoryParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeListDirectoryResult>;
-  glob(params: RuntimeGlobParams, options?: RuntimeRequestOptions): Promise<RuntimeGlobResult>;
-  grep(params: RuntimeGrepParams, options?: RuntimeRequestOptions): Promise<RuntimeGrepResult>;
+  glob(params: RuntimeGlobParams, options?: RequestOptions): Promise<RuntimeGlobResult>;
+  grep(params: RuntimeGrepParams, options?: RequestOptions): Promise<RuntimeGrepResult>;
   applyPatch(
     params: RuntimeApplyPatchParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMutationResult<RuntimeApplyPatchResult>>;
 }
 
 interface RuntimeShellClient {
-  run(params: RuntimeShellRunParams, options?: RuntimeRequestOptions): Promise<RuntimeShellResult>;
+  run(params: RuntimeShellRunParams, options?: RequestOptions): Promise<RuntimeShellResult>;
 }
 
 interface RuntimeGitClient {
-  exec(
-    params: RuntimeGitExecParams,
-    options?: RuntimeRequestOptions
-  ): Promise<RuntimeGitExecResult>;
+  exec(params: RuntimeGitExecParams, options?: RequestOptions): Promise<RuntimeGitExecResult>;
 }
 
 /**
@@ -213,40 +210,37 @@ interface RuntimeGitClient {
  * own allowlist per method and refuses the mismatch.
  */
 interface RuntimeGhClient {
-  exec(params: RuntimeGhExecParams, options?: RuntimeRequestOptions): Promise<RuntimeGhExecResult>;
-  mutate(
-    params: RuntimeGhExecParams,
-    options?: RuntimeRequestOptions
-  ): Promise<RuntimeGhExecResult>;
+  exec(params: RuntimeGhExecParams, options?: RequestOptions): Promise<RuntimeGhExecResult>;
+  mutate(params: RuntimeGhExecParams, options?: RequestOptions): Promise<RuntimeGhExecResult>;
 }
 
 interface RuntimeSnapshotClient {
   capture(
     params: RuntimeSnapshotCaptureParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeBeforeSnapshot>;
   hash(
     params: RuntimeSnapshotHashParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeSnapshotHashResult>;
   revert(
     params: RuntimeSnapshotRevertParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeSnapshotRevertResult>;
 }
 
 interface RuntimeWorkspaceClient {
   browse(
     params?: RuntimeWorkspaceBrowseParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeWorkspaceBrowseResult>;
   validate(
     params: RuntimeWorkspaceValidateParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeWorkspaceValidateResult>;
   resolveContained(
     params: RuntimeWorkspaceResolveContainedParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeWorkspaceResolveContainedResult>;
 }
 
@@ -257,33 +251,30 @@ interface RuntimeWorkspaceClient {
 interface RuntimeTerminalClient {
   open(
     params: RuntimeTerminalOpenParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeTerminalOpenResult>;
   attach(
     params: RuntimeTerminalAttachParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeTerminalAttachResult>;
   detach(
     params: RuntimeTerminalDetachParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<{ readonly ok: true }>;
   write(
     params: RuntimeTerminalWriteParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<{ readonly ok: true }>;
   resize(
     params: RuntimeTerminalResizeParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<{ readonly ok: true }>;
-  ack(
-    params: RuntimeTerminalAckParams,
-    options?: RuntimeRequestOptions
-  ): Promise<{ readonly ok: true }>;
+  ack(params: RuntimeTerminalAckParams, options?: RequestOptions): Promise<{ readonly ok: true }>;
   close(
     params: RuntimeTerminalCloseParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<{ readonly ok: true }>;
-  list(options?: RuntimeRequestOptions): Promise<RuntimeTerminalListResult>;
+  list(options?: RequestOptions): Promise<RuntimeTerminalListResult>;
   /**
    * Subscribes to one session's output frames, filtered by `streamId` the way
    * `RuntimeExternalAgentsClient.onEvent` filters by `sessionId`.
@@ -305,39 +296,39 @@ interface RuntimeTerminalClient {
 interface RuntimeMcpClient {
   connect(
     params: RuntimeMcpConnectParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpConnectResult>;
   listTools(
     params: RuntimeMcpServerParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpListToolsResult>;
   callTool(
     params: RuntimeMcpCallToolParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpCallResult>;
   listResources(
     params: RuntimeMcpServerParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpListResourcesResult>;
   readResource(
     params: RuntimeMcpReadResourceParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpReadResourceResult>;
   listPrompts(
     params: RuntimeMcpServerParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpListPromptsResult>;
   getPrompt(
     params: RuntimeMcpGetPromptParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpPromptResult>;
   respondToElicitation(
     params: RuntimeMcpElicitResponseParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpAckResult>;
   disconnect(
     params: RuntimeMcpServerParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMcpAckResult>;
 }
 
@@ -345,45 +336,39 @@ interface RuntimeMcpClient {
 interface RuntimeExternalAgentsClient {
   discover(
     params: ExternalAgentDiscoverParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<ExternalAgentDiscoverResult>;
-  open(
-    params: ExternalAgentOpenParams,
-    options?: RuntimeRequestOptions
-  ): Promise<ExternalAgentOpenResult>;
-  turn(
-    params: ExternalAgentTurnParams,
-    options?: RuntimeRequestOptions
-  ): Promise<ExternalAgentTurnResult>;
+  open(params: ExternalAgentOpenParams, options?: RequestOptions): Promise<ExternalAgentOpenResult>;
+  turn(params: ExternalAgentTurnParams, options?: RequestOptions): Promise<ExternalAgentTurnResult>;
   respond(
     params: ExternalAgentRespondParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<ExternalAgentAckResult>;
   steer(
     params: ExternalAgentSteerParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<ExternalAgentSteerResult>;
   /** A vendor-native review, delivered on the session's own event stream. */
   startReview(
     params: ExternalAgentStartReviewParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<ExternalAgentStartReviewResult>;
   cancel(
     params: ExternalAgentCancelParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<ExternalAgentAckResult>;
   close(
     params: ExternalAgentCloseParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<ExternalAgentAckResult>;
   refreshAccountUsage(
     params: ExternalAgentRefreshAccountUsageParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<ExternalAgentRefreshAccountUsageResult>;
   /** The vendor's own conversation history on that machine, one page at a time. */
   listSessions(
     params: ExternalAgentListSessionsParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<ExternalAgentListSessionsResult>;
   /**
    * Subscribes to one hub-owned session's events. Only the envelope frame is
@@ -397,28 +382,25 @@ interface RuntimeExternalAgentsClient {
  * row and the decision to run at all; only the child process is over there.
  */
 interface RuntimeInstallClient {
-  run(
-    params: RuntimeInstallRunParams,
-    options?: RuntimeRequestOptions
-  ): Promise<RuntimeInstallRunResult>;
+  run(params: RuntimeInstallRunParams, options?: RequestOptions): Promise<RuntimeInstallRunResult>;
   cancel(
     params: RuntimeInstallCancelParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<{ readonly ok: true }>;
 }
 
 interface RuntimeUpdateClient {
   begin(
     params: RuntimeUpdateBeginParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeUpdateBeginResult>;
   chunk(
     params: RuntimeUpdateChunkParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeUpdateChunkResult>;
   commit(
     params: RuntimeUpdateCommitParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeUpdateCommitResult>;
 }
 
@@ -431,59 +413,56 @@ interface RuntimeUpdateClient {
 interface RuntimeProbingClient {
   runtimes(
     params: RuntimeProbeRuntimesParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeProbeRuntimesResult>;
   versionManagers(
     params: RuntimeProbeVersionManagersParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeProbeVersionManagersResult>;
   agentClis(
     params: RuntimeProbeAgentClisParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeProbeAgentClisResult>;
 }
 
 interface RuntimeLibraryClient {
   scan(
     params: RuntimeLibraryScanParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeLibraryScanResult>;
   read(
     params: RuntimeLibraryReadParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeLibraryReadResult>;
   readTree(
     params: RuntimeLibraryReadTreeParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeLibraryReadTreeResult>;
   locations(
     params?: RuntimeLibraryLocationsParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeLibraryLocationsResult>;
   settingsSources(
     params?: RuntimeLibrarySettingsSourcesParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeSettingsSourcesResult>;
   apply(
     params: RuntimeLibraryApplyParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeLibraryApplyResult>;
   remove(
     params: RuntimeLibraryRemoveParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeLibraryRemoveResult>;
   undo(
     params: RuntimeLibraryUndoParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeLibraryUndoResult>;
   backups(
     params: RuntimeLibraryBackupsParams,
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeLibraryBackupsResult>;
-  gc(
-    params: RuntimeLibraryGcParams,
-    options?: RuntimeRequestOptions
-  ): Promise<RuntimeLibraryGcResult>;
+  gc(params: RuntimeLibraryGcParams, options?: RequestOptions): Promise<RuntimeLibraryGcResult>;
 }
 
 /** Typed API-side facade over the transport-level runtime request multiplexer. */
@@ -505,12 +484,21 @@ export class RuntimeClient {
   private unenforcedContainment = false;
   private pathPolicyEnforced = false;
 
+  /**
+   * The manifest this connection announced, replaced in place after a consent
+   * change. Owned here rather than read from the session because the session's
+   * `hello` is what the peer said once, and `refreshManifest` is the hub
+   * learning it changed without tearing the connection down.
+   */
+  private runtimeManifest: RuntimeCapabilityManifest;
+
   constructor(
-    private readonly protocol: RuntimeProtocolClient,
+    private readonly hub: HubSession,
     private readonly onUnavailable?: () => void,
     /** Named in the warning when this peer turns out not to enforce containment. */
     private readonly environmentId?: string
   ) {
+    this.runtimeManifest = hub.manifest;
     this.fs = {
       readFile: (params, options) => this.request('fs.read-file', params, options),
       writeFile: (params, options) => this.request('fs.write-file', params, options),
@@ -561,7 +549,7 @@ export class RuntimeClient {
       listSessions: (params, options) =>
         this.request('external-agent.list-sessions', params, options),
       onEvent: (sessionId, listener) =>
-        this.protocol.onEvent((frame) => {
+        this.hub.onEvent((frame) => {
           if (frame.topic !== RUNTIME_EXTERNAL_AGENT_TOPIC) return;
           // Every open session adds a listener on this topic, so the cheap
           // session match runs before the envelope validation: a delta stream
@@ -630,7 +618,7 @@ export class RuntimeClient {
       close: (params, options) => this.request('terminal.close', params, options),
       list: (options) => this.request('terminal.list', {}, options),
       onOutput: (sessionId, listener) =>
-        this.protocol.onEvent((frame) => {
+        this.hub.onEvent((frame) => {
           if (frame.topic !== RUNTIME_TERMINAL_OUTPUT_TOPIC) return;
           if (frame.streamId !== sessionId) return;
           listener(frame.payload as RuntimeTerminalOutputEvent);
@@ -639,7 +627,7 @@ export class RuntimeClient {
   }
 
   get manifest(): RuntimeCapabilityManifest {
-    return this.protocol.manifest;
+    return this.runtimeManifest;
   }
 
   /**
@@ -648,12 +636,12 @@ export class RuntimeClient {
    * manifest with another environment's connection.
    */
   get paths(): TargetPaths {
-    this.targetPaths ??= createTargetPaths(this.protocol.manifest);
+    this.targetPaths ??= createTargetPaths(this.runtimeManifest);
     return this.targetPaths;
   }
 
   get runtimeVersion(): string {
-    return this.protocol.runtimeVersion;
+    return this.hub.runtimeVersion;
   }
 
   /**
@@ -662,7 +650,7 @@ export class RuntimeClient {
    * declaration — the hub cannot read enforcement into silence.
    */
   get enforcesPathPolicy(): boolean {
-    return this.protocol.manifest.enforcesPathPolicy === true;
+    return this.runtimeManifest.enforcesPathPolicy === true;
   }
 
   /**
@@ -671,20 +659,22 @@ export class RuntimeClient {
    * version.
    */
   get directoryHashDomain(): number {
-    return directoryHashDomainOf(this.protocol.manifest.directoryHashDomain);
+    return directoryHashDomainOf(this.runtimeManifest.directoryHashDomain);
   }
 
   /** One health truth: same payload as `mangostudio-runtime health --json`. */
-  health(options?: RuntimeRequestOptions) {
+  health(options?: RequestOptions) {
     return this.request('runtime.health', {}, options);
   }
 
   /**
-   * Replaces the handshake manifest after a consent change (see
-   * {@link RuntimeProtocolClient.replaceManifest}).
+   * Replaces the handshake manifest after a consent change.
+   *
+   * Used when the hub re-reads `runtime.health` so the cosmetic filter and the
+   * environment card see the new allow set without tearing the connection down.
    */
   replaceManifest(manifest: RuntimeCapabilityManifest): void {
-    this.protocol.replaceManifest(manifest);
+    this.runtimeManifest = manifest;
     this.targetPaths = undefined;
     this.pathPolicyEnforced = false;
   }
@@ -694,8 +684,8 @@ export class RuntimeClient {
    * connection dropping clears every listener on its own, so a caller that
    * forgets one leaks nothing past the socket.
    */
-  onEvent(listener: (event: RuntimeEventFrame) => void): () => void {
-    return this.protocol.onEvent(listener);
+  onEvent(listener: (event: EventFrame) => void): () => void {
+    return this.hub.onEvent(listener);
   }
 
   /**
@@ -703,19 +693,19 @@ export class RuntimeClient {
    * connection cannot keep returning a handle whose session is already gone.
    */
   onClose(listener: () => void): () => void {
-    return this.protocol.onClose(listener);
+    return this.hub.onClose(listener);
   }
 
   private async request<K extends RuntimeMethod>(
     method: K,
     params: RuntimeMethodMap[K]['params'],
-    options?: RuntimeRequestOptions
+    options?: RequestOptions
   ): Promise<RuntimeMethodMap[K]['result']> {
     this.noteUnenforcedContainment(method, params);
     try {
-      return await this.protocol.request(method, params, options);
+      return await this.hub.request(method, params, options);
     } catch (error) {
-      if (error instanceof RuntimeRemoteError && error.code === 'RUNTIME_UNAVAILABLE') {
+      if (error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.UNAVAILABLE) {
         this.onUnavailable?.();
       }
       throw translateRuntimeError(error);
@@ -762,14 +752,8 @@ export class RuntimeClient {
   }
 
   /** Both handshake facts, or nothing when the handshake has not settled. */
-  private peerIdentity():
-    | { manifest: RuntimeCapabilityManifest; runtimeVersion: string }
-    | undefined {
-    try {
-      return { manifest: this.protocol.manifest, runtimeVersion: this.protocol.runtimeVersion };
-    } catch {
-      return undefined;
-    }
+  private peerIdentity(): { manifest: RuntimeCapabilityManifest; runtimeVersion: string } {
+    return { manifest: this.runtimeManifest, runtimeVersion: this.hub.runtimeVersion };
   }
 }
 
@@ -788,16 +772,16 @@ function containmentRootOf(params: unknown): string | undefined {
 }
 
 function translateRuntimeError(error: unknown): Error {
-  if (!(error instanceof RuntimeRemoteError)) {
+  if (!(error instanceof RemoteError)) {
     return error instanceof Error ? error : new Error(String(error));
   }
-  if (error.code === 'CANCELLED') {
+  if (error.code === RESERVED_ERROR_CODES.CANCELLED) {
     return new DOMException(error.message, 'AbortError');
   }
-  if (error.code === 'TIMEOUT') {
+  if (error.code === RESERVED_ERROR_CODES.TIMEOUT) {
     return new ToolExecutionTimedOutError(error.message);
   }
-  if (error.code === 'RUNTIME_DENIED') {
+  if (error.code === RESERVED_ERROR_CODES.DENIED) {
     const missing = error.details?.missing;
     return new RuntimeConsentDeniedError(error.message, {
       capability: detailString(error, 'capability'),
@@ -848,19 +832,19 @@ function translateRuntimeError(error: unknown): Error {
         slot: detailString(error, 'slot'),
       });
     default:
-      // `mcp_call` deliberately stays a RuntimeRemoteError: the turn pipeline
+      // `mcp_call` deliberately stays a RemoteError: the turn pipeline
       // classifies it from the `mcpFailure` detail the runtime attached, and
       // wrapping it here would drop that.
       return error;
   }
 }
 
-function detailString(error: RuntimeRemoteError, key: string): string | undefined {
+function detailString(error: RemoteError, key: string): string | undefined {
   const value = error.details?.[key];
   return typeof value === 'string' ? value : undefined;
 }
 
-function detailNumber(error: RuntimeRemoteError, key: string): number {
+function detailNumber(error: RemoteError, key: string): number {
   const value = error.details?.[key];
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }

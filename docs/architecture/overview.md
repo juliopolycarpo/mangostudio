@@ -256,7 +256,7 @@ shared/src/
   contracts/           → Barrel export of all contract types
   <module>/            → Per-module contracts + TypeBox schemas
   realtime/            → WebSocket invalidation messages, topics, and close codes
-  runtime-protocol/     → Hub/runtime frame schemas, compatibility, and NDJSON codec
+  runtime-contract/    → Hub/runtime methods, capabilities, events, manifest, errors
   streaming/           → SSE event types + schemas
   types/               → Domain types (provider, agent-events, gallery)
   i18n/                → Portuguese/English dictionaries + type system

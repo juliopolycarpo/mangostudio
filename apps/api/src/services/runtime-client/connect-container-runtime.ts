@@ -19,7 +19,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import type { ContainerEngine, ContainerFailureReason } from '@mangostudio/shared/environments';
 import {
   containerConfigRefusal,
@@ -28,6 +28,7 @@ import {
   containerName,
   describeContainerMountRefusal,
 } from '@mangostudio/shared/environments';
+import { narrowRuntimeErrorCode } from '@mangostudio/shared/runtime-contract';
 import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { throwIfAborted } from '../../modules/environments/domain/cancellation';
@@ -120,8 +121,8 @@ export async function connectContainerRuntime(
   // before the engine is touched, because the engine would happily do it.
   const refusal = containerConfigRefusal(config);
   if (refusal) {
-    throw new RuntimeRemoteError(
-      'RUNTIME_UNAVAILABLE',
+    throw new RemoteError(
+      RESERVED_ERROR_CODES.UNAVAILABLE,
       `Environment "${definition.id}" cannot be launched: ${describeContainerMountRefusal(refusal)}`
     );
   }
@@ -185,7 +186,7 @@ export async function connectContainerRuntime(
   }
 
   return {
-    client: new RuntimeClient(connection.client, onUnavailable, definition.id),
+    client: new RuntimeClient(connection.hub, onUnavailable, definition.id),
     close: async () => {
       await connection.close();
       // Closing the child's stdin ends the runtime, which ends the container,
@@ -230,12 +231,12 @@ async function withFailureReason<T>(step: () => Promise<T>): Promise<T> {
     return await step();
   } catch (error) {
     if (error instanceof ContainerEngineError) {
-      throw new RuntimeRemoteError('RUNTIME_UNAVAILABLE', error.message, {
+      throw new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, error.message, {
         containerFailureReason: error.reason,
       });
     }
     if (error instanceof ContainerRuntimeSourceError) {
-      throw new RuntimeRemoteError('RUNTIME_UNAVAILABLE', error.message, {
+      throw new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, error.message, {
         containerFailureReason: 'runtime-unavailable' satisfies ContainerFailureReason,
       });
     }
@@ -249,12 +250,15 @@ async function withFailureReason<T>(step: () => Promise<T>): Promise<T> {
  * manager latches on it, and a runtime too old to speak this protocol is not
  * fixed by retrying.
  */
-function attachReason(error: unknown, reason: ContainerFailureReason): RuntimeRemoteError {
-  if (reason === 'unknown' && error instanceof RuntimeRemoteError) return error;
-  const code = error instanceof RuntimeRemoteError ? error.code : 'RUNTIME_UNAVAILABLE';
+function attachReason(error: unknown, reason: ContainerFailureReason): RemoteError {
+  if (reason === 'unknown' && error instanceof RemoteError) return error;
+  const code =
+    error instanceof RemoteError
+      ? narrowRuntimeErrorCode(error.code)
+      : RESERVED_ERROR_CODES.UNAVAILABLE;
   const message = error instanceof Error ? error.message : String(error);
-  return new RuntimeRemoteError(code, message, {
-    ...(error instanceof RuntimeRemoteError ? error.details : {}),
+  return new RemoteError(code, message, {
+    ...(error instanceof RemoteError ? error.details : {}),
     containerFailureReason: reason,
   });
 }

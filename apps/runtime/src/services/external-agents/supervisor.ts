@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import type { EventInput } from '@mangostudio/protocol';
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
 import { schemaErrorPointer } from '@mangostudio/shared/errors';
 import type {
@@ -57,7 +58,6 @@ import type { TSchema } from 'typebox';
 import Value from 'typebox/value';
 import type { RuntimeConsentSource } from '../../consent-source';
 import { RuntimeToolArgumentError } from '../../errors';
-import type { RuntimeEventInput } from '../../host';
 import { RUNTIME_EXTERNAL_AGENT_TOPIC } from '../../methods';
 import { probingService } from '../probing/service';
 import { buildSpawnEnv, nodeSpawnEnvHost, type SpawnEnvFs } from '../spawn-env';
@@ -161,7 +161,7 @@ export interface ExternalAgentExecutable {
 export interface ExternalAgentSupervisorOptions {
   readonly registry: ExternalAgentAdapterRegistry;
   readonly runtimeVersion: string;
-  readonly emit: (event: RuntimeEventInput) => void;
+  readonly emit: (event: EventInput) => void;
   readonly consent: RuntimeConsentSource;
   readonly env?: NodeJS.ProcessEnv;
   /** Host facts `buildSpawnEnv` resolves a session's toolchain selection against. */
@@ -192,7 +192,7 @@ export interface ExternalAgentSupervisorOptions {
 export class ExternalAgentSessionSupervisor {
   readonly #registry: ExternalAgentAdapterRegistry;
   readonly #runtimeVersion: string;
-  readonly #emit: (event: RuntimeEventInput) => void;
+  readonly #emit: (event: EventInput) => void;
   readonly #consent: RuntimeConsentSource;
   readonly #env: NodeJS.ProcessEnv;
   readonly #platform: string;

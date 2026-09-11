@@ -1,6 +1,6 @@
+import { RemoteError } from '@mangostudio/protocol';
 import {
   type RuntimeGitExecResult,
-  RuntimeRemoteError,
   buildGitArgv as runtimeBuildGitArgv,
   buildGitEnvironment as runtimeBuildGitEnvironment,
 } from '@mangostudio/runtime';
@@ -146,7 +146,7 @@ function mapGitFailure(args: readonly string[], error: unknown): GitCliError {
   if (isAbortError(error)) {
     return new GitCliError(args, null, 'Git command aborted.', true);
   }
-  if (error instanceof RuntimeRemoteError && detailString(error, 'kind') === 'git_execution') {
+  if (error instanceof RemoteError && detailString(error, 'kind') === 'git_execution') {
     return new GitCliError(
       detailStringArray(error, 'args') ?? args,
       detailExitCode(error),

@@ -1,41 +1,25 @@
 import { describe, expect, it } from 'bun:test';
+import { PathAccessError, RuntimeConsentDeniedError } from '@mangostudio/runtime';
 import {
-  CONSENT_DENIED_KIND,
-  connectInProcessRuntime,
-  RuntimeConsentDeniedError,
-  RuntimeHost,
-  type RuntimeMethodHandler,
-  RuntimeServiceError,
-} from '@mangostudio/runtime';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
-import { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
+  RUNTIME_CONSENT_PRESETS,
+  type RuntimeCapabilityAllow,
+} from '@mangostudio/shared/runtime-home';
 import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';
+import { connectTestRuntime, TEST_RUNTIME_MANIFEST } from '../../../support/runtime-fixture';
 
-const manifest: RuntimeCapabilityManifest = {
-  platform: 'test',
-  arch: 'test',
-  pathStyle: 'posix',
-  homeDir: '/test',
-  shells: [],
-  git: { available: false },
-  features: {
-    tools: true,
-    git: false,
-    probing: false,
-    mcp: false,
-    library: false,
-    checkpoints: true,
-  },
-};
+/** A consent source that grants everything but `shell`, like `setup --profile readonly`. */
+function withoutShell(): RuntimeCapabilityAllow {
+  return { ...RUNTIME_CONSENT_PRESETS.full, shell: false };
+}
 
 describe('RuntimeClient', () => {
   it('routes the complete external-agent facade through the typed request multiplexer', async () => {
     const received: [string, unknown][] = [];
-    const handler =
-      (method: string, result: unknown): RuntimeMethodHandler =>
-      (params) => {
+    const record =
+      (method: string, result: unknown) =>
+      (params: never): unknown => {
         received.push([method, params]);
-        return Promise.resolve(result);
+        return result;
       };
     const capabilities = {
       structuredStreaming: true,
@@ -58,10 +42,9 @@ describe('RuntimeClient', () => {
       routing: 'user' as const,
       workspaceRoots: ['/workspace'],
     };
-    const handlers = new Map<string, RuntimeMethodHandler>([
-      [
-        'external-agent.discover',
-        handler('external-agent.discover', {
+    const runtime = await connectTestRuntime({
+      handlers: {
+        'external-agent.discover': record('external-agent.discover', {
           descriptors: [
             {
               targetId: 'codex',
@@ -74,39 +57,32 @@ describe('RuntimeClient', () => {
             },
           ],
         }),
-      ],
-      [
-        'external-agent.open',
-        handler('external-agent.open', {
+        'external-agent.open': record('external-agent.open', {
           nativeSessionId: 'native-session-1',
           resumed: false,
           effectiveConfiguration: configuration,
           capabilities,
         }),
-      ],
-      ['external-agent.turn', handler('external-agent.turn', { nativeTurnId: 'turn-1' })],
-      ['external-agent.respond', handler('external-agent.respond', { ok: true })],
-      ['external-agent.cancel', handler('external-agent.cancel', { ok: true })],
-      ['external-agent.close', handler('external-agent.close', { ok: true })],
-    ]);
-    const host = new RuntimeHost({ runtimeVersion: 'runtime-test', manifest, handlers });
-    const connection = await connectInProcessRuntime(host, {
-      hubVersion: 'hub-test',
-      validateFrames: true,
+        'external-agent.turn': record('external-agent.turn', { nativeTurnId: 'turn-1' }),
+        'external-agent.respond': record('external-agent.respond', { ok: true }),
+        'external-agent.cancel': record('external-agent.cancel', { ok: true }),
+        'external-agent.close': record('external-agent.close', { ok: true }),
+      },
     });
-    const client = new RuntimeClient(connection.client);
     const events: unknown[] = [];
-    const unsubscribe = client.externalAgents.onEvent('session-1', (event) => events.push(event));
+    const unsubscribe = runtime.client.externalAgents.onEvent('session-1', (event) =>
+      events.push(event)
+    );
 
     try {
-      const discovery = await client.externalAgents.discover({
+      const discovery = await runtime.client.externalAgents.discover({
         targetIds: ['codex'],
         timeoutMs: 1_000,
       });
       expect(discovery.descriptors[0]?.models?.[0]?.id).toBe('codex-default');
       expect(discovery.descriptors[0]?.account?.label).toBe('Ada');
 
-      await client.externalAgents.open({
+      await runtime.client.externalAgents.open({
         sessionId: 'session-1',
         targetId: 'codex',
         workspacePath: '/workspace',
@@ -114,20 +90,23 @@ describe('RuntimeClient', () => {
         resumeMode: 'fallback',
         timeoutMs: 1_000,
       });
-      await client.externalAgents.turn({
+      await runtime.client.externalAgents.turn({
         sessionId: 'session-1',
         clientMessageId: 'message-1',
         input: 'Inspect this workspace',
         configuration,
       });
-      await client.externalAgents.respond({
+      await runtime.client.externalAgents.respond({
         sessionId: 'session-1',
         nativeTurnId: 'turn-1',
         requestId: 'approval-1',
         optionId: 'allow-once',
       });
-      await client.externalAgents.cancel({ sessionId: 'session-1', nativeTurnId: 'turn-1' });
-      await client.externalAgents.close({ sessionId: 'session-1' });
+      await runtime.client.externalAgents.cancel({
+        sessionId: 'session-1',
+        nativeTurnId: 'turn-1',
+      });
+      await runtime.client.externalAgents.close({ sessionId: 'session-1' });
 
       expect(received.map(([method]) => method)).toEqual([
         'external-agent.discover',
@@ -143,7 +122,8 @@ describe('RuntimeClient', () => {
         clientMessageId: 'message-1',
         configuration,
       });
-      host.emit({
+
+      runtime.emit({
         topic: 'external-agent.event',
         streamId: 'session-1',
         payload: {
@@ -154,7 +134,7 @@ describe('RuntimeClient', () => {
           event: { type: 'completed' },
         },
       });
-      host.emit({
+      runtime.emit({
         topic: 'external-agent.event',
         streamId: 'session-1',
         payload: {
@@ -169,7 +149,7 @@ describe('RuntimeClient', () => {
       expect(events).toHaveLength(1);
     } finally {
       unsubscribe();
-      await connection.close();
+      await runtime.close();
     }
   });
 
@@ -179,27 +159,20 @@ describe('RuntimeClient', () => {
     // would silently let a read-only machine run a write.
     const received: [string, unknown][] = [];
     const record =
-      (method: string): RuntimeMethodHandler =>
-      (params) => {
+      (method: string) =>
+      (params: never): unknown => {
         received.push([method, params]);
-        return Promise.resolve({ stdout: '', stderr: '', exitCode: 0 });
+        return { stdout: '', stderr: '', exitCode: 0 };
       };
-    const handlers = new Map<string, RuntimeMethodHandler>([
-      ['gh.exec', record('gh.exec')],
-      ['gh.mutate', record('gh.mutate')],
-    ]);
-    const host = new RuntimeHost({ runtimeVersion: 'runtime-test', manifest, handlers });
-    const connection = await connectInProcessRuntime(host, {
-      hubVersion: 'hub-test',
-      validateFrames: true,
+    const runtime = await connectTestRuntime({
+      handlers: { 'gh.exec': record('gh.exec'), 'gh.mutate': record('gh.mutate') },
     });
-    const client = new RuntimeClient(connection.client);
 
     try {
-      await client.gh.exec({ args: ['pr', 'view'], cwd: '/repo' });
-      await client.gh.mutate({ args: ['pr', 'create', '--fill'], cwd: '/repo' });
+      await runtime.client.gh.exec({ args: ['pr', 'view'], cwd: '/repo' });
+      await runtime.client.gh.mutate({ args: ['pr', 'create', '--fill'], cwd: '/repo' });
     } finally {
-      await connection.close();
+      await runtime.close();
     }
 
     expect(received).toEqual([
@@ -209,37 +182,29 @@ describe('RuntimeClient', () => {
   });
 
   it('routes git.exec through the same multiplexer as its gh siblings', async () => {
-    const received: [string, unknown][] = [];
-    const handlers = new Map<string, RuntimeMethodHandler>([
-      [
-        'git.exec',
-        (params) => {
-          received.push(['git.exec', params]);
-          return Promise.resolve({ stdout: 'ok', stderr: '', exitCode: 0 });
+    const received: unknown[] = [];
+    const runtime = await connectTestRuntime({
+      handlers: {
+        'git.exec': (params) => {
+          received.push(params);
+          return { stdout: 'ok', stderr: '', exitCode: 0 };
         },
-      ],
-    ]);
-    const host = new RuntimeHost({ runtimeVersion: 'runtime-test', manifest, handlers });
-    const connection = await connectInProcessRuntime(host, {
-      hubVersion: 'hub-test',
-      validateFrames: true,
+      },
     });
-    const client = new RuntimeClient(connection.client);
 
     try {
-      await client.git.exec({ args: ['status'], cwd: '/repo' });
+      await runtime.client.git.exec({ args: ['status'], cwd: '/repo' });
     } finally {
-      await connection.close();
+      await runtime.close();
     }
 
-    expect(received).toEqual([['git.exec', { args: ['status'], cwd: '/repo' }]]);
+    expect(received).toEqual([{ args: ['status'], cwd: '/repo' }]);
   });
 
   it('inherits request timeout translation for external-agent methods', async () => {
-    const handlers = new Map<string, RuntimeMethodHandler>([
-      [
-        'external-agent.discover',
-        (_params, { signal }) =>
+    const runtime = await connectTestRuntime({
+      handlers: {
+        'external-agent.discover': (_params, { signal }) =>
           new Promise((_, reject) => {
             signal.addEventListener(
               'abort',
@@ -247,31 +212,32 @@ describe('RuntimeClient', () => {
               { once: true }
             );
           }),
-      ],
-    ]);
-    const host = new RuntimeHost({ runtimeVersion: 'runtime-test', manifest, handlers });
-    const connection = await connectInProcessRuntime(host, {
-      hubVersion: 'hub-test',
-      validateFrames: true,
+      },
     });
-    const client = new RuntimeClient(connection.client);
 
     try {
       await expect(
-        client.externalAgents.discover({ targetIds: ['codex'], timeoutMs: 1_000 }, { timeoutMs: 1 })
+        runtime.client.externalAgents.discover(
+          { targetIds: ['codex'], timeoutMs: 1_000 },
+          { timeoutMs: 1 }
+        )
       ).rejects.toBeInstanceOf(ToolExecutionTimedOutError);
     } finally {
-      await connection.close();
+      await runtime.close();
     }
   });
 
   it('translates an API abort into protocol cancellation without serializing the signal', async () => {
     let receivedParams: unknown;
-    const handlers = new Map<string, RuntimeMethodHandler>([
-      [
-        'snapshot.hash',
-        (params, { signal }) => {
+    const runtime = await connectTestRuntime({
+      handlers: {
+        'snapshot.hash': (params, { signal }) => {
           receivedParams = params;
+          // The cancel can land before the handler runs — consent is re-read
+          // between the two — so a handler that only listened would wait for an
+          // abort that already happened. Every real service checks first; see
+          // `services/cancellation.ts`.
+          if (signal.aborted) throw new DOMException('Cancelled by API test', 'AbortError');
           return new Promise((_, reject) => {
             signal.addEventListener(
               'abort',
@@ -280,22 +246,12 @@ describe('RuntimeClient', () => {
             );
           });
         },
-      ],
-    ]);
-    const host = new RuntimeHost({
-      runtimeVersion: 'runtime-test',
-      manifest,
-      handlers,
+      },
     });
-    const connection = await connectInProcessRuntime(host, {
-      hubVersion: 'hub-test',
-      validateFrames: true,
-    });
-    const client = new RuntimeClient(connection.client);
     const controller = new AbortController();
 
     try {
-      const request = client.snapshot.hash(
+      const request = runtime.client.snapshot.hash(
         { path: '/workspace/file.txt' },
         { signal: controller.signal }
       );
@@ -305,47 +261,72 @@ describe('RuntimeClient', () => {
       expect(receivedParams).toEqual({ path: '/workspace/file.txt' });
       expect(receivedParams).not.toHaveProperty('signal');
     } finally {
-      connection.close();
+      await runtime.close();
     }
   });
 
-  it('translates RUNTIME_DENIED into a typed consent refusal', async () => {
-    const handlers = new Map<string, RuntimeMethodHandler>([
-      [
-        'shell.run',
-        () =>
-          Promise.reject(
-            new RuntimeServiceError(CONSENT_DENIED_KIND, 'shell is refused', {
-              method: 'shell.run',
-              missing: ['shell'],
-              slot: 'host',
-              capability: 'shell',
-            })
-          ),
-      ],
-    ]);
-    const host = new RuntimeHost({
-      runtimeVersion: 'runtime-test',
-      manifest,
-      handlers,
+  it('translates a consent refusal into a typed error the turn pipeline can render', async () => {
+    // The refusal comes from the real gate, not a handler pretending: this is
+    // the path a `readonly` machine actually takes.
+    const runtime = await connectTestRuntime({
+      handlers: { 'shell.run': () => ({ stdout: '', stderr: '', exitCode: 0 }) },
+      consent: { slot: 'host', current: withoutShell, refresh: async () => withoutShell() },
     });
-    const connection = await connectInProcessRuntime(host, {
-      hubVersion: 'hub-test',
-      validateFrames: true,
+
+    try {
+      const error = await runtime.client.shell
+        .run({ command: 'true', kind: 'bash', timeoutMs: 1_000, maxOutputBytes: 1024 })
+        .catch((thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(RuntimeConsentDeniedError);
+      expect((error as RuntimeConsentDeniedError).details).toMatchObject({
+        capability: 'shell',
+        method: 'shell.run',
+        slot: 'host',
+        missing: ['shell'],
+      });
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it('rebuilds a service error from the kind that survived the wire', async () => {
+    const runtime = await connectTestRuntime({
+      handlers: {
+        'fs.read-file': () => {
+          throw new PathAccessError('"/etc/shadow" is outside every allowed root.');
+        },
+      },
     });
-    const client = new RuntimeClient(connection.client);
 
     try {
       await expect(
-        client.shell.run({
-          command: 'true',
-          kind: 'bash',
-          timeoutMs: 1_000,
-          maxOutputBytes: 1024,
+        runtime.client.fs.readFile({
+          chatId: 'chat-1',
+          inputPath: '/etc/shadow',
+          resolvedPath: '/etc/shadow',
         })
-      ).rejects.toBeInstanceOf(RuntimeConsentDeniedError);
+      ).rejects.toBeInstanceOf(PathAccessError);
     } finally {
-      connection.close();
+      await runtime.close();
+    }
+  });
+
+  it('owns the manifest it was seeded with, without the contract announcement', async () => {
+    // `hello.capabilities` carries the manifest *and* the contract version;
+    // keeping the latter would make every `refreshManifest` comparison see a
+    // change that never happened and publish an invalidation for nothing.
+    const runtime = await connectTestRuntime({ handlers: {} });
+
+    try {
+      expect(runtime.client.manifest).toEqual(TEST_RUNTIME_MANIFEST);
+      expect(runtime.client.manifest).not.toHaveProperty('contracts');
+      expect(runtime.client.runtimeVersion).toBe('runtime-test');
+
+      runtime.client.replaceManifest({ ...TEST_RUNTIME_MANIFEST, homeDir: '/somewhere/else' });
+      expect(runtime.client.manifest.homeDir).toBe('/somewhere/else');
+    } finally {
+      await runtime.close();
     }
   });
 });

@@ -35,7 +35,7 @@ interface Harness {
 
 function createHarness(
   overrides: {
-    emit?: (payload: RuntimeTerminalOutputEvent, end?: true) => void;
+    emit?: (payload: RuntimeTerminalOutputEvent, end?: true) => boolean;
     scrollbackBytes?: number;
   } = {}
 ): Harness {
@@ -45,6 +45,7 @@ function createHarness(
     overrides.emit ??
     ((payload: RuntimeTerminalOutputEvent) => {
       frames.push(payload);
+      return true;
     });
 
   const session = createTerminalSession({
@@ -283,7 +284,7 @@ describe('createTerminalSession', () => {
         cols,
         rows,
         pty: port,
-        emit: () => undefined,
+        emit: () => true,
       });
 
     expect(() => create(0, 24)).toThrow(/cols must be an integer/);
@@ -319,6 +320,20 @@ describe('createTerminalSession', () => {
 
     expect(frames).toHaveLength(0);
     expect(session.snapshot().attached).toBe(false);
+  });
+
+  it('an emit that reports no session is treated as the viewer going away', () => {
+    // The protocol session answers `false` instead of throwing once the hub
+    // is gone; parking output for a viewer that cannot come back is the same
+    // mistake either way.
+    const { session, port, frames } = createHarness({ emit: () => false });
+    session.attach();
+
+    port.handles[0]?.emitData(bytesOf(10));
+
+    expect(session.snapshot().attached).toBe(false);
+    port.handles[0]?.emitData(bytesOf(10));
+    expect(frames).toHaveLength(0);
   });
 
   it('an emit that throws is swallowed and treated as the viewer going away', () => {

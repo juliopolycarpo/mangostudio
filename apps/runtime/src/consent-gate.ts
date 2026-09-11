@@ -1,5 +1,6 @@
 /**
- * Turning the recorded `allow` set into something that actually refuses.
+ * Turning the recorded `allow` set into something that actually refuses, and
+ * writing down what was asked either way.
  *
  * Without this the consent file is a note about intent: `setup --profile
  * readonly` records that a hub may not run commands here, every handler stays
@@ -14,180 +15,199 @@
  * anyone can act on. So the method stays in the map and answers with the
  * capability it needed and the command that grants it.
  *
+ * Which capabilities a method needs is the contract's own `capabilities` list,
+ * so a new method without one is a compile error in the shared contract rather
+ * than a silently ungoverned hole here.
+ *
  * The allow set is re-read on every call through {@link RuntimeConsentSource},
- * so a mid-connection `setup` takes effect without reconnecting. The typed wire
- * code is `RUNTIME_DENIED` (see `errorPayloadFor`); older peers that have not
- * learned that literal still receive a decodeable frame because the protocol
- * keeps `err.code` open and narrows unknowns to `INTERNAL`.
+ * so a mid-connection `setup` takes effect without reconnecting.
+ *
+ * ## Why a wrapper and not `ServeOptions.guard`
+ *
+ * The SDK offers a guard that runs before every handler with the method's
+ * capability list, which is exactly the consent decision — but only that. The
+ * guard never sees the parameters the audit line summarises, cannot see how
+ * many requests are in flight (which is what update exclusivity is decided
+ * from), and runs *before* the contract validates parameters, so a refusal it
+ * raised would bypass everything below. The capability list still comes from
+ * the contract; only the place it is read from moved.
+ *
+ * One consequence: parameter validation now runs first, so a non-object payload
+ * answers `INVALID_PARAMS` where it used to answer a refusal, and writes no
+ * audit line — there was no method call to record.
  */
 
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import {
+  CONSENT_DENIED_KIND,
+  RUNTIME_CONTRACT,
+  RUNTIME_UPDATE_REFUSED,
+  type RuntimeMethod,
+} from '@mangostudio/shared/runtime-contract';
 import type { RuntimeCapabilityAllow, RuntimeSlot } from '@mangostudio/shared/runtime-home';
+import type { RuntimeAuditOutcome, RuntimeAuditSink } from './audit-log';
 import type { RuntimeConsentSource } from './consent-source';
-import { RuntimeServiceError } from './errors';
-import type { RuntimeMethodHandler } from './host';
-import type { RuntimeMethod } from './methods';
+import { toRemoteError } from './errors';
+import type { RuntimeHandlers } from './handlers';
 
-/** Carried in `details.kind` so a hub can tell consent apart from a fault. */
-export const CONSENT_DENIED_KIND = 'consent_denied';
-
-/**
- * Which capabilities each protocol method needs, all of them.
- *
- * Keyed by `RuntimeMethod`, so adding a method without deciding what governs it
- * is a type error rather than a silently ungoverned hole — the alternative is a
- * default, and every safe default here is one somebody eventually regrets.
- *
- * Some methods need two. `library.apply` is a library operation *and* a write
- * to somebody's files, and `readonly` grants the first while refusing the
- * second; listing only `library` would have let the profile whose whole promise
- * is "no writes" write files.
- */
-export const RUNTIME_METHOD_CAPABILITIES: Readonly<
-  Record<RuntimeMethod, readonly (keyof RuntimeCapabilityAllow)[]>
-> = {
-  'fs.read-file': ['fsRead'],
-  'fs.list-directory': ['fsRead'],
-  'fs.glob': ['fsRead'],
-  'fs.grep': ['fsRead'],
-  'fs.write-file': ['fsWrite'],
-  'fs.create-file': ['fsWrite'],
-  'fs.edit-file': ['fsWrite'],
-  'fs.replace-range': ['fsWrite'],
-  'fs.delete-file': ['fsWrite'],
-  'fs.move-file': ['fsWrite'],
-  'fs.apply-patch': ['fsWrite'],
-  'shell.run': ['shell'],
-  'git.exec': ['git'],
-  // `gh` is split across two methods for the reason this table exists: consent
-  // is decided from the method name, before any handler sees a parameter, so a
-  // single `gh.exec` could not treat `pr view` and `pr create` differently
-  // however carefully it inspected its argv. `readonly` grants `git`, and a
-  // machine whose owner marked it read-only must not be able to open a pull
-  // request — so the mutating half answers to `shell` as well, the capability
-  // that means "this hub may cause effects here". The runtime also keeps two
-  // separate subcommand allowlists (`services/gh.ts`), so the read method
-  // refuses a write subcommand even when the hub asks for one on it.
-  'gh.exec': ['git'],
-  'gh.mutate': ['git', 'shell'],
-  // Reading a file to remember it, and writing files back to undo a turn.
-  'snapshot.capture': ['checkpoints', 'fsRead'],
-  'snapshot.hash': ['checkpoints', 'fsRead'],
-  'snapshot.revert': ['checkpoints', 'fsWrite'],
-  'workspace.browse': ['fsRead'],
-  'workspace.validate': ['fsRead'],
-  'workspace.resolve-contained': ['fsRead'],
-  'mcp.connect': ['mcp'],
-  'mcp.list-tools': ['mcp'],
-  'mcp.call-tool': ['mcp'],
-  'mcp.list-resources': ['mcp'],
-  'mcp.read-resource': ['mcp'],
-  'mcp.list-prompts': ['mcp'],
-  'mcp.get-prompt': ['mcp'],
-  'mcp.elicit-response': ['mcp'],
-  'mcp.disconnect': ['mcp'],
-  'external-agent.discover': ['externalAgents'],
-  'external-agent.open': ['externalAgents'],
-  'external-agent.turn': ['externalAgents'],
-  'external-agent.respond': ['externalAgents'],
-  'external-agent.steer': ['externalAgents'],
-  'external-agent.start-review': ['externalAgents'],
-  'external-agent.cancel': ['externalAgents'],
-  'external-agent.close': ['externalAgents'],
-  'external-agent.list-sessions': ['externalAgents'],
-  'external-agent.refresh-account-usage': ['externalAgents'],
-  'probing.runtimes': ['probing'],
-  'probing.version-managers': ['probing'],
-  'probing.agent-clis': ['probing'],
-  // An install run executes an argv this machine's owner did not write. That is
-  // the shell capability wearing a different name, and it answers to it.
-  'install.run': ['shell'],
-  'install.cancel': ['shell'],
-  // An interactive shell is everything `shell.run` reaches and more, so it
-  // answers to the same capability rather than a new one: `allow.shell`
-  // already means "this hub may run what it likes here". Every leg names it,
-  // including the reads, because a `readonly` machine has nothing to attach to.
-  'terminal.open': ['shell'],
-  'terminal.attach': ['shell'],
-  'terminal.detach': ['shell'],
-  'terminal.write': ['shell'],
-  'terminal.resize': ['shell'],
-  'terminal.ack': ['shell'],
-  'terminal.close': ['shell'],
-  'terminal.list': ['shell'],
-  'library.scan': ['library'],
-  'library.read': ['library'],
-  'library.read-tree': ['library'],
-  'library.locations': ['library'],
-  'library.settings-sources': ['library'],
-  'library.apply': ['library', 'fsWrite'],
-  'library.remove': ['library', 'fsWrite'],
-  'library.undo': ['library', 'fsWrite'],
-  // Listing is a read even though the sets it lists were written: a machine
-  // downgraded to readonly still has a history, and hiding it would tell the
-  // user their backups are gone rather than that this hub may no longer write.
-  'library.backups': ['library'],
-  'library.gc': ['library', 'fsWrite'],
-  // Intentionally empty: health must answer under every profile.
-  'runtime.health': [],
-  'runtime.update.begin': ['update'],
-  'runtime.update.chunk': ['update'],
-  'runtime.update.commit': ['update'],
-};
-
-class RuntimeConsentDeniedError extends RuntimeServiceError {
-  constructor(method: string, missing: readonly string[], slot: RuntimeSlot) {
-    const because =
-      missing.length > 0
-        ? `this machine has not granted ${missing.join(' or ')}`
-        : 'no capability governs it, so nothing can grant it';
-    super(
-      CONSENT_DENIED_KIND,
-      `"${method}" is refused: ${because}. Run "mangostudio-runtime setup --slot ${slot}" there to change what a hub may do.`,
-      { method, missing, slot, capability: missing[0] }
-    );
-    this.name = 'RuntimeConsentDeniedError';
-  }
+export interface RuntimeGateDeps {
+  readonly consent: RuntimeConsentSource;
+  /** Absent means the slot has auditing off (the `host` default). */
+  readonly audit?: RuntimeAuditSink;
+  /** True between `runtime.update.begin` and `runtime.update.commit`. */
+  readonly isUpdateActive: () => boolean;
 }
 
-/**
- * Wraps a handler map so denied methods refuse before they run.
- *
- * Every method is wrapped: the source re-reads consent on each call, so a map
- * that looked fully granted at connect can refuse mid-connection after `setup`.
- */
-export function gateHandlersByConsent(
-  handlers: ReadonlyMap<string, RuntimeMethodHandler>,
-  consent: RuntimeConsentSource
-): ReadonlyMap<string, RuntimeMethodHandler> {
-  const gated = new Map<string, RuntimeMethodHandler>();
+/** Methods that carry a live binary; they and ordinary calls exclude each other. */
+const UPDATE_METHOD_PREFIX = 'runtime.update.';
 
-  for (const [method, handle] of handlers) {
-    gated.set(method, async (params, context) => {
-      const allow = await consent.refresh();
-      const missing = missingCapabilities(method, allow);
-      if (missing?.length === 0) {
-        return await handle(params, context);
+/**
+ * Wraps every handler so a denied method refuses before it runs, an update and
+ * an ordinary call never overlap, and each outcome reaches the audit log.
+ *
+ * @example
+ * const handlers = gateHandlers(registry.handlers, { consent, isUpdateActive });
+ * RUNTIME_CONTRACT.serve(session, handlers);
+ */
+export function gateHandlers(handlers: RuntimeHandlers, deps: RuntimeGateDeps): RuntimeHandlers {
+  const inFlight = new Set<symbol>();
+  const inFlightUpdates = new Set<symbol>();
+
+  const gate = <K extends RuntimeMethod>(method: K, handle: RuntimeHandlers[K]) =>
+    (async (params: never, context: never) => {
+      const started = performance.now();
+      const refusal = exclusivityRefusal(method, inFlight, inFlightUpdates, deps.isUpdateActive);
+      if (refusal) {
+        record(deps.audit, method, 'error', started, params, refusal);
+        throw refusal;
       }
-      throw new RuntimeConsentDeniedError(method, missing ?? [], consent.slot);
-    });
-  }
 
-  return gated;
+      // Claimed before the first `await`: consent is re-read from disk, and a
+      // call that only claimed its slot afterwards would be invisible to an
+      // update arriving in that window — which is the overlap this prevents.
+      const token = Symbol(method);
+      inFlight.add(token);
+      if (method.startsWith(UPDATE_METHOD_PREFIX)) inFlightUpdates.add(token);
+      let recorded = false;
+      try {
+        const allow = await deps.consent.refresh();
+        const missing = missingCapabilities(method, allow);
+        if (missing.length > 0) {
+          const denial = consentDenial(method, missing, deps.consent.slot);
+          record(deps.audit, method, 'denied', started, params, denial);
+          recorded = true;
+          throw denial;
+        }
+        const result = await handle(params, context);
+        record(deps.audit, method, 'ok', started, params);
+        recorded = true;
+        return result;
+      } catch (error) {
+        const remote = toRemoteError(error);
+        if (!recorded) {
+          record(deps.audit, method, 'error', started, params, auditErrorFor(remote));
+        }
+        throw remote;
+      } finally {
+        inFlight.delete(token);
+        inFlightUpdates.delete(token);
+      }
+    }) as RuntimeHandlers[K];
+
+  return Object.fromEntries(
+    Object.entries(handlers).map(([method, handle]) => [
+      method,
+      gate(method as RuntimeMethod, handle as RuntimeHandlers[RuntimeMethod]),
+    ])
+  ) as unknown as RuntimeHandlers;
 }
 
 /**
- * Which of a method's capabilities this machine has not granted, or null when
- * nothing governs the method at all.
+ * Why this call may not run beside what is already running, or undefined.
  *
- * Null is a refusal, not a pass. The table is exhaustive over `RuntimeMethod`,
- * so reaching it means a handler was registered under a name the protocol does
- * not declare — and deciding that an unrecognised name must be harmless is how
- * a gate becomes decorative.
+ * An update rewrites the bytes this process is serving from, so it may not
+ * overlap an ordinary call in either direction. Both refusals are the
+ * application's own code, not a reserved one: the hub retries them.
  */
+function exclusivityRefusal(
+  method: RuntimeMethod,
+  inFlight: ReadonlySet<symbol>,
+  inFlightUpdates: ReadonlySet<symbol>,
+  isUpdateActive: () => boolean
+): RemoteError | undefined {
+  const updateMethod = method.startsWith(UPDATE_METHOD_PREFIX);
+  if (updateMethod && inFlight.size > 0) {
+    return new RemoteError(
+      RUNTIME_UPDATE_REFUSED,
+      'Runtime update refused while another call is in flight.',
+      { kind: 'runtime_update_refused', reason: 'call_in_flight' }
+    );
+  }
+  if (!updateMethod && (inFlightUpdates.size > 0 || isUpdateActive())) {
+    return new RemoteError(
+      RUNTIME_UPDATE_REFUSED,
+      'Runtime call refused while a binary update is in progress.',
+      { kind: 'runtime_update_refused', reason: 'update_in_progress' }
+    );
+  }
+  return undefined;
+}
+
+function consentDenial(method: string, missing: readonly string[], slot: RuntimeSlot): RemoteError {
+  const because =
+    missing.length > 0
+      ? `this machine has not granted ${missing.join(' or ')}`
+      : 'no capability governs it, so nothing can grant it';
+  return new RemoteError(
+    RESERVED_ERROR_CODES.DENIED,
+    `"${method}" is refused: ${because}. Run "mangostudio-runtime setup --slot ${slot}" there to change what a hub may do.`,
+    { kind: CONSENT_DENIED_KIND, method, missing, slot, capability: missing[0] }
+  );
+}
+
+/** Which of a method's capabilities this machine has not granted. */
 function missingCapabilities(
-  method: string,
+  method: RuntimeMethod,
   allow: RuntimeCapabilityAllow
-): readonly (keyof RuntimeCapabilityAllow)[] | null {
-  const required = RUNTIME_METHOD_CAPABILITIES[method as RuntimeMethod];
-  return required ? required.filter((capability) => !allow[capability]) : null;
+): readonly (keyof RuntimeCapabilityAllow)[] {
+  const required = RUNTIME_CONTRACT.definition.methods[method].capabilities;
+  return required.filter((capability) => !allow[capability]);
+}
+
+/**
+ * The code the local receipt should carry for this throw.
+ *
+ * `toRemoteError` leaves `AbortError` and ordinary `Error` alone so the
+ * session can map them (`CANCELLED` / `INTERNAL`). The audit line still
+ * needs that code — `RuntimeAuditOutcome` has no `cancelled` member, so a
+ * synthetic `RemoteError` is enough. The throw itself is unchanged.
+ */
+function auditErrorFor(remote: unknown): RemoteError | undefined {
+  if (remote instanceof RemoteError) return remote;
+  if (remote instanceof Error && remote.name === 'AbortError') {
+    return new RemoteError(RESERVED_ERROR_CODES.CANCELLED, remote.message);
+  }
+  if (remote instanceof Error) {
+    return new RemoteError(RESERVED_ERROR_CODES.INTERNAL, remote.message);
+  }
+  return undefined;
+}
+
+function record(
+  audit: RuntimeAuditSink | undefined,
+  method: string,
+  outcome: RuntimeAuditOutcome,
+  started: number,
+  params: unknown,
+  error?: RemoteError
+): void {
+  const capability = error?.details?.capability;
+  audit?.record({
+    method,
+    outcome,
+    durationMs: performance.now() - started,
+    params,
+    ...(typeof capability === 'string' ? { capability } : {}),
+    ...(error ? { code: error.code } : {}),
+  });
 }

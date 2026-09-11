@@ -8,10 +8,11 @@
  * the hub's own is.
  */
 
-import type { RuntimeSettingsSource, RuntimeSettingsSourcesResult } from '@mangostudio/runtime';
 import type {
   LibraryLocationId,
   LibraryTargetId,
+  RuntimeSettingsSource,
+  RuntimeSettingsSourcesResult,
   SettingsSnapshot,
   SettingsSourceSnapshot,
 } from '@mangostudio/shared/library';

@@ -187,7 +187,7 @@ describe('connectSshRuntime over a real sshd', () => {
         () => undefined
       ).catch((caught) => caught);
 
-      expect(error.code).toBe('RUNTIME_UNAVAILABLE');
+      expect(error.code).toBe('UNAVAILABLE');
       expect(error.details?.sshFailureReason).toBe('runtime-missing');
       expect(error.message).toContain('absent');
     },

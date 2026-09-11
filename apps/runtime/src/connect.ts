@@ -2,21 +2,29 @@
  * The dial-out loop: a runtime that reaches the hub instead of waiting to be
  * reached.
  *
- * Bun's WebSocket client has no built-in reconnect, so the backoff is here, and
- * it reads the hub's close code before deciding what to do with it. Retrying a
- * revoked credential forever is not resilience, it is a machine hammering an
- * endpoint that will never say yes; coming back on the same cadence after being
- * rate limited is the same mistake from the other side.
+ * The WebSocket transport has no built-in reconnect, so the backoff is here,
+ * and it reads the hub's close code before deciding what to do with it.
+ * Retrying a revoked credential forever is not resilience, it is a machine
+ * hammering an endpoint that will never say yes; coming back on the same
+ * cadence after being rate limited is the same mistake from the other side.
  */
 
 import {
-  isFatalRuntimeCloseCode,
-  RUNTIME_CLOSE_CODES,
-  RUNTIME_HEARTBEAT_TOPIC,
-} from '@mangostudio/shared/runtime-protocol';
-import type { RuntimeHost } from './host';
-import { startProtocolLiveness } from './liveness';
-import { clientWebSocketSink, createWebSocketFramePort } from './transports/websocket';
+  CLOSE_CODES,
+  isFatalCloseCode,
+  type Port,
+  type Session,
+  type SessionClosure,
+} from '@mangostudio/protocol';
+import { connectWebSocket } from '@mangostudio/protocol/ws';
+import { RUNTIME_HEARTBEAT_TOPIC } from '@mangostudio/shared/runtime-contract';
+import { dialDeadline } from '@mangostudio/shared/utils/dial-deadline';
+import {
+  createRuntimeSession,
+  type RuntimeEventRelay,
+  type RuntimeHostDefinition,
+  whenRuntimeReleased,
+} from './session';
 
 /** Base of the jittered exponential backoff, doubling to the cap below. */
 const RECONNECT_BASE_DELAY_MS = 1_000;
@@ -27,19 +35,24 @@ const RATE_LIMITED_DELAY_MS = 30_000;
 const JITTER_RATIO = 0.5;
 
 const HANDSHAKE_TIMEOUT_MS = 15_000;
-/** Well under the hub's 60s socket idle timeout, in both directions. */
-const LIVENESS_INTERVAL_MS = 20_000;
 const HEARTBEAT_INTERVAL_MS = 60_000;
 
 export interface RuntimeConnectOptions {
   readonly hubUrl: string;
   readonly token: string;
-  readonly createHost: () => RuntimeHost;
+  /** Built once per connection: a reconnect serves a fresh definition. */
+  readonly createDefinition: () => RuntimeHostDefinition;
   /** Diagnostics; stdout stays free of anything that is not a protocol frame. */
   readonly log?: (message: string) => void;
   /** Stops the loop. A signal handler aborts it. */
   readonly signal?: AbortSignal;
   readonly sleep?: (ms: number) => Promise<void>;
+  /**
+   * Bound on the WebSocket upgrade and on the hello exchange. A hub that
+   * accepts TCP and never finishes the upgrade produces no open, error, or
+   * close, so without this the reconnect loop never starts.
+   */
+  readonly handshakeTimeoutMs?: number;
 }
 
 export interface RuntimeConnectOutcome {
@@ -50,6 +63,9 @@ export interface RuntimeConnectOutcome {
 /**
  * Dials, serves, and redials until the signal aborts or the hub refuses in a
  * way redialing cannot change.
+ *
+ * @example
+ * await connectToHub({ hubUrl, token, createDefinition: () => createLocalRuntimeHost({ runtimeVersion }) });
  */
 export async function connectToHub(options: RuntimeConnectOptions): Promise<RuntimeConnectOutcome> {
   const log = options.log ?? (() => undefined);
@@ -66,7 +82,7 @@ export async function connectToHub(options: RuntimeConnectOptions): Promise<Runt
     // hub and be accepted.
     failures = attempt.served ? 1 : failures + 1;
     const delay =
-      attempt.closeCode === RUNTIME_CLOSE_CODES.RATE_LIMITED
+      attempt.closeCode === CLOSE_CODES.RATE_LIMITED
         ? RATE_LIMITED_DELAY_MS
         : backoffDelay(failures);
     log(`${attempt.message} Reconnecting in ${Math.round(delay / 1_000)}s.`);
@@ -101,111 +117,114 @@ async function runOneConnection(
   options: RuntimeConnectOptions,
   log: (message: string) => void
 ): Promise<ConnectionAttempt> {
-  const socket = new WebSocket(options.hubUrl, {
-    headers: { Authorization: `Bearer ${options.token}` },
-  });
-  socket.binaryType = 'arraybuffer';
+  const handshakeTimeoutMs = options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS;
+  // `connectWebSocket` settles on open, error, close, or abort. A host that
+  // accepts TCP and never finishes the upgrade produces none of the first
+  // three, so the process signal alone is not a bound — it only fires when
+  // someone stops the runtime. The Direct URL dialler carries the same
+  // deadline for the same stall.
+  const deadline = dialDeadline(
+    handshakeTimeoutMs,
+    `The hub did not accept a WebSocket at ${options.hubUrl} within ${handshakeTimeoutMs}ms.`
+  );
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, deadline.signal])
+    : deadline.signal;
+  let port: Port;
+  try {
+    port = await connectWebSocket(options.hubUrl, {
+      headers: { authorization: `Bearer ${options.token}` },
+      signal,
+    });
+  } catch (error) {
+    // Nothing was accepted, so there is no close code to read: the hub is
+    // down, the address is wrong, the upgrade stalled, or the dial was
+    // aborted. All four are the loop's own business, and none of them is
+    // fatal on its own.
+    return {
+      retry: true,
+      served: false,
+      message: `Could not reach the hub: ${asError(error).message}`,
+    };
+  } finally {
+    deadline.clear();
+  }
 
-  const host = options.createHost();
-  const port = createWebSocketFramePort({ sink: clientWebSocketSink(socket) });
-  socket.addEventListener('message', (event) => port.receive(event.data as ArrayBuffer));
-
-  const closed = new Promise<{ code: number; reason: string }>((resolve) => {
-    socket.addEventListener(
-      'close',
-      (event) => {
-        port.handleSocketClosed();
-        const closeEvent = event as CloseEvent;
-        resolve({ code: closeEvent.code, reason: closeEvent.reason });
-      },
-      { once: true }
-    );
+  const definition = options.createDefinition();
+  const session = createRuntimeSession(port, definition, {
+    handshakeTimeoutMs,
   });
-  const abort = (): void => socket.close(1000, 'Runtime stopping');
+  const abort = (): void => session.close(CLOSE_CODES.RELEASED, 'Runtime stopping');
   options.signal?.addEventListener('abort', abort, { once: true });
 
   try {
-    const opened = await Promise.race([
-      new Promise<boolean>((resolve) => {
-        socket.addEventListener('open', () => resolve(true), { once: true });
-        socket.addEventListener('close', () => resolve(false), { once: true });
-      }),
-      // A hub can also accept the socket and say nothing; without this the loop
-      // would stall on a connection that is neither open nor closed.
-      sleepMs(HANDSHAKE_TIMEOUT_MS).then(() => false),
-    ]);
-    if (!opened) {
-      socket.close(1000, 'Handshake timed out');
-      return classifyClosure(await closed, false);
-    }
-
-    host.attach(port);
-    host.start();
-    const handshake = await Promise.race([
-      host.waitUntilReady().then(
-        () => null,
-        (error: unknown) => asError(error)
-      ),
+    try {
+      await session.ready;
+    } catch (error) {
       // A hub that refuses mid-handshake — a disabled environment discovered
       // after the upgrade, a protocol version it will not serve — says so by
-      // closing. The frame port does not turn that into a handshake rejection,
-      // so without this the CLI sits out the full timeout before reporting a
-      // refusal it already has in hand.
-      closed.then(() => new Error('The hub closed the connection during the handshake.')),
-      sleepMs(HANDSHAKE_TIMEOUT_MS).then(
-        () => new Error('The hub did not acknowledge the protocol handshake in time.')
-      ),
-    ]);
-    if (handshake) {
-      socket.close(1000, 'Handshake failed');
-      const closure = classifyClosure(await closed, false);
-      // A hub that refused the credential has already said why; the local
-      // handshake error is only the symptom of that close arriving mid-hello.
+      // closing, and that close code is the better answer. The local handshake
+      // error is only the symptom of it arriving mid-hello.
+      const closure = classifyClosure(session.closure, false);
       return closure.retry
-        ? { ...closure, message: `Protocol handshake failed: ${handshake.message}` }
+        ? { ...closure, message: `Protocol handshake failed: ${asError(error).message}` }
         : closure;
     }
 
-    const stopLiveness = startProtocolLiveness({
-      ping: () => host.ping(),
-      onPong: (listener) => host.onPong(listener),
-      intervalMs: LIVENESS_INTERVAL_MS,
-      onTimeout: () => {
-        log('Hub stopped answering protocol pings.');
-        socket.close(RUNTIME_CLOSE_CODES.RELEASED, 'Liveness timeout');
-      },
-    });
-    const beat = (): void => {
-      host.emit({ topic: RUNTIME_HEARTBEAT_TOPIC, payload: { at: Date.now() } });
-    };
-    const heartbeat = setInterval(beat, HEARTBEAT_INTERVAL_MS);
-    (heartbeat as { unref?: () => void }).unref?.();
-    beat();
+    const stopHeartbeat = startHeartbeat(definition.events);
     log(`Connected to ${options.hubUrl}.`);
-
     try {
-      return classifyClosure(await closed, true);
+      return classifyClosure(await whenClosed(session), true);
     } finally {
-      stopLiveness();
-      clearInterval(heartbeat);
+      stopHeartbeat();
     }
   } finally {
     options.signal?.removeEventListener('abort', abort);
-    // Teardown reaps external-agent sessions and vendor process trees, so it
-    // can reject. Contained here: a failed close must not reject
-    // `runOneConnection` and take the whole reconnect loop down with it.
-    await host.close().catch((error: unknown) => {
-      log(`Runtime host cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
-    });
+    // Closed before the wait below, and unconditionally: `whenRuntimeReleased`
+    // only settles once the session has ended, so a handshake that failed
+    // without the transport dropping would hang the loop here.
+    session.close(CLOSE_CODES.RELEASED, 'Runtime stopping');
+    // Teardown reaps external-agent sessions and vendor process trees, and the
+    // next dial rebuilds all of it, so the loop waits for the old one to let go
+    // before it asks for another.
+    await whenRuntimeReleased(session);
   }
 }
 
-function classifyClosure(
-  closure: { code: number; reason: string },
-  served: boolean
-): ConnectionAttempt {
+/** Settles with the closure that ended `session`. */
+function whenClosed(session: Session): Promise<SessionClosure> {
+  return new Promise<SessionClosure>((resolve) => {
+    session.onClose(resolve);
+  });
+}
+
+/**
+ * Publishes the keep-alive the hub records a credential's use from, until the
+ * returned function stops it.
+ *
+ * Through the relay rather than the session, because that is the path every
+ * other runtime event takes: whichever session is currently bound carries it,
+ * and one that is gone drops it.
+ *
+ * @example
+ * const stop = startHeartbeat(definition.events);
+ */
+function startHeartbeat(events: RuntimeEventRelay): () => void {
+  const beat = (): void => {
+    events.emit({ topic: RUNTIME_HEARTBEAT_TOPIC, payload: { at: Date.now() } });
+  };
+  const timer = setInterval(beat, HEARTBEAT_INTERVAL_MS);
+  (timer as { unref?: () => void }).unref?.();
+  beat();
+  return () => clearInterval(timer);
+}
+
+function classifyClosure(closure: SessionClosure | undefined, served: boolean): ConnectionAttempt {
+  if (!closure) {
+    return { retry: true, served, message: 'The connection to the hub ended without a reason.' };
+  }
   const detail = closure.reason ? ` (${closure.reason})` : '';
-  if (isFatalRuntimeCloseCode(closure.code)) {
+  if (isFatalCloseCode(closure.code)) {
     return {
       retry: false,
       served,
@@ -213,7 +232,7 @@ function classifyClosure(
       message: fatalClosureMessage(closure.code, detail),
     };
   }
-  if (closure.code === RUNTIME_CLOSE_CODES.RATE_LIMITED) {
+  if (closure.code === CLOSE_CODES.RATE_LIMITED) {
     return {
       retry: true,
       served,
@@ -237,11 +256,11 @@ function classifyClosure(
  */
 function fatalClosureMessage(code: number, detail: string): string {
   switch (code) {
-    case RUNTIME_CLOSE_CODES.UNAUTHORIZED:
+    case CLOSE_CODES.UNAUTHORIZED:
       return `The hub refused this runtime's pairing token${detail}. Issue a new one from the environment card and run "connect" again with it.`;
-    case RUNTIME_CLOSE_CODES.PROTOCOL_MISMATCH:
+    case CLOSE_CODES.PROTOCOL_MISMATCH:
       return `The hub speaks a runtime protocol this binary does not${detail}. Update the runtime on this machine, then run "connect" again.`;
-    case RUNTIME_CLOSE_CODES.SUPERSEDED:
+    case CLOSE_CODES.SUPERSEDED:
       // Stopping rather than redialing: another process holds this credential,
       // and a runtime that takes it back on every reconnect just trades the
       // environment back and forth, dropping in-flight calls each time. Which
@@ -262,10 +281,6 @@ function backoffDelay(failures: number): number {
 }
 
 function defaultSleep(ms: number): Promise<void> {
-  return sleepMs(ms);
-}
-
-function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
     (timer as { unref?: () => void }).unref?.();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import { SubagentDelegationError } from '../../../../src/modules/generation/application/subagent-turn-types';
 import {
   classifyToolExecutionFailure,
@@ -13,8 +13,8 @@ import { ToolArgumentError } from '../../../../src/services/tools/arg-parsing';
 import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';
 
 /** The shape an MCP failure reaches the hub in: classified by the runtime. */
-function mcpFailure(failure: 'timeout' | 'server_closed', message: string): RuntimeRemoteError {
-  return new RuntimeRemoteError('INTERNAL', message, {
+function mcpFailure(failure: 'timeout' | 'server_closed', message: string): RemoteError {
+  return new RemoteError('INTERNAL', message, {
     kind: 'mcp_call',
     serverSlug: 'fixture',
     mcpFailure: failure,
@@ -43,7 +43,7 @@ describe('classifyToolExecutionFailure', () => {
   it('maps a runtime that went away mid-call to a closed session', () => {
     expect(
       classifyToolExecutionFailure(
-        new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'Runtime connection was closed.')
+        new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'Runtime connection was closed.')
       )
     ).toEqual({ status: 'failed', reasonCode: 'server_closed' });
   });

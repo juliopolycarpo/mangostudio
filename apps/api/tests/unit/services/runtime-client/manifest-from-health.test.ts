@@ -123,13 +123,11 @@ describe('capabilityManifestFromHealth', () => {
 
     const refreshed = capabilityManifestFromHealth(report, {
       ...capabilityManifestFromHealth(report),
-      acceptsHubIdentity: true,
       enforcesPathPolicy: true,
       publishesWindowsSlot: true,
       directoryHashDomain: 2,
     });
 
-    expect(refreshed.acceptsHubIdentity).toBe(true);
     expect(refreshed.enforcesPathPolicy).toBe(true);
     expect(refreshed.publishesWindowsSlot).toBe(true);
     expect(refreshed.directoryHashDomain).toBe(2);
@@ -144,7 +142,6 @@ describe('capabilityManifestFromHealth', () => {
 
     const refreshed = capabilityManifestFromHealth(report, capabilityManifestFromHealth(report));
 
-    expect(refreshed.acceptsHubIdentity).toBeUndefined();
     expect(refreshed.enforcesPathPolicy).toBeUndefined();
     expect(refreshed.publishesWindowsSlot).toBeUndefined();
     expect(refreshed.directoryHashDomain).toBeUndefined();

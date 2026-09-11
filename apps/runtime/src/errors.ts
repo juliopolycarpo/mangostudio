@@ -1,4 +1,5 @@
-import type { RuntimeErrorCode } from '@mangostudio/shared/runtime-protocol';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { CONSENT_DENIED_KIND, RUNTIME_UPDATE_REFUSED } from '@mangostudio/shared/runtime-contract';
 
 export type RuntimeServiceErrorKind =
   /** The machine's owner did not grant a capability the method needs. */
@@ -108,24 +109,46 @@ export class RuntimeServiceManagementError extends RuntimeServiceError {
  * every service error to code `INTERNAL` plus its kind — so this constant is
  * what lets the hub answer 404 instead of matching on the message text. It goes
  * in `details`, which is an open record on the wire. Consent refusals are the
- * exception: they travel as the typed `RUNTIME_DENIED` code.
+ * exception: they travel as the reserved `DENIED` code.
  */
 export const LIBRARY_BACKUP_MISSING_KIND =
   'library_backup_missing' satisfies RuntimeServiceErrorKind;
 
 /**
- * Hub-side mirror of a remote `err` payload. `code` is always a known literal
- * after the protocol client narrows the open wire form.
+ * Maps what a runtime handler threw onto the wire error the peer receives.
+ *
+ * Consent refusals travel as the reserved `DENIED`, a refused live update as
+ * the application's own `RUNTIME_UPDATE_REFUSED`, and every other service
+ * error as `INTERNAL` carrying its `kind` — which is what lets a hub answer
+ * 404 for a missing backup set instead of matching on message text. An
+ * `AbortError` is left alone: the session maps it to `CANCELLED`.
+ *
+ * @example
+ * throw toRemoteError(new LibraryBackupMissingError('set "a1" is gone'));
+ * // RemoteError INTERNAL, details.kind === 'library_backup_missing'
  */
-export class RuntimeRemoteError extends Error {
-  constructor(
-    readonly code: RuntimeErrorCode,
-    message: string,
-    readonly details?: Readonly<Record<string, unknown>>
-  ) {
-    super(message);
-    this.name = 'RuntimeRemoteError';
+export function toRemoteError(error: unknown): unknown {
+  if (!(error instanceof RuntimeServiceError)) return error;
+  if (error.kind === CONSENT_DENIED_KIND) {
+    const missing = Array.isArray(error.data.missing)
+      ? error.data.missing.filter((entry): entry is string => typeof entry === 'string')
+      : [];
+    return new RemoteError(RESERVED_ERROR_CODES.DENIED, error.message, {
+      kind: error.kind,
+      ...error.data,
+      capability: typeof error.data.capability === 'string' ? error.data.capability : missing[0],
+    });
   }
+  if (error.kind === 'runtime_update_refused') {
+    return new RemoteError(RUNTIME_UPDATE_REFUSED, error.message, {
+      kind: error.kind,
+      ...error.data,
+    });
+  }
+  return new RemoteError(RESERVED_ERROR_CODES.INTERNAL, error.message, {
+    kind: error.kind,
+    ...error.data,
+  });
 }
 
 /**

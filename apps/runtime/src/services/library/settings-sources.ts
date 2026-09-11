@@ -21,7 +21,13 @@ import {
   readSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import type { LibraryLocationId } from '@mangostudio/shared/library';
+import type {
+  LibraryLocationId,
+  RuntimeSettingsReadFailure,
+  RuntimeSettingsRuleFile,
+  RuntimeSettingsSource,
+  RuntimeSettingsSourcesResult,
+} from '@mangostudio/shared/library';
 import {
   getLibraryLocation,
   LIBRARY_TARGET_DEFINITIONS,
@@ -37,38 +43,6 @@ const MAX_SETTINGS_SOURCE_BYTES = 512 * 1024;
 // anything it points at elsewhere is not the file the user was asked about.
 const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
 const READ_FLAGS = fsConstants.O_RDONLY | O_NOFOLLOW;
-
-/** Why a source that exists could not be turned into settings text. */
-type RuntimeSettingsReadFailure = 'unreadable' | 'not-regular-file' | 'too-large';
-
-interface RuntimeSettingsRuleFile {
-  readonly name: string;
-  readonly content: string;
-}
-
-export interface RuntimeSettingsSource {
-  readonly locationId: LibraryLocationId;
-  /**
-   * False when the location does not resolve on this machine or nothing is
-   * there. A missing settings file is an ordinary state, not a failure.
-   */
-  readonly present: boolean;
-  readonly sizeBytes?: number;
-  readonly failureReason?: RuntimeSettingsReadFailure;
-  /** Raw text, for every format except `rules-dsl`. */
-  readonly content?: string;
-  /** One entry per `.rules` file, name-sorted, for `rules-dsl` locations. */
-  readonly rules?: readonly RuntimeSettingsRuleFile[];
-}
-
-export interface RuntimeSettingsSourcesResult {
-  /**
-   * This machine's home directory. The hub's parsers abbreviate paths against
-   * it, and abbreviating a remote path against the hub's home would be wrong.
-   */
-  readonly homeDir: string;
-  readonly sources: readonly RuntimeSettingsSource[];
-}
 
 /** Every location any target reads settings or hooks from, in registry order. */
 function settingsSourceLocationIds(): LibraryLocationId[] {

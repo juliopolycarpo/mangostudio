@@ -11,9 +11,9 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename } from 'node:path';
-import type { RuntimeShellKind } from '@mangostudio/shared/runtime-protocol';
+import type { EventInput } from '@mangostudio/protocol';
+import type { RuntimeShellKind } from '@mangostudio/shared/runtime-contract';
 import { RuntimeToolArgumentError } from '../../errors';
-import type { RuntimeEventInput } from '../../host';
 import type {
   RuntimeTerminalAckParams,
   RuntimeTerminalAttachParams,
@@ -88,8 +88,11 @@ export interface TerminalService {
 }
 
 export interface TerminalServiceOptions {
-  /** Publishes a `terminal.output` frame; only ever called once a session has been attached. */
-  readonly emit: (event: RuntimeEventInput) => void;
+  /**
+   * Publishes a `terminal.output` frame; only ever called once a session has
+   * been attached. `false` means no session was there to carry it.
+   */
+  readonly emit: (event: EventInput) => boolean;
   readonly deps?: Partial<TerminalServiceDeps>;
 }
 
@@ -97,14 +100,13 @@ export function createTerminalService(options: TerminalServiceOptions): Terminal
   const deps: TerminalServiceDeps = { ...DEFAULT_DEPS, ...options.deps };
   const sessions = new Map<string, TerminalSession>();
 
-  const publish = (sessionId: string, payload: RuntimeTerminalOutputEvent, end?: true): void => {
+  const publish = (sessionId: string, payload: RuntimeTerminalOutputEvent, end?: true): boolean =>
     options.emit({
       topic: RUNTIME_TERMINAL_OUTPUT_TOPIC,
       streamId: sessionId,
       payload,
       ...(end ? { end } : {}),
     });
-  };
 
   const requireSession = (sessionId: string): TerminalSession => {
     const session = sessions.get(sessionId);

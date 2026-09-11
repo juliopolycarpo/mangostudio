@@ -6,11 +6,9 @@ import {
   MAX_DIRECTORY_HASH_DOMAIN_VERSION,
 } from '../library';
 import { ProfileIdSchema } from '../profiles';
+import { RuntimeErrorCodeSchema } from '../runtime-contract/errors';
+import { RuntimeCapabilityManifestSchema } from '../runtime-contract/manifest';
 import { RuntimeCapabilityAllowSchema, RuntimeHealthReportSchema } from '../runtime-home/schemas';
-import {
-  RuntimeCapabilityManifestSchema,
-  RuntimeErrorCodeSchema,
-} from '../runtime-protocol/schemas';
 import { ReadonlyArraySchema } from '../schema-helpers';
 import { ToolchainSelectionSchema } from './toolchain-schemas';
 
@@ -169,7 +167,7 @@ export const ContainerEnvironmentConfigSchema = Type.Object(
  * Why a container launch failed, when the engine's output allows naming it.
  *
  * Same reason SSH carries one: these arrive as one exit status and one
- * `RUNTIME_UNAVAILABLE`, while the fixes have nothing to do with each other —
+ * `UNAVAILABLE`, while the fixes have nothing to do with each other —
  * a missing engine is installed, an unreachable daemon is started, an image
  * without a shell is swapped for one that has it.
  */
@@ -434,7 +432,7 @@ export const EnvironmentConnectionStatusSchema = Type.Object(
     /**
      * Set when an SSH launch failed and the client's output named a cause.
      * `errorCode` cannot carry it: every one of these arrives as
-     * `RUNTIME_UNAVAILABLE`, and they have nothing to do with each other.
+     * `UNAVAILABLE`, and they have nothing to do with each other.
      */
     sshFailureReason: Type.Optional(SshFailureReasonSchema),
     /** The same, for a container launch. See {@link ContainerFailureReasonSchema}. */

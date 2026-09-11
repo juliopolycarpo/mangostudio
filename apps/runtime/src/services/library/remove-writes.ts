@@ -11,6 +11,7 @@
 import { resolve as resolvePath } from 'node:path';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type {
+  PreparedRemovalOperation,
   RemovalApply,
   RemovalFailure,
   RemovalKept,
@@ -38,7 +39,6 @@ import {
   stageResourceRemoval,
   type TreeRemovalFs,
 } from './tree-removal';
-import type { PreparedRemovalOperation } from './write-shapes';
 
 export interface RemovalWriteEngineDeps {
   hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;

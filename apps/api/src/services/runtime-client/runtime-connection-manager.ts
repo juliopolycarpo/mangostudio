@@ -1,10 +1,8 @@
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import {
-  connectInProcessRuntime,
   createLocalRuntimeHost,
   createSingleUserHostExternalAgentIsolation,
   createSlotConsentSource,
-  type InProcessRuntimeConnection,
-  RuntimeRemoteError,
 } from '@mangostudio/runtime';
 import type {
   EnvironmentConnectionState,
@@ -18,8 +16,11 @@ import {
   SshFailureReasonSchema,
 } from '@mangostudio/shared/environments';
 import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
+import {
+  narrowRuntimeErrorCode,
+  type RuntimeErrorCode,
+} from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
-import type { RuntimeErrorCode } from '@mangostudio/shared/runtime-protocol';
 import Value from 'typebox/value';
 import { probeRuntimeSlots } from '../../cli/runtime-slot-probe';
 import { getDb } from '../../db/database';
@@ -41,6 +42,7 @@ import { wslProvisioner } from '../../modules/environments/infrastructure/wsl-pr
 import { publishEnvironmentInvalidation } from '../realtime/environment-invalidation';
 import { connectContainerRuntime } from './connect-container-runtime';
 import { connectHttpRuntime } from './connect-http-runtime';
+import { connectInProcessRuntime } from './connect-in-process-runtime';
 import { connectSshRuntime } from './connect-ssh-runtime';
 import { capabilityManifestFromHealth } from './manifest-from-health';
 import { RuntimeClient } from './runtime-client';
@@ -373,7 +375,10 @@ function retryDeadline(failureCount: number, errorCode: RuntimeErrorCode, dialIn
   if (dialIn) return 0;
   // A stale binary cannot fix itself by being asked again; require a reinstall
   // and an explicit reconnect rather than burning attempts on it.
-  if (errorCode === 'PROTOCOL_MISMATCH' || failureCount >= MAX_RECONNECT_ATTEMPTS) {
+  if (
+    errorCode === RESERVED_ERROR_CODES.PROTOCOL_MISMATCH ||
+    failureCount >= MAX_RECONNECT_ATTEMPTS
+  ) {
     return Number.POSITIVE_INFINITY;
   }
   const delay = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** (failureCount - 1), RECONNECT_MAX_DELAY_MS);
@@ -388,18 +393,18 @@ function describeBackoff(environmentId: string, entry: RuntimeConnectionEntry): 
   return `Environment "${environmentId}" is unavailable; the next connection attempt is allowed in ${seconds}s.`;
 }
 
-function unavailable(message: string): RuntimeRemoteError {
-  return new RuntimeRemoteError('RUNTIME_UNAVAILABLE', message);
+function unavailable(message: string): RemoteError {
+  return new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, message);
 }
 
 /**
- * Callers branch on `RUNTIME_UNAVAILABLE` to decide that a tool call failed
+ * Callers branch on the unavailable code to decide that a tool call failed
  * because its target is gone, so every connect failure keeps that code when it
  * is thrown. The specific cause is preserved separately on the connection
  * status, which is what the Environments UI reads.
  */
-function normalizeUnavailable(error: unknown): RuntimeRemoteError {
-  return error instanceof RuntimeRemoteError && error.code === 'RUNTIME_UNAVAILABLE'
+function normalizeUnavailable(error: unknown): RemoteError {
+  return error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.UNAVAILABLE
     ? error
     : unavailable(error instanceof Error ? error.message : String(error));
 }
@@ -418,7 +423,9 @@ function peerRelease(
 }
 
 function statusErrorCode(error: unknown): RuntimeErrorCode {
-  return error instanceof RuntimeRemoteError ? error.code : 'RUNTIME_UNAVAILABLE';
+  return error instanceof RemoteError
+    ? narrowRuntimeErrorCode(error.code)
+    : RESERVED_ERROR_CODES.UNAVAILABLE;
 }
 
 /**
@@ -434,7 +441,7 @@ function statusErrorCode(error: unknown): RuntimeErrorCode {
 function failureDetail(
   error: unknown
 ): Pick<EnvironmentConnectionStatus, 'sshFailureReason' | 'containerFailureReason'> {
-  const details = error instanceof RuntimeRemoteError ? error.details : undefined;
+  const details = error instanceof RemoteError ? error.details : undefined;
   const ssh = details?.sshFailureReason;
   const container = details?.containerFailureReason;
   return {
@@ -1000,12 +1007,16 @@ export class RuntimeConnectionManager {
     const dialIn = isDialIn(entry.transportKind);
     entry.connectedAtMs = undefined;
     entry.failureCount = dialIn ? 0 : healthy ? 1 : entry.failureCount + 1;
-    entry.retryAfterMs = retryDeadline(entry.failureCount, 'RUNTIME_UNAVAILABLE', dialIn);
+    entry.retryAfterMs = retryDeadline(
+      entry.failureCount,
+      RESERVED_ERROR_CODES.UNAVAILABLE,
+      dialIn
+    );
     entry.status = {
       // A latched deadline is what `error` means here, so read it rather than
       // re-deriving the cap and drifting from whatever else latches.
       state: entry.retryAfterMs === Number.POSITIVE_INFINITY ? 'error' : 'disconnected',
-      errorCode: 'RUNTIME_UNAVAILABLE',
+      errorCode: RESERVED_ERROR_CODES.UNAVAILABLE,
       ...this.#cachedPeer(entry),
     };
     this.#publish(userId);
@@ -1146,7 +1157,7 @@ async function connectLocalRuntime(
   // being able to narrow it. Absence resolves to full, so the default is
   // unchanged and no install has to have run.
   const [probe] = (await probeRuntimeSlots()).filter((slot) => slot.slot === 'host');
-  const host = createLocalRuntimeHost({
+  const definition = createLocalRuntimeHost({
     runtimeVersion: version,
     externalAgents: {
       authorizeWorkspace: options.authorizeWorkspace,
@@ -1157,11 +1168,9 @@ async function connectLocalRuntime(
       ...(probe && !probe.error ? { initial: probe.config.allow } : {}),
     }),
   });
-  const connection: InProcessRuntimeConnection = await connectInProcessRuntime(host, {
-    hubVersion: version,
-  });
+  const connection = await connectInProcessRuntime(definition, { hubVersion: version });
   return {
-    client: new RuntimeClient(connection.client, options.onUnavailable, LOCAL_ENVIRONMENT_ID),
+    client: new RuntimeClient(connection.hub, options.onUnavailable, LOCAL_ENVIRONMENT_ID),
     close: () => connection.close(),
   };
 }
@@ -1251,7 +1260,7 @@ function advanceChainAfter(attempt: Promise<unknown>, deadlineMs: number): Promi
 /**
  * Binds the hub process's OS credential home to one MangoStudio user.
  *
- * Separate Local RuntimeHost instances still share the same OS account. The
+ * Separate Local runtime sessions still share the same OS account. The
  * first authenticated owner may be attested while it is the only owner the
  * process has served. If a second owner appears, every attested connection is
  * closed before that owner connects and this connector permanently falls back
@@ -1363,7 +1372,7 @@ async function connectStdioRuntime(
     // a child that dies mid-request reporting through both costs nothing. Neither
     // covers the other: the pipe closing catches a death with no request in
     // flight, and a request failing catches a child that answers but is gone.
-    client: new RuntimeClient(connection.client, onUnavailable, definition.id),
+    client: new RuntimeClient(connection.hub, onUnavailable, definition.id),
     close: () => connection.close(),
   };
 }
@@ -1411,7 +1420,7 @@ export async function connectWslRuntime(
     onClosed: onUnavailable,
   });
   return {
-    client: new RuntimeClient(connection.client, onUnavailable, definition.id),
+    client: new RuntimeClient(connection.hub, onUnavailable, definition.id),
     close: () => connection.close(),
   };
 }

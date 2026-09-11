@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import { getDb } from '../../../../src/db/database';
 import { resolveAgentRuntime } from '../../../../src/modules/generation/application/resolve-agent-runtime';
 import { upsertToolSettings } from '../../../../src/modules/tool-settings/infrastructure/tool-settings-repository';
@@ -184,7 +184,7 @@ describe('resolveAgentRuntime with MCP tools', () => {
       environmentName: 'Local',
     });
 
-    // The peer answers mcp.connect with RUNTIME_DENIED; spending the listing
+    // The peer answers mcp.connect with DENIED; spending the listing
     // budget to rediscover that is the bug this pins.
     expect(connectCalls).toBe(0);
     expect(runtime.mcpServerSnapshots).toMatchObject([

@@ -200,7 +200,7 @@ describe('runtime external-agent protocol payloads', () => {
     ).toBe(true);
     // Guards a real cycle risk: ToolchainSelectionSchema is imported from
     // `environments/toolchain-schemas` specifically to avoid a loop through
-    // `runtime-protocol/schemas` and `runtime-home/schemas`, both of which
+    // `runtime-contract` and `runtime-home/schemas`, both of which
     // import this module. A regression there does not fail `tsc` — it makes
     // this optional resolve to `undefined` at eval time instead.
     expect(

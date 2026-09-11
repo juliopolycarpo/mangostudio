@@ -1,4 +1,4 @@
-import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import type {
   CreateEnvironmentBody,
   Environment,
@@ -32,7 +32,9 @@ import { type ToolchainService, toolchainService } from './toolchain-service';
 
 function statusForTokenPersistFailure(error: unknown): 400 | 503 {
   // Secret-store outages are server conditions; a malformed request stays 400.
-  return error instanceof RuntimeRemoteError && error.code === 'RUNTIME_UNAVAILABLE' ? 503 : 400;
+  return error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.UNAVAILABLE
+    ? 503
+    : 400;
 }
 
 export interface EnvironmentService {

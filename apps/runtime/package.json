@@ -19,6 +19,7 @@
     "test:coverage": "bun test --timings=../../.mango/artifacts/timings/runtime.json --update-timings --coverage --timeout 15000 --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/runtime.xml $MANGOSTUDIO_BUN_TEST_ARGS"
   },
   "dependencies": {
+    "@mangostudio/protocol": "^0.1.0",
     "@mangostudio/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "smol-toml": "^1.7.0",

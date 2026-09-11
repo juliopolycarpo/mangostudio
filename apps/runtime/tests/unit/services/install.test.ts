@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { RuntimeEventInput } from '../../../src/host';
+import type { EventInput } from '@mangostudio/protocol';
 import type { RuntimeInstallOutputEvent } from '../../../src/methods';
 import { buildInstallEnvironment, createInstallService } from '../../../src/services/install';
 
@@ -51,7 +51,7 @@ function streamFrom(text: string): ReadableStream<Uint8Array> {
 /** Collects the lines the service publishes, dropping the terminal marker. */
 function collector() {
   const events: InstallLogLine[] = [];
-  const emit = (event: RuntimeEventInput) => {
+  const emit = (event: EventInput) => {
     const payload = event.payload as RuntimeInstallOutputEvent;
     if (payload.end) return;
     events.push({ stream: payload.stream, line: payload.line });
@@ -62,7 +62,7 @@ function collector() {
 function createRunner(
   process: FakeInstallProcess,
   captured: { log: Uint8Array[] },
-  emit: (event: RuntimeEventInput) => void = () => undefined
+  emit: (event: EventInput) => void = () => undefined
 ) {
   return createInstallService({
     emit,
@@ -256,7 +256,7 @@ describe('runtime install execution', () => {
   });
 
   it('ends the output stream so the hub stops waiting for frames', async () => {
-    const ended: RuntimeEventInput[] = [];
+    const ended: EventInput[] = [];
     const service = createRunner(new FakeInstallProcess('done\n', '', 0), { log: [] }, (event) => {
       if ((event.payload as RuntimeInstallOutputEvent).end) ended.push(event);
     });

@@ -1,8 +1,44 @@
-import { describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
 import { directoryHashDomainVersion } from '@mangostudio/shared/library';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { createLocalRuntimeManifest, parseGhVersion } from '../../src/manifest';
 import { supportsPty } from '../../src/services/terminal/pty';
+
+let probeDir = '';
+
+beforeAll(async () => {
+  probeDir = await mkdtemp(join(tmpdir(), 'mango-manifest-probe-'));
+});
+
+afterAll(async () => {
+  if (probeDir) await rm(probeDir, { force: true, recursive: true });
+});
+
+/**
+ * Puts a `gh` running `script` first on PATH; the returned call restores it.
+ *
+ * @example
+ * const restore = await stagePathWithGh('hangs', '#!/bin/sh\nsleep 30\n');
+ */
+async function stagePathWithGh(name: string, script: string): Promise<() => void> {
+  const dir = join(probeDir, name);
+  await mkdir(dir, { recursive: true });
+  const executable = join(dir, 'gh');
+  await writeFile(executable, script);
+  await chmod(executable, 0o755);
+  const previous = process.env.PATH;
+  process.env.PATH = previous ? `${dir}${delimiter}${previous}` : dir;
+  return () => {
+    if (previous === undefined) {
+      delete process.env.PATH;
+      return;
+    }
+    process.env.PATH = previous;
+  };
+}
 
 describe('createLocalRuntimeManifest', () => {
   it('derives a full profile from the full allow set', () => {
@@ -48,6 +84,43 @@ describe('createLocalRuntimeManifest', () => {
     expect(readonly.gh).toBeDefined();
     expect(typeof readonly.gh?.available).toBe('boolean');
     expect(readonly.gh?.available).toBe(readonly.features.git && readonly.git.available);
+  });
+
+  // `inspectGh` resolves its binary against the live PATH, which is the seam a
+  // hung probe can be staged through; `inspectGit` reads the startup PATH and
+  // has none, so `gh` stands in for both — they share the bound.
+  it.skipIf(process.platform === 'win32')('gives up on a probe that never answers', async () => {
+    const restore = await stagePathWithGh('never-answers', '#!/bin/sh\nsleep 30\n');
+    const started = Date.now();
+
+    try {
+      const manifest = createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly);
+
+      // The probe is `spawnSync`: unbounded, it blocks the event loop and with
+      // it every timer on it, including the hub's 10s in-process connect
+      // deadline. A probe that cannot answer is announced as absent instead.
+      expect(manifest.gh?.available).toBe(false);
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      restore();
+    }
+  });
+
+  // SIGTERM is what `timeout` sends on its own, and a child is free to refuse
+  // it: `spawnSync` then blocks for that child's whole life whatever the bound
+  // says, which is the freeze the bound exists to prevent.
+  it.skipIf(process.platform === 'win32')('kills a probe that refuses to stop', async () => {
+    const restore = await stagePathWithGh('ignores-term', "#!/bin/sh\ntrap '' TERM\nsleep 30\n");
+    const started = Date.now();
+
+    try {
+      const manifest = createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly);
+
+      expect(manifest.gh?.available).toBe(false);
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      restore();
+    }
   });
 
   it('advertises none with every feature off', () => {
