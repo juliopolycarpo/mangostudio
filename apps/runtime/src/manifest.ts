@@ -10,6 +10,7 @@ import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,
 } from '@mangostudio/shared/runtime-home';
+import { writeRuntimeDiagnostic } from './diagnostics';
 import { HIDDEN_WINDOW } from './services/process-window';
 import { isShellAvailable } from './services/shell';
 import { supportsPty } from './services/terminal/pty';
@@ -189,7 +190,19 @@ function probeVersion(
     killSignal: 'SIGKILL',
     ...HIDDEN_WINDOW,
   });
-  if (!result.success) return { available: false };
+  if (!result.success) {
+    // The manifest announces a machine with no `gh` and a machine whose `gh`
+    // is merely too slow to answer identically, as `available: false`, so the
+    // difference only survives if it is said here. The executable is named;
+    // the PATH that found it is not — this channel is unredacted by design.
+    const signal = result.signalCode ?? null;
+    writeRuntimeDiagnostic('version_probe_failed', {
+      executable,
+      killed: signal !== null,
+      ...(signal === null ? { exitCode: result.exitCode } : { signal }),
+    });
+    return { available: false };
+  }
 
   const version = parseVersion(result.stdout.toString());
   const answer: VersionProbeResult = version ? { available: true, version } : { available: true };

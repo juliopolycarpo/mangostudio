@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -184,6 +184,31 @@ describe('createLocalRuntimeManifest', () => {
       expect(await probe.invocations()).toBe(2);
     } finally {
       probe.restore();
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('announces a probe it had to kill', async () => {
+    // `available: false` alone cannot tell a machine with no `gh` from one
+    // whose `gh` is merely too slow to answer. The diagnostic is the only
+    // place that difference survives, and stderr is where the hub collects it.
+    const restore = await stagePathWithGh('announced-kill', '#!/bin/sh\nsleep 30\n');
+    const stderr = spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    try {
+      createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly);
+
+      const written = stderr.mock.calls.map(([line]) => String(line)).join('');
+      expect(written).toContain('version_probe_failed');
+      expect(written).toContain(join(probeDir, 'announced-kill', 'gh'));
+      expect(written).toContain('"killed":true');
+      // The channel is unredacted by design, so the PATH that found the binary
+      // never travels on it — only the binary.
+      const stagedPath = process.env.PATH;
+      expect(stagedPath).toBeTruthy();
+      expect(written).not.toContain(String(stagedPath));
+    } finally {
+      stderr.mockRestore();
+      restore();
     }
   });
 
