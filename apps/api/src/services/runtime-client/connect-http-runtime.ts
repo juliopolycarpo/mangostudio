@@ -10,10 +10,10 @@
 
 import { CLOSE_CODES, type Port, RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import { connectWebSocket } from '@mangostudio/protocol/ws';
+import { dialDeadline } from '@mangostudio/shared/utils/dial-deadline';
 import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { environmentConfigFor } from '../../modules/environments/domain/environment-config';
-import { dialDeadline } from './dial-deadline';
 import { httpRuntimeBaseUrlToWebSocketUrl } from './http-runtime-url';
 import { openHubSession, type ProtocolHubSession } from './hub-session';
 import { RuntimeClient } from './runtime-client';

@@ -5,7 +5,9 @@
  * accepts the TCP connection and then says nothing produces none of the three.
  * The runtime connection manager leaves that bound to the connector — "a
  * connector that only spawns a process is bounded by its own handshake timeout"
- * — so a dialling connector has to carry one of its own.
+ * — so a dialling connector has to carry one of its own. The runtime's own
+ * reconnect loop dials the hub and needs the same bound, which is why this
+ * lives in shared rather than beside either caller.
  */
 
 export interface DialDeadline {

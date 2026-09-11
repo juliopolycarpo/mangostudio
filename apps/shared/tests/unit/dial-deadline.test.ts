@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { rejectionOf } from '@mangostudio/protocol/testing';
-import { dialDeadline } from '../../../../src/services/runtime-client/dial-deadline';
+import { dialDeadline } from '../../src/utils/dial-deadline';
 
 /** A dial that never settles on its own, so only the deadline can end it. */
 function neverSettles(signal: AbortSignal): Promise<never> {

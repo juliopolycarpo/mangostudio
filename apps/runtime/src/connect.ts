@@ -18,6 +18,7 @@ import {
 } from '@mangostudio/protocol';
 import { connectWebSocket } from '@mangostudio/protocol/ws';
 import { RUNTIME_HEARTBEAT_TOPIC } from '@mangostudio/shared/runtime-contract';
+import { dialDeadline } from '@mangostudio/shared/utils/dial-deadline';
 import {
   createRuntimeSession,
   type RuntimeEventRelay,
@@ -284,25 +285,6 @@ function defaultSleep(ms: number): Promise<void> {
     const timer = setTimeout(resolve, ms);
     (timer as { unref?: () => void }).unref?.();
   });
-}
-
-/**
- * A deadline for a dial that neither opens nor fails.
- *
- * The timer is unreferenced, so an armed deadline never keeps a process alive
- * on its own. `clear` is safe after the deadline has already fired.
- */
-function dialDeadline(
-  timeoutMs: number,
-  message: string
-): { readonly signal: AbortSignal; clear(): void } {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error(message)), timeoutMs);
-  (timer as { unref?: () => void }).unref?.();
-  return {
-    signal: controller.signal,
-    clear: () => clearTimeout(timer),
-  };
 }
 
 function asError(error: unknown): Error {
