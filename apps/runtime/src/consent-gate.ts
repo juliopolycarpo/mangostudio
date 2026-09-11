@@ -105,14 +105,7 @@ export function gateHandlers(handlers: RuntimeHandlers, deps: RuntimeGateDeps): 
       } catch (error) {
         const remote = toRemoteError(error);
         if (!recorded) {
-          record(
-            deps.audit,
-            method,
-            'error',
-            started,
-            params,
-            remote instanceof RemoteError ? remote : undefined
-          );
+          record(deps.audit, method, 'error', started, params, auditErrorFor(remote));
         }
         throw remote;
       } finally {
@@ -179,6 +172,25 @@ function missingCapabilities(
 ): readonly (keyof RuntimeCapabilityAllow)[] {
   const required = RUNTIME_CONTRACT.definition.methods[method].capabilities;
   return required.filter((capability) => !allow[capability]);
+}
+
+/**
+ * The code the local receipt should carry for this throw.
+ *
+ * `toRemoteError` leaves `AbortError` and ordinary `Error` alone so the
+ * session can map them (`CANCELLED` / `INTERNAL`). The audit line still
+ * needs that code — `RuntimeAuditOutcome` has no `cancelled` member, so a
+ * synthetic `RemoteError` is enough. The throw itself is unchanged.
+ */
+function auditErrorFor(remote: unknown): RemoteError | undefined {
+  if (remote instanceof RemoteError) return remote;
+  if (remote instanceof Error && remote.name === 'AbortError') {
+    return new RemoteError(RESERVED_ERROR_CODES.CANCELLED, remote.message);
+  }
+  if (remote instanceof Error) {
+    return new RemoteError(RESERVED_ERROR_CODES.INTERNAL, remote.message);
+  }
+  return undefined;
 }
 
 function record(

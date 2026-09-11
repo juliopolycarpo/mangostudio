@@ -156,31 +156,46 @@ describe('gateHandlers dispatch', () => {
 
   it('leaves an aborted handler alone so the session answers CANCELLED', async () => {
     // The gate must not wrap an AbortError: the SDK maps it to CANCELLED, and
-    // an INTERNAL here would read as a crash instead of a cancellation.
+    // an INTERNAL here would read as a crash instead of a cancellation. The
+    // local receipt still needs the code — outcome is `error`, code CANCELLED.
+    const audit = new FakeAuditSink();
     const handlers = new FakeRuntimeHandlers({
       'shell.run': () => {
         throw new DOMException('The request was cancelled.', 'AbortError');
       },
     });
-    const gated = gateHandlers(handlers.map, deps());
+    const gated = gateHandlers(handlers.map, { ...deps(), audit });
 
     const error = await call(gated, 'shell.run').catch((thrown: unknown) => thrown);
 
     expect(error).toBeInstanceOf(DOMException);
     expect((error as DOMException).name).toBe('AbortError');
+    expect(audit.records).toEqual([
+      expect.objectContaining({
+        method: 'shell.run',
+        outcome: 'error',
+        code: 'CANCELLED',
+      }),
+    ]);
   });
 
   it('releases the in-flight slot when a handler throws', async () => {
+    const audit = new FakeAuditSink();
     const handlers = new FakeRuntimeHandlers({
       'fs.read-file': () => {
         throw new Error('disk went away');
       },
     });
-    const gated = gateHandlers(handlers.map, deps());
+    const gated = gateHandlers(handlers.map, { ...deps(), audit });
 
     await call(gated, 'fs.read-file').catch(() => undefined);
 
     // A leaked slot would refuse every later update for the life of the session.
     await expect(call(gated, 'runtime.update.begin')).resolves.toEqual({ ok: true });
+    expect(audit.records[0]).toMatchObject({
+      method: 'fs.read-file',
+      outcome: 'error',
+      code: 'INTERNAL',
+    });
   });
 });
