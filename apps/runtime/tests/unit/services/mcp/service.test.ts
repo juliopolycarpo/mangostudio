@@ -50,10 +50,13 @@ function installFixture(create: () => Server): void {
   });
 }
 
-function createService(events: EventInput[]) {
+function createService(events: EventInput[], deliverable = true) {
   return createMcpService({
     runtimeVersion: 'service-test',
-    emit: (event) => events.push(event),
+    emit: (event) => {
+      events.push(event);
+      return deliverable;
+    },
   });
 }
 
@@ -141,6 +144,41 @@ describe('runtime MCP service', () => {
     await expect(service.listTools({ serverId: CONFIG.id })).rejects.toMatchObject({
       kind: 'mcp_session_missing',
     });
+  });
+
+  it('cancels a question the hub session refused to carry instead of parking it', async () => {
+    const events: EventInput[] = [];
+    const service = createService(events, false);
+    let answer: unknown;
+    installFixture(() =>
+      createFixtureServer(async (server) => {
+        answer = await server.elicitInput({
+          mode: 'form',
+          message: 'Nobody will hear this',
+          requestedSchema: { type: 'object', properties: {} },
+        });
+      })
+    );
+    await service.connect({ config: CONFIG });
+
+    const call = service.callTool(
+      { serverId: CONFIG.id, toolName: 'ask', args: {}, toolCallId: 'call-d' },
+      { signal: new AbortController().signal }
+    );
+
+    // A refused publish is an answer that can never arrive. The tool call has
+    // to come back on its own; waiting here proves it does not merely take a
+    // while.
+    const outcome = await Promise.race([
+      call.then((result) => result.contentText),
+      Bun.sleep(500).then(() => 'still parked on an answer nobody can send'),
+    ]);
+
+    expect(outcome).toBe('done');
+    expect(answer).toMatchObject({ action: 'cancel' });
+    // Asked once — the connect event and this one, and nothing republished.
+    expect(events.filter((event) => event.topic === 'mcp.elicitation')).toHaveLength(1);
+    await service.close();
   });
 
   it('treats a late answer to a forgotten question as a no-op, not a failure', async () => {
