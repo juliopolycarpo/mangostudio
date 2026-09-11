@@ -23,6 +23,10 @@ import { supportsPty } from './services/terminal/pty';
  * in-process connect deadline (a timer) and, in tests, bun's 15s per-test
  * timeout. A `--version` that cannot answer in two seconds is not a git this
  * machine can use.
+ *
+ * The kill is not graceful: `timeout` on its own sends SIGTERM, and a child
+ * that refuses it leaves `spawnSync` blocking for the child's whole life all
+ * the same. A `--version` has nothing to flush.
  */
 const VERSION_PROBE_TIMEOUT_MS = 2_000;
 
@@ -139,6 +143,7 @@ function inspectGh(): NonNullable<RuntimeCapabilityManifest['gh']> {
     stdout: 'pipe',
     stderr: 'ignore',
     timeout: VERSION_PROBE_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
     ...HIDDEN_WINDOW,
   });
   if (!result.success) return { available: false };
@@ -163,6 +168,7 @@ function inspectGit(): RuntimeCapabilityManifest['git'] {
     stdout: 'pipe',
     stderr: 'ignore',
     timeout: VERSION_PROBE_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
     ...HIDDEN_WINDOW,
   });
   if (!result.success) return { available: false };

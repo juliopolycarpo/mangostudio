@@ -106,6 +106,23 @@ describe('createLocalRuntimeManifest', () => {
     }
   });
 
+  // SIGTERM is what `timeout` sends on its own, and a child is free to refuse
+  // it: `spawnSync` then blocks for that child's whole life whatever the bound
+  // says, which is the freeze the bound exists to prevent.
+  it.skipIf(process.platform === 'win32')('kills a probe that refuses to stop', async () => {
+    const restore = await stagePathWithGh('ignores-term', "#!/bin/sh\ntrap '' TERM\nsleep 30\n");
+    const started = Date.now();
+
+    try {
+      const manifest = createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly);
+
+      expect(manifest.gh?.available).toBe(false);
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      restore();
+    }
+  });
+
   it('advertises none with every feature off', () => {
     const manifest = createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.none);
     expect(manifest.profile).toBe('none');
