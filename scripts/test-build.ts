@@ -58,7 +58,6 @@ const RELEASE_ASSETS_DIR = join(ROOT_DIR, 'release-assets');
 const DISTRIBUTION_MANIFEST_PATH =
   process.env.DISTRIBUTION_MANIFEST_PATH?.trim() || join(ROOT_DIR, DISTRIBUTION_MANIFEST_FILE);
 const CHATGPT_CALLBACK_PORT = 1455;
-const RUNTIME_HANDSHAKE_TIMEOUT_MS = 10_000;
 // Resolve via the canonical helper so the archive name we expect matches the one
 // archive-assets.ts produces (same VERSION override + semver validation).
 const VERSION = resolveReleaseVersion({ rootDir: ROOT_DIR });
@@ -328,10 +327,9 @@ async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Pro
   }
   pass(`${label} --version → ${VERSION}`);
 
-  const probe = await probeRuntimeHandshake({
-    command: [binaryPath, '--stdio'],
-    timeoutMs: RUNTIME_HANDSHAKE_TIMEOUT_MS,
-  });
+  // No budget passed: the platform default is the policy, and Windows needs a
+  // different one than Linux and macOS do.
+  const probe = await probeRuntimeHandshake({ command: [binaryPath, '--stdio'] });
 
   // `=== null`, not falsy: a child whose first record is a bare newline greets
   // with an empty line, and that belongs in the JSON check below with a real
@@ -356,7 +354,13 @@ async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Pro
     fail(`Handshake reported runtime ${frame.peer?.version}, expected ${VERSION}`);
   }
   if (!frame.capabilities?.platform) fail('Handshake carried no capability manifest');
-  pass(`${label} --stdio handshakes with a v${VERSION} manifest`);
+  // The elapsed time rides along on the green path on purpose: the budget above
+  // it was argued about three times with no measurement of what a passing
+  // handshake actually costs on each runner. The budget is printed with it —
+  // "6288ms" only says whether there is headroom once you know what of.
+  pass(
+    `${label} --stdio handshakes with a v${VERSION} manifest in ${probe.elapsedMs}ms of ${probe.budgetMs}ms`
+  );
 }
 
 /**
@@ -372,6 +376,10 @@ async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Pro
  */
 function reportFailedHandshake(label: string, probe: RuntimeHandshakeProbe): never {
   console.error(`  🔎 ${label} --stdio ${probe.failure}`);
+  // The half of the measurement the green line already carries. On the `eof`
+  // paths the failure text has no timing at all, so a runtime that died at
+  // 400ms and one that died at 55s read identically without this.
+  console.error(`     waited ${probe.elapsedMs}ms of a ${probe.budgetMs}ms budget`);
   if (probe.partial) console.error(`     partial stdout (no newline): ${probe.partial}`);
   if (probe.exitCode !== null) console.error(`     exit code: ${probe.exitCode}`);
   if (probe.signal) console.error(`     signal: ${probe.signal}`);

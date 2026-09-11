@@ -1,7 +1,13 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 
 import { findModuleResolutionFailure } from '../lib/module-resolution';
-import { probeRuntimeHandshake } from '../lib/runtime-handshake';
+import {
+  DEFAULT_HANDSHAKE_BUDGET_MS,
+  probeRuntimeHandshake,
+  resolveHandshakeBudgetMs,
+  WIN32_HANDSHAKE_BUDGET_MS,
+} from '../lib/runtime-handshake';
+import { stubProcessPlatform } from './support/process-platform';
 
 /**
  * A generous budget for stand-ins that answer or exit on their own: only the
@@ -31,6 +37,64 @@ function standIn(source: string): readonly string[] {
 const NEVER_RESOLVES = 'await new Promise(() => {});';
 
 describe('scripts/lib/runtime-handshake', () => {
+  describe('budget constants', () => {
+    test('Windows gets more headroom than everything else', () => {
+      // A cold `windows-*` runner pays process spawn plus first-run JIT and
+      // disk warmup on `--stdio`; `--version` short-circuits and answers in
+      // milliseconds, which is why a green `--version` says nothing about this.
+      expect(WIN32_HANDSHAKE_BUDGET_MS).toBeGreaterThan(DEFAULT_HANDSHAKE_BUDGET_MS);
+    });
+
+    test('the Windows budget stays within a smoke job people will wait for', () => {
+      // Generous on purpose — the cost of being wrong upwards is a slower red,
+      // not a missed one — but a runtime that never greets still has to fail
+      // inside a job somebody is watching.
+      expect(WIN32_HANDSHAKE_BUDGET_MS).toBeLessThanOrEqual(2 * 60_000);
+    });
+  });
+
+  describe('resolveHandshakeBudgetMs', () => {
+    let restorePlatform: (() => void) | undefined;
+
+    afterEach(() => {
+      restorePlatform?.();
+      restorePlatform = undefined;
+    });
+
+    test('returns the Windows budget on win32', () => {
+      restorePlatform = stubProcessPlatform('win32');
+      expect(resolveHandshakeBudgetMs()).toBe(WIN32_HANDSHAKE_BUDGET_MS);
+    });
+
+    test.each(['linux', 'darwin'] as const)('returns the default budget on %s', (platform) => {
+      restorePlatform = stubProcessPlatform(platform);
+      expect(resolveHandshakeBudgetMs()).toBe(DEFAULT_HANDSHAKE_BUDGET_MS);
+    });
+
+    // The smoke passes no `timeoutMs`, so a probe that stopped reading the
+    // resolver would silently put every platform back on one budget. Asserted
+    // through `budgetMs` against a child that exits at once rather than by
+    // waiting a budget out: the `win32` branch is the one that discriminates —
+    // a hardcoded `10_000` default reports 10000 here — and waiting it out
+    // would cost the lane a minute to learn the same thing.
+    test.each([
+      ['win32', WIN32_HANDSHAKE_BUDGET_MS],
+      ['linux', DEFAULT_HANDSHAKE_BUDGET_MS],
+    ] as const)(
+      'is the budget a probe with no budget of its own uses on %s',
+      async (platform, expected) => {
+        restorePlatform = stubProcessPlatform(platform);
+
+        const probe = await probeRuntimeHandshake({
+          command: standIn('process.exit(0);'),
+          exitGraceMs: 200,
+        });
+
+        expect(probe.budgetMs).toBe(expected);
+      }
+    );
+  });
+
   describe('probeRuntimeHandshake', () => {
     test('returns the handshake line and still drains stderr', async () => {
       const probe = await probeRuntimeHandshake({
@@ -46,6 +110,33 @@ describe('scripts/lib/runtime-handshake', () => {
       expect(probe.failure).toBeNull();
       expect(probe.stderr).toContain('warming up');
     });
+
+    test.skipIf(process.platform === 'win32')(
+      'times how long the child took to speak, not how long cleanup took',
+      async () => {
+        // This child greets at once and then refuses to die on SIGTERM, so the
+        // probe pays the whole exit grace *after* it already has its answer. A
+        // number taken at the return would fold that wait into what is meant to
+        // be evidence about how long the runtime took to start talking.
+        // Skipped on Windows, where `kill()` is `TerminateProcess` and no
+        // handler can decline it, so there is no cleanup wait to exclude.
+        const startedAt = performance.now();
+        const probe = await probeRuntimeHandshake({
+          command: standIn(
+            `process.on('SIGTERM', () => {});` +
+              `await Bun.write(Bun.stdout, ${JSON.stringify(`${HELLO_FRAME}\n`)});` +
+              `setTimeout(() => process.exit(0), 1_200);` +
+              NEVER_RESOLVES
+          ),
+          timeoutMs: ANSWERING_TIMEOUT_MS,
+          exitGraceMs: 800,
+        });
+        const callMs = performance.now() - startedAt;
+
+        expect(probe.hello).toBe(HELLO_FRAME);
+        expect(callMs - probe.elapsedMs).toBeGreaterThanOrEqual(500);
+      }
+    );
 
     test('names the child exit and carries its code and stderr', async () => {
       const probe = await probeRuntimeHandshake({
@@ -71,6 +162,9 @@ describe('scripts/lib/runtime-handshake', () => {
         `wrote no handshake frame within ${HANGING_TIMEOUT_MS}ms and was killed`
       );
       expect(probe.stderr).toContain('stuck');
+      // An explicit budget still wins over the platform default, and is what
+      // the elapsed on the report is measured against.
+      expect(probe.budgetMs).toBe(HANGING_TIMEOUT_MS);
       // The kill is ours, so its status is not the failure cause (issue #957).
       expect(probe.exitCode).toBeNull();
       expect(probe.signal).toBeNull();
@@ -130,7 +224,7 @@ describe('scripts/lib/runtime-handshake', () => {
     });
 
     test('kills a child that closed stdout but never exits, without claiming its status', async () => {
-      const startedAt = Date.now();
+      const startedAt = performance.now();
       const probe = await probeRuntimeHandshake({
         command: standIn(
           `(await import('node:fs')).closeSync(1);` +
@@ -146,7 +240,7 @@ describe('scripts/lib/runtime-handshake', () => {
       expect(probe.exitCode).toBeNull();
       expect(probe.stderr).toContain('orphaned');
       // Cleanup is bounded: the handshake budget is 10s and must not be spent.
-      expect(Date.now() - startedAt).toBeLessThan(5_000);
+      expect(performance.now() - startedAt).toBeLessThan(5_000);
     });
 
     // The Windows shape this probe exists to name: the runtime died, but a

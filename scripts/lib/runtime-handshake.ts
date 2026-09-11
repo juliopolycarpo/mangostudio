@@ -16,15 +16,53 @@ import {
   pumpStream,
   readFirstLine,
 } from './child-streams';
+import { pickPlatformBudgetMs } from './platform-budget';
 
 /** How long a child that closed stdout gets to exit before it is killed. */
 const DEFAULT_EXIT_GRACE_MS = 2_000;
 
+/** Budget for the first stdout record everywhere but Windows. */
+export const DEFAULT_HANDSHAKE_BUDGET_MS = 10_000;
+
+/**
+ * Windows-specific handshake budget.
+ *
+ * The same cold start `wait-for-health.ts` already bumps for (issue #377):
+ * process spawn plus first-run JIT and disk warmup on a GitHub `windows-*`
+ * runner routinely costs multiples of what Linux and macOS pay, and the runtime
+ * pays it on `--stdio` rather than on `--version`, which short-circuits.
+ *
+ * What a *passing* handshake costs, measured by the elapsed readout below on
+ * the run that introduced it: `linux-x64` 284ms, `darwin-arm64` 342ms,
+ * `windows-arm64` 3920ms, `windows-x64` 6288ms — already 63% of the old 10s on
+ * a good day, and measured after `--version` had already run against the same
+ * file. 60s restores roughly 10x headroom on the worst number observed.
+ *
+ * The evidence this is timing and not a bad binary: on PR #1039 the runtime exe
+ * with digest `443930e2…` timed out here on one run and handshook on the next,
+ * byte-identical both times. Being generous costs a slower red on a genuinely
+ * hung runtime and nothing at all on a healthy one — so this matches
+ * `WIN32_READY_BUDGET_MS` rather than splitting the difference and guessing
+ * again in a month.
+ */
+export const WIN32_HANDSHAKE_BUDGET_MS = 60_000;
+
+/**
+ * The platform's default handshake budget. Exported separately from the probe
+ * so a test can pin both branches without spawning anything.
+ *
+ * @example
+ * const timeoutMs = resolveHandshakeBudgetMs();
+ */
+export function resolveHandshakeBudgetMs(): number {
+  return pickPlatformBudgetMs(DEFAULT_HANDSHAKE_BUDGET_MS, WIN32_HANDSHAKE_BUDGET_MS);
+}
+
 export interface RuntimeHandshakeProbeOptions {
   /** Full argv, e.g. `[runtimeBinaryPath, '--stdio']`. */
   readonly command: readonly string[];
-  /** Budget for the first stdout record. */
-  readonly timeoutMs: number;
+  /** Budget for the first stdout record. Overrides the platform default. */
+  readonly timeoutMs?: number;
   /** How long a child that closed stdout gets to exit; defaults to 2s. */
   readonly exitGraceMs?: number;
 }
@@ -43,6 +81,18 @@ export interface RuntimeHandshakeProbe {
   readonly exitCode: number | null;
   /** The signal the child died on, when it died on one of its own. */
   readonly signal: string | null;
+  /**
+   * How long the probe waited, in milliseconds. Reported on success too: what
+   * headroom a passing handshake actually leaves is the measurement every
+   * argument about this budget has so far had to do without.
+   */
+  readonly elapsedMs: number;
+  /**
+   * The budget `elapsedMs` was spent against — the caller's `timeoutMs` when it
+   * gave one, the platform default otherwise. An elapsed with no denominator is
+   * half a measurement, and it is the half a reader cannot recover from the log.
+   */
+  readonly budgetMs: number;
 }
 
 /**
@@ -52,16 +102,22 @@ export interface RuntimeHandshakeProbe {
  * whole matrix of child behaviours is unit-testable.
  *
  * @example
- * const probe = await probeRuntimeHandshake({
- *   command: [runtimePath, '--stdio'],
- *   timeoutMs: 10_000,
- * });
+ * const probe = await probeRuntimeHandshake({ command: [runtimePath, '--stdio'] });
  * if (!probe.hello) console.error(probe.failure, probe.stderr);
  */
 export async function probeRuntimeHandshake(
   options: RuntimeHandshakeProbeOptions
 ): Promise<RuntimeHandshakeProbe> {
-  const { command, timeoutMs, exitGraceMs = DEFAULT_EXIT_GRACE_MS } = options;
+  const {
+    command,
+    timeoutMs = resolveHandshakeBudgetMs(),
+    exitGraceMs = DEFAULT_EXIT_GRACE_MS,
+  } = options;
+  // `performance.now()`, not `Date.now()`: this is a duration, and a runner that
+  // steps its wall clock mid-handshake (NTP on a cold VM — the same cold start
+  // the budget above is for) would otherwise report a wrong or negative one.
+  // Matches how `scripts/lib/exec.ts` and `scripts/lib/summary.ts` time work.
+  const startedAt = performance.now();
 
   const child = Bun.spawn({
     cmd: [...command],
@@ -84,6 +140,9 @@ export async function probeRuntimeHandshake(
     await finish(child, stderr, exitGraceMs);
     throw caught;
   }
+  // Taken before any cleanup: what this is evidence of is how long the child
+  // took to speak, not how long we then spent waiting for it to die.
+  const elapsedMs = Math.round(performance.now() - startedAt);
   child.stdin.end();
 
   if (read.kind === 'line') {
@@ -96,6 +155,8 @@ export async function probeRuntimeHandshake(
       stderr: stderr.text(),
       exitCode: null,
       signal: null,
+      elapsedMs,
+      budgetMs: timeoutMs,
     };
   }
 
@@ -120,6 +181,8 @@ export async function probeRuntimeHandshake(
       stderr: stderr.text(),
       exitCode,
       signal,
+      elapsedMs,
+      budgetMs: timeoutMs,
     };
   }
 
@@ -134,6 +197,8 @@ export async function probeRuntimeHandshake(
       stderr: stderr.text(),
       exitCode: null,
       signal: null,
+      elapsedMs,
+      budgetMs: timeoutMs,
     };
   }
 
@@ -147,6 +212,8 @@ export async function probeRuntimeHandshake(
     stderr: stderr.text(),
     exitCode,
     signal,
+    elapsedMs,
+    budgetMs: timeoutMs,
   };
 }
 
