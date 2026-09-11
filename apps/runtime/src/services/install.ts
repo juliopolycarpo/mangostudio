@@ -12,6 +12,7 @@ import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import type { EventInput } from '@mangostudio/protocol';
+import { writeRuntimeDiagnostic } from '../diagnostics';
 import { RuntimeToolArgumentError } from '../errors';
 import type {
   RuntimeInstallCancelParams,
@@ -184,8 +185,12 @@ export interface InstallService {
 }
 
 export interface InstallServiceOptions {
-  /** Publishes an `evt` frame; log lines stream through it as they arrive. */
-  readonly emit: (event: EventInput) => void;
+  /**
+   * Publishes an `evt` frame; log lines stream through it as they arrive.
+   * `false` means the hub session cannot carry it — it closed, or the
+   * handshake has not completed.
+   */
+  readonly emit: (event: EventInput) => boolean;
   readonly deps?: Partial<InstallHostDeps>;
 }
 
@@ -193,13 +198,28 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
   const deps: InstallHostDeps = { ...DEFAULT_DEPS, ...options.deps };
   const active = new Map<string, () => void>();
 
-  const publish = (runId: string, payload: RuntimeInstallOutputEvent, end?: true): void => {
-    options.emit({
-      topic: RUNTIME_INSTALL_OUTPUT_TOPIC,
-      streamId: runId,
-      payload,
-      ...(end ? { end } : {}),
-    });
+  /**
+   * One run's output stream, which stops the first time nobody is there.
+   *
+   * A `false` from `emit` is final for this run: a host binds one session for
+   * its lifetime and a reconnect builds a fresh host, so no later line can
+   * reach a hub either. The installer itself keeps going — it is a machine
+   * mutation, and abandoning it half-applied because the viewer left is worse
+   * than finishing it unobserved — and the run's log file remains the durable
+   * record of everything the dropped lines would have said.
+   */
+  const streamFor = (runId: string) => {
+    let observed = true;
+    return (payload: RuntimeInstallOutputEvent, end?: true): void => {
+      if (!observed) return;
+      observed = options.emit({
+        topic: RUNTIME_INSTALL_OUTPUT_TOPIC,
+        streamId: runId,
+        payload,
+        ...(end ? { end } : {}),
+      });
+      if (!observed) writeRuntimeDiagnostic('install_output_unobserved', { runId });
+    };
   };
 
   return {
@@ -217,11 +237,12 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
         deps.runtimeHome?.() ?? defaultRuntimeHome()
       );
       const outputLimit = params.outputLimitBytes ?? INSTALL_OUTPUT_LIMIT_BYTES;
+      const publish = streamFor(params.runId);
       const emitLine = (stream: RuntimeInstallOutputEvent['stream'], line: string) => {
-        publish(params.runId, { stream, line });
+        publish({ stream, line });
       };
       const endStream = () => {
-        publish(params.runId, { stream: 'system', line: '', end: true }, true);
+        publish({ stream: 'system', line: '', end: true }, true);
       };
 
       // Reserved before any await so a concurrent cancel/start for the same id

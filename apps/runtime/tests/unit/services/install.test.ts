@@ -53,8 +53,9 @@ function collector() {
   const events: InstallLogLine[] = [];
   const emit = (event: EventInput) => {
     const payload = event.payload as RuntimeInstallOutputEvent;
-    if (payload.end) return;
+    if (payload.end) return true;
     events.push({ stream: payload.stream, line: payload.line });
+    return true;
   };
   return { events, emit };
 }
@@ -62,7 +63,7 @@ function collector() {
 function createRunner(
   process: FakeInstallProcess,
   captured: { log: Uint8Array[] },
-  emit: (event: EventInput) => void = () => undefined
+  emit: (event: EventInput) => boolean = () => true
 ) {
   return createInstallService({
     emit,
@@ -176,6 +177,29 @@ describe('runtime install execution', () => {
     ).toBe('hello\nworld\nwarning\n');
   });
 
+  it('stops streaming once the hub session refuses a line, without abandoning the install', async () => {
+    const process = new FakeInstallProcess('hello\nworld\n', 'warning\n', 0);
+    const captured = { log: [] as Uint8Array[] };
+    const attempts: EventInput[] = [];
+    const runner = createRunner(process, captured, (event) => {
+      attempts.push(event);
+      return false;
+    });
+
+    const result = await runner.run(COMMAND);
+
+    // One attempt, then silence: a closed session cannot carry the rest, and
+    // nothing later can reopen it.
+    expect(attempts).toHaveLength(1);
+    // The installer is a machine mutation. Losing the viewer must not kill it,
+    // and its log file stays the record of what the dropped lines said.
+    expect(process.killedWith).toBeNull();
+    expect(result.status).toBe('succeeded');
+    expect(
+      new TextDecoder().decode(Uint8Array.from(captured.log.flatMap((chunk) => [...chunk])))
+    ).toBe('hello\nworld\nwarning\n');
+  });
+
   it('treats an accepted non-zero exit code as success', async () => {
     // winget's own "no applicable update found" — a package already at the
     // version it would install exits with this instead of 0.
@@ -259,6 +283,7 @@ describe('runtime install execution', () => {
     const ended: EventInput[] = [];
     const service = createRunner(new FakeInstallProcess('done\n', '', 0), { log: [] }, (event) => {
       if ((event.payload as RuntimeInstallOutputEvent).end) ended.push(event);
+      return true;
     });
 
     await service.run(COMMAND);
@@ -291,7 +316,7 @@ describe('runtime install execution', () => {
     const process = new FakeInstallProcess('', '', 0);
     let capturedEnv: Record<string, string> | undefined;
     const runner = createInstallService({
-      emit: () => undefined,
+      emit: () => true,
       deps: {
         spawn: (_argv, env) => {
           capturedEnv = env;
@@ -321,7 +346,7 @@ describe('runtime install execution', () => {
     const process = new FakeInstallProcess('', '', 0);
     let capturedEnv: Record<string, string> | undefined;
     const runner = createInstallService({
-      emit: () => undefined,
+      emit: () => true,
       deps: {
         spawn: (_argv, env) => {
           capturedEnv = env;
@@ -349,7 +374,7 @@ describe('runtime install execution', () => {
     const process = new FakeInstallProcess('', '', 0);
     let capturedEnv: Record<string, string> | undefined;
     const runner = createInstallService({
-      emit: () => undefined,
+      emit: () => true,
       deps: {
         spawn: (_argv, env) => {
           capturedEnv = env;
