@@ -195,10 +195,15 @@ function probeVersion(
     // is merely too slow to answer identically, as `available: false`, so the
     // difference only survives if it is said here. The executable is named;
     // the PATH that found it is not — this channel is unredacted by design.
+    //
+    // `killed` is read from `exitedDueToTimeout`, not from `signalCode`: a
+    // Windows `TerminateProcess` timeout carries no POSIX signal, so a probe
+    // this bound actually killed would otherwise be misreported as a plain
+    // non-zero exit.
     const signal = result.signalCode ?? null;
     writeRuntimeDiagnostic('version_probe_failed', {
       executable,
-      killed: signal !== null,
+      killed: result.exitedDueToTimeout === true,
       ...(signal === null ? { exitCode: result.exitCode } : { signal }),
     });
     return { available: false };

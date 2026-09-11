@@ -240,6 +240,41 @@ describe('createLocalRuntimeManifest', () => {
     }
   });
 
+  it.skipIf(process.platform === 'win32')(
+    'reports a kill from exitedDueToTimeout, not merely from a signal',
+    async () => {
+      // Windows' `TerminateProcess` ends a timed-out probe without a POSIX
+      // signal, so `signalCode` alone would misreport this as a plain
+      // non-zero exit. `Bun.spawnSync` still marks the timeout with
+      // `exitedDueToTimeout`, which is what `killed` must be read from.
+      const restore = await stagePathWithGh('no-signal-timeout', '#!/bin/sh\n:\n');
+      const spawnSync = spyOn(Bun, 'spawnSync').mockReturnValue({
+        exitCode: null,
+        signalCode: undefined,
+        stdout: Buffer.from(''),
+        stderr: Buffer.from(''),
+        success: false,
+        resourceUsage: {},
+        exitedDueToTimeout: true,
+        pid: 0,
+      } as unknown as ReturnType<typeof Bun.spawnSync>);
+      const stderr = spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+      try {
+        createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly);
+
+        const written = stderr.mock.calls.map(([line]) => String(line)).join('');
+        expect(written).toContain('version_probe_failed');
+        expect(written).toContain('"killed":true');
+        expect(written).toContain('"exitCode":null');
+      } finally {
+        stderr.mockRestore();
+        spawnSync.mockRestore();
+        restore();
+      }
+    }
+  );
+
   it('advertises none with every feature off', () => {
     const manifest = createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.none);
     expect(manifest.profile).toBe('none');
