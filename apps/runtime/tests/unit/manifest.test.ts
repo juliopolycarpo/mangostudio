@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { directoryHashDomainVersion } from '@mangostudio/shared/library';
@@ -37,6 +37,25 @@ async function stagePathWithGh(name: string, script: string): Promise<() => void
       return;
     }
     process.env.PATH = previous;
+  };
+}
+
+/**
+ * Stages a `gh` that records every invocation, and reads the tally back.
+ *
+ * @example
+ * const probe = await stageCountingGh('answers', 'echo "gh version 2.97.0"');
+ */
+async function stageCountingGh(
+  name: string,
+  body: string
+): Promise<{ readonly restore: () => void; readonly invocations: () => Promise<number> }> {
+  const log = join(probeDir, `${name}.log`);
+  await writeFile(log, '');
+  const restore = await stagePathWithGh(name, `#!/bin/sh\necho ran >> "${log}"\n${body}\n`);
+  return {
+    restore,
+    invocations: async () => (await readFile(log, 'utf8')).split('\n').filter(Boolean).length,
   };
 }
 
@@ -120,6 +139,51 @@ describe('createLocalRuntimeManifest', () => {
       expect(Date.now() - started).toBeLessThan(5_000);
     } finally {
       restore();
+    }
+  });
+
+  // Every test here stages its own directory, so each resolves to a distinct
+  // absolute path and gets its own cache entry — no reset hook, and no
+  // test-only export to reset one.
+  it.skipIf(process.platform === 'win32')(
+    'spawns the probe once per resolved binary, not once per manifest',
+    async () => {
+      // `gh` stands in for both probes: they share one helper, and `inspectGit`
+      // resolves against the PATH this process started with, which no test can
+      // stage from inside it.
+      const probe = await stageCountingGh('answers-once', 'echo "gh version 2.97.0 (2026-07-31)"');
+
+      try {
+        const first = createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly);
+        const second = createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly);
+
+        expect(first.gh).toEqual({ available: true, version: '2.97.0' });
+        expect(second.gh).toEqual({ available: true, version: '2.97.0' });
+        // A machine fact that cannot change during this process, measured once.
+        expect(await probe.invocations()).toBe(1);
+      } finally {
+        probe.restore();
+      }
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')('re-probes after a probe that was killed', async () => {
+    // Remembering this answer would announce the CLI as absent for the whole
+    // life of the runtime over one transient hang — worse than re-spawning,
+    // which the two-second bound already pays for.
+    const probe = await stageCountingGh('kill-not-remembered', 'sleep 30');
+
+    try {
+      expect(createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly).gh?.available).toBe(
+        false
+      );
+      expect(createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly).gh?.available).toBe(
+        false
+      );
+
+      expect(await probe.invocations()).toBe(2);
+    } finally {
+      probe.restore();
     }
   });
 

@@ -30,6 +30,29 @@ import { supportsPty } from './services/terminal/pty';
  */
 const VERSION_PROBE_TIMEOUT_MS = 2_000;
 
+/** What a `--version` probe answered, once it answered at all. */
+type VersionProbeResult = { readonly available: true; readonly version?: string };
+
+/**
+ * Successful `--version` answers, keyed on the absolute path that produced
+ * them.
+ *
+ * The expensive half of a probe is the child process, not the PATH walk, so
+ * the child is the half memoised — and it is keyed on the resolved executable
+ * rather than on the tool name, because {@link inspectGh} resolves against the
+ * *live* PATH on purpose. Keying on the path keeps that invariant intact: a
+ * PATH that now resolves to a different binary re-probes, and a repeat of the
+ * same binary does not. `findShellExecutable` memoises the same class of
+ * machine fact one layer over.
+ *
+ * Only successes are cached. A probe killed at {@link VERSION_PROBE_TIMEOUT_MS}
+ * says nothing about the binary, and caching it would announce git as absent
+ * for the whole life of the runtime over one transient hang — a worse bug than
+ * the repeated spawn this cache exists to remove. A failure re-spawns on the
+ * next call, still bounded by the same timeout.
+ */
+const versionProbeCache = new Map<string, VersionProbeResult>();
+
 /**
  * Announces what this runtime may execute under the recorded consent.
  *
@@ -139,6 +162,26 @@ function inspectGh(): NonNullable<RuntimeCapabilityManifest['gh']> {
   const executable = Bun.which('gh', { PATH: process.env.PATH });
   if (!executable) return { available: false };
 
+  return probeVersion(executable, parseGhVersion);
+}
+
+/**
+ * Runs `<executable> --version` once per resolved executable path.
+ *
+ * Takes an already-resolved path rather than a tool name because the two
+ * callers resolve differently on purpose — `git` against the PATH this process
+ * started with, `gh` against the live one — while the spawn, its bound and the
+ * caching are the same for both.
+ *
+ * @example probeVersion('/usr/bin/git', parseGitVersion) // => { available: true, version: '2.51.0' }
+ */
+function probeVersion(
+  executable: string,
+  parseVersion: (output: string) => string
+): { available: boolean; version?: string } {
+  const cached = versionProbeCache.get(executable);
+  if (cached) return cached;
+
   const result = Bun.spawnSync([executable, '--version'], {
     stdout: 'pipe',
     stderr: 'ignore',
@@ -147,8 +190,11 @@ function inspectGh(): NonNullable<RuntimeCapabilityManifest['gh']> {
     ...HIDDEN_WINDOW,
   });
   if (!result.success) return { available: false };
-  const version = parseGhVersion(result.stdout.toString());
-  return version ? { available: true, version } : { available: true };
+
+  const version = parseVersion(result.stdout.toString());
+  const answer: VersionProbeResult = version ? { available: true, version } : { available: true };
+  versionProbeCache.set(executable, answer);
+  return answer;
 }
 
 /** `gh version 2.97.0 (2026-07-31)\nhttps://...` becomes `2.97.0`. */
@@ -164,17 +210,10 @@ function inspectGit(): RuntimeCapabilityManifest['git'] {
   const executable = Bun.which('git');
   if (!executable) return { available: false };
 
-  const result = Bun.spawnSync([executable, '--version'], {
-    stdout: 'pipe',
-    stderr: 'ignore',
-    timeout: VERSION_PROBE_TIMEOUT_MS,
-    killSignal: 'SIGKILL',
-    ...HIDDEN_WINDOW,
-  });
-  if (!result.success) return { available: false };
-  const version = result.stdout
-    .toString()
-    .trim()
-    .replace(/^git version\s+/i, '');
-  return version ? { available: true, version } : { available: true };
+  return probeVersion(executable, parseGitVersion);
+}
+
+/** `git version 2.51.0` becomes `2.51.0`; one line, unlike `gh`. */
+function parseGitVersion(output: string): string {
+  return output.trim().replace(/^git version\s+/i, '');
 }
