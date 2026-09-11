@@ -51,6 +51,8 @@ class HangingExternalAgentAdapter implements ExternalAgentAdapter {
 async function fixture(
   options: {
     readonly adapter?: FakeExternalAgentAdapter;
+    /** What the bound hub session answers; `false` is a session that closed. */
+    readonly deliverEvents?: boolean;
     readonly sessionCap?: number;
     readonly idleTimeoutMs?: number;
     readonly hardTurnTimeoutMs?: number;
@@ -79,7 +81,10 @@ async function fixture(
   const supervisor = new ExternalAgentSessionSupervisor({
     registry,
     runtimeVersion: 'test',
-    emit: (event) => events.push(event),
+    emit: (event) => {
+      events.push(event);
+      return options.deliverEvents ?? true;
+    },
     consent: { slot: 'host', ...consent },
     env: options.env,
     ...(options.platform !== undefined && { platform: options.platform }),
@@ -275,7 +280,7 @@ describe('external-agent adapter registry and supervisor', () => {
     const supervisor = new ExternalAgentSessionSupervisor({
       registry,
       runtimeVersion: 'test',
-      emit: () => undefined,
+      emit: () => true,
       consent: {
         slot: 'host',
         current: () => RUNTIME_CONSENT_PRESETS.full,
@@ -821,6 +826,35 @@ describe('external-agent adapter registry and supervisor', () => {
     nextEvent.resolve({ done: false, value: { type: 'text_delta', text: 'too late' } });
     await waitFor(() => iteratorReturned);
     expect(value.events).toHaveLength(0);
+    await value.supervisor.close();
+  });
+
+  it('silences a session whose events the hub refused, and lets the turn finish', async () => {
+    const adapter = new FakeExternalAgentAdapter({
+      events: [
+        { type: 'text_delta', text: 'first' },
+        { type: 'text_delta', text: 'second' },
+        { type: 'completed' },
+      ],
+    });
+    const value = await fixture({ adapter, deliverEvents: false });
+    await openSession(value);
+
+    await value.supervisor.turn({
+      sessionId: 'session-1',
+      clientMessageId: 'unobserved-turn',
+      input: 'go',
+      configuration: CONFIGURATION,
+    });
+    await waitFor(() => value.supervisor.health.liveSessions[0]?.state === 'idle');
+
+    // Published once, refused, and never attempted again: no later event on
+    // this session can reach a hub that is no longer there.
+    expect(value.events).toHaveLength(1);
+    // The vendor turn is editing a workspace. Losing the viewer must not stop
+    // it partway through — it drained to `completed` and the session is idle,
+    // and only teardown reaps a session.
+    expect(adapter.cancellations).toHaveLength(0);
     await value.supervisor.close();
   });
 
