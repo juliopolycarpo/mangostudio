@@ -10,6 +10,7 @@ import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,
 } from '@mangostudio/shared/runtime-home';
+import { writeRuntimeDiagnostic } from './diagnostics';
 import { HIDDEN_WINDOW } from './services/process-window';
 import { isShellAvailable } from './services/shell';
 import { supportsPty } from './services/terminal/pty';
@@ -30,6 +31,42 @@ import { supportsPty } from './services/terminal/pty';
  */
 const VERSION_PROBE_TIMEOUT_MS = 2_000;
 
+/** What a `--version` probe answered, once it answered at all. */
+type VersionProbeResult = { readonly available: true; readonly version?: string };
+
+/**
+ * Successful `--version` answers, keyed on the absolute path that produced
+ * them.
+ *
+ * The expensive half of a probe is the child process, not the PATH walk, so
+ * the child is the half memoised — and it is keyed on the resolved executable
+ * rather than on the tool name, because {@link inspectGh} resolves against the
+ * *live* PATH on purpose. Keying on the path keeps that invariant intact: a
+ * PATH that now resolves to a different binary re-probes, and a repeat of the
+ * same binary does not. `findShellExecutable` memoises the same class of
+ * machine fact one layer over.
+ *
+ * Only successes are cached. A probe killed at {@link VERSION_PROBE_TIMEOUT_MS}
+ * says nothing about the binary, and caching it would announce git as absent
+ * for the whole life of the runtime over one transient hang — a worse bug than
+ * the repeated spawn this cache exists to remove. A failure re-spawns on the
+ * next call, still bounded by the same timeout.
+ */
+const versionProbeCache = new Map<string, VersionProbeResult>();
+
+/**
+ * The last failure announced per executable, so a broken CLI says so once.
+ *
+ * Failures are re-probed by design, and the probe runs once per handshake *and*
+ * once per `runtime.health` — which the hub issues on every environment-card
+ * refresh. The hub keeps only a bounded tail of this peer's stderr and excerpts
+ * it into the launch-failure message, so the same line on every refresh would
+ * evict the lines that tail exists to carry. Keyed on the failure's shape, not
+ * merely on the path: a CLI that starts timing out after exiting non-zero is a
+ * different fact and is announced again.
+ */
+const announcedProbeFailures = new Map<string, string>();
+
 /**
  * Announces what this runtime may execute under the recorded consent.
  *
@@ -45,8 +82,15 @@ export function createLocalRuntimeManifest(
   } = {}
 ): RuntimeCapabilityManifest {
   const shells = (['bash', 'zsh', 'powershell'] as const).filter(isShellAvailable);
-  const git = inspectGit();
-  const gh = inspectGh();
+  // Both probes are spawns, and every field they feed is masked by `allow.git`
+  // below — so on a machine whose owner refused git they measured a fact that
+  // could not change the answer. That is two child processes per handshake and
+  // two more per `runtime.health`, including under the `none` preset that
+  // `collectRuntimeHealth` falls back to when the consent file cannot be read.
+  const git: RuntimeCapabilityManifest['git'] = allow.git ? inspectGit() : { available: false };
+  const gh: NonNullable<RuntimeCapabilityManifest['gh']> = allow.git
+    ? inspectGh()
+    : { available: false };
   const tools =
     allow.fsRead ||
     allow.fsWrite ||
@@ -139,22 +183,129 @@ function inspectGh(): NonNullable<RuntimeCapabilityManifest['gh']> {
   const executable = Bun.which('gh', { PATH: process.env.PATH });
   if (!executable) return { available: false };
 
-  const result = Bun.spawnSync([executable, '--version'], {
+  return probeVersion(executable, parseGhVersion);
+}
+
+/**
+ * Runs `<executable> --version` once per resolved executable path.
+ *
+ * Takes an already-resolved path rather than a tool name because the two
+ * callers resolve differently on purpose — `git` against the PATH this process
+ * started with, `gh` against the live one — while the spawn, its bound and the
+ * caching are the same for both.
+ *
+ * @example probeVersion('/usr/bin/git', parseGitVersion) // => { available: true, version: '2.51.0' }
+ */
+function probeVersion(
+  executable: string,
+  parseVersion: (output: string) => string
+): { available: boolean; version?: string } {
+  const cached = versionProbeCache.get(executable);
+  if (cached) return cached;
+
+  let result: ReturnType<typeof spawnVersionProbe>;
+  try {
+    result = spawnVersionProbe(executable);
+  } catch (error) {
+    // `Bun.which` checks the executable bit, not the interpreter behind a
+    // shebang, so a CLI installed as a wrapper whose runtime has since been
+    // removed resolves cleanly and then makes the spawn *throw* ENOENT — as
+    // does a binary deleted between the two calls, and EACCES for a directory.
+    // Uncaught, that throw escapes `createLocalRuntimeManifest`, which the
+    // handshake's `manifest: () =>` arrow and `collectRuntimeHealth` both call:
+    // the whole connection would fail over one optional CLI, where the
+    // documented answer is to under-report it.
+    announceProbeFailure(executable, { killed: false, spawnError: spawnErrorCode(error) });
+    return { available: false };
+  }
+
+  if (!result.success) {
+    announceProbeFailure(executable, describeProbeFailure(result));
+    return { available: false };
+  }
+
+  const version = parseVersion(result.stdout.toString());
+  const answer: VersionProbeResult = version ? { available: true, version } : { available: true };
+  versionProbeCache.set(executable, answer);
+  // Hygiene, not behaviour: a path that answered is memoised and short-circuits
+  // above from here on, so it can never fail again in this process. Dropping its
+  // complaint keeps the dedup map from holding an entry nothing will ever read.
+  announcedProbeFailures.delete(executable);
+  return answer;
+}
+
+/**
+ * Runs the bounded `<executable> --version`; throws when it cannot be started.
+ *
+ * Its own function so the options stay one block and the `stdout: 'pipe'`
+ * literal keeps inferring a `Buffer` for the caller, which a widened
+ * `ReturnType<typeof Bun.spawnSync>` annotation would lose.
+ *
+ * @example spawnVersionProbe('/usr/bin/git').stdout.toString() // => 'git version 2.51.0\n'
+ */
+function spawnVersionProbe(executable: string) {
+  return Bun.spawnSync([executable, '--version'], {
     stdout: 'pipe',
     stderr: 'ignore',
     timeout: VERSION_PROBE_TIMEOUT_MS,
     killSignal: 'SIGKILL',
     ...HIDDEN_WINDOW,
   });
-  if (!result.success) return { available: false };
-  const version = parseGhVersion(result.stdout.toString());
-  return version ? { available: true, version } : { available: true };
+}
+
+/**
+ * Says a probe failed, once per executable per distinct failure.
+ *
+ * The manifest announces a machine with no `gh` and a machine whose `gh` is
+ * merely too slow to answer identically, as `available: false`, so the
+ * difference only survives if it is said here. The executable is named; the
+ * PATH that found it is not — this channel is unredacted by design.
+ *
+ * @example announceProbeFailure('/usr/bin/gh', { killed: true, signal: 'SIGKILL' })
+ */
+function announceProbeFailure(executable: string, detail: Readonly<Record<string, unknown>>): void {
+  const signature = JSON.stringify(detail);
+  if (announcedProbeFailures.get(executable) === signature) return;
+
+  announcedProbeFailures.set(executable, signature);
+  writeRuntimeDiagnostic('version_probe_failed', { executable, ...detail });
+}
+
+/**
+ * How a probe that did start ended, as the diagnostic reports it.
+ *
+ * `killed` is read from `exitedDueToTimeout`, not from `signalCode`: a Windows
+ * `TerminateProcess` timeout carries no POSIX signal, so a probe this bound
+ * actually killed would otherwise be misreported as a plain non-zero exit.
+ *
+ * @example describeProbeFailure(result) // => { killed: true, signal: 'SIGKILL' }
+ */
+function describeProbeFailure(result: {
+  readonly exitCode: number | null;
+  readonly signalCode?: string | undefined;
+  readonly exitedDueToTimeout?: boolean | undefined;
+}): Readonly<Record<string, unknown>> {
+  const signal = result.signalCode ?? null;
+  return {
+    killed: result.exitedDueToTimeout === true,
+    ...(signal === null ? { exitCode: result.exitCode } : { signal }),
+  };
+}
+
+/**
+ * The errno a refused spawn carries (`ENOENT`, `EACCES`), or `unknown`.
+ *
+ * Read rather than matched, unlike `isErrnoException` in `services/fs-utils.ts`:
+ * this reports whichever code came back instead of testing for one.
+ */
+function spawnErrorCode(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return typeof code === 'string' ? code : 'unknown';
 }
 
 /** `gh version 2.97.0 (2026-07-31)\nhttps://...` becomes `2.97.0`. */
 export function parseGhVersion(output: string): string {
-  const firstLine = output.split('\n', 1)[0]?.trim() ?? '';
-  return firstLine
+  return firstLine(output)
     .replace(/^gh version\s+/i, '')
     .replace(/\s*\(.*$/, '')
     .trim();
@@ -164,17 +315,28 @@ function inspectGit(): RuntimeCapabilityManifest['git'] {
   const executable = Bun.which('git');
   if (!executable) return { available: false };
 
-  const result = Bun.spawnSync([executable, '--version'], {
-    stdout: 'pipe',
-    stderr: 'ignore',
-    timeout: VERSION_PROBE_TIMEOUT_MS,
-    killSignal: 'SIGKILL',
-    ...HIDDEN_WINDOW,
-  });
-  if (!result.success) return { available: false };
-  const version = result.stdout
-    .toString()
-    .trim()
-    .replace(/^git version\s+/i, '');
-  return version ? { available: true, version } : { available: true };
+  return probeVersion(executable, parseGitVersion);
+}
+
+/**
+ * `git version 2.51.0` becomes `2.51.0`.
+ *
+ * Only the first line, for the same reason {@link parseGhVersion} reads only
+ * one: a `git` on PATH is often a wrapper — a toolchain shim, a corporate
+ * trampoline — and anything it prints after the version travels into the
+ * manifest. The health report caps this field at 64 characters, so a second
+ * line does not merely read wrong, it fails to encode; and the answer is
+ * memoised, so one such probe would poison every later report.
+ *
+ * @example parseGitVersion('git version 2.51.0\n') // => '2.51.0'
+ */
+export function parseGitVersion(output: string): string {
+  return firstLine(output)
+    .replace(/^git version\s+/i, '')
+    .trim();
+}
+
+/** The first line of a `--version` answer, trimmed. */
+function firstLine(output: string): string {
+  return output.split('\n', 1)[0]?.trim() ?? '';
 }
