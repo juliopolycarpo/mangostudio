@@ -55,6 +55,19 @@ type VersionProbeResult = { readonly available: true; readonly version?: string 
 const versionProbeCache = new Map<string, VersionProbeResult>();
 
 /**
+ * The last failure announced per executable, so a broken CLI says so once.
+ *
+ * Failures are re-probed by design, and the probe runs once per handshake *and*
+ * once per `runtime.health` — which the hub issues on every environment-card
+ * refresh. The hub keeps only a bounded tail of this peer's stderr and excerpts
+ * it into the launch-failure message, so the same line on every refresh would
+ * evict the lines that tail exists to carry. Keyed on the failure's shape, not
+ * merely on the path: a CLI that starts timing out after exiting non-zero is a
+ * different fact and is announced again.
+ */
+const announcedProbeFailures = new Map<string, string>();
+
+/**
  * Announces what this runtime may execute under the recorded consent.
  *
  * Effective features are the intersection of what the machine's owner granted
@@ -198,28 +211,57 @@ function probeVersion(
     ...HIDDEN_WINDOW,
   });
   if (!result.success) {
-    // The manifest announces a machine with no `gh` and a machine whose `gh`
-    // is merely too slow to answer identically, as `available: false`, so the
-    // difference only survives if it is said here. The executable is named;
-    // the PATH that found it is not — this channel is unredacted by design.
-    //
-    // `killed` is read from `exitedDueToTimeout`, not from `signalCode`: a
-    // Windows `TerminateProcess` timeout carries no POSIX signal, so a probe
-    // this bound actually killed would otherwise be misreported as a plain
-    // non-zero exit.
-    const signal = result.signalCode ?? null;
-    writeRuntimeDiagnostic('version_probe_failed', {
-      executable,
-      killed: result.exitedDueToTimeout === true,
-      ...(signal === null ? { exitCode: result.exitCode } : { signal }),
-    });
+    announceProbeFailure(executable, describeProbeFailure(result));
     return { available: false };
   }
 
   const version = parseVersion(result.stdout.toString());
   const answer: VersionProbeResult = version ? { available: true, version } : { available: true };
   versionProbeCache.set(executable, answer);
+  // Hygiene, not behaviour: a path that answered is memoised and short-circuits
+  // above from here on, so it can never fail again in this process. Dropping its
+  // complaint keeps the dedup map from holding an entry nothing will ever read.
+  announcedProbeFailures.delete(executable);
   return answer;
+}
+
+/**
+ * Says a probe failed, once per executable per distinct failure.
+ *
+ * The manifest announces a machine with no `gh` and a machine whose `gh` is
+ * merely too slow to answer identically, as `available: false`, so the
+ * difference only survives if it is said here. The executable is named; the
+ * PATH that found it is not — this channel is unredacted by design.
+ *
+ * @example announceProbeFailure('/usr/bin/gh', { killed: true, signal: 'SIGKILL' })
+ */
+function announceProbeFailure(executable: string, detail: Readonly<Record<string, unknown>>): void {
+  const signature = JSON.stringify(detail);
+  if (announcedProbeFailures.get(executable) === signature) return;
+
+  announcedProbeFailures.set(executable, signature);
+  writeRuntimeDiagnostic('version_probe_failed', { executable, ...detail });
+}
+
+/**
+ * How a probe that did start ended, as the diagnostic reports it.
+ *
+ * `killed` is read from `exitedDueToTimeout`, not from `signalCode`: a Windows
+ * `TerminateProcess` timeout carries no POSIX signal, so a probe this bound
+ * actually killed would otherwise be misreported as a plain non-zero exit.
+ *
+ * @example describeProbeFailure(result) // => { killed: true, signal: 'SIGKILL' }
+ */
+function describeProbeFailure(result: {
+  readonly exitCode: number | null;
+  readonly signalCode?: string | undefined;
+  readonly exitedDueToTimeout?: boolean | undefined;
+}): Readonly<Record<string, unknown>> {
+  const signal = result.signalCode ?? null;
+  return {
+    killed: result.exitedDueToTimeout === true,
+    ...(signal === null ? { exitCode: result.exitCode } : { signal }),
+  };
 }
 
 /** `gh version 2.97.0 (2026-07-31)\nhttps://...` becomes `2.97.0`. */

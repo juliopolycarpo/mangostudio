@@ -59,6 +59,31 @@ async function stageCountingGh(
   };
 }
 
+type StderrSpy = { readonly mock: { readonly calls: readonly (readonly unknown[])[] } };
+
+/** Every `version_probe_failed` line written for `executable`, in order. */
+function announcementsFor(stderr: StderrSpy, executable: string): string[] {
+  return stderr.mock.calls
+    .map(([chunk]) => String(chunk))
+    .filter((line) => line.includes('version_probe_failed') && line.includes(executable));
+}
+
+/**
+ * The single announcement for `executable`; fails loudly when there is not one.
+ *
+ * @example announcementFor(stderr, '/tmp/probe/gh')
+ */
+function announcementFor(stderr: StderrSpy, executable: string): string {
+  const lines = announcementsFor(stderr, executable);
+  expect(lines).toHaveLength(1);
+  return lines[0] ?? '';
+}
+
+/** The JSON detail `writeRuntimeDiagnostic` appended to a diagnostic line. */
+function parseDiagnosticDetail(line: string): Record<string, unknown> {
+  return JSON.parse(line.slice(line.indexOf('{'))) as Record<string, unknown>;
+}
+
 describe('createLocalRuntimeManifest', () => {
   it('derives a full profile from the full allow set', () => {
     const manifest = createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.full);
@@ -225,15 +250,16 @@ describe('createLocalRuntimeManifest', () => {
     try {
       createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly);
 
-      const written = stderr.mock.calls.map(([line]) => String(line)).join('');
-      expect(written).toContain('version_probe_failed');
-      expect(written).toContain(join(probeDir, 'announced-kill', 'gh'));
-      expect(written).toContain('"killed":true');
-      // The channel is unredacted by design, so the PATH that found the binary
-      // never travels on it — only the binary.
-      const stagedPath = process.env.PATH;
-      expect(stagedPath).toBeTruthy();
-      expect(written).not.toContain(String(stagedPath));
+      const line = announcementFor(stderr, join(probeDir, 'announced-kill', 'gh'));
+      expect(line).toContain('version_probe_failed');
+      // The channel is unredacted by design, so the detail carries the binary
+      // and nothing that could smuggle an environment with it. Asserted as the
+      // exact key set rather than as the absence of one string: a whole-PATH
+      // `not.toContain` can never fire, because no leak would reproduce the
+      // PATH verbatim.
+      const detail = parseDiagnosticDetail(line);
+      expect(Object.keys(detail).sort()).toEqual(['executable', 'killed', 'signal']);
+      expect(detail.killed).toBe(true);
     } finally {
       stderr.mockRestore();
       restore();
@@ -263,13 +289,42 @@ describe('createLocalRuntimeManifest', () => {
       try {
         createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly);
 
-        const written = stderr.mock.calls.map(([line]) => String(line)).join('');
-        expect(written).toContain('version_probe_failed');
-        expect(written).toContain('"killed":true');
-        expect(written).toContain('"exitCode":null');
+        // Pinned to the staged `gh`: `inspectGit` runs first and consumes the
+        // same mock whenever the real git is not yet memoised, so a bare
+        // `toContain` would pass on git's announcement without `inspectGh`
+        // ever having been exercised.
+        const detail = parseDiagnosticDetail(
+          announcementFor(stderr, join(probeDir, 'no-signal-timeout', 'gh'))
+        );
+        expect(detail.killed).toBe(true);
+        expect(detail.exitCode).toBeNull();
       } finally {
         stderr.mockRestore();
         spawnSync.mockRestore();
+        restore();
+      }
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'announces a repeating failure once, not once per manifest',
+    async () => {
+      // The failure itself is deliberately not memoised, so the probe re-spawns
+      // — but the hub keeps only a bounded tail of this peer's stderr, and a
+      // line repeated on every `runtime.health` would evict the lines that tail
+      // exists to carry.
+      const executable = join(probeDir, 'repeat-failure', 'gh');
+      const restore = await stagePathWithGh('repeat-failure', '#!/bin/sh\nexit 127\n');
+      const stderr = spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+      try {
+        createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly);
+        createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly);
+
+        const detail = parseDiagnosticDetail(announcementFor(stderr, executable));
+        expect(detail).toEqual({ executable, killed: false, exitCode: 127 });
+      } finally {
+        stderr.mockRestore();
         restore();
       }
     }
