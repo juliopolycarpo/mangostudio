@@ -15,6 +15,7 @@ import {
   McpServiceError,
   setMcpTransportFactoryForTest,
 } from '../../../../src/services/mcp/service';
+import { captureDiagnostics } from '../../../support/diagnostics';
 
 const CONFIG: RuntimeMcpServerConfig = {
   id: 'server-1',
@@ -169,15 +170,22 @@ describe('runtime MCP service', () => {
     // A refused publish is an answer that can never arrive. The tool call has
     // to come back on its own; waiting here proves it does not merely take a
     // while.
-    const outcome = await Promise.race([
-      call.then((result) => result.contentText),
-      Bun.sleep(500).then(() => 'still parked on an answer nobody can send'),
-    ]);
+    let outcome: unknown;
+    const diagnostics = await captureDiagnostics(async () => {
+      outcome = await Promise.race([
+        call.then((result) => result.contentText),
+        Bun.sleep(500).then(() => 'still parked on an answer nobody can send'),
+      ]);
+    });
 
     expect(outcome).toBe('done');
     expect(answer).toMatchObject({ action: 'cancel' });
     // Asked once — the connect event and this one, and nothing republished.
     expect(events.filter((event) => event.topic === 'mcp.elicitation')).toHaveLength(1);
+    // The call came back cancelled without anyone declining it, so this line is
+    // the only record of why — and it has to name the call, not just the server.
+    expect(diagnostics).toContain('mcp_elicitation_unobserved');
+    expect(diagnostics).toContain('call-d');
     await service.close();
   });
 

@@ -199,7 +199,14 @@ export function createMcpService(options: McpServiceOptions): McpService {
       // Cancelling is the same answer this function already gives when the
       // session is gone or the call was aborted before it was asked.
       if (!options.emit({ topic: RUNTIME_MCP_ELICITATION_TOPIC, payload: event })) {
-        writeRuntimeDiagnostic('mcp_elicitation_unobserved', { serverSlug: request.serverSlug });
+        // Keyed by the tool call, not only by the server: this line is the one
+        // record that a call came back cancelled without anyone declining it,
+        // and `toolCallId` is the handle the hub filed that call under. Ids
+        // only — the question's text is the user's, not the operator's.
+        writeRuntimeDiagnostic('mcp_elicitation_unobserved', {
+          serverId: request.serverId,
+          toolCallId: request.toolCallId,
+        });
         settle({ action: 'cancel' });
       }
     });
