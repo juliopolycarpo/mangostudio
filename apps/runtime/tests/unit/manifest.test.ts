@@ -345,6 +345,43 @@ describe('createLocalRuntimeManifest', () => {
   );
 
   it.skipIf(process.platform === 'win32')(
+    'announces the same binary again once its failure changes shape',
+    async () => {
+      // The dedup key is the failure, not the path — the case the sibling above
+      // cannot distinguish, since a bare set of executables would satisfy it
+      // too. A `gh` that exits 127 today and starts hanging tomorrow is a
+      // different machine fact, and the hub only ever sees the fact that got
+      // announced: collapsing the two would leave the tail carrying the exit
+      // code long after the binary stopped answering at all.
+      const executable = join(probeDir, 'changing-failure', 'gh');
+      const restore = await stagePathWithGh('changing-failure', '#!/bin/sh\nexit 127\n');
+      const stderr = spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+      try {
+        createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly);
+
+        // Rewritten in place rather than staged again: a second
+        // `stagePathWithGh` would prepend a second directory and capture the
+        // already-modified PATH as the one to restore.
+        await writeFile(executable, '#!/bin/sh\nexec sleep 30\n');
+        await chmod(executable, 0o755);
+        createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly);
+
+        const details = announcementsFor(stderr, executable).map(parseDiagnosticDetail);
+        expect(details).toHaveLength(2);
+        expect(details[0]).toEqual({ executable, killed: false, exitCode: 127 });
+        // The signal is asserted as a key rather than as `SIGKILL` for the same
+        // reason the kill test above does: the value is the bound's business.
+        expect(Object.keys(details[1] ?? {}).sort()).toEqual(['executable', 'killed', 'signal']);
+        expect(details[1]?.killed).toBe(true);
+      } finally {
+        stderr.mockRestore();
+        restore();
+      }
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
     'announces a gh it cannot start instead of throwing out of the manifest',
     async () => {
       // `Bun.which` checks the executable bit, not the interpreter behind the
