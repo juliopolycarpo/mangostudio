@@ -205,13 +205,16 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
    * its lifetime and a reconnect builds a fresh host, so no later line can
    * reach a hub either. The installer itself keeps going — it is a machine
    * mutation, and abandoning it half-applied because the viewer left is worse
-   * than finishing it unobserved — and the run's log file remains the durable
-   * record of everything the dropped lines would have said.
+   * than finishing it unobserved — and the run's log file holds every captured
+   * byte the dropped lines would have carried.
+   *
+   * What the log file cannot hold is a report of its own failure, which is why
+   * this answers whether the line landed rather than swallowing it.
    */
   const streamFor = (runId: string) => {
     let observed = true;
-    return (payload: RuntimeInstallOutputEvent, end?: true): void => {
-      if (!observed) return;
+    return (payload: RuntimeInstallOutputEvent, end?: true): boolean => {
+      if (!observed) return false;
       observed = options.emit({
         topic: RUNTIME_INSTALL_OUTPUT_TOPIC,
         streamId: runId,
@@ -219,6 +222,7 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
         ...(end ? { end } : {}),
       });
       if (!observed) writeRuntimeDiagnostic('install_output_unobserved', { runId });
+      return observed;
     };
   };
 
@@ -244,6 +248,22 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
       const endStream = () => {
         publish({ stream: 'system', line: '', end: true }, true);
       };
+      /**
+       * Why this run did not succeed — the one thing the log file cannot be
+       * the record of, since every case here is the log missing, truncated, or
+       * never opened.
+       *
+       * Silenced, the terminal status has no carrier either: it travels on the
+       * response to a request the same closed session refuses. So a dropped
+       * one goes to stderr, where a `spawn-failed` install otherwise leaves
+       * nothing behind but a run id. These details are host errors — an fs
+       * failure, an executable not on `PATH` — and carry no argument or
+       * secret the diagnostic channel would publish unredacted.
+       */
+      const reportFailure = (detail: string) => {
+        if (publish({ stream: 'system', line: detail })) return;
+        writeRuntimeDiagnostic('install_failure_unobserved', { runId: params.runId, detail });
+      };
 
       // Reserved before any await so a concurrent cancel/start for the same id
       // cannot slip in while prepareLog is still opening the file.
@@ -254,7 +274,7 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
       } catch (error) {
         active.delete(params.runId);
         const detail = error instanceof Error ? error.message : 'Unable to prepare install log.';
-        emitLine('system', detail);
+        reportFailure(detail);
         endStream();
         const finishedAt = deps.now();
         return {
@@ -287,7 +307,7 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
       } catch (error) {
         active.delete(params.runId);
         const detail = error instanceof Error ? error.message : 'Unable to start installer.';
-        emitLine('system', detail);
+        reportFailure(detail);
         endStream();
         const finishedAt = deps.now();
         return {
@@ -383,7 +403,7 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
         streamFailed = true;
         await child.exited.catch(() => undefined);
         const detail = error instanceof Error ? error.message : 'Installer output stream failed.';
-        emitLine('system', detail);
+        reportFailure(detail);
       } finally {
         clearTimeout(timeoutId);
         active.delete(params.runId);
@@ -396,7 +416,7 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
         await logWrites;
       } catch (error) {
         const detail = error instanceof Error ? error.message : 'Unknown log write failure.';
-        emitLine('system', `Install log write failed: ${detail}`);
+        reportFailure(`Install log write failed: ${detail}`);
       }
 
       const finishedAt = deps.now();
