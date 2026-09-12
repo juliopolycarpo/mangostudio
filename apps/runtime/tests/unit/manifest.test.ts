@@ -20,8 +20,14 @@ afterAll(async () => {
 /**
  * Puts a `gh` running `script` first on PATH; the returned call restores it.
  *
+ * A script that blocks must `exec` what it blocks on. The probe's bound sends
+ * SIGKILL to the process it spawned — the `#!/bin/sh` wrapper — and a shell
+ * cannot pass that on, so a plain `sleep` is orphaned holding the stdout pipe
+ * it inherited and outlives the whole run. `exec` makes the sleeper itself the
+ * process the bound kills.
+ *
  * @example
- * const restore = await stagePathWithGh('hangs', '#!/bin/sh\nsleep 30\n');
+ * const restore = await stagePathWithGh('hangs', '#!/bin/sh\nexec sleep 30\n');
  */
 async function stagePathWithGh(name: string, script: string): Promise<() => void> {
   const dir = join(probeDir, name);
@@ -134,7 +140,7 @@ describe('createLocalRuntimeManifest', () => {
   // hung probe can be staged through; `inspectGit` reads the startup PATH and
   // has none, so `gh` stands in for both — they share the bound.
   it.skipIf(process.platform === 'win32')('gives up on a probe that never answers', async () => {
-    const restore = await stagePathWithGh('never-answers', '#!/bin/sh\nsleep 30\n');
+    const restore = await stagePathWithGh('never-answers', '#!/bin/sh\nexec sleep 30\n');
     const started = Date.now();
 
     try {
@@ -153,8 +159,16 @@ describe('createLocalRuntimeManifest', () => {
   // SIGTERM is what `timeout` sends on its own, and a child is free to refuse
   // it: `spawnSync` then blocks for that child's whole life whatever the bound
   // says, which is the freeze the bound exists to prevent.
+  //
+  // The `exec` does not cost the refusal this test is built on: a signal set to
+  // *ignore* is inherited across `exec` (only a caught one resets to default),
+  // so the sleeper itself still refuses SIGTERM — and is now the process the
+  // bound's SIGKILL reaches, instead of leaking past the run.
   it.skipIf(process.platform === 'win32')('kills a probe that refuses to stop', async () => {
-    const restore = await stagePathWithGh('ignores-term', "#!/bin/sh\ntrap '' TERM\nsleep 30\n");
+    const restore = await stagePathWithGh(
+      'ignores-term',
+      "#!/bin/sh\ntrap '' TERM\nexec sleep 30\n"
+    );
     const started = Date.now();
 
     try {
@@ -224,7 +238,7 @@ describe('createLocalRuntimeManifest', () => {
     // Remembering this answer would announce the CLI as absent for the whole
     // life of the runtime over one transient hang — worse than re-spawning,
     // which the two-second bound already pays for.
-    const probe = await stageCountingGh('kill-not-remembered', 'sleep 30');
+    const probe = await stageCountingGh('kill-not-remembered', 'exec sleep 30');
 
     try {
       expect(createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly).gh?.available).toBe(
@@ -244,7 +258,7 @@ describe('createLocalRuntimeManifest', () => {
     // `available: false` alone cannot tell a machine with no `gh` from one
     // whose `gh` is merely too slow to answer. The diagnostic is the only
     // place that difference survives, and stderr is where the hub collects it.
-    const restore = await stagePathWithGh('announced-kill', '#!/bin/sh\nsleep 30\n');
+    const restore = await stagePathWithGh('announced-kill', '#!/bin/sh\nexec sleep 30\n');
     const stderr = spyOn(process.stderr, 'write').mockImplementation(() => true);
 
     try {
