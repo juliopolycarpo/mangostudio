@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { EventInput } from '@mangostudio/protocol';
 import type { RuntimeInstallOutputEvent } from '../../../src/methods';
 import { buildInstallEnvironment, createInstallService } from '../../../src/services/install';
+import { captureDiagnostics } from '../../support/diagnostics';
 
 interface InstallLogLine {
   readonly stream: RuntimeInstallOutputEvent['stream'];
@@ -79,28 +80,6 @@ function createRunner(
       ...deps,
     },
   });
-}
-
-/**
- * Collects what the runtime wrote to its own stderr while `run` executed.
- *
- * `writeRuntimeDiagnostic` has no injection seam — it is the process's one
- * diagnostic channel by design — so the channel itself is the seam.
- */
-async function captureDiagnostics(run: () => Promise<void>): Promise<string> {
-  const written: string[] = [];
-  const stderr = globalThis.process.stderr;
-  const original = stderr.write.bind(stderr);
-  stderr.write = ((chunk: unknown) => {
-    written.push(String(chunk));
-    return true;
-  }) as typeof stderr.write;
-  try {
-    await run();
-  } finally {
-    stderr.write = original;
-  }
-  return written.join('');
 }
 
 const COMMAND = {
