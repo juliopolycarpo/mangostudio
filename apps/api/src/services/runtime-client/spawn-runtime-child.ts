@@ -21,9 +21,9 @@ import { type SpawnedPeer, spawnPort } from '@mangostudio/protocol/spawn';
 import { sanitizeShellEnv } from '@mangostudio/runtime';
 import { createDiagnosticLogger } from '../../lib/logger';
 import type { RuntimeLaunchCommand } from '../../lib/runtime-paths';
+import { resolveHandshakeTimeoutMs } from './handshake-budget';
 import { type HubSession, openHubSession, type ProtocolHubSession } from './hub-session';
 
-const HANDSHAKE_TIMEOUT_MS = 5_000;
 /** Grace between end of stdin and SIGTERM when a runtime does not unwind on its own. */
 const TERMINATE_GRACE_MS = 2_000;
 /** Further wait after SIGTERM before the launcher escalates to SIGKILL. */
@@ -62,6 +62,13 @@ export interface SpawnRuntimeChildOptions {
   readonly launch: RuntimeLaunchCommand;
   readonly cwd?: string;
   readonly hubVersion: string;
+  /**
+   * How long the child has to say hello. Omit it for a child on the hub's own
+   * machine and it follows the host — see {@link resolveHandshakeTimeoutMs},
+   * which is 5s but 30s on Windows. A launcher that reaches another machine
+   * states its own number instead, because what it is waiting for is not a
+   * local process spawn.
+   */
   readonly handshakeTimeoutMs?: number;
   /**
    * Whether a runtime from another release is refused. True for a runtime that
@@ -117,7 +124,7 @@ export async function spawnRuntimeChild(
   try {
     hub = await openHubSession(peer.port, {
       hubVersion: options.hubVersion,
-      handshakeTimeoutMs: options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS,
+      handshakeTimeoutMs: options.handshakeTimeoutMs ?? resolveHandshakeTimeoutMs(),
       // Defaults to on: the runtime ships inside the hub's own distribution, so
       // a binary from another release is a stale install rather than a peer to
       // negotiate with.
