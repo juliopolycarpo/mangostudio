@@ -69,8 +69,15 @@ export function createLocalRuntimeManifest(
   } = {}
 ): RuntimeCapabilityManifest {
   const shells = (['bash', 'zsh', 'powershell'] as const).filter(isShellAvailable);
-  const git = inspectGit();
-  const gh = inspectGh();
+  // Both probes are spawns, and every field they feed is masked by `allow.git`
+  // below — so on a machine whose owner refused git they measured a fact that
+  // could not change the answer. That is two child processes per handshake and
+  // two more per `runtime.health`, including under the `none` preset that
+  // `collectRuntimeHealth` falls back to when the consent file cannot be read.
+  const git: RuntimeCapabilityManifest['git'] = allow.git ? inspectGit() : { available: false };
+  const gh: NonNullable<RuntimeCapabilityManifest['gh']> = allow.git
+    ? inspectGh()
+    : { available: false };
   const tools =
     allow.fsRead ||
     allow.fsWrite ||

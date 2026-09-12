@@ -275,6 +275,26 @@ describe('createLocalRuntimeManifest', () => {
     }
   );
 
+  it.skipIf(process.platform === 'win32')(
+    'runs no probe at all when the owner refused git',
+    async () => {
+      // Every field the two probes feed is already masked by `allow.git`, so a
+      // machine that refused it was paying two child processes per manifest —
+      // once per handshake and once per `runtime.health` — for constants.
+      const probe = await stageCountingGh('no-git-consent', 'echo "gh version 3.0.0 (2026-03-03)"');
+
+      try {
+        const manifest = createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.none);
+
+        expect(manifest.git.available).toBe(false);
+        expect(manifest.gh?.available).toBe(false);
+        expect(await probe.invocations()).toBe(0);
+      } finally {
+        probe.restore();
+      }
+    }
+  );
+
   it('advertises none with every feature off', () => {
     const manifest = createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.none);
     expect(manifest.profile).toBe('none');
