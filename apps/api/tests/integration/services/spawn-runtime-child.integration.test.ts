@@ -31,6 +31,15 @@ const SHELL_DEFAULTS = { kind: 'bash', timeoutMs: 10_000, maxOutputBytes: 65_536
  */
 const RUNTIME_VERSION = process.env.VERSION || 'dev';
 
+/**
+ * A child that starts, says nothing, and would outlive the launch that gave up
+ * on it. It announces its pid on stderr — which the launcher puts in the
+ * failure message — so every test that spawns one can prove it was reaped
+ * rather than leaking a process per run.
+ */
+const NEVER_GREETING_CHILD =
+  'process.stderr.write("pid=" + process.pid + "\\n"); setInterval(() => {}, 1_000);';
+
 let workdir = '';
 
 beforeAll(async () => {
@@ -286,7 +295,11 @@ describe('spawnRuntimeChild', () => {
     // Generous against a loaded runner, and still far below every budget in
     // play: 5s on this runner, up to 30s on a Windows one.
     expect(elapsedMs).toBeLessThan(2_000);
-  }, 30_000);
+    // Longer than the 30s budget plus the exit-observation grace on purpose. If
+    // a broken Windows install ever stops failing fast, this has to fail on the
+    // elapsed assertion — which names the budget it blew — rather than on the
+    // runner's own timeout, which would only say the test took too long.
+  }, 40_000);
 
   it.skipIf(!hasPosixShell)(
     'reaps a child that started but never handshaked',
@@ -295,21 +308,17 @@ describe('spawnRuntimeChild', () => {
       // failed handshake closes it — so nothing here asks for a termination.
       // A child that outlived its rejected connection would be a runtime this
       // hub can no longer reach and no longer stop.
-      const child =
-        'process.stderr.write("pid=" + process.pid + "\\n"); setInterval(() => {}, 1_000);';
       const error = (await rejectionOf(
         spawnRuntimeChild({
           environmentId: 'devbox',
-          launch: { command: process.execPath, args: ['-e', child] },
+          launch: { command: process.execPath, args: ['-e', NEVER_GREETING_CHILD] },
           hubVersion: 'hub-test',
           handshakeTimeoutMs: 1_000,
           onClosed: () => undefined,
         })
       )) as RemoteError;
 
-      const pid = Number(/pid=(\d+)/.exec(error.message)?.[1]);
-      expect(Number.isInteger(pid)).toBe(true);
-      await expect(whenProcessGone(pid)).resolves.toBeUndefined();
+      await expect(whenProcessGone(announcedPid(error))).resolves.toBeUndefined();
     },
     30_000
   );
@@ -326,14 +335,14 @@ describe('spawnRuntimeChild', () => {
       // reads the resolver instead of a constant of its own. That, plus the unit
       // test's `win32` case, leaves only `process.platform === 'win32'` unproven
       // on a Windows host.
-      // ~5.5s on purpose — the 5s budget, the 250ms exit-observation grace and
-      // the terminate escalation — and well inside this file's 30s per-test
-      // timeout. It is the cost of the assertion, not slack to trim.
-      const child = 'setInterval(() => {}, 1_000);';
+      // ~7s on purpose: the 5s budget and the 250ms exit-observation grace
+      // before the rejection, then the launcher's 2s terminate grace before the
+      // child is gone. Well inside this file's 30s per-test timeout. It is the
+      // cost of the assertions, not slack to trim.
       const error = (await rejectionOf(
         spawnRuntimeChild({
           environmentId: 'devbox',
-          launch: { command: process.execPath, args: ['-e', child] },
+          launch: { command: process.execPath, args: ['-e', NEVER_GREETING_CHILD] },
           hubVersion: 'hub-test',
           onClosed: () => undefined,
         })
@@ -342,6 +351,11 @@ describe('spawnRuntimeChild', () => {
       // `spawnRuntimeChild` rewrites the message but keeps the protocol error's
       // details, which is where the budget it actually waited on is recorded.
       expect(error.details?.timeoutMs).toBe(5_000);
+      // The rejection lands on the exit-observation grace, well before the
+      // launcher escalates — so returning here would leave an immortal child
+      // behind, and the test runner exiting is what it would outlive. Measured:
+      // without this wait the file leaks one `bun -e` process per run.
+      await expect(whenProcessGone(announcedPid(error))).resolves.toBeUndefined();
     },
     30_000
   );
@@ -360,6 +374,19 @@ describe('spawnRuntimeChild', () => {
     expect(error.message).toContain('handshake');
   }, 30_000);
 });
+
+/**
+ * The pid a {@link NEVER_GREETING_CHILD} announced, read off the launch failure
+ * the launcher built from its stderr tail.
+ *
+ * @example
+ * await whenProcessGone(announcedPid(error));
+ */
+function announcedPid(error: RemoteError): number {
+  const pid = Number(/pid=(\d+)/.exec(error.message)?.[1]);
+  expect(Number.isInteger(pid)).toBe(true);
+  return pid;
+}
 
 /**
  * Settles once `pid` is gone, and rejects naming it when it is still running
