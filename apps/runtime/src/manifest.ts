@@ -203,13 +203,22 @@ function probeVersion(
   const cached = versionProbeCache.get(executable);
   if (cached) return cached;
 
-  const result = Bun.spawnSync([executable, '--version'], {
-    stdout: 'pipe',
-    stderr: 'ignore',
-    timeout: VERSION_PROBE_TIMEOUT_MS,
-    killSignal: 'SIGKILL',
-    ...HIDDEN_WINDOW,
-  });
+  let result: ReturnType<typeof spawnVersionProbe>;
+  try {
+    result = spawnVersionProbe(executable);
+  } catch (error) {
+    // `Bun.which` checks the executable bit, not the interpreter behind a
+    // shebang, so a CLI installed as a wrapper whose runtime has since been
+    // removed resolves cleanly and then makes the spawn *throw* ENOENT — as
+    // does a binary deleted between the two calls, and EACCES for a directory.
+    // Uncaught, that throw escapes `createLocalRuntimeManifest`, which the
+    // handshake's `manifest: () =>` arrow and `collectRuntimeHealth` both call:
+    // the whole connection would fail over one optional CLI, where the
+    // documented answer is to under-report it.
+    announceProbeFailure(executable, { killed: false, spawnError: spawnErrorCode(error) });
+    return { available: false };
+  }
+
   if (!result.success) {
     announceProbeFailure(executable, describeProbeFailure(result));
     return { available: false };
@@ -223,6 +232,25 @@ function probeVersion(
   // complaint keeps the dedup map from holding an entry nothing will ever read.
   announcedProbeFailures.delete(executable);
   return answer;
+}
+
+/**
+ * Runs the bounded `<executable> --version`; throws when it cannot be started.
+ *
+ * Its own function so the options stay one block and the `stdout: 'pipe'`
+ * literal keeps inferring a `Buffer` for the caller, which a widened
+ * `ReturnType<typeof Bun.spawnSync>` annotation would lose.
+ *
+ * @example spawnVersionProbe('/usr/bin/git').stdout.toString() // => 'git version 2.51.0\n'
+ */
+function spawnVersionProbe(executable: string) {
+  return Bun.spawnSync([executable, '--version'], {
+    stdout: 'pipe',
+    stderr: 'ignore',
+    timeout: VERSION_PROBE_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+    ...HIDDEN_WINDOW,
+  });
 }
 
 /**
@@ -262,6 +290,17 @@ function describeProbeFailure(result: {
     killed: result.exitedDueToTimeout === true,
     ...(signal === null ? { exitCode: result.exitCode } : { signal }),
   };
+}
+
+/**
+ * The errno a refused spawn carries (`ENOENT`, `EACCES`), or `unknown`.
+ *
+ * Read rather than matched, unlike `isErrnoException` in `services/fs-utils.ts`:
+ * this reports whichever code came back instead of testing for one.
+ */
+function spawnErrorCode(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return typeof code === 'string' ? code : 'unknown';
 }
 
 /** `gh version 2.97.0 (2026-07-31)\nhttps://...` becomes `2.97.0`. */

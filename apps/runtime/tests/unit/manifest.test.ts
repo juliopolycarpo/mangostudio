@@ -331,6 +331,32 @@ describe('createLocalRuntimeManifest', () => {
   );
 
   it.skipIf(process.platform === 'win32')(
+    'announces a gh it cannot start instead of throwing out of the manifest',
+    async () => {
+      // `Bun.which` checks the executable bit, not the interpreter behind the
+      // shebang, so this `gh` resolves cleanly and then makes `Bun.spawnSync`
+      // *throw* ENOENT — as does a binary deleted between the two calls, and
+      // EACCES for a directory. Uncaught, that throw escapes the handshake's
+      // `manifest: () =>` arrow and `collectRuntimeHealth`, failing the whole
+      // connection over one optional CLI.
+      const executable = join(probeDir, 'broken-shebang', 'gh');
+      const restore = await stagePathWithGh('broken-shebang', '#!/nonexistent/interp\necho hi\n');
+      const stderr = spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+      try {
+        const manifest = createLocalRuntimeManifest(RUNTIME_CONSENT_PRESETS.readonly);
+
+        expect(manifest.gh?.available).toBe(false);
+        const detail = parseDiagnosticDetail(announcementFor(stderr, executable));
+        expect(detail).toEqual({ executable, killed: false, spawnError: 'ENOENT' });
+      } finally {
+        stderr.mockRestore();
+        restore();
+      }
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
     'runs no probe at all when the owner refused git',
     async () => {
       // Every field the two probes feed is already masked by `allow.git`, so a
