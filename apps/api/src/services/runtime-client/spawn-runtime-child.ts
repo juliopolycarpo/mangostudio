@@ -62,6 +62,13 @@ export interface SpawnRuntimeChildOptions {
   readonly launch: RuntimeLaunchCommand;
   readonly cwd?: string;
   readonly hubVersion: string;
+  /**
+   * How long the child has to say hello. Omit it for a child on the hub's own
+   * machine and it follows the host — see {@link resolveHandshakeTimeoutMs},
+   * which is 5s but 30s on Windows. A launcher that reaches another machine
+   * states its own number instead, because what it is waiting for is not a
+   * local process spawn.
+   */
   readonly handshakeTimeoutMs?: number;
   /**
    * Whether a runtime from another release is refused. True for a runtime that

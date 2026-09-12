@@ -54,6 +54,11 @@ import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-ch
  * container, start an init, and run a binary off a bind mount before the first
  * frame. The image is already on disk by this point — the pull is its own
  * step — so this budgets a start, not a download.
+ *
+ * Flat across platforms, so on a Windows hub it is now *shorter* than the 30s
+ * `resolveHandshakeTimeoutMs` gives a local child — see the note in
+ * `handshake-budget.ts`. What dominates here is the engine, not the `docker.exe`
+ * spawn, so this stays one number until something measures otherwise.
  */
 const HANDSHAKE_TIMEOUT_MS = 20_000;
 

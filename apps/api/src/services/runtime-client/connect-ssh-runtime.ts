@@ -34,6 +34,12 @@ import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-ch
  * Longer than a local spawn's five seconds: a connection setup, an
  * authentication exchange, and a process start on the far machine all happen
  * before the first frame, and a busy host on a slow link uses all of it.
+ *
+ * Flat across platforms, so on a Windows hub it is now *shorter* than the 30s
+ * `resolveHandshakeTimeoutMs` gives a local child — see the note in
+ * `handshake-budget.ts`. What dominates here is the link and the far machine,
+ * not the `ssh.exe` spawn, so this stays one number until something measures
+ * otherwise.
  */
 const HANDSHAKE_TIMEOUT_MS = 20_000;
 
