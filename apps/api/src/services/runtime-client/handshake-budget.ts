@@ -12,9 +12,16 @@
  * `stdio` and `wsl`, both of which inherit it by passing no timeout. The
  * transports that reach another machine state their own budget instead — not
  * because the hub's platform is irrelevant to them (the `ssh` and `docker`
- * wrappers are spawned on it) but because those budgets already sit at three to
- * four times this default and are dominated by network and remote work, so a
- * platform branch would be tuning the wrong term.
+ * wrappers are spawned on it) but because those budgets are dominated by network
+ * and remote work, so a platform branch would be tuning the wrong term.
+ *
+ * Note what that costs on `win32`, because those flat numbers were chosen
+ * against the 5s default and no longer clear the Windows one: `ssh` and
+ * `container` are 20s and `http` 15s, all three now *below* what a plain local
+ * child gets there. Judged acceptable rather than unnoticed — they are already
+ * three to four times the default this branch left alone. If a healthy remote
+ * runtime is ever measured losing to one of them on a Windows hub, the fix is a
+ * platform floor on that budget, not a bigger flat number.
  *
  * Deliberately not shared with `scripts/lib/platform-budget.ts`, which has the
  * same shape for the same reason on the smoke side. Sharing is closed from both
@@ -42,10 +49,14 @@ const WIN32_HANDSHAKE_TIMEOUT_MS = 30_000;
  * global. Every caller wants the hub's own platform, `wsl` included: its child
  * is a Linux binary, but the `wsl.exe` launch that starts it is paid on Windows.
  *
+ * Typed as `NodeJS.Platform` rather than `string` so the one spelling that means
+ * anything here has to be spelled right: `'windows'` or `'Win32'` would type-
+ * check against `string` and silently take the 5s branch.
+ *
  * @example
  * // in spawn-runtime-child.ts, for a child on this machine:
  * handshakeTimeoutMs: options.handshakeTimeoutMs ?? resolveHandshakeTimeoutMs(),
  */
-export function resolveHandshakeTimeoutMs(platform: string = process.platform): number {
+export function resolveHandshakeTimeoutMs(platform: NodeJS.Platform = process.platform): number {
   return platform === 'win32' ? WIN32_HANDSHAKE_TIMEOUT_MS : DEFAULT_HANDSHAKE_TIMEOUT_MS;
 }
