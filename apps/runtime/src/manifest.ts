@@ -224,8 +224,7 @@ function probeVersion(
 
 /** `gh version 2.97.0 (2026-07-31)\nhttps://...` becomes `2.97.0`. */
 export function parseGhVersion(output: string): string {
-  const firstLine = output.split('\n', 1)[0]?.trim() ?? '';
-  return firstLine
+  return firstLine(output)
     .replace(/^gh version\s+/i, '')
     .replace(/\s*\(.*$/, '')
     .trim();
@@ -238,7 +237,25 @@ function inspectGit(): RuntimeCapabilityManifest['git'] {
   return probeVersion(executable, parseGitVersion);
 }
 
-/** `git version 2.51.0` becomes `2.51.0`; one line, unlike `gh`. */
-function parseGitVersion(output: string): string {
-  return output.trim().replace(/^git version\s+/i, '');
+/**
+ * `git version 2.51.0` becomes `2.51.0`.
+ *
+ * Only the first line, for the same reason {@link parseGhVersion} reads only
+ * one: a `git` on PATH is often a wrapper — a toolchain shim, a corporate
+ * trampoline — and anything it prints after the version travels into the
+ * manifest. The health report caps this field at 64 characters, so a second
+ * line does not merely read wrong, it fails to encode; and the answer is
+ * memoised, so one such probe would poison every later report.
+ *
+ * @example parseGitVersion('git version 2.51.0\n') // => '2.51.0'
+ */
+export function parseGitVersion(output: string): string {
+  return firstLine(output)
+    .replace(/^git version\s+/i, '')
+    .trim();
+}
+
+/** The first line of a `--version` answer, trimmed. */
+function firstLine(output: string): string {
+  return output.split('\n', 1)[0]?.trim() ?? '';
 }

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { directoryHashDomainVersion } from '@mangostudio/shared/library';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
-import { createLocalRuntimeManifest, parseGhVersion } from '../../src/manifest';
+import { createLocalRuntimeManifest, parseGhVersion, parseGitVersion } from '../../src/manifest';
 import { supportsPty } from '../../src/services/terminal/pty';
 
 let probeDir = '';
@@ -326,5 +326,20 @@ describe('parseGhVersion', () => {
     ).toBe('2.97.0');
     expect(parseGhVersion('gh version 2.40.1')).toBe('2.40.1');
     expect(parseGhVersion('')).toBe('');
+  });
+});
+
+describe('parseGitVersion', () => {
+  it('reads only the first line, so a wrapper cannot overflow the field', () => {
+    expect(parseGitVersion('git version 2.51.0\n')).toBe('2.51.0');
+    // A `git` on PATH is often a wrapper — a toolchain shim, a corporate
+    // trampoline — and anything it prints after the version travels into the
+    // manifest. The health report caps this field at 64 characters, so a second
+    // line does not merely read wrong: it fails to encode. And the answer is
+    // memoised, so one such probe would poison every later report.
+    expect(
+      parseGitVersion('git version 2.51.0\nwarning: templates not found in /usr/share/git-core')
+    ).toBe('2.51.0');
+    expect(parseGitVersion('')).toBe('');
   });
 });
