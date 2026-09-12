@@ -79,7 +79,11 @@ interface PendingElicitation {
 
 export interface McpServiceOptions {
   readonly runtimeVersion: string;
-  readonly emit: (event: EventInput) => void;
+  /**
+   * Publishes an `evt` frame. `false` means the hub session cannot carry it —
+   * it closed, or the handshake has not completed.
+   */
+  readonly emit: (event: EventInput) => boolean;
 }
 
 export interface McpService {
@@ -110,8 +114,19 @@ export function createMcpService(options: McpServiceOptions): McpService {
   /** Serializes tool calls per server; the host dispatches requests concurrently. */
   const callToolChains = new Map<string, Promise<unknown>>();
 
+  /**
+   * Announces a session change, or records that nobody heard it.
+   *
+   * Nothing is unwound when the hub session refuses it: this is a
+   * notification, and the MCP children it describes are owned by `close()`,
+   * not by whoever was watching them.
+   */
   function publishSession(event: RuntimeMcpSessionEvent): void {
-    options.emit({ topic: RUNTIME_MCP_SESSION_TOPIC, payload: event });
+    if (options.emit({ topic: RUNTIME_MCP_SESSION_TOPIC, payload: event })) return;
+    writeRuntimeDiagnostic('mcp_session_event_unobserved', {
+      serverId: event.serverId,
+      change: event.change,
+    });
   }
 
   /**
@@ -178,7 +193,22 @@ export function createMcpService(options: McpServiceOptions): McpService {
         message: request.message,
         fields: request.fields,
       };
-      options.emit({ topic: RUNTIME_MCP_ELICITATION_TOPIC, payload: event });
+      // A question nobody received is a question nobody can answer: the hub
+      // session carries both halves, so parking this one would hold the tool
+      // call open until its own deadline for an answer that cannot come.
+      // Cancelling is the same answer this function already gives when the
+      // session is gone or the call was aborted before it was asked.
+      if (!options.emit({ topic: RUNTIME_MCP_ELICITATION_TOPIC, payload: event })) {
+        // Keyed by the tool call, not only by the server: this line is the one
+        // record that a call came back cancelled without anyone declining it,
+        // and `toolCallId` is the handle the hub filed that call under. Ids
+        // only — the question's text is the user's, not the operator's.
+        writeRuntimeDiagnostic('mcp_elicitation_unobserved', {
+          serverId: request.serverId,
+          toolCallId: request.toolCallId,
+        });
+        settle({ action: 'cancel' });
+      }
     });
   }
 

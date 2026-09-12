@@ -52,9 +52,9 @@ export function createLocalRuntimeHost(options: {
   const consent =
     options.consent ??
     staticConsentSource(options.allow ?? RUNTIME_CONSENT_PRESETS.full, options.slot ?? 'host');
-  // The services publish through the relay rather than through a session: they
-  // are built once and every reconnect binds a new session to the same
-  // definition, so the emitter has to be the thing that moves.
+  // The services publish through the relay rather than through a session
+  // because they are built here, before this definition is bound to one. The
+  // binding happens once: a reconnect calls this function again.
   const events = createRuntimeEventRelay();
   // A caller that named its own adapters gets exactly those — that is how the
   // test suites drive a fake peer. Everyone else gets the production set, so a

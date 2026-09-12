@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { EventInput } from '@mangostudio/protocol';
 import type { RuntimeInstallOutputEvent } from '../../../src/methods';
 import { buildInstallEnvironment, createInstallService } from '../../../src/services/install';
+import { captureDiagnostics } from '../../support/diagnostics';
 
 interface InstallLogLine {
   readonly stream: RuntimeInstallOutputEvent['stream'];
@@ -53,8 +54,9 @@ function collector() {
   const events: InstallLogLine[] = [];
   const emit = (event: EventInput) => {
     const payload = event.payload as RuntimeInstallOutputEvent;
-    if (payload.end) return;
+    if (payload.end) return true;
     events.push({ stream: payload.stream, line: payload.line });
+    return true;
   };
   return { events, emit };
 }
@@ -62,7 +64,9 @@ function collector() {
 function createRunner(
   process: FakeInstallProcess,
   captured: { log: Uint8Array[] },
-  emit: (event: EventInput) => void = () => undefined
+  emit: (event: EventInput) => boolean = () => true,
+  /** Host failures a test needs to stage — a log file that will not take bytes. */
+  deps: Partial<Parameters<typeof createInstallService>[0]['deps']> = {}
 ) {
   return createInstallService({
     emit,
@@ -73,6 +77,7 @@ function createRunner(
         captured.log.push(bytes);
         return Promise.resolve();
       },
+      ...deps,
     },
   });
 }
@@ -176,6 +181,84 @@ describe('runtime install execution', () => {
     ).toBe('hello\nworld\nwarning\n');
   });
 
+  it('stops streaming once the hub session refuses a line, without abandoning the install', async () => {
+    const process = new FakeInstallProcess('hello\nworld\n', 'warning\n', 0);
+    const captured = { log: [] as Uint8Array[] };
+    const attempts: EventInput[] = [];
+    const runner = createRunner(process, captured, (event) => {
+      attempts.push(event);
+      return false;
+    });
+
+    const result = await runner.run(COMMAND);
+
+    // One attempt, then silence: a closed session cannot carry the rest, and
+    // nothing later can reopen it.
+    expect(attempts).toHaveLength(1);
+    // The installer is a machine mutation. Losing the viewer must not kill it,
+    // and its log file stays the record of what the dropped lines said.
+    expect(process.killedWith).toBeNull();
+    expect(result.status).toBe('succeeded');
+    expect(
+      new TextDecoder().decode(Uint8Array.from(captured.log.flatMap((chunk) => [...chunk])))
+    ).toBe('hello\nworld\nwarning\n');
+  });
+
+  it('publishes every line the hub still takes, and stops at the one it refuses', async () => {
+    const child = new FakeInstallProcess('first\nsecond\nthird\nfourth\n', '', 0);
+    const attempts: string[] = [];
+    // The sequence a real disconnect produces: frames land, the hub goes away,
+    // and the next one is refused. A constant-false emit cannot tell a latch
+    // apart from a stream that only ever published once.
+    let remaining = 2;
+    const runner = createRunner(child, { log: [] }, (event) => {
+      attempts.push((event.payload as RuntimeInstallOutputEvent).line);
+      return remaining-- > 0;
+    });
+
+    await runner.run(COMMAND);
+
+    expect(attempts).toEqual(['first', 'second', 'third']);
+  });
+
+  it('reports a log-file failure the silenced stream was carrying', async () => {
+    const child = new FakeInstallProcess('hello\n', '', 0);
+    const runner = createRunner(child, { log: [] }, () => false, {
+      appendLog: () => Promise.reject(new Error('ENOSPC: no space left on device')),
+    });
+
+    let result: Awaited<ReturnType<typeof runner.run>> | undefined;
+    const diagnostics = await captureDiagnostics(async () => {
+      result = await runner.run(COMMAND);
+    });
+
+    // The log file is where the dropped lines are supposed to survive, so a
+    // failure *of* the log file has no other carrier: the run's terminal status
+    // travels on a response the same closed session refuses.
+    expect(result?.status).toBe('succeeded');
+    expect(diagnostics).toContain('install_failure_unobserved');
+    expect(diagnostics).toContain('ENOSPC: no space left on device');
+  });
+
+  it('reports an install that never started once the stream is silenced', async () => {
+    const child = new FakeInstallProcess('', '', 0);
+    const runner = createRunner(child, { log: [] }, () => false, {
+      prepareLog: () => Promise.reject(new Error('EACCES: permission denied')),
+    });
+
+    let result: Awaited<ReturnType<typeof runner.run>> | undefined;
+    const diagnostics = await captureDiagnostics(async () => {
+      result = await runner.run(COMMAND);
+    });
+
+    // The worst case: the very first line is the refused one, there is no log
+    // file to fall back on, and `spawn-failed` reaches nobody. Without the
+    // stderr line the whole run leaves a run id and nothing else.
+    expect(result?.status).toBe('spawn-failed');
+    expect(diagnostics).toContain('install_failure_unobserved');
+    expect(diagnostics).toContain('EACCES: permission denied');
+  });
+
   it('treats an accepted non-zero exit code as success', async () => {
     // winget's own "no applicable update found" — a package already at the
     // version it would install exits with this instead of 0.
@@ -259,6 +342,7 @@ describe('runtime install execution', () => {
     const ended: EventInput[] = [];
     const service = createRunner(new FakeInstallProcess('done\n', '', 0), { log: [] }, (event) => {
       if ((event.payload as RuntimeInstallOutputEvent).end) ended.push(event);
+      return true;
     });
 
     await service.run(COMMAND);
@@ -291,7 +375,7 @@ describe('runtime install execution', () => {
     const process = new FakeInstallProcess('', '', 0);
     let capturedEnv: Record<string, string> | undefined;
     const runner = createInstallService({
-      emit: () => undefined,
+      emit: () => true,
       deps: {
         spawn: (_argv, env) => {
           capturedEnv = env;
@@ -321,7 +405,7 @@ describe('runtime install execution', () => {
     const process = new FakeInstallProcess('', '', 0);
     let capturedEnv: Record<string, string> | undefined;
     const runner = createInstallService({
-      emit: () => undefined,
+      emit: () => true,
       deps: {
         spawn: (_argv, env) => {
           capturedEnv = env;
@@ -349,7 +433,7 @@ describe('runtime install execution', () => {
     const process = new FakeInstallProcess('', '', 0);
     let capturedEnv: Record<string, string> | undefined;
     const runner = createInstallService({
-      emit: () => undefined,
+      emit: () => true,
       deps: {
         spawn: (_argv, env) => {
           capturedEnv = env;

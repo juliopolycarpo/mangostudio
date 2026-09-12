@@ -17,6 +17,7 @@ import type { ExternalAgentAdapter } from '../../../src/services/external-agents
 import { ExternalAgentAdapterRegistry } from '../../../src/services/external-agents/registry';
 import { ExternalAgentSessionSupervisor } from '../../../src/services/external-agents/supervisor';
 import type { SpawnEnvFs } from '../../../src/services/spawn-env';
+import { captureDiagnostics } from '../../support/diagnostics';
 import { FakeExternalAgentAdapter } from '../../support/fake-external-agent-adapter';
 
 const CONFIGURATION = {
@@ -51,6 +52,11 @@ class HangingExternalAgentAdapter implements ExternalAgentAdapter {
 async function fixture(
   options: {
     readonly adapter?: FakeExternalAgentAdapter;
+    /**
+     * What the bound hub session answers; `false` is a session that closed. A
+     * function answers per event, for the sequence a real disconnect produces.
+     */
+    readonly deliverEvents?: boolean | (() => boolean);
     readonly sessionCap?: number;
     readonly idleTimeoutMs?: number;
     readonly hardTurnTimeoutMs?: number;
@@ -79,7 +85,11 @@ async function fixture(
   const supervisor = new ExternalAgentSessionSupervisor({
     registry,
     runtimeVersion: 'test',
-    emit: (event) => events.push(event),
+    emit: (event) => {
+      events.push(event);
+      const deliver = options.deliverEvents ?? true;
+      return typeof deliver === 'function' ? deliver() : deliver;
+    },
     consent: { slot: 'host', ...consent },
     env: options.env,
     ...(options.platform !== undefined && { platform: options.platform }),
@@ -275,7 +285,7 @@ describe('external-agent adapter registry and supervisor', () => {
     const supervisor = new ExternalAgentSessionSupervisor({
       registry,
       runtimeVersion: 'test',
-      emit: () => undefined,
+      emit: () => true,
       consent: {
         slot: 'host',
         current: () => RUNTIME_CONSENT_PRESETS.full,
@@ -821,6 +831,90 @@ describe('external-agent adapter registry and supervisor', () => {
     nextEvent.resolve({ done: false, value: { type: 'text_delta', text: 'too late' } });
     await waitFor(() => iteratorReturned);
     expect(value.events).toHaveLength(0);
+    await value.supervisor.close();
+  });
+
+  it('silences a session whose events the hub refused, and lets the turn finish', async () => {
+    const adapter = new FakeExternalAgentAdapter({
+      events: [
+        { type: 'text_delta', text: 'first' },
+        { type: 'text_delta', text: 'second' },
+        { type: 'completed' },
+      ],
+    });
+    const value = await fixture({ adapter, deliverEvents: false });
+    await openSession(value);
+
+    await value.supervisor.turn({
+      sessionId: 'session-1',
+      clientMessageId: 'unobserved-turn',
+      input: 'go',
+      configuration: CONFIGURATION,
+    });
+    await waitFor(() => value.supervisor.health.liveSessions[0]?.state === 'idle');
+
+    // Published once, refused, and never attempted again: no later event on
+    // this session can reach a hub that is no longer there.
+    expect(value.events).toHaveLength(1);
+    // The vendor turn is editing a workspace. Losing the viewer must not stop
+    // it partway through — it drained to `completed` and the session is idle,
+    // and only teardown reaps a session.
+    expect(adapter.cancellations).toHaveLength(0);
+    await value.supervisor.close();
+  });
+
+  it('publishes every event the hub still takes, and stops at the one it refuses', async () => {
+    const adapter = new FakeExternalAgentAdapter({
+      events: [
+        { type: 'text_delta', text: 'first' },
+        { type: 'text_delta', text: 'second' },
+        { type: 'text_delta', text: 'third' },
+        { type: 'completed' },
+      ],
+    });
+    // The sequence a real disconnect produces. A constant-false emit arms the
+    // latch on the very first event, which cannot tell a latch apart from a
+    // session that only ever published once.
+    let remaining = 2;
+    const value = await fixture({ adapter, deliverEvents: () => remaining-- > 0 });
+    await openSession(value);
+
+    await value.supervisor.turn({
+      sessionId: 'session-1',
+      clientMessageId: 'partly-observed-turn',
+      input: 'go',
+      configuration: CONFIGURATION,
+    });
+    await waitFor(() => value.supervisor.health.liveSessions[0]?.state === 'idle');
+
+    expect(value.events.map((event) => (event.payload as { sequence: number }).sequence)).toEqual([
+      1, 2, 3,
+    ]);
+    expect(adapter.cancellations).toHaveLength(0);
+    await value.supervisor.close();
+  });
+
+  it('reports a silenced turn that its own deadline cancelled', async () => {
+    const adapter = new FakeExternalAgentAdapter({ hangTurn: true, events: [] });
+    const value = await fixture({ adapter, deliverEvents: false, idleTimeoutMs: 5 });
+    await openSession(value);
+
+    const diagnostics = await captureDiagnostics(async () => {
+      await value.supervisor.turn({
+        sessionId: 'session-1',
+        clientMessageId: 'unobserved-timeout',
+        input: 'hang',
+        configuration: CONFIGURATION,
+      });
+      await waitFor(() => adapter.cancellations.length === 1);
+    });
+
+    // `turn` answered with a native id the moment the stream opened, so the
+    // error event is the only place this outcome was ever going to appear.
+    // Refused, it would reap a vendor process mid-edit in total silence.
+    expect(adapter.cancellations[0]?.reason).toBe('timeout');
+    expect(diagnostics).toContain('external_agent_turn_failed_unobserved');
+    expect(diagnostics).toContain('idle timeout');
     await value.supervisor.close();
   });
 

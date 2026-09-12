@@ -8,10 +8,12 @@
  * the consent gate, learns who the hub is once both hellos have crossed, and
  * releases the definition's resources when the transport ends.
  *
- * The same definition is bound again on every reconnect, so the events its
- * services emit have to reach whichever session is current — that is what the
- * relay is for. A definition with no session drops its events, which is what
- * the hub would have done with them anyway.
+ * A definition serves exactly one session. `serve.ts` builds a host per hub
+ * connection and `connect.ts` builds one per dial, so a reconnect arrives at a
+ * fresh definition rather than rebinding this one — which is what lets a
+ * service treat a refused `emit` as final for whatever produced it. The relay
+ * exists because the services are built before the session that carries them,
+ * not because one definition outlives a connection.
  */
 
 import { type EventInput, type Port, Session } from '@mangostudio/protocol';
@@ -62,13 +64,20 @@ export interface RuntimeHostDefinition {
 /**
  * The indirection between services that emit and the session that carries.
  *
- * Services are built once, at host construction, and the connection they
- * publish over is replaced on every reconnect. Handing them the relay rather
- * than a session means a reconnect rebinds one reference instead of rebuilding
- * the service graph.
+ * A host's services are constructed before its session exists: `runtime.ts`
+ * creates the relay, hands `emit` to every service, and only then is the
+ * definition bound to a port. The relay is what makes that order work.
+ *
+ * It is not a reconnect mechanism. Nothing rebinds a definition today, and a
+ * service that latched on a refusal — install runs, external-agent sessions —
+ * would stay mute for its lifetime if anything ever did.
  */
 export interface RuntimeEventRelay {
-  /** Publishes to the bound session; false when nothing is bound or it is not ready. */
+  /**
+   * Publishes to the bound session. False when nothing is bound, or the bound
+   * session closed, or its handshake has not completed — the three ways a
+   * service learns that what it is producing has nowhere to go.
+   */
   emit(event: EventInput): boolean;
   /** Binds a target and returns the function that unbinds it. */
   bind(target: (event: EventInput) => boolean): () => void;

@@ -57,6 +57,7 @@ import { RUNTIME_HEALTH_LIVE_SESSION_LIMIT } from '@mangostudio/shared/runtime-h
 import type { TSchema } from 'typebox';
 import Value from 'typebox/value';
 import type { RuntimeConsentSource } from '../../consent-source';
+import { writeRuntimeDiagnostic } from '../../diagnostics';
 import { RuntimeToolArgumentError } from '../../errors';
 import { RUNTIME_EXTERNAL_AGENT_TOPIC } from '../../methods';
 import { probingService } from '../probing/service';
@@ -146,6 +147,12 @@ interface LiveSession {
   state: 'idle' | 'running' | 'closing';
   activeTurn?: LiveTurn;
   closePromise?: Promise<ExternalAgentAckResult>;
+  /**
+   * Set once the hub session refused an event for this session. Final: a host
+   * binds one session for its lifetime and a reconnect builds a fresh host, so
+   * nothing this session goes on to produce can reach a hub either.
+   */
+  eventsUnobserved?: true;
 }
 
 interface LateOpenReaper {
@@ -161,7 +168,11 @@ export interface ExternalAgentExecutable {
 export interface ExternalAgentSupervisorOptions {
   readonly registry: ExternalAgentAdapterRegistry;
   readonly runtimeVersion: string;
-  readonly emit: (event: EventInput) => void;
+  /**
+   * Publishes an `evt` frame. `false` means the hub session cannot carry it —
+   * it closed, or the handshake has not completed.
+   */
+  readonly emit: (event: EventInput) => boolean;
   readonly consent: RuntimeConsentSource;
   readonly env?: NodeJS.ProcessEnv;
   /** Host facts `buildSpawnEnv` resolves a session's toolchain selection against. */
@@ -192,7 +203,7 @@ export interface ExternalAgentSupervisorOptions {
 export class ExternalAgentSessionSupervisor {
   readonly #registry: ExternalAgentAdapterRegistry;
   readonly #runtimeVersion: string;
-  readonly #emit: (event: EventInput) => void;
+  readonly #emit: (event: EventInput) => boolean;
   readonly #consent: RuntimeConsentSource;
   readonly #env: NodeJS.ProcessEnv;
   readonly #platform: string;
@@ -1133,7 +1144,7 @@ export class ExternalAgentSessionSupervisor {
           abortError('External-agent turn was cancelled after a stream error.')
         );
         const bounded = boundedErrorMessage(error);
-        this.#emitEvent(session, turn.nativeTurnId, {
+        const published = this.#emitEvent(session, turn.nativeTurnId, {
           type: 'error',
           error: {
             code: 'adapter-stream',
@@ -1141,6 +1152,18 @@ export class ExternalAgentSessionSupervisor {
             ...(bounded.truncated ? { truncated: true } : {}),
           },
         });
+        // This event is the whole record that the turn ended badly: `turn`
+        // answered with a native id the moment the stream opened, so no
+        // response carries the outcome. Silenced, a turn cancelled by its own
+        // idle or hard deadline would reap a vendor process mid-edit and leave
+        // nothing anywhere saying so.
+        if (!published) {
+          writeRuntimeDiagnostic('external_agent_turn_failed_unobserved', {
+            sessionId: session.sessionId,
+            nativeTurnId: turn.nativeTurnId,
+            message: bounded.text,
+          });
+        }
         await settleCleanup(
           session.adapter.cancel({
             sessionId: session.sessionId,
@@ -1160,7 +1183,22 @@ export class ExternalAgentSessionSupervisor {
     }
   }
 
-  #emitEvent(session: LiveSession, nativeTurnId: string, event: ExternalAgentEvent): void {
+  /**
+   * Publishes one turn event, until the hub session stops taking them, and
+   * answers whether this one reached a hub.
+   *
+   * A refusal silences this session's stream and nothing else. The vendor turn
+   * behind it keeps running: it is editing a workspace, and killing it partway
+   * through because the viewer left would leave the machine in a state nobody
+   * asked for. What reaps it is teardown — the same close that ends every
+   * session when the connection goes away.
+   *
+   * The answer matters to one caller. Everything a turn reports travels on this
+   * stream and nothing else, so an event that says the turn failed has no
+   * second carrier the way a run's log file is a second carrier for its output.
+   */
+  #emitEvent(session: LiveSession, nativeTurnId: string, event: ExternalAgentEvent): boolean {
+    if (session.eventsUnobserved) return false;
     session.sequence += 1;
     const payload = {
       sessionId: session.sessionId,
@@ -1173,11 +1211,19 @@ export class ExternalAgentSessionSupervisor {
       session.sequence -= 1;
       throw new Error('External-agent adapter produced an invalid event envelope.');
     }
-    this.#emit({
+    const delivered = this.#emit({
       topic: RUNTIME_EXTERNAL_AGENT_TOPIC,
       streamId: session.sessionId,
       payload,
     });
+    if (delivered) return true;
+    session.eventsUnobserved = true;
+    writeRuntimeDiagnostic('external_agent_events_unobserved', {
+      sessionId: session.sessionId,
+      nativeTurnId,
+      sequence: session.sequence,
+    });
+    return false;
   }
 
   #assertDescriptor(
