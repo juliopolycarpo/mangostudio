@@ -10,6 +10,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, type FileHandle, mkdir, open, rm, rmdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { RUNTIME_UPDATE_EXIT_CODE } from '@mangostudio/shared/runtime-contract';
 import {
   type RuntimeSlot,
   runtimeBinaryName,
@@ -46,8 +47,14 @@ import { type WriteChunk, writeAllBytes } from './write-all-bytes';
 const RUNTIME_UPDATE_MAX_BYTES = 256 * 1024 * 1024;
 const RUNTIME_UPDATE_MAX_CHUNK_BYTES = 32 * 1024;
 const RUNTIME_UPDATE_SESSION_TIMEOUT_MS = 120_000;
-/** Distinct from ordinary failure so a supervisor can identify an intentional restart. */
-export const RUNTIME_UPDATE_EXIT_CODE = 75;
+
+/**
+ * A supervisor on this machine reads it and so does the hub that pushed the
+ * bytes, which is what makes it a shared contract rather than a CLI detail; it
+ * lives in `@mangostudio/shared/runtime-contract` and is re-exported here for
+ * the callers that already name this module.
+ */
+export { RUNTIME_UPDATE_EXIT_CODE };
 
 const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
 

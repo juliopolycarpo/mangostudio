@@ -14,13 +14,13 @@
  * than one reading a confident wrong diagnosis.
  */
 
-import { RUNTIME_SETUP_PENDING_SIGNATURE } from '@mangostudio/runtime';
 import type { SshEnvironmentConfig, SshFailureReason } from '@mangostudio/shared/environments';
 import {
   sshDestination,
   sshPreflightCommands,
   sshRuntimePath,
 } from '@mangostudio/shared/environments';
+import { RUNTIME_SETUP_PENDING_SIGNATURE } from '@mangostudio/shared/runtime-contract';
 
 export interface SshFailureContext {
   /** Bounded tail of the client's stderr; may be empty. */

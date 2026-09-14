@@ -1,39 +1,16 @@
 import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
-import { CONSENT_DENIED_KIND, RUNTIME_UPDATE_REFUSED } from '@mangostudio/shared/runtime-contract';
+import {
+  CONSENT_DENIED_KIND,
+  RUNTIME_UPDATE_REFUSED,
+  type RuntimeServiceErrorKind,
+} from '@mangostudio/shared/runtime-contract';
 
-export type RuntimeServiceErrorKind =
-  /** The machine's owner did not grant a capability the method needs. */
-  | 'consent_denied'
-  | 'path_access'
-  | 'tool_argument'
-  | 'grep_pattern'
-  | 'file_not_read'
-  | 'partial_read'
-  | 'stale_file'
-  | 'stale_line_numbers'
-  | 'unobserved_line_numbers'
-  | 'shell_execution'
-  /** A `terminal.*` call named a session id this runtime does not hold. */
-  | 'terminal_not_found'
-  /** A `terminal.write` reached a session whose shell has already exited. */
-  | 'terminal_exited'
-  | 'git_execution'
-  | 'gh_execution'
-  | 'workspace_browser'
-  | 'workspace_containment'
-  | 'workdir_validation'
-  | 'snapshot_conflict'
-  | 'snapshot_too_large'
-  | 'runtime_update_refused'
-  | 'runtime_service_unsupported'
-  | 'runtime_service_no_session_bus'
-  | 'runtime_service_setup_pending'
-  | 'runtime_service_unconfigured'
-  | 'runtime_service_binary_missing'
-  | 'library_backup_missing'
-  | 'mcp_connection'
-  | 'mcp_call'
-  | 'mcp_session_missing';
+/**
+ * The kind vocabulary is shared, not runtime-owned: it is what reaches a hub in
+ * `details.kind` once the class is gone. See
+ * `apps/shared/src/runtime-contract/errors.ts`.
+ */
+export type { RuntimeServiceErrorKind };
 
 export class RuntimeServiceError extends Error {
   constructor(

@@ -26,7 +26,7 @@ import {
   ExternalAgentTargetIdSchema,
   ExternalIdentityIsolationSchema,
 } from '../external-agents/schemas';
-import { ReadonlyArraySchema } from '../schema-helpers';
+import { ReadonlyArraySchema, ReadonlyRecordSchema } from '../schema-helpers';
 
 /**
  * Who placed the runtime in this directory — not which transport talks to it.
@@ -290,6 +290,53 @@ export interface ResolvedRuntimeSlotConfig {
   readonly serveListen: string | null;
   readonly audit: RuntimeAuditConfig;
 }
+
+/**
+ * `credentials.json` as it sits on disk, at 0600 beside `runtime.json`.
+ *
+ * The half of a slot's state that must never be pasted anywhere, which is the
+ * whole reason it is a second file. Both members are optional because a slot
+ * holds whichever credential its transport needs and neither is required to
+ * exist: a `connect` slot has a pairing token, a `serve` slot has a serve
+ * token, and a freshly provisioned one has neither yet.
+ */
+export const RuntimeSlotCredentialsSchema = Type.Object({
+  schemaVersion: Type.Literal(1),
+  pairingToken: Type.Optional(Type.String()),
+  serveToken: Type.Optional(Type.String()),
+});
+export type RuntimeSlotCredentials = Static<typeof RuntimeSlotCredentialsSchema>;
+
+export const RuntimeAuditOutcomeSchema = Type.Union([
+  Type.Literal('ok'),
+  Type.Literal('denied'),
+  Type.Literal('error'),
+]);
+export type RuntimeAuditOutcome = Static<typeof RuntimeAuditOutcomeSchema>;
+
+/**
+ * One line of `audit.log`. Safe to paste into an issue — no payload bytes, no
+ * secrets.
+ *
+ * Shaped here rather than beside the sink that writes it because the reader is
+ * not the writer: the log is JSON-lines on the machine's own disk, and whoever
+ * opens it — a person, a support script, a runtime built in another language
+ * reading a log its predecessor wrote — has only the file to go on.
+ */
+export const RuntimeAuditRecordSchema = Type.Object({
+  /** ISO-8601 instant, on the runtime's own clock. */
+  ts: Type.String(),
+  method: Type.String(),
+  hub: Type.String(),
+  outcome: RuntimeAuditOutcomeSchema,
+  durationMs: Type.Number(),
+  /** Identifying arguments only — paths, argv summaries, byte counts. */
+  args: Type.Optional(ReadonlyRecordSchema(Type.Unknown())),
+  /** Capability named by a `DENIED` refusal. */
+  capability: Type.Optional(Type.String()),
+  code: Type.Optional(Type.String()),
+});
+export type RuntimeAuditRecord = Static<typeof RuntimeAuditRecordSchema>;
 
 /** Long-lived supervisor mode for the `remote` slot. */
 export const RuntimeServiceModeSchema = Type.Union([
