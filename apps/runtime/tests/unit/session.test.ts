@@ -7,6 +7,7 @@ import {
   type RuntimeCapabilityManifest,
 } from '@mangostudio/shared/runtime-contract';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+import type { RuntimeAuditSink } from '../../src/audit-log';
 import { staticConsentSource } from '../../src/consent-source';
 import {
   createRuntimeEventRelay,
@@ -14,6 +15,7 @@ import {
   type RuntimeHostDefinition,
   whenRuntimeReleased,
 } from '../../src/session';
+import { FakeAuditSink } from '../support/fake-audit-sink';
 import { FakeRuntimeHandlers } from '../support/fake-runtime-handlers';
 
 const MANIFEST: RuntimeCapabilityManifest = {
@@ -64,6 +66,11 @@ class AcknowledgingDefinition implements RuntimeHostDefinition {
   readonly isUpdateActive = () => false;
   readonly events = createRuntimeEventRelay();
   readonly onClose = () => undefined;
+  readonly audit: RuntimeAuditSink | undefined;
+
+  constructor(audit?: RuntimeAuditSink) {
+    this.audit = audit;
+  }
 }
 
 /** A hub that says hello and nothing else. */
@@ -76,10 +83,10 @@ function openFakeHub(port: Parameters<typeof createRuntimeSession>[0]): Session 
 
 /**
  * The check is wired here, not only decided in `loadRuntimeConfig`: nothing
- * else in the tree would notice the third argument to `RUNTIME_CONTRACT.serve`
- * being dropped, and the whole point of validating results is that a runtime
- * generated from the same catalog in another language never sees the drift its
- * TypeScript sibling shipped.
+ * else in the tree would notice `checkResults` no longer wrapping the handlers,
+ * and the whole point of validating results is that a runtime generated from
+ * the same catalog in another language never sees the drift its TypeScript
+ * sibling shipped.
  *
  * `runtime.health` because it needs no capability, and the fake answers it —
  * like every other method — with `{ ok: true }`, which is not a health report.
@@ -108,6 +115,31 @@ describe('createRuntimeSession result validation', () => {
     await hub.ready;
 
     expect(await hub.request('runtime.health', {})).toEqual({ ok: true });
+
+    hub.close(CLOSE_CODES.RELEASED, 'hub stopping');
+    await whenRuntimeReleased(runtime);
+  });
+
+  // The hub is told `INTERNAL`; the machine's own receipt has to agree with it.
+  // It would not if the check ran outside the consent gate, which records the
+  // outcome as soon as the handler resolves.
+  it('records the refused call as an error rather than a success', async () => {
+    const audit = new FakeAuditSink();
+    const ports = createInProcessPortPair();
+    const runtime = createRuntimeSession(ports.b, new AcknowledgingDefinition(audit));
+    const hub = openFakeHub(ports.a);
+    await hub.ready;
+
+    await expect(hub.request('runtime.health', {})).rejects.toThrow(
+      /Result of "runtime.health" does not match the contract/
+    );
+
+    expect(audit.records).toHaveLength(1);
+    expect(audit.records[0]).toMatchObject({
+      method: 'runtime.health',
+      outcome: 'error',
+      code: 'INTERNAL',
+    });
 
     hub.close(CLOSE_CODES.RELEASED, 'hub stopping');
     await whenRuntimeReleased(runtime);
