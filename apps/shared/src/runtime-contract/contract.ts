@@ -18,10 +18,21 @@
  * in it, and a peer built from a catalog of `{ "type": "object" }` would have
  * been told nothing at all.
  *
- * The schemas are deliberately open — no `additionalProperties: false` — so a
- * newer hub can send a member an older runtime has never heard of and be
- * ignored rather than refused. Closing them would make every additive change a
- * breaking one.
+ * New shapes are written open — no `additionalProperties: false` — so a newer
+ * hub can send a member an older runtime has never heard of and be ignored
+ * rather than refused. Closing one makes every additive change to it a breaking
+ * change, which is a cost to take deliberately and not by default.
+ *
+ * The `external-agent.*` family is the standing exception: its params and
+ * results are closed, and so is the `external-agent.event` payload, because
+ * those shapes are bounded vendor transcripts rather than a growing hub/runtime
+ * negotiation — a member nobody declared is a vendor surface nobody reviewed.
+ * `ToolchainSelection`, reused by `shell.run`, `install.run` and
+ * `terminal.open`, is closed for a different one: it is also an HTTP response
+ * schema, and `features.toolchain` gates whether a hub sends it to a given peer
+ * at all. Every one of those predates this module and is visible in
+ * `generated/catalog.json` — grep it for `additionalProperties` before assuming
+ * a method is tolerant.
  *
  * @example
  * const client = RUNTIME_CONTRACT.client(session);

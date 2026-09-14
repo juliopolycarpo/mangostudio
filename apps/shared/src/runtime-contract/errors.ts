@@ -3,8 +3,8 @@
  * the protocol reserves.
  *
  * A leaf on purpose: `environments/schemas.ts` needs the code union for the
- * connection status it publishes, and `runtime-contract/methods.ts` needs the
- * environment types, so anything this file imported from the rest of shared
+ * connection status it publishes, and `runtime-contract/methods/` needs the
+ * environment schemas, so anything this file imported from the rest of shared
  * would close that loop and `madge` would report it.
  *
  * The wire keeps `err.code` open — an unknown code is a refusal from a newer

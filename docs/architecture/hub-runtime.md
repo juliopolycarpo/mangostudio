@@ -121,16 +121,26 @@ independent of the protocol version, and neither has to move for an additive met
   [`catalog.json`](https://mangostudio.dev/protocol/schema/1/catalog.json) on the way past.
   The five files beside it describe everything else two processes share: the slot's files,
   the manifest, the health report, the install stream, and the strings nothing derives.
-- **Schemas are open; no bound goes in that is not already enforced.** A shape written for a
-  contract method does not set `additionalProperties: false`, because a newer hub sending a
-  member an older runtime has never heard of must be ignored rather than refused — the same
-  tolerance the manifest has, for the same reason. (`ToolchainSelection` is the one closed
-  shape the contract reuses; it is also an HTTP response schema, and `features.toolchain`
-  gates whether a hub sends the field to a given peer at all.) Nor does a schema carry a
-  numeric range or a string length that the handler was not already asserting: a bound added
-  at the boundary is a new rejection, and a peer generated from the catalog inherits it
-  everywhere. `terminal.open`'s `cols`/`rows` are the exception that shows the rule, mirroring
-  `assertTerminalSize` rather than inventing a limit.
+- **New schemas are open; no bound goes in that is not already enforced.** A shape written
+  for a contract method does not set `additionalProperties: false`, because a newer hub
+  sending a member an older runtime has never heard of must be ignored rather than refused —
+  the same tolerance the manifest has, for the same reason. Two families already decided
+  otherwise and stayed that way: the ten `external-agent.*` methods close their params and
+  results (and the `external-agent.event` payload), because a vendor transcript is a bounded
+  shape rather than a growing negotiation; and `ToolchainSelection`, reused by `shell.run`,
+  `install.run` and `terminal.open`, is closed because it is also an HTTP response schema,
+  with `features.toolchain` gating whether a hub sends the field to a given peer at all.
+  Adding a field to a closed shape is a breaking change for every older peer — check
+  `generated/catalog.json` for `additionalProperties` before you assume a method is
+  tolerant. Nor does a schema carry a numeric range or a string length that the handler was
+  not already asserting: a bound added at the boundary is a new rejection, and a peer
+  generated from the catalog inherits it everywhere. `terminal.open`'s `cols`/`rows` are the
+  exception that shows the rule, mirroring `assertTerminalSize` rather than inventing a
+  limit. A bound the method's *result* already carries is not a new one either: a parameter
+  looser than the value it ends up in accepts a call the method then cannot answer, and
+  under result validation that reads as an `INTERNAL` fault rather than the bad argument it
+  was. `library.apply`/`library.remove` take `environmentId` on the same
+  `LibraryEnvironmentIdSchema` their result rows echo it into, for that reason.
 - **Results are validated outside production.** `serve` checks every handler's return value
   against its result schema when `validateHandlerResults` is on (everywhere but production).
   Parameters are what a peer owes this one; results are what this build owes a peer that was
