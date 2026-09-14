@@ -50,7 +50,7 @@ describe('dependency policy', () => {
       '@sinclair/typebox',
       '@elysiajs/*',
     ]);
-    expect([...COHORT_DEPENDENCIES]).toEqual(['elysia', 'typebox']);
+    expect([...COHORT_DEPENDENCIES]).toEqual(['elysia', 'typebox', '@mangostudio/protocol']);
   });
 
   test('rejects a retired specifier in any manifest and any section', () => {

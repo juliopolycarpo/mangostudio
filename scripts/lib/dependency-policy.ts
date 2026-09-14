@@ -76,8 +76,13 @@ export const RETIRED_DEPENDENCIES = [
  * Same reasoning as above, one step further: declaring `elysia` at two
  * different versions lets the isolated linker give workspaces separate copies,
  * and a schema or plugin crossing that boundary is silently not recognised.
+ *
+ * `@mangostudio/protocol` is here because the root declares it too — the script
+ * that emits the contract artifacts needs the published catalog schema — and a
+ * second copy would mean the catalog is built by a `defineContract` the
+ * contract was not defined with.
  */
-export const COHORT_DEPENDENCIES = ['elysia', 'typebox'] as const;
+export const COHORT_DEPENDENCIES = ['elysia', 'typebox', '@mangostudio/protocol'] as const;
 
 export interface ManifestEntry {
   /** Repo-relative manifest location, e.g. `apps/api`. Empty string for root. */
