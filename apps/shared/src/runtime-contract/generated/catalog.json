@@ -8627,7 +8627,10 @@
             "type": "string"
           },
           "environmentId": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 63,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
           },
           "operations": {
             "type": "array",
@@ -9149,7 +9152,10 @@
             "type": "string"
           },
           "environmentId": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 63,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
           },
           "operations": {
             "type": "array",

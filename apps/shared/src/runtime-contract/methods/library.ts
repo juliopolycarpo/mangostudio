@@ -14,6 +14,7 @@ import Type, { type Static } from 'typebox';
 import { LibraryLocationSettingsSchema } from '../../app-settings/schemas';
 import {
   LibraryBackupSetSchema,
+  LibraryEnvironmentIdSchema,
   LibraryInstanceSchema,
   LibraryLocationIdSchema,
   LibraryLocationStatusSchema,
@@ -165,8 +166,13 @@ export const RuntimeLibraryBackupEnvelopeSchema = Type.Object({
    * under — so it travels with the request rather than being resolved here.
    * Absent means Local, which is what every backup written before environments
    * existed was.
+   *
+   * The same schema the results carry: `library.apply` and `library.remove`
+   * echo this value into every row of `PropagationApply`/`RemovalApply`, which
+   * bind it to {@link LibraryEnvironmentIdSchema}. A looser parameter would
+   * accept an id the method then cannot answer with.
    */
-  environmentId: Type.Optional(Type.String()),
+  environmentId: Type.Optional(LibraryEnvironmentIdSchema),
 });
 export type RuntimeLibraryBackupEnvelope = Static<typeof RuntimeLibraryBackupEnvelopeSchema>;
 
