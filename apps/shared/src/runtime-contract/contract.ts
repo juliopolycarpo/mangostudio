@@ -3,20 +3,25 @@
  * one needs the machine's owner to have granted, the events a runtime
  * publishes, and the manifest it announces itself with.
  *
- * One definition drives four things — the hub's typed client, the runtime's
+ * One definition drives five things — the hub's typed client, the runtime's
  * typed handler map, the parameter validation `serve` runs before a handler
- * sees a payload, and the catalog document a peer in another language can
- * generate from. Adding a method here without a handler in the runtime's
- * registry is a compile error there; adding one without a capability list is a
- * compile error here.
+ * sees a payload, the result validation it runs outside production, and the
+ * catalog document a peer in another language is built from. Adding a method
+ * here without a handler in the runtime's registry is a compile error there;
+ * adding one without a capability list is a compile error here.
  *
  * ## Schemas
  *
- * The ten `external-agent.*` methods and the seven results below carry real
- * TypeBox schemas, because those shapes already had one. Everything else
- * carries {@link UnsafeObjectSchema}: the type is exact, and the validation is
- * "is a JSON object" — precisely the check the hand-written dispatcher ran.
- * Replacing one with a real schema is a local change; nothing else moves.
+ * Every method carries a real TypeBox schema, and every shape it names is
+ * declared once in `methods/` and derived with `Static<>`. That is what makes
+ * `catalog.json` worth generating: the catalog is only as good as the schemas
+ * in it, and a peer built from a catalog of `{ "type": "object" }` would have
+ * been told nothing at all.
+ *
+ * The schemas are deliberately open — no `additionalProperties: false` — so a
+ * newer hub can send a member an older runtime has never heard of and be
+ * ignored rather than refused. Closing them would make every additive change a
+ * breaking one.
  *
  * @example
  * const client = RUNTIME_CONTRACT.client(session);
@@ -45,19 +50,12 @@ import {
   ExternalAgentTurnParamsSchema,
   ExternalAgentTurnResultSchema,
 } from '../external-agents/schemas';
-import {
-  LibraryUndoResultSchema,
-  PropagationApplySchema,
-  RemovalApplySchema,
-  type RuntimeSettingsSourcesResult,
-} from '../library';
+import { RuntimeSettingsSourcesResultSchema } from '../library/settings-sources';
 import type { RuntimeCapabilityAllow } from '../runtime-home';
 import { RuntimeHealthReportSchema } from '../runtime-home/schemas';
-import { UnsafeObjectSchema } from '../schema-helpers';
-import { ListDirectoryResponseSchema } from '../workspaces/schemas';
 import { RUNTIME_CONTRACT_EVENTS } from './events';
 import { RuntimeCapabilityManifestSchema } from './manifest';
-import type * as Methods from './methods';
+import * as Methods from './methods';
 
 /** Contract name announced in `hello.capabilities.contracts`. */
 export const RUNTIME_CONTRACT_NAME = 'mangostudio.runtime';
@@ -92,156 +90,142 @@ function method<P extends TSchema, R extends TSchema>(
 }
 
 const RUNTIME_METHODS = {
-  'fs.read-file': method(
-    UnsafeObjectSchema<Methods.RuntimeReadFileParams>(),
-    UnsafeObjectSchema<Methods.RuntimeReadFileResult>(),
-    ['fsRead']
-  ),
+  'fs.read-file': method(Methods.RuntimeReadFileParamsSchema, Methods.RuntimeReadFileResultSchema, [
+    'fsRead',
+  ]),
   'fs.write-file': method(
-    UnsafeObjectSchema<Methods.RuntimeWriteFileParams>(),
-    UnsafeObjectSchema<Methods.RuntimeMutationResult<Methods.RuntimeWriteFileResult>>(),
+    Methods.RuntimeWriteFileParamsSchema,
+    Methods.RuntimeMutationResultSchema(Methods.RuntimeWriteFileResultSchema),
     ['fsWrite']
   ),
   'fs.create-file': method(
-    UnsafeObjectSchema<Methods.RuntimeCreateFileParams>(),
-    UnsafeObjectSchema<Methods.RuntimeMutationResult<Methods.RuntimeCreateFileResult>>(),
+    Methods.RuntimeCreateFileParamsSchema,
+    Methods.RuntimeMutationResultSchema(Methods.RuntimeCreateFileResultSchema),
     ['fsWrite']
   ),
   'fs.edit-file': method(
-    UnsafeObjectSchema<Methods.RuntimeEditFileParams>(),
-    UnsafeObjectSchema<Methods.RuntimeMutationResult<Methods.RuntimeEditFileResult>>(),
+    Methods.RuntimeEditFileParamsSchema,
+    Methods.RuntimeMutationResultSchema(Methods.RuntimeEditFileResultSchema),
     ['fsWrite']
   ),
   'fs.replace-range': method(
-    UnsafeObjectSchema<Methods.RuntimeReplaceRangeParams>(),
-    UnsafeObjectSchema<Methods.RuntimeMutationResult<Methods.RuntimeReplaceRangeResult>>(),
+    Methods.RuntimeReplaceRangeParamsSchema,
+    Methods.RuntimeMutationResultSchema(Methods.RuntimeReplaceRangeResultSchema),
     ['fsWrite']
   ),
   'fs.delete-file': method(
-    UnsafeObjectSchema<Methods.RuntimeDeleteFileParams>(),
-    UnsafeObjectSchema<Methods.RuntimeMutationResult<Methods.RuntimeDeleteFileResult>>(),
+    Methods.RuntimeDeleteFileParamsSchema,
+    Methods.RuntimeMutationResultSchema(Methods.RuntimeDeleteFileResultSchema),
     ['fsWrite']
   ),
   'fs.move-file': method(
-    UnsafeObjectSchema<Methods.RuntimeMoveFileParams>(),
-    UnsafeObjectSchema<Methods.RuntimeMutationResult<Methods.RuntimeMoveFileResult>>(),
+    Methods.RuntimeMoveFileParamsSchema,
+    Methods.RuntimeMutationResultSchema(Methods.RuntimeMoveFileResultSchema),
     ['fsWrite']
   ),
   'fs.list-directory': method(
-    UnsafeObjectSchema<Methods.RuntimeListDirectoryParams>(),
-    UnsafeObjectSchema<Methods.RuntimeListDirectoryResult>(),
+    Methods.RuntimeListDirectoryParamsSchema,
+    Methods.RuntimeListDirectoryResultSchema,
     ['fsRead']
   ),
-  'fs.glob': method(
-    UnsafeObjectSchema<Methods.RuntimeGlobParams>(),
-    UnsafeObjectSchema<Methods.RuntimeGlobResult>(),
-    ['fsRead']
-  ),
-  'fs.grep': method(
-    UnsafeObjectSchema<Methods.RuntimeGrepParams>(),
-    UnsafeObjectSchema<Methods.RuntimeGrepResult>(),
-    ['fsRead']
-  ),
+  'fs.glob': method(Methods.RuntimeGlobParamsSchema, Methods.RuntimeGlobResultSchema, ['fsRead']),
+  'fs.grep': method(Methods.RuntimeGrepParamsSchema, Methods.RuntimeGrepResultSchema, ['fsRead']),
   'fs.apply-patch': method(
-    UnsafeObjectSchema<Methods.RuntimeApplyPatchParams>(),
-    UnsafeObjectSchema<Methods.RuntimeMutationResult<Methods.RuntimeApplyPatchResult>>(),
+    Methods.RuntimeApplyPatchParamsSchema,
+    Methods.RuntimeMutationResultSchema(Methods.RuntimeApplyPatchResultSchema),
     ['fsWrite']
   ),
-  'shell.run': method(
-    UnsafeObjectSchema<Methods.RuntimeShellRunParams>(),
-    UnsafeObjectSchema<Methods.RuntimeShellResult>(),
-    ['shell']
-  ),
-  'git.exec': method(
-    UnsafeObjectSchema<Methods.RuntimeGitExecParams>(),
-    UnsafeObjectSchema<Methods.RuntimeGitExecResult>(),
-    ['git']
-  ),
+  'shell.run': method(Methods.RuntimeShellRunParamsSchema, Methods.RuntimeShellResultSchema, [
+    'shell',
+  ]),
+  'git.exec': method(Methods.RuntimeGitExecParamsSchema, Methods.RuntimeGitExecResultSchema, [
+    'git',
+  ]),
   'gh.exec': method(
-    UnsafeObjectSchema<Methods.RuntimeGhExecParams>(),
-    UnsafeObjectSchema<Methods.RuntimeGhExecResult>(),
+    Methods.RuntimeGhExecParamsSchema,
+    Methods.RuntimeGhExecResultSchema,
     ['git'],
     'Read-only `gh` subcommands; refuses a write subcommand structurally.'
   ),
   'gh.mutate': method(
-    UnsafeObjectSchema<Methods.RuntimeGhExecParams>(),
-    UnsafeObjectSchema<Methods.RuntimeGhExecResult>(),
+    Methods.RuntimeGhExecParamsSchema,
+    Methods.RuntimeGhExecResultSchema,
     ['git', 'shell'],
     'Mutating `gh` subcommands; needs shell consent on top of git.'
   ),
   'snapshot.capture': method(
-    UnsafeObjectSchema<Methods.RuntimeSnapshotCaptureParams>(),
-    UnsafeObjectSchema<Methods.RuntimeBeforeSnapshot>(),
+    Methods.RuntimeSnapshotCaptureParamsSchema,
+    Methods.RuntimeBeforeSnapshotSchema,
     ['checkpoints', 'fsRead']
   ),
   'snapshot.hash': method(
-    UnsafeObjectSchema<Methods.RuntimeSnapshotHashParams>(),
-    UnsafeObjectSchema<Methods.RuntimeSnapshotHashResult>(),
+    Methods.RuntimeSnapshotHashParamsSchema,
+    Methods.RuntimeSnapshotHashResultSchema,
     ['checkpoints', 'fsRead']
   ),
   'snapshot.revert': method(
-    UnsafeObjectSchema<Methods.RuntimeSnapshotRevertParams>(),
-    UnsafeObjectSchema<Methods.RuntimeSnapshotRevertResult>(),
+    Methods.RuntimeSnapshotRevertParamsSchema,
+    Methods.RuntimeSnapshotRevertResultSchema,
     ['checkpoints', 'fsWrite']
   ),
   'workspace.browse': method(
-    UnsafeObjectSchema<Methods.RuntimeWorkspaceBrowseParams>(),
-    ListDirectoryResponseSchema,
+    Methods.RuntimeWorkspaceBrowseParamsSchema,
+    Methods.RuntimeWorkspaceBrowseResultSchema,
     ['fsRead']
   ),
   'workspace.validate': method(
-    UnsafeObjectSchema<Methods.RuntimeWorkspaceValidateParams>(),
-    UnsafeObjectSchema<Methods.RuntimeWorkspaceValidateResult>(),
+    Methods.RuntimeWorkspaceValidateParamsSchema,
+    Methods.RuntimeWorkspaceValidateResultSchema,
     ['fsRead']
   ),
   'workspace.resolve-contained': method(
-    UnsafeObjectSchema<Methods.RuntimeWorkspaceResolveContainedParams>(),
-    UnsafeObjectSchema<Methods.RuntimeWorkspaceResolveContainedResult>(),
+    Methods.RuntimeWorkspaceResolveContainedParamsSchema,
+    Methods.RuntimeWorkspaceResolveContainedResultSchema,
     ['fsRead']
   ),
   'mcp.connect': method(
-    UnsafeObjectSchema<Methods.RuntimeMcpConnectParams>(),
-    UnsafeObjectSchema<Methods.RuntimeMcpConnectResult>(),
+    Methods.RuntimeMcpConnectParamsSchema,
+    Methods.RuntimeMcpConnectResultSchema,
     ['mcp']
   ),
   'mcp.list-tools': method(
-    UnsafeObjectSchema<Methods.RuntimeMcpServerParams>(),
-    UnsafeObjectSchema<Methods.RuntimeMcpListToolsResult>(),
+    Methods.RuntimeMcpServerParamsSchema,
+    Methods.RuntimeMcpListToolsResultSchema,
     ['mcp']
   ),
   'mcp.call-tool': method(
-    UnsafeObjectSchema<Methods.RuntimeMcpCallToolParams>(),
-    UnsafeObjectSchema<Methods.RuntimeMcpCallResult>(),
+    Methods.RuntimeMcpCallToolParamsSchema,
+    Methods.RuntimeMcpCallResultSchema,
     ['mcp']
   ),
   'mcp.list-resources': method(
-    UnsafeObjectSchema<Methods.RuntimeMcpServerParams>(),
-    UnsafeObjectSchema<Methods.RuntimeMcpListResourcesResult>(),
+    Methods.RuntimeMcpServerParamsSchema,
+    Methods.RuntimeMcpListResourcesResultSchema,
     ['mcp']
   ),
   'mcp.read-resource': method(
-    UnsafeObjectSchema<Methods.RuntimeMcpReadResourceParams>(),
-    UnsafeObjectSchema<Methods.RuntimeMcpReadResourceResult>(),
+    Methods.RuntimeMcpReadResourceParamsSchema,
+    Methods.RuntimeMcpReadResourceResultSchema,
     ['mcp']
   ),
   'mcp.list-prompts': method(
-    UnsafeObjectSchema<Methods.RuntimeMcpServerParams>(),
-    UnsafeObjectSchema<Methods.RuntimeMcpListPromptsResult>(),
+    Methods.RuntimeMcpServerParamsSchema,
+    Methods.RuntimeMcpListPromptsResultSchema,
     ['mcp']
   ),
   'mcp.get-prompt': method(
-    UnsafeObjectSchema<Methods.RuntimeMcpGetPromptParams>(),
-    UnsafeObjectSchema<Methods.RuntimeMcpPromptResult>(),
+    Methods.RuntimeMcpGetPromptParamsSchema,
+    Methods.RuntimeMcpPromptResultSchema,
     ['mcp']
   ),
   'mcp.elicit-response': method(
-    UnsafeObjectSchema<Methods.RuntimeMcpElicitResponseParams>(),
-    UnsafeObjectSchema<Methods.RuntimeMcpAckResult>(),
+    Methods.RuntimeMcpElicitResponseParamsSchema,
+    Methods.RuntimeMcpAckResultSchema,
     ['mcp']
   ),
   'mcp.disconnect': method(
-    UnsafeObjectSchema<Methods.RuntimeMcpServerParams>(),
-    UnsafeObjectSchema<Methods.RuntimeMcpAckResult>(),
+    Methods.RuntimeMcpServerParamsSchema,
+    Methods.RuntimeMcpAckResultSchema,
     ['mcp']
   ),
   'external-agent.discover': method(
@@ -284,138 +268,129 @@ const RUNTIME_METHODS = {
     ['externalAgents']
   ),
   'probing.runtimes': method(
-    UnsafeObjectSchema<Methods.RuntimeProbeRuntimesParams>(),
-    UnsafeObjectSchema<Methods.RuntimeProbeRuntimesResult>(),
+    Methods.RuntimeProbeRuntimesParamsSchema,
+    Methods.RuntimeProbeRuntimesResultSchema,
     ['probing']
   ),
   'probing.version-managers': method(
-    UnsafeObjectSchema<Methods.RuntimeProbeVersionManagersParams>(),
-    UnsafeObjectSchema<Methods.RuntimeProbeVersionManagersResult>(),
+    Methods.RuntimeProbeVersionManagersParamsSchema,
+    Methods.RuntimeProbeVersionManagersResultSchema,
     ['probing']
   ),
   'probing.agent-clis': method(
-    UnsafeObjectSchema<Methods.RuntimeProbeAgentClisParams>(),
-    UnsafeObjectSchema<Methods.RuntimeProbeAgentClisResult>(),
+    Methods.RuntimeProbeAgentClisParamsSchema,
+    Methods.RuntimeProbeAgentClisResultSchema,
     ['probing']
   ),
   'install.run': method(
-    UnsafeObjectSchema<Methods.RuntimeInstallRunParams>(),
-    UnsafeObjectSchema<Methods.RuntimeInstallRunResult>(),
+    Methods.RuntimeInstallRunParamsSchema,
+    Methods.RuntimeInstallRunResultSchema,
     ['shell']
   ),
   'install.cancel': method(
-    UnsafeObjectSchema<Methods.RuntimeInstallCancelParams>(),
-    UnsafeObjectSchema<{ readonly ok: true }>(),
+    Methods.RuntimeInstallCancelParamsSchema,
+    Methods.RuntimeAckResultSchema,
     ['shell']
   ),
   'terminal.open': method(
-    UnsafeObjectSchema<Methods.RuntimeTerminalOpenParams>(),
-    UnsafeObjectSchema<Methods.RuntimeTerminalOpenResult>(),
+    Methods.RuntimeTerminalOpenParamsSchema,
+    Methods.RuntimeTerminalOpenResultSchema,
     ['shell']
   ),
   'terminal.attach': method(
-    UnsafeObjectSchema<Methods.RuntimeTerminalAttachParams>(),
-    UnsafeObjectSchema<Methods.RuntimeTerminalAttachResult>(),
+    Methods.RuntimeTerminalAttachParamsSchema,
+    Methods.RuntimeTerminalAttachResultSchema,
     ['shell']
   ),
   'terminal.detach': method(
-    UnsafeObjectSchema<Methods.RuntimeTerminalDetachParams>(),
-    UnsafeObjectSchema<{ readonly ok: true }>(),
+    Methods.RuntimeTerminalDetachParamsSchema,
+    Methods.RuntimeAckResultSchema,
     ['shell']
   ),
   'terminal.write': method(
-    UnsafeObjectSchema<Methods.RuntimeTerminalWriteParams>(),
-    UnsafeObjectSchema<{ readonly ok: true }>(),
+    Methods.RuntimeTerminalWriteParamsSchema,
+    Methods.RuntimeAckResultSchema,
     ['shell']
   ),
   'terminal.resize': method(
-    UnsafeObjectSchema<Methods.RuntimeTerminalResizeParams>(),
-    UnsafeObjectSchema<{ readonly ok: true }>(),
+    Methods.RuntimeTerminalResizeParamsSchema,
+    Methods.RuntimeAckResultSchema,
     ['shell']
   ),
-  'terminal.ack': method(
-    UnsafeObjectSchema<Methods.RuntimeTerminalAckParams>(),
-    UnsafeObjectSchema<{ readonly ok: true }>(),
-    ['shell']
-  ),
+  'terminal.ack': method(Methods.RuntimeTerminalAckParamsSchema, Methods.RuntimeAckResultSchema, [
+    'shell',
+  ]),
   'terminal.close': method(
-    UnsafeObjectSchema<Methods.RuntimeTerminalCloseParams>(),
-    UnsafeObjectSchema<{ readonly ok: true }>(),
+    Methods.RuntimeTerminalCloseParamsSchema,
+    Methods.RuntimeAckResultSchema,
     ['shell']
   ),
-  'terminal.list': method(
-    UnsafeObjectSchema<Record<string, never>>(),
-    UnsafeObjectSchema<Methods.RuntimeTerminalListResult>(),
-    ['shell']
-  ),
+  'terminal.list': method(Methods.RuntimeNoParamsSchema, Methods.RuntimeTerminalListResultSchema, [
+    'shell',
+  ]),
   'library.scan': method(
-    UnsafeObjectSchema<Methods.RuntimeLibraryScanParams>(),
-    UnsafeObjectSchema<Methods.RuntimeLibraryScanResult>(),
+    Methods.RuntimeLibraryScanParamsSchema,
+    Methods.RuntimeLibraryScanResultSchema,
     ['library']
   ),
   'library.read': method(
-    UnsafeObjectSchema<Methods.RuntimeLibraryReadParams>(),
-    UnsafeObjectSchema<Methods.RuntimeLibraryReadResult>(),
+    Methods.RuntimeLibraryReadParamsSchema,
+    Methods.RuntimeLibraryReadResultSchema,
     ['library']
   ),
   'library.read-tree': method(
-    UnsafeObjectSchema<Methods.RuntimeLibraryReadTreeParams>(),
-    UnsafeObjectSchema<Methods.RuntimeLibraryReadTreeResult>(),
+    Methods.RuntimeLibraryReadTreeParamsSchema,
+    Methods.RuntimeLibraryReadTreeResultSchema,
     ['library']
   ),
   'library.locations': method(
-    UnsafeObjectSchema<Methods.RuntimeLibraryLocationsParams>(),
-    UnsafeObjectSchema<Methods.RuntimeLibraryLocationsResult>(),
+    Methods.RuntimeLibraryLocationsParamsSchema,
+    Methods.RuntimeLibraryLocationsResultSchema,
     ['library']
   ),
   'library.settings-sources': method(
-    UnsafeObjectSchema<Methods.RuntimeLibrarySettingsSourcesParams>(),
-    UnsafeObjectSchema<RuntimeSettingsSourcesResult>(),
+    Methods.RuntimeLibrarySettingsSourcesParamsSchema,
+    RuntimeSettingsSourcesResultSchema,
     ['library']
   ),
   'library.apply': method(
-    UnsafeObjectSchema<Methods.RuntimeLibraryApplyParams>(),
-    PropagationApplySchema,
+    Methods.RuntimeLibraryApplyParamsSchema,
+    Methods.RuntimeLibraryApplyResultSchema,
     ['library', 'fsWrite']
   ),
   'library.remove': method(
-    UnsafeObjectSchema<Methods.RuntimeLibraryRemoveParams>(),
-    RemovalApplySchema,
+    Methods.RuntimeLibraryRemoveParamsSchema,
+    Methods.RuntimeLibraryRemoveResultSchema,
     ['library', 'fsWrite']
   ),
   'library.undo': method(
-    UnsafeObjectSchema<Methods.RuntimeLibraryUndoParams>(),
-    LibraryUndoResultSchema,
+    Methods.RuntimeLibraryUndoParamsSchema,
+    Methods.RuntimeLibraryUndoResultSchema,
     ['library', 'fsWrite']
   ),
   'library.backups': method(
-    UnsafeObjectSchema<Methods.RuntimeLibraryBackupsParams>(),
-    UnsafeObjectSchema<Methods.RuntimeLibraryBackupsResult>(),
+    Methods.RuntimeLibraryBackupsParamsSchema,
+    Methods.RuntimeLibraryBackupsResultSchema,
     ['library']
   ),
-  'library.gc': method(
-    UnsafeObjectSchema<Methods.RuntimeLibraryGcParams>(),
-    UnsafeObjectSchema<Methods.RuntimeLibraryGcResult>(),
-    ['library', 'fsWrite']
-  ),
-  'runtime.health': method(
-    UnsafeObjectSchema<Record<string, never>>(),
-    RuntimeHealthReportSchema,
-    []
-  ),
+  'library.gc': method(Methods.RuntimeLibraryGcParamsSchema, Methods.RuntimeLibraryGcResultSchema, [
+    'library',
+    'fsWrite',
+  ]),
+  'runtime.health': method(Methods.RuntimeNoParamsSchema, RuntimeHealthReportSchema, []),
   'runtime.update.begin': method(
-    UnsafeObjectSchema<Methods.RuntimeUpdateBeginParams>(),
-    UnsafeObjectSchema<Methods.RuntimeUpdateBeginResult>(),
+    Methods.RuntimeUpdateBeginParamsSchema,
+    Methods.RuntimeUpdateBeginResultSchema,
     ['update']
   ),
   'runtime.update.chunk': method(
-    UnsafeObjectSchema<Methods.RuntimeUpdateChunkParams>(),
-    UnsafeObjectSchema<Methods.RuntimeUpdateChunkResult>(),
+    Methods.RuntimeUpdateChunkParamsSchema,
+    Methods.RuntimeUpdateChunkResultSchema,
     ['update']
   ),
   'runtime.update.commit': method(
-    UnsafeObjectSchema<Methods.RuntimeUpdateCommitParams>(),
-    UnsafeObjectSchema<Methods.RuntimeUpdateCommitResult>(),
+    Methods.RuntimeUpdateCommitParamsSchema,
+    Methods.RuntimeUpdateCommitResultSchema,
     ['update']
   ),
 } as const;
