@@ -27,6 +27,7 @@ import {
 } from '@mangostudio/shared/runtime-contract';
 import Value from 'typebox/value';
 import type { RuntimeAuditSink } from './audit-log';
+import { loadRuntimeConfig } from './config';
 import { gateHandlers } from './consent-gate';
 import type { RuntimeConsentSource } from './consent-source';
 import { writeRuntimeDiagnostic } from './diagnostics';
@@ -111,6 +112,13 @@ interface RuntimeSessionOptions {
    * diagnostics, which is where every transport already collects them.
    */
   readonly log?: (message: string) => void;
+  /**
+   * Whether a handler's return value is checked against the contract's result
+   * schema before it is sent. Defaults to
+   * {@link RuntimeConfig.validateHandlerResults}; a test that wants the check
+   * regardless of how the process was started passes it explicitly.
+   */
+  readonly validateResults?: boolean;
 }
 
 /**
@@ -155,7 +163,8 @@ export function createRuntimeSession(
       consent: definition.consent,
       isUpdateActive: definition.isUpdateActive,
       ...(definition.audit ? { audit: definition.audit } : {}),
-    })
+    }),
+    { validateResults: options.validateResults ?? loadRuntimeConfig().validateHandlerResults }
   );
 
   const unbind = definition.events.bind((event) => session.emit(event));
