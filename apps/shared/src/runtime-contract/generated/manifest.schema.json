@@ -1,0 +1,295 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mangostudio.dev/runtime/schema/1/manifest.json",
+  "title": "MangoStudio runtime capability manifest",
+  "description": "What a runtime announces about itself in hello.capabilities. Open by design: an older hub keeps talking to a newer runtime that advertises extra keys. $defs.hubIdentity is what the hub announces back under capabilities.hub.",
+  "$defs": {
+    "hubIdentity": {
+      "type": "object",
+      "required": [
+        "host",
+        "user"
+      ],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "user": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "required": [
+    "platform",
+    "arch",
+    "pathStyle",
+    "homeDir",
+    "shells",
+    "git",
+    "features"
+  ],
+  "properties": {
+    "platform": {
+      "type": "string",
+      "minLength": 1
+    },
+    "arch": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pathStyle": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "posix"
+        },
+        {
+          "type": "string",
+          "const": "win32"
+        }
+      ]
+    },
+    "homeDir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "shells": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string",
+            "const": "bash"
+          },
+          {
+            "type": "string",
+            "const": "zsh"
+          },
+          {
+            "type": "string",
+            "const": "powershell"
+          }
+        ]
+      },
+      "uniqueItems": true
+    },
+    "git": {
+      "type": "object",
+      "required": [
+        "available"
+      ],
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "gh": {
+      "type": "object",
+      "required": [
+        "available"
+      ],
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "features": {
+      "type": "object",
+      "required": [
+        "tools",
+        "git",
+        "probing",
+        "mcp",
+        "library",
+        "checkpoints"
+      ],
+      "properties": {
+        "tools": {
+          "type": "boolean"
+        },
+        "git": {
+          "type": "boolean"
+        },
+        "probing": {
+          "type": "boolean"
+        },
+        "mcp": {
+          "type": "boolean"
+        },
+        "library": {
+          "type": "boolean"
+        },
+        "checkpoints": {
+          "type": "boolean"
+        },
+        "fsRead": {
+          "type": "boolean"
+        },
+        "fsWrite": {
+          "type": "boolean"
+        },
+        "shell": {
+          "type": "boolean"
+        },
+        "update": {
+          "type": "boolean"
+        },
+        "externalAgents": {
+          "type": "boolean"
+        },
+        "toolchain": {
+          "type": "boolean"
+        }
+      }
+    },
+    "externalAgents": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string",
+            "const": "codex"
+          },
+          {
+            "type": "string",
+            "const": "cursor"
+          },
+          {
+            "type": "string",
+            "const": "claude"
+          }
+        ]
+      },
+      "maxItems": 3,
+      "uniqueItems": true
+    },
+    "identityIsolation": {
+      "type": "object",
+      "required": [
+        "method",
+        "credentialHomeFingerprint"
+      ],
+      "properties": {
+        "method": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "single-user-host"
+            },
+            {
+              "type": "string",
+              "const": "os-account"
+            },
+            {
+              "type": "string",
+              "const": "container"
+            }
+          ]
+        },
+        "credentialHomeFingerprint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "terminal": {
+      "type": "boolean"
+    },
+    "enforcesPathPolicy": {
+      "type": "boolean"
+    },
+    "publishesWindowsSlot": {
+      "type": "boolean"
+    },
+    "directoryHashDomain": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 255
+    },
+    "profile": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "full"
+        },
+        {
+          "type": "string",
+          "const": "readonly"
+        },
+        {
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "type": "string",
+          "const": "custom"
+        }
+      ]
+    },
+    "allow": {
+      "type": "object",
+      "required": [
+        "fsRead",
+        "fsWrite",
+        "shell",
+        "git",
+        "probing",
+        "mcp",
+        "library",
+        "checkpoints",
+        "update"
+      ],
+      "properties": {
+        "fsRead": {
+          "type": "boolean"
+        },
+        "fsWrite": {
+          "type": "boolean"
+        },
+        "shell": {
+          "type": "boolean"
+        },
+        "git": {
+          "type": "boolean"
+        },
+        "probing": {
+          "type": "boolean"
+        },
+        "mcp": {
+          "type": "boolean"
+        },
+        "library": {
+          "type": "boolean"
+        },
+        "checkpoints": {
+          "type": "boolean"
+        },
+        "update": {
+          "type": "boolean"
+        },
+        "externalAgents": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

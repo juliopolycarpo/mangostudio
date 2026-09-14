@@ -1,0 +1,129 @@
+import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  ARTIFACT_DIR,
+  CATALOG_SCHEMA_URL,
+  CONTRACT_ARTIFACTS,
+  type ContractArtifact,
+  renderArtifact,
+  renderArtifacts,
+} from '../runtime-contract/artifacts';
+import { assertCatalogValid } from '../runtime-contract/validate';
+
+const ROOT_DIR = join(import.meta.dir, '..', '..');
+
+interface CatalogMethod {
+  readonly name: string;
+  readonly params: Record<string, unknown>;
+  readonly result: Record<string, unknown>;
+  readonly capabilities?: readonly string[];
+}
+
+interface CatalogDocument {
+  readonly name: string;
+  readonly version: string;
+  readonly methods: readonly CatalogMethod[];
+  readonly events?: ReadonlyArray<{ readonly topic: string }>;
+  readonly capabilities?: Record<string, unknown>;
+}
+
+function renderedCatalog(): CatalogDocument {
+  const text = renderArtifacts().get(`${ARTIFACT_DIR}/catalog.json`);
+  if (text === undefined) throw new Error('renderArtifacts() produced no catalog.json.');
+  return JSON.parse(text) as CatalogDocument;
+}
+
+function artifactByName(name: string): ContractArtifact {
+  const artifact = CONTRACT_ARTIFACTS.find((entry) => entry.name === name);
+  if (!artifact) throw new Error(`No artifact named ${name}.`);
+  return artifact;
+}
+
+describe('runtime contract artifacts', () => {
+  test('every artifact renders byte-identically twice', () => {
+    for (const artifact of CONTRACT_ARTIFACTS) {
+      expect(renderArtifact(artifact)).toBe(renderArtifact(artifact));
+    }
+  });
+
+  test('every artifact matches the file committed beside the contract', () => {
+    for (const [path, expected] of renderArtifacts()) {
+      expect(readFileSync(join(ROOT_DIR, path), 'utf8')).toBe(expected);
+    }
+  });
+
+  test('the catalog validates against the published protocol schema', async () => {
+    await expect(assertCatalogValid(renderArtifacts())).resolves.toBeUndefined();
+  });
+
+  test('the catalog names itself and points at the schema it satisfies', () => {
+    const catalog = renderedCatalog();
+    expect(catalog.name).toBe('mangostudio.runtime');
+    expect(JSON.parse(renderArtifact(artifactByName('catalog.json'))).$schema).toBe(
+      CATALOG_SCHEMA_URL
+    );
+  });
+
+  /**
+   * The point of the whole exercise. A catalog whose methods carry
+   * `{ "type": "object" }` is byte-stable, validates, and tells a peer in
+   * another language nothing at all — so "the file exists" is not the
+   * assertion worth making about it.
+   */
+  test('no method describes its payloads as a bare object', () => {
+    const bare = renderedCatalog()
+      .methods.flatMap((method) => [
+        { name: `${method.name} params`, schema: method.params },
+        { name: `${method.name} result`, schema: method.result },
+      ])
+      .filter(({ schema }) => Object.keys(schema).length === 1 && schema.type === 'object')
+      .map(({ name }) => name);
+
+    expect(bare).toEqual([]);
+  });
+
+  /**
+   * `runtime.health` is the deliberate exception: it answers what a machine is
+   * allowed to do, so gating it on a capability would make the answer
+   * unreachable for exactly the machine whose answer matters.
+   */
+  test('every method declares a capability list, and only health is empty', () => {
+    const withoutList = renderedCatalog()
+      .methods.filter((method) => method.capabilities === undefined)
+      .map((method) => method.name);
+    expect(withoutList).toEqual([]);
+
+    const ungated = renderedCatalog()
+      .methods.filter((method) => (method.capabilities ?? []).length === 0)
+      .map((method) => method.name);
+    expect(ungated).toEqual(['runtime.health']);
+  });
+
+  test('the catalog carries the events and the manifest a peer negotiates with', () => {
+    const catalog = renderedCatalog();
+    expect(
+      catalog.events
+        ?.map((event) => event.topic)
+        .slice()
+        .sort()
+    ).toEqual([
+      'external-agent.event',
+      'install.output',
+      'mcp.elicitation',
+      'mcp.session',
+      'runtime.heartbeat',
+      'terminal.output',
+    ]);
+    expect(catalog.capabilities?.type).toBe('object');
+  });
+
+  test('the string contracts a peer cannot derive are emitted verbatim', () => {
+    const strings = JSON.parse(renderArtifact(artifactByName('strings.json')));
+    expect(strings.setupPendingSignature).toBe('runtime setup is pending on this machine');
+    expect(strings.updateExitCode).toBe(75);
+    expect(strings.pairingTokenPrefix).toBe('mrt_');
+    expect(strings.runtimeHome.slots).toEqual(['host', 'wsl', 'remote']);
+    expect(strings.errors.serviceErrorKinds).toContain('consent_denied');
+  });
+});

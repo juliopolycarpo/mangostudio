@@ -1,0 +1,68 @@
+{
+  "$comment": "Generated from apps/shared/src/runtime-contract. Regenerate with \"bun run contracts:emit\".",
+  "contract": {
+    "name": "mangostudio.runtime",
+    "version": "1.0.0"
+  },
+  "topics": [
+    "external-agent.event",
+    "install.output",
+    "mcp.elicitation",
+    "mcp.session",
+    "runtime.heartbeat",
+    "terminal.output"
+  ],
+  "errors": {
+    "consentDeniedKind": "consent_denied",
+    "updateRefusedCode": "RUNTIME_UPDATE_REFUSED",
+    "serviceErrorKinds": [
+      "consent_denied",
+      "path_access",
+      "tool_argument",
+      "grep_pattern",
+      "file_not_read",
+      "partial_read",
+      "stale_file",
+      "stale_line_numbers",
+      "unobserved_line_numbers",
+      "shell_execution",
+      "terminal_not_found",
+      "terminal_exited",
+      "git_execution",
+      "gh_execution",
+      "workspace_browser",
+      "workspace_containment",
+      "workdir_validation",
+      "snapshot_conflict",
+      "snapshot_too_large",
+      "runtime_update_refused",
+      "runtime_service_unsupported",
+      "runtime_service_no_session_bus",
+      "runtime_service_setup_pending",
+      "runtime_service_unconfigured",
+      "runtime_service_binary_missing",
+      "library_backup_missing",
+      "mcp_connection",
+      "mcp_call",
+      "mcp_session_missing"
+    ]
+  },
+  "setupPendingSignature": "runtime setup is pending on this machine",
+  "updateExitCode": 75,
+  "pairingTokenPrefix": "mrt_",
+  "runtimeHome": {
+    "slots": [
+      "host",
+      "wsl",
+      "remote"
+    ],
+    "homeDirName": ".mango",
+    "runtimeDirName": "runtime",
+    "currentLinkName": "current",
+    "configFileName": "runtime.json",
+    "configLockFileName": "runtime.lock",
+    "credentialsFileName": "credentials.json",
+    "auditLogFileName": "audit.log",
+    "binaryBasename": "mangostudio-runtime"
+  }
+}

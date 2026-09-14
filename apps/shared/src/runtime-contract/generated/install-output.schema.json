@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mangostudio.dev/runtime/schema/1/install-output.json",
+  "title": "MangoStudio runtime install output frame",
+  "description": "One frame on the install.output topic, keyed by run id. The frame carrying end closes the stream and its line is empty.",
+  "type": "object",
+  "required": [
+    "stream",
+    "line"
+  ],
+  "properties": {
+    "stream": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "stdout"
+        },
+        {
+          "type": "string",
+          "const": "stderr"
+        },
+        {
+          "type": "string",
+          "const": "system"
+        }
+      ]
+    },
+    "line": {
+      "type": "string"
+    },
+    "end": {
+      "type": "boolean",
+      "const": true
+    }
+  }
+}
