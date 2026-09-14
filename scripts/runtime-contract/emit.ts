@@ -23,7 +23,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { parseArgs } from '../lib/args';
+import { assertNoUnexpectedArguments, parseArgs } from '../lib/args';
 import { error, info, success } from '../lib/log';
 import { ARTIFACT_DIR, renderArtifacts } from './artifacts';
 import { assertCatalogValid } from './validate';
@@ -41,12 +41,20 @@ Writes the cross-language contract artifacts under ${ARTIFACT_DIR}.
   process.exit(0);
 }
 
-/** Committed text of one artifact, or null when the file is not there yet. */
+/**
+ * Committed text of one artifact, or null when the file is not there yet.
+ *
+ * Only a missing file reads as null. Anything else — a directory in its place,
+ * a mode this user cannot read — is reported as itself, because "run
+ * contracts:emit and commit the result" is the wrong instruction for a
+ * permission problem and following it would overwrite nothing.
+ */
 async function readCommitted(path: string): Promise<string | null> {
   try {
     return await readFile(join(ROOT_DIR, path), 'utf8');
-  } catch {
-    return null;
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw cause;
   }
 }
 
@@ -77,8 +85,12 @@ async function writeArtifacts(artifacts: ReadonlyMap<string, string>): Promise<v
   success(`Wrote ${artifacts.size} contract artifacts.`);
 }
 
-const { flags } = parseArgs({ booleanFlags: ['--check'] });
+const { flags, positional } = parseArgs({ booleanFlags: ['--check'] });
 if (flags['--help']) printHelp();
+// A mistyped `--check` is otherwise indistinguishable from omitting it, and the
+// two modes are not symmetric: the gate would silently become a regeneration
+// that overwrites the very files it was asked to diff.
+assertNoUnexpectedArguments(positional);
 
 const artifacts = renderArtifacts();
 await assertCatalogValid(artifacts);
