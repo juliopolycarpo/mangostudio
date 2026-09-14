@@ -111,6 +111,30 @@ supplied can hold the event loop and no signal can interrupt one.
 The contract grows without moving the wire under it — `RUNTIME_CONTRACT_VERSION` is
 independent of the protocol version, and neither has to move for an additive method:
 
+- **The catalog file is the contract; a method change is a schema change first.**
+  `apps/shared/src/runtime-contract/generated/catalog.json` is generated from
+  `RUNTIME_CONTRACT` and committed, and it is what a runtime written in another language is
+  built against. So a method is changed by changing its TypeBox schema in
+  `runtime-contract/methods/` and regenerating (`bun run contracts:emit`) — never by editing
+  the generated file, and never by changing a handler and leaving the schema behind.
+  `bun run check` fails on a stale or hand-edited artifact, and validates the catalog against
+  [`catalog.json`](https://mangostudio.dev/protocol/schema/1/catalog.json) on the way past.
+  The five files beside it describe everything else two processes share: the slot's files,
+  the manifest, the health report, the install stream, and the strings nothing derives.
+- **Schemas are open; no bound goes in that is not already enforced.** A shape written for a
+  contract method does not set `additionalProperties: false`, because a newer hub sending a
+  member an older runtime has never heard of must be ignored rather than refused — the same
+  tolerance the manifest has, for the same reason. (`ToolchainSelection` is the one closed
+  shape the contract reuses; it is also an HTTP response schema, and `features.toolchain`
+  gates whether a hub sends the field to a given peer at all.) Nor does a schema carry a
+  numeric range or a string length that the handler was not already asserting: a bound added
+  at the boundary is a new rejection, and a peer generated from the catalog inherits it
+  everywhere. `terminal.open`'s `cols`/`rows` are the exception that shows the rule, mirroring
+  `assertTerminalSize` rather than inventing a limit.
+- **Results are validated outside production.** `serve` checks every handler's return value
+  against its result schema when `validateHandlerResults` is on (everywhere but production).
+  Parameters are what a peer owes this one; results are what this build owes a peer that was
+  generated from the same catalog and has only the schema to go on.
 - **Tolerant manifest.** Feature keys beyond the original six are optional. An absent value
   means the peer predates the key and should be treated as granted (`true`) so an older
   runtime is not silently stripped of tools the hub already trusted. Top-level keys that
@@ -1096,19 +1120,20 @@ the declaration is what keeps the gap legible rather than silent.
 
 Add a runtime operation as one coherent change:
 
-1. Define its serializable parameters and result in
-   `apps/shared/src/runtime-contract/methods.ts` (`apps/runtime/src/methods.ts` is a
-   re-export, so the runtime's own services keep their import path), then add the row to the
-   method table in `apps/shared/src/runtime-contract/contract.ts` with the capabilities it
-   needs. A row without a capability list is a compile error, and so is a capability the
-   consent file cannot grant. The answer is a *set*: a method that both reads a domain and
-   causes effects names both capabilities, or the profile that refuses the second still runs
-   it. The gate decides on the method's list and never on its params, so a read/write split
-   has to be two methods.
-2. Give the row real TypeBox schemas if the shapes have them. Most rows carry
-   `UnsafeObjectSchema`: the type is exact and the validation `serve` runs before a handler
-   sees the payload is "is a JSON object". Replacing one with a real schema is a local change
-   and nothing else moves.
+1. Write its parameter and result **schemas** in the matching family module under
+   `apps/shared/src/runtime-contract/methods/` — `fs.ts`, `mcp.ts`, `library.ts` and so on —
+   and derive the public types with `Static<>`. The schema is the declaration; a hand-written
+   interface beside one is a second source of truth that only the TypeScript end can see.
+   (`apps/runtime/src/methods.ts` is a re-export, so the runtime's own services keep their
+   import path.) Reuse the schema a shape already has in its owning module rather than
+   restating it, leave the object open — never `additionalProperties: false` — and add no
+   numeric range or string length the handler was not already asserting.
+2. Add the row to the method table in `apps/shared/src/runtime-contract/contract.ts` with the
+   capabilities it needs. A row without a capability list is a compile error, and so is a
+   capability the consent file cannot grant. The answer is a *set*: a method that both reads
+   a domain and causes effects names both capabilities, or the profile that refuses the
+   second still runs it. The gate decides on the method's list and never on its params, so a
+   read/write split has to be two methods.
 3. Register the handler in `apps/runtime/src/registry.ts` — the map is typed by the contract,
    so a missing one is a compile error there rather than a method that answers
    `METHOD_UNSUPPORTED` at runtime — and keep host effects inside `apps/runtime/src/services/`.
@@ -1117,17 +1142,20 @@ Add a runtime operation as one coherent change:
 5. Keep authorization, product policy, and durable persistence in the API.
 6. Test the handler directly and test any cancellation or error translation at the API
    boundary.
+7. Run `bun run contracts:emit` and commit the regenerated artifacts. `bun run check` fails
+   without this, because a method that exists only in TypeScript is a method a runtime in
+   another language cannot be built against.
 
 A method that also announces a **capability** — a binary it needs, a feature it can only
 offer on some machines — has two more legs, and forgetting either ships green:
 
-7. Add the field to `RuntimeCapabilityManifestSchema`
+8. Add the field to `RuntimeCapabilityManifestSchema`
    (`apps/shared/src/runtime-contract/manifest.ts`) as `Type.Optional`, and populate it from
    `createLocalRuntimeManifest` (`apps/runtime/src/manifest.ts`). Required would fail decode
    for every older peer; document whether absent means granted or unavailable, because the
    two readings already coexist in that schema — the original `features` keys mean granted,
    `externalAgents` and `gh` mean unavailable.
-8. Add the same field to `RuntimeHealthReportSchema` (`apps/shared/src/runtime-home/`), emit it
+9. Add the same field to `RuntimeHealthReportSchema` (`apps/shared/src/runtime-home/`), emit it
    from `apps/runtime/src/health.ts`, and carry it in `capabilityManifestFromHealth`
    (`apps/api/src/services/runtime-client/manifest-from-health.ts`). **This is the leg that
    fails silently.** The hub rebuilds a remote peer's manifest from `runtime.health` after any

@@ -26,6 +26,7 @@ scripts/
 ├── install/          Canonical installers (install.sh, install.ps1): shipped as release assets on both channels and embedded in the hub binary
 ├── qa-gate/          PR metrics collector, comment renderers + comment publisher
 ├── release/          Release-time packaging + publication (see below)
+├── runtime-contract/ Emit + drift-check the cross-language hub/runtime artifacts (bun run contracts:emit)
 ├── vendor/           Regenerate + drift-check committed vendor contracts (bun run vendor-contracts:regen)
 └── tests/            Cross-cutting unit tests (co-located tests live beside sources)
 ```
@@ -177,6 +178,37 @@ module-load time are visible rather than buried under migration work.
 
 Compare two binaries by building both and running the same command against
 each; a startup claim is only worth as much as its median and spread.
+
+## runtime-contract/ — the boundary as files
+
+A runtime that is not a TypeScript module still has to be fully described by files the hub owns.
+Six of them are generated from `RUNTIME_CONTRACT` and committed under
+`apps/shared/src/runtime-contract/generated/`.
+
+```bash
+bun run contracts:emit    # regenerate
+bun run contracts:check   # diff instead of writing (what `bun run check` runs)
+```
+
+| Artifact                     | What it describes                                                            |
+| ---------------------------- | ---------------------------------------------------------------------------- |
+| `catalog.json`               | Every method, its params/result schemas, capabilities, events and manifest   |
+| `runtime-home.schema.json`   | `runtime.json`, `credentials.json`, one line of `audit.log`                  |
+| `manifest.schema.json`       | `hello.capabilities`, plus the hub identity announced back                   |
+| `health.schema.json`         | `health --json` and the `runtime.health` result                              |
+| `install-output.schema.json` | One frame of an install run's output stream                                  |
+| `strings.json`               | What nothing derives: stderr signature, exit code, token prefix, slot layout |
+
+Unlike the vendor captures below, this needs no third-party binary and no network, so it runs
+inside `bun run check` rather than in a workflow of its own — including on a scoped `--staged` run,
+because a method's schemas reach most of `apps/shared/src` and an edit two modules away can leave
+the catalog stale.
+
+`catalog.json` is validated against the protocol's published
+[`catalog.json`](https://mangostudio.dev/protocol/schema/1/catalog.json) on every run of either
+mode, with ajv: a wrong catalog is byte-stable too, so a diff check alone would never see it.
+Nothing under `generated/` is formatted by Biome, for the same reason nothing under the vendor
+captures is.
 
 ## vendor/ — committed vendor contracts
 
