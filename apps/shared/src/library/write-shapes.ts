@@ -24,6 +24,7 @@ import {
   AdaptNoteSchema,
   AdaptProvenanceSchema,
   LibraryLocationIdSchema,
+  PropagationOperationSchema,
 } from './schemas';
 
 export const PreparedPropagationAdaptationSchema = Type.Object({
@@ -35,13 +36,19 @@ export const PreparedPropagationAdaptationSchema = Type.Object({
 });
 export type PreparedPropagationAdaptation = Static<typeof PreparedPropagationAdaptationSchema>;
 
-/** The write a propagation can prepare; `noop` is decided before preparation. */
-export const PreparedPropagationOperationKindSchema = Type.Union([
-  Type.Literal('create'),
-  Type.Literal('overwrite'),
-  Type.Literal('adapt-create'),
-  Type.Literal('adapt-overwrite'),
-]);
+/**
+ * The write a propagation can prepare: every `PropagationOperation` except the
+ * two that are decided before preparation — `noop` (nothing to write) and
+ * `blocked` (the location refused it).
+ *
+ * Subtracted from the full vocabulary rather than restated, so a member renamed
+ * or added in {@link PropagationOperationSchema} reaches the prepared shape
+ * instead of quietly staying behind in a list nobody re-read.
+ */
+export const PreparedPropagationOperationKindSchema = Type.Exclude(
+  PropagationOperationSchema,
+  Type.Union([Type.Literal('noop'), Type.Literal('blocked')])
+);
 
 /**
  * Everything a prepared propagation carries apart from its payload.
