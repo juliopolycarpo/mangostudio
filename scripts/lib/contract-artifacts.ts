@@ -9,9 +9,15 @@
  * environment status are all reachable from a method's params — so narrowing
  * this to `runtime-contract/` would let an edit two modules away go out with a
  * stale catalog and turn the gate red only on somebody else's full run.
+ *
+ * The generated directory is named separately because the artifacts are `.json`
+ * and the first pattern only covers TypeScript: a hand-edited catalog is the
+ * other case the gate exists for, and it has to be caught on the scoped run
+ * that is about to commit it.
  */
 const CONTRACT_SOURCE_PATTERNS = [
   /^apps\/shared\/src\/.*\.ts$/,
+  /^apps\/shared\/src\/runtime-contract\/generated\//,
   /^scripts\/runtime-contract\//,
 ] as const;
 
