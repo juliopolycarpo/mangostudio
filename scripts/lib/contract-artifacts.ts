@@ -14,11 +14,20 @@
  * and the first pattern only covers TypeScript: a hand-edited catalog is the
  * other case the gate exists for, and it has to be caught on the scoped run
  * that is about to commit it.
+ *
+ * Manifests and the lockfile are here because none of the bytes are written by
+ * this repository: `typebox` decides how a schema serializes and
+ * `@mangostudio/protocol` decides how `buildCatalog` lays the document out, so
+ * bumping either moves `catalog.json` without touching a single `.ts` file.
+ * That is the same edit the `@mangostudio/protocol` entry in
+ * `COHORT_DEPENDENCIES` exists to keep on one version.
  */
 const CONTRACT_SOURCE_PATTERNS = [
   /^apps\/shared\/src\/.*\.ts$/,
   /^apps\/shared\/src\/runtime-contract\/generated\//,
   /^scripts\/runtime-contract\//,
+  /^(?:.*\/)?package\.json$/,
+  /^bun\.lock$/,
 ] as const;
 
 /** True when scoped changes can move what the emitted contract artifacts contain. */

@@ -16,6 +16,11 @@ describe('contract artifact check scoping', () => {
       'apps/shared/src/runtime-contract/generated/strings.json',
       'scripts/runtime-contract/artifacts.ts',
       'scripts/runtime-contract/emit.ts',
+      // Neither `typebox` nor `@mangostudio/protocol` writes its bytes here, so
+      // bumping one moves the catalog without touching a `.ts` file at all.
+      'package.json',
+      'apps/shared/package.json',
+      'bun.lock',
     ]) {
       expect(touchesContractArtifactSurface([file]), file).toBe(true);
     }
