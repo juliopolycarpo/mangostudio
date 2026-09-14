@@ -23,6 +23,24 @@ export function ReadonlyArraySchema<T extends TSchema>(
 }
 
 /**
+ * Record schema whose inferred type is `Readonly<Record<string, T>>` while
+ * validating like a normal record at runtime.
+ *
+ * The sibling of {@link ReadonlyArraySchema}, and needed for the same reason:
+ * `Type.Record` infers a mutable `Record<string, T>`, so a contract that
+ * declares an immutable bag of environment variables or base64 payloads would
+ * widen on the way through a schema and break every caller that passes a
+ * `Readonly` value in.
+ *
+ * Usage:
+ *   const EnvSchema = ReadonlyRecordSchema(Type.String());
+ *   type Env = Static<typeof EnvSchema>; // Readonly<Record<string, string>>
+ */
+export function ReadonlyRecordSchema<T extends TSchema>(value: T) {
+  return Type.Unsafe<Readonly<Record<string, Static<T>>>>(Type.Record(Type.String(), value));
+}
+
+/**
  * Object schema that validates "is a JSON object" while inferring `T`.
  *
  * A contract method whose parameters have no TypeBox schema yet still needs a
