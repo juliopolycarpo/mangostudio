@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mangostudio.dev/runtime/schema/1/runtime-home.json",
+  "title": "MangoStudio runtime home",
+  "description": "What a runtime keeps under its slot directory: runtime.json, credentials.json, and one line of audit.log. The file and directory names these shapes are stored under are in strings.json.",
+  "$defs": {
+    "slotConfig": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "slot"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "slot": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "host"
+            },
+            {
+              "type": "string",
+              "const": "wsl"
+            },
+            {
+              "type": "string",
+              "const": "remote"
+            }
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "bundled"
+            },
+            {
+              "type": "string",
+              "const": "source-checkout"
+            },
+            {
+              "type": "string",
+              "const": "provisioned"
+            }
+          ]
+        },
+        "version": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "binaryPath": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "maxLength": 71
+        },
+        "sourceSha": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "full"
+            },
+            {
+              "type": "string",
+              "const": "readonly"
+            },
+            {
+              "type": "string",
+              "const": "none"
+            },
+            {
+              "type": "string",
+              "const": "custom"
+            }
+          ]
+        },
+        "allow": {
+          "type": "object",
+          "properties": {
+            "fsRead": {
+              "type": "boolean"
+            },
+            "fsWrite": {
+              "type": "boolean"
+            },
+            "shell": {
+              "type": "boolean"
+            },
+            "git": {
+              "type": "boolean"
+            },
+            "probing": {
+              "type": "boolean"
+            },
+            "mcp": {
+              "type": "boolean"
+            },
+            "library": {
+              "type": "boolean"
+            },
+            "checkpoints": {
+              "type": "boolean"
+            },
+            "update": {
+              "type": "boolean"
+            },
+            "externalAgents": {
+              "type": "boolean"
+            }
+          }
+        },
+        "setup": {
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "pending"
+                },
+                {
+                  "type": "string",
+                  "const": "configured"
+                }
+              ]
+            },
+            "at": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "by": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "cli"
+                },
+                {
+                  "type": "string",
+                  "const": "env"
+                },
+                {
+                  "type": "string",
+                  "const": "launch"
+                },
+                {
+                  "type": "string",
+                  "const": "install"
+                }
+              ]
+            }
+          }
+        },
+        "installedBy": {
+          "type": "object",
+          "properties": {
+            "hubVersion": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "host": {
+              "type": "string",
+              "maxLength": 255
+            },
+            "user": {
+              "type": "string",
+              "maxLength": 255
+            },
+            "transport": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "at": {
+              "type": "string",
+              "maxLength": 64
+            }
+          }
+        },
+        "hubUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "serveListen": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "audit": {
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "credentials": {
+      "type": "object",
+      "required": [
+        "schemaVersion"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "pairingToken": {
+          "type": "string"
+        },
+        "serveToken": {
+          "type": "string"
+        }
+      }
+    },
+    "auditRecord": {
+      "type": "object",
+      "required": [
+        "ts",
+        "method",
+        "hub",
+        "outcome",
+        "durationMs"
+      ],
+      "properties": {
+        "ts": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "hub": {
+          "type": "string"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "ok"
+            },
+            {
+              "type": "string",
+              "const": "denied"
+            },
+            {
+              "type": "string",
+              "const": "error"
+            }
+          ]
+        },
+        "durationMs": {
+          "type": "number"
+        },
+        "args": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {}
+          }
+        },
+        "capability": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

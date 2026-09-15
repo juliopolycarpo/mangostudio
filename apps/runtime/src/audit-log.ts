@@ -10,25 +10,20 @@
 import { appendFile, mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { HubIdentity } from '@mangostudio/shared/runtime-contract';
-import { type RuntimeSlot, runtimeSlotAuditLogPath } from '@mangostudio/shared/runtime-home';
+import {
+  type RuntimeAuditOutcome,
+  type RuntimeAuditRecord,
+  type RuntimeSlot,
+  runtimeSlotAuditLogPath,
+} from '@mangostudio/shared/runtime-home';
 import { loadRuntimeConfig } from './config';
 import { summarizeGhSubcommand } from './services/gh';
 
-export type RuntimeAuditOutcome = 'ok' | 'denied' | 'error';
-
-/** One line on disk. Safe to paste into an issue — no payload bytes, no secrets. */
-export interface RuntimeAuditRecord {
-  readonly ts: string;
-  readonly method: string;
-  readonly hub: string;
-  readonly outcome: RuntimeAuditOutcome;
-  readonly durationMs: number;
-  /** Identifying arguments only — paths, argv summaries, byte counts. */
-  readonly args?: Readonly<Record<string, unknown>>;
-  /** Capability named by a `DENIED` refusal. */
-  readonly capability?: string;
-  readonly code?: string;
-}
+/**
+ * The line's shape is shared: whoever reads `audit.log` is not the process that
+ * wrote it. See `apps/shared/src/runtime-home/schemas.ts`.
+ */
+export type { RuntimeAuditOutcome, RuntimeAuditRecord };
 
 export interface RuntimeAuditSinkOptions {
   readonly slot: RuntimeSlot;

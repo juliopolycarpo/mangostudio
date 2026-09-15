@@ -595,6 +595,35 @@ export const RuntimeIdSchema = Type.Union([
   Type.Literal('cursor'),
 ]);
 
+/**
+ * A version floor a runtime has to clear.
+ *
+ * Here rather than beside the analysis that applies it because the floors
+ * travel: the hub decides them and a `probing.runtimes` call carries them to
+ * whichever machine is being probed. `environments/detection` reaches for
+ * `node:path` and cannot be imported by a wire contract, so the shape the wire
+ * moves lives in this browser-safe module and the analysis derives its type
+ * from here.
+ */
+export const MinimumRuntimeVersionSchema = Type.Object({
+  major: Type.Number(),
+  minor: Type.Number(),
+  patch: Type.Optional(Type.Number()),
+});
+export type MinimumRuntimeVersion = Static<typeof MinimumRuntimeVersionSchema>;
+
+/**
+ * A version floor that belongs to one consumer of this runtime, not the
+ * runtime itself — e.g. an agent CLI that needs a newer Node than MangoStudio
+ * requires generically. `enabled` decides whether falling short of it is the
+ * user's problem right now: a consumer that is off cannot fail on it yet.
+ */
+export const ConsumerVersionRequirementSchema = Type.Interface([MinimumRuntimeVersionSchema], {
+  consumer: Type.String(),
+  enabled: Type.Boolean(),
+});
+export type ConsumerVersionRequirement = Static<typeof ConsumerVersionRequirementSchema>;
+
 export const RuntimeOriginSchema = Type.Union([
   Type.Literal('path'),
   Type.Literal('well-known'),

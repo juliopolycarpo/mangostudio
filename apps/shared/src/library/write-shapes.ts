@@ -7,47 +7,68 @@
  * types as these plus an encoding. Declared once, so a field added here cannot
  * compile on one side and be dropped on the other.
  *
- * Types only — nothing here imports a filesystem.
+ * Schema-first, with one seam. A propagation operation carries bytes, and bytes
+ * are a `Uint8Array` in the engine and base64 in a frame — so the schema here
+ * describes everything *except* the payload members, and each side adds its own:
+ * the engine in the type alias below, the wire in
+ * `runtime-contract/methods/library.ts`. That keeps one declaration of the
+ * thirteen members both sides share, which is the part a field gets added to.
+ *
+ * Nothing here imports a filesystem.
  */
 
-import type {
-  AdapterStrategy,
-  AdaptNote,
-  AdaptProvenance,
-  LibraryLocationId,
-  PropagationApplied,
+import Type, { type Static } from 'typebox';
+import { ReadonlyArraySchema } from '../schema-helpers';
+import {
+  AdapterStrategySchema,
+  AdaptNoteSchema,
+  AdaptProvenanceSchema,
+  LibraryLocationIdSchema,
+  PropagationOperationSchema,
 } from './schemas';
 
-export interface PreparedPropagationAdaptation {
-  readonly strategy: AdapterStrategy;
-  readonly lossy: boolean;
-  readonly requiresReview: boolean;
-  readonly notes: readonly AdaptNote[];
-  readonly provenance?: AdaptProvenance;
-}
+export const PreparedPropagationAdaptationSchema = Type.Object({
+  strategy: AdapterStrategySchema,
+  lossy: Type.Boolean(),
+  requiresReview: Type.Boolean(),
+  notes: ReadonlyArraySchema(AdaptNoteSchema),
+  provenance: Type.Optional(AdaptProvenanceSchema),
+});
+export type PreparedPropagationAdaptation = Static<typeof PreparedPropagationAdaptationSchema>;
 
-export interface PreparedPropagationOperation {
-  readonly resourceKey: string;
-  readonly locationId: LibraryLocationId;
-  readonly slug: string;
-  readonly operation: Extract<
-    PropagationApplied['operation'],
-    'create' | 'overwrite' | 'adapt-create' | 'adapt-overwrite'
-  >;
-  readonly kind: 'file' | 'directory';
-  readonly expectedContentHash: string;
+/**
+ * The write a propagation can prepare: every `PropagationOperation` except the
+ * two that are decided before preparation — `noop` (nothing to write) and
+ * `blocked` (the location refused it).
+ *
+ * Subtracted from the full vocabulary rather than restated, so a member renamed
+ * or added in {@link PropagationOperationSchema} reaches the prepared shape
+ * instead of quietly staying behind in a list nobody re-read.
+ */
+export const PreparedPropagationOperationKindSchema = Type.Exclude(
+  PropagationOperationSchema,
+  Type.Union([Type.Literal('noop'), Type.Literal('blocked')])
+);
+
+/**
+ * Everything a prepared propagation carries apart from its payload.
+ *
+ * Consumed by the engine type below and by the wire schema in the runtime
+ * contract; neither declares these members for itself.
+ */
+export const PreparedPropagationOperationBaseSchema = Type.Object({
+  resourceKey: Type.String(),
+  locationId: LibraryLocationIdSchema,
+  slug: Type.String(),
+  operation: PreparedPropagationOperationKindSchema,
+  kind: Type.Union([Type.Literal('file'), Type.Literal('directory')]),
+  expectedContentHash: Type.String(),
   /** Location root the preview showed, as resolved on the hub. */
-  readonly destinationRoot: string;
+  destinationRoot: Type.String(),
   /** Directory writes on the machine that holds the source. */
-  readonly sourceDir?: string;
-  /**
-   * Directory writes whose source is on another machine: the tree travelled in
-   * the frame. Exactly one of this and `sourceDir` is ever set.
-   */
-  readonly files?: readonly PreparedPropagationFile[];
-  readonly contents?: string | Uint8Array;
-  readonly adaptation?: PreparedPropagationAdaptation;
-}
+  sourceDir: Type.Optional(Type.String()),
+  adaptation: Type.Optional(PreparedPropagationAdaptationSchema),
+});
 
 /** One file of a transferred directory resource. */
 export interface PreparedPropagationFile {
@@ -56,12 +77,30 @@ export interface PreparedPropagationFile {
   readonly contents: Uint8Array;
 }
 
-export interface PreparedRemovalOperation {
-  readonly resourceKey: string;
-  readonly locationId: LibraryLocationId;
-  readonly slug: string;
-  readonly kind: 'file' | 'directory';
-  readonly expectedPath: string;
-  readonly expectedContentHash: string;
-  readonly lastCopy: boolean;
-}
+/**
+ * A prepared propagation as the engine acts on it: the shared members plus the
+ * payload as bytes.
+ *
+ * `contents` and `files` are the two members that cannot be schema-derived —
+ * a `Uint8Array` is not a JSON value — so they are declared here and the wire
+ * declares its base64 counterparts.
+ */
+export type PreparedPropagationOperation = Static<typeof PreparedPropagationOperationBaseSchema> & {
+  /**
+   * Directory writes whose source is on another machine: the tree travelled in
+   * the frame. Exactly one of this and `sourceDir` is ever set.
+   */
+  readonly files?: readonly PreparedPropagationFile[];
+  readonly contents?: string | Uint8Array;
+};
+
+export const PreparedRemovalOperationSchema = Type.Object({
+  resourceKey: Type.String(),
+  locationId: LibraryLocationIdSchema,
+  slug: Type.String(),
+  kind: Type.Union([Type.Literal('file'), Type.Literal('directory')]),
+  expectedPath: Type.String(),
+  expectedContentHash: Type.String(),
+  lastCopy: Type.Boolean(),
+});
+export type PreparedRemovalOperation = Static<typeof PreparedRemovalOperationSchema>;

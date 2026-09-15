@@ -5,6 +5,18 @@ export interface RuntimeConfig {
   /** Exercise the byte codec in-process so development catches wire drift. */
   readonly validateInProcessFrames: boolean;
   /**
+   * Check every handler's return value against the contract's result schema
+   * before it is sent.
+   *
+   * Off in production, where a shape the schema refuses is still better
+   * delivered than turned into a 500 for a user who did nothing wrong. On
+   * everywhere else, because this is the one check that catches a handler
+   * drifting from the contract *before* a peer built from the same catalog in
+   * another language copies the mistake — that peer has only the schema, so a
+   * result nobody validated is a bug it inherits rather than one it reports.
+   */
+  readonly validateHandlerResults: boolean;
+  /**
    * Pairing token for `connect`, for setups that cannot pipe one in. Never a
    * command-line argument: argv is readable by every process on the machine.
    */
@@ -35,10 +47,12 @@ export function loadRuntimeConfig(
   const serve = env.MANGOSTUDIO_RUNTIME_SERVE_TOKEN?.trim();
   const home = env.MANGO_HOME?.trim();
   const setupProfile = env.MANGOSTUDIO_RUNTIME_SETUP?.trim();
+  // allow-node-env: one production discriminator, read once and shared by the
+  // two checks that are on outside production; not a test seam.
+  const production = env.NODE_ENV === 'production';
   return {
-    // allow-node-env: enables frame validation outside production; this is a
-    // production discriminator, not a test seam.
-    validateInProcessFrames: env.NODE_ENV !== 'production',
+    validateInProcessFrames: !production,
+    validateHandlerResults: !production,
     pairingToken: pairing && pairing.length > 0 ? pairing : null,
     serveToken: serve && serve.length > 0 ? serve : null,
     mangoHome: home && home.length > 0 ? home : mangoHomeDir(homedir(), process.platform),

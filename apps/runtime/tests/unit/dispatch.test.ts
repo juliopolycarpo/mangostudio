@@ -2,35 +2,11 @@ import { describe, expect, it } from 'bun:test';
 import { RemoteError } from '@mangostudio/protocol';
 import { CONSENT_DENIED_KIND, type RuntimeMethod } from '@mangostudio/shared/runtime-contract';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
-import type { RuntimeAuditSink } from '../../src/audit-log';
 import { gateHandlers, type RuntimeGateDeps } from '../../src/consent-gate';
 import { staticConsentSource } from '../../src/consent-source';
 import { PathAccessError } from '../../src/errors';
+import { FakeAuditSink } from '../support/fake-audit-sink';
 import { FakeRuntimeHandlers } from '../support/fake-runtime-handlers';
-
-/** Collects audit lines in memory; the on-disk sink has its own suite. */
-class FakeAuditSink implements RuntimeAuditSink {
-  readonly enabled = true;
-  readonly path = '<memory>';
-  readonly records: Array<Parameters<RuntimeAuditSink['record']>[0]> = [];
-  hub: { readonly host: string; readonly user: string } | null = null;
-
-  lastError(): string | null {
-    return null;
-  }
-  setHub(hub: { readonly host: string; readonly user: string } | null): void {
-    this.hub = hub ?? null;
-  }
-  record(input: Parameters<RuntimeAuditSink['record']>[0]): void {
-    this.records.push(input);
-  }
-  async flush(): Promise<void> {
-    // Nothing is buffered; the records are already in memory.
-  }
-  async close(): Promise<void> {
-    // Nothing to release.
-  }
-}
 
 function call(
   handlers: ReturnType<typeof gateHandlers>,

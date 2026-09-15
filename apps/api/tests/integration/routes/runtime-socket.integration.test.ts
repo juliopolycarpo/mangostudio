@@ -13,6 +13,7 @@ import {
   RUNTIME_HEARTBEAT_TOPIC,
   type RuntimeCapabilityManifest,
   type RuntimeMethod,
+  type RuntimeShellResult,
 } from '@mangostudio/shared/runtime-contract';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { Elysia } from 'elysia';
@@ -258,9 +259,32 @@ function closureOfSocket(socket: WebSocket): Promise<CloseEvent> {
   });
 }
 
+/**
+ * A `shell.run` answer that is a real {@link RuntimeShellResult}, with the
+ * marker in `stdout`.
+ *
+ * It cannot be an arbitrary object any more: the runtime session validates a
+ * handler's result against the contract outside production, so a stub that
+ * only carried a marker would be refused by the peer under test rather than
+ * routed by the hub this test is about.
+ */
+function echoShellResult(marker: string): RuntimeShellResult {
+  return {
+    shell: 'bash',
+    command: SHELL_CALL.command,
+    exitCode: 0,
+    signal: null,
+    stdout: marker,
+    stderr: '',
+    truncated: false,
+    termination: { kind: 'exited' },
+    durationMs: 1,
+  };
+}
+
 function echoHandlers(marker: string): Partial<Record<RuntimeMethod, TestHandler>> {
   return {
-    'shell.run': () => ({ marker }),
+    'shell.run': () => echoShellResult(marker),
     'git.exec': (_params, context) =>
       new Promise((_resolve, reject) => {
         context.signal.addEventListener('abort', () => reject(new Error('aborted')), {
@@ -289,7 +313,7 @@ describe('runtime dial-in socket', () => {
     await hub.whenAdopted(1);
 
     const client = await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
-    expect(await client.shell.run(SHELL_CALL)).toEqual({ marker: 'first' } as never);
+    expect(await client.shell.run(SHELL_CALL)).toEqual(echoShellResult('first'));
     expect(hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID)).toMatchObject({
       state: 'connected',
       manifest: MANIFEST,
@@ -348,7 +372,7 @@ describe('runtime dial-in socket', () => {
     expect(await pending).toMatchObject({ code: RESERVED_ERROR_CODES.UNAVAILABLE });
 
     const survivor = await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
-    expect(await survivor.shell.run(SHELL_CALL)).toEqual({ marker: 'second' } as never);
+    expect(await survivor.shell.run(SHELL_CALL)).toEqual(echoShellResult('second'));
   });
 
   it('never latches a dial-in environment, however many attempts it refused', async () => {
@@ -369,7 +393,7 @@ describe('runtime dial-in socket', () => {
     await hub.whenAdopted(1);
 
     const client = await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
-    expect(await client.shell.run(SHELL_CALL)).toEqual({ marker: 'late' } as never);
+    expect(await client.shell.run(SHELL_CALL)).toEqual(echoShellResult('late'));
   });
 
   it('fails an in-flight call when the runtime disappears, then accepts a redial', async () => {
@@ -387,9 +411,7 @@ describe('runtime dial-in socket', () => {
     await redial.ready;
     await hub.whenAdopted(2);
     const reconnected = await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
-    expect(await reconnected.shell.run(SHELL_CALL)).toEqual({
-      marker: 'second',
-    } as never);
+    expect(await reconnected.shell.run(SHELL_CALL)).toEqual(echoShellResult('second'));
   });
 
   it('keeps an adopted connection when the lastSeenAt write fails', async () => {
@@ -402,7 +424,7 @@ describe('runtime dial-in socket', () => {
     await hub.whenAdopted(1);
 
     const client = await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
-    expect(await client.shell.run(SHELL_CALL)).toEqual({ marker: 'first' } as never);
+    expect(await client.shell.run(SHELL_CALL)).toEqual(echoShellResult('first'));
     expect(hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID).state).toBe('connected');
   });
 
@@ -539,7 +561,7 @@ describe('runtime dial-in socket', () => {
     // The environment came from the verified token, never from the URL — a
     // route that started trusting the query would bind to `someone-else`.
     const client = await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
-    expect(await client.shell.run(SHELL_CALL)).toEqual({ marker: 'queried' } as never);
+    expect(await client.shell.run(SHELL_CALL)).toEqual(echoShellResult('queried'));
   });
 
   it('records a heartbeat without writing the credential to the logs', async () => {

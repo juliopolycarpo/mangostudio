@@ -27,10 +27,12 @@ import {
 } from '@mangostudio/shared/runtime-contract';
 import Value from 'typebox/value';
 import type { RuntimeAuditSink } from './audit-log';
+import { loadRuntimeConfig } from './config';
 import { gateHandlers } from './consent-gate';
 import type { RuntimeConsentSource } from './consent-source';
 import { writeRuntimeDiagnostic } from './diagnostics';
 import type { RuntimeHandlers } from './handlers';
+import { checkResults } from './result-check';
 
 /** Name this peer announces itself under; the hub's audit log records it. */
 const RUNTIME_PEER_NAME = 'mangostudio-runtime';
@@ -111,6 +113,13 @@ interface RuntimeSessionOptions {
    * diagnostics, which is where every transport already collects them.
    */
   readonly log?: (message: string) => void;
+  /**
+   * Whether a handler's return value is checked against the contract's result
+   * schema before it is sent. Defaults to
+   * {@link RuntimeConfig.validateHandlerResults}; a test that wants the check
+   * regardless of how the process was started passes it explicitly.
+   */
+  readonly validateResults?: boolean;
 }
 
 /**
@@ -149,9 +158,13 @@ export function createRuntimeSession(
       : {}),
   });
 
+  // Checked inside the gate rather than through `ServeOptions.validateResults`,
+  // which runs after the gate has already recorded the call as `ok`; see
+  // `result-check.ts`.
+  const validate = options.validateResults ?? loadRuntimeConfig().validateHandlerResults;
   RUNTIME_CONTRACT.serve(
     session,
-    gateHandlers(definition.handlers, {
+    gateHandlers(validate ? checkResults(definition.handlers) : definition.handlers, {
       consent: definition.consent,
       isUpdateActive: definition.isUpdateActive,
       ...(definition.audit ? { audit: definition.audit } : {}),

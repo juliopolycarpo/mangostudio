@@ -257,6 +257,8 @@ shared/src/
   <module>/            → Per-module contracts + TypeBox schemas
   realtime/            → WebSocket invalidation messages, topics, and close codes
   runtime-contract/    → Hub/runtime methods, capabilities, events, manifest, errors
+    methods/           → One schema module per method family (fs, mcp, library, …)
+    generated/         → Emitted catalog + schemas a non-TypeScript runtime is built from
   streaming/           → SSE event types + schemas
   types/               → Domain types (provider, agent-events, gallery)
   i18n/                → Portuguese/English dictionaries + type system

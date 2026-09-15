@@ -13,3 +13,4 @@ export * from './events';
 export * from './manifest';
 export * from './methods';
 export * from './path-policy';
+export * from './strings';

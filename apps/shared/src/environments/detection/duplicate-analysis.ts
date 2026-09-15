@@ -1,22 +1,13 @@
-import type { RuntimeFinding, RuntimeHealth, RuntimeStatus } from '../schemas';
+import type {
+  ConsumerVersionRequirement,
+  MinimumRuntimeVersion,
+  RuntimeFinding,
+  RuntimeHealth,
+  RuntimeStatus,
+} from '../schemas';
 import type { RuntimeDefinition, RuntimeScanResult, SemVer } from './binary-scan';
 
-export interface MinimumRuntimeVersion {
-  readonly major: number;
-  readonly minor: number;
-  readonly patch?: number;
-}
-
-/**
- * A version floor that belongs to one consumer of this runtime, not the
- * runtime itself — e.g. an agent CLI that needs a newer Node than MangoStudio
- * requires generically. `enabled` decides whether falling short of it is the
- * user's problem right now: a consumer that is off cannot fail on it yet.
- */
-export interface ConsumerVersionRequirement extends MinimumRuntimeVersion {
-  readonly consumer: string;
-  readonly enabled: boolean;
-}
+export type { ConsumerVersionRequirement, MinimumRuntimeVersion } from '../schemas';
 
 export interface RuntimeAnalysisOptions {
   readonly installable: boolean;

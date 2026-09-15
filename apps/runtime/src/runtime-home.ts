@@ -14,6 +14,7 @@
 import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import { RUNTIME_SETUP_PENDING_SIGNATURE } from '@mangostudio/shared/runtime-contract';
 import {
   type ResolvedRuntimeSlotConfig,
   RUNTIME_CONFIG_LOCK_FILE_NAME,
@@ -23,6 +24,7 @@ import {
   type RuntimeSlot,
   type RuntimeSlotConfig,
   RuntimeSlotConfigSchema,
+  type RuntimeSlotCredentials,
   resolveRuntimeSlotConfig,
   runtimeSlotConfigPath,
   runtimeSlotCredentialsPath,
@@ -36,17 +38,12 @@ import { defaultOwnerOnlyDeps, type OwnerOnlyDeps, restrictToOwner } from './ser
 export type { RuntimeSlot } from '@mangostudio/shared/runtime-home';
 
 /**
- * The phrase a runtime prints when it refuses a slot its owner has not
- * consented to yet, and the sentence built around it.
- *
- * It is a constant because a second party reads it. A hub launching a runtime
- * over SSH sees only the remote side's exit code and stderr — ssh reports its
- * own failures as 255 and passes everything else through — so "not set up yet"
- * and "no binary there" are told apart by signature. Two spellings of the same
- * refusal would make the hub classify a consent gate as a missing install and
- * send the user to reinstall something that is already present.
+ * The signature a hub greps this runtime's stderr for is a shared contract, not
+ * a runtime detail — it lives in `@mangostudio/shared/runtime-contract` and is
+ * re-exported here for the callers that already name this module. The sentence
+ * built around it stays local: only the signature crosses.
  */
-export const RUNTIME_SETUP_PENDING_SIGNATURE = 'runtime setup is pending on this machine';
+export { RUNTIME_SETUP_PENDING_SIGNATURE };
 export const RUNTIME_SETUP_PENDING_MESSAGE = `${RUNTIME_SETUP_PENDING_SIGNATURE}. Run "mangostudio-runtime setup" there before connecting it.`;
 
 const CONFIG_LOCK_FILE = RUNTIME_CONFIG_LOCK_FILE_NAME;
@@ -61,12 +58,6 @@ const SLOT_LOCK_POLL_MS = 25;
  * honest hold; it only ever applies when the pid check cannot.
  */
 const SLOT_LOCK_STALE_MS = 60_000;
-
-interface RuntimeSlotCredentials {
-  readonly schemaVersion: 1;
-  readonly pairingToken?: string;
-  readonly serveToken?: string;
-}
 
 /** What was on disk, plus why it could not be trusted when that happened. */
 export interface RuntimeSlotState {

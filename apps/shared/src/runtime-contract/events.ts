@@ -9,8 +9,7 @@
 
 import Type, { type Static } from 'typebox';
 import { ExternalAgentEventEnvelopeSchema } from '../external-agents/schemas';
-import type { McpElicitationField } from '../mcp';
-import { UnsafeObjectSchema } from '../schema-helpers';
+import { RuntimeMcpElicitationEventSchema, RuntimeMcpSessionEventSchema } from './methods/mcp';
 
 /**
  * Topic a runtime publishes on while it is connected. It is a keep-alive with
@@ -35,30 +34,16 @@ export const RUNTIME_MCP_ELICITATION_TOPIC = 'mcp.elicitation' as const;
 /** Topic carrying out-of-band session state (drops, tool-list invalidations). */
 export const RUNTIME_MCP_SESSION_TOPIC = 'mcp.session' as const;
 
-export interface RuntimeMcpElicitationEvent {
-  readonly requestId: string;
-  readonly serverId: string;
-  readonly serverSlug: string;
-  readonly toolCallId: string;
-  readonly message: string;
-  readonly fields: readonly McpElicitationField[];
-}
-
-export interface RuntimeMcpSessionEvent {
-  readonly serverId: string;
-  /** `closed`: the session dropped. `tool-list-changed`: caches are stale. */
-  readonly change: 'closed' | 'tool-list-changed';
-}
-
 /** Topic carrying one install run's output up to the hub, keyed by run id. */
 export const RUNTIME_INSTALL_OUTPUT_TOPIC = 'install.output' as const;
 
-export interface RuntimeInstallOutputEvent {
-  readonly stream: 'stdout' | 'stderr' | 'system';
-  readonly line: string;
+export const RuntimeInstallOutputEventSchema = Type.Object({
+  stream: Type.Union([Type.Literal('stdout'), Type.Literal('stderr'), Type.Literal('system')]),
+  line: Type.String(),
   /** Marks the frame that closes the stream; its `line` is empty. */
-  readonly end?: true;
-}
+  end: Type.Optional(Type.Literal(true)),
+});
+export type RuntimeInstallOutputEvent = Static<typeof RuntimeInstallOutputEventSchema>;
 
 /**
  * Topic carrying one terminal session's output up to the hub, keyed by
@@ -73,10 +58,16 @@ export const RUNTIME_TERMINAL_OUTPUT_TOPIC = 'terminal.output' as const;
  * is a marker for bytes discarded when the in-flight window and the pending
  * buffer were both full. `exit` rides the frame that ends the stream.
  */
-export type RuntimeTerminalOutputEvent =
-  | { readonly kind: 'data'; readonly data: string }
-  | { readonly kind: 'dropped'; readonly bytes: number }
-  | { readonly kind: 'exit'; readonly exitCode: number | null; readonly signal: string | null };
+export const RuntimeTerminalOutputEventSchema = Type.Union([
+  Type.Object({ kind: Type.Literal('data'), data: Type.String() }),
+  Type.Object({ kind: Type.Literal('dropped'), bytes: Type.Number() }),
+  Type.Object({
+    kind: Type.Literal('exit'),
+    exitCode: Type.Union([Type.Number(), Type.Null()]),
+    signal: Type.Union([Type.String(), Type.Null()]),
+  }),
+]);
+export type RuntimeTerminalOutputEvent = Static<typeof RuntimeTerminalOutputEventSchema>;
 
 /** The `events` half of the runtime contract definition. */
 export const RUNTIME_CONTRACT_EVENTS = {
@@ -90,20 +81,20 @@ export const RUNTIME_CONTRACT_EVENTS = {
     description: 'One ordered, semantic event of a hub-owned vendor-agent session.',
   },
   [RUNTIME_MCP_ELICITATION_TOPIC]: {
-    payload: UnsafeObjectSchema<RuntimeMcpElicitationEvent>(),
+    payload: RuntimeMcpElicitationEventSchema,
     description: "A server's mid-tool-call form request.",
   },
   [RUNTIME_MCP_SESSION_TOPIC]: {
-    payload: UnsafeObjectSchema<RuntimeMcpSessionEvent>(),
+    payload: RuntimeMcpSessionEventSchema,
     description: 'Out-of-band MCP session state: drops and tool-list invalidations.',
   },
   [RUNTIME_INSTALL_OUTPUT_TOPIC]: {
-    payload: UnsafeObjectSchema<RuntimeInstallOutputEvent>(),
+    payload: RuntimeInstallOutputEventSchema,
     stream: true,
     description: "One line of an install run's output, keyed by run id.",
   },
   [RUNTIME_TERMINAL_OUTPUT_TOPIC]: {
-    payload: UnsafeObjectSchema<RuntimeTerminalOutputEvent>(),
+    payload: RuntimeTerminalOutputEventSchema,
     stream: true,
     description: "One frame of a terminal session's output, keyed by session id.",
   },

@@ -1,0 +1,448 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mangostudio.dev/runtime/schema/1/health.json",
+  "title": "MangoStudio runtime health report",
+  "description": "What `mangostudio-runtime health --json` prints and what the runtime.health method returns — one payload, so a terminal on the machine and a card in a browser cannot disagree.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "slot",
+    "source",
+    "runtimeVersion",
+    "version",
+    "binaryPath",
+    "digest",
+    "profile",
+    "allow",
+    "setup",
+    "platform",
+    "arch",
+    "homeDir",
+    "shells",
+    "git",
+    "lastError"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "slot": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "host"
+        },
+        {
+          "type": "string",
+          "const": "wsl"
+        },
+        {
+          "type": "string",
+          "const": "remote"
+        }
+      ]
+    },
+    "source": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "bundled"
+        },
+        {
+          "type": "string",
+          "const": "source-checkout"
+        },
+        {
+          "type": "string",
+          "const": "provisioned"
+        }
+      ]
+    },
+    "runtimeVersion": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "version": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 64
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "binaryPath": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 4096
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "digest": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "maxLength": 71
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sourceSha": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 64
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "profile": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "full"
+        },
+        {
+          "type": "string",
+          "const": "readonly"
+        },
+        {
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "type": "string",
+          "const": "custom"
+        }
+      ]
+    },
+    "allow": {
+      "type": "object",
+      "required": [
+        "fsRead",
+        "fsWrite",
+        "shell",
+        "git",
+        "probing",
+        "mcp",
+        "library",
+        "checkpoints",
+        "update"
+      ],
+      "properties": {
+        "fsRead": {
+          "type": "boolean"
+        },
+        "fsWrite": {
+          "type": "boolean"
+        },
+        "shell": {
+          "type": "boolean"
+        },
+        "git": {
+          "type": "boolean"
+        },
+        "probing": {
+          "type": "boolean"
+        },
+        "mcp": {
+          "type": "boolean"
+        },
+        "library": {
+          "type": "boolean"
+        },
+        "checkpoints": {
+          "type": "boolean"
+        },
+        "update": {
+          "type": "boolean"
+        },
+        "externalAgents": {
+          "type": "boolean"
+        }
+      }
+    },
+    "setup": {
+      "type": "object",
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "pending"
+            },
+            {
+              "type": "string",
+              "const": "configured"
+            }
+          ]
+        },
+        "at": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "by": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "cli"
+            },
+            {
+              "type": "string",
+              "const": "env"
+            },
+            {
+              "type": "string",
+              "const": "launch"
+            },
+            {
+              "type": "string",
+              "const": "install"
+            }
+          ]
+        }
+      }
+    },
+    "platform": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "arch": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "platformId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "linux-x64"
+        },
+        {
+          "type": "string",
+          "const": "linux-arm64"
+        },
+        {
+          "type": "string",
+          "const": "linux-x64-musl"
+        },
+        {
+          "type": "string",
+          "const": "linux-arm64-musl"
+        },
+        {
+          "type": "string",
+          "const": "darwin-x64"
+        },
+        {
+          "type": "string",
+          "const": "darwin-arm64"
+        }
+      ]
+    },
+    "homeDir": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "shells": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 32
+      }
+    },
+    "git": {
+      "type": "object",
+      "required": [
+        "available"
+      ],
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "string",
+          "maxLength": 64
+        }
+      }
+    },
+    "gh": {
+      "type": "object",
+      "required": [
+        "available"
+      ],
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "string",
+          "maxLength": 64
+        }
+      }
+    },
+    "lastError": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 1024
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "audit": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "auditError": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 1024
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "externalAgents": {
+      "type": "object",
+      "required": [
+        "targets",
+        "liveSessionCount",
+        "liveSessions"
+      ],
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "codex"
+              },
+              {
+                "type": "string",
+                "const": "cursor"
+              },
+              {
+                "type": "string",
+                "const": "claude"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "uniqueItems": true
+        },
+        "identityIsolation": {
+          "type": "object",
+          "required": [
+            "method",
+            "credentialHomeFingerprint"
+          ],
+          "properties": {
+            "method": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "single-user-host"
+                },
+                {
+                  "type": "string",
+                  "const": "os-account"
+                },
+                {
+                  "type": "string",
+                  "const": "container"
+                }
+              ]
+            },
+            "credentialHomeFingerprint": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "additionalProperties": false
+        },
+        "liveSessionCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "liveSessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "sessionId",
+              "targetId",
+              "ageMs",
+              "state"
+            ],
+            "properties": {
+              "sessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "targetId": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "codex"
+                  },
+                  {
+                    "type": "string",
+                    "const": "cursor"
+                  },
+                  {
+                    "type": "string",
+                    "const": "claude"
+                  }
+                ]
+              },
+              "ageMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "state": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            },
+            "additionalProperties": false
+          },
+          "maxItems": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "terminal": {
+      "type": "boolean"
+    }
+  }
+}

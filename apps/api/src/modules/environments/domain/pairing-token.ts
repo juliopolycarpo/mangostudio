@@ -13,10 +13,15 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { RUNTIME_PAIRING_TOKEN_PREFIX } from '@mangostudio/shared/runtime-contract';
 import { computeHash } from '../../../utils/hash';
 
-/** Marks the string in a paste or a bug report for what it is. */
-export const RUNTIME_PAIRING_TOKEN_PREFIX = 'mrt_';
+/**
+ * The prefix is a shared contract — a runtime stores what the hub mints — so it
+ * lives in `@mangostudio/shared/runtime-contract` and is re-exported here for
+ * the callers that already name this module.
+ */
+export { RUNTIME_PAIRING_TOKEN_PREFIX };
 
 const SELECTOR_BYTES = 16;
 const SECRET_BYTES = 32;

@@ -87,11 +87,70 @@ describe('RUNTIME_CONTRACT', () => {
     );
   });
 
-  it('accepts any object where a method carries no schema yet', () => {
-    expect(() => RUNTIME_CONTRACT.assertParams('fs.read-file', { path: '/tmp/a' })).not.toThrow();
+  it('describes no method as a bare object', () => {
+    // The whole point of the schemas: a catalog of `{ "type": "object" }` is a
+    // catalog that tells a peer generated from it nothing at all.
+    const bare = RUNTIME_CONTRACT.catalog()
+      .methods.flatMap((method) => [
+        [`${method.name} params`, method.params] as const,
+        [`${method.name} result`, method.result] as const,
+      ])
+      .filter(([, schema]) => Object.keys(schema).length === 1 && schema.type === 'object')
+      .map(([label]) => label);
+
+    expect(bare).toEqual([]);
+  });
+
+  it('refuses a payload missing a member its method requires', () => {
+    expect(() =>
+      RUNTIME_CONTRACT.assertParams('fs.read-file', {
+        chatId: 'chat-1',
+        inputPath: 'README.md',
+        resolvedPath: '/repo/README.md',
+      })
+    ).not.toThrow();
+    expect(() => RUNTIME_CONTRACT.assertParams('fs.read-file', { chatId: 'chat-1' })).toThrow(
+      /do not match the contract/
+    );
     expect(() => RUNTIME_CONTRACT.assertParams('fs.read-file', 'not an object')).toThrow(
       /do not match the contract/
     );
+  });
+
+  it('ignores a member a newer peer added rather than refusing the call', () => {
+    // No wire schema closes its object. A hub one release ahead sends a field
+    // this build has never heard of, and refusing the whole call over it would
+    // strand exactly the machine that has not been upgraded yet.
+    expect(() =>
+      RUNTIME_CONTRACT.assertParams('fs.read-file', {
+        chatId: 'chat-1',
+        inputPath: 'README.md',
+        resolvedPath: '/repo/README.md',
+        somethingFromTheFuture: 'ignored',
+      })
+    ).not.toThrow();
+  });
+
+  it('leaves a hub-computed number unbounded, and bounds the one already asserted', () => {
+    // `assertTerminalSize` in the runtime already refuses these, so the schema
+    // replaces a hand-written check rather than inventing a new rejection.
+    expect(() =>
+      RUNTIME_CONTRACT.assertParams('terminal.resize', { sessionId: 's1', cols: 80, rows: 24 })
+    ).not.toThrow();
+    expect(() =>
+      RUNTIME_CONTRACT.assertParams('terminal.resize', { sessionId: 's1', cols: 0, rows: 24 })
+    ).toThrow(/do not match the contract/);
+
+    // Nothing asserts a ceiling on a timeout the hub computed, so nothing here
+    // may invent one.
+    expect(() =>
+      RUNTIME_CONTRACT.assertParams('shell.run', {
+        kind: 'bash',
+        command: 'true',
+        timeoutMs: 7_200_000,
+        maxOutputBytes: 1_000_000_000,
+      })
+    ).not.toThrow();
   });
 });
 

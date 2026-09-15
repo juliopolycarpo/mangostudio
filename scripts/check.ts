@@ -8,6 +8,7 @@ import {
   WORKSPACE_DPRINT_PATHS,
   type WorkspaceName,
 } from './lib/config';
+import { touchesContractArtifactSurface } from './lib/contract-artifacts';
 import {
   assertDependencyCohort,
   assertNoDisallowedWorkspaceDependencies,
@@ -34,7 +35,8 @@ function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
 
 Runs Biome, dprint, madge circular checks, tsc typechecks, Knip code health,
-and workflow static analysis (actionlint, zizmor, ShellCheck) in parallel.
+generated contract-artifact freshness, and workflow static analysis
+(actionlint, zizmor, ShellCheck) in parallel.
 Default workspace selection: --all
 
 Workspace flags:
@@ -134,6 +136,10 @@ let includeActionsLint = includeRoot;
 // Full/root runs always scan the repository. Scoped runs scan only when a
 // changed file can affect Knip's entry graph or dependency report.
 let includeCodeHealth = includeRoot;
+// The generated contract artifacts are what a non-TypeScript runtime is built
+// against, so staleness has to be caught in the pull request that caused it —
+// including on the scoped run the pre-commit hook uses.
+let includeContractArtifacts = includeRoot;
 
 if (flags['--staged']) {
   const files = getStagedFiles();
@@ -146,6 +152,7 @@ if (flags['--staged']) {
   effectiveIncludeRoot = mapped.includeRoot;
   includeActionsLint = touchesActionsLintSurface(files);
   includeCodeHealth = touchesCodeHealthSurface(files);
+  includeContractArtifacts = touchesContractArtifactSurface(files);
 } else if (flags['--changed']) {
   const base = values['--base'] ?? resolveDefaultBase();
   const files = getChangedFiles(base);
@@ -158,6 +165,7 @@ if (flags['--staged']) {
   effectiveIncludeRoot = mapped.includeRoot;
   includeActionsLint = touchesActionsLintSurface(files);
   includeCodeHealth = touchesCodeHealthSurface(files);
+  includeContractArtifacts = touchesContractArtifactSurface(files);
 }
 
 const tasks: Array<() => Promise<RunResult>> = [];
@@ -170,6 +178,13 @@ if (effectiveWorkspaces.length > 0) {
 if (effectiveIncludeRoot) {
   info('\nRoot');
   tasks.push(...createRootTasks(flags['--skip-format']));
+}
+
+if (includeContractArtifacts) {
+  info('\nContract artifacts');
+  tasks.push(() =>
+    runCommand('root:contract-artifacts', ['bun', 'run', 'contracts:check'], { cwd: ROOT_DIR })
+  );
 }
 
 if (includeActionsLint) {

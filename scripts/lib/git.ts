@@ -8,17 +8,29 @@ import type { WorkspaceName } from './config';
  * Throws with stderr on a non-zero exit.
  * // Usage: const sha = git(['rev-parse', 'HEAD']).trim();
  */
-function git(args: string[]): string {
-  const result = Bun.spawnSync(['git', ...args]);
+function git(args: string[], cwd?: string): string {
+  const result = Bun.spawnSync(['git', ...args], cwd ? { cwd } : {});
   if (!result.success) {
     throw new Error(result.stderr.toString().trim() || `git ${args.join(' ')} failed`);
   }
   return result.stdout.toString();
 }
 
-/** Files staged for commit (added/copied/modified/renamed). */
-export function getStagedFiles(): string[] {
-  const out = git(['diff', '--name-only', '--cached', '--diff-filter=ACMR']);
+/**
+ * Files staged for commit, deletions included.
+ *
+ * A deletion is a change like any other to everything downstream: these paths
+ * only ever select workspaces and gates by pattern, and removing a file is
+ * exactly as able to break its importers, or to leave a generated artifact
+ * missing, as editing one. Excluding `D` made a commit whose only staged change
+ * was a deletion exit as "nothing to check" — `getChangedFiles` never filtered,
+ * so the same commit failed on somebody else's run instead.
+ *
+ * @example
+ * getStagedFiles(); // ['apps/api/src/routes/chats.ts']
+ */
+export function getStagedFiles(cwd?: string): string[] {
+  const out = git(['diff', '--name-only', '--cached', '--diff-filter=ACMRD'], cwd);
   return out.split('\n').filter(Boolean);
 }
 
