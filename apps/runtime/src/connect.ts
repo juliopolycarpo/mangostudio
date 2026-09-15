@@ -154,7 +154,7 @@ async function runOneConnection(
   const session = createRuntimeSession(port, definition, {
     handshakeTimeoutMs,
   });
-  const abort = (): void => session.close(CLOSE_CODES.RELEASED, 'Runtime stopping');
+  const abort = (): void => session.closeNow(CLOSE_CODES.RELEASED, 'Runtime stopping');
   options.signal?.addEventListener('abort', abort, { once: true });
 
   try {
@@ -183,7 +183,7 @@ async function runOneConnection(
     // Closed before the wait below, and unconditionally: `whenRuntimeReleased`
     // only settles once the session has ended, so a handshake that failed
     // without the transport dropping would hang the loop here.
-    session.close(CLOSE_CODES.RELEASED, 'Runtime stopping');
+    session.closeNow(CLOSE_CODES.RELEASED, 'Runtime stopping');
     // Teardown reaps external-agent sessions and vendor process trees, and the
     // next dial rebuilds all of it, so the loop waits for the old one to let go
     // before it asks for another.

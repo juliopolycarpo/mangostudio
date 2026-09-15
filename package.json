@@ -48,7 +48,7 @@
     "@dprint/dockerfile": "^0.4.1",
     "@dprint/markdown": "^0.22.1",
     "@dprint/toml": "^0.7.0",
-    "@mangostudio/protocol": "^0.1.0",
+    "@mangostudio/protocol": "^0.2.0",
     "@mangostudio/shared": "workspace:*",
     "@playwright/test": "^1.62.1",
     "@types/bun": "^1.4.1",
