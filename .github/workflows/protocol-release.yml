@@ -215,10 +215,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PRERELEASE: ${{ needs.verify.outputs.prerelease }}
           VERSION: ${{ needs.verify.outputs.version }}
+        # Re-runnable, like the two publish jobs before it: `gh release create`
+        # fails outright on a release that already exists, so a re-run after a
+        # partial failure would die here with both registries already published
+        # and nothing left to do but delete the release by hand.
         run: |
           set -euo pipefail
           cp spec/schema/1/protocol.json mango-protocol-schema-1-protocol.json
           cp spec/schema/1/catalog.json mango-protocol-schema-1-catalog.json
+          if gh release view "protocol-v$VERSION" >/dev/null 2>&1; then
+            echo "the release protocol-v$VERSION already exists; refreshing its assets"
+            gh release upload "protocol-v$VERSION" --clobber \
+              mango-protocol-schema-1-protocol.json \
+              mango-protocol-schema-1-catalog.json
+            exit 0
+          fi
           flags=()
           if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
           gh release create "protocol-v$VERSION" \

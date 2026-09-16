@@ -137,7 +137,12 @@ the schema files; its `schema` feature emits an equivalent document at runtime.
 
 ## When a release fails
 
-The jobs run in order: verify, npm, crates.io, GitHub release. A failure in the npm job leaves
-nothing published. A failure in the crates.io job leaves the npm version published; fix the cause
-and re-run the workflow from the failed job (each publish job skips a version that is already on
-its registry). Never delete a tag that published anything; cut the next patch.
+`verify` runs first; `npm` and `crate` then run **concurrently**, and `github-release` waits for
+both. So a failure in either publish job says nothing about the other — an npm failure can still
+leave `mango-protocol` on crates.io, and vice versa. Check both registries before deciding what is
+left to do.
+
+Every job is re-runnable: each publish job skips a version already on its registry, and the
+release job refreshes the assets of a release that already exists instead of failing on it. Fix
+the cause and re-run the whole workflow. Never delete a tag that published anything; cut the next
+patch.
