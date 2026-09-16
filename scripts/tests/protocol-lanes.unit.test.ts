@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
@@ -607,5 +607,94 @@ describe('the release workflow refuses a tag that is not on main', () => {
     const verify = extractJobBlock(readText('.github/workflows/protocol-release.yml'), 'verify');
     const checkout = extractStepBlocks(verify).find((block) => block.includes('actions/checkout@'));
     expect(checkout).toContain('fetch-depth: 0');
+  });
+});
+
+// Release immutability is enabled on this repository, so a published release
+// cannot be edited or deleted. A rerun after a partial failure therefore has
+// exactly one recovery — skip — and the npm and crates.io jobs already work
+// that way. This step is driven against a fake `gh` rather than grepped, so
+// the skip and the flags are proved rather than asserted to be spelled.
+describe('the release job is rerunnable under immutability', () => {
+  const releaseScript = (): string => {
+    const workflow = readText('.github/workflows/protocol-release.yml');
+    const job = extractJobBlock(workflow, 'github-release');
+    const step = extractStepBlocks(job).find((block) => /^\s*-\s+id: release\b/m.test(block));
+    expect(step, 'protocol-release.yml has no `id: release` step').toBeDefined();
+    const body = /\n\s+run: \|\n([\s\S]*?)(?=\n {6}- |$)/.exec(step as string)?.[1];
+    expect(body, 'the release step has no `run: |` block').toBeDefined();
+    return (body as string).replace(/^ {10}/gm, '');
+  };
+
+  /** A workspace with the files the step copies, and a `gh` that records its argv. */
+  const workspace = (releaseExists: boolean): { dir: string; log: string } => {
+    const dir = mkdtempSync(join(tmpdir(), 'release-step-'));
+    mkdirSync(join(dir, 'spec', 'schema', '1'), { recursive: true });
+    writeFileSync(join(dir, 'spec', 'schema', '1', 'protocol.json'), '{}');
+    writeFileSync(join(dir, 'spec', 'schema', '1', 'catalog.json'), '{}');
+    writeFileSync(join(dir, 'release-notes.md'), 'notes');
+
+    const bin = join(dir, 'bin');
+    const log = join(dir, 'gh.log');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(
+      join(bin, 'gh'),
+      `#!/bin/sh
+if [ "$1" = "release" ] && [ "$2" = "view" ]; then exit ${releaseExists ? '0' : '1'}; fi
+printf '%s\\n' "$*" >> ${JSON.stringify(log)}
+exit 0
+`,
+      { mode: 0o755 }
+    );
+    return { dir, log };
+  };
+
+  const run = (
+    releaseExists: boolean,
+    prerelease: string
+  ): { exitCode: number; stdout: string; ghCalls: string } => {
+    const { dir, log } = workspace(releaseExists);
+    const proc = Bun.spawnSync({
+      cmd: ['bash', '-c', releaseScript()],
+      cwd: dir,
+      env: {
+        PATH: `${join(dir, 'bin')}:${process.env.PATH ?? ''}`,
+        GH_TOKEN: 'fake',
+        VERSION: '0.2.1',
+        PRERELEASE: prerelease,
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    return {
+      exitCode: proc.exitCode,
+      stdout: proc.stdout.toString() + proc.stderr.toString(),
+      ghCalls: existsSync(log) ? readFileSync(log, 'utf8') : '',
+    };
+  };
+
+  test('creates the release when none exists, verifying the tag it was given', () => {
+    const result = run(false, 'false');
+    expect(result.exitCode).toBe(0);
+    expect(result.ghCalls).toContain('release create protocol-v0.2.1');
+    // Without --verify-tag, gh invents a tag from the default branch — an
+    // immutable release against a commit nobody chose.
+    expect(result.ghCalls).toContain('--verify-tag');
+    expect(result.ghCalls).toContain('mango-protocol-schema-1-protocol.json');
+    expect(result.ghCalls).toContain('mango-protocol-schema-1-catalog.json');
+    expect(result.ghCalls).not.toContain('--prerelease');
+  });
+
+  test('skips instead of failing when the release already exists', () => {
+    // The whole point: an immutable release cannot be replaced, so a rerun of
+    // a partially failed release must not die here.
+    const result = run(true, 'false');
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('already exists; skipping');
+    expect(result.ghCalls).toBe('');
+  });
+
+  test('marks a pre-release version as one', () => {
+    expect(run(false, 'true').ghCalls).toContain('--prerelease');
   });
 });

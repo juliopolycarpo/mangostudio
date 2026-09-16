@@ -245,29 +245,38 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Release notes for this tag
         run: bunx git-cliff --config packages/protocol/cliff.toml --current --strip header --output release-notes.md
-      - name: Create the release
+      - id: release
+        name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
           PRERELEASE: ${{ needs.verify.outputs.prerelease }}
           VERSION: ${{ needs.verify.outputs.version }}
-        # Re-runnable, like the two publish jobs before it: `gh release create`
-        # fails outright on a release that already exists, so a re-run after a
-        # partial failure would die here with both registries already published
-        # and nothing left to do but delete the release by hand.
         run: |
           set -euo pipefail
-          cp spec/schema/1/protocol.json mango-protocol-schema-1-protocol.json
-          cp spec/schema/1/catalog.json mango-protocol-schema-1-catalog.json
+          # Re-runnable, like the npm and crates.io jobs: a rerun after a
+          # partial failure must not die here on a release that already
+          # landed. Release immutability is enabled on this repository, so a
+          # published release cannot be edited or deleted to make room for a
+          # second attempt — skipping is the only recovery, and it has to be
+          # deliberate rather than a `gh` error nobody expected.
           if gh release view "protocol-v$VERSION" >/dev/null 2>&1; then
-            echo "the release protocol-v$VERSION already exists; refreshing its assets"
-            gh release upload "protocol-v$VERSION" --clobber \
-              mango-protocol-schema-1-protocol.json \
-              mango-protocol-schema-1-catalog.json
+            echo "the GitHub release for protocol-v$VERSION already exists; skipping"
             exit 0
           fi
+          cp spec/schema/1/protocol.json mango-protocol-schema-1-protocol.json
+          cp spec/schema/1/catalog.json mango-protocol-schema-1-catalog.json
           flags=()
           if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          # `--verify-tag` so a missing tag aborts. Without it `gh` invents one
+          # from the default branch, which would publish an immutable release
+          # against a commit no one chose.
+          #
+          # Assets are passed to `create` rather than uploaded afterwards: `gh`
+          # splits that into draft, upload, then publish, and immutability
+          # engages only at publish. Uploading to an already-published release
+          # would be refused.
           gh release create "protocol-v$VERSION" \
+            --verify-tag \
             --latest=false \
             --title "Mango Protocol v$VERSION" \
             --notes-file release-notes.md \
