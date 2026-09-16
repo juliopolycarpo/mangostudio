@@ -157,6 +157,10 @@ describe('labeler coverage', () => {
     expect(runtimeSection).toContain('- "apps/runtime/**"');
     expect(runtimeSection).toContain('- "apps/shared/src/runtime-contract/**"');
     expect(runtimeSection).toContain('- "apps/api/src/services/runtime-client/**"');
+    // The imported protocol tree is the hub/runtime wire contract; without a
+    // glob a protocol-only pull request reaches the classification gate with
+    // no area: or type: label.
+    expect(runtimeSection).toContain('- "mango-protocol/**"');
   });
 
   test('classifies the repository status feature as area: git', () => {

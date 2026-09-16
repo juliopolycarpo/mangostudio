@@ -13,7 +13,8 @@
       "!apps/frontend/src/routeTree.gen.ts",
       "!apps/runtime/src/services/external-agents/codex/protocol",
       "!apps/runtime/src/services/external-agents/*/contract",
-      "!apps/shared/src/runtime-contract/generated"
+      "!apps/shared/src/runtime-contract/generated",
+      "!mango-protocol"
     ]
   },
   "formatter": {

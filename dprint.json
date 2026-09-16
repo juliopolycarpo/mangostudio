@@ -30,7 +30,8 @@
     ".mango/out",
     "apps/frontend/src/routeTree.gen.ts",
     "**/CHANGELOG.md",
-    "bun.lock"
+    "bun.lock",
+    "mango-protocol"
   ],
   "plugins": [
     "./node_modules/@dprint/markdown/plugin.wasm",

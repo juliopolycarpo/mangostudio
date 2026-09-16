@@ -48,6 +48,8 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
           queries: ${{ matrix.queries }}
+          # Extraction scope only; the query suite stays in the matrix above.
+          config-file: ./.github/codeql/config.yml
 
       - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:

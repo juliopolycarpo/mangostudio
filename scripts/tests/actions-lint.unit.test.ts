@@ -201,6 +201,10 @@ describe('actions-lint tasks', () => {
     expect(createZizmorCommand('/cache/zizmor')).toContain('--no-online-audits');
     expect(createZizmorCommand('/cache/zizmor')).toContain('pedantic');
     expect(createZizmorCommand('/cache/zizmor')).toContain('high');
+    // Scoped to the one directory GitHub executes; a bare `.` recurses into
+    // nested workflow directories that this repository never runs.
+    expect(createZizmorCommand('/cache/zizmor')).toContain('.github');
+    expect(createZizmorCommand('/cache/zizmor')).not.toContain('.');
     expect(createShellcheckCommand('/cache/shellcheck', ['a.sh'])).toContain(
       '--source-path=SCRIPTDIR'
     );

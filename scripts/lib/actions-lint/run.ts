@@ -24,6 +24,12 @@ export function createActionlintCommand(actionlintBin: string, shellcheckBin: st
 
 export function createZizmorCommand(zizmorBin: string): string[] {
   // Offline audits only: the blocking gate must not flake on network access.
+  // Scoped to `.github` rather than the repository root: GitHub only ever
+  // executes `.github/workflows/**`, every composite action this repository
+  // owns lives under `.github/actions/**`, and a bare `.` makes zizmor recurse
+  // into nested `.github/workflows` directories that are inert here — an
+  // imported or vendored tree would be audited under this repository's
+  // pedantic persona and fail the gate for workflows it does not run.
   return [
     zizmorBin,
     '--no-online-audits',
@@ -31,7 +37,7 @@ export function createZizmorCommand(zizmorBin: string): string[] {
     'pedantic',
     '--min-confidence',
     'high',
-    '.',
+    '.github',
   ];
 }
 

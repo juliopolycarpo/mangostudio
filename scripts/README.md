@@ -60,7 +60,7 @@ surface, as does CI's Check job (same script):
 
 - **actionlint** over `.github/workflows/**`, with ShellCheck applied to
   embedded `run:` scripts;
-- **zizmor** over workflows + composite actions in blocking
+- **zizmor** over `.github/` (workflows + composite actions) in blocking
   `--persona pedantic --min-confidence high` mode (offline audits only);
 - **ShellCheck** over every tracked `*.sh` file.
 
