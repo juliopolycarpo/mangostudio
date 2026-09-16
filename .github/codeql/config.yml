@@ -1,11 +1,10 @@
 # CodeQL advanced-setup configuration for .github/workflows/codeql.yml.
 #
 # Query selection stays in the workflow's matrix (`queries: security-extended`);
-# this file exists only to bound what gets extracted.
+# this file carries the analysis name and any bound on what gets extracted.
+#
+# Nothing is bounded. The one entry this file ever held was `mango-protocol/`,
+# the standalone protocol repository imported with its history and waiting to be
+# relocated; the relocation dropped the directory and the entry with it, and the
+# protocol's TypeScript is scanned with the rest of the repository from here on.
 name: mangostudio
-
-# Generated from the Mango Protocol spec by `bun run contracts:emit`, and
-# checked byte for byte by `bun run contracts:check`. Scanning emitted code
-# reports findings no edit here can fix.
-paths-ignore:
-  - apps/shared/src/runtime-contract/generated
