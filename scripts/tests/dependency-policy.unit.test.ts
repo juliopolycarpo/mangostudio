@@ -39,6 +39,7 @@ describe('dependency policy', () => {
       'apps/runtime',
       'apps/shared',
       'packages/cli',
+      'packages/protocol',
     ]);
     expect(findRetiredDependencies(entries)).toEqual([]);
     expect(findCohortVersionConflicts(entries)).toEqual([]);

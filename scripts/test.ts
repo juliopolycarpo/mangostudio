@@ -33,6 +33,14 @@ const ROOT_SCRIPTS_TEST_COMMAND = [
   '--log-order=stream',
 ];
 
+// The protocol is not a `WorkspaceName` (see scripts/lib/config.ts), so the
+// Turbo fan-out below never reaches it. `--ts-only` for the same reason
+// scripts/check.ts passes it: the Cargo suites belong to the path-filtered
+// `protocol-ci.yml`, not to every run of this one. Unsharded and in the unit
+// phase only — the suite is seconds, and CI's Test job is `--coverage --shard`,
+// which never enters this phase, so nothing here runs eight times.
+const PROTOCOL_TEST_COMMAND = ['bun', './scripts/protocol/test.ts', '--ts-only'];
+
 function printHelp(): never {
   console.log(`Usage: bun run test [lane flags]
 
@@ -140,13 +148,17 @@ const laneEnv = testLaneEnv(shard);
 // be reassembled from slices (see shardedCoverageWorkspaces).
 const laneWorkspaces: WorkspaceName[] = only ? [only] : [...ALL_WORKSPACE_NAMES];
 const coverageWorkspaces: WorkspaceName[] = shard ? shardedCoverageWorkspaces() : laneWorkspaces;
-// The root scripts lane has no workspace, so --only leaves it out.
+// Neither the root scripts lane nor the protocol lane has a workspace, so
+// --only leaves both out.
 const runRootScripts = only === null;
 const rootScriptsTask = runRootScripts
   ? [
       () =>
         runCommand('root:test:scripts', ROOT_SCRIPTS_TEST_COMMAND, { cwd: ROOT_DIR, env: laneEnv }),
     ]
+  : [];
+const protocolTask = runRootScripts
+  ? [() => runCommand('root:test:protocol', PROTOCOL_TEST_COMMAND, { cwd: ROOT_DIR })]
   : [];
 
 const hasExplicitLaneSelection =
@@ -164,6 +176,7 @@ if (shouldRunUnit) {
   info('\nPhase: unit');
   const unitResults = await runParallel([
     ...rootScriptsTask,
+    ...protocolTask,
     () =>
       runCommand('workspaces:test:unit', createTurboTestCommand('test:unit', laneWorkspaces), {
         cwd: ROOT_DIR,

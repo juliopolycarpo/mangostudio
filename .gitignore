@@ -97,8 +97,18 @@ config.toml
 .local/
 .scratch/
 
-# ─── Rust build output (cargo-shim launcher crate) ─── #
-packages/cargo-shim/target/
+# ─── Rust build output ─── #
+# Bare `target/`, not one entry per crate: the protocol workspace builds at
+# the repository root, its fuzz workspace under crates/mango-protocol/fuzz,
+# and the launcher under packages/cargo-shim.
+target/
+
+# ─── Mango Protocol package build output ─── #
+# `build.ts` copies the normative schema files and the licence in beside
+# dist/ so the npm tarball can ship them; the sources live in spec/ and at
+# the repository root.
+packages/protocol/schema/
+packages/protocol/LICENSE
 
 # ─── Build and lint caches (generated, never committed) ─── #
 **/.eslintcache

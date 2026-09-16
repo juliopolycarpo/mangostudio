@@ -12,6 +12,7 @@
 *.jsx                      text eol=lf
 *.mjs                      text eol=lf
 *.cjs                      text eol=lf
+*.rs                       text eol=lf
 
 # ─── Styles ─── #
 *.css                      text eol=lf
@@ -19,6 +20,7 @@
 # ─── Config / Data ─── #
 *.json                     text eol=lf
 *.jsonc                    text eol=lf
+*.ndjson                   text eol=lf
 *.toml                     text eol=lf
 *.yml                      text eol=lf
 *.yaml                     text eol=lf
@@ -33,6 +35,16 @@
 
 # ─── HTML ─── #
 *.html                     text eol=lf
+
+# ─── Cargo lockfiles ─── #
+# Text, so a dependency bump reviews as a diff; generated, so it stays out
+# of the language statistics.
+Cargo.lock                 text eol=lf linguist-generated=true
+
+# ─── Mango Protocol conformance corpus ─── #
+# Data, not source: both SDKs assert on the exact bytes, so no normalisation.
+spec/fixtures/**           -text linguist-generated=false
+spec/**/*.md               linguist-documentation=true
 
 # ─── Bun lockfile ─── #
 # Treat as binary to avoid spurious merge conflicts and line-ending churn.

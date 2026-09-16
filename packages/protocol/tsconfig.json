@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["bun"],
+    "rootDir": ".",
+    "outDir": "dist",
+    // Declared here rather than inherited: this package is published to npm and
+    // compiled by consumers under their own settings, so it holds the stricter
+    // set the standalone repository compiled it with. The monorepo root
+    // tsconfig is deliberately looser (the applications predate these flags),
+    // and `resolveJsonModule` is load-bearing — every fixture test imports a
+    // `spec/fixtures/1/*.json` corpus file directly.
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "verbatimModuleSyntax": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src", "tests", "build.ts"]
+}

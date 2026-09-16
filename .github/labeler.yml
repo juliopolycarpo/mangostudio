@@ -22,11 +22,16 @@
           - "apps/runtime/**"
           - "apps/shared/src/runtime-contract/**"
           - "apps/api/src/services/runtime-client/**"
-          # The Mango Protocol tree imported by plan 075, until the relocation
-          # pull request moves it to packages/protocol, crates/mango-protocol
-          # and spec/. Without it a protocol-only change carries no area: or
-          # type: label and the classification gate fails.
-          - "mango-protocol/**"
+          # The Mango Protocol: the wire contract the hub and the runtime speak,
+          # published as @mangostudio/protocol and the mango-protocol crate.
+          # Without these a protocol-only change carries no area: or type: label
+          # and the classification gate fails. Kept under `area: runtime` rather
+          # than a label of its own — the description already reads
+          # "hub/runtime protocol".
+          - "spec/**"
+          - "packages/protocol/**"
+          - "crates/**"
+          - "scripts/protocol/**"
 
 "area: git":
   - changed-files:

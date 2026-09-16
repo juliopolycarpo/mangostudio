@@ -88,6 +88,19 @@ export async function runWorkspaceScript(
   return runCommand(`${workspace}:${script}`, cmd);
 }
 
+/**
+ * Run task thunks one at a time, in order, and collect every result. Unlike
+ * runParallel this is for tasks that write to the same tree — formatters, or a
+ * test suite whose two halves share a build directory — where concurrent runs
+ * would race each other rather than just interleave output.
+ * // Usage: await runSequential([() => fmt('biome'), () => fmt('dprint')]);
+ */
+export async function runSequential(tasks: Array<() => Promise<RunResult>>): Promise<RunResult[]> {
+  const results: RunResult[] = [];
+  for (const task of tasks) results.push(await task());
+  return results;
+}
+
 /** Run task thunks concurrently and collect every result. */
 // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function runParallel(tasks: Array<() => Promise<RunResult>>): Promise<RunResult[]> {

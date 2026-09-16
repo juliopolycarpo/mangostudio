@@ -92,6 +92,34 @@ updates:
           - minor
           - patch
 
+  # The Mango Protocol crate. Its workspace manifest and lockfile are at the
+  # repository root, and `crates/mango-protocol/fuzz` is a workspace of its own
+  # with its own Cargo.lock — a directory Dependabot only visits when named.
+  # Both are published or built with `--locked`, so a manifest bump without a
+  # lockfile refresh fails the release rather than the pull request.
+  - package-ecosystem: cargo
+    directories:
+      - /
+      - /crates/mango-protocol/fuzz
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:35"
+      timezone: UTC
+    commit-message:
+      prefix: chore(deps)
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
+    labels:
+      - "type: dependencies"
+      - "area: runtime"
+    groups:
+      protocol-cargo-minor-patch:
+        update-types:
+          - minor
+          - patch
+
   # Both Dockerfile and Dockerfile.alpine live at the repo root; Dependabot
   # matches filenames containing "dockerfile".
   - package-ecosystem: docker

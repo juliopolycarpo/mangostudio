@@ -99,6 +99,12 @@ if (effectiveIncludeRoot) {
     cwd: ROOT_DIR,
   });
   results.push(rootDprintResult);
+
+  // rustfmt over the protocol crate. Biome and dprint above already cover the
+  // package's TypeScript and its markdown; nothing else here speaks Rust.
+  results.push(
+    await runCommand('root:protocol:fix', ['bun', './scripts/protocol/fix.ts'], { cwd: ROOT_DIR })
+  );
 }
 
 if (results.length === 0) {

@@ -66,6 +66,16 @@ jobs:
     defaults:
       run:
         working-directory: packages/cargo-shim
+    env:
+      # The repository root carries `rust-toolchain.toml` for the Mango Protocol
+      # workspace, and rustup resolves that file by walking up from the working
+      # directory — so it overrides the toolchain the action below installs and
+      # this crate would silently stop being built against its MSRV. Measured:
+      # from `packages/cargo-shim`, `rustup show active-toolchain` reports
+      # "1.98.1 (overridden by '<root>/rust-toolchain.toml')". The environment
+      # variable outranks the file, which is the only lever that does not mean
+      # a second toolchain file to keep in sync.
+      RUSTUP_TOOLCHAIN: 1.96.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

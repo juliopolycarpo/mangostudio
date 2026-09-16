@@ -1,0 +1,115 @@
+# git-cliff configuration for the Mango Protocol — https://git-cliff.org
+# Generates packages/protocol/CHANGELOG.md from Conventional Commits. Driven by
+# `bun run protocol:release:prepare`; never edit that changelog by hand.
+#
+# The repository root has its own cliff.toml for the application. The two are
+# kept apart by `tag_pattern` (this one reads `protocol-v*`, the root reads
+# `^v[0-9]`) and by the path rules at the bottom of each file.
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to this project are documented in this file.
+The format is based on [Keep a Changelog](https://keepachangelog.com), and this
+project adheres to [Semantic Versioning](https://semver.org).
+
+"""
+body = """
+{% if version -%}
+## [{{ version | trim_start_matches(pat="protocol-v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else -%}
+## [Unreleased]
+{% endif -%}
+{% set breaking = commits | filter(attribute="breaking", value=true) -%}
+{% if breaking | length > 0 %}
+### 💥 Breaking Changes
+{% for commit in breaking %}
+- {% if commit.scope %}**({{ commit.scope }})** {% endif %}\
+{{ commit.breaking_description | replace(from="\n", to=" ") | trim | upper_first }}\
+{% endfor %}
+{% endif -%}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {% if commit.breaking %}**[breaking]** {% endif %}\
+{% if commit.scope %}**({{ commit.scope }})** {% endif %}{{ commit.message | upper_first }}\
+{% endfor %}
+{% endfor %}
+<!-- seam -->
+"""
+footer = ""
+trim = true
+# Group headers carry a sortable HTML comment for ordering; strip it from output.
+# The seam marker is what `trim` would otherwise eat: git-cliff trims each
+# release body and joins them with one newline, so the last bullet of a version
+# and the next `## [x.y.z]` heading land on consecutive lines. Ending the body
+# with a non-whitespace marker keeps the newline before it, and removing only
+# the marker here leaves the blank line behind.
+postprocessors = [
+  { pattern = '<!-- [0-9]+ -->', replace = "" },
+  { pattern = '<!-- seam -->', replace = "" },
+]
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+# `e39d1f8` states its breaking surface as "Breaking pre-1.0:", which the
+# conventional parser does not recognise. Rewrite it to the footer token so the
+# surface reaches the changelog and the generated release notes.
+commit_preprocessors = [
+  { pattern = '(?m)^Breaking pre-1\.0: ', replace = "BREAKING CHANGE: " },
+]
+commit_parsers = [
+  { message = "^chore\\(release\\)", skip = true },
+  { message = "^chore\\(deps\\)", group = "<!-- 8 -->⬆️ Dependencies" },
+  { message = "^build\\(deps\\)", group = "<!-- 8 -->⬆️ Dependencies" },
+  { message = "^feat", group = "<!-- 0 -->🚀 Features" },
+  { message = "^fix", group = "<!-- 1 -->🐛 Bug Fixes" },
+  { message = "^perf", group = "<!-- 2 -->⚡ Performance" },
+  { message = "^refactor", group = "<!-- 3 -->♻️ Refactor" },
+  { message = "^security", group = "<!-- 4 -->🔒 Security" },
+  { message = "^migration", group = "<!-- 5 -->🛢️ Migrations" },
+  { message = "^docs", group = "<!-- 6 -->📚 Documentation" },
+  { message = "^test", group = "<!-- 7 -->🧪 Testing" },
+  { message = "^ci", group = "<!-- 9 -->👷 CI" },
+  { message = "^build", group = "<!-- 10 -->🏗️ Build" },
+  { message = "^style", group = "<!-- 11 -->🎨 Styling" },
+  { message = "^chore", group = "<!-- 12 -->🧹 Miscellaneous" },
+  { message = "^revert", group = "<!-- 13 -->◀️ Revert" },
+  { body = ".*", group = "<!-- 14 -->Other" },
+]
+protect_breaking_commits = false
+filter_commits = false
+# Anchored and prefixed: the application's `v0.1.1` tags live in the same
+# repository, and an unanchored `v[0-9]*` would match them as protocol releases.
+tag_pattern = "^protocol-v[0-9]"
+sort_commits = "newest"
+# The mirror of the root cliff.toml's `exclude_paths`. Only commits touching the
+# protocol reach this changelog, which is what lets the two trains share a
+# history. The same directory list is `PROTOCOL_PATHS` in
+# scripts/lib/protocol.ts; protocol-lanes.unit.test.ts holds the two in step.
+#
+# This changelog is only ever **prepended** to, never regenerated — see
+# `scripts/protocol/release-prepare.ts`. The tree moved here from
+# juliopolycarpo/mango-protocol with its history and its original SHAs, and
+# those commits carry the *upstream* root-relative paths (`docs/**`,
+# `scripts/**`, `CHANGELOG.md`, …), which this repository's own directories now
+# occupy. Regenerating from history therefore cannot reproduce the 0.1.0 and
+# 0.2.0 sections: measured, 87 committed entries come back as 70, the 17 that
+# only ever touched an upstream root path are lost, and `protocol-v0.1.0` —
+# whose commit touched nothing but the upstream `CHANGELOG.md` — stops being a
+# release boundary, folding every 0.1.0 entry into 0.2.0. Widening the rules to
+# recover them pulls this repository's own commits in instead (measured: root
+# `CHANGELOG.md` brings in `refactor(scripts)` #261). Prepending sidesteps all
+# of it: the imported sections stay as upstream generated them, and these rules
+# only ever have to classify commits made since the merge, where the paths below
+# are the real ones.
+include_paths = [
+  "packages/protocol/**",
+  "crates/**",
+  "spec/**",
+  "docs/protocol/**",
+  "scripts/protocol/**",
+]

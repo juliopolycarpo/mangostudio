@@ -4,15 +4,8 @@
 # this file exists only to bound what gets extracted.
 name: mangostudio
 
-# `mango-protocol/` is the standalone protocol repository imported with its
-# history by plan 075, waiting to be relocated into `packages/protocol`,
-# `crates/mango-protocol` and `spec/`. Its TypeScript is published from its own
-# release train and has never been scanned by this repository's
-# security-extended suite, so extracting it would turn an unrelated alert into a
-# red "Code scanning results" check on the import pull request. The relocation
-# pull request drops this entry along with the directory.
-#
-# `paths-ignore` applies to interpreted languages, which is exactly the
-# `javascript-typescript` / `build-mode: none` analysis this repository runs.
+# Generated from the Mango Protocol spec by `bun run contracts:emit`, and
+# checked byte for byte by `bun run contracts:check`. Scanning emitted code
+# reports findings no edit here can fix.
 paths-ignore:
-  - mango-protocol
+  - apps/shared/src/runtime-contract/generated
