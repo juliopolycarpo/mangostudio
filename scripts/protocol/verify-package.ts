@@ -1,7 +1,7 @@
 /**
  * Proves the published `@mangostudio/protocol` tarball: packs it, installs it
- * into a throwaway project, and imports every subpath its published `exports`
- * declares.
+ * into a throwaway project, checks every file its published `exports` names is
+ * actually in there, and imports every subpath it declares.
  *
  * The workspace resolves this package from `src/` and the tarball from `dist/`
  * (see `packages/protocol/AGENTS.md`), so the published map, the `files` list
@@ -18,7 +18,12 @@ import { join } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
 import { withTempDir } from '../lib/fs';
 import { captureCommand, error, runCommand, success } from '../lib/runner';
-import { type ProtocolManifest, publishedSubpaths } from './package-contents';
+import {
+  exportTargets,
+  type ProtocolManifest,
+  publishedExports,
+  publishedSubpaths,
+} from './package-contents';
 
 const PACKAGE_DIR = join(ROOT_DIR, 'packages', 'protocol');
 const manifest = (await Bun.file(join(PACKAGE_DIR, 'package.json')).json()) as ProtocolManifest;
@@ -57,6 +62,14 @@ async function verifyPackage(workdir: string): Promise<number> {
   const install = await runCommand('install tarball', ['bun', 'add', tarball], { cwd: project });
   if (install.exitCode !== 0) return install.exitCode;
 
+  const absent = await missingTargets(join(project, 'node_modules', ...manifest.name.split('/')));
+  if (absent.length > 0) {
+    error(
+      `the published tarball declares ${absent.length} export target(s) it does not contain: ${absent.join(', ')}.`
+    );
+    return 1;
+  }
+
   // One process resolving every subpath, so a failure names the subpath instead
   // of aborting the lane on the first import.
   const subpaths = publishedSubpaths(manifest);
@@ -77,6 +90,29 @@ async function verifyPackage(workdir: string): Promise<number> {
   if (probed.exitCode !== 0) return probed.exitCode;
   success(`the published tarball resolves all ${specifiers.length} subpaths`);
   return 0;
+}
+
+/**
+ * Export targets the installed package does not contain. The probe above only
+ * exercises the condition a runtime `import()` picks — `default` — so a
+ * `types` entry pointing at a declaration the build never emitted would resolve
+ * fine here and fail in every consumer's editor. Wildcard targets are left to
+ * the probe, which substitutes a real document into them.
+ *
+ * @example
+ * await missingTargets('/tmp/x/node_modules/@mangostudio/protocol'); // []
+ */
+async function missingTargets(installed: string): Promise<string[]> {
+  const targets = exportTargets(publishedExports(manifest)).filter(
+    (target) => !target.includes('*')
+  );
+  const checked = await Promise.all(
+    targets.map(async (target) => ({
+      target,
+      exists: await Bun.file(join(installed, target)).exists(),
+    }))
+  );
+  return checked.filter((entry) => !entry.exists).map((entry) => entry.target);
 }
 
 /** The consumer-side probe: import each specifier, collect every failure. */
