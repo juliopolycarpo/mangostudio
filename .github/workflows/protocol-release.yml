@@ -7,10 +7,18 @@ name: Protocol Release
 # to a GitHub release with git-cliff notes.
 #
 # The tag prefix is what keeps the two trains apart: release.yml fires on an
-# anchored `v*.*.*`, which `protocol-v0.2.1` cannot match. Publish jobs run in
-# the `protocol-release` environment, whose deployment rule admits only
-# protocol-v* tags — deliberately not the `release` environment, which holds the
-# Homebrew/Scoop tokens this train has no business reaching.
+# anchored `v*.*.*`, which `protocol-v0.2.1` cannot match.
+#
+# Two things bind a run to its tag, and the workflow only owns the first. The
+# `resolve` step below refuses any ref that is not the exact `protocol-v$version`
+# tag, which is what makes `workflow_dispatch` — where the operator picks both
+# the ref and the version — as safe as the push trigger. The second is the
+# `protocol-release` environment every credential-bearing job names: it must be
+# provisioned with a deployment rule admitting only `protocol-v*` tags, and it is
+# deliberately not the `release` environment, which holds the Homebrew/Scoop
+# tokens this train has no business reaching. GitHub creates a named environment
+# on first use with no rules at all, so until that rule exists the `resolve`
+# guard is the only thing enforcing tag-only releases.
 
 on:
   push:
@@ -49,6 +57,7 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.version }}
           REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
         run: |
           set -euo pipefail
           if [ -n "$INPUT_VERSION" ]; then version="$INPUT_VERSION"; else version="${REF_NAME#protocol-v}"; fi
@@ -58,6 +67,15 @@ jobs:
               exit 1
               ;;
           esac
+          # A dispatch chooses its ref and its version separately, so the version
+          # is only trustworthy when the ref is the tag carrying it: otherwise a
+          # branch whose manifests happen to agree reaches the publish jobs and
+          # ships that branch's tree under the tag's name. On the push trigger
+          # the version is derived from the ref, so this can only hold.
+          if [ "$REF_TYPE" != "tag" ] || [ "$REF_NAME" != "protocol-v$version" ]; then
+            echo "::error::refusing to release $version from $REF_TYPE $REF_NAME; expected the tag protocol-v$version"
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           # A pre-release must not become the repository's latest GitHub release.
           case "$version" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
@@ -174,6 +192,7 @@ jobs:
     needs: [verify, npm, crate]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: protocol-release # `contents: write` belongs behind the same gate as the registries
     permissions:
       contents: write # `gh release create` writes the release and uploads the schema assets
     steps:

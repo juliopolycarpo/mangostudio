@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
 import {
@@ -20,6 +21,7 @@ import {
   type ToolchainProbe,
 } from '../protocol/tasks';
 import { readText } from './support/read-text';
+import { extractJobBlock, extractStepBlocks } from './support/workflow-blocks';
 
 // The protocol ships on its own version line from inside this repository. These
 // tests pin the two things that silently break when it does not: the tag prefix
@@ -381,4 +383,106 @@ describe('PROTOCOL_IMPORT_TIP', () => {
       expect(run(['merge-base', '--is-ancestor', PROTOCOL_IMPORT_TIP, 'HEAD']).ok).toBe(true);
     }
   );
+});
+
+// The release workflow's `resolve` step is the only thing standing between a
+// `workflow_dispatch` and the OIDC publish jobs: the operator picks the ref and
+// the version independently there, and the `protocol-release` environment that
+// is meant to be the second gate does not enforce a tag rule until someone
+// provisions one (GitHub creates a named environment on first use with none).
+// So the step is run here, as the shell actually runs it, rather than grepped.
+describe('the release workflow binds a run to its tag', () => {
+  const resolveScript = (): string => {
+    const workflow = readText('.github/workflows/protocol-release.yml');
+    const verify = extractJobBlock(workflow, 'verify');
+    const step = extractStepBlocks(verify).find((block) => /^\s*-\s+id: resolve\b/m.test(block));
+    expect(step, 'protocol-release.yml has no `id: resolve` step in the verify job').toBeDefined();
+    const body = /\n\s+run: \|\n([\s\S]*?)(?=\n {6}- |$)/.exec(step as string)?.[1];
+    expect(body, 'the resolve step has no `run: |` block').toBeDefined();
+    // Every line of a block scalar carries the same indent; strip it so the
+    // script runs the way the runner's shell receives it.
+    return (body as string).replace(/^ {10}/gm, '');
+  };
+
+  const resolve = (env: {
+    INPUT_VERSION?: string;
+    REF_NAME: string;
+    REF_TYPE: string;
+  }): { exitCode: number; version: string | null; stderr: string } => {
+    const outputFile = join(mkdtempSync(join(tmpdir(), 'protocol-resolve-')), 'GITHUB_OUTPUT');
+    writeFileSync(outputFile, '');
+    const proc = Bun.spawnSync({
+      cmd: ['bash', '-c', resolveScript()],
+      env: {
+        PATH: process.env.PATH ?? '',
+        GITHUB_OUTPUT: outputFile,
+        INPUT_VERSION: '',
+        ...env,
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const written = readFileSync(outputFile, 'utf8');
+    return {
+      exitCode: proc.exitCode,
+      version: /^version=(.*)$/m.exec(written)?.[1] ?? null,
+      stderr: proc.stdout.toString() + proc.stderr.toString(),
+    };
+  };
+
+  test('a pushed tag resolves to the version it carries', () => {
+    const pushed = resolve({ REF_NAME: 'protocol-v0.2.1', REF_TYPE: 'tag' });
+    expect(pushed.exitCode).toBe(0);
+    expect(pushed.version).toBe('0.2.1');
+  });
+
+  test('a dispatch from the matching tag is accepted', () => {
+    const dispatched = resolve({
+      INPUT_VERSION: '0.2.1',
+      REF_NAME: 'protocol-v0.2.1',
+      REF_TYPE: 'tag',
+    });
+    expect(dispatched.exitCode).toBe(0);
+    expect(dispatched.version).toBe('0.2.1');
+  });
+
+  test('a dispatch from a branch is refused, whatever version it names', () => {
+    // The manifests on a branch can agree with any version; nothing but the ref
+    // says which tree is being published under the tag's name.
+    const branch = resolve({ INPUT_VERSION: '0.2.1', REF_NAME: 'main', REF_TYPE: 'branch' });
+    expect(branch.exitCode).not.toBe(0);
+    expect(branch.version).toBeNull();
+    expect(branch.stderr).toContain('expected the tag protocol-v0.2.1');
+  });
+
+  test('a dispatch from a tag that is not the version it names is refused', () => {
+    const mismatched = resolve({
+      INPUT_VERSION: '0.2.1',
+      REF_NAME: 'protocol-v0.2.0',
+      REF_TYPE: 'tag',
+    });
+    expect(mismatched.exitCode).not.toBe(0);
+    expect(mismatched.version).toBeNull();
+    expect(mismatched.stderr).toContain('expected the tag protocol-v0.2.1');
+  });
+
+  test('a version that is not semver-shaped is still refused first', () => {
+    const injected = resolve({
+      INPUT_VERSION: '0.2.1; rm -rf /',
+      REF_NAME: 'protocol-v0.2.1',
+      REF_TYPE: 'tag',
+    });
+    expect(injected.exitCode).not.toBe(0);
+    expect(injected.stderr).toContain('not semver-shaped');
+  });
+
+  test('every credential-bearing job names the protected environment', () => {
+    // `github-release` holds `contents: write`; leaving it outside the
+    // environment left the release and its assets ungated once the deployment
+    // rule exists.
+    const workflow = readText('.github/workflows/protocol-release.yml');
+    for (const job of ['npm', 'crate', 'github-release']) {
+      expect(extractJobBlock(workflow, job), job).toContain('environment: protocol-release');
+    }
+  });
 });
