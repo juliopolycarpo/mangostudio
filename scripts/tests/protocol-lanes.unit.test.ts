@@ -498,3 +498,113 @@ describe('the release workflow binds a run to its tag', () => {
     }
   });
 });
+
+// A tag is not a review gate. Creating `protocol-v*` is unrestricted — the
+// `release tags` ruleset only makes one immutable once pushed — so any commit
+// in the repository can carry one, including a commit that never opened a pull
+// request. `main` is the only ref whose ruleset enforces review, thread
+// resolution, signed commits and the required checks. This step is what ties a
+// release to that gate, so it is run against real repositories rather than
+// grepped.
+describe('the release workflow refuses a tag that is not on main', () => {
+  const ancestryScript = (): string => {
+    const workflow = readText('.github/workflows/protocol-release.yml');
+    const verify = extractJobBlock(workflow, 'verify');
+    const step = extractStepBlocks(verify).find((block) => /^\s*-\s+id: ancestry\b/m.test(block));
+    expect(step, 'protocol-release.yml has no `id: ancestry` step in the verify job').toBeDefined();
+    const body = /\n\s+run: \|\n([\s\S]*?)(?=\n {6}- |$)/.exec(step as string)?.[1];
+    expect(body, 'the ancestry step has no `run: |` block').toBeDefined();
+    return (body as string).replace(/^ {10}/gm, '');
+  };
+
+  const git = (cwd: string, ...args: string[]): string => {
+    const proc = Bun.spawnSync({
+      cmd: ['git', ...args],
+      cwd,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'T',
+        GIT_AUTHOR_EMAIL: 't@example.com',
+        GIT_COMMITTER_NAME: 'T',
+        GIT_COMMITTER_EMAIL: 't@example.com',
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_SYSTEM: '/dev/null',
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    if (proc.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${proc.stderr.toString()}`);
+    return proc.stdout.toString().trim();
+  };
+
+  const commit = (repo: string, message: string): string => {
+    writeFileSync(join(repo, `${message}.txt`), message);
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '--no-gpg-sign', '-m', message);
+    return git(repo, 'rev-parse', 'HEAD');
+  };
+
+  /**
+   * A repository with two commits on main and one on a side branch that was
+   * never merged — the shape of a tag cut from an unreviewed branch.
+   */
+  const scenario = (): { repo: string; first: string; head: string; side: string } => {
+    const repo = mkdtempSync(join(tmpdir(), 'ancestry-'));
+    git(repo, 'init', '--initial-branch=main', '--quiet');
+    const first = commit(repo, 'first');
+    const head = commit(repo, 'second');
+    git(repo, 'checkout', '--quiet', '-b', 'side', first);
+    const side = commit(repo, 'unreviewed');
+    git(repo, 'checkout', '--quiet', 'main');
+    // `actions/checkout` leaves main as a remote-tracking ref, not a branch.
+    git(repo, 'update-ref', 'refs/remotes/origin/main', head);
+    return { repo, first, head, side };
+  };
+
+  const runAt = (repo: string, sha: string): { exitCode: number; output: string } => {
+    git(repo, 'checkout', '--quiet', '--detach', sha);
+    const proc = Bun.spawnSync({
+      cmd: ['bash', '-c', ancestryScript()],
+      cwd: repo,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    return { exitCode: proc.exitCode, output: proc.stdout.toString() + proc.stderr.toString() };
+  };
+
+  test('accepts the tip of main', () => {
+    const { repo, head } = scenario();
+    expect(runAt(repo, head).exitCode).toBe(0);
+  });
+
+  test('accepts an older commit that is still an ancestor of main', () => {
+    // Tagging a commit main has since moved past is ordinary, not suspicious.
+    const { repo, first } = scenario();
+    expect(runAt(repo, first).exitCode).toBe(0);
+  });
+
+  test('refuses a commit on a branch that never merged', () => {
+    const { repo, side } = scenario();
+    const result = runAt(repo, side);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain('not an ancestor of origin/main');
+  });
+
+  test('refuses to pass when origin/main is missing rather than assuming', () => {
+    // A depth-1 checkout has no origin/main. Without this branch `merge-base`
+    // errors on an unknown revision and the step could be read as a pass.
+    const { repo, head } = scenario();
+    git(repo, 'update-ref', '-d', 'refs/remotes/origin/main');
+    const result = runAt(repo, head);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain('fetch-depth: 0');
+  });
+
+  test('the verify checkout fetches the history the step needs', () => {
+    // The guard is only as good as the ref it reads; a default depth-1 checkout
+    // would make it fail closed on every release instead of only bad ones.
+    const verify = extractJobBlock(readText('.github/workflows/protocol-release.yml'), 'verify');
+    const checkout = extractStepBlocks(verify).find((block) => block.includes('actions/checkout@'));
+    expect(checkout).toContain('fetch-depth: 0');
+  });
+});

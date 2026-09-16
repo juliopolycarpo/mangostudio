@@ -56,6 +56,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Full history and every branch ref: the ancestry check below needs a
+          # merge base between the tag and origin/main, and the default depth-1
+          # checkout has neither the history nor the ref.
+          fetch-depth: 0
           persist-credentials: false
       - id: resolve
         name: Resolve the version from the tag
@@ -87,6 +91,27 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           # A pre-release must not become the repository's latest GitHub release.
           case "$version" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
+      - id: ancestry
+        name: The tag is on main
+        # A tag is not a review gate: any commit in the repository can carry
+        # one, including a commit that never opened a pull request. `main` is
+        # the only ref whose ruleset enforces review, thread resolution, signed
+        # commits and the required checks, so a commit that is not an ancestor
+        # of it was gated by none of them. The two guards above prove the *ref*
+        # is a release tag; this is the only thing proving the *code* was
+        # reviewed. The `release tags` ruleset makes a release tag immutable
+        # once pushed, but it does not restrict *creating* one and says nothing
+        # about the commit underneath, so nothing upstream makes this claim.
+        run: |
+          set -euo pipefail
+          if ! git rev-parse --verify --quiet origin/main >/dev/null; then
+            echo "::error::origin/main is missing; the checkout needs fetch-depth: 0 for the ancestry check"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::refusing to release $(git rev-parse HEAD): not an ancestor of origin/main, so it never passed the pull request gate"
+            exit 1
+          fi
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
