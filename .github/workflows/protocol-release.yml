@@ -259,9 +259,22 @@ jobs:
           # published release cannot be edited or deleted to make room for a
           # second attempt — skipping is the only recovery, and it has to be
           # deliberate rather than a `gh` error nobody expected.
-          if gh release view "protocol-v$VERSION" >/dev/null 2>&1; then
-            echo "the GitHub release for protocol-v$VERSION already exists; skipping"
-            exit 0
+          #
+          # Existence alone is the wrong question. `gh release create` with
+          # assets is three calls — draft, upload, publish — and a failure
+          # after the first leaves a *draft* that `gh release view` reports
+          # just as happily. Skipping on that would exit 0 with the release
+          # unpublished and its assets possibly half-uploaded, and every rerun
+          # would keep reporting success. A draft is still mutable, so the
+          # recovery is real: delete it and run again.
+          if state=$(gh release view "protocol-v$VERSION" --json isDraft \
+              --jq 'if .isDraft then "draft" else "published" end' 2>/dev/null); then
+            if [ "$state" = "published" ]; then
+              echo "the GitHub release for protocol-v$VERSION is already published; skipping"
+              exit 0
+            fi
+            echo "::error::a draft release for protocol-v$VERSION is left over from a failed attempt and its assets may be incomplete; delete it with 'gh release delete protocol-v$VERSION --cleanup-tag=false' and rerun"
+            exit 1
           fi
           cp spec/schema/1/protocol.json mango-protocol-schema-1-protocol.json
           cp spec/schema/1/catalog.json mango-protocol-schema-1-catalog.json

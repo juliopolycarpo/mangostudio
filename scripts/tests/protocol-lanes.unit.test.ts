@@ -626,8 +626,11 @@ describe('the release job is rerunnable under immutability', () => {
     return (body as string).replace(/^ {10}/gm, '');
   };
 
+  /** What `gh release view` finds: nothing, a half-finished draft, or a published release. */
+  type ReleaseState = 'absent' | 'draft' | 'published';
+
   /** A workspace with the files the step copies, and a `gh` that records its argv. */
-  const workspace = (releaseExists: boolean): { dir: string; log: string } => {
+  const workspace = (state: ReleaseState): { dir: string; log: string } => {
     const dir = mkdtempSync(join(tmpdir(), 'release-step-'));
     mkdirSync(join(dir, 'spec', 'schema', '1'), { recursive: true });
     writeFileSync(join(dir, 'spec', 'schema', '1', 'protocol.json'), '{}');
@@ -637,10 +640,16 @@ describe('the release job is rerunnable under immutability', () => {
     const bin = join(dir, 'bin');
     const log = join(dir, 'gh.log');
     mkdirSync(bin, { recursive: true });
+    // `gh release view` is the branch under test: absent exits non-zero, and
+    // both draft and published succeed — which is the distinction the step has
+    // to make and the earlier guard did not.
+    const viewBranch = state === 'absent' ? '  exit 1' : `  echo ${state}\n  exit 0`;
     writeFileSync(
       join(bin, 'gh'),
       `#!/bin/sh
-if [ "$1" = "release" ] && [ "$2" = "view" ]; then exit ${releaseExists ? '0' : '1'}; fi
+if [ "$1" = "release" ] && [ "$2" = "view" ]; then
+${viewBranch}
+fi
 printf '%s\\n' "$*" >> ${JSON.stringify(log)}
 exit 0
 `,
@@ -650,10 +659,10 @@ exit 0
   };
 
   const run = (
-    releaseExists: boolean,
+    state: ReleaseState,
     prerelease: string
   ): { exitCode: number; stdout: string; ghCalls: string } => {
-    const { dir, log } = workspace(releaseExists);
+    const { dir, log } = workspace(state);
     const proc = Bun.spawnSync({
       cmd: ['bash', '-c', releaseScript()],
       cwd: dir,
@@ -674,7 +683,7 @@ exit 0
   };
 
   test('creates the release when none exists, verifying the tag it was given', () => {
-    const result = run(false, 'false');
+    const result = run('absent', 'false');
     expect(result.exitCode).toBe(0);
     expect(result.ghCalls).toContain('release create protocol-v0.2.1');
     // Without --verify-tag, gh invents a tag from the default branch — an
@@ -685,16 +694,28 @@ exit 0
     expect(result.ghCalls).not.toContain('--prerelease');
   });
 
-  test('skips instead of failing when the release already exists', () => {
+  test('skips instead of failing when the release is already published', () => {
     // The whole point: an immutable release cannot be replaced, so a rerun of
     // a partially failed release must not die here.
-    const result = run(true, 'false');
+    const result = run('published', 'false');
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain('already exists; skipping');
+    expect(result.stdout).toContain('already published; skipping');
+    expect(result.ghCalls).toBe('');
+  });
+
+  test('refuses a leftover draft rather than reporting success over it', () => {
+    // `gh release create` with assets is draft, upload, publish. A failure
+    // after the first leaves a draft that `gh release view` reports just as
+    // happily as a published release — skipping on mere existence would exit 0
+    // with nothing published and every rerun would keep saying it was fine.
+    const result = run('draft', 'false');
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toContain('draft release');
+    expect(result.stdout).toContain('gh release delete');
     expect(result.ghCalls).toBe('');
   });
 
   test('marks a pre-release version as one', () => {
-    expect(run(false, 'true').ghCalls).toContain('--prerelease');
+    expect(run('absent', 'true').ghCalls).toContain('--prerelease');
   });
 });
