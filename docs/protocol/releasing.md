@@ -36,9 +36,10 @@ deliberately not one of the manifests below.
    ```
 
 3. Review the diff and merge the release preparation through a pull request. After it lands,
-   tag the commit on `main`. The tag must be signed and its commit must be reachable from
-   `origin/main`; a commit from the preparation branch that was rewritten by a squash merge
-   will be refused.
+   tag the commit on `main`. The workflow verifies that the exact tag exists and its commit is
+   reachable from `origin/main`; a commit from the preparation branch that was rewritten by a
+   squash merge will be refused. The release procedure uses a signed tag, but the workflow does
+   not verify the tag signature.
 
    ```sh
    git switch main

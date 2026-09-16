@@ -1,7 +1,7 @@
 name: Protocol Release
 
-# Cut a Mango Protocol release from a signed protocol-v* tag: verify the
-# manifests agree with the tag, run both lanes, publish @mangostudio/protocol to
+# Cut a Mango Protocol release from a protocol-v* tag: verify the manifests
+# agree with the tag, run both lanes, publish @mangostudio/protocol to
 # npm through trusted publishing (OIDC, no stored token), publish mango-protocol
 # to crates.io through crates.io trusted publishing, and attach the schema files
 # to a GitHub release with git-cliff notes.
@@ -254,11 +254,11 @@ jobs:
         run: |
           set -euo pipefail
           # Re-runnable, like the npm and crates.io jobs: a rerun after a
-          # partial failure must not die here on a release that already
-          # landed. Release immutability is enabled on this repository, so a
-          # published release cannot be edited or deleted to make room for a
-          # second attempt — skipping is the only recovery, and it has to be
-          # deliberate rather than a `gh` error nobody expected.
+          # partial failure must not die here on a complete release that
+          # already landed. Release immutability is enabled on this repository,
+          # so a published release cannot be edited or deleted to make room for
+          # a second attempt. Skipping needs to prove its two schema assets are
+          # already there, rather than treating existence as completeness.
           #
           # Existence alone is the wrong question. `gh release create` with
           # assets is three calls — draft, upload, publish — and a failure
@@ -267,14 +267,26 @@ jobs:
           # unpublished and its assets possibly half-uploaded, and every rerun
           # would keep reporting success. A draft is still mutable, so the
           # recovery is real: delete it and run again.
-          if state=$(gh release view "protocol-v$VERSION" --json isDraft \
-              --jq 'if .isDraft then "draft" else "published" end' 2>/dev/null); then
-            if [ "$state" = "published" ]; then
-              echo "the GitHub release for protocol-v$VERSION is already published; skipping"
-              exit 0
-            fi
-            echo "::error::a draft release for protocol-v$VERSION is left over from a failed attempt and its assets may be incomplete; delete it with 'gh release delete protocol-v$VERSION --cleanup-tag=false' and rerun"
-            exit 1
+          if state=$(gh release view "protocol-v$VERSION" --json isDraft,assets \
+              --jq 'if .isDraft then "draft" elif ([.assets[].name] | index("mango-protocol-schema-1-protocol.json") and index("mango-protocol-schema-1-catalog.json")) then "published" else "published-incomplete" end' 2>/dev/null); then
+            case "$state" in
+              published)
+                echo "the GitHub release for protocol-v$VERSION is already published with the required schema assets; skipping"
+                exit 0
+                ;;
+              draft)
+                echo "::error::a draft release for protocol-v$VERSION is left over from a failed attempt and its assets may be incomplete; delete it with 'gh release delete protocol-v$VERSION --cleanup-tag=false' and rerun"
+                exit 1
+                ;;
+              published-incomplete)
+                echo "::error::published release for protocol-v$VERSION is missing required schema assets; release immutability prevents repair. Inspect it and cut the next patch release."
+                exit 1
+                ;;
+              *)
+                echo "::error::unexpected GitHub release state for protocol-v$VERSION: $state"
+                exit 1
+                ;;
+            esac
           fi
           cp spec/schema/1/protocol.json mango-protocol-schema-1-protocol.json
           cp spec/schema/1/catalog.json mango-protocol-schema-1-catalog.json

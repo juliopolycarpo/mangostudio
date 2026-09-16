@@ -626,11 +626,11 @@ describe('the release job is rerunnable under immutability', () => {
     return (body as string).replace(/^ {10}/gm, '');
   };
 
-  /** What `gh release view` finds: nothing, a half-finished draft, or a published release. */
-  type ReleaseState = 'absent' | 'draft' | 'published';
+  /** What `gh release view` finds: nothing, a draft, or a published release with its assets. */
+  type ReleaseState = 'absent' | 'draft' | 'published' | 'published-incomplete';
 
   /** A workspace with the files the step copies, and a `gh` that records its argv. */
-  const workspace = (state: ReleaseState): { dir: string; log: string } => {
+  const workspace = (state: ReleaseState): { dir: string; log: string; viewLog: string } => {
     const dir = mkdtempSync(join(tmpdir(), 'release-step-'));
     mkdirSync(join(dir, 'spec', 'schema', '1'), { recursive: true });
     writeFileSync(join(dir, 'spec', 'schema', '1', 'protocol.json'), '{}');
@@ -639,11 +639,15 @@ describe('the release job is rerunnable under immutability', () => {
 
     const bin = join(dir, 'bin');
     const log = join(dir, 'gh.log');
+    const viewLog = join(dir, 'gh-view.log');
     mkdirSync(bin, { recursive: true });
     // `gh release view` is the branch under test: absent exits non-zero, and
     // both draft and published succeed — which is the distinction the step has
     // to make and the earlier guard did not.
-    const viewBranch = state === 'absent' ? '  exit 1' : `  echo ${state}\n  exit 0`;
+    const viewBranch =
+      state === 'absent'
+        ? '  exit 1'
+        : `  printf '%s\\n' "$*" >> ${JSON.stringify(viewLog)}\n  echo ${state}\n  exit 0`;
     writeFileSync(
       join(bin, 'gh'),
       `#!/bin/sh
@@ -655,14 +659,14 @@ exit 0
 `,
       { mode: 0o755 }
     );
-    return { dir, log };
+    return { dir, log, viewLog };
   };
 
   const run = (
     state: ReleaseState,
     prerelease: string
-  ): { exitCode: number; stdout: string; ghCalls: string } => {
-    const { dir, log } = workspace(state);
+  ): { exitCode: number; stdout: string; ghCalls: string; ghViewCalls: string } => {
+    const { dir, log, viewLog } = workspace(state);
     const proc = Bun.spawnSync({
       cmd: ['bash', '-c', releaseScript()],
       cwd: dir,
@@ -679,6 +683,7 @@ exit 0
       exitCode: proc.exitCode,
       stdout: proc.stdout.toString() + proc.stderr.toString(),
       ghCalls: existsSync(log) ? readFileSync(log, 'utf8') : '',
+      ghViewCalls: existsSync(viewLog) ? readFileSync(viewLog, 'utf8') : '',
     };
   };
 
@@ -699,8 +704,18 @@ exit 0
     // a partially failed release must not die here.
     const result = run('published', 'false');
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain('already published; skipping');
+    expect(result.stdout).toContain('already published with the required schema assets; skipping');
     expect(result.ghCalls).toBe('');
+  });
+
+  test('refuses a published release missing either required schema asset', () => {
+    const result = run('published-incomplete', 'false');
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toContain(
+      'published release for protocol-v0.2.1 is missing required schema assets'
+    );
+    expect(result.ghCalls).toBe('');
+    expect(result.ghViewCalls).toContain('--json isDraft,assets');
   });
 
   test('refuses a leftover draft rather than reporting success over it', () => {
@@ -713,6 +728,13 @@ exit 0
     expect(result.stdout).toContain('draft release');
     expect(result.stdout).toContain('gh release delete');
     expect(result.ghCalls).toBe('');
+  });
+
+  test('documents the tag guarantees the workflow actually enforces', () => {
+    expect(readText('.github/workflows/protocol-release.yml')).not.toContain(
+      'signed protocol-v* tag'
+    );
+    expect(readText('docs/protocol/releasing.md')).toMatch(/does\s+not verify the tag signature/);
   });
 
   test('marks a pre-release version as one', () => {
