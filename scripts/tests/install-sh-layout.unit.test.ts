@@ -399,11 +399,37 @@ describe('install.sh layout', () => {
 });
 
 describe('install.sh internals (network-free)', () => {
-  test('extract_canary_tag picks the first *-canary tag_name', () => {
+  test('extract_canary_tag picks the newest per-commit canary tag_name', () => {
+    // GitHub lists newest first, and canary now cuts one release per green
+    // commit, so the first match is the build to install.
+    const releasesJson = JSON.stringify([
+      { tag_name: 'v0.1.2', prerelease: false },
+      { tag_name: 'v0.1.1-canary.abc1234', prerelease: true },
+      { tag_name: 'v0.1.1-canary.9876543', prerelease: true },
+      { tag_name: 'v0.1.0', prerelease: false },
+    ]);
+
+    const result = sourceAndCall(`extract_canary_tag '${releasesJson}'`);
+
+    expect(result.stdout.trim()).toBe('v0.1.1-canary.abc1234');
+  });
+
+  test('extract_canary_tag accepts a git-describe style sha identifier', () => {
+    // A short sha that is all digits with a leading zero is an illegal semver
+    // numeric identifier, so the release scripts write it `g`-prefixed.
+    const releasesJson = JSON.stringify([{ tag_name: 'v0.1.1-canary.g0123456', prerelease: true }]);
+
+    const result = sourceAndCall(`extract_canary_tag '${releasesJson}'`);
+
+    expect(result.stdout.trim()).toBe('v0.1.1-canary.g0123456');
+  });
+
+  test('extract_canary_tag still resolves the frozen rolling tag', () => {
+    // Pre-2026-09 releases carry no sha suffix. The release is immutable and
+    // still serves the last rolling build, so an old install must keep working.
     const releasesJson = JSON.stringify([
       { tag_name: 'v0.1.2', prerelease: false },
       { tag_name: 'v0.1.1-canary', prerelease: true },
-      { tag_name: 'v0.1.0', prerelease: false },
     ]);
 
     const result = sourceAndCall(`extract_canary_tag '${releasesJson}'`);

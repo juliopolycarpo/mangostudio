@@ -801,3 +801,43 @@ describe('install.ps1 layout (real windows-x64 exe required)', () => {
     90000
   );
 });
+
+describe('install.ps1 canary tag selection', () => {
+  // Mirrors `extract_canary_tag` in install.sh: canary cuts one release per
+  // green commit, GitHub lists newest first, and the frozen pre-2026-09 rolling
+  // tag (no sha suffix) must still resolve for an older install.
+  const releases = (...tags: readonly string[]) =>
+    `@(${tags.map((tag) => `[pscustomobject]@{ tag_name = '${tag}' }`).join(', ')})`;
+
+  const selectFrom = (...tags: readonly string[]) =>
+    runDotSourced(
+      layout().scriptPath,
+      `Write-Output ('tag=' + (Select-CanaryTag ${releases(...tags)}))`
+    );
+
+  test.skipIf(!POWERSHELL)('picks the newest per-commit canary tag', () => {
+    const result = selectFrom('v0.1.2', 'v0.1.1-canary.abc1234', 'v0.1.1-canary.9876543');
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('tag=v0.1.1-canary.abc1234');
+  });
+
+  test.skipIf(!POWERSHELL)('accepts a git-describe style sha identifier', () => {
+    const result = selectFrom('v0.1.1-canary.g0123456');
+
+    expect(result.stdout).toContain('tag=v0.1.1-canary.g0123456');
+  });
+
+  test.skipIf(!POWERSHELL)('still resolves the frozen rolling tag', () => {
+    const result = selectFrom('v0.1.2', 'v0.1.1-canary');
+
+    expect(result.stdout).toContain('tag=v0.1.1-canary');
+  });
+
+  test.skipIf(!POWERSHELL)('selects nothing when no release is canary', () => {
+    const result = selectFrom('v0.1.2', 'v0.2.0-rc.1');
+
+    expect(result.stdout).toContain('tag=');
+    expect(result.stdout).not.toContain('canary');
+  });
+});
