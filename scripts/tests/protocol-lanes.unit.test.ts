@@ -13,7 +13,12 @@ import {
   protocolVersion,
   touchesProtocolSurface,
 } from '../lib/protocol';
-import { protocolCheckTasks, protocolTestTasks, selectLanes } from '../protocol/tasks';
+import {
+  protocolCheckTasks,
+  protocolTestTasks,
+  selectLanes,
+  type ToolchainProbe,
+} from '../protocol/tasks';
 import { readText } from './support/read-text';
 
 // The protocol ships on its own version line from inside this repository. These
@@ -127,6 +132,11 @@ describe('protocol lane selection', () => {
   const labels = (tasks: ReadonlyArray<{ label: string }>): string[] =>
     tasks.map((task) => task.label);
 
+  // Injected rather than read from PATH, so these assertions describe the same
+  // machine whether or not the developer running them has a Rust toolchain.
+  const INSTALLED: ToolchainProbe = { cargo: true, cargoHack: true };
+  const BARE: ToolchainProbe = { cargo: false, cargoHack: false };
+
   test('--ts-only produces no cargo lane, whatever the machine has installed', () => {
     // This is what scripts/check.ts and scripts/test.ts pass: CI's Check job has
     // a 10-minute budget and GitHub's Linux runners ship a Rust toolchain, so a
@@ -162,7 +172,7 @@ describe('protocol lane selection', () => {
   });
 
   test('--rs-only drops the TypeScript lanes and the cross-language round trip', () => {
-    const cmds = labels(protocolCheckTasks(['--rs-only']));
+    const cmds = labels(protocolCheckTasks(['--rs-only'], INSTALLED));
     expect(cmds).not.toContain('protocol:workspace');
     expect(cmds).not.toContain('protocol:verify-spec');
     // The round trip drives the Rust decoder from the TypeScript encoder, so it
@@ -179,6 +189,47 @@ describe('protocol lane selection', () => {
   test('extra bun arguments are appended after the package path', () => {
     const [suite] = protocolTestTasks(['--ts-only'], ['--test-name-pattern', 'codec']);
     expect(suite?.cmd.slice(-3)).toEqual(['packages/protocol', '--test-name-pattern', 'codec']);
+  });
+
+  // An empty task list is reported as "All tasks passed." A run narrowed to
+  // Rust that produced one was therefore a green over nothing — the one shape
+  // where the graceful skip below is a false positive rather than a courtesy.
+  test('--rs-only without cargo is refused, not silently reduced to nothing', () => {
+    expect(() => protocolCheckTasks(['--rs-only'], BARE)).toThrow(
+      'Received --rs-only but cargo is not on PATH; install a Rust toolchain, or drop the flag to run the TypeScript half.'
+    );
+    expect(() => protocolTestTasks(['--rs-only'], [], BARE)).toThrow(
+      'Received --rs-only but cargo is not on PATH; install a Rust toolchain, or drop the flag to run the TypeScript half.'
+    );
+  });
+
+  test('a combined run without cargo still degrades to the TypeScript half', () => {
+    // The courtesy this repository documents: a contributor with no Rust
+    // toolchain gets `bun run check` passing on the half they can run.
+    expect(labels(protocolCheckTasks([], BARE))).toEqual([
+      'protocol:workspace',
+      'protocol:versions',
+      'protocol:verify-spec',
+      'protocol:schema-equality',
+      'protocol:fixtures:chunks',
+      'protocol:fixtures:ssh-argv',
+      'protocol:fixtures:catalog-example',
+    ]);
+    expect(labels(protocolTestTasks([], [], BARE))).toEqual(['protocol:bun-test']);
+  });
+
+  test('--ts-only without cargo is unaffected, since it asked for no Rust', () => {
+    expect(() => protocolCheckTasks(['--ts-only'], BARE)).not.toThrow();
+    expect(() => protocolTestTasks(['--ts-only'], [], BARE)).not.toThrow();
+  });
+
+  test('the feature-powerset lane appears only when cargo-hack is installed', () => {
+    expect(labels(protocolCheckTasks(['--rs-only'], INSTALLED))).toContain(
+      'protocol:feature-powerset'
+    );
+    expect(
+      labels(protocolCheckTasks(['--rs-only'], { cargo: true, cargoHack: false }))
+    ).not.toContain('protocol:feature-powerset');
   });
 });
 

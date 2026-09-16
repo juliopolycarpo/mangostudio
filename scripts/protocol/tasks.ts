@@ -15,6 +15,35 @@ export interface ProtocolTask {
   readonly env?: Record<string, string>;
 }
 
+/**
+ * What the machine running the lanes has installed. Injected so a test can ask
+ * for the toolchain-less machine without mocking `./toolchain`, whose module
+ * namespace this file imports four symbols from.
+ */
+export interface ToolchainProbe {
+  readonly cargo: boolean;
+  readonly cargoHack: boolean;
+}
+
+/** What is actually on PATH; the default for both selectors. */
+function probeToolchain(): ToolchainProbe {
+  return { cargo: hasCargo(), cargoHack: hasCargoHack() };
+}
+
+/**
+ * A run narrowed to Rust must find the toolchain it asked for. The default
+ * combined run still degrades to the TypeScript half with a warning, but
+ * `--rs-only` with no Cargo produced an empty task list, and an empty list is
+ * reported as "All tasks passed." — a green for the one command that explicitly
+ * asked for Rust validation and ran none of it.
+ */
+function assertRustToolchain(typescript: boolean, cargo: boolean): void {
+  if (typescript || cargo) return;
+  throw new Error(
+    'Received --rs-only but cargo is not on PATH; install a Rust toolchain, or drop the flag to run the TypeScript half.'
+  );
+}
+
 /** Which halves of the contract a flag set selects. */
 export interface ProtocolLaneSelection {
   readonly typescript: boolean;
@@ -124,25 +153,29 @@ function rustCheckTasks(format: boolean, cargoHack: boolean): ProtocolTask[] {
 /**
  * The `bun run check` protocol lanes for a flag set. Rust lanes are omitted
  * with a warning when no toolchain is present, so a contributor without Cargo
- * still gets the TypeScript half rather than a failure.
+ * still gets the TypeScript half rather than a failure — unless `--rs-only`
+ * asked for that half alone, which is refused rather than passing on nothing.
  *
  * @example
  * protocolCheckTasks([]).map((task) => task.label);
  */
-export function protocolCheckTasks(args: readonly string[]): ProtocolTask[] {
+export function protocolCheckTasks(
+  args: readonly string[],
+  probe: ToolchainProbe = probeToolchain()
+): ProtocolTask[] {
   const { typescript, rust, format } = selectLanes(args);
-  const cargo = hasCargo();
+  const { cargo, cargoHack } = probe;
   const tasks: ProtocolTask[] = [];
 
   if (typescript) tasks.push(...typescriptCheckTasks(!rust, cargo));
 
   if (!rust) return tasks;
+  assertRustToolchain(typescript, cargo);
   if (!cargo) {
     warnNoCargo();
     return tasks;
   }
 
-  const cargoHack = hasCargoHack();
   if (!cargoHack) warnNoCargoHack();
   tasks.push(...rustCheckTasks(format, cargoHack));
   // The round trip drives the Rust decoder from the TypeScript encoder, so it
@@ -159,17 +192,19 @@ export function protocolCheckTasks(args: readonly string[]): ProtocolTask[] {
 /**
  * The `bun run test` protocol lanes. `MANGO_INTEROP` turns on the suites that
  * drive the Rust conformance example from TypeScript; without a toolchain they
- * skip themselves, which is what keeps a `--ts-only` run toolchain-free.
+ * skip themselves, which is what keeps a `--ts-only` run toolchain-free. As in
+ * `protocolCheckTasks`, `--rs-only` on a machine without Cargo is refused.
  *
  * @example
  * protocolTestTasks(['--ts-only'], []).map((task) => task.label);
  */
 export function protocolTestTasks(
   args: readonly string[],
-  bunTestArgs: readonly string[] = []
+  bunTestArgs: readonly string[] = [],
+  probe: ToolchainProbe = probeToolchain()
 ): ProtocolTask[] {
   const { typescript, rust } = selectLanes(args);
-  const cargo = hasCargo();
+  const { cargo } = probe;
   const tasks: ProtocolTask[] = [];
 
   if (typescript) {
@@ -181,6 +216,7 @@ export function protocolTestTasks(
   }
 
   if (!rust) return tasks;
+  assertRustToolchain(typescript, cargo);
   if (!cargo) {
     warnNoCargo();
     return tasks;
