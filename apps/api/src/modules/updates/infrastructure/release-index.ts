@@ -1,7 +1,6 @@
 /**
  * The GitHub side of resolving an upgrade target: which tag "stable latest"
- * and "canary latest" currently mean, and the rolling canary tag's provenance
- * manifest.
+ * and "canary latest" currently mean, and that tag's provenance manifest.
  *
  * `releaseAssetUrl`, `findReleaseChecksum` and the manifest parser already
  * exist for the runtime-provisioning paths (`wsl-runtime-release.ts`,
@@ -118,11 +117,9 @@ export async function resolveLatestCanaryVersion(deps: SafeFetchDeps): Promise<s
 
 /**
  * A canary tag's provenance manifest, or null when the tag predates the
- * manifest — the same tolerated fallback `checkRollingPair` uses for runtime
- * provisioning. Unlike that helper, this one makes no claim about whether the
- * *running* hub may install what the tag serves: it is read here purely to
- * report the sha-stamped version and source commit of an upgrade *target*,
- * which is expected to differ from the current build.
+ * manifest — the same tolerated fallback `parseCanaryManifest` documents. It
+ * is read purely to report the sha-stamped version and source commit of an
+ * upgrade *target*, which is expected to differ from the current build.
  * // Usage: fetchCanaryManifestForTag({ fetch }, '0.2.0-canary.abc1234')
  */
 export async function fetchCanaryManifestForTag(

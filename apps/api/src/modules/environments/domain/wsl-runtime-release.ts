@@ -210,7 +210,7 @@ export function distroRuntimeConfigAfterInstall(params: {
   readonly home: string;
   readonly version: string;
   readonly digest: string;
-  /** Source commit, for a rolling build whose version does not name one. */
+  /** Source commit, when the caller has one to record beside the binary. */
   readonly sourceSha?: string | undefined;
   readonly hubVersion: string;
   readonly hubHost: string;
@@ -228,8 +228,8 @@ export function distroRuntimeConfigAfterInstall(params: {
     }),
     digest: params.digest,
     // Cleared, not carried, when this install has no commit to record: a
-    // stale sha left over from a previous rolling install would claim this
-    // slot holds a build it does not.
+    // stale sha left over from an earlier install would claim this slot holds
+    // a build it does not.
     ...(params.sourceSha ? { sourceSha: params.sourceSha } : { sourceSha: undefined }),
     installedBy: {
       hubVersion: params.hubVersion,

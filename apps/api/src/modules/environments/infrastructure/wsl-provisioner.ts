@@ -35,12 +35,6 @@ import {
   safeFetchBytes,
 } from '../../../lib/safe-fetch';
 import {
-  CANARY_MANIFEST_ASSET,
-  type CanaryManifest,
-  checkRollingPair,
-  manifestRuntimeDigest,
-} from '../domain/canary-manifest';
-import {
   pushRuntimeBinary,
   type RuntimeCommandOptions,
   type RuntimeCommandResult,
@@ -231,7 +225,7 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
         return;
 
       await install(deps, distro, version, platformId, source, signal, options.onTransferProgress);
-      await recordInstall(deps, distro, version, slot, digest, source.sourceSha);
+      await recordInstall(deps, distro, version, slot, digest);
       // First provision only: an upgrade replaces bytes, never the answer
       // somebody gave about what a hub may do inside this distribution. A
       // config that could not be read is neither case — `recordInstall` left
@@ -293,19 +287,12 @@ async function loadSource(
   return { fromArchive: false, bytes, digest: sha256(bytes), offlineCache: false };
 }
 
-/**
- * Bytes to install plus what is known about where they came from.
- *
- * `sourceSha` is present only for a rolling release: that is the one channel
- * whose version string does not settle which build a slot holds, because the
- * asset name behind the tag is reused across commits.
- */
+/** Bytes to install plus what is known about where they came from. */
 interface RuntimeSource {
   readonly fromArchive: boolean;
   readonly bytes: Uint8Array;
   /** Lowercase hex of `bytes`, from whatever already verified them. */
   readonly digest: string;
-  readonly sourceSha?: string;
   /**
    * Whether the bytes came from the cache without the release confirming them
    * this time — see {@link readOfflineCacheEntry}. A checkout's own build is
@@ -402,8 +389,7 @@ async function recordInstall(
   distro: string,
   version: string,
   installed: DistroSlotProbe,
-  digest: string,
-  sourceSha: string | undefined
+  digest: string
 ): Promise<void> {
   const slot = await reprobeSlot(deps, distro, installed);
   const config = distroRuntimeConfigAfterInstall({
@@ -411,7 +397,6 @@ async function recordInstall(
     home: slot.home,
     version,
     digest,
-    sourceSha,
     hubVersion: deps.version(),
     hubHost: deps.hubHost(),
     at: new Date().toISOString(),
@@ -498,11 +483,8 @@ async function removeLegacyRuntime(deps: WslProvisionerDeps, distro: string): Pr
  * raw asset is missing from SHA256SUMS or 404s (older releases), and when the
  * release cannot be reached at all but a verified archive is already cached.
  *
- * Names and tag both come from the channel resolver rather than the hub's own
- * version string. A canary hub calls itself `<root>-canary.<sha7>` while the
- * rolling pre-release is tagged `v<root>-canary` and carries assets named for
- * the same rolling version — splicing the running version into either would
- * ask GitHub for a tag and a filename that no release ever published.
+ * Names and tag both come from the channel resolver rather than spliced here,
+ * so one module owns what a version implies about a tag and a filename.
  */
 async function loadRelease(
   deps: WslProvisionerDeps,
@@ -514,24 +496,14 @@ async function loadRelease(
   const rawName = release.runtimeAssetName;
   const archiveName = releaseArchiveName(release.assetVersion, platformId);
 
-  const manifest = release.rolling
-    ? await assertRollingPair(deps, version, release, platformId)
-    : null;
-  const provenance = manifest ? { sourceSha: manifest.sourceSha } : {};
-  // Bound to the manifest read `assertRollingPair` already validated, rather
-  // than a second, later fetch of SHA256SUMS off the same rolling tag — see
-  // `manifestRuntimeDigest`.
-  const boundDigest = manifest ? manifestRuntimeDigest(manifest, platformId, rawName) : undefined;
-
   let rawFailure: unknown;
   try {
-    const raw = await loadAsset(deps, version, release, rawName, boundDigest);
+    const raw = await loadAsset(deps, version, release, rawName);
     return {
       fromArchive: false,
       bytes: raw.bytes,
       digest: raw.digest,
       offlineCache: raw.offlineCache,
-      ...provenance,
     };
   } catch (error) {
     // Same split the shared loader makes: a 404 or unpublished raw asset is
@@ -559,7 +531,6 @@ async function loadRelease(
       bytes: archive.bytes,
       digest: archive.digest,
       offlineCache: archive.offlineCache,
-      ...provenance,
     };
   } catch (error) {
     // Unreachable raw with no archive cache: keep the original hint, which
@@ -577,35 +548,6 @@ async function loadRelease(
     }
     throw error;
   }
-}
-
-/**
- * Refuses a rolling install whose assets belong to a different commit.
- *
- * A missing manifest is tolerated: rolling releases cut before it existed have
- * none, and turning that into a failure would break the channel to add a check.
- * Those fall through to the install-time version check, which is what caught
- * this case before — later, and after bytes had already reached the machine.
- */
-async function assertRollingPair(
-  deps: WslProvisionerDeps,
-  version: string,
-  release: RuntimeReleaseResolution,
-  platformId: LinuxPlatformId
-): Promise<CanaryManifest | null> {
-  const { manifest, refusal } = await checkRollingPair({
-    fetchManifest: () =>
-      download(
-        deps,
-        releaseAssetUrl(release.tagVersion, CANARY_MANIFEST_ASSET),
-        MAX_CHECKSUMS_BYTES
-      ),
-    tolerate: (error) => error instanceof WslDownloadError || error instanceof WslAssetMissingError,
-    hubVersion: version,
-    platformId,
-  });
-  if (refusal) throw new WslProvisioningError(refusal);
-  return manifest;
 }
 
 class WslAssetMissingError extends WslProvisioningError {}
@@ -669,45 +611,29 @@ async function loadAsset(
   deps: WslProvisionerDeps,
   version: string,
   release: RuntimeReleaseResolution,
-  assetName: string,
-  expectedDigest?: string
+  assetName: string
 ): Promise<VerifiedAsset & { offlineCache: boolean }> {
-  // Cached under the hub's own version, downloaded from the resolved tag. On a
-  // rolling channel those differ, and it is the difference that keeps two
-  // canary builds in separate cache directories while both read one tag.
+  // Cached under the hub's own version, downloaded from the resolved tag.
   const versionDir = deps.cacheDir(version);
   const cachePath = join(versionDir, assetName);
-  // Never cached, on any channel: the manifest is what decides whether the
-  // bytes on disk are still the bytes this tag publishes. A rolling tag
-  // republishes under one filename, so a cached copy of yesterday's canary is
-  // only distinguishable from today's by failing this comparison.
-  //
-  // `expectedDigest`, when given, is a rolling raw asset already bound to a
-  // validated manifest read — see `manifestRuntimeDigest`. Trusting it instead
-  // of a fresh SHA256SUMS fetch here is what keeps the tag from moving between
-  // the manifest check and this download.
   let expected: string;
-  if (expectedDigest) {
-    expected = expectedDigest;
-  } else {
-    try {
-      expected = await fetchExpectedChecksum(deps, release, assetName, versionDir);
-    } catch (error) {
-      // The same rule the shared loader applies, through the same helper: only
-      // an unreachable release qualifies, and only a digest this hub recorded
-      // earlier — never one re-derived from the bytes being checked — may vouch
-      // for what is on disk.
-      const offline = await readOfflineCacheEntry({
-        cachePath,
-        versionDir,
-        assetName,
-        readBytes: deps.readBytes,
-        unreachableReason:
-          error instanceof WslDownloadError && error.unreachable ? error.message : undefined,
-      });
-      if (offline) return { ...offline, offlineCache: true };
-      throw error;
-    }
+  try {
+    expected = await fetchExpectedChecksum(deps, release, assetName, versionDir);
+  } catch (error) {
+    // The same rule the shared loader applies, through the same helper: only an
+    // unreachable release qualifies, and only a digest this hub recorded
+    // earlier — never one re-derived from the bytes being checked — may vouch
+    // for what is on disk.
+    const offline = await readOfflineCacheEntry({
+      cachePath,
+      versionDir,
+      assetName,
+      readBytes: deps.readBytes,
+      unreachableReason:
+        error instanceof WslDownloadError && error.unreachable ? error.message : undefined,
+    });
+    if (offline) return { ...offline, offlineCache: true };
+    throw error;
   }
 
   const cached = await deps.readBytes(cachePath);
@@ -740,9 +666,8 @@ async function loadAsset(
   );
   if (written) {
     // Same cache the staged-runtime card describes, so the same sidecar it
-    // reads: without one, the verify command it prints for these bytes goes
-    // back to the rolling tag's SHA256SUMS, which reports a mismatch for a
-    // perfectly good cached file the moment the tag moves.
+    // reads: without one, the verify command it prints for these bytes has to
+    // re-fetch a release this hub may no longer be able to reach.
     await deps
       .writeCache(runtimeDigestSidecarPath(cachePath), new TextEncoder().encode(actual))
       .catch(() => undefined);
@@ -779,7 +704,6 @@ async function fetchExpectedChecksum(
     );
   }
   await rememberReleaseChecksums({
-    rolling: release.rolling,
     versionDir,
     checksums,
     writeCache: deps.writeCache,

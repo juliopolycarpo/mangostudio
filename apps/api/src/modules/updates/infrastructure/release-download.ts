@@ -5,8 +5,8 @@
  *
  * Two verification shapes, chosen by `resolveUpgradeTarget` and carried on the
  * `ResolvedDownload` it returns: a `sha256-sums` target's digest is fetched
- * fresh from its own `checksumsUrl` (a rolling tag republishes the file, so an
- * earlier read would check today's bytes against yesterday's list); an
+ * fresh from its own `checksumsUrl`, so the list and the bytes come from the
+ * same read of the same release; an
  * `npm-integrity` target already has its digest, handed back by the registry
  * with the packument.
  */

@@ -438,9 +438,9 @@ export function createRuntimeLifecycleService(
         // raw runtime for this platform is served from its archive instead, so
         // the path and the checksum line have to name the archive — the raw
         // ones would point at a file that is not there. Pinned to the digest
-        // this run just verified rather than reusing `staged.verify`: that was
-        // built before the download, off whatever SHA256SUMS a rolling tag
-        // served then, which is not necessarily the build these bytes are.
+        // this run just verified rather than reusing `staged.verify`, which
+        // was built before the download and describes whatever was cached
+        // then, not the bytes that just landed.
         const landed =
           stagedRuntimeAssetFor(input.transportKind, input.health, {
             fromArchive: asset.fromArchive,
@@ -898,11 +898,10 @@ async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
       client: client.update,
       version,
       digest: asset.digest,
-      // Present only for a rolling build. It travels because a rolling name
-      // reused across builds makes the commit the only thing identifying which
-      // one is on that machine — and because the write it feeds clears a stale
-      // one rather than keeping it.
-      sourceSha: asset.sourceSha,
+      // No `sourceSha`: every release is immutable and its version names one
+      // build, so the version is the identity. `streamRuntimeUpdate` sends an
+      // explicit null for it, which clears a commit a rolling install left
+      // beside an older binary rather than letting it claim these bytes.
       bytes: asset.bytes,
       signal: input.signal,
       onProgress: progress,

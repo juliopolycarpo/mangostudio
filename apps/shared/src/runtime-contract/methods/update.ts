@@ -16,8 +16,9 @@ export const RuntimeUpdateBeginParamsSchema = Type.Object({
   digest: Type.String(),
   totalBytes: Type.Number(),
   /**
-   * Source commit these bytes were built from, for a rolling channel; `null` or
-   * absent for a stable one, where the version already names the build.
+   * Source commit these bytes were built from, when the sender has one; `null`
+   * or absent where the version already names the build, which is every release
+   * this hub installs from today.
    *
    * The absent case is not "leave what is recorded alone": the slot config is
    * written by merge, so an update that omitted this left the *previous*

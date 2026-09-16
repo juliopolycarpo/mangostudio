@@ -3,11 +3,12 @@
  * optional pin) and the platform asking.
  *
  * Three sources, one per shape of request: the GitHub release index for a
- * stable version or the rolling canary tag (`release-index.ts`), and the npm
- * registry for a canary build pinned to a source commit (`npm-registry.ts`),
- * since a per-commit canary is never republished under a tag the way the
- * rolling one is. `resolveUpgradeTarget` is the one place that picks between
- * them; nothing downstream re-derives an asset name or URL on its own.
+ * stable version or the newest canary release (`release-index.ts`), and the
+ * npm registry for a canary build pinned to a source commit
+ * (`npm-registry.ts`), since GitHub keeps only a window of canary releases
+ * while npm keeps every build. `resolveUpgradeTarget` is the one place that
+ * picks between them; nothing downstream re-derives an asset name or URL on
+ * its own.
  */
 
 import type { UpdateChannel, UpgradeTarget } from '@mangostudio/shared/updates';

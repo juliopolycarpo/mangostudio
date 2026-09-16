@@ -208,10 +208,9 @@ export function releasePlatformIdFromHint(platformHint: string): string {
  * Raw runtime asset basename published for a release platform id — mirrors
  * `releaseRawRuntimeBinaryFileName` (`.exe` on Windows).
  *
- * Resolved through the channel, not spliced from the running version: on a
- * rolling channel the asset is named for the tag it lives under, so a canary
- * hub that pasted its own `<root>-canary.<sha7>` in here would hand somebody a
- * command that 404s.
+ * Resolved through the channel resolver, not spliced from the running version,
+ * so one module owns what a version implies about an asset name and nothing
+ * here can hand somebody a command that 404s.
  */
 export function manualRuntimeReleaseAssetName(version: string, platformHint: string): string {
   return resolveRuntimeRelease(version, releasePlatformIdFromHint(platformHint)).runtimeAssetName;
@@ -247,8 +246,8 @@ export function stagedRuntimeAsset(input: {
   /**
    * The digest recorded next to the cached file at download time (see
    * {@link runtimeDigestSidecarPath}). When present, the verify command checks
-   * the file against this pinned value instead of re-fetching SHA256SUMS —
-   * the fetch is what a rolling tag can outrun between download and view.
+   * the file against this pinned value instead of re-fetching SHA256SUMS,
+   * which a hub that has since lost its route to the release cannot do.
    */
   readonly pinnedDigest?: string;
 }): RuntimeStagedAsset | undefined {

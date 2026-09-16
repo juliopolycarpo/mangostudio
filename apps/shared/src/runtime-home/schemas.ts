@@ -237,13 +237,13 @@ export const RuntimeSlotConfigSchema = Type.Object({
    */
   digest: Type.Optional(RuntimeBinaryDigestSchema),
   /**
-   * Source commit the installed bytes were built from, recorded only for a
-   * rolling channel.
+   * Source commit the installed bytes were built from, when the installer had
+   * one to record.
    *
-   * A stable version identifies one build by itself. A rolling one does not:
-   * `mangostudio-runtime-0.1.0-canary-linux-x64` is whatever the last green
-   * commit published under that name, so without this field "which canary is
-   * on this machine" has no answer that survives the filename collision.
+   * Every release is immutable and its version names one build, so this hub
+   * records nothing here today; the field stays because it is what a slot
+   * installed by an older hub — or by a producer whose version does not name a
+   * commit — already carries.
    *
    * It is provenance, not a gate — nothing compares it to decide whether to
    * re-install. {@link digest} is what answers that.
@@ -473,9 +473,9 @@ export const RuntimeHealthReportSchema = Type.Object({
   binaryPath: Type.Union([Type.String({ maxLength: 4_096 }), Type.Null()]),
   digest: Type.Union([RuntimeBinaryDigestSchema, Type.Null()]),
   /**
-   * Source commit of a rolling build, echoed from `runtime.json`. Optional so a
-   * hub still accepts health from a runtime that predates the field, and null
-   * on every stable install, where the version already names the build.
+   * Source commit recorded for the installed bytes, echoed from `runtime.json`.
+   * Optional so a hub still accepts health from a runtime that predates the
+   * field, and null wherever the version already names the build.
    */
   sourceSha: Type.Optional(Type.Union([Type.String({ maxLength: 64 }), Type.Null()])),
   profile: RuntimeConsentProfileSchema,
