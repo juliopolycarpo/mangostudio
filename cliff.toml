@@ -65,6 +65,16 @@ commit_parsers = [
 protect_breaking_commits = false
 filter_commits = false
 tag_pattern = "^v[0-9]"
+# Canary cuts one tag per green commit (`v0.1.1-canary.<sha7>`), and every one of
+# them matches `tag_pattern` — left alone, each would open its own release
+# section and swallow "Unreleased". `ignore_tags` drops the tag while keeping its
+# commits, so they land under the next real release. Measured on git-cliff 2.13.1
+# with a scratch `v9.9.9-canary.abc1234` tag.
+#
+# The pattern requires the dot: the pre-2026-09-16 rolling `v<root>-canary` tags
+# share a commit with their stable release, and ignoring one of those drops the
+# stable section with it.
+ignore_tags = "-canary\\."
 sort_commits = "newest"
 # The Mango Protocol lives in this repository but releases on its own
 # `protocol-v*` train, with its own changelog under packages/protocol. Excluding

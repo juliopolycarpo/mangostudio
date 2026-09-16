@@ -1,4 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { ROOT_DIR } from '../lib/config';
 
 import {
   PROTOCOL_CHANGELOG,
@@ -72,6 +77,47 @@ describe('changelog partition', () => {
       expect(config, name).toContain(`{ pattern = '<!-- seam -->', replace = "" }`);
     }
   });
+
+  test('a per-commit canary tag never opens a release section', () => {
+    // Every canary tag matches the root `tag_pattern`, and canary cuts one per
+    // green commit. Measured without `ignore_tags` on git-cliff 2.13.1: a
+    // scratch `v9.9.9-canary.abc1234` opened its own section and swallowed
+    // "Unreleased" along with it.
+    const repo = mkdtempSync(join(tmpdir(), 'cliff-canary-'));
+    try {
+      const git = (...args: string[]) =>
+        Bun.spawnSync({ cmd: ['git', '-C', repo, ...args], stdout: 'pipe', stderr: 'pipe' });
+      git('init', '-q', '-b', 'main');
+      // A non-owner identity in an explicitly unsigned repo: the only shape the
+      // local git wrapper lets a scratch commit through with.
+      git('config', 'user.email', 'changelog-fixture@example.com');
+      git('config', 'user.name', 'Changelog Fixture');
+      git('config', 'commit.gpgsign', 'false');
+      writeFileSync(join(repo, 'a.txt'), 'a');
+      git('add', '.');
+      git('commit', '-q', '-m', 'feat: the released feature');
+      git('tag', 'v1.0.0');
+      writeFileSync(join(repo, 'b.txt'), 'b');
+      git('add', '.');
+      git('commit', '-q', '-m', 'fix: a fix that went green on main');
+      git('tag', 'v1.0.1-canary.abc1234');
+
+      const cliff = Bun.spawnSync({
+        cmd: ['bunx', 'git-cliff', '--config', join(ROOT_DIR, 'cliff.toml'), '--strip', 'header'],
+        cwd: repo,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const output = cliff.stdout.toString();
+
+      expect(output).not.toContain('1.0.1-canary');
+      // The commit is kept, not skipped: it belongs to whatever releases next.
+      expect(output).toContain('## [Unreleased]');
+      expect(output).toContain('A fix that went green on main');
+    } finally {
+      rmSync(repo, { force: true, recursive: true });
+    }
+  }, 30000);
 
   test('the protocol changelog is prepended to, never regenerated', () => {
     // Its 0.1.0 and 0.2.0 sections were generated upstream, before the tree
