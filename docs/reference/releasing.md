@@ -7,6 +7,23 @@ GHCR, as an npm CLI (`mangostudio`), via a Homebrew tap, via a Scoop bucket
 Commits with [git-cliff](https://git-cliff.org) at release preparation and
 enforced at tag time; nothing here is hand-edited.
 
+## Two trains, one repository
+
+This page is the **application's** release train: bare `v*` tags,
+`.github/workflows/release.yml`, and the root `CHANGELOG.md`.
+
+The Mango Protocol releases separately from the same repository — `protocol-v*` tags,
+`.github/workflows/protocol-release.yml`, the `protocol-release` environment, and
+`packages/protocol/CHANGELOG.md`. The two never move together, and nothing below applies to it.
+See `packages/protocol/AGENTS.md`. The tag prefixes are what keep the workflows apart:
+`release.yml` triggers on an anchored `v*.*.*`, which `protocol-v0.2.1` cannot match.
+
+One consequence worth knowing: the protocol arrived through a merge of an unrelated root with its
+original SHAs, so this repository has two disjoint histories. `bun run changelog` scopes its
+full-history modes past the import boundary (`PROTOCOL_IMPORT_TIP` in `scripts/lib/protocol.ts`),
+because a path rule cannot separate them — the imported commits carry the upstream tree's
+root-relative paths.
+
 ## One-shot contract
 
 With the secrets below set, releasing is `bun run release:prepare <version>`, one

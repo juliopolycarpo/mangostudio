@@ -817,6 +817,26 @@ carry the same build stamp and ship together in every channel — archives, npm
 platform packages, and the Docker images — because the hub resolves the runtime as a
 sibling of its own executable and the protocol handshake refuses a version mismatch.
 
+## Mango Protocol (spec, TypeScript SDK, Rust crate)
+
+The wire contract the hub and the runtime speak, published as `@mangostudio/protocol` (npm) and
+`mango-protocol` (crates.io) on their own `protocol-v*` release train. Read
+`packages/protocol/AGENTS.md` before changing anything here — a wire change touches every layer in
+a fixed order and is reviewed as one.
+
+- Normative text: `spec/mango-protocol-1.md`, `spec/transports/*.md`, `spec/versioning.md`
+- Normative schemas: `spec/schema/1/{protocol,catalog}.json`
+- Conformance corpus both SDKs read: `spec/fixtures/1/`
+- TypeScript SDK: `packages/protocol/src/` (entries `index`, `stdio`, `ipc`, `in-process`, `ws`, `spawn`, `testing`)
+- Rust crate: `crates/mango-protocol/src/`; fuzz targets in `crates/mango-protocol/fuzz/`
+- Lanes: `scripts/protocol/{check,test,fix}.ts`, driven by `bun run protocol:check` / `protocol:test`
+- Packing and publishing: `scripts/protocol/{pack,verify-package,release-prepare}.ts`
+- CI: `.github/workflows/protocol-{ci,release,fuzz}.yml`, path-filtered on the directories above
+- Where the repository records all of this once: `scripts/lib/protocol.ts`
+
+The hub's own catalog is generated against this spec — see `scripts/runtime-contract/` and
+`apps/shared/src/runtime-contract/`.
+
 ## Out-Of-Process Environments (stdio, WSL, paired WebSocket, Direct URL)
 
 Open these first:
