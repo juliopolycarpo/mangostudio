@@ -128,7 +128,9 @@ mangostudio upgrade --canary 1234abc
   são podadas por `scripts/release/prune-canary-releases.ts` (mantém 14 por
   padrão), junto com suas tags — o ruleset `release tags` exclui
   `refs/tags/v*-canary.*`; qualquer outra tag `v*` continua sem poder ser
-  apagada nem movida.
+  apagada nem movida. A janela conta apenas releases publicadas: um upload
+  interrompido nunca desaloja um build que os hubs ainda usam, e o draft que ele
+  deixou para trás é apagado de qualquer forma.
 - **npm** (`npm-canary`): `mangostudio@<versão>` na dist-tag `canary`, então
   `latest` nunca aponta para um canary.
 

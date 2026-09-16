@@ -165,6 +165,11 @@ Two consequences worth knowing:
   release). A hub older than the window can no longer download its own runtime
   pair and has to upgrade first; it is told exactly that.
 
+  The window counts published releases only, so an interrupted upload never
+  evicts a build hubs can still use — and the leftover draft it left behind is
+  deleted outright, since a superseded run never returns to finish it and a
+  per-commit tag is never retried.
+
   Deleting the tag is possible only because the `release tags` ruleset excludes
   `refs/tags/v*-canary.*`. Every other `v*` tag stays undeletable and unmovable,
   the frozen `v<root>-canary` one included — it carries no dot. The tag's *name*

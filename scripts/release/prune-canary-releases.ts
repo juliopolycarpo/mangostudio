@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-// Delete old canary pre-releases, keeping the newest few.
+// Delete old canary pre-releases, keeping the newest few, and every leftover
+// canary draft.
 //
 // Canary cuts one release per green commit — the only shape immutable releases
 // allow, since a published release's assets can never be replaced — and each one
@@ -45,31 +46,59 @@ export interface ReleaseListEntry {
 }
 
 /**
- * The tags to delete: every published per-commit canary pre-release except the
- * newest `keep`, newest first by creation time.
+ * The releases to delete, published history first and then every leftover
+ * draft.
+ *
+ * Two rules, because the two shapes cost storage for different reasons. A
+ * published per-commit canary is retained by the keep-window, newest first by
+ * creation time — and the window is measured over published rows only, so a
+ * newer interrupted upload can never evict a build that hubs can still use. A
+ * draft is retention-exempt and always deleted: `canary-publish` runs
+ * `cancel-in-progress`, and `gh release create` is internally
+ * draft → upload → publish, so a superseded run leaves a partial copy of a
+ * ~1.1 GB asset set that nothing will ever finish. `publish_release` only
+ * clears one when the *same* tag is retried, and a per-commit tag never is.
+ *
+ * That is safe where this runs — after this job published its own release, in a
+ * concurrency group that admits one GitHub canary job — so every draft it can
+ * still see belongs to a run that is gone.
+ *
+ * The draft rule keys on the tag name alone. Only this workflow ever writes
+ * that shape, and the name is fixed when the draft is created, whereas
+ * `isPrerelease` is set by flags this code does not own.
  *
  * @example
- * selectCanaryReleasesToPrune(entries, 14) // ['v0.1.1-canary.0a1b2c3', …]
+ * selectCanaryReleasesToPrune(entries, 14) // [{ tagName: 'v0.1.1-canary.0a1b2c3', … }, …]
  */
 export function selectCanaryReleasesToPrune(
   entries: readonly ReleaseListEntry[],
   keep: number
-): readonly string[] {
+): readonly ReleaseListEntry[] {
   if (keep < 0) throw new Error(`Keep-window must not be negative, received ${keep}.`);
-  return entries
-    .filter(
-      (entry) => !entry.isDraft && entry.isPrerelease && PER_COMMIT_CANARY_TAG.test(entry.tagName)
-    )
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-    .slice(keep)
-    .map((entry) => entry.tagName);
+  const canaries = entries.filter((entry) => PER_COMMIT_CANARY_TAG.test(entry.tagName));
+  const newestFirst = (a: ReleaseListEntry, b: ReleaseListEntry) =>
+    Date.parse(b.createdAt) - Date.parse(a.createdAt);
+
+  const staleReleases = canaries
+    .filter((entry) => !entry.isDraft && entry.isPrerelease)
+    .sort(newestFirst)
+    .slice(keep);
+  const drafts = canaries.filter((entry) => entry.isDraft).sort(newestFirst);
+
+  return [...staleReleases, ...drafts];
 }
 
 /**
- * The GitHub CLI call that lists published releases for retention.
+ * The GitHub CLI call that lists releases for retention.
+ *
+ * Drafts are listed on purpose: they are half of what this script deletes, and
+ * `--exclude-drafts` would hide them. The other `gh release list` call site —
+ * the nightly resolver — wants the opposite and keeps the flag, because it
+ * resolves the newest canary to smoke-test and a half-uploaded draft is not a
+ * published identity.
  *
  * @example
- * listArgs() // ['gh', 'release', 'list', '--limit', '200', '--exclude-drafts', …]
+ * listArgs() // ['gh', 'release', 'list', '--limit', '200', '--json', …]
  */
 export function listArgs(): string[] {
   return [
@@ -78,14 +107,14 @@ export function listArgs(): string[] {
     'list',
     '--limit',
     '200',
-    '--exclude-drafts',
     '--json',
     'tagName,isPrerelease,isDraft,createdAt',
   ];
 }
 
 /**
- * The `gh` call that retires one canary release, tag included.
+ * The `gh` call that retires one canary release, tag included for a published
+ * one.
  *
  * `--cleanup-tag` is what keeps a tag per green commit from accumulating
  * forever. It works only because the `release tags` ruleset excludes
@@ -93,16 +122,24 @@ export function listArgs(): string[] {
  * the frozen `v<root>-canary` one, which carries no dot and stays protected.
  * The tag's *name* is burned either way once an immutable release has used it,
  * so deleting it frees the ref, never the name.
- * // Usage: deleteArgs('v0.1.1-canary.0a1b2c3')
+ *
+ * A draft is deleted without it. A draft's ref may or may not exist — `gh
+ * release create` reuses one it finds — and cleaning up a ref that is not there
+ * fails the call, which would abort the rest of the prune. An orphan
+ * per-commit canary ref costs nothing: its name is already reserved.
+ *
+ * // Usage: deleteArgs({ tagName: 'v0.1.1-canary.0a1b2c3', isDraft: false })
  */
-export function deleteArgs(tag: string): string[] {
-  return ['gh', 'release', 'delete', tag, '--yes', '--cleanup-tag'];
+export function deleteArgs(entry: Pick<ReleaseListEntry, 'tagName' | 'isDraft'>): string[] {
+  const base = ['gh', 'release', 'delete', entry.tagName, '--yes'];
+  return entry.isDraft ? base : [...base, '--cleanup-tag'];
 }
 
 const printHelp = (): never => {
   console.log(`Usage: bun ./scripts/release/prune-canary-releases.ts [flags]
 
-Deletes canary pre-releases older than the newest --keep of them, and their tags.
+Deletes canary pre-releases older than the newest --keep of them and their tags,
+plus every leftover canary draft from an interrupted publish.
 
 Flags:
   --keep <n>   How many canary releases to keep (default: ${DEFAULT_KEEP})
@@ -134,17 +171,20 @@ async function main(): Promise<void> {
   header('Prune canary releases');
   const stale = selectCanaryReleasesToPrune(await listReleases(), keep);
   if (stale.length === 0) {
-    success(`No canary release is older than the newest ${keep}.`);
+    success(`No canary release is older than the newest ${keep}, and no draft is left over.`);
     return;
   }
 
-  for (const tag of stale) {
+  for (const entry of stale) {
+    const label = entry.isDraft ? `${entry.tagName} (draft)` : entry.tagName;
     if (flags['--dry-run']) {
-      info(`Would delete ${tag}`);
+      info(`Would delete ${label}`);
       continue;
     }
-    const deleted = await runCommand(`delete ${tag}`, deleteArgs(tag));
-    if (deleted.exitCode !== 0) throw new Error(`Could not delete the canary release ${tag}.`);
+    const deleted = await runCommand(`delete ${label}`, deleteArgs(entry));
+    if (deleted.exitCode !== 0) {
+      throw new Error(`Could not delete the canary release ${entry.tagName}.`);
+    }
   }
   success(`Pruned ${stale.length} canary release(s), keeping the newest ${keep}.`);
 }

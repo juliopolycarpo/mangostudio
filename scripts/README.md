@@ -145,7 +145,7 @@ Run by `.github/workflows/release.yml`; each is also runnable locally:
 | `publish-summary.sh`       | Render a per-channel ✅/❌ publish table into the GitHub step summary                                                                                                      |
 | `retry.sh`                 | `retry_command` helper sourced by workflow shell steps                                                                                                                     |
 | `publish-release.sh`       | `publish_release` helper: one `gh release create` (draft → upload → publish); never edits or uploads onto an already-published release, since immutable releases forbid it |
-| `prune-canary-releases.ts` | Delete old per-commit canary pre-releases and their tags, keeping the newest few (`--keep`, default 14)                                                                    |
+| `prune-canary-releases.ts` | Delete old per-commit canary pre-releases and their tags, keeping the newest few (`--keep`, default 14), plus every leftover canary draft                                  |
 
 ## examples/ — maintainer samples
 
