@@ -66,6 +66,13 @@ jobs:
           bun-version-file: .bun-version
       - run: rustup show active-toolchain
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # `protocol:check` adds the feature-powerset lane only when cargo-hack is
+      # already on PATH, and skips it with a warning otherwise — a runner
+      # without it verifies a release with less than protocol-ci.yml runs on the
+      # pull request that produced it.
+      - uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+        with:
+          tool: cargo-hack
       - run: bun install --frozen-lockfile
       - name: Manifests match the tag
         env:

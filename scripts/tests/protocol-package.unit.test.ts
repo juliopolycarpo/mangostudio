@@ -130,6 +130,20 @@ describe('the real protocol manifest', () => {
     expect(() => publishedManifest(manifest)).not.toThrow();
   });
 
+  test('the release verification carries every tool its lanes are optional on', () => {
+    // `protocol:check` drops the feature-powerset lane with a warning when
+    // cargo-hack is absent and still exits 0, so a verify job without it
+    // publishes on strictly less than the pull request lane ran.
+    const release = readText('.github/workflows/protocol-release.yml');
+    const ci = readText('.github/workflows/protocol-ci.yml');
+    const installs = (workflow: string, tool: string): boolean =>
+      new RegExp(
+        `taiki-e/install-action@[0-9a-f]{40} # v[\\d.]+\\n\\s+with:\\n\\s+tool: ${tool}\\b`
+      ).test(workflow);
+    expect(installs(ci, 'cargo-hack'), 'protocol-ci.yml stopped installing cargo-hack').toBe(true);
+    expect(installs(release, 'cargo-hack'), 'protocol-release.yml verifies without it').toBe(true);
+  });
+
   test('the release workflow publishes from the staging directory, not the package', () => {
     const workflow = readText('.github/workflows/protocol-release.yml');
     expect(workflow).toContain('bun ./scripts/protocol/pack.ts --out .mango/out/protocol');
