@@ -32,11 +32,11 @@ import {
   CANARY_MANIFEST_ASSET,
   parseCanaryManifest,
 } from '../../environments/domain/canary-manifest';
-import { resolveRuntimeRelease } from '../../environments/domain/runtime-release-resolution';
 import { fitToLimit } from '../../machine/domain/machine-limits';
 import { versionChannel } from '../domain/install-origin';
-import { RELEASES_BASE_URL, versionRoot } from '../domain/upgrade-plan';
+import { RELEASES_BASE_URL } from '../domain/upgrade-plan';
 import { compareStableVersions, sharesShaPrefix, stripLeadingV } from '../domain/version-compare';
+import { resolveLatestCanaryVersion } from '../infrastructure/release-index';
 
 const logger = createDiagnosticLogger('update-check');
 
@@ -252,23 +252,11 @@ async function checkStable(d: ResolvedDeps, currentVersion: string): Promise<Upd
   };
 }
 
-/**
- * `v<root>-canary`: the release tag the rolling canary channel publishes
- * under. `resolveRuntimeRelease`'s `tagVersion` already carries the
- * `-canary` suffix for a canary version, so a stable current version takes
- * the other branch to reach the same shape rather than appending it twice.
- */
-function canaryReleaseTag(currentVersion: string): string {
-  const resolution = resolveRuntimeRelease(currentVersion, 'linux-x64');
-  const root =
-    resolution.channel === 'canary'
-      ? resolution.tagVersion
-      : `${versionRoot(currentVersion)}-canary`;
-  return `v${root}`;
-}
-
 async function checkCanary(d: ResolvedDeps, currentVersion: string): Promise<UpdateCheck> {
-  const tag = canaryReleaseTag(currentVersion);
+  // The tag is looked up, never derived from the running version: canary cuts
+  // one immutable release per green commit, so `v<currentVersion>` is this
+  // build's own release and would report itself as the latest forever.
+  const tag = `v${await resolveLatestCanaryVersion({ fetch: d.fetch, resolveHostname: d.resolveHostname })}`;
   const url = `${RELEASES_BASE_URL}/download/${tag}/${CANARY_MANIFEST_ASSET}`;
   const result = await safeFetchBytes(
     url,

@@ -24,16 +24,11 @@ import {
   SafeFetchError,
   safeFetchBytes,
 } from '../../../lib/safe-fetch';
-import {
-  CANARY_MANIFEST_ASSET,
-  type CanaryManifest,
-  checkRollingPair,
-  manifestRuntimeDigest,
-} from './canary-manifest';
-import { type RuntimeReleaseResolution, resolveRuntimeRelease } from './runtime-release-resolution';
+import { resolveRuntimeRelease } from './runtime-release-resolution';
 import {
   findReleaseChecksum,
   localRuntimeBuildPath,
+  prunedCanaryHint,
   releaseArchiveName,
   releaseAssetUrl,
 } from './wsl-runtime-release';
@@ -67,14 +62,6 @@ export interface LoadedRuntimeAsset {
   readonly fromArchive: boolean;
   readonly digest: string;
   /**
-   * Source commit these bytes were built from, when the channel publishes one.
-   *
-   * Only a rolling release answers this: its filename and tag are reused across
-   * builds, so the commit is the only thing that says which build a slot holds.
-   * A stable version already names one build on its own.
-   */
-  readonly sourceSha?: string;
-  /**
    * Whether `bytes` is actually on disk at the cache path, not just verified
    * in memory. A caller that installs the bytes elsewhere (WSL/SSH push) can
    * treat the cache as a courtesy and ignore this; a caller whose entire job
@@ -100,7 +87,7 @@ export async function loadRuntimeReleaseBytes(
     readonly readBytes?: (path: string) => Promise<Uint8Array | null>;
     readonly writeCache?: (path: string, bytes: Uint8Array) => Promise<void>;
     readonly localBuildPath?: (platformId: string) => string;
-    /** Cancels an in-flight manifest or asset download; checked between hops, not mid-byte-stream. */
+    /** Cancels an in-flight checksum or asset download; checked between hops, not mid-byte-stream. */
     readonly signal?: AbortSignal;
   } = {}
 ): Promise<LoadedRuntimeAsset> {
@@ -148,22 +135,11 @@ export async function loadRuntimeReleaseBytes(
     ...(overrides.resolveHostname ? { resolveHostname: overrides.resolveHostname } : {}),
   };
   const release = resolveRuntimeRelease(version, platformId);
-  const manifest = release.rolling
-    ? await assertRollingPair(deps, version, release, platformId, signal)
-    : null;
-  const provenance = manifest ? { sourceSha: manifest.sourceSha } : {};
-  // Bound to the manifest read {@link assertRollingPair} already validated,
-  // rather than a second, later fetch of SHA256SUMS off the same rolling tag —
-  // see {@link manifestRuntimeDigest}.
-  const boundDigest = manifest
-    ? manifestRuntimeDigest(manifest, platformId, release.runtimeAssetName)
-    : undefined;
 
   const load = {
     deps,
     cacheVersion: version,
     tagVersion: release.tagVersion,
-    rolling: release.rolling,
     cacheDir,
     readBytes,
     writeCache,
@@ -171,18 +147,13 @@ export async function loadRuntimeReleaseBytes(
   };
 
   try {
-    const raw = await loadAsset({
-      ...load,
-      assetName: release.runtimeAssetName,
-      ...(boundDigest ? { expectedDigest: boundDigest } : {}),
-    });
+    const raw = await loadAsset({ ...load, assetName: release.runtimeAssetName });
     return {
       bytes: raw.bytes,
       fromArchive: false,
       digest: `sha256:${raw.digest}`,
       cached: raw.cached,
       offlineCache: raw.offlineCache,
-      ...provenance,
     };
   } catch (error) {
     // A missing raw asset is the older-release case this fallback exists for.
@@ -205,56 +176,22 @@ export async function loadRuntimeReleaseBytes(
     digest: `sha256:${archive.digest}`,
     cached: archive.cached,
     offlineCache: archive.offlineCache,
-    ...provenance,
   };
 }
 
 class RuntimeAssetMissingError extends RuntimeAssetLoadError {}
-
-/**
- * Refuses a rolling install whose assets belong to a different commit.
- *
- * A missing manifest is tolerated: rolling releases cut before it existed have
- * none, and turning that into a failure would break the channel to add a check.
- */
-async function assertRollingPair(
-  deps: SafeFetchDeps,
-  version: string,
-  release: RuntimeReleaseResolution,
-  platformId: string,
-  signal?: AbortSignal
-): Promise<CanaryManifest | null> {
-  const { manifest, refusal } = await checkRollingPair({
-    fetchManifest: () =>
-      download(
-        deps,
-        releaseAssetUrl(release.tagVersion, CANARY_MANIFEST_ASSET),
-        MAX_CHECKSUMS_BYTES,
-        signal
-      ),
-    tolerate: (error) => error instanceof RuntimeAssetLoadError,
-    hubVersion: version,
-    platformId,
-  });
-  if (refusal) throw new RuntimeAssetLoadError(refusal);
-  return manifest;
-}
 
 /** Everything one asset load needs, in one object so no caller mis-orders it. */
 interface AssetLoad {
   readonly deps: SafeFetchDeps;
   /** The hub's own version, which names the cache directory. */
   readonly cacheVersion: string;
-  /** The tag the asset is published under; differs from the above on a rolling channel. */
+  /** The tag the asset is published under. */
   readonly tagVersion: string;
   readonly assetName: string;
-  /** Whether the tag republishes under one filename, which decides what may be remembered. */
-  readonly rolling: boolean;
   readonly cacheDir: (version: string) => string;
   readonly readBytes: (path: string) => Promise<Uint8Array | null>;
   readonly writeCache: (path: string, bytes: Uint8Array) => Promise<void>;
-  /** A digest already bound to a validated manifest read, when there is one. */
-  readonly expectedDigest?: string;
   readonly signal?: AbortSignal;
 }
 
@@ -266,23 +203,19 @@ async function loadAsset(
   const cachePath = join(versionDir, assetName);
 
   let expected: string;
-  if (load.expectedDigest) {
-    expected = load.expectedDigest;
-  } else {
-    try {
-      expected = await fetchExpectedChecksum(load, versionDir);
-    } catch (error) {
-      const offline = await readOfflineCacheEntry({
-        cachePath,
-        versionDir,
-        assetName,
-        readBytes: load.readBytes,
-        unreachableReason:
-          error instanceof RuntimeAssetLoadError && error.unreachable ? error.message : undefined,
-      });
-      if (offline) return { ...offline, cached: true, offlineCache: true };
-      throw error;
-    }
+  try {
+    expected = await fetchExpectedChecksum(load, versionDir);
+  } catch (error) {
+    const offline = await readOfflineCacheEntry({
+      cachePath,
+      versionDir,
+      assetName,
+      readBytes: load.readBytes,
+      unreachableReason:
+        error instanceof RuntimeAssetLoadError && error.unreachable ? error.message : undefined,
+    });
+    if (offline) return { ...offline, cached: true, offlineCache: true };
+    throw error;
   }
 
   const fromCache = await load.readBytes(cachePath);
@@ -309,8 +242,8 @@ async function loadAsset(
     () => false
   );
   if (cached) {
-    // Pins what verifying this file later means, independent of whatever
-    // SHA256SUMS a rolling tag serves by then — see {@link runtimeDigestSidecarPath}.
+    // Pins what verifying this file later means, without re-deriving it from a
+    // second fetch — see {@link runtimeDigestSidecarPath}.
     await load
       .writeCache(runtimeDigestSidecarPath(cachePath), new TextEncoder().encode(actual))
       .catch(() => undefined);
@@ -326,8 +259,8 @@ export const CHECKSUMS_CACHE_NAME = 'SHA256SUMS';
  * Bytes and the digest that vouched for them.
  *
  * Carried together because every path that produces these bytes has already
- * hashed them — against the release's SHA256SUMS, a manifest, or a recorded
- * sidecar — and the runtime asset is up to {@link MAX_ARCHIVE_BYTES}. A caller
+ * hashed them — against the release's SHA256SUMS or a recorded sidecar — and
+ * the runtime asset is up to {@link MAX_ARCHIVE_BYTES}. A caller
  * that needs the digest re-deriving it costs a second full pass over a quarter
  * of a gigabyte to learn what the loader just proved.
  */
@@ -411,17 +344,14 @@ export async function readOfflineCacheEntry(
  * launch that cannot reach the release still has a record of what these bytes
  * were verified against — see {@link recordedCacheDigest}.
  *
- * A rolling tag is left out: it republishes SHA256SUMS under one filename as
- * new builds land, so a copy records what that tag used to hold, not what it
- * holds. Failing to write is not a failure to install.
+ * Every release is immutable, so the copy stays true to the tag it came from.
+ * Failing to write is not a failure to install.
  */
 export async function rememberReleaseChecksums(remember: {
-  readonly rolling: boolean;
   readonly versionDir: string;
   readonly checksums: Uint8Array;
   readonly writeCache: (path: string, bytes: Uint8Array) => Promise<void>;
 }): Promise<void> {
-  if (remember.rolling) return;
   await remember
     .writeCache(join(remember.versionDir, CHECKSUMS_CACHE_NAME), remember.checksums)
     .catch(() => undefined);
@@ -443,11 +373,9 @@ async function recordedCacheDigest(lookup: VerifiedCacheLookup): Promise<string 
 /**
  * Where the digest that validated a cached asset is recorded, next to it.
  *
- * A rolling tag republishes SHA256SUMS under the same filename as newer builds
- * land, so re-fetching it to build a verify command for bytes already on disk
- * checks today's build against yesterday's cache and reports a false mismatch.
- * The sidecar remembers the digest this hub actually verified at download
- * time, so a later verify command can check the file against itself.
+ * The sidecar remembers the digest this hub actually verified at download time,
+ * so a later verify command checks the file against itself rather than against
+ * a fresh fetch of a release it may no longer be able to reach.
  */
 export function runtimeDigestSidecarPath(assetPath: string): string {
   return `${assetPath}.sha256`;
@@ -506,18 +434,28 @@ export async function pruneRuntimeCache(
  */
 async function fetchExpectedChecksum(load: AssetLoad, versionDir: string): Promise<string> {
   const { assetName, tagVersion } = load;
+  // A pruned release takes its SHA256SUMS with it, so this is where a hub whose
+  // own release is gone actually lands — not at the "does not publish" check
+  // below, which only a release that still exists can reach.
   const checksums = await download(
     load.deps,
     releaseAssetUrl(tagVersion, 'SHA256SUMS'),
     MAX_CHECKSUMS_BYTES,
     load.signal
-  );
+  ).catch((error: unknown) => {
+    if (!(error instanceof RuntimeAssetMissingError)) throw error;
+    throw new RuntimeAssetMissingError(
+      `Release v${tagVersion} publishes no checksums, so ${assetName} cannot be verified.` +
+        prunedCanaryHint(tagVersion)
+    );
+  });
   const expected = findReleaseChecksum(new TextDecoder().decode(checksums), assetName);
   if (!expected) {
-    throw new RuntimeAssetMissingError(`Release v${tagVersion} does not publish ${assetName}.`);
+    throw new RuntimeAssetMissingError(
+      `Release v${tagVersion} does not publish ${assetName}.${prunedCanaryHint(tagVersion)}`
+    );
   }
   await rememberReleaseChecksums({
-    rolling: load.rolling,
     versionDir,
     checksums,
     writeCache: load.writeCache,

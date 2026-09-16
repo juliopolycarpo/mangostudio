@@ -242,13 +242,12 @@ jobs:
     needs: [gate, distribution-identity, distribution]
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     permissions:
-      attestations: write # canary jobs verify build provenance and attest the rolling checksums
-      contents: write # canary.yml updates the rolling GitHub pre-release
+      attestations: write # canary jobs verify build provenance and attest this build's checksums
+      contents: write # canary.yml creates this commit's GitHub pre-release
       id-token: write # npm provenance for the canary dist-tag publish and the checksum attestation
     uses: ./.github/workflows/canary.yml
     with:
       version: ${{ needs.distribution-identity.outputs.version }}
-      cargo_version: ${{ needs.distribution-identity.outputs.cargo_version }}
       source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
       channel: ${{ needs.distribution-identity.outputs.channel }}
       assets_artifact: ${{ needs.distribution.outputs.assets_artifact }}

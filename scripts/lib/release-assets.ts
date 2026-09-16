@@ -174,7 +174,7 @@ function createRawBinaryPlans(
 }
 
 /**
- * Platforms whose raw hub+runtime pair the rolling canary publishes.
+ * Platforms whose raw hub+runtime pair a canary release publishes.
  *
  * A default, not a constant — widening it is a one-line config change. What it
  * must never do is widen by accident, which is why the canary staging step
@@ -206,7 +206,7 @@ export interface CanaryAssetSelection {
 }
 
 /**
- * The exact asset names the rolling canary pre-release publishes.
+ * The exact asset names a canary pre-release publishes.
  *
  * Explicit selection rather than a shell glob: `release-assets/mangostudio-*`
  * silently absorbed the eight raw hub binaries the moment raw assets shipped,

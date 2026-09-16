@@ -19,7 +19,10 @@ retry_command() {
       return "$status"
     fi
 
-    echo "Attempt ${attempt}/${attempts} failed; retrying in ${delay_seconds}s: $*"
+    # stderr, not stdout: a caller may run this inside a command substitution to
+    # capture the command's own output, and a retry notice mixed into that
+    # output is indistinguishable from a result.
+    echo "Attempt ${attempt}/${attempts} failed; retrying in ${delay_seconds}s: $*" >&2
     sleep "$delay_seconds"
     attempt=$((attempt + 1))
   done

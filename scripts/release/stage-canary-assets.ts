@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-// Stage the rolling canary pre-release asset set: every platform archive plus a
-// curated set of raw hub+runtime pairs, renamed onto the rolling version.
+// Stage one canary pre-release's asset set: every platform archive plus a
+// curated set of raw hub+runtime pairs, under their built sha-stamped names.
 
 import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -24,19 +24,18 @@ import {
   success,
 } from '../lib/runner';
 
-/** Names the provenance of one rolling build; see `canary-manifest.json` below. */
+/** Names the provenance of one canary build; see `canary-manifest.json` below. */
 const MANIFEST_NAME = 'canary-manifest.json';
 const MANIFEST_SCHEMA_VERSION = 1;
 
 const printHelp = (): never => {
   console.log(`Usage: bun ./scripts/release/stage-canary-assets.ts [flags]
 
-Copies the canary asset set out of the built release assets, renaming the build
-version onto the rolling version, and writes ${MANIFEST_NAME} plus SHA256SUMS.
+Copies the canary asset set out of the built release assets and writes
+${MANIFEST_NAME} plus SHA256SUMS.
 
 Flags:
-  --version <v>        Built canary version (default: $VERSION)
-  --cargo-version <v>  Rolling version the assets are published under (default: $CARGO_VERSION)
+  --version <v>        Built canary version, tag and asset names (default: $VERSION)
   --source-sha <sha>   Commit the build came from (default: $SOURCE_SHA)
   --in <dir>           Built release assets (default: release-assets)
   --out <dir>          Staging directory to write (default: github-canary-assets)
@@ -54,7 +53,11 @@ interface CanaryManifest {
   readonly channel: 'canary';
   /** The version the binaries report about themselves, sha included. */
   readonly version: string;
-  /** The version their filenames and tag carry. */
+  /**
+   * The version their filenames and tag carry. Equal to {@link version} since
+   * canary releases became per-commit; kept because the field is a published
+   * schema the hub and the installers read.
+   */
   readonly assetVersion: string;
   readonly sourceSha: string;
   readonly builtAt: string;
@@ -67,7 +70,6 @@ interface CanaryManifest {
 
 export interface StageCanaryAssetsOptions {
   readonly version: string;
-  readonly cargoVersion: string;
   readonly sourceSha: string;
   readonly inDir: string;
   readonly outDir: string;
@@ -75,33 +77,33 @@ export interface StageCanaryAssetsOptions {
 }
 
 /**
- * Stage the rolling asset set and return the names written.
+ * Stage one canary release's asset set and return the names written.
  *
- * Assets are renamed rather than rebuilt: the binaries were compiled with the
- * sha-stamped version and report it, while their filenames and tag carry the
- * rolling one. That gap is exactly why {@link MANIFEST_NAME} exists — it is the
- * only thing on the release that says which commit these bytes came from.
+ * Names are the ones the build produced: the binaries were compiled with the
+ * sha-stamped version, report it, and are published under a tag carrying it, so
+ * the tag, the file names and {@link MANIFEST_NAME} all name the same build.
+ * The manifest stays because it is the only asset that says which *commit*
+ * those bytes came from.
+ *
+ * @example
+ * stageCanaryAssets({ version: '0.1.1-canary.abc1234', sourceSha, inDir, outDir })
  */
 export function stageCanaryAssets(options: StageCanaryAssetsOptions): readonly string[] {
-  const { version, cargoVersion, sourceSha, inDir, outDir } = options;
+  const { version, sourceSha, inDir, outDir } = options;
   const plan = createReleaseAssetPlan({ version, assetsDir: inDir });
   const selection = selectCanaryAssets(plan);
 
   prepareOutDir(outDir);
 
   const staged: string[] = [];
-  for (const assetName of [...selection.archives, ...selection.rawBinaries]) {
-    staged.push(stageOne(assetName, { version, cargoVersion, inDir, outDir }));
-  }
-  for (const assetName of selection.scripts) {
-    staged.push(stageScript(assetName, { inDir, outDir }));
+  for (const assetName of [...selection.archives, ...selection.rawBinaries, ...selection.scripts]) {
+    staged.push(stageAsset(assetName, { inDir, outDir }));
   }
 
   const manifest = buildManifest({
     plan,
     selection,
     version,
-    cargoVersion,
     sourceSha,
     builtAt: options.builtAt ?? new Date().toISOString(),
     outDir,
@@ -115,24 +117,8 @@ export function stageCanaryAssets(options: StageCanaryAssetsOptions): readonly s
   return staged;
 }
 
-function stageOne(
-  assetName: string,
-  context: {
-    readonly version: string;
-    readonly cargoVersion: string;
-    readonly inDir: string;
-    readonly outDir: string;
-  }
-): string {
-  const source = join(context.inDir, assetName);
-  assertFile(source, assetName);
-  const target = rollingAssetName(assetName, context.version, context.cargoVersion);
-  copyFileSync(source, join(context.outDir, target));
-  return target;
-}
-
-/** Install scripts carry no version in their name, so they stage as-is. */
-function stageScript(
+/** Copies one built asset into the staging directory under its own name. */
+function stageAsset(
   assetName: string,
   context: { readonly inDir: string; readonly outDir: string }
 ): string {
@@ -142,28 +128,10 @@ function stageScript(
   return assetName;
 }
 
-/**
- * Swap the built version for the rolling one in an asset name.
- *
- * Anchored on the `mangostudio-` / `mangostudio-runtime-` prefix rather than a
- * bare substring replace: a version string can appear inside a platform id in
- * principle, and a filename is not the place to find out.
- */
-export function rollingAssetName(assetName: string, version: string, cargoVersion: string): string {
-  for (const prefix of ['mangostudio-runtime-', 'mangostudio-']) {
-    const head = `${prefix}${version}`;
-    if (assetName.startsWith(head)) {
-      return `${prefix}${cargoVersion}${assetName.slice(head.length)}`;
-    }
-  }
-  throw new Error(`Canary asset ${assetName} does not carry version ${version}.`);
-}
-
 function buildManifest(context: {
   readonly plan: ReturnType<typeof createReleaseAssetPlan>;
   readonly selection: ReturnType<typeof selectCanaryAssets>;
   readonly version: string;
-  readonly cargoVersion: string;
   readonly sourceSha: string;
   readonly builtAt: string;
   readonly outDir: string;
@@ -173,8 +141,10 @@ function buildManifest(context: {
     const named = (kind: 'hub' | 'runtime'): PairAsset => {
       const asset = forPlatform.find((candidate) => candidate.kind === kind);
       if (!asset) throw new Error(`Canary platform ${platform} is missing its ${kind} binary.`);
-      const staged = rollingAssetName(asset.assetName, context.version, context.cargoVersion);
-      return { asset: staged, digest: sha256File(join(context.outDir, staged)) };
+      return {
+        asset: asset.assetName,
+        digest: sha256File(join(context.outDir, asset.assetName)),
+      };
     };
     return { platform, hub: named('hub'), runtime: named('runtime') };
   });
@@ -183,7 +153,7 @@ function buildManifest(context: {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     channel: 'canary',
     version: context.version,
-    assetVersion: context.cargoVersion,
+    assetVersion: context.version,
     sourceSha: context.sourceSha,
     builtAt: context.builtAt,
     pairs,
@@ -217,19 +187,18 @@ function sha256File(path: string): string {
 
 function main(): void {
   const { flags, values, positional } = parseArgs({
-    valueFlags: ['--version', '--cargo-version', '--source-sha', '--in', '--out'],
+    valueFlags: ['--version', '--source-sha', '--in', '--out'],
   });
   if (flags['--help']) printHelp();
   assertNoUnexpectedArguments(positional);
 
   const version = values['--version'] ?? requiredEnv('VERSION');
-  const cargoVersion = values['--cargo-version'] ?? requiredEnv('CARGO_VERSION');
   const sourceSha = values['--source-sha'] ?? requiredEnv('SOURCE_SHA');
   const inDir = values['--in'] ?? join(ROOT_DIR, 'release-assets');
   const outDir = values['--out'] ?? join(ROOT_DIR, 'github-canary-assets');
 
   header('Stage canary release assets');
-  const staged = stageCanaryAssets({ version, cargoVersion, sourceSha, inDir, outDir });
+  const staged = stageCanaryAssets({ version, sourceSha, inDir, outDir });
   info(`Curated raw pairs: ${CANARY_PAIR_PLATFORMS.join(', ')}`);
   success(`Staged ${staged.length} assets (plus SHA256SUMS) in ${outDir}`);
 }

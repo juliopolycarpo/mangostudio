@@ -3,16 +3,16 @@
  * optional pin) and the platform asking.
  *
  * Three sources, one per shape of request: the GitHub release index for a
- * stable version or the rolling canary tag (`release-index.ts`), and the npm
- * registry for a canary build pinned to a source commit (`npm-registry.ts`),
- * since a per-commit canary is never republished under a tag the way the
- * rolling one is. `resolveUpgradeTarget` is the one place that picks between
- * them; nothing downstream re-derives an asset name or URL on its own.
+ * stable version or the newest canary release (`release-index.ts`), and the
+ * npm registry for a canary build pinned to a source commit
+ * (`npm-registry.ts`), since GitHub keeps only a window of canary releases
+ * while npm keeps every build. `resolveUpgradeTarget` is the one place that
+ * picks between them; nothing downstream re-derives an asset name or URL on
+ * its own.
  */
 
 import type { UpdateChannel, UpgradeTarget } from '@mangostudio/shared/updates';
 import type { SafeFetchDeps } from '../../../lib/safe-fetch';
-import { resolveRuntimeRelease } from '../../environments/domain/runtime-release-resolution';
 import { releaseAssetUrl } from '../../environments/domain/wsl-runtime-release';
 import {
   fetchNpmPackument,
@@ -21,7 +21,7 @@ import {
 } from '../infrastructure/npm-registry';
 import {
   fetchCanaryManifestForTag,
-  resolveCanaryRollingVersion,
+  resolveLatestCanaryVersion,
   resolveStableLatestVersion,
 } from '../infrastructure/release-index';
 import type { ReleasePlatformId } from './platform-id';
@@ -116,33 +116,15 @@ async function resolveStableTarget(
   return stableAsset(version, context.platformId);
 }
 
-/**
- * The rolling canary tag's version, without a network round trip when this
- * build is already canary: `resolveRuntimeRelease` reads it straight off the
- * running version, since a canary hub's own tag never depends on what else
- * has since been published. Only a stable build has to ask GitHub which tag
- * is current.
- *
- * A canary build therefore only ever sees its own root's rolling tag this
- * way: a root bump (`0.1.1-canary` moving to `0.1.2-canary`) is invisible to
- * it until something else — a stable-relative read, or a later upgrade —
- * moves it onto the new root.
- */
-function resolveCanaryTagVersion(
-  context: UpgradeTargetContext,
-  deps: SafeFetchDeps
-): Promise<string> {
-  const currentRelease = resolveRuntimeRelease(context.currentVersion, context.platformId);
-  return currentRelease.channel === 'canary'
-    ? Promise.resolve(currentRelease.tagVersion)
-    : resolveCanaryRollingVersion(deps);
-}
-
 async function resolveCanaryLatest(
   context: UpgradeTargetContext,
   deps: SafeFetchDeps
 ): Promise<ResolvedArchiveDownload> {
-  const tagVersion = await resolveCanaryTagVersion(context, deps);
+  // Always a lookup, for a canary build as much as a stable one: canary cuts
+  // one immutable release per green commit, so a build's own tag names itself
+  // and reading the target off the running version would resolve every upgrade
+  // to the version already installed.
+  const tagVersion = await resolveLatestCanaryVersion(deps);
   const manifest = await fetchCanaryManifestForTag(deps, tagVersion);
   const version = manifest?.version ?? tagVersion;
   const assetName = hubArchiveName(tagVersion, context.platformId);

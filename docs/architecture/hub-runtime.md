@@ -333,8 +333,10 @@ lets a current hub upgrade peers from before the live-update methods existed. Th
 downloads the exact release asset identity reported by health — including glibc versus musl —
 and verifies it against the release `SHA256SUMS`; the runtime independently hashes the
 received bytes before making them current.
-Asset identity is channel-aware: stable uses the exact version tag and filename, while a
-SHA-stamped canary resolves the rolling `v<root>-canary` tag and rolling asset name.
+Asset identity is channel-aware: stable uses the exact version tag and filename, and so
+does a SHA-stamped canary — its tag and asset names carry the build's own commit, immutable
+like a stable release. Only a canary version with no sha, naming the frozen pre-2026-09-16
+release, still resolves the rolling `v<root>-canary` tag and rolling asset name.
 Chunks are sequential requests capped at 32 KiB, so the WebSocket frame queue supplies real
 backpressure instead of buffering an entire binary behind a slow peer.
 
@@ -654,29 +656,33 @@ Each launch also used to pay the System32-stub relaunch described above, so the 
 savings compound with the direct-binary resolution rather than being independent of it.
 
 Which release those bytes come from is resolved by channel, not by splicing the hub's
-version into a URL. Stable maps to `v<version>` and versioned asset names. A canary hub
-reports `<root>-canary.<sha7>` while its assets live on the rolling `v<root>-canary` tag
-under rolling names, so splicing would ask for a tag that has never existed. The cache
-stays keyed on the hub's own sha-stamped version even though the fetch targets the rolling
-tag, so two canary builds never share a cache entry.
+version into a URL. Stable maps to `v<version>` and versioned asset names, and so does a
+sha-stamped canary: `resolveRuntimeRelease` returns `tagVersion === assetVersion ===
+version`, so a canary release publishes under its own build's name like a stable one does —
+immutable releases mean it can never move. Only a canary version with no sha — naming the
+frozen pre-2026-09-16 release — still resolves the rolling `v<root>-canary` tag under
+rolling names. The cache stays keyed on the hub's own version either way, so two canary
+builds never share a cache entry.
 
-A rolling tag is clobbered on every green commit, which means the asset behind a rolling
-name is not necessarily this hub's pair — and its checksum verifies, because `SHA256SUMS`
-was clobbered with it. Before installing from one, the hub reads `canary-manifest.json`
-(published beside the assets, checksummed like them) and refuses when the tag has moved
-past its own build. The refusal lands on the hub, before any remote write, instead of
-surfacing as a handshake failure on somebody's machine. A rolling release that publishes
-no manifest is tolerated and falls back to the install-time version check. The manifest is
-only read at a layout version this hub understands; an unknown `schemaVersion` reads as no
-manifest rather than as a record it would be guessing at.
+That frozen rolling tag is the one hazard left: it was clobbered with every green commit
+before 2026-09-16, so the asset behind its name is not necessarily a given hub's pair — and
+its checksum still verifies, because `SHA256SUMS` was clobbered with it. Before installing
+from it, the hub reads `canary-manifest.json` (published beside the assets, checksummed
+like them) and refuses when the tag has moved past its own build. The refusal lands on the
+hub, before any remote write, instead of surfacing as a handshake failure on somebody's
+machine. A rolling release that publishes no manifest is tolerated and falls back to the
+install-time version check. The manifest is only read at a layout version this hub
+understands; an unknown `schemaVersion` reads as no manifest rather than as a record it
+would be guessing at. A per-commit canary release skips all of it: `rolling` is `false`,
+there is no manifest fetch, and nothing needs confirming because nothing can be replaced.
 
 The manifest's source commit is kept rather than discarded once it has served that check.
 It lands in the slot's `runtime.json` beside the digest and comes back out through
 `runtime health`, so "which canary is on this machine" has an answer that survives the
 filename collision. It is provenance, not a gate — nothing compares it to decide whether to
-reinstall, which remains the digest's job — and it is written only for a rolling install,
-and cleared rather than carried, so a sha from a previous canary cannot claim a slot holds
-a build it does not.
+reinstall, which remains the digest's job — and it is written only for a rolling install
+(a canary version with no sha), and cleared rather than carried, so a sha from a previous
+canary cannot claim a slot holds a build it does not.
 
 ### When the release cannot be reached
 

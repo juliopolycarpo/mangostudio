@@ -65,11 +65,8 @@ function harness(
     readonly cacheFiles?: Record<string, Uint8Array>;
     /** Stands in for a host with no route to the release. */
     readonly offline?: boolean;
-    /**
-     * `canary-manifest.json` the rolling tag serves, or null for a release that
-     * publishes none. Only consulted on a rolling version.
-     */
-    readonly manifest?: string | null;
+    /** Stands in for a release that was pruned: nothing under its tag answers. */
+    readonly releaseGone?: boolean;
   } = {}
 ) {
   const version = options.version ?? VERSION;
@@ -150,12 +147,8 @@ function harness(
       const url = String(input);
       requested.push(url);
       if (options.offline) throw new Error('getaddrinfo EAI_AGAIN github.com');
-      if (url.endsWith('canary-manifest.json')) {
-        return Promise.resolve(
-          options.manifest
-            ? new Response(new TextEncoder().encode(options.manifest), { status: 200 })
-            : new Response('not found', { status: 404 })
-        );
+      if (options.releaseGone) {
+        return Promise.resolve(new Response('Not Found', { status: 404 }));
       }
       const body = url.endsWith('SHA256SUMS')
         ? new TextEncoder().encode(options.checksums ?? CHECKSUMS)
@@ -274,13 +267,12 @@ describe('WslProvisioner', () => {
     expect(unpack?.stdinBytes).toBe(ARCHIVE.byteLength);
   });
 
-  // A canary hub calls itself `<root>-canary.<sha7>` while its assets live on
-  // the rolling `v<root>-canary` tag under rolling names. Splicing the running
-  // version into the URL asked GitHub for a tag that has never existed, so
-  // hub-driven provisioning could not work on canary at all.
-  it('resolves canary assets onto the rolling tag, not the running version', async () => {
+  // A canary hub's assets live on its own `v<root>-canary.<sha7>` release, one
+  // per green commit. No manifest hop: an immutable release cannot be handing
+  // back some other build's runtime, so there is nothing to cross-check.
+  it("resolves canary assets onto this build's own release", async () => {
     const canaryVersion = '1.2.3-canary.abcdef0';
-    const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
+    const canaryAsset = `mangostudio-runtime-${canaryVersion}-linux-x64`;
     const { provisioner, requested, written } = harness({
       version: canaryVersion,
       checksums: `${DIGEST}  ${canaryAsset}\n`,
@@ -289,150 +281,52 @@ describe('WslProvisioner', () => {
     await provisioner.ensure('Ubuntu');
 
     expect(requested).toEqual([
-      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/canary-manifest.json',
-      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/SHA256SUMS',
-      `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/${canaryAsset}`,
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v${canaryVersion}/SHA256SUMS`,
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v${canaryVersion}/${canaryAsset}`,
     ]);
-    // Cached under the hub's own sha-stamped version even though it was fetched
-    // from the rolling tag: two canary builds must not share a cache entry.
     expect(written.get(`/cache/${canaryVersion}/${canaryAsset}`)).toEqual(ARCHIVE);
   });
 
-  // Two canary builds resolve one filename on one tag, so the only thing that
-  // can tell yesterday's bytes from today's is a checksum fetched now. Serving
-  // a stale cache entry against a stale manifest would install the wrong pair.
-  it('re-downloads a rolling asset whose cached bytes no longer match the tag', async () => {
-    const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
+  // A cache entry is only as good as the checksum that vouches for it: a
+  // truncated or half-written file under the right name must be re-downloaded,
+  // not installed.
+  it('re-downloads a cached asset whose bytes no longer match the published checksum', async () => {
+    const canaryVersion = '1.2.3-canary.abcdef0';
+    const canaryAsset = `mangostudio-runtime-${canaryVersion}-linux-x64`;
     const { provisioner, requested, written } = harness({
-      version: '1.2.3-canary.abcdef0',
+      version: canaryVersion,
       checksums: `${DIGEST}  ${canaryAsset}\n`,
-      cached: new TextEncoder().encode('yesterday of the same rolling name'),
+      cached: new TextEncoder().encode('a half-written cache entry'),
     });
 
     await provisioner.ensure('Ubuntu');
 
     expect(requested).toEqual([
-      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/canary-manifest.json',
-      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/SHA256SUMS',
-      `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/${canaryAsset}`,
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v${canaryVersion}/SHA256SUMS`,
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v${canaryVersion}/${canaryAsset}`,
     ]);
-    expect(written.get(`/cache/1.2.3-canary.abcdef0/${canaryAsset}`)).toEqual(ARCHIVE);
+    expect(written.get(`/cache/${canaryVersion}/${canaryAsset}`)).toEqual(ARCHIVE);
   });
 
-  // The rolling tag is clobbered on every green commit, so a hub can ask for
-  // "its" runtime and be handed a newer one whose checksum verifies. Nothing
-  // else catches that until the handshake refuses the pair on the machine, so
-  // the refusal has to land here — before anything is written to the distro.
-  it('refuses a rolling install the canary tag has moved past', async () => {
-    const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
-    const manifest = JSON.stringify({
-      schemaVersion: 1,
-      channel: 'canary',
-      version: '1.2.3-canary.9999999',
-      assetVersion: '1.2.3-canary',
-      sourceSha: '9999999999999999999999999999999999999999',
-      builtAt: '2026-08-05T00:00:00.000Z',
-      pairs: [
-        {
-          platform: 'linux-x64',
-          hub: { asset: 'mangostudio-1.2.3-canary-linux-x64', digest: 'a'.repeat(64) },
-          runtime: { asset: canaryAsset, digest: 'b'.repeat(64) },
-        },
-      ],
-    });
-    const { provisioner, calls } = harness({
-      version: '1.2.3-canary.abcdef0',
-      checksums: `${DIGEST}  ${canaryAsset}\n`,
-      manifest,
-    });
+  // Pruning deletes the whole release, so SHA256SUMS 404s before anything can
+  // ask whether the runtime asset is listed in it. This provisioner keeps its
+  // own copy of the fetch path, so the explanation has to be added at both —
+  // the shared loader alone leaves a WSL install on a generic URL error.
+  it('tells a canary build whose release was pruned to upgrade', async () => {
+    const { provisioner } = harness({ version: '1.2.3-canary.abcdef0', releaseGone: true });
 
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
-      /rolling canary release has moved on/
+      /Canary keeps only its most recent releases/
     );
-    expect(calls.some((call) => call.script.includes('cat > '))).toBe(false);
-    expect(calls.some((call) => call.script.includes('runtime.json.incoming'))).toBe(false);
   });
 
-  // Rolling releases cut before the manifest existed have none, and turning
-  // that into a failure would break the channel to add a check.
-  it('still provisions from a rolling tag that publishes no manifest', async () => {
-    const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
-    const { provisioner, calls } = harness({
-      version: '1.2.3-canary.abcdef0',
-      checksums: `${DIGEST}  ${canaryAsset}\n`,
-      manifest: null,
-    });
+  // Stable releases are never pruned, so the same 404 there means something
+  // else and must not be explained away as a pruned canary.
+  it('does not blame pruning when a stable release cannot be read', async () => {
+    const { provisioner } = harness({ releaseGone: true });
 
-    await provisioner.ensure('Ubuntu');
-
-    expect(calls.some((call) => call.script.includes('cat > '))).toBe(true);
-  });
-
-  // The manifest read that clears `canaryPairRefusal` already named a digest
-  // for this platform's raw asset. Trusting it instead of a second SHA256SUMS
-  // fetch removes the only remaining window for the tag to move between the
-  // check and the download.
-  it('binds a rolling raw asset to the digest a validated manifest already named, skipping a second SHA256SUMS fetch', async () => {
-    const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
-    const manifest = JSON.stringify({
-      schemaVersion: 1,
-      channel: 'canary',
-      version: '1.2.3-canary.abcdef0',
-      assetVersion: '1.2.3-canary',
-      sourceSha: 'abcdef0abcdef0abcdef0abcdef0abcdef0abcde',
-      builtAt: '2026-08-05T00:00:00.000Z',
-      pairs: [
-        {
-          platform: 'linux-x64',
-          hub: { asset: 'mangostudio-1.2.3-canary-linux-x64', digest: 'a'.repeat(64) },
-          runtime: { asset: canaryAsset, digest: DIGEST },
-        },
-      ],
-    });
-    const { provisioner, requested, written } = harness({
-      version: '1.2.3-canary.abcdef0',
-      manifest,
-    });
-
-    await provisioner.ensure('Ubuntu');
-
-    expect(requested).toEqual([
-      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/canary-manifest.json',
-      `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/${canaryAsset}`,
-    ]);
-    expect(written.get(`/cache/1.2.3-canary.abcdef0/${canaryAsset}`)).toEqual(ARCHIVE);
-  });
-
-  // Simulates the tag moving between the manifest read and the asset download:
-  // same asset name, different bytes, still "clean" against a SHA256SUMS this
-  // hub never consults for a bound asset. Without the binding, this is the
-  // scenario where build B installs under the pair validated for build A.
-  it('refuses a rolling raw asset whose bytes do not match the manifest-bound digest', async () => {
-    const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
-    const manifest = JSON.stringify({
-      schemaVersion: 1,
-      channel: 'canary',
-      version: '1.2.3-canary.abcdef0',
-      assetVersion: '1.2.3-canary',
-      sourceSha: 'abcdef0abcdef0abcdef0abcdef0abcdef0abcde',
-      builtAt: '2026-08-05T00:00:00.000Z',
-      pairs: [
-        {
-          platform: 'linux-x64',
-          hub: { asset: 'mangostudio-1.2.3-canary-linux-x64', digest: 'a'.repeat(64) },
-          runtime: { asset: canaryAsset, digest: 'b'.repeat(64) },
-        },
-      ],
-    });
-    const { provisioner, calls } = harness({
-      version: '1.2.3-canary.abcdef0',
-      manifest,
-      archive: new TextEncoder().encode('a later build under the same rolling name'),
-    });
-
-    await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(/does not match the checksum/);
-    expect(calls.some((call) => call.script.includes('cat > '))).toBe(false);
-    expect(calls.some((call) => call.script.includes('runtime.json.incoming'))).toBe(false);
+    await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(/publishes no checksums/);
+    await expect(provisioner.ensure('Ubuntu')).rejects.not.toThrow(/Canary keeps only/);
   });
 
   it('records what it installed and what the distribution may do', async () => {
@@ -775,10 +669,9 @@ describe('WslProvisioner', () => {
   // shared one in `runtime-release-fetch` learned to record the digest it
   // verified. Both write into the same `~/.mango/runtime-cache/<version>/` the
   // staged-runtime card reads, so bytes cached by a WSL install arrived with no
-  // sidecar — and the card fell back to checking them against whatever
-  // SHA256SUMS the rolling tag serves at view time. That reports a mismatch for
-  // a perfectly good cached file as soon as the tag moves, which is the exact
-  // false alarm the sidecar exists to prevent.
+  // sidecar — and the card fell back to re-fetching SHA256SUMS at view time,
+  // which reports a failure for a perfectly good cached file as soon as the
+  // release is unreachable. That is the false alarm the sidecar prevents.
   it('records the verified digest beside a freshly cached asset', async () => {
     const { provisioner, written } = harness();
 

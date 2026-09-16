@@ -8,10 +8,9 @@
  * {@link loadRuntimeReleaseBytes} directly.
  *
  * Everything about *which* bytes is delegated. The channel-aware resolver
- * decides the tag and asset name, the rolling guardrails decide whether a
- * cached copy may satisfy a canary version, and the checksum is verified
- * against the release before any of it reaches disk. A second fetch path here
- * would be a second place for those rules to be forgotten.
+ * decides the tag and asset name, and the checksum is verified against the
+ * release before any of it reaches disk. A second fetch path here would be a
+ * second place for those rules to be forgotten.
  *
  * One cache, the documented one: `~/.mango/runtime-cache/<version>/`, pruned by
  * the rule that already prunes it and reported by the `doctor` check that

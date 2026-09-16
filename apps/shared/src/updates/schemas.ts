@@ -64,7 +64,7 @@ export const UpdateCheckSchema = Type.Object({
   channel: UpdateChannelSchema,
   currentVersion: Type.String({ maxLength: UPDATE_VERSION_MAX }),
   latestVersion: Type.Optional(Type.String({ maxLength: UPDATE_VERSION_MAX })),
-  /** Canary only: the source commit the rolling pre-release currently carries. */
+  /** Canary only: the source commit the newest canary release was built from. */
   latestSourceSha: Type.Optional(Type.String({ maxLength: SOURCE_SHA_MAX })),
   updateAvailable: Type.Boolean(),
   /** Epoch milliseconds of the check that produced this answer. */

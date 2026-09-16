@@ -210,7 +210,7 @@ export function distroRuntimeConfigAfterInstall(params: {
   readonly home: string;
   readonly version: string;
   readonly digest: string;
-  /** Source commit, for a rolling build whose version does not name one. */
+  /** Source commit, when the caller has one to record beside the binary. */
   readonly sourceSha?: string | undefined;
   readonly hubVersion: string;
   readonly hubHost: string;
@@ -228,8 +228,8 @@ export function distroRuntimeConfigAfterInstall(params: {
     }),
     digest: params.digest,
     // Cleared, not carried, when this install has no commit to record: a
-    // stale sha left over from a previous rolling install would claim this
-    // slot holds a build it does not.
+    // stale sha left over from an earlier install would claim this slot holds
+    // a build it does not.
     ...(params.sourceSha ? { sourceSha: params.sourceSha } : { sourceSha: undefined }),
     installedBy: {
       hubVersion: params.hubVersion,
@@ -327,6 +327,25 @@ export function releaseRuntimeBinaryName(version: string, platformId: string): s
 
 export function releaseAssetUrl(version: string, assetName: string): string {
   return `https://github.com/${REPOSITORY}/releases/download/v${version}/${assetName}`;
+}
+
+/**
+ * What a canary build has to be told when its release cannot answer, appended
+ * to whatever the caller already said; empty on every other channel.
+ *
+ * Canary keeps a window of releases, one per green commit, so the usual reason
+ * a canary release cannot answer is that this build's own release has been
+ * pruned — not a broken install. Nothing restores it: releases are immutable
+ * and a pruned tag name can never be republished, so the only way forward is a
+ * newer build.
+ * // Usage: `No SHA256SUMS.${prunedCanaryHint('0.1.1-canary.abc1234')}`
+ */
+export function prunedCanaryHint(tagVersion: string): string {
+  if (!tagVersion.includes('-canary')) return '';
+  return (
+    ' Canary keeps only its most recent releases, so a build older than that window can no' +
+    ' longer fetch its own runtime. Upgrade to the current canary build and try again.'
+  );
 }
 
 /**

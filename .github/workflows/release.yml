@@ -254,14 +254,18 @@ jobs:
       - name: Generate release notes
         run: bunx git-cliff --tag "v${{ needs.build.outputs.version }}" --latest --strip all > RELEASE_NOTES.md
 
-      - name: Create or update GitHub Release
+      - name: Create the GitHub Release
+        # Immutable releases: assets ride along with the create call, which
+        # uploads them to a draft and publishes last. A rerun after a partial
+        # failure recovers the draft; a release that published without all of
+        # its assets is reported rather than patched, because it cannot be.
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
-          source scripts/release/create-or-update-release.sh
+          source scripts/release/publish-release.sh
           tag="v${VERSION}"
-          create_or_update_release "$tag" release-assets/* -- \
+          publish_release "$tag" release-assets/* -- \
             --title "$tag" \
             --notes-file RELEASE_NOTES.md
 

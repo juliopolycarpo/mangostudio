@@ -1,9 +1,9 @@
 /**
  * The npm side of resolving a canary `<sha>` upgrade target.
  *
- * A per-commit canary build is never republished under a rolling tag the way
- * `mangostudio-<root>-canary-<platformId>` is on GitHub; it is published to npm
- * as a per-platform optional-dependency package (the same ones
+ * GitHub keeps only a window of canary releases, so a sha older than that
+ * window no longer has a tag to resolve. npm keeps every build: each is
+ * published as a per-platform optional-dependency package (the same ones
  * `packages/cli/bin/mangostudio.js` resolves at install time), one version per
  * build. Finding the version behind a given sha is therefore an npm registry
  * lookup, not a GitHub one.

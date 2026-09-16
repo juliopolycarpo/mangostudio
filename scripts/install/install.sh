@@ -183,11 +183,20 @@ verify_checksum() {
 # --- Canary tag/manifest parsing -------------------------------------------
 # Pure text-in, text-out so tests exercise them without a network call.
 
+# Canary cuts one release per green commit, tagged `v<version>` with the sha the
+# build carries (`g`-prefixed when the short sha is an illegal semver numeric
+# identifier). The suffix is optional only so the frozen pre-2026-09 rolling tag
+# still resolves for an older install; GitHub lists newest first, so the first
+# match is the newest build either way.
 extract_canary_tag() {
   local releases_json="$1" tag
+  # `head -n 1`, not `grep -m1`: the whole payload is one line, so -m1 stops
+  # after that line and -o still prints every match on it. With one release per
+  # commit there are many, and only the first (newest) is wanted.
   tag="$(printf '%s' "$releases_json" \
-    | grep -m1 -o '"tag_name": *"v[0-9][^"]*-canary"' \
-    | sed -E 's/.*"(v[0-9][^"]*-canary)"$/\1/')" || true
+    | grep -oE '"tag_name": *"v[0-9][^"]*-canary(\.g?[0-9a-f]{7,40})?"' \
+    | head -n 1 \
+    | sed -E 's/.*"(v[^"]+)"$/\1/')" || true
   printf '%s\n' "$tag"
 }
 

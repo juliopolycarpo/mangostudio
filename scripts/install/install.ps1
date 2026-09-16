@@ -140,8 +140,11 @@ function Test-Checksum([string]$ManifestPath, [string]$ArchivePath, [string]$Ass
 # Pure data-in, data-out so tests exercise them without a network call.
 
 # $Releases: the parsed array Invoke-RestMethod returns for the releases API.
+# One release per green commit, tagged `v<version>` with the build's sha; the
+# suffix is optional only so the frozen pre-2026-09 rolling tag still resolves.
+# GitHub lists newest first, so the first match is the newest build.
 function Select-CanaryTag($Releases) {
-  $match = $Releases | Where-Object { $_.tag_name -match '^v[0-9].*-canary$' } | Select-Object -First 1
+  $match = $Releases | Where-Object { $_.tag_name -match '^v[0-9].*-canary(\.g?[0-9a-f]{7,40})?$' } | Select-Object -First 1
   if ($match) { return $match.tag_name }
   return $null
 }

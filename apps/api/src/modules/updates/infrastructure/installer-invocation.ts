@@ -99,12 +99,11 @@ export function installerArgv(
 /**
  * The flags that tell the script to install `archivePath`, in the spelling its
  * shell uses. `--version`/`-Version` is passed for every kind, not just
- * `npm-tarball`: a canary archive's file name only carries the bare
- * `<major>.<minor>.<patch>-canary`, but the resolved version (from the canary
- * manifest) carries the full `<version>.<sha7>` the binary reports — without it
- * install.sh falls back to deriving the version from the file name and the
- * post-install smoke check compares that truncated string against `--version`,
- * failing every canary self-upgrade.
+ * `npm-tarball`: install.sh otherwise derives the version from the archive's
+ * file name, and the post-install smoke check compares that against what the
+ * binary reports. Canary archives carry the full `<version>.<sha7>` today, but
+ * the npm tarball's name does not, and passing the resolved version keeps the
+ * two from having to agree by coincidence.
  * // Usage: selfInstallFlags('sh', '/tmp/a.tar.gz', '0.1.1')
  */
 export function selfInstallFlags(

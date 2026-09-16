@@ -64,7 +64,15 @@ commit_parsers = [
 ]
 protect_breaking_commits = false
 filter_commits = false
-tag_pattern = "^v[0-9]"
+tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+(?:-(?:c|ca|can|cana|canar|canary|(?:[^c]|c[^a]|ca[^n]|can[^a]|cana[^r]|canar[^y]|canary[^.])[0-9A-Za-z.-]*))?(?:\\+[0-9A-Za-z.-]+)?$"
+# Canary cuts one tag per green commit (`v0.1.1-canary.<sha7>`), and every one of
+# them matched the former broad `tag_pattern` — left alone, each would open its
+# own release section and swallow "Unreleased". The pattern accepts the stable
+# and real prerelease tags the release workflow admits while rejecting only the
+# `-canary.` prefix before git-cliff selects release boundaries. Rust regex has
+# no negative lookahead, so its prerelease alternatives name each prefix that
+# diverges from `canary.`. `skip_tags` and `ignore_tags` both discard every tag
+# on the matching commit, including a stable tag that shares it with a canary.
 sort_commits = "newest"
 # The Mango Protocol lives in this repository but releases on its own
 # `protocol-v*` train, with its own changelog under packages/protocol. Excluding
