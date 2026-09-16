@@ -54,6 +54,37 @@ export const PROTOCOL_PATHS: readonly string[] = [
   'scripts/protocol/',
 ];
 
+/**
+ * Protocol-owned files that live outside `PROTOCOL_PATHS` and still belong to
+ * the protocol's changelog, as git-cliff globs.
+ *
+ * The three `protocol-*.yml` workflows are the protocol's own CI, release and
+ * fuzz lanes. Leaving them out of both configs sent every commit that touches
+ * only them to the *application's* changelog and to neither of the protocol's:
+ * measured on this tree, `ci(protocol): own CI, release and fuzz workflows` and
+ * four of its siblings reached `CHANGELOG.md` and never
+ * `packages/protocol/CHANGELOG.md`, the exact inversion the partition exists to
+ * prevent.
+ *
+ * `scripts/lib/protocol.ts` and `scripts/tests/protocol-*.unit.test.ts` stay
+ * out on purpose, for the reason `PROTOCOL_TOOLING_FILES` gives: they are the
+ * application repository's own tooling about the protocol, not the protocol.
+ */
+const PROTOCOL_EXTRA_CHANGELOG_GLOBS: readonly string[] = ['.github/workflows/protocol-*.yml'];
+
+/**
+ * Every glob both git-cliff configs mirror — the root as `exclude_paths`, the
+ * protocol's as `include_paths`. `protocol-changelog.unit.test.ts` holds the
+ * three in step.
+ *
+ * @example
+ * PROTOCOL_CHANGELOG_GLOBS.includes('spec/**'); // true
+ */
+export const PROTOCOL_CHANGELOG_GLOBS: readonly string[] = [
+  ...PROTOCOL_PATHS.map((prefix) => `${prefix}**`),
+  ...PROTOCOL_EXTRA_CHANGELOG_GLOBS,
+];
+
 /** Root files the protocol workspace owns outright. */
 const PROTOCOL_ROOT_FILES: readonly string[] = [
   'Cargo.toml',

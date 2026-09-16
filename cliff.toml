@@ -72,14 +72,18 @@ sort_commits = "newest"
 # history import brought in — which carry the *upstream* tree's root-relative
 # paths (`packages/protocol/**`, `crates/**`, `spec/**`, …), so no rule matching
 # the import prefix could ever have reached them — and it keeps every future
-# protocol commit out of this file. git-cliff 2.13.1 has no first-parent
-# traversal, so a path rule is the only lever. The same directory list is
-# `PROTOCOL_PATHS` in scripts/lib/protocol.ts; protocol-lanes.unit.test.ts holds
-# the two in step.
+# protocol-only commit out of this file. git-cliff 2.13.1 has no first-parent
+# traversal, so a path rule is the only lever. A commit touching both trees
+# still lands in both changelogs: git-cliff keeps a commit whose file set is not
+# entirely excluded, which is the right answer for one.
+#
+# The same list is `PROTOCOL_CHANGELOG_GLOBS` in scripts/lib/protocol.ts;
+# protocol-changelog.unit.test.ts holds the two in step.
 exclude_paths = [
   "packages/protocol/**",
   "crates/**",
   "spec/**",
   "docs/protocol/**",
   "scripts/protocol/**",
+  ".github/workflows/protocol-*.yml",
 ]

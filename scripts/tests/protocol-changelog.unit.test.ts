@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { PROTOCOL_CHANGELOG, PROTOCOL_CLIFF_CONFIG, PROTOCOL_PATHS } from '../lib/protocol';
+import {
+  PROTOCOL_CHANGELOG,
+  PROTOCOL_CHANGELOG_GLOBS,
+  PROTOCOL_CLIFF_CONFIG,
+  PROTOCOL_PATHS,
+} from '../lib/protocol';
 import { readText } from './support/read-text';
 
 // Two disjoint histories share this repository: the application's, and the
@@ -21,12 +26,27 @@ describe('changelog partition', () => {
     expect(PROTOCOL_CONFIG).toContain('tag_pattern = "^protocol-v[0-9]"');
   });
 
-  test('the root excludes exactly the directories the protocol includes', () => {
-    // One list, three consumers: these two configs and the CI path filter.
+  test('the root excludes exactly what the protocol includes', () => {
+    // One list, two configs. Every protocol directory is on it, and so is
+    // anything the protocol owns outside them.
+    for (const glob of PROTOCOL_CHANGELOG_GLOBS) {
+      const quoted = `"${glob}"`;
+      expect(ROOT_CONFIG, `root cliff.toml must exclude ${glob}`).toContain(quoted);
+      expect(PROTOCOL_CONFIG, `protocol cliff.toml must include ${glob}`).toContain(quoted);
+    }
     for (const prefix of PROTOCOL_PATHS) {
-      const glob = `"${prefix}**"`;
-      expect(ROOT_CONFIG, `root cliff.toml must exclude ${prefix}`).toContain(glob);
-      expect(PROTOCOL_CONFIG, `protocol cliff.toml must include ${prefix}`).toContain(glob);
+      expect(PROTOCOL_CHANGELOG_GLOBS, prefix).toContain(`${prefix}**`);
+    }
+  });
+
+  test("the protocol's own workflows reach its changelog and not the application's", () => {
+    // Measured before this rule existed: `ci(protocol): own CI, release and
+    // fuzz workflows` touches nothing but `.github/workflows/protocol-*.yml`,
+    // so it landed in CHANGELOG.md and in neither protocol section — the exact
+    // inversion the partition exists to prevent. Four sibling commits on the
+    // relocation branch had the same file shape.
+    for (const config of [ROOT_CONFIG, PROTOCOL_CONFIG]) {
+      expect(config).toContain('".github/workflows/protocol-*.yml"');
     }
   });
 
