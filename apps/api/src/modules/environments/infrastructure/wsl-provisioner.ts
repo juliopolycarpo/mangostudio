@@ -65,6 +65,7 @@ import {
   localRuntimeBuildPath,
   PROBE_SLOT_SCRIPT,
   parseDistroSlotProbe,
+  prunedCanaryHint,
   REMOVE_LEGACY_RUNTIME_SCRIPT,
   releaseArchiveName,
   releaseAssetUrl,
@@ -692,15 +693,23 @@ async function fetchExpectedChecksum(
   versionDir: string
 ): Promise<string> {
   const { tagVersion } = release;
+  // A pruned release takes its SHA256SUMS with it, so this is where a hub whose
+  // own release is gone actually lands — not at the "does not publish" check
+  // below, which only a release that still exists can reach.
   const checksums = await download(
     deps,
     releaseAssetUrl(tagVersion, 'SHA256SUMS'),
     MAX_CHECKSUMS_BYTES
-  );
+  ).catch((error: unknown) => {
+    if (!(error instanceof WslAssetMissingError)) throw error;
+    throw new WslAssetMissingError(
+      `Release v${tagVersion} publishes no checksums, so there is no Linux runtime this hub can verify and install.${prunedCanaryHint(tagVersion)}`
+    );
+  });
   const expected = findReleaseChecksum(new TextDecoder().decode(checksums), assetName);
   if (!expected) {
     throw new WslAssetMissingError(
-      `Release v${tagVersion} does not publish ${assetName}, so there is no Linux runtime to install. Update MangoStudio, or put a matching runtime at ${DISTRO_RUNTIME_PATH} in the distribution yourself.`
+      `Release v${tagVersion} does not publish ${assetName}, so there is no Linux runtime to install.${prunedCanaryHint(tagVersion)} Update MangoStudio, or put a matching runtime at ${DISTRO_RUNTIME_PATH} in the distribution yourself.`
     );
   }
   await rememberReleaseChecksums({

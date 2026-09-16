@@ -330,6 +330,25 @@ export function releaseAssetUrl(version: string, assetName: string): string {
 }
 
 /**
+ * What a canary build has to be told when its release cannot answer, appended
+ * to whatever the caller already said; empty on every other channel.
+ *
+ * Canary keeps a window of releases, one per green commit, so the usual reason
+ * a canary release cannot answer is that this build's own release has been
+ * pruned — not a broken install. Nothing restores it: releases are immutable
+ * and a pruned tag name can never be republished, so the only way forward is a
+ * newer build.
+ * // Usage: `No SHA256SUMS.${prunedCanaryHint('0.1.1-canary.abc1234')}`
+ */
+export function prunedCanaryHint(tagVersion: string): string {
+  if (!tagVersion.includes('-canary')) return '';
+  return (
+    ' Canary keeps only its most recent releases, so a build older than that window can no' +
+    ' longer fetch its own runtime. Upgrade to the current canary build and try again.'
+  );
+}
+
+/**
  * Where a source checkout keeps the Linux runtime it built for itself — the
  * same layout `bun run build:binary --platform <id>` writes into. A checkout's
  * version names no release, so this is the only place left to look.

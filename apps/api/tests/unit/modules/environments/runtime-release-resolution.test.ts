@@ -171,6 +171,35 @@ describe('resolveRuntimeRelease', () => {
 
     expect(loaded).toMatchObject({ fromArchive: false, digest: `sha256:${hash}`, cached: false });
   });
+
+  /** A release that was pruned: nothing under its tag answers any more. */
+  const goneRelease = (version: string) =>
+    loadRuntimeReleaseBytes('linux-x64', {
+      version,
+      fetch: (() =>
+        Promise.resolve(new Response('Not Found', { status: 404 }))) as unknown as typeof fetch,
+      resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
+      cacheDir: () => '/unused',
+      readBytes: () => Promise.resolve(null),
+      writeCache: () => Promise.resolve(),
+    });
+
+  // Pruning deletes the whole release, so SHA256SUMS 404s before anything can
+  // ask whether the runtime asset is listed in it. The message a pruned canary
+  // build gets has to come from that hop, not from the asset-not-listed check
+  // a deleted release can never reach.
+  it('tells a canary build whose release was pruned to upgrade', async () => {
+    await expect(goneRelease('1.2.3-canary.abcdef0')).rejects.toThrow(
+      /Canary keeps only its most recent releases/
+    );
+  });
+
+  // Stable releases are never pruned, so the same 404 there means something
+  // else and must not be explained away as a pruned canary.
+  it('does not blame pruning when a stable release cannot be read', async () => {
+    await expect(goneRelease('1.2.3')).rejects.toThrow(/publishes no checksums/);
+    await expect(goneRelease('1.2.3')).rejects.not.toThrow(/Canary keeps only/);
+  });
 });
 
 describe('pinnedRuntimeDigest', () => {

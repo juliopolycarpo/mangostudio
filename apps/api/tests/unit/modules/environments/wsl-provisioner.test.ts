@@ -65,6 +65,8 @@ function harness(
     readonly cacheFiles?: Record<string, Uint8Array>;
     /** Stands in for a host with no route to the release. */
     readonly offline?: boolean;
+    /** Stands in for a release that was pruned: nothing under its tag answers. */
+    readonly releaseGone?: boolean;
   } = {}
 ) {
   const version = options.version ?? VERSION;
@@ -145,6 +147,9 @@ function harness(
       const url = String(input);
       requested.push(url);
       if (options.offline) throw new Error('getaddrinfo EAI_AGAIN github.com');
+      if (options.releaseGone) {
+        return Promise.resolve(new Response('Not Found', { status: 404 }));
+      }
       const body = url.endsWith('SHA256SUMS')
         ? new TextEncoder().encode(options.checksums ?? CHECKSUMS)
         : (options.archive ?? ARCHIVE);
@@ -301,6 +306,27 @@ describe('WslProvisioner', () => {
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${canaryVersion}/${canaryAsset}`,
     ]);
     expect(written.get(`/cache/${canaryVersion}/${canaryAsset}`)).toEqual(ARCHIVE);
+  });
+
+  // Pruning deletes the whole release, so SHA256SUMS 404s before anything can
+  // ask whether the runtime asset is listed in it. This provisioner keeps its
+  // own copy of the fetch path, so the explanation has to be added at both —
+  // the shared loader alone leaves a WSL install on a generic URL error.
+  it('tells a canary build whose release was pruned to upgrade', async () => {
+    const { provisioner } = harness({ version: '1.2.3-canary.abcdef0', releaseGone: true });
+
+    await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
+      /Canary keeps only its most recent releases/
+    );
+  });
+
+  // Stable releases are never pruned, so the same 404 there means something
+  // else and must not be explained away as a pruned canary.
+  it('does not blame pruning when a stable release cannot be read', async () => {
+    const { provisioner } = harness({ releaseGone: true });
+
+    await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(/publishes no checksums/);
+    await expect(provisioner.ensure('Ubuntu')).rejects.not.toThrow(/Canary keeps only/);
   });
 
   it('records what it installed and what the distribution may do', async () => {

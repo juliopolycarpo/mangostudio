@@ -28,6 +28,7 @@ import { resolveRuntimeRelease } from './runtime-release-resolution';
 import {
   findReleaseChecksum,
   localRuntimeBuildPath,
+  prunedCanaryHint,
   releaseArchiveName,
   releaseAssetUrl,
 } from './wsl-runtime-release';
@@ -425,25 +426,6 @@ export async function pruneRuntimeCache(
 }
 
 /**
- * Why a release does not publish an asset, in the terms a user can act on.
- *
- * Canary keeps a window of releases, one per green commit, so the common cause
- * on that channel is that this build's own release has been pruned — not a
- * broken install. Nothing can restore it: releases are immutable and a pruned
- * tag name can never be republished.
- */
-function missingAssetMessage(tagVersion: string, assetName: string): string {
-  if (!tagVersion.includes('-canary')) {
-    return `Release v${tagVersion} does not publish ${assetName}.`;
-  }
-  return (
-    `Release v${tagVersion} does not publish ${assetName}. Canary keeps only its most ` +
-    'recent releases, so a build older than that window can no longer fetch its own ' +
-    'runtime. Upgrade to the current canary build and try again.'
-  );
-}
-
-/**
  * The digest this release publishes for the asset, from the release itself.
  *
  * The answer is also kept in the version directory on the way past — see
@@ -452,15 +434,26 @@ function missingAssetMessage(tagVersion: string, assetName: string): string {
  */
 async function fetchExpectedChecksum(load: AssetLoad, versionDir: string): Promise<string> {
   const { assetName, tagVersion } = load;
+  // A pruned release takes its SHA256SUMS with it, so this is where a hub whose
+  // own release is gone actually lands — not at the "does not publish" check
+  // below, which only a release that still exists can reach.
   const checksums = await download(
     load.deps,
     releaseAssetUrl(tagVersion, 'SHA256SUMS'),
     MAX_CHECKSUMS_BYTES,
     load.signal
-  );
+  ).catch((error: unknown) => {
+    if (!(error instanceof RuntimeAssetMissingError)) throw error;
+    throw new RuntimeAssetMissingError(
+      `Release v${tagVersion} publishes no checksums, so ${assetName} cannot be verified.` +
+        prunedCanaryHint(tagVersion)
+    );
+  });
   const expected = findReleaseChecksum(new TextDecoder().decode(checksums), assetName);
   if (!expected) {
-    throw new RuntimeAssetMissingError(missingAssetMessage(tagVersion, assetName));
+    throw new RuntimeAssetMissingError(
+      `Release v${tagVersion} does not publish ${assetName}.${prunedCanaryHint(tagVersion)}`
+    );
   }
   await rememberReleaseChecksums({
     versionDir,
