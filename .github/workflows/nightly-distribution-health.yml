@@ -91,38 +91,38 @@ jobs:
           fi
           stable_version="$(jq -r '.["dist-tags"].latest // empty' <<<"$packument")"
 
-          # Canary npm versions are <root>-canary.<sha7>; release assets drop the
-          # .<sha7> so the fixed Cargo launcher keeps resolving them.
+          # Both channels publish under their exact version: the tag is
+          # v<version> and the assets carry <version>, canary sha included.
           if [ "$CHANNEL" = "canary" ]; then
-            if [[ ! "$npm_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-canary\.[0-9a-f]{7}$ ]]; then
+            if [[ ! "$npm_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-canary\.g?[0-9a-f]{7,40}$ ]]; then
               echo "Unexpected canary version shape: ${npm_version}" >&2
               exit 1
             fi
-            asset_version="${npm_version%.*}"
+            # Resolved from the release list, the way install.sh and the hub do,
+            # rather than derived from the npm version: the two channels publish
+            # independently, and pinning a tag npm names would turn a failed
+            # GitHub publish into a 404 halfway through this workflow.
+            release_tag="$(gh release list --limit 30 --json tagName,isPrerelease \
+              --jq 'map(select(.isPrerelease and (.tagName | test("-canary\\.")))) | .[0].tagName // empty')"
+            if [ -z "$release_tag" ]; then
+              echo "No canary pre-release is published." >&2
+              exit 1
+            fi
+            asset_version="${release_tag#v}"
+            if [ "$asset_version" != "$npm_version" ]; then
+              echo "::warning::npm canary (${npm_version}) and ${release_tag} diverge — one channel likely failed its last publish."
+            fi
           else
             if [[ ! "$npm_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "Unexpected stable version shape: ${npm_version}" >&2
               exit 1
             fi
             asset_version="$npm_version"
+            release_tag="v${asset_version}"
           fi
-          release_tag="v${asset_version}"
 
-          # The rolling canary pre-release records its exact canary version in
-          # the notes; that is the version the archived binary reports. Stable
-          # tags are immutable, so the archive version equals the npm version.
-          archive_version="$npm_version"
-          if [ "$CHANNEL" = "canary" ]; then
-            notes="$(gh release view "$release_tag" --json body --jq .body)"
-            archive_version="$(grep -oE 'Canary version: [0-9]+\.[0-9]+\.[0-9]+-canary\.[0-9a-f]{7}' <<<"$notes" | head -n 1 | awk '{print $3}')"
-            if [ -z "$archive_version" ]; then
-              echo "Could not parse the canary version from the ${release_tag} release notes." >&2
-              exit 1
-            fi
-            if [ "$archive_version" != "$npm_version" ]; then
-              echo "::warning::npm canary (${npm_version}) and the ${release_tag} pre-release (${archive_version}) diverge — one channel likely failed its last publish."
-            fi
-          fi
+          # The tag names the version its binaries report, on both channels.
+          archive_version="$asset_version"
 
           mkdir -p pinned-checksums
           gh release download "$release_tag" --pattern SHA256SUMS --dir pinned-checksums
@@ -323,7 +323,7 @@ jobs:
           fi
           if [ "$actual" != "$expected" ]; then
             echo "Checksum mismatch for ${ASSET_NAME}: expected ${expected}, got ${actual}." >&2
-            echo "If this is the canary channel, the rolling pre-release may have been republished mid-run — re-run the workflow." >&2
+            echo "Releases are immutable, so a mismatch here is corruption in flight, not a republished asset." >&2
             exit 1
           fi
           echo "Checksum verified: ${ASSET_NAME}"
@@ -421,10 +421,10 @@ jobs:
           actual="$("${MANGOSTUDIO_BIN_DIR}/mangostudio" --version)"
           if [ "$actual" != "$ARCHIVE_VERSION" ]; then
             if [ "$CHANNEL" = "canary" ]; then
-              # --canary resolves its own tag, which can race the identity
-              # `resolve` pinned if the rolling pre-release republished
-              # mid-run — a divergence here is a notice, not a failure.
-              echo "::warning::install.sh resolved canary ${actual}, pinned identity was ${ARCHIVE_VERSION} — the rolling pre-release likely republished mid-run."
+              # --canary resolves the newest canary release, which a green main
+              # commit can publish while this workflow runs — a divergence here
+              # is a notice, not a failure.
+              echo "::warning::install.sh resolved canary ${actual}, pinned identity was ${ARCHIVE_VERSION} — a newer canary release likely landed mid-run."
             else
               echo "Expected ${ARCHIVE_VERSION}, got ${actual}" >&2
               exit 1
@@ -448,7 +448,7 @@ jobs:
           $actual = & "$env:MANGOSTUDIO_BIN_DIR\mangostudio.cmd" --version
           if ($actual -ne $env:ARCHIVE_VERSION) {
             if ($env:CHANNEL -eq 'canary') {
-              Write-Host "::warning::install.ps1 resolved canary $actual, pinned identity was $env:ARCHIVE_VERSION — the rolling pre-release likely republished mid-run."
+              Write-Host "::warning::install.ps1 resolved canary $actual, pinned identity was $env:ARCHIVE_VERSION — a newer canary release likely landed mid-run."
             } else {
               Write-Error "Expected $env:ARCHIVE_VERSION, got $actual"
               exit 1

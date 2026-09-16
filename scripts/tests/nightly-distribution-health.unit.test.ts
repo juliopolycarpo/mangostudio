@@ -41,6 +41,23 @@ describe('nightly distribution health workflow', () => {
     expect(laneJobs).not.toContain('dist-tags');
   });
 
+  test('canary identity comes from the release list, not from the npm version', () => {
+    const workflow = readText(WORKFLOW_PATH);
+
+    // Canary publishes one release per green commit, so the tag carries the
+    // full sha-stamped version. Deriving it from npm (the old `${npm_version%.*}`
+    // strip, for a rolling `v<root>-canary` tag) now names a tag that does not
+    // exist, and pinning npm's version as the tag turns a failed GitHub publish
+    // into a 404 halfway through the run.
+    expect(workflow).toContain('--json tagName,isPrerelease');
+    expect(workflow).toContain('asset_version="${release_tag#v}"');
+    expect(workflow).toContain('archive_version="$asset_version"');
+    expect(workflow).not.toContain('asset_version="${npm_version%.*}"');
+    // The canary version the archive reports is read off the tag, never parsed
+    // back out of release notes.
+    expect(workflow).not.toContain('Canary version:');
+  });
+
   test('archive lanes verify against the SHA256SUMS snapshot pinned at resolve time', () => {
     const workflow = readText(WORKFLOW_PATH);
 
