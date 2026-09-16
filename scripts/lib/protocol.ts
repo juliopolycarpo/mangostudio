@@ -55,12 +55,34 @@ export const PROTOCOL_PATHS: readonly string[] = [
 ];
 
 /** Root files the protocol workspace owns outright. */
-export const PROTOCOL_ROOT_FILES: readonly string[] = [
+const PROTOCOL_ROOT_FILES: readonly string[] = [
   'Cargo.toml',
   'Cargo.lock',
   'deny.toml',
   'rustfmt.toml',
   'rust-toolchain.toml',
+];
+
+/**
+ * Files outside the protocol directories that decide whether its lanes run.
+ *
+ * Kept apart from `PROTOCOL_PATHS`, which the two git-cliff configs mirror as
+ * include/exclude globs: this module is the application repository's own
+ * tooling and has no place in the protocol's changelog. It belongs to the lane
+ * detection because it *is* the lane detection — an edit here reshapes the path
+ * set, the CI filter derived from it and the release-note range, and the
+ * detector that decided to skip the lanes would be running the pre-edit rules.
+ */
+const PROTOCOL_TOOLING_FILES: readonly string[] = ['scripts/lib/protocol.ts'];
+
+/**
+ * Every file the protocol lanes react to that is not under a protocol
+ * directory. This is the list the CI path filter and the push trigger mirror;
+ * the two halves above differ only in why they are on it.
+ */
+export const PROTOCOL_TRIGGER_FILES: readonly string[] = [
+  ...PROTOCOL_ROOT_FILES,
+  ...PROTOCOL_TOOLING_FILES,
 ];
 
 /**
@@ -72,7 +94,8 @@ export const PROTOCOL_ROOT_FILES: readonly string[] = [
 export function touchesProtocolSurface(files: readonly string[]): boolean {
   return files.some(
     (file) =>
-      PROTOCOL_PATHS.some((prefix) => file.startsWith(prefix)) || PROTOCOL_ROOT_FILES.includes(file)
+      PROTOCOL_PATHS.some((prefix) => file.startsWith(prefix)) ||
+      PROTOCOL_TRIGGER_FILES.includes(file)
   );
 }
 

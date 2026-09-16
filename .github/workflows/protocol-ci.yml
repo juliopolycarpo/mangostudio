@@ -26,6 +26,7 @@ on:
       - "deny.toml"
       - "rustfmt.toml"
       - "rust-toolchain.toml"
+      - "scripts/lib/protocol.ts"
       - ".github/workflows/protocol-ci.yml"
   workflow_dispatch:
 
@@ -58,10 +59,12 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        # The path set is `PROTOCOL_PATHS` + `PROTOCOL_ROOT_FILES` in
+        # The path set is `PROTOCOL_PATHS` + `PROTOCOL_TRIGGER_FILES` in
         # scripts/lib/protocol.ts; protocol-lanes.unit.test.ts holds the two in
-        # step. `--no-renames` lists both sides of a rename, so moving a
-        # protocol source under an unrelated path cannot hide the deletion.
+        # step. That module lists itself, so an edit to the rules deciding this
+        # skip cannot be judged by the rules it replaced. `--no-renames` lists
+        # both sides of a rename, so moving a protocol source under an unrelated
+        # path cannot hide the deletion.
         run: |
           if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "protocol=true" >> "$GITHUB_OUTPUT"
@@ -75,7 +78,7 @@ jobs:
             exit 1
           fi
 
-          relevant='^(packages/protocol/|crates/|spec/|docs/protocol/|scripts/protocol/|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/protocol-ci\.yml$)'
+          relevant='^(packages/protocol/|crates/|spec/|docs/protocol/|scripts/protocol/|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|scripts/lib/protocol\.ts$|\.github/workflows/protocol-ci\.yml$)'
           if grep -Eq "$relevant" "$RUNNER_TEMP/changed-files"; then
             echo "protocol=true" >> "$GITHUB_OUTPUT"
           else

@@ -8,8 +8,8 @@ import {
   PROTOCOL_CLIFF_CONFIG,
   PROTOCOL_IMPORT_TIP,
   PROTOCOL_PATHS,
-  PROTOCOL_ROOT_FILES,
   PROTOCOL_TAG_PREFIX,
+  PROTOCOL_TRIGGER_FILES,
   protocolTag,
   protocolVersion,
   touchesProtocolSurface,
@@ -64,6 +64,7 @@ describe('touchesProtocolSurface', () => {
     'deny.toml',
     'rustfmt.toml',
     'rust-toolchain.toml',
+    'scripts/lib/protocol.ts',
   ])('claims %s', (file) => {
     expect(touchesProtocolSurface([file])).toBe(true);
   });
@@ -86,14 +87,14 @@ describe('touchesProtocolSurface', () => {
     // The same list drives the scoped-run predicate here and the CI path filter;
     // a directory renamed in one place and not the other fails open — no lane
     // runs, and nothing says so.
-    for (const entry of [...PROTOCOL_PATHS, ...PROTOCOL_ROOT_FILES]) {
+    for (const entry of [...PROTOCOL_PATHS, ...PROTOCOL_TRIGGER_FILES]) {
       expect(existsSync(join(ROOT_DIR, entry)), `${entry} is declared but does not exist`).toBe(
         true
       );
     }
     // Trailing slash matters: without it `spec` would also claim `special/`.
     expect(PROTOCOL_PATHS.every((prefix) => prefix.endsWith('/'))).toBe(true);
-    expect(PROTOCOL_ROOT_FILES.every((file) => !file.endsWith('/'))).toBe(true);
+    expect(PROTOCOL_TRIGGER_FILES.every((file) => !file.endsWith('/'))).toBe(true);
   });
 });
 
@@ -312,23 +313,34 @@ describe('the CI path filter reads the same list as everything else', () => {
     return new RegExp(literal as string);
   };
 
-  test.each([...PROTOCOL_PATHS, ...PROTOCOL_ROOT_FILES])('the changes job claims %s', (entry) => {
-    // Failing open here is silent: no lane runs, the Gate accepts the skip, and
-    // the pull request goes green with the Rust half never compiled.
-    const probe = entry.endsWith('/') ? `${entry}some/file.rs` : entry;
-    expect(relevance().test(probe), `${probe} does not match the changes-job regex`).toBe(true);
-  });
+  test.each([...PROTOCOL_PATHS, ...PROTOCOL_TRIGGER_FILES])(
+    'the changes job claims %s',
+    (entry) => {
+      // Failing open here is silent: no lane runs, the Gate accepts the skip, and
+      // the pull request goes green with the Rust half never compiled.
+      const probe = entry.endsWith('/') ? `${entry}some/file.rs` : entry;
+      expect(relevance().test(probe), `${probe} does not match the changes-job regex`).toBe(true);
+    }
+  );
 
   test.each([...PROTOCOL_PATHS])('the push trigger is filtered on %s', (prefix) => {
     expect(workflow, prefix).toContain(`      - "${prefix}**"`);
   });
 
-  test.each([...PROTOCOL_ROOT_FILES])('the push trigger is filtered on %s', (file) => {
+  test.each([...PROTOCOL_TRIGGER_FILES])('the push trigger is filtered on %s', (file) => {
     expect(workflow, file).toContain(`      - "${file}"`);
   });
 
   test('the workflow files itself, so editing the filter reruns the lanes', () => {
     expect(relevance().test('.github/workflows/protocol-ci.yml')).toBe(true);
+  });
+
+  test('the module defining the path set files itself too', () => {
+    // Otherwise the detector judges an edit to its own rules by the rules that
+    // edit replaced: a pull request narrowing PROTOCOL_PATHS would skip every
+    // lane, and the Gate would accept the skip it just authorised.
+    expect(relevance().test('scripts/lib/protocol.ts')).toBe(true);
+    expect(touchesProtocolSurface(['scripts/lib/protocol.ts'])).toBe(true);
   });
 
   test('a change outside the protocol does not trigger the lanes', () => {
