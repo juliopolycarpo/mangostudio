@@ -23,11 +23,20 @@ body = """
 - {% if commit.scope %}**({{ commit.scope }})** {% endif %}{{ commit.message | upper_first }}\
 {% endfor %}
 {% endfor %}
+<!-- seam -->
 """
 footer = ""
 trim = true
 # Group headers carry a sortable HTML comment for ordering; strip it from output.
-postprocessors = [{ pattern = '<!-- [0-9]+ -->', replace = "" }]
+# The seam marker is what `trim` would otherwise eat: git-cliff trims each
+# release body and joins them with one newline, so the last bullet of a version
+# and the next `## [x.y.z]` heading land on consecutive lines. Ending the body
+# with a non-whitespace marker keeps the newline before it, and removing only
+# the marker here leaves the blank line behind.
+postprocessors = [
+  { pattern = '<!-- [0-9]+ -->', replace = "" },
+  { pattern = '<!-- seam -->', replace = "" },
+]
 
 [git]
 conventional_commits = true
@@ -57,3 +66,20 @@ protect_breaking_commits = false
 filter_commits = false
 tag_pattern = "^v[0-9]"
 sort_commits = "newest"
+# The Mango Protocol lives in this repository but releases on its own
+# `protocol-v*` train, with its own changelog under packages/protocol. Excluding
+# its directories here does two jobs at once: it drops the 87 commits the
+# history import brought in — which carry the *upstream* tree's root-relative
+# paths (`packages/protocol/**`, `crates/**`, `spec/**`, …), so no rule matching
+# the import prefix could ever have reached them — and it keeps every future
+# protocol commit out of this file. git-cliff 2.13.1 has no first-parent
+# traversal, so a path rule is the only lever. The same directory list is
+# `PROTOCOL_PATHS` in scripts/lib/protocol.ts; protocol-lanes.unit.test.ts holds
+# the two in step.
+exclude_paths = [
+  "packages/protocol/**",
+  "crates/**",
+  "spec/**",
+  "docs/protocol/**",
+  "scripts/protocol/**",
+]
