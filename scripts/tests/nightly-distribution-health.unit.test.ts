@@ -44,18 +44,46 @@ describe('nightly distribution health workflow', () => {
   test('canary identity comes from the release list, not from the npm version', () => {
     const workflow = readText(WORKFLOW_PATH);
 
-    // Canary publishes one release per green commit, so the tag carries the
-    // full sha-stamped version. Deriving it from npm (the old `${npm_version%.*}`
-    // strip, for a rolling `v<root>-canary` tag) now names a tag that does not
-    // exist, and pinning npm's version as the tag turns a failed GitHub publish
-    // into a 404 halfway through the run.
+    // Canary publishes one release per green commit. Deriving the tag from npm
+    // (the old `${npm_version%.*}` strip, for a rolling `v<root>-canary` tag)
+    // now names a tag that does not exist, and pinning npm's version as the tag
+    // turns a failed GitHub publish into a 404 halfway through the run.
     expect(workflow).toContain('--json tagName,isPrerelease');
     expect(workflow).toContain('asset_version="${release_tag#v}"');
     expect(workflow).toContain('archive_version="$asset_version"');
     expect(workflow).not.toContain('asset_version="${npm_version%.*}"');
-    // The canary version the archive reports is read off the tag, never parsed
-    // back out of release notes.
+    // The canary version the archive reports comes from the tag or, for the
+    // frozen release, from its manifest — never parsed back out of release
+    // notes, which is what the rolling channel used to do.
     expect(workflow).not.toContain('Canary version:');
+  });
+
+  test('admits the frozen sha-less canary tag, the way the installers still do', () => {
+    const workflow = readText(WORKFLOW_PATH);
+
+    // install.sh, install.ps1 and the hub's release index all accept a canary
+    // tag whose sha suffix is absent, because the frozen pre-2026-09 release is
+    // one. A resolver that required the dot would call that release unpublished
+    // and exit before any lane ran, while every consumer it is meant to mirror
+    // kept installing from it.
+    const [, resolveStep = ''] = workflow.split('gh release list --limit 30');
+    expect(resolveStep).toContain('-canary(\\\\.g?[0-9a-f]{7,40})?$');
+    expect(resolveStep).not.toContain('test("-canary\\\\.")');
+  });
+
+  test('reads the reported version from the manifest for a sha-less canary tag', () => {
+    const workflow = readText(WORKFLOW_PATH);
+
+    // That release's assets carry the bare `<root>-canary` while its binaries
+    // report the sha-stamped version, so `archive_version` taken from the tag
+    // would fail every `--version` assertion the archive lane makes. Only its
+    // manifest records what the bytes call themselves; asset names stay on the
+    // tag version, which is what the filenames actually use.
+    const [, canaryBranch = ''] = workflow.split('asset_version="${release_tag#v}"');
+    expect(canaryBranch).toContain('--pattern canary-manifest.json');
+    expect(canaryBranch).toContain(
+      'archive_version="$(jq -r \'.version // empty\' legacy-canary-manifest/canary-manifest.json)"'
+    );
   });
 
   test('archive lanes verify against the SHA256SUMS snapshot pinned at resolve time', () => {

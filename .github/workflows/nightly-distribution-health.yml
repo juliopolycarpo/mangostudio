@@ -92,25 +92,43 @@ jobs:
           stable_version="$(jq -r '.["dist-tags"].latest // empty' <<<"$packument")"
 
           # Both channels publish under their exact version: the tag is
-          # v<version> and the assets carry <version>, canary sha included.
+          # v<version> and the assets carry <version>, canary sha included. The
+          # frozen pre-2026-09 canary release is the one exception, and the
+          # canary branch below is where it is reconciled.
           if [ "$CHANNEL" = "canary" ]; then
             if [[ ! "$npm_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-canary\.g?[0-9a-f]{7,40}$ ]]; then
               echo "Unexpected canary version shape: ${npm_version}" >&2
               exit 1
             fi
-            # Resolved from the release list, the way install.sh and the hub do,
-            # rather than derived from the npm version: the two channels publish
-            # independently, and pinning a tag npm names would turn a failed
-            # GitHub publish into a 404 halfway through this workflow.
+            # Resolved from the release list, the way install.sh, install.ps1
+            # and the hub do — same suffix-optional shape, so this workflow
+            # cannot call a release they still accept unpublished. Deriving the
+            # tag from the npm version instead would turn a failed GitHub
+            # publish into a 404 halfway through this run.
             release_tag="$(gh release list --limit 30 --json tagName,isPrerelease \
-              --jq 'map(select(.isPrerelease and (.tagName | test("-canary\\.")))) | .[0].tagName // empty')"
+              --jq 'map(select(.isPrerelease and (.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-canary(\\.g?[0-9a-f]{7,40})?$")))) | .[0].tagName // empty')"
             if [ -z "$release_tag" ]; then
               echo "No canary pre-release is published." >&2
               exit 1
             fi
             asset_version="${release_tag#v}"
-            if [ "$asset_version" != "$npm_version" ]; then
-              echo "::warning::npm canary (${npm_version}) and ${release_tag} diverge — one channel likely failed its last publish."
+            # A per-commit tag names the version its binaries report. The frozen
+            # pre-2026-09 rolling release does not: its assets carry the bare
+            # `<root>-canary` while the binaries inside report the sha-stamped
+            # version, which only its manifest records. Asset names keep the tag
+            # version either way; only the reported identity needs the hop.
+            if [[ "$asset_version" =~ -canary\.g?[0-9a-f]{7,40}$ ]]; then
+              archive_version="$asset_version"
+            else
+              gh release download "$release_tag" --pattern canary-manifest.json --dir legacy-canary-manifest
+              archive_version="$(jq -r '.version // empty' legacy-canary-manifest/canary-manifest.json)"
+              if [ -z "$archive_version" ]; then
+                echo "The ${release_tag} manifest records no version to smoke against." >&2
+                exit 1
+              fi
+            fi
+            if [ "$archive_version" != "$npm_version" ]; then
+              echo "::warning::npm canary (${npm_version}) and ${release_tag} (${archive_version}) diverge — one channel likely failed its last publish."
             fi
           else
             if [[ ! "$npm_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -119,10 +137,8 @@ jobs:
             fi
             asset_version="$npm_version"
             release_tag="v${asset_version}"
+            archive_version="$asset_version"
           fi
-
-          # The tag names the version its binaries report, on both channels.
-          archive_version="$asset_version"
 
           mkdir -p pinned-checksums
           gh release download "$release_tag" --pattern SHA256SUMS --dir pinned-checksums
