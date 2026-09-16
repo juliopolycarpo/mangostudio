@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   fetchCanaryManifestForTag,
   fetchReleaseChecksums,
-  resolveCanaryRollingVersion,
+  resolveLatestCanaryVersion,
   resolveStableLatestVersion,
 } from '../../../../src/modules/updates/infrastructure/release-index';
 import { FakeReleaseHost } from './support/fake-release-host';
@@ -41,19 +41,47 @@ describe('resolveStableLatestVersion', () => {
   });
 });
 
-describe('resolveCanaryRollingVersion', () => {
-  it('finds the first pre-release whose tag is the rolling canary shape', async () => {
-    const host = new FakeReleaseHost({
+describe('resolveLatestCanaryVersion', () => {
+  const listing = (tags: readonly { tag_name: string; prerelease: boolean }[]) =>
+    new FakeReleaseHost({
       'https://api.github.com/repos/juliopolycarpo/mangostudio/releases?per_page=30': {
-        body: JSON.stringify([
-          { tag_name: 'v1.4.0', prerelease: false },
-          { tag_name: 'v1.3.9-canary.abc1234', prerelease: true },
-          { tag_name: 'v1.4.0-canary', prerelease: true },
-        ]),
+        body: JSON.stringify(tags),
       },
     });
 
-    const version = await resolveCanaryRollingVersion({
+  it('takes the first canary pre-release, which is the newest GitHub listed', async () => {
+    const host = listing([
+      { tag_name: 'v1.4.0', prerelease: false },
+      { tag_name: 'v1.4.1-canary.abc1234', prerelease: true },
+      { tag_name: 'v1.4.1-canary.9999999', prerelease: true },
+    ]);
+
+    const version = await resolveLatestCanaryVersion({
+      fetch: host.fetch,
+      resolveHostname: host.resolveHostname,
+    });
+
+    expect(version).toBe('1.4.1-canary.abc1234');
+  });
+
+  it('accepts a git-describe style sha identifier', async () => {
+    const host = listing([{ tag_name: 'v1.4.1-canary.g0123456', prerelease: true }]);
+
+    const version = await resolveLatestCanaryVersion({
+      fetch: host.fetch,
+      resolveHostname: host.resolveHostname,
+    });
+
+    expect(version).toBe('1.4.1-canary.g0123456');
+  });
+
+  it('still resolves the frozen rolling tag, which carries no sha', async () => {
+    const host = listing([
+      { tag_name: 'v1.4.0', prerelease: false },
+      { tag_name: 'v1.4.0-canary', prerelease: true },
+    ]);
+
+    const version = await resolveLatestCanaryVersion({
       fetch: host.fetch,
       resolveHostname: host.resolveHostname,
     });
@@ -61,16 +89,12 @@ describe('resolveCanaryRollingVersion', () => {
     expect(version).toBe('1.4.0-canary');
   });
 
-  it('fails clearly when no rolling canary pre-release is published', async () => {
-    const host = new FakeReleaseHost({
-      'https://api.github.com/repos/juliopolycarpo/mangostudio/releases?per_page=30': {
-        body: JSON.stringify([{ tag_name: 'v1.4.0', prerelease: false }]),
-      },
-    });
+  it('fails clearly when no canary pre-release is published', async () => {
+    const host = listing([{ tag_name: 'v1.4.0', prerelease: false }]);
 
     await expect(
-      resolveCanaryRollingVersion({ fetch: host.fetch, resolveHostname: host.resolveHostname })
-    ).rejects.toThrow('No rolling canary pre-release');
+      resolveLatestCanaryVersion({ fetch: host.fetch, resolveHostname: host.resolveHostname })
+    ).rejects.toThrow('No canary pre-release');
   });
 });
 

@@ -274,13 +274,12 @@ describe('WslProvisioner', () => {
     expect(unpack?.stdinBytes).toBe(ARCHIVE.byteLength);
   });
 
-  // A canary hub calls itself `<root>-canary.<sha7>` while its assets live on
-  // the rolling `v<root>-canary` tag under rolling names. Splicing the running
-  // version into the URL asked GitHub for a tag that has never existed, so
-  // hub-driven provisioning could not work on canary at all.
-  it('resolves canary assets onto the rolling tag, not the running version', async () => {
+  // A canary hub's assets live on its own `v<root>-canary.<sha7>` release, one
+  // per green commit. No manifest hop: an immutable release cannot be handing
+  // back some other build's runtime, so there is nothing to cross-check.
+  it("resolves canary assets onto this build's own release", async () => {
     const canaryVersion = '1.2.3-canary.abcdef0';
-    const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
+    const canaryAsset = `mangostudio-runtime-${canaryVersion}-linux-x64`;
     const { provisioner, requested, written } = harness({
       version: canaryVersion,
       checksums: `${DIGEST}  ${canaryAsset}\n`,
@@ -289,22 +288,20 @@ describe('WslProvisioner', () => {
     await provisioner.ensure('Ubuntu');
 
     expect(requested).toEqual([
-      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/canary-manifest.json',
-      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/SHA256SUMS',
-      `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/${canaryAsset}`,
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v${canaryVersion}/SHA256SUMS`,
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v${canaryVersion}/${canaryAsset}`,
     ]);
-    // Cached under the hub's own sha-stamped version even though it was fetched
-    // from the rolling tag: two canary builds must not share a cache entry.
     expect(written.get(`/cache/${canaryVersion}/${canaryAsset}`)).toEqual(ARCHIVE);
   });
 
-  // Two canary builds resolve one filename on one tag, so the only thing that
-  // can tell yesterday's bytes from today's is a checksum fetched now. Serving
-  // a stale cache entry against a stale manifest would install the wrong pair.
+  // Everything below exercises the frozen rolling release, whose hub version
+  // carries no sha: two builds resolved one filename on one tag there, so the
+  // only thing that can tell yesterday's bytes from today's is a checksum
+  // fetched now. Serving a stale cache entry would install the wrong pair.
   it('re-downloads a rolling asset whose cached bytes no longer match the tag', async () => {
     const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
     const { provisioner, requested, written } = harness({
-      version: '1.2.3-canary.abcdef0',
+      version: '1.2.3-canary',
       checksums: `${DIGEST}  ${canaryAsset}\n`,
       cached: new TextEncoder().encode('yesterday of the same rolling name'),
     });
@@ -316,7 +313,7 @@ describe('WslProvisioner', () => {
       'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/SHA256SUMS',
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/${canaryAsset}`,
     ]);
-    expect(written.get(`/cache/1.2.3-canary.abcdef0/${canaryAsset}`)).toEqual(ARCHIVE);
+    expect(written.get(`/cache/1.2.3-canary/${canaryAsset}`)).toEqual(ARCHIVE);
   });
 
   // The rolling tag is clobbered on every green commit, so a hub can ask for
@@ -341,7 +338,7 @@ describe('WslProvisioner', () => {
       ],
     });
     const { provisioner, calls } = harness({
-      version: '1.2.3-canary.abcdef0',
+      version: '1.2.3-canary',
       checksums: `${DIGEST}  ${canaryAsset}\n`,
       manifest,
     });
@@ -358,7 +355,7 @@ describe('WslProvisioner', () => {
   it('still provisions from a rolling tag that publishes no manifest', async () => {
     const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
     const { provisioner, calls } = harness({
-      version: '1.2.3-canary.abcdef0',
+      version: '1.2.3-canary',
       checksums: `${DIGEST}  ${canaryAsset}\n`,
       manifest: null,
     });
@@ -377,7 +374,7 @@ describe('WslProvisioner', () => {
     const manifest = JSON.stringify({
       schemaVersion: 1,
       channel: 'canary',
-      version: '1.2.3-canary.abcdef0',
+      version: '1.2.3-canary',
       assetVersion: '1.2.3-canary',
       sourceSha: 'abcdef0abcdef0abcdef0abcdef0abcdef0abcde',
       builtAt: '2026-08-05T00:00:00.000Z',
@@ -390,7 +387,7 @@ describe('WslProvisioner', () => {
       ],
     });
     const { provisioner, requested, written } = harness({
-      version: '1.2.3-canary.abcdef0',
+      version: '1.2.3-canary',
       manifest,
     });
 
@@ -400,7 +397,7 @@ describe('WslProvisioner', () => {
       'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/canary-manifest.json',
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/${canaryAsset}`,
     ]);
-    expect(written.get(`/cache/1.2.3-canary.abcdef0/${canaryAsset}`)).toEqual(ARCHIVE);
+    expect(written.get(`/cache/1.2.3-canary/${canaryAsset}`)).toEqual(ARCHIVE);
   });
 
   // Simulates the tag moving between the manifest read and the asset download:
@@ -412,7 +409,7 @@ describe('WslProvisioner', () => {
     const manifest = JSON.stringify({
       schemaVersion: 1,
       channel: 'canary',
-      version: '1.2.3-canary.abcdef0',
+      version: '1.2.3-canary',
       assetVersion: '1.2.3-canary',
       sourceSha: 'abcdef0abcdef0abcdef0abcdef0abcdef0abcde',
       builtAt: '2026-08-05T00:00:00.000Z',
@@ -425,7 +422,7 @@ describe('WslProvisioner', () => {
       ],
     });
     const { provisioner, calls } = harness({
-      version: '1.2.3-canary.abcdef0',
+      version: '1.2.3-canary',
       manifest,
       archive: new TextEncoder().encode('a later build under the same rolling name'),
     });

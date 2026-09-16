@@ -103,6 +103,18 @@ const STABLE_TAG_RESPONSE = (tag: string) =>
     headers: { 'content-type': 'application/json' },
   });
 
+const RELEASES_URL = 'https://api.github.com/repos/juliopolycarpo/mangostudio/releases?per_page=30';
+
+const MANIFEST_URL = (tag: string) =>
+  `https://github.com/juliopolycarpo/mangostudio/releases/download/${tag}/canary-manifest.json`;
+
+/** The canary check starts from the release list: the newest pre-release is the target. */
+const CANARY_LIST_RESPONSE = (tag: string) =>
+  new Response(JSON.stringify([{ tag_name: tag, prerelease: true }]), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+
 const CANARY_MANIFEST_RESPONSE = (overrides: Partial<Record<string, unknown>> = {}) =>
   new Response(
     JSON.stringify({
@@ -335,10 +347,11 @@ describe('createUpdateChecker', () => {
       expect(result).toMatchObject({ latestVersion: '0.1.10', updateAvailable: true });
     });
 
-    it('fetches the canary manifest at the rolling tag and compares source shas', async () => {
+    it('reads the newest canary release and compares source shas', async () => {
       const fake = new FakeFetch({
-        'https://github.com/juliopolycarpo/mangostudio/releases/download/v0.1.1-canary/canary-manifest.json':
-          () => CANARY_MANIFEST_RESPONSE({ sourceSha: 'cafebabe00' }),
+        [RELEASES_URL]: () => CANARY_LIST_RESPONSE('v0.1.1-canary.cafebee'),
+        [MANIFEST_URL('v0.1.1-canary.cafebee')]: () =>
+          CANARY_MANIFEST_RESPONSE({ version: '0.1.1-canary.cafebee', sourceSha: 'cafebabe00' }),
       });
       const { deps } = harness({
         fetch: fake.fetch,
@@ -356,17 +369,19 @@ describe('createUpdateChecker', () => {
 
       expect(result).toMatchObject({
         channel: 'canary',
-        latestVersion: '0.1.1-canary.deadbee',
+        latestVersion: '0.1.1-canary.cafebee',
         latestSourceSha: 'cafebabe00',
         updateAvailable: true,
       });
-      expect(fake.calls).toHaveLength(1);
+      // The listing, then the manifest on the tag it named.
+      expect(fake.calls).toHaveLength(2);
     });
 
     it('reports no canary update when the manifest sha shares this build’s prefix', async () => {
       const fake = new FakeFetch({
-        'https://github.com/juliopolycarpo/mangostudio/releases/download/v0.1.1-canary/canary-manifest.json':
-          () => CANARY_MANIFEST_RESPONSE({ sourceSha: 'deadbeef0011223344' }),
+        [RELEASES_URL]: () => CANARY_LIST_RESPONSE('v0.1.1-canary.deadbee'),
+        [MANIFEST_URL('v0.1.1-canary.deadbee')]: () =>
+          CANARY_MANIFEST_RESPONSE({ sourceSha: 'deadbeef0011223344' }),
       });
       const { deps } = harness({
         fetch: fake.fetch,
@@ -391,8 +406,9 @@ describe('createUpdateChecker', () => {
       // it would call this permanently out of date even when it is running
       // the exact commit the manifest names.
       const fake = new FakeFetch({
-        'https://github.com/juliopolycarpo/mangostudio/releases/download/v0.1.1-canary/canary-manifest.json':
-          () => CANARY_MANIFEST_RESPONSE({ sourceSha: 'cafebabe00' }),
+        [RELEASES_URL]: () => CANARY_LIST_RESPONSE('v0.1.1-canary.deadbee'),
+        [MANIFEST_URL('v0.1.1-canary.deadbee')]: () =>
+          CANARY_MANIFEST_RESPONSE({ sourceSha: 'cafebabe00' }),
       });
       const { deps } = harness({
         fetch: fake.fetch,
@@ -418,9 +434,9 @@ describe('createUpdateChecker', () => {
 
     it('still reports a canary update via version compare when unstamped and the manifest has moved on', async () => {
       const fake = new FakeFetch({
-        'https://github.com/juliopolycarpo/mangostudio/releases/download/v0.1.1-canary/canary-manifest.json':
-          () =>
-            CANARY_MANIFEST_RESPONSE({ version: '0.1.1-canary.cafebee', sourceSha: 'cafebee000' }),
+        [RELEASES_URL]: () => CANARY_LIST_RESPONSE('v0.1.1-canary.cafebee'),
+        [MANIFEST_URL('v0.1.1-canary.cafebee')]: () =>
+          CANARY_MANIFEST_RESPONSE({ version: '0.1.1-canary.cafebee', sourceSha: 'cafebee000' }),
       });
       const { deps } = harness({
         fetch: fake.fetch,
@@ -442,10 +458,11 @@ describe('createUpdateChecker', () => {
       });
     });
 
-    it('resolves the rolling tag the same way for a stable build asking about canary', async () => {
+    it('looks the canary release up the same way for a stable build asking about canary', async () => {
       const fake = new FakeFetch({
-        'https://github.com/juliopolycarpo/mangostudio/releases/download/v0.1.1-canary/canary-manifest.json':
-          () => CANARY_MANIFEST_RESPONSE({ sourceSha: 'cafebabe00' }),
+        [RELEASES_URL]: () => CANARY_LIST_RESPONSE('v0.1.1-canary.deadbee'),
+        [MANIFEST_URL('v0.1.1-canary.deadbee')]: () =>
+          CANARY_MANIFEST_RESPONSE({ sourceSha: 'cafebabe00' }),
       });
       const { deps } = harness({
         fetch: fake.fetch,

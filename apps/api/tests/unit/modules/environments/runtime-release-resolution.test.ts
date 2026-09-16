@@ -19,12 +19,24 @@ describe('resolveRuntimeRelease', () => {
     });
   });
 
-  it('maps a sha-stamped canary build onto the rolling tag and asset', () => {
+  it('maps a sha-stamped canary build onto its own per-commit tag and asset', () => {
     expect(resolveRuntimeRelease('1.2.3-canary.abcdef0', 'darwin-arm64')).toEqual({
+      channel: 'canary',
+      tagVersion: '1.2.3-canary.abcdef0',
+      assetVersion: '1.2.3-canary.abcdef0',
+      runtimeAssetName: 'mangostudio-runtime-1.2.3-canary.abcdef0-darwin-arm64',
+      rolling: false,
+    });
+  });
+
+  // The pre-2026-09 canary release published every green commit under one tag.
+  // It is frozen and immutable now, but a hub installed from it resolves there.
+  it('maps a canary version with no sha onto the frozen rolling identity', () => {
+    expect(resolveRuntimeRelease('1.2.3-canary', 'linux-x64')).toEqual({
       channel: 'canary',
       tagVersion: '1.2.3-canary',
       assetVersion: '1.2.3-canary',
-      runtimeAssetName: 'mangostudio-runtime-1.2.3-canary-darwin-arm64',
+      runtimeAssetName: 'mangostudio-runtime-1.2.3-canary-linux-x64',
       rolling: true,
     });
   });
@@ -32,13 +44,13 @@ describe('resolveRuntimeRelease', () => {
   // `canaryReleaseVersion` prefixes a short sha that is all digits with a
   // leading zero, because that is an illegal semver numeric identifier. Reading
   // it as stable would resolve a tag no release ever published.
-  it('maps a git-describe style canary sha onto the same rolling identity', () => {
+  it('maps a git-describe style canary sha onto its own release too', () => {
     expect(resolveRuntimeRelease('1.2.3-canary.g0123456', 'linux-x64')).toEqual({
       channel: 'canary',
-      tagVersion: '1.2.3-canary',
-      assetVersion: '1.2.3-canary',
-      runtimeAssetName: 'mangostudio-runtime-1.2.3-canary-linux-x64',
-      rolling: true,
+      tagVersion: '1.2.3-canary.g0123456',
+      assetVersion: '1.2.3-canary.g0123456',
+      runtimeAssetName: 'mangostudio-runtime-1.2.3-canary.g0123456-linux-x64',
+      rolling: false,
     });
   });
 
@@ -63,29 +75,26 @@ describe('resolveRuntimeRelease', () => {
     expect(resolveRuntimeRelease('1.2.3', platformId).runtimeAssetName).toBe(assetName);
   });
 
-  it('keeps the .exe suffix on the rolling canary asset too', () => {
+  it('keeps the .exe suffix on a canary asset too', () => {
     expect(resolveRuntimeRelease('1.2.3-canary.abcdef0', 'windows-x64').runtimeAssetName).toBe(
-      'mangostudio-runtime-1.2.3-canary-windows-x64.exe'
+      'mangostudio-runtime-1.2.3-canary.abcdef0-windows-x64.exe'
     );
   });
 
-  it('fetches canary checksums and bytes from the rolling release identity', async () => {
+  // No manifest hop: a per-commit canary release is immutable, so the tag names
+  // exactly these bytes and there is nothing for a manifest to disambiguate.
+  it('fetches canary checksums and bytes from its own release, with no manifest hop', async () => {
     const bytes = new TextEncoder().encode('canary-runtime');
     const hash = createHash('sha256').update(bytes).digest('hex');
     const calls: string[] = [];
     let resolved = 0;
-    const asset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
+    const asset = 'mangostudio-runtime-1.2.3-canary.abcdef0-linux-x64';
 
     const loaded = await loadRuntimeReleaseBytes('linux-x64', {
       version: '1.2.3-canary.abcdef0',
       fetch: ((input: string | URL | Request) => {
         const url = String(input);
         calls.push(url);
-        // A rolling release cut before the manifest existed publishes none;
-        // provisioning has to keep working against those.
-        if (url.endsWith('/canary-manifest.json')) {
-          return Promise.resolve(new Response('not found', { status: 404 }));
-        }
         return Promise.resolve(
           url.endsWith('/SHA256SUMS') ? new Response(`${hash}  ${asset}\n`) : new Response(bytes)
         );
@@ -101,13 +110,16 @@ describe('resolveRuntimeRelease', () => {
 
     expect(loaded).toMatchObject({ fromArchive: false, digest: `sha256:${hash}` });
     expect(calls).toEqual([
-      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/canary-manifest.json',
-      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/SHA256SUMS',
-      `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/${asset}`,
+      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary.abcdef0/SHA256SUMS',
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary.abcdef0/${asset}`,
     ]);
-    expect(resolved).toBe(3);
+    expect(resolved).toBe(2);
   });
 
+  // The frozen rolling release, whose hub version carries no sha: every case
+  // below exercises the machinery that tag still needs. A per-commit canary
+  // release cannot move, so none of it runs for one.
+  //
   // Same refusal the WSL provisioner makes, on the path SSH push and the live
   // self-update share: the rolling tag can hand back a runtime from a newer
   // commit whose checksum verifies, and the mismatch is only visible here.
@@ -134,7 +146,7 @@ describe('resolveRuntimeRelease', () => {
 
     await expect(
       loadRuntimeReleaseBytes('linux-x64', {
-        version: '1.2.3-canary.abcdef0',
+        version: '1.2.3-canary',
         fetch: ((input: string | URL | Request) => {
           calls.push(String(input));
           return Promise.resolve(new Response(manifest));
@@ -161,7 +173,7 @@ describe('resolveRuntimeRelease', () => {
     const manifest = JSON.stringify({
       schemaVersion: 1,
       channel: 'canary',
-      version: '1.2.3-canary.abcdef0',
+      version: '1.2.3-canary',
       assetVersion: '1.2.3-canary',
       sourceSha: 'abcdef0abcdef0abcdef0abcdef0abcdef0abcde',
       builtAt: '2026-08-05T00:00:00.000Z',
@@ -176,7 +188,7 @@ describe('resolveRuntimeRelease', () => {
     const calls: string[] = [];
 
     const loaded = await loadRuntimeReleaseBytes('linux-x64', {
-      version: '1.2.3-canary.abcdef0',
+      version: '1.2.3-canary',
       fetch: ((input: string | URL | Request) => {
         const url = String(input);
         calls.push(url);
@@ -211,7 +223,7 @@ describe('resolveRuntimeRelease', () => {
     const manifest = JSON.stringify({
       schemaVersion: 1,
       channel: 'canary',
-      version: '1.2.3-canary.abcdef0',
+      version: '1.2.3-canary',
       assetVersion: '1.2.3-canary',
       sourceSha: 'abcdef0abcdef0abcdef0abcdef0abcdef0abcde',
       builtAt: '2026-08-05T00:00:00.000Z',
@@ -226,7 +238,7 @@ describe('resolveRuntimeRelease', () => {
     const written: Array<{ path: string; bytes: Uint8Array }> = [];
 
     const loaded = await loadRuntimeReleaseBytes('linux-x64', {
-      version: '1.2.3-canary.abcdef0',
+      version: '1.2.3-canary',
       fetch: ((input: string | URL | Request) => {
         const url = String(input);
         if (url.endsWith('/canary-manifest.json')) {
@@ -286,7 +298,7 @@ describe('resolveRuntimeRelease', () => {
     const manifest = JSON.stringify({
       schemaVersion: 1,
       channel: 'canary',
-      version: '1.2.3-canary.abcdef0',
+      version: '1.2.3-canary',
       assetVersion: '1.2.3-canary',
       sourceSha: 'abcdef0abcdef0abcdef0abcdef0abcdef0abcde',
       builtAt: '2026-08-05T00:00:00.000Z',
@@ -301,7 +313,7 @@ describe('resolveRuntimeRelease', () => {
 
     await expect(
       loadRuntimeReleaseBytes('linux-x64', {
-        version: '1.2.3-canary.abcdef0',
+        version: '1.2.3-canary',
         fetch: ((input: string | URL | Request) => {
           const url = String(input);
           if (url.endsWith('/canary-manifest.json')) {
@@ -569,7 +581,7 @@ describe('the runtime cache while the release is reachable', () => {
     const written: string[] = [];
 
     await loadRuntimeReleaseBytes('linux-x64', {
-      version: '1.2.3-canary.abcdef0',
+      version: '1.2.3-canary',
       fetch: ((input: string | URL | Request) => {
         const url = String(input);
         if (url.endsWith('/canary-manifest.json')) {

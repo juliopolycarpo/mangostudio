@@ -424,9 +424,9 @@ describe('stagedRuntimeAsset', () => {
     expect(staged?.present).toBe(true);
   });
 
-  // The rolling tag and the rolling filename, never the hub's sha-stamped
-  // version — that names a tag no release ever published.
-  it('resolves a canary hub onto the rolling tag and rolling asset name', () => {
+  // Canary cuts one release per green commit, so a hub's own sha-stamped
+  // version is the tag and the filename both.
+  it('resolves a canary hub onto its own tag and asset name', () => {
     const staged = stagedRuntimeAsset({
       version: '1.2.3-canary.gabc1234',
       platformHint: 'linux-x64',
@@ -434,10 +434,8 @@ describe('stagedRuntimeAsset', () => {
       present: false,
     });
 
-    expect(staged?.assetName).toBe('mangostudio-runtime-1.2.3-canary-linux-x64');
-    expect(staged?.verify).toContain('releases/download/v1.2.3-canary/SHA256SUMS');
-    // Cached under the hub's own build, which is what keeps two canary builds
-    // in separate directories while both read one tag.
+    expect(staged?.assetName).toBe('mangostudio-runtime-1.2.3-canary.gabc1234-linux-x64');
+    expect(staged?.verify).toContain('releases/download/v1.2.3-canary.gabc1234/SHA256SUMS');
     expect(staged?.path).toContain('/runtime-cache/1.2.3-canary.gabc1234/');
   });
 
@@ -595,18 +593,18 @@ describe('manual install commands on a released hub', () => {
   });
 
   // A dial-in machine cannot be pushed to, so this one-liner is the whole
-  // install story for it. On canary it pointed at `v<root>-canary.<sha7>` —
-  // a tag no release publishes — and named an asset that does not exist, so
-  // the only path onto those machines was a 404 the user had to debug.
-  it('points the one-liner at the rolling tag and asset on canary', () => {
+  // install story for it. Both halves — the tag and the asset — have to name
+  // this hub's own canary release, or the only path onto those machines is a
+  // 404 the user has to debug.
+  it("points the one-liner at this build's own canary tag and asset", () => {
     process.env.VERSION = '9.9.9-canary.abcdef0';
     const manual = manualFor('linux-x64');
-    const asset = 'mangostudio-runtime-9.9.9-canary-linux-x64';
-    const tagUrl = 'https://github.com/juliopolycarpo/mangostudio/releases/download/v9.9.9-canary';
+    const asset = 'mangostudio-runtime-9.9.9-canary.abcdef0-linux-x64';
+    const tagUrl =
+      'https://github.com/juliopolycarpo/mangostudio/releases/download/v9.9.9-canary.abcdef0';
 
     expect(manual?.install).toContain(`${tagUrl}/${asset}`);
     expect(manual?.install).toContain(`${tagUrl}/SHA256SUMS`);
-    expect(manual?.install).not.toContain('abcdef0');
   });
 });
 
@@ -629,12 +627,12 @@ describe('manual release asset naming', () => {
     );
   });
 
-  it('names the rolling asset for a canary version, exe suffix included', () => {
+  it("names a canary version's own asset, exe suffix included", () => {
     expect(manualRuntimeReleaseAssetName('1.2.3-canary.abcdef0', 'linux-x64')).toBe(
-      'mangostudio-runtime-1.2.3-canary-linux-x64'
+      'mangostudio-runtime-1.2.3-canary.abcdef0-linux-x64'
     );
     expect(manualRuntimeReleaseAssetName('1.2.3-canary.abcdef0', 'win32-arm64')).toBe(
-      'mangostudio-runtime-1.2.3-canary-windows-arm64.exe'
+      'mangostudio-runtime-1.2.3-canary.abcdef0-windows-arm64.exe'
     );
   });
 });

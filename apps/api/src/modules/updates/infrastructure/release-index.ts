@@ -75,17 +75,24 @@ function isReleaseListEntry(value: unknown): value is GithubReleaseListEntry {
   return typeof candidate.tag_name === 'string' && typeof candidate.prerelease === 'boolean';
 }
 
-/** `vX.Y.Z-canary` — the one tag shape the rolling canary release ever cuts. */
-const CANARY_ROLLING_TAG = /^v\d+\.\d+\.\d+-canary$/;
+/**
+ * `vX.Y.Z-canary.<sha>` — one release per green commit. The sha is optional so
+ * the frozen pre-2026-09 rolling tag still resolves, and `g`-prefixed when the
+ * short sha is an illegal semver numeric identifier.
+ */
+const CANARY_TAG = /^v\d+\.\d+\.\d+-canary(?:\.g?[0-9a-f]{7,40})?$/i;
 
 /**
- * The rolling canary tag's version, found by listing recent releases and
- * taking the first pre-release whose tag is the rolling shape. Used only when
- * the current build is not itself canary — a canary hub already knows its own
- * tag from `resolveRuntimeRelease(currentVersion, platformId).tagVersion`.
- * // Usage: resolveCanaryRollingVersion({ fetch }) // '0.2.0-canary'
+ * The newest canary release's version, found by listing recent releases and
+ * taking the first canary pre-release — GitHub lists newest first.
+ *
+ * Always a network lookup, including for a canary build asking about its own
+ * channel: since canary releases became per-commit and immutable, a build's own
+ * tag names *itself*, so reading the tag off the running version would answer
+ * "nothing is newer" forever.
+ * // Usage: resolveLatestCanaryVersion({ fetch }) // '0.2.0-canary.abc1234'
  */
-export async function resolveCanaryRollingVersion(deps: SafeFetchDeps): Promise<string> {
+export async function resolveLatestCanaryVersion(deps: SafeFetchDeps): Promise<string> {
   const result = await safeFetchBytes(
     `${GITHUB_API_BASE}/releases?per_page=30`,
     {
@@ -100,23 +107,23 @@ export async function resolveCanaryRollingVersion(deps: SafeFetchDeps): Promise<
   if (!Array.isArray(parsed)) {
     throw new Error('GitHub release listing did not answer with an array.');
   }
-  const rolling = parsed
+  const newest = parsed
     .filter(isReleaseListEntry)
-    .find((entry) => entry.prerelease && CANARY_ROLLING_TAG.test(entry.tag_name));
-  if (!rolling) {
-    throw new Error('No rolling canary pre-release is currently published.');
+    .find((entry) => entry.prerelease && CANARY_TAG.test(entry.tag_name));
+  if (!newest) {
+    throw new Error('No canary pre-release is currently published.');
   }
-  return rolling.tag_name.slice(1);
+  return newest.tag_name.slice(1);
 }
 
 /**
- * The rolling tag's provenance manifest, or null when the tag predates the
+ * A canary tag's provenance manifest, or null when the tag predates the
  * manifest — the same tolerated fallback `checkRollingPair` uses for runtime
  * provisioning. Unlike that helper, this one makes no claim about whether the
  * *running* hub may install what the tag serves: it is read here purely to
  * report the sha-stamped version and source commit of an upgrade *target*,
  * which is expected to differ from the current build.
- * // Usage: fetchCanaryManifestForTag({ fetch }, '0.2.0-canary')
+ * // Usage: fetchCanaryManifestForTag({ fetch }, '0.2.0-canary.abc1234')
  */
 export async function fetchCanaryManifestForTag(
   deps: SafeFetchDeps,

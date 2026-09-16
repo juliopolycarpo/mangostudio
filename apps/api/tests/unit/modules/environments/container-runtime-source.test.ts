@@ -165,16 +165,16 @@ describe('resolveContainerRuntimeBinary from a release', () => {
     });
   });
 
-  it('resolves a canary hub onto the rolling asset name', async () => {
+  it("resolves a canary hub onto its own build's asset name", async () => {
     const result = await resolveContainerRuntimeBinary(
       'linux-x64',
       deps({ version: '0.1.1-canary.gabc1234' })
     );
 
-    // The cache directory is the hub's own version; the asset carries the
-    // rolling name, which is what the release actually published.
+    // Cache directory and asset name are both the hub's own version: canary
+    // publishes one release per green commit, so that is what it can download.
     expect(result).toEqual({
-      path: '/home/j/.mango/runtime-cache/0.1.1-canary.gabc1234/mangostudio-runtime-0.1.1-canary-linux-x64',
+      path: '/home/j/.mango/runtime-cache/0.1.1-canary.gabc1234/mangostudio-runtime-0.1.1-canary.gabc1234-linux-x64',
       offlineCache: false,
     });
   });

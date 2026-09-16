@@ -64,18 +64,25 @@ describe('resolveUpgradeTarget — stable', () => {
 });
 
 describe('resolveUpgradeTarget — canary latest', () => {
-  it('reads the rolling tag directly from the current canary version, no network for the tag itself', async () => {
+  // The tag is looked up even for a canary build: one release per green commit
+  // means this build's own version names its own release, so deriving the tag
+  // from it would resolve every upgrade to the version already installed.
+  it('looks up the newest canary release rather than deriving a tag from the running version', async () => {
+    const tag = 'v0.2.0-canary.def5678a';
     const manifest = JSON.stringify({
       schemaVersion: 1,
       channel: 'canary',
       version: '0.2.0-canary.def5678a',
-      assetVersion: '0.2.0-canary',
+      assetVersion: '0.2.0-canary.def5678a',
       sourceSha: 'def5678adef5678adef5678adef5678adef5678a',
       builtAt: '2026-01-01T00:00:00.000Z',
       pairs: [],
     });
     const host = new FakeReleaseHost({
-      [`${GITHUB}/releases/download/v0.2.0-canary/canary-manifest.json`]: { body: manifest },
+      [`${GITHUB_API}/releases?per_page=30`]: {
+        body: JSON.stringify([{ tag_name: tag, prerelease: true }]),
+      },
+      [`${GITHUB}/releases/download/${tag}/canary-manifest.json`]: { body: manifest },
     });
 
     const target = await resolveUpgradeTarget(
@@ -88,16 +95,19 @@ describe('resolveUpgradeTarget — canary latest', () => {
       channel: 'canary',
       version: '0.2.0-canary.def5678a',
       sourceSha: 'def5678adef5678adef5678adef5678adef5678a',
-      assetName: 'mangostudio-0.2.0-canary-linux-x64.tar.gz',
-      url: `${GITHUB}/releases/download/v0.2.0-canary/mangostudio-0.2.0-canary-linux-x64.tar.gz`,
+      assetName: 'mangostudio-0.2.0-canary.def5678a-linux-x64.tar.gz',
+      url: `${GITHUB}/releases/download/${tag}/mangostudio-0.2.0-canary.def5678a-linux-x64.tar.gz`,
       kind: 'archive',
       verification: 'sha256-sums',
-      checksumsUrl: `${GITHUB}/releases/download/v0.2.0-canary/SHA256SUMS`,
+      checksumsUrl: `${GITHUB}/releases/download/${tag}/SHA256SUMS`,
     });
-    expect(host.calls).toEqual([`${GITHUB}/releases/download/v0.2.0-canary/canary-manifest.json`]);
+    expect(host.calls).toEqual([
+      `${GITHUB_API}/releases?per_page=30`,
+      `${GITHUB}/releases/download/${tag}/canary-manifest.json`,
+    ]);
   });
 
-  it('lists releases to find the rolling tag when the current build is stable', async () => {
+  it('falls back to the tag version when the newest canary release publishes no manifest', async () => {
     const host = new FakeReleaseHost({
       [`${GITHUB_API}/releases?per_page=30`]: {
         body: JSON.stringify([

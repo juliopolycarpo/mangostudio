@@ -498,6 +498,25 @@ export async function pruneRuntimeCache(
 }
 
 /**
+ * Why a release does not publish an asset, in the terms a user can act on.
+ *
+ * Canary keeps a window of releases, one per green commit, so the common cause
+ * on that channel is that this build's own release has been pruned — not a
+ * broken install. Nothing can restore it: releases are immutable and a pruned
+ * tag name can never be republished.
+ */
+function missingAssetMessage(tagVersion: string, assetName: string): string {
+  if (!tagVersion.includes('-canary')) {
+    return `Release v${tagVersion} does not publish ${assetName}.`;
+  }
+  return (
+    `Release v${tagVersion} does not publish ${assetName}. Canary keeps only its most ` +
+    'recent releases, so a build older than that window can no longer fetch its own ' +
+    'runtime. Upgrade to the current canary build and try again.'
+  );
+}
+
+/**
  * The digest this release publishes for the asset, from the release itself.
  *
  * The answer is also kept in the version directory on the way past — see
@@ -514,7 +533,7 @@ async function fetchExpectedChecksum(load: AssetLoad, versionDir: string): Promi
   );
   const expected = findReleaseChecksum(new TextDecoder().decode(checksums), assetName);
   if (!expected) {
-    throw new RuntimeAssetMissingError(`Release v${tagVersion} does not publish ${assetName}.`);
+    throw new RuntimeAssetMissingError(missingAssetMessage(tagVersion, assetName));
   }
   await rememberReleaseChecksums({
     rolling: load.rolling,
