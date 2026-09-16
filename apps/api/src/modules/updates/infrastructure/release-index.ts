@@ -34,7 +34,10 @@ const GITHUB_API_HEADERS = { ...GITHUB_HEADERS, Accept: 'application/vnd.github+
  */
 const LOOKUP_TIMEOUT_MS = 30_000;
 const MAX_TAG_PAGE_BYTES = 4 * 1024 * 1024;
-const MAX_RELEASE_LIST_BYTES = 512 * 1024;
+// A 30-release page includes notes and full asset metadata. Fourteen retained
+// canaries with 19 assets each already exceed 512 KiB; allow a full page plus
+// room for longer notes while retaining the streaming cap and deadline.
+const MAX_RELEASE_LIST_BYTES = 4 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 64 * 1024;
 
 /**

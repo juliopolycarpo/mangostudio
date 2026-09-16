@@ -75,6 +75,59 @@ describe('resolveLatestCanaryVersion', () => {
     expect(version).toBe('1.4.1-canary.g0123456');
   });
 
+  it('resolves a full retention window with release notes and 19 assets per release', async () => {
+    const repository = 'https://api.github.com/repos/juliopolycarpo/mangostudio';
+    const releases = Array.from({ length: 30 }, (_, index) => ({
+      id: index + 1,
+      tag_name: `v1.4.1-canary.abc${index.toString(16).padStart(4, '0')}`,
+      name: `Canary build ${index}`,
+      prerelease: true,
+      draft: false,
+      immutable: true,
+      target_commitish: 'a'.repeat(40),
+      created_at: '2026-09-16T00:00:00Z',
+      published_at: '2026-09-16T00:00:00Z',
+      url: `${repository}/releases/${index + 1}`,
+      body: 'Release notes describing changes and installation instructions.\n'.repeat(400),
+      assets: Array.from({ length: 19 }, (_, asset) => ({
+        id: index * 19 + asset,
+        node_id: `RA_fixture_${index}_${asset}`,
+        name: `mangostudio-1.4.1-canary.abc${index.toString(16).padStart(4, '0')}-target-${asset}.tar.gz`,
+        label: '',
+        state: 'uploaded',
+        content_type: 'application/gzip',
+        size: 80_000_000,
+        download_count: 1,
+        digest: `sha256:${'a'.repeat(64)}`,
+        created_at: '2026-09-16T00:00:00Z',
+        updated_at: '2026-09-16T00:00:00Z',
+        url: `${repository}/releases/assets/${index * 19 + asset}`,
+        browser_download_url: `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.4.1-canary.abc${index.toString(16).padStart(4, '0')}/target-${asset}.tar.gz`,
+        uploader: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
+      })),
+    }));
+    // The retained 14 builds alone must exceed the old cap. Also exercise a
+    // full 30-entry response, including releases awaiting the next prune.
+    expect(Buffer.byteLength(JSON.stringify(releases.slice(0, 14)))).toBeGreaterThan(512 * 1024);
+    const host = listing(releases);
+    const version = await resolveLatestCanaryVersion({
+      fetch: host.fetch,
+      resolveHostname: host.resolveHostname,
+    });
+    expect(version).toBe('1.4.1-canary.abc0000');
+  });
+
+  it('keeps the release response bounded', async () => {
+    const host = new FakeReleaseHost({
+      'https://api.github.com/repos/juliopolycarpo/mangostudio/releases?per_page=30': {
+        body: ' '.repeat(4 * 1024 * 1024 + 1),
+      },
+    });
+    await expect(
+      resolveLatestCanaryVersion({ fetch: host.fetch, resolveHostname: host.resolveHostname })
+    ).rejects.toMatchObject({ kind: 'too-large' });
+  });
+
   it('still resolves the frozen rolling tag, which carries no sha', async () => {
     const host = listing([
       { tag_name: 'v1.4.0', prerelease: false },
