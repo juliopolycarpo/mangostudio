@@ -1,0 +1,199 @@
+name: Protocol Release
+
+# Cut a Mango Protocol release from a signed protocol-v* tag: verify the
+# manifests agree with the tag, run both lanes, publish @mangostudio/protocol to
+# npm through trusted publishing (OIDC, no stored token), publish mango-protocol
+# to crates.io through crates.io trusted publishing, and attach the schema files
+# to a GitHub release with git-cliff notes.
+#
+# The tag prefix is what keeps the two trains apart: release.yml fires on an
+# anchored `v*.*.*`, which `protocol-v0.2.1` cannot match. Publish jobs run in
+# the `protocol-release` environment, whose deployment rule admits only
+# protocol-v* tags — deliberately not the `release` environment, which holds the
+# Homebrew/Scoop tokens this train has no business reaching.
+
+on:
+  push:
+    tags:
+      - "protocol-v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release without the prefix (e.g. 0.2.1); the ref must be its tag"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: protocol-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify tag and manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: resolve
+        name: Resolve the version from the tag
+        # Through `env:`, never interpolated into the script body: a tag name is
+        # attacker-supplied text on a public repository, and `${{ }}` inside a
+        # `run:` block is substituted before the shell ever sees it.
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_VERSION" ]; then version="$INPUT_VERSION"; else version="${REF_NAME#protocol-v}"; fi
+          case "$version" in
+            *[!0-9.A-Za-z+-]*|"")
+              echo "::error::refusing to release from a version that is not semver-shaped: $version"
+              exit 1
+              ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # A pre-release must not become the repository's latest GitHub release.
+          case "$version" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: bun install --frozen-lockfile
+      - name: Manifests match the tag
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: bun ./scripts/protocol/check-versions.ts "$VERSION"
+      - run: bun run protocol:check
+      - run: bun run protocol:test
+      - name: Package contents
+        run: bun ./scripts/protocol/verify-package.ts
+
+  npm:
+    name: Publish to npm
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: protocol-release
+    permissions:
+      contents: read
+      id-token: write # exchanged for a short-lived npm credential; no NPM_TOKEN is stored
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      # Publishing happens from the staged directory, never from
+      # packages/protocol: the workspace manifest's `exports` points at `src/`,
+      # which the tarball does not ship, and npm does not apply the
+      # `publishConfig.exports` override that would fix it (measured on npm
+      # 11.19.0 — see scripts/protocol/package-contents.ts). `pack.ts` writes
+      # the published manifest and the build output into .mango/out/protocol.
+      - run: bun ./scripts/protocol/pack.ts --out .mango/out/protocol
+      # npm trusted publishing needs the npm CLI (>= 11.5.1 on Node >= 22.14);
+      # this is the one place the repository runs npm instead of bun.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      - run: npm --version
+      - name: Publish
+        working-directory: .mango/out/protocol/package
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          if npm view "@mangostudio/protocol@$VERSION" version >/dev/null 2>&1; then
+            echo "@mangostudio/protocol@$VERSION is already on npm; skipping"
+            exit 0
+          fi
+          tag=latest
+          case "$VERSION" in *-*) tag=next ;; esac
+          npm publish --provenance --access public --tag "$tag"
+
+  crate:
+    name: Publish to crates.io
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: protocol-release
+    permissions:
+      contents: read
+      id-token: write # exchanged for a scoped crates.io token; no CARGO_REGISTRY_TOKEN is stored
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - id: published
+        name: Already on crates.io?
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          status=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -A 'mango-protocol release workflow (github.com/juliopolycarpo/mangostudio)' \
+            "https://crates.io/api/v1/crates/mango-protocol/$VERSION")
+          if [ "$status" = "200" ]; then
+            echo "mango-protocol $VERSION is already on crates.io; skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      # The token exchange fails outright while the crate has no trusted-publishing
+      # config, which is exactly the state of a first version published by hand
+      # (crates.io accepts the config only once the crate exists). Ask for a token
+      # only when there is something left to publish.
+      - id: auth
+        if: steps.published.outputs.skip != 'true'
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+      - name: Publish
+        if: steps.published.outputs.skip != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish -p mango-protocol --locked
+
+  github-release:
+    name: GitHub release with schema assets
+    needs: [verify, npm, crate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # `gh release create` writes the release and uploads the schema assets
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - name: Release notes for this tag
+        run: bunx git-cliff --config packages/protocol/cliff.toml --current --strip header --output release-notes.md
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          cp spec/schema/1/protocol.json mango-protocol-schema-1-protocol.json
+          cp spec/schema/1/catalog.json mango-protocol-schema-1-catalog.json
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "protocol-v$VERSION" \
+            --title "Mango Protocol v$VERSION" \
+            --notes-file release-notes.md \
+            "${flags[@]}" \
+            mango-protocol-schema-1-protocol.json \
+            mango-protocol-schema-1-catalog.json
