@@ -7,7 +7,7 @@
  * must validate against catalog.json.
  *
  * @example
- * bun ./scripts/verify-spec.ts
+ * bun ./scripts/protocol/verify-spec.ts
  */
 
 import { CLOSE_CODES } from '@mangostudio/protocol';
