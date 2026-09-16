@@ -66,7 +66,7 @@ Complete these once per fork or org before the first tag push:
 4. Configure crates.io Trusted Publishing for the existing `mangostudio` crate: crate **Settings -> Trusted Publishing -> Add -> GitHub**, repository owner `juliopolycarpo`, repository name `mangostudio`, workflow filename `release.yml`, and leave the environment field empty. The `cargo-publish` job declares `environment: release`, but crates.io configs with no environment still match — do not set an environment on the crates.io side unless you intentionally want to require one.
 5. Create the `release` GitHub Environment (tag rule `v*.*.*`, no required reviewers) and add `DIST_REPOS_TOKEN` as an **environment** secret. Keep `NPM_TOKEN` in the environment only while the `allow_legacy_npm_token` dispatch escape hatch might still be needed. Keep a repository-scoped `NPM_TOKEN` for canary. Keep `CARGO_REGISTRY_TOKEN` only while you still need the explicit `allow_legacy_cargo_token` dispatch escape hatch. After a green release through the environment, delete the repository-level `DIST_REPOS_TOKEN`.
 6. After a release proves `cargo-publish` minted a Trusted Publishing token successfully, revoke and delete `CARGO_REGISTRY_TOKEN`. Do not leave a long-lived crates.io write token in the repository once OIDC is proven.
-7. Configure npm Trusted Publishing for `mangostudio` and each `@mangostudio/cli-*` platform package (npm package **Settings -> Trusted Publisher**): repository `juliopolycarpo/mangostudio`, workflow filename `release.yml`, GitHub Environment `release`, allowed action `npm publish`. npm allows only one trusted publisher per package, so canary cannot share that identity — it keeps using the repository `NPM_TOKEN` (the caller workflow would be `ci.yml`, not `canary.yml`). Do not enable npm “disallow tokens” / require-2FA-only publishing while canary still needs a token.
+7. Configure npm Trusted Publishing for `mangostudio` and each `@mangostudio/cli-*` platform package (npm package **Settings -> Trusted Publisher**): repository `juliopolycarpo/mangostudio`, workflow filename `release.yml`, GitHub Environment `release`, allowed action `npm publish`. npm allows up to 10 trusted publishers per package, so a second row could register canary's caller workflow, `ci.yml` (not `canary.yml`) — but `.github/workflows/canary.yml` always requires and uses the repository `NPM_TOKEN` today; registering that row does not remove the need for the token until the workflow itself is migrated to OIDC (out of scope here). Do not enable npm “disallow tokens” / require-2FA-only publishing while canary still needs that token.
 8. After the first green stable release through npm OIDC, remove the `release` environment `NPM_TOKEN` if you no longer need the legacy dispatch path.
 9. After the first GHCR push, set the `ghcr.io/juliopolycarpo/mangostudio` package visibility to **public** in GitHub package settings.
 10. No branch-protection tuning or extra token is required for the changelog: `CHANGELOG.md` lands on `main` in the release-prep commit (`bun run release:prepare`) **before** the tag is pushed, and the release workflow only verifies it is there.
@@ -755,9 +755,12 @@ The [One-shot contract](#one-shot-contract) table lists every secret. In short:
   packages, used only when a maintainer sets `allow_legacy_npm_token=true` on
   `workflow_dispatch`. Stable release publishes authenticate via Trusted
   Publishing OIDC (`release.yml`, environment `release`) once configured on
-  npmjs.com. A repository-scoped copy remains required for `npm-canary` (npm
-  validates the caller workflow `ci.yml`, which cannot share the single trusted
-  publisher slot with `release.yml`).
+  npmjs.com. A repository-scoped copy remains required for `npm-canary`:
+  `.github/workflows/canary.yml` always passes it with `allow-legacy-token:
+  true` and never attempts OIDC, so it stays required even after a second
+  Trusted Publishing row is registered for its caller workflow, `ci.yml` (see
+  the [one-time setup checklist](#one-time-setup-checklist)) — only migrating
+  that workflow itself would remove the need for it.
 - **`DIST_REPOS_TOKEN`** — `release` environment secret: fine-grained PAT with
   contents read/write on `juliopolycarpo/homebrew-tap` (see
   [Homebrew tap](#homebrew-tap)) and `juliopolycarpo/scoop-bucket` (see

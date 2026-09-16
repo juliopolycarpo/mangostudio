@@ -109,20 +109,29 @@ The repository owner sets these up once.
   matching `protocol-v*`. The publish jobs run in it, so a push to a branch can never publish.
   Deliberately not the application's `release` environment, which holds the Homebrew tap and Scoop
   bucket tokens this train has no business reaching.
-- npm trusted publishing for `@mangostudio/protocol`, configured in the package settings on
-  npmjs.com with this repository and the workflow file `protocol-release.yml`. The publish step
-  runs `npm publish --provenance --access public` with the OIDC token GitHub mints for the job.
-- crates.io trusted publishing for `mango-protocol`, configured in the crate settings on
-  crates.io with this repository and the same workflow file. The publish step uses
-  `rust-lang/crates-io-auth-action` to exchange the OIDC token for a short-lived one.
+- npm trusted publishing for `@mangostudio/protocol`, in the package settings on npmjs.com: owner
+  `juliopolycarpo`, repository `mangostudio`, workflow filename `protocol-release.yml`, environment
+  `protocol-release`. The allowed actions must include **`npm publish`** — a configuration created
+  after 2026-09-03 permits only `npm stage publish` by default, and the publish step runs
+  `npm publish --provenance --access public` with the OIDC token GitHub mints for the job.
+- crates.io trusted publishing for `mango-protocol`, in the crate settings on crates.io, with the
+  same four values. The environment field is filled here, unlike the application crate on
+  `release.yml`, because the `crate` job declares `environment: protocol-release`. The publish step
+  uses `rust-lang/crates-io-auth-action` to exchange the OIDC token for a short-lived one.
 
 Trusted publishing binds a repository, a workflow filename and an environment name. All three
-changed when the tree moved here, so both registries must be repointed before the first release
-from this repository; until they are, the archived `juliopolycarpo/mango-protocol` workflow is the
-fallback.
+changed when the tree moved here, so both registries were repointed on 2026-09-16. Adding a
+publisher does not replace the old one — npm allows up to ten per package, crates.io several — so
+the `juliopolycarpo/mango-protocol` configurations are still live and remain the fallback until a
+release from this repository succeeds. They are deleted with the archive step, not before, and
+crates.io's "Require trusted publishing for all new versions" stays off for a related but distinct
+reason: it would block the token/manual fallback used for the hand-published first version below,
+and that fallback stays available until a release from this repository succeeds.
 
-Trusted publishing can only be configured for a package that already exists. Publishing a first
-version by hand goes through the staging directory for the reason above:
+Neither registry lets a name that does not exist yet be configured, so this is the recipe for a
+future rename, not for today: both `@mangostudio/protocol` and `mango-protocol` exist and are
+configured. A first version published by hand goes through the staging directory for the reason
+above:
 
 ```sh
 bun run protocol:pack
@@ -130,10 +139,10 @@ cd .mango/out/protocol/package && npm login && npm publish --access public
 cd - && cargo login && cargo publish -p mango-protocol --locked
 ```
 
-After that, configure trusted publishing in both registries and let the workflow handle every
-later tag. No long-lived token is stored anywhere. The tag for that version can still be pushed:
-each publish job checks its registry before asking for a token, skips a version that is already
-there, and the GitHub release is created as usual.
+Configuring trusted publishing then lets the workflow handle every later tag, with no long-lived
+token stored anywhere. The tag for that hand-published version can still be pushed: each publish
+job checks its registry before asking for a token, skips a version that is already there, and the
+GitHub release is created as usual.
 
 ## Schema files
 
