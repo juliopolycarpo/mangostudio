@@ -755,9 +755,10 @@ The [One-shot contract](#one-shot-contract) table lists every secret. In short:
   packages, used only when a maintainer sets `allow_legacy_npm_token=true` on
   `workflow_dispatch`. Stable release publishes authenticate via Trusted
   Publishing OIDC (`release.yml`, environment `release`) once configured on
-  npmjs.com. A repository-scoped copy remains required for `npm-canary` (npm
-  validates the caller workflow `ci.yml`, which cannot share the single trusted
-  publisher slot with `release.yml`).
+  npmjs.com. A repository-scoped copy remains required for `npm-canary` until
+  it has its own Trusted Publishing configuration (npm validates the caller
+  workflow `ci.yml`, a distinct configuration from `release.yml`'s — see the
+  [one-time setup checklist](#one-time-setup-checklist)).
 - **`DIST_REPOS_TOKEN`** — `release` environment secret: fine-grained PAT with
   contents read/write on `juliopolycarpo/homebrew-tap` (see
   [Homebrew tap](#homebrew-tap)) and `juliopolycarpo/scoop-bucket` (see
