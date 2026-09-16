@@ -13,19 +13,24 @@
  * bun ./scripts/protocol/verify-package.ts
  */
 
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
-import { captureCommand, fatal, runCommand, success } from '../lib/runner';
+import { withTempDir } from '../lib/fs';
+import { captureCommand, error, runCommand, success } from '../lib/runner';
 import { type ProtocolManifest, publishedSubpaths } from './package-contents';
 
 const PACKAGE_DIR = join(ROOT_DIR, 'packages', 'protocol');
 const manifest = (await Bun.file(join(PACKAGE_DIR, 'package.json')).json()) as ProtocolManifest;
 
-const workdir = await mkdtemp(join(tmpdir(), 'mango-protocol-pack-'));
-try {
+// The exit code travels back out of `withTempDir` rather than being taken inside
+// it: `process.exit` terminates before any `finally` runs, so exiting from the
+// body left the workdir — tarball, node_modules and all — behind on every
+// failed run, and CI retries accumulated them.
+process.exit(await withTempDir('mango-protocol-pack-', verifyPackage));
+
+/** Pack the tarball, install it into a throwaway project, and resolve every published subpath. */
+async function verifyPackage(workdir: string): Promise<number> {
   const packed = await captureCommand(
     ['bun', './scripts/protocol/pack.ts', '--out', '.mango/out/protocol'],
     {
@@ -34,13 +39,14 @@ try {
   );
   if (packed.exitCode !== 0) {
     process.stderr.write(packed.stdout + packed.stderr);
-    process.exit(packed.exitCode);
+    return packed.exitCode;
   }
   const tarball = packed.stdout.trim().split('\n').at(-1);
   if (!tarball?.endsWith('.tgz')) {
-    fatal(
+    error(
       `pack.ts printed no tarball path; last stdout line was ${JSON.stringify(tarball ?? '')}.`
     );
+    return 1;
   }
 
   const project = join(workdir, 'consumer');
@@ -49,7 +55,7 @@ try {
     `${JSON.stringify({ name: 'protocol-consumer', private: true, type: 'module' }, null, 2)}\n`
   );
   const install = await runCommand('install tarball', ['bun', 'add', tarball], { cwd: project });
-  if (install.exitCode !== 0) process.exit(install.exitCode);
+  if (install.exitCode !== 0) return install.exitCode;
 
   // One process resolving every subpath, so a failure names the subpath instead
   // of aborting the lane on the first import.
@@ -68,10 +74,9 @@ try {
   const probed = await runCommand('resolve subpaths', ['bun', 'run', 'probe.mjs'], {
     cwd: project,
   });
-  if (probed.exitCode !== 0) process.exit(probed.exitCode);
+  if (probed.exitCode !== 0) return probed.exitCode;
   success(`the published tarball resolves all ${specifiers.length} subpaths`);
-} finally {
-  await rm(workdir, { recursive: true, force: true });
+  return 0;
 }
 
 /** The consumer-side probe: import each specifier, collect every failure. */
