@@ -93,15 +93,21 @@ jobs:
           case "$version" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
       - id: ancestry
         name: The tag is on main
-        # A tag is not a review gate: any commit in the repository can carry
-        # one, including a commit that never opened a pull request. `main` is
-        # the only ref whose ruleset enforces review, thread resolution, signed
-        # commits and the required checks, so a commit that is not an ancestor
-        # of it was gated by none of them. The two guards above prove the *ref*
-        # is a release tag; this is the only thing proving the *code* was
-        # reviewed. The `release tags` ruleset makes a release tag immutable
-        # once pushed, but it does not restrict *creating* one and says nothing
-        # about the commit underneath, so nothing upstream makes this claim.
+        # A tag is not a gate: any commit in the repository can carry one,
+        # including a commit that never opened a pull request. The `release
+        # tags` ruleset makes a release tag immutable once pushed but does not
+        # restrict creating one, and the two guards above only prove the *ref*
+        # is a release tag — nothing upstream looks at the commit underneath.
+        #
+        # What reachability from `main` buys, precisely: `main`'s ruleset
+        # requires a pull request, thread resolution, signed commits and the
+        # four required checks. It does **not** require an approving review
+        # (`required_approving_review_count: 0`), so this is "went through
+        # main's gate", not "a human approved it". It also cannot re-gate what
+        # predates the ruleset or arrived through a bypass — the imported
+        # protocol history is reachable from `main`, and deliberately so, since
+        # protocol-v0.1.0 and v0.2.0 point into it. The case it rules out is
+        # the one worth ruling out: a tag on a commit that never reached `main`.
         run: |
           set -euo pipefail
           if ! git rev-parse --verify --quiet origin/main >/dev/null; then

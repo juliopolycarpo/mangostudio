@@ -499,13 +499,14 @@ describe('the release workflow binds a run to its tag', () => {
   });
 });
 
-// A tag is not a review gate. Creating `protocol-v*` is unrestricted — the
-// `release tags` ruleset only makes one immutable once pushed — so any commit
-// in the repository can carry one, including a commit that never opened a pull
-// request. `main` is the only ref whose ruleset enforces review, thread
-// resolution, signed commits and the required checks. This step is what ties a
-// release to that gate, so it is run against real repositories rather than
-// grepped.
+// A tag is not a gate. Creating `protocol-v*` is unrestricted — the `release
+// tags` ruleset only makes one immutable once pushed — so any commit in the
+// repository can carry one, including a commit that never opened a pull
+// request. Reachability from `main` means the commit went through main's
+// ruleset: a pull request, thread resolution, signed commits and the four
+// required checks. Not an approving review — that ruleset sets
+// `required_approving_review_count: 0`. This step is what ties a release to
+// that gate, so it is run against real repositories rather than grepped.
 describe('the release workflow refuses a tag that is not on main', () => {
   const ancestryScript = (): string => {
     const workflow = readText('.github/workflows/protocol-release.yml');
