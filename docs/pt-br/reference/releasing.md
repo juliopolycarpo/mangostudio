@@ -95,39 +95,51 @@ sobrescreve. `bun run check:versions` valida lockstep entre root, workspaces,
 ## Canal canary
 
 Todo commit que entra verde em `main` é publicado como **canary**. O job `canary`
-em `.github/workflows/ci.yml` é gated em todos os outros jobs de CI passarem e em
-um push para `main`, então o commit que acabou de ficar verde é a fonte do canary
-— sem trigger separado. Ele chama o reutilizável `.github/workflows/canary.yml`.
+em `.github/workflows/ci.yml` é gated no `CI / Gate` agregado e em um push para
+`main`, então o commit que acabou de ficar verde é a fonte do canary — sem
+trigger separado. Ele chama o reutilizável `.github/workflows/canary.yml`.
 
-npm usa `<versão-raiz>-canary.<sha7>` (ex.: `0.1.0-canary.1234abc`). O GitHub
-Releases usa um pre-release rolling `v<versão-raiz>-canary` cujas notas registram
-o SHA de origem e a versão canary completa. Os nomes dos assets ficam fixos em
-`<versão-raiz>-canary` para o launcher Cargo canary já publicado continuar
-resolvendo-os. Consuma builds canary via npm ou pelos arquivos do GitHub
-pre-release:
+Este repositório tem **releases imutáveis** habilitadas, então o canary não é
+mais uma pre-release rolling: ele corta **uma release por commit verde**,
+com tag `v<versão>` usando a versão com SHA que os binários reportam (ex.:
+`v0.1.1-canary.abc1234`). Os assets não são mais renomeados para uma versão
+rolling — mantêm o nome de build, por exemplo
+`mangostudio-0.1.1-canary.abc1234-linux-x64.tar.gz`. A pre-release rolling
+`v<root>-canary` publicada antes de 2026-09-16 fica congelada e imutável;
+nada a republica, e hubs instalados a partir dela continuam resolvendo-a.
+Consuma builds canary via npm ou pelos arquivos da pre-release mais recente:
 
 ```bash
 # npm — a dist-tag `canary`; `latest` nunca é tocado
 npm install -g mangostudio@canary
-# GitHub Releases — arquivos do pre-release rolling e SHA256SUMS
-gh release download v0.1.0-canary --repo juliopolycarpo/mangostudio
-# Cargo — o launcher prerelease fixo já publicado, apoiado pelos assets rolling
-cargo install mangostudio --version 0.1.0-canary
+
+# GitHub Releases — os arquivos da pre-release canary mais recente e SHA256SUMS
+gh release download --repo juliopolycarpo/mangostudio \
+  "$(gh release list --repo juliopolycarpo/mangostudio --json tagName,isPrerelease \
+    --jq 'map(select(.isPrerelease and (.tagName | test("-canary")))) | first | .tagName')"
+
+# Um hub instalado — canary mais recente, ou um commit específico
+mangostudio upgrade --canary
+mangostudio upgrade --canary 1234abc
 ```
 
-- **GitHub Releases** (`github-release-canary`): assets do pre-release rolling
-  `v<root>-canary` e `SHA256SUMS`, sobrescritos a cada commit verde em `main` e
-  nomeados para o launcher Cargo fixo.
-- **npm** (`npm-canary`): `mangostudio` na dist-tag `canary`, então `latest`
-  nunca aponta para um canary.
+- **GitHub Releases** (`github-release-canary`): uma pre-release `v<versão>`
+  por commit verde em `main`, com seus assets e `SHA256SUMS`. Releases antigas
+  são podadas por `scripts/release/prune-canary-releases.ts` (mantém 14 por
+  padrão).
+- **npm** (`npm-canary`): `mangostudio@<versão>` na dist-tag `canary`, então
+  `latest` nunca aponta para um canary.
+
+Nada reconstrói mais uma tag canary a partir de uma versão: `install.sh
+--canary`, `install.ps1 -Canary` e a verificação de atualização do hub sempre
+resolvem a pre-release canary mais recente na lista de releases do GitHub.
 
 Cada canal é independente e idempotente (igual à release por tag): uma falha não
 bloqueia a outra e **Re-run failed jobs** re-executa só o canal que falhou (o
 job `canary-summary` escreve uma tabela ✅/❌ por canal). O grupo de concorrência
-`canary-publish` cancela runs superadas em voo, então o pre-release rolling e a
-dist-tag npm sempre acompanham o commit verde mais recente; versões npm por
-commit são únicas, então um run cancelado nunca deixa um half-publish
-conflitante.
+`canary-publish` cancela runs superadas em voo, então a dist-tag npm sempre
+acompanha o commit verde mais recente; versões npm por commit são únicas,
+então um run cancelado nunca deixa um half-publish conflitante.
 
 Ressalvas:
 
@@ -136,8 +148,13 @@ Ressalvas:
   limpas manualmente. Releases por tag ainda publicam o conjunto completo de
   imagens Docker.
 - O workflow não publica mais canaries no crates.io. O launcher `<root>-canary`
-  atualmente publicado continua funcionando porque os assets do pre-release
-  rolling no GitHub seguem sendo atualizados sob os mesmos nomes.
+  atualmente publicado continua funcionando porque aponta para a pre-release
+  `v<root>-canary` congelada — releases imutáveis significam que os assets
+  dela nunca podem ser substituídos, então a URL do launcher continua
+  resolvendo mesmo que essa release nunca mais seja republicada. Nenhum crate
+  canary novo é publicado, e um bump futuro de versão raiz não ganha um
+  `<root>-canary` a menos que o publish canary no crates.io seja
+  reintroduzido de propósito.
 - Tags `v<version>-canary.<sha7>` continuam excluídas do trigger de release
   (`!v*-canary*`) como guarda para tags antigas ou manuais.
 
@@ -183,8 +200,10 @@ deliberado (registrado como aviso no workflow); use quando a run de CI sumiu da
 API mas o commit ainda é o da release, e mencione o bypass nas notas de release.
 
 **Re-run failed jobs** é sempre seguro: jobs de canal são independentes — uma
-falha nunca bloqueia as outras. Versões npm já publicadas são ignoradas e assets
-de release usam clobber. Para durabilidade extra: artefatos de build retêm por
+falha nunca bloqueia as outras. Versões npm já publicadas são ignoradas, e um
+re-run contra uma GitHub Release já publicada verifica os assets em vez de
+reenviá-los — releases imutáveis não podem receber clobber. Para durabilidade
+extra: artefatos de build retêm por
 30 dias, o job `docker` retenta cada push multi-arch contra o artefato de
 distribuição verificado, e o job `release-summary` (sempre executa) escreve uma
 tabela ✅/❌ por canal mais o resultado de auth/provenance do npm e do crates.io.

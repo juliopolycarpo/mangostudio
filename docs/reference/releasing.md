@@ -85,7 +85,7 @@ updating every template and installer in the same release.
 | `mangostudio-runtime-<version>-<platform>[.exe]` | Raw runtime binary for WSL/SSH provisioning and remote one-liners                                                          |
 | `mangostudio-<version>-frontend-dist.tar.gz`     | Frontend bundle only (`apps/frontend/dist`)                                                                                |
 | `install.sh` / `install.ps1`                     | Canonical installers, copied verbatim (see below)                                                                          |
-| `canary-manifest.json`                           | **Canary only.** Source commit, build time, and pair digests for the rolling build (see below)                             |
+| `canary-manifest.json`                           | **Canary only.** Source commit, build time, and pair digests for that commit's release (see below)                         |
 | `SHA256SUMS`                                     | Checksums for every asset above                                                                                            |
 
 Each platform archive has a **flat root**: `mangostudio` (or `mangostudio.exe`),
@@ -115,14 +115,13 @@ defines the naming contract and is covered by unit tests.
 
 ### What each channel publishes
 
-A stable release publishes everything. The rolling canary does not: it is cut
-from every green `main` commit, so each asset it carries is paid for many times
-a day.
+A stable release publishes everything. Canary does not: it cuts a release from
+every green `main` commit, so each asset it carries is paid for many times a day.
 
-| Channel          | Platform archives | Raw hub + runtime pairs                    |
-| ---------------- | ----------------- | ------------------------------------------ |
-| Stable release   | all 8 platforms   | all 8 platforms                            |
-| Canary (rolling) | all 8 platforms   | `linux-x64`, `darwin-arm64`, `windows-x64` |
+| Channel             | Platform archives | Raw hub + runtime pairs                    |
+| ------------------- | ----------------- | ------------------------------------------ |
+| Stable release      | all 8 platforms   | all 8 platforms                            |
+| Canary (per commit) | all 8 platforms   | `linux-x64`, `darwin-arm64`, `windows-x64` |
 
 Archives stay at the full matrix on both channels because the Cargo launcher
 resolves an archive for whatever host it was built for, so narrowing them would
@@ -138,38 +137,46 @@ type to the release plan therefore cannot widen a canary upload on its own; a
 unit test pins that. Widening the curated platform list is a one-line change to
 `CANARY_PAIR_PLATFORMS`.
 
-Narrowing it does not leave orphans on the rolling tag: after publishing,
-`purge_stale_release_assets` (`scripts/release/upload-release-assets.sh`) deletes
-any remote asset not in the run's staged set, so a platform dropped from
-`CANARY_PAIR_PLATFORMS` stops shipping instead of lingering under the old name
-forever.
+Narrowing it leaves nothing behind: each canary release carries only what that
+run staged, so a platform dropped from `CANARY_PAIR_PLATFORMS` simply stops
+appearing in the next release.
 
-### Rolling identity and `canary-manifest.json`
+### Per-commit identity and `canary-manifest.json`
 
-Canary assets keep the **rolling name** on the **rolling tag** —
-`mangostudio-runtime-0.1.0-canary-linux-x64` under `v0.1.0-canary` — because
-sha-named assets are unbounded and a per-sha tag would cut a pre-release per
-commit. The cost is that two different builds answer to one filename, while the
-binaries themselves report the sha-stamped `<root>-canary.<sha7>` version.
+Canary cuts **one release per green commit**, tagged `v<version>` with the
+sha-stamped version the binaries report — `v0.1.0-canary.abc1234`, carrying
+`mangostudio-runtime-0.1.0-canary.abc1234-linux-x64`. Tag, file names and
+reported version all agree.
 
-`canary-manifest.json` closes that gap. It ships beside the assets, is listed in
-`SHA256SUMS` like everything else, and records the source commit, the build
-time, and the digest of both halves of every published pair. The hub reads it
-before installing from a rolling tag: if the tag has moved past this hub's own
-build, provisioning is refused on the hub, before anything is written to the
-target machine, rather than surfacing later as a handshake failure. A rolling
-release that publishes no manifest is tolerated — provisioning falls back to the
-install-time version check — and so is one whose `schemaVersion` this hub does
-not know, which reads as no manifest rather than as a record it would be
-guessing at. Bumping `MANIFEST_SCHEMA_VERSION` in
-`scripts/release/stage-canary-assets.ts` therefore turns the guardrail off for
-every hub already in the field until they update; change the shape only when
-that is what you mean.
+It is not the rolling `v<root>-canary` pre-release it used to be, and cannot go
+back to being one: this repository has **immutable releases** enabled, so a
+published release's assets can never be replaced and a tag that carried one can
+never be reused. The rolling release published before 2026-09-16 is frozen in
+place; nothing republishes it, and hubs installed from it keep resolving it.
 
-The source commit it carries outlives the check. A rolling install records it in
-the target's `runtime.json` next to the digest, and `runtime health` prints it,
-so a canary machine can say which commit it is running even though its runtime's
-filename cannot.
+Two consequences worth knowing:
+
+- **Nothing reconstructs a canary tag from a version.** `install.sh --canary`,
+  `install.ps1 -Canary` and the hub's own update check all resolve the newest
+  canary pre-release from the release list.
+- **Old canary releases are pruned** to a keep-window
+  (`scripts/release/prune-canary-releases.ts`, 14 by default — roughly eight
+  days at the current merge rate, and ~15 GB of release storage at ~1.1 GB per
+  release). A hub older than the window can no longer download its own runtime
+  pair and has to upgrade first; it is told exactly that.
+
+`canary-manifest.json` ships beside the assets, is listed in `SHA256SUMS` like
+everything else, and records the source commit, the build time, and the digest
+of both halves of every published pair. It is what names the *commit* behind a
+version: an install records it in the target's `runtime.json` next to the
+digest, and `runtime health` prints it. A release that publishes no manifest is
+tolerated, and so is one whose `schemaVersion` this hub does not know, which
+reads as no manifest rather than as a record it would be guessing at.
+
+The manifest's other job is now historical: the hub cross-checks it before
+installing from the **frozen rolling tag**, where the asset behind a name is
+whatever the last run put there. A per-commit release cannot move, so that check
+does not run for one.
 
 Install scripts are release assets on both channels, copied verbatim into
 `release-assets/` and listed in `SHA256SUMS` alongside the archives they
@@ -189,13 +196,13 @@ runs the install script embedded in its own binary against that archive:
 | Channel          | Source                                                                        | Verified against                         |
 | ---------------- | ----------------------------------------------------------------------------- | ---------------------------------------- |
 | stable           | `mangostudio-<v>-<platform>.tar.gz\|.zip` from tag `v<v>`                     | that tag's `SHA256SUMS` (SHA-256)        |
-| canary, latest   | the rolling `v<root>-canary` archive; `canary-manifest.json` names the commit | the rolling tag's `SHA256SUMS`           |
+| canary, latest   | the newest canary release's archive; `canary-manifest.json` names the commit  | that release's `SHA256SUMS`              |
 | canary, `<sha7>` | the `@mangostudio/cli-<os>-<cpu>` npm tarball whose version ends in `.<sha7>` | the registry's `dist.integrity` (sha512) |
 
 The platform id is baked into the binary at build time
 (`BUILD_PLATFORM_ID`, `scripts/build.ts`), so a musl build never fetches a glibc
-archive. musl has no npm package and therefore no per-commit canary; `upgrade
---canary` (rolling) still works there. Package-manager installs are not
+archive. musl has no npm package, so `upgrade --canary <sha7>` cannot resolve a
+tarball there; plain `upgrade --canary` still works. Package-manager installs are not
 upgraded in place: `upgrade` prints (or, with `--yes`, runs) the manager's own
 command. `docs/reference/cli.md` has the per-origin table and exit codes.
 
@@ -288,39 +295,37 @@ just went green is the canary source — there is no separate trigger or SHA
 re-resolution. It calls the reusable
 `.github/workflows/canary.yml`, whose jobs share the build and fan out per channel.
 
-npm uses `<root-version>-canary.<sha7>` (e.g. `0.1.0-canary.1234abc`), where
-`<sha7>` is the 7-char short commit SHA. GitHub Releases uses a rolling
-`v<root-version>-canary` pre-release whose notes record the source SHA and full
-canary version. Its asset names stay fixed at `<root-version>-canary` so the
-already-published Cargo canary launcher can keep resolving them. Consume canary
-builds with npm or the GitHub pre-release archives:
+Both channels use the same version, `<root-version>-canary.<sha7>` (e.g.
+`0.1.0-canary.1234abc`), where `<sha7>` is the 7-char short commit SHA: npm
+publishes it under the `canary` dist-tag, and GitHub Releases cuts a
+`v<root-version>-canary.<sha7>` pre-release carrying assets of the same name.
+Consume canary builds with npm or the GitHub pre-release archives:
 
 ```bash
 # npm — the `canary` dist-tag; `latest` is never touched
 npm install -g mangostudio@canary
 
-# GitHub Releases — rolling pre-release archives and SHA256SUMS
-gh release download v0.1.0-canary --repo juliopolycarpo/mangostudio
+# GitHub Releases — the newest canary pre-release's archives and SHA256SUMS
+gh release download --repo juliopolycarpo/mangostudio \
+  "$(gh release list --repo juliopolycarpo/mangostudio --json tagName,isPrerelease \
+    --jq 'map(select(.isPrerelease and (.tagName | test("-canary")))) | .[0].tagName // empty')"
 
-# Cargo — existing fixed prerelease launcher backed by the rolling assets
-cargo install mangostudio --version 0.1.0-canary
-
-# An installed hub — rolling latest, or one commit
+# An installed hub — newest canary, or one commit
 mangostudio upgrade --canary
 mangostudio upgrade --canary 1234abc
 ```
 
-| Channel         | Job                     | What it publishes                                                                                                                      |
-| --------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| GitHub Releases | `github-release-canary` | Rolling `v<root>-canary` pre-release assets and `SHA256SUMS`, clobbered each green main commit and named for the fixed Cargo launcher. |
-| npm             | `npm-canary`            | `mangostudio@<version>` under the `canary` dist-tag, so `npm i -g mangostudio` (latest) never resolves to a canary.                    |
+| Channel         | Job                     | What it publishes                                                                                                           |
+| --------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| GitHub Releases | `github-release-canary` | A `v<version>` pre-release per green main commit, with its assets and `SHA256SUMS`. Older ones are pruned to a keep-window. |
+| npm             | `npm-canary`            | `mangostudio@<version>` under the `canary` dist-tag, so `npm i -g mangostudio` (latest) never resolves to a canary.         |
 
 Each channel is independent and idempotent, exactly like the tag release: a
 GitHub release upload failure never blocks npm, and **Re-run failed jobs**
 re-runs only the failed channel (the `canary-summary` job writes a per-channel
 ✅/❌ table naming the job to re-run). The `canary-publish` concurrency group
-cancels superseded in-flight runs so the rolling pre-release and npm dist-tag
-always track the newest green commit; per-commit npm versions are unique, so a
+cancels superseded in-flight runs so the npm dist-tag always tracks the newest
+green commit; per-commit npm versions are unique, so a
 cancelled run never leaves a conflicting half-publish.
 
 ### Distribution bundle compression
@@ -423,10 +428,12 @@ Caveats:
   (`npm install -g mangostudio@canary`) or download the GitHub pre-release
   archives. Tagged releases still publish the full Docker image set.
 - The workflow no longer publishes crates.io canaries. The currently published
-  `<root>-canary` launcher keeps working because the rolling GitHub pre-release
-  assets keep refreshing under the same asset names. A future root-version bump
-  will not get a new `<root>-canary` crate unless Cargo canary publishing is
-  intentionally reintroduced.
+  `<root>-canary` launcher keeps working because it points at the frozen
+  `v<root>-canary` pre-release published before 2026-09-16 — immutable releases
+  mean those assets can never be replaced, so the launcher's URL keeps
+  resolving even though the release itself never publishes again. A future
+  root-version bump will not get a new `<root>-canary` crate unless Cargo
+  canary publishing is intentionally reintroduced.
 - Canary-like `v<version>-canary.<sha7>` tags remain excluded from the tag release
   trigger (`!v*-canary*`) as a guard for legacy or manual per-SHA tags.
 
@@ -442,9 +449,9 @@ behind the channel dist-tag, the matching GitHub release tag, the canary version
 recorded in that release's notes, and a snapshot of its `SHA256SUMS` (handed to
 the matrix as a run artifact). Every lane consumes that pin, so a canary publish
 landing mid-run can never make jobs disagree — it surfaces as an explicit
-checksum or version mismatch instead. If the npm canary and the rolling
-pre-release diverge (one channel failed its last publish), the resolve job emits
-a warning naming both versions.
+checksum or version mismatch instead. If the npm canary and the newest canary
+pre-release diverge (one channel failed its last publish), the resolve job
+emits a warning naming both versions.
 
 | Lane                               | Unique signal                                                                                                                                         |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -526,8 +533,9 @@ is still the intended release, and call out the bypass in the release notes.
 `.github/workflows/release.yml` is designed to converge when a networked release
 step flakes: **Re-run failed jobs** is always safe because channel jobs are
 independent — one failing never blocks the others. Published npm versions are
-skipped and release assets upload with clobber semantics. For extra
-durability: build artifacts retain for 30 days, the `docker` job retries each
+skipped, and a re-run against an already-published GitHub Release verifies its
+assets rather than re-uploading them — immutable releases mean nothing can be
+clobbered onto one. For extra durability: build artifacts retain for 30 days, the `docker` job retries each
 multi-arch push against the verified distribution artifact, and the always-run
 `release-summary` job writes a per-channel ✅/❌ table naming the exact job to
 re-run, plus auth/provenance outcomes for npm and crates.io.
@@ -540,7 +548,7 @@ summary, listed here in workflow order:
 | `prepare`         | Resolves the release version and source SHA, verifies versions are in lockstep with the tag and that `CHANGELOG.md` carries the release section (`check:versions --expect`), and requires the tagged commit to be a green ancestor of `origin/main` (the `Gate` job of `ci.yml`'s main-push run for that commit) unless dispatch sets `allow_unverified_source=true`.                             |
 | `build`           | Cross-compiles every platform binary (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                                                                                                                                                                                                                                                 |
 | `verify-build`    | Smoke-tests the freshly built linux-x64 archive (`smoke-binary.sh`) before any channel publishes, so a broken binary fails the release early. Gates `github-release`, `docker`, and `npm-publish`.                                                                                                                                                                                                |
-| `github-release`  | Creates the GitHub Release, or updates an existing one by refreshing notes and uploading assets with `--clobber`.                                                                                                                                                                                                                                                                                 |
+| `github-release`  | Creates the GitHub Release with its assets in one call (`publish_release`); a re-run against an already-published release verifies its assets instead of re-uploading them, since immutable releases cannot be clobbered.                                                                                                                                                                         |
 | `docker`          | Stages Linux glibc and musl archives into `docker-ctx/` (`stage-docker-ctx.ts`) and publishes Bookworm and Alpine images for amd64 and arm64. It uses only `GITHUB_TOKEN` with `packages: write`.                                                                                                                                                                                                 |
 | `verify-image`    | Pulls each published GHCR image (Bookworm and Alpine, amd64 and arm64) and boots it (`smoke-docker-image.sh`). Depends on `docker`; its matrix legs are non-blocking for the other channels.                                                                                                                                                                                                      |
 | `npm-publish`     | Publishes the platform packages, then the `mangostudio` wrapper via npm Trusted Publishing (OIDC) by default; already-published versions are skipped, transient failures are retried, and provenance is **required** (never silently dropped). A legacy `NPM_TOKEN` path exists only when `workflow_dispatch` sets `allow_legacy_npm_token=true` and is labeled `legacy-explicit` in the summary. |
@@ -742,9 +750,11 @@ Design notes:
   re-checks between retries, so workflow re-runs converge instead of failing on
   "version already exists".
 - The [Canary channel](#canary-channel) no longer publishes crates.io canaries.
-  Existing installs of the current `<root>-canary` launcher continue to track the
-  rolling `v<root>-canary` GitHub pre-release because those assets keep
-  refreshing under stable names.
+  Existing installs of the current `<root>-canary` launcher continue to track
+  the frozen `v<root>-canary` GitHub pre-release published before 2026-09-16 —
+  immutable releases mean that release's assets can never be replaced, so the
+  launcher keeps resolving under the same names even though nothing
+  republishes it.
 
 ## Prerequisites
 

@@ -17,8 +17,11 @@ verifies it against the release `SHA256SUMS`, and unpacks it into
 Every later run execs the real binary directly with your arguments and
 environment untouched, except for two markers — `MANGOSTUDIO_LAUNCHER` and
 `MANGOSTUDIO_LAUNCHER_PATH` — that let the binary tell a cargo install apart
-from any other. Canary launcher versions (`*-canary`) refresh that versioned
-install before every run so they track the rolling canary release assets.
+from any other. Canary launcher versions (`*-canary`) re-download and re-verify
+that versioned install on every run. `canary.yml` publishes no crate, so the
+only `*-canary` launcher on crates.io is the one published by hand; it resolves
+the frozen `v<root>-canary` GitHub pre-release from before 2026-09-16, whose
+assets are immutable, so the per-run refresh finds the same bytes every time.
 
 `cargo binstall mangostudio` installs the prebuilt app binary directly from the
 matching GitHub release archive instead of building the launcher. The installed

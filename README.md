@@ -64,7 +64,7 @@ checksum-verified archive on first run.
 Both install scripts live in this repository (`scripts/install/`), ship as
 release assets beside the archives they install, and are listed in `SHA256SUMS`;
 the copies at `https://mangostudio.dev/install.sh` and `install.ps1` mirror them.
-Pass `--canary` (`-Canary`) for the rolling pre-release or `--version x.y.z`
+Pass `--canary` (`-Canary`) for the newest canary pre-release or `--version x.y.z`
 (`-Version`) to pin one.
 
 ### Upgrade

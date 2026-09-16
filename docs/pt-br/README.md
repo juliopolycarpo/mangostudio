@@ -61,7 +61,7 @@ Os dois scripts de instalação vivem neste repositório (`scripts/install/`), s
 publicados como assets de release ao lado dos arquivos que instalam e constam
 em `SHA256SUMS`; as cópias em `https://mangostudio.dev/install.sh` e
 `install.ps1` são espelhos. Use `--canary` (`-Canary`) para o pre-release
-rolante ou `--version x.y.z` (`-Version`) para fixar uma versão.
+canary mais recente ou `--version x.y.z` (`-Version`) para fixar uma versão.
 
 ### Atualizar
 

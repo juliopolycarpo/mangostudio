@@ -36,9 +36,10 @@ runs are predictable and `main` never loses a green publish path:
   progress, so every green commit can reach Canary and downstream publish steps.
 - **Publish workflows.** `release.yml` never cancels mid-publish
   (`cancel-in-progress: false`). `canary.yml` is the exception: it cancels
-  in-flight canary publishes so only the newest green commit owns the rolling
-  pre-release and npm `canary` dist-tag; per-commit versions are unique, so
-  superseding does not leave a half-published conflict.
+  in-flight canary publishes so only the newest green commit owns the npm
+  `canary` dist-tag; per-commit versions are unique, and canary now cuts one
+  immutable GitHub release per commit, so superseding does not leave a
+  half-published conflict.
 - **Scheduled workflows.** Cron-driven runs never cancel in progress.
 
 Reusable workflows do not inherit a `concurrency` group from their caller, but
