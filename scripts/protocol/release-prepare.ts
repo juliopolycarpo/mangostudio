@@ -54,9 +54,14 @@ if (results.some((result) => result.exitCode !== 0)) process.exit(1);
 assertLockstep(await readVersions(), version);
 
 console.log(`
-Prepared ${version}. Review the diff, then:
+Prepared ${version}. Review the diff, commit it on a preparation branch,
+and merge it through a pull request. After it lands on main:
 
-  git add -A && git commit -m "chore(release): ${tag}"
+  git switch main
+  git pull --ff-only origin main
+  bun ./scripts/protocol/check-versions.ts ${version}
   git tag -s ${tag} -m "${tag}"
-  git push origin main ${tag}
+  git push origin ${tag}
+
+Tag the commit that landed on main, not the preparation branch commit.
 `);

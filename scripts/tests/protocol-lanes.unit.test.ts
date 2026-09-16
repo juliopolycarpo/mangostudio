@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
@@ -496,5 +496,282 @@ describe('the release workflow binds a run to its tag', () => {
     for (const job of ['npm', 'crate', 'github-release']) {
       expect(extractJobBlock(workflow, job), job).toContain('environment: protocol-release');
     }
+  });
+});
+
+// A tag is not a gate. Creating `protocol-v*` is unrestricted — the `release
+// tags` ruleset only makes one immutable once pushed — so any commit in the
+// repository can carry one, including a commit that never opened a pull
+// request. Reachability from `main` means the commit went through main's
+// ruleset: a pull request, thread resolution, signed commits and the four
+// required checks. Not an approving review — that ruleset sets
+// `required_approving_review_count: 0`. This step is what ties a release to
+// that gate, so it is run against real repositories rather than grepped.
+describe('the release workflow refuses a tag that is not on main', () => {
+  const ancestryScript = (): string => {
+    const workflow = readText('.github/workflows/protocol-release.yml');
+    const verify = extractJobBlock(workflow, 'verify');
+    const step = extractStepBlocks(verify).find((block) => /^\s*-\s+id: ancestry\b/m.test(block));
+    expect(step, 'protocol-release.yml has no `id: ancestry` step in the verify job').toBeDefined();
+    const body = /\n\s+run: \|\n([\s\S]*?)(?=\n {6}- |$)/.exec(step as string)?.[1];
+    expect(body, 'the ancestry step has no `run: |` block').toBeDefined();
+    return (body as string).replace(/^ {10}/gm, '');
+  };
+
+  const git = (cwd: string, ...args: string[]): string => {
+    const proc = Bun.spawnSync({
+      cmd: ['git', ...args],
+      cwd,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'T',
+        GIT_AUTHOR_EMAIL: 't@example.com',
+        GIT_COMMITTER_NAME: 'T',
+        GIT_COMMITTER_EMAIL: 't@example.com',
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_SYSTEM: '/dev/null',
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    if (proc.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${proc.stderr.toString()}`);
+    return proc.stdout.toString().trim();
+  };
+
+  const commit = (repo: string, message: string): string => {
+    writeFileSync(join(repo, `${message}.txt`), message);
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '--no-gpg-sign', '-m', message);
+    return git(repo, 'rev-parse', 'HEAD');
+  };
+
+  /**
+   * A repository with two commits on main and one on a side branch that was
+   * never merged — the shape of a tag cut from an unreviewed branch.
+   */
+  const scenario = (): { repo: string; first: string; head: string; side: string } => {
+    const repo = mkdtempSync(join(tmpdir(), 'ancestry-'));
+    git(repo, 'init', '--initial-branch=main', '--quiet');
+    const first = commit(repo, 'first');
+    const head = commit(repo, 'second');
+    git(repo, 'checkout', '--quiet', '-b', 'side', first);
+    const side = commit(repo, 'unreviewed');
+    git(repo, 'checkout', '--quiet', 'main');
+    // `actions/checkout` leaves main as a remote-tracking ref, not a branch.
+    git(repo, 'update-ref', 'refs/remotes/origin/main', head);
+    return { repo, first, head, side };
+  };
+
+  const runAt = (repo: string, sha: string): { exitCode: number; output: string } => {
+    git(repo, 'checkout', '--quiet', '--detach', sha);
+    const proc = Bun.spawnSync({
+      cmd: ['bash', '-c', ancestryScript()],
+      cwd: repo,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    return { exitCode: proc.exitCode, output: proc.stdout.toString() + proc.stderr.toString() };
+  };
+
+  test('accepts the tip of main', () => {
+    const { repo, head } = scenario();
+    expect(runAt(repo, head).exitCode).toBe(0);
+  });
+
+  test('accepts an older commit that is still an ancestor of main', () => {
+    // Tagging a commit main has since moved past is ordinary, not suspicious.
+    const { repo, first } = scenario();
+    expect(runAt(repo, first).exitCode).toBe(0);
+  });
+
+  test('refuses a commit on a branch that never merged', () => {
+    const { repo, side } = scenario();
+    const result = runAt(repo, side);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain('not an ancestor of origin/main');
+  });
+
+  test('refuses to pass when origin/main is missing rather than assuming', () => {
+    // A depth-1 checkout has no origin/main. Without this branch `merge-base`
+    // errors on an unknown revision and the step could be read as a pass.
+    const { repo, head } = scenario();
+    git(repo, 'update-ref', '-d', 'refs/remotes/origin/main');
+    const result = runAt(repo, head);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain('fetch-depth: 0');
+  });
+
+  test('the verify checkout fetches the history the step needs', () => {
+    // The guard is only as good as the ref it reads; a default depth-1 checkout
+    // would make it fail closed on every release instead of only bad ones.
+    const verify = extractJobBlock(readText('.github/workflows/protocol-release.yml'), 'verify');
+    const checkout = extractStepBlocks(verify).find((block) => block.includes('actions/checkout@'));
+    expect(checkout).toContain('fetch-depth: 0');
+  });
+});
+
+// Release immutability is enabled on this repository, so a published release
+// cannot be edited or deleted. A rerun after a partial failure therefore has
+// exactly one recovery — skip — and the npm and crates.io jobs already work
+// that way. This step is driven against a fake `gh` rather than grepped, so
+// the skip and the flags are proved rather than asserted to be spelled.
+describe('the release job is rerunnable under immutability', () => {
+  const releaseScript = (): string => {
+    const workflow = readText('.github/workflows/protocol-release.yml');
+    const job = extractJobBlock(workflow, 'github-release');
+    const step = extractStepBlocks(job).find((block) => /^\s*-\s+id: release\b/m.test(block));
+    expect(step, 'protocol-release.yml has no `id: release` step').toBeDefined();
+    const body = /\n\s+run: \|\n([\s\S]*?)(?=\n {6}- |$)/.exec(step as string)?.[1];
+    expect(body, 'the release step has no `run: |` block').toBeDefined();
+    return (body as string).replace(/^ {10}/gm, '');
+  };
+
+  /** What `gh release view` finds: nothing, a draft, or a published release with its assets. */
+  type ReleaseState =
+    | 'absent'
+    | 'draft'
+    | 'published'
+    | 'published-missing-protocol'
+    | 'published-missing-catalog';
+
+  /** A workspace with the files the step copies, and a `gh` that records its argv. */
+  const workspace = (state: ReleaseState): { dir: string; log: string; viewLog: string } => {
+    const dir = mkdtempSync(join(tmpdir(), 'release-step-'));
+    mkdirSync(join(dir, 'spec', 'schema', '1'), { recursive: true });
+    writeFileSync(join(dir, 'spec', 'schema', '1', 'protocol.json'), '{}');
+    writeFileSync(join(dir, 'spec', 'schema', '1', 'catalog.json'), '{}');
+    writeFileSync(join(dir, 'release-notes.md'), 'notes');
+
+    const bin = join(dir, 'bin');
+    const log = join(dir, 'gh.log');
+    const viewLog = join(dir, 'gh-view.log');
+    mkdirSync(bin, { recursive: true });
+    const viewResponse =
+      state === 'draft'
+        ? { isDraft: true, assets: [] }
+        : state === 'published'
+          ? {
+              isDraft: false,
+              assets: [
+                { name: 'mango-protocol-schema-1-protocol.json' },
+                { name: 'mango-protocol-schema-1-catalog.json' },
+              ],
+            }
+          : state === 'published-missing-protocol'
+            ? { isDraft: false, assets: [{ name: 'mango-protocol-schema-1-catalog.json' }] }
+            : { isDraft: false, assets: [{ name: 'mango-protocol-schema-1-protocol.json' }] };
+    // `gh release view` returns GitHub's JSON and runs the exact jq expression
+    // the workflow supplied. That keeps the test on the asset classifier rather
+    // than a synthetic state label.
+    const viewBranch =
+      state === 'absent'
+        ? '  exit 1'
+        : `  printf '%s\\n' "$*" >> ${JSON.stringify(viewLog)}
+  json_fields=""
+  jq_filter=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --json) json_fields="$2"; shift 2 ;;
+      --jq) jq_filter="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  [ "$json_fields" = "isDraft,assets" ] && [ -n "$jq_filter" ] || exit 2
+  printf '%s\\n' '${JSON.stringify(viewResponse)}' | jq -r "$jq_filter"
+  exit $?`;
+    writeFileSync(
+      join(bin, 'gh'),
+      `#!/bin/sh
+if [ "$1" = "release" ] && [ "$2" = "view" ]; then
+${viewBranch}
+fi
+printf '%s\\n' "$*" >> ${JSON.stringify(log)}
+exit 0
+`,
+      { mode: 0o755 }
+    );
+    return { dir, log, viewLog };
+  };
+
+  const run = (
+    state: ReleaseState,
+    prerelease: string
+  ): { exitCode: number; stdout: string; ghCalls: string; ghViewCalls: string } => {
+    const { dir, log, viewLog } = workspace(state);
+    const proc = Bun.spawnSync({
+      cmd: ['bash', '-c', releaseScript()],
+      cwd: dir,
+      env: {
+        PATH: `${join(dir, 'bin')}:${process.env.PATH ?? ''}`,
+        GH_TOKEN: 'fake',
+        VERSION: '0.2.1',
+        PRERELEASE: prerelease,
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    return {
+      exitCode: proc.exitCode,
+      stdout: proc.stdout.toString() + proc.stderr.toString(),
+      ghCalls: existsSync(log) ? readFileSync(log, 'utf8') : '',
+      ghViewCalls: existsSync(viewLog) ? readFileSync(viewLog, 'utf8') : '',
+    };
+  };
+
+  test('creates the release when none exists, verifying the tag it was given', () => {
+    const result = run('absent', 'false');
+    expect(result.exitCode).toBe(0);
+    expect(result.ghCalls).toContain('release create protocol-v0.2.1');
+    // Without --verify-tag, gh invents a tag from the default branch — an
+    // immutable release against a commit nobody chose.
+    expect(result.ghCalls).toContain('--verify-tag');
+    expect(result.ghCalls).toContain('mango-protocol-schema-1-protocol.json');
+    expect(result.ghCalls).toContain('mango-protocol-schema-1-catalog.json');
+    expect(result.ghCalls).not.toContain('--prerelease');
+  });
+
+  test('skips instead of failing when the release is already published', () => {
+    // The whole point: an immutable release cannot be replaced, so a rerun of
+    // a partially failed release must not die here.
+    const result = run('published', 'false');
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('already published with the required schema assets; skipping');
+    expect(result.ghCalls).toBe('');
+  });
+
+  test.each(['published-missing-protocol', 'published-missing-catalog'] as const)(
+    'refuses a published release missing %s',
+    (state) => {
+      const result = run(state, 'false');
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stdout).toContain(
+        'published release for protocol-v0.2.1 is missing required schema assets'
+      );
+      expect(result.ghCalls).toBe('');
+      expect(result.ghViewCalls).toContain('--json isDraft,assets');
+    }
+  );
+
+  test('refuses a leftover draft rather than reporting success over it', () => {
+    // `gh release create` with assets is draft, upload, publish. A failure
+    // after the first leaves a draft that `gh release view` reports just as
+    // happily as a published release — skipping on mere existence would exit 0
+    // with nothing published and every rerun would keep saying it was fine.
+    const result = run('draft', 'false');
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toContain('draft release');
+    expect(result.stdout).toContain('gh release delete');
+    expect(result.ghCalls).toBe('');
+  });
+
+  test('documents the tag guarantees the workflow actually enforces', () => {
+    expect(readText('.github/workflows/protocol-release.yml')).not.toContain(
+      'signed protocol-v* tag'
+    );
+    expect(readText('docs/protocol/releasing.md')).toMatch(/does\s+not verify the tag signature/);
+  });
+
+  test('marks a pre-release version as one', () => {
+    expect(run('absent', 'true').ghCalls).toContain('--prerelease');
   });
 });
