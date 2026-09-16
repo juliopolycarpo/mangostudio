@@ -627,7 +627,12 @@ describe('the release job is rerunnable under immutability', () => {
   };
 
   /** What `gh release view` finds: nothing, a draft, or a published release with its assets. */
-  type ReleaseState = 'absent' | 'draft' | 'published' | 'published-incomplete';
+  type ReleaseState =
+    | 'absent'
+    | 'draft'
+    | 'published'
+    | 'published-missing-protocol'
+    | 'published-missing-catalog';
 
   /** A workspace with the files the step copies, and a `gh` that records its argv. */
   const workspace = (state: ReleaseState): { dir: string; log: string; viewLog: string } => {
@@ -641,13 +646,39 @@ describe('the release job is rerunnable under immutability', () => {
     const log = join(dir, 'gh.log');
     const viewLog = join(dir, 'gh-view.log');
     mkdirSync(bin, { recursive: true });
-    // `gh release view` is the branch under test: absent exits non-zero, and
-    // both draft and published succeed — which is the distinction the step has
-    // to make and the earlier guard did not.
+    const viewResponse =
+      state === 'draft'
+        ? { isDraft: true, assets: [] }
+        : state === 'published'
+          ? {
+              isDraft: false,
+              assets: [
+                { name: 'mango-protocol-schema-1-protocol.json' },
+                { name: 'mango-protocol-schema-1-catalog.json' },
+              ],
+            }
+          : state === 'published-missing-protocol'
+            ? { isDraft: false, assets: [{ name: 'mango-protocol-schema-1-catalog.json' }] }
+            : { isDraft: false, assets: [{ name: 'mango-protocol-schema-1-protocol.json' }] };
+    // `gh release view` returns GitHub's JSON and runs the exact jq expression
+    // the workflow supplied. That keeps the test on the asset classifier rather
+    // than a synthetic state label.
     const viewBranch =
       state === 'absent'
         ? '  exit 1'
-        : `  printf '%s\\n' "$*" >> ${JSON.stringify(viewLog)}\n  echo ${state}\n  exit 0`;
+        : `  printf '%s\\n' "$*" >> ${JSON.stringify(viewLog)}
+  json_fields=""
+  jq_filter=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --json) json_fields="$2"; shift 2 ;;
+      --jq) jq_filter="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  [ "$json_fields" = "isDraft,assets" ] && [ -n "$jq_filter" ] || exit 2
+  printf '%s\\n' '${JSON.stringify(viewResponse)}' | jq -r "$jq_filter"
+  exit $?`;
     writeFileSync(
       join(bin, 'gh'),
       `#!/bin/sh
@@ -708,15 +739,18 @@ exit 0
     expect(result.ghCalls).toBe('');
   });
 
-  test('refuses a published release missing either required schema asset', () => {
-    const result = run('published-incomplete', 'false');
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stdout).toContain(
-      'published release for protocol-v0.2.1 is missing required schema assets'
-    );
-    expect(result.ghCalls).toBe('');
-    expect(result.ghViewCalls).toContain('--json isDraft,assets');
-  });
+  test.each(['published-missing-protocol', 'published-missing-catalog'] as const)(
+    'refuses a published release missing %s',
+    (state) => {
+      const result = run(state, 'false');
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stdout).toContain(
+        'published release for protocol-v0.2.1 is missing required schema assets'
+      );
+      expect(result.ghCalls).toBe('');
+      expect(result.ghViewCalls).toContain('--json isDraft,assets');
+    }
+  );
 
   test('refuses a leftover draft rather than reporting success over it', () => {
     // `gh release create` with assets is draft, upload, publish. A failure
