@@ -18,16 +18,14 @@ import { cp, mkdir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
-import { fatal, info, parseArgs, runCommand } from '../lib/runner';
+import { assertNoUnexpectedArguments, fatal, info, parseArgs, runCommand } from '../lib/runner';
 import { type ProtocolManifest, publishedManifest } from './package-contents';
 
 const PACKAGE_DIR = join(ROOT_DIR, 'packages', 'protocol');
 const DEFAULT_OUT = join(ROOT_DIR, '.mango', 'out', 'protocol');
 
-/** Everything `files` may name, plus the manifest this script rewrites. */
-const STAGED_ENTRIES = ['dist', 'schema', 'README.md', 'LICENSE'] as const;
-
-const { values } = parseArgs({ valueFlags: ['--out'] });
+const { positional, values } = parseArgs({ valueFlags: ['--out'] });
+assertNoUnexpectedArguments(positional);
 const outDir = values['--out'] ? join(ROOT_DIR, values['--out']) : DEFAULT_OUT;
 const stageDir = join(outDir, 'package');
 
@@ -46,7 +44,10 @@ try {
 }
 await Bun.write(join(stageDir, 'package.json'), `${JSON.stringify(staged, null, 2)}\n`);
 
-for (const entry of STAGED_ENTRIES) {
+// Read off `files` rather than restated: npm packs only what the staging
+// directory holds, so an entry added to the manifest and forgotten here would
+// ship a tarball missing it with nothing reporting the gap.
+for (const entry of manifest.files ?? []) {
   const source = join(PACKAGE_DIR, entry);
   // `build.ts` refuses to finish without dist/, schema/ and LICENSE, so a
   // missing entry here means `files` names something the build never produced.
