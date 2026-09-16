@@ -40,12 +40,13 @@ const PER_COMMIT_CANARY_TAG = /^v\d+\.\d+\.\d+-canary\.g?[0-9a-f]{7,40}$/i;
 export interface ReleaseListEntry {
   readonly tagName: string;
   readonly isPrerelease: boolean;
+  readonly isDraft: boolean;
   readonly createdAt: string;
 }
 
 /**
- * The tags to delete: every per-commit canary pre-release except the newest
- * `keep`, newest first by creation time.
+ * The tags to delete: every published per-commit canary pre-release except the
+ * newest `keep`, newest first by creation time.
  *
  * @example
  * selectCanaryReleasesToPrune(entries, 14) // ['v0.1.1-canary.0a1b2c3', …]
@@ -56,10 +57,31 @@ export function selectCanaryReleasesToPrune(
 ): readonly string[] {
   if (keep < 0) throw new Error(`Keep-window must not be negative, received ${keep}.`);
   return entries
-    .filter((entry) => entry.isPrerelease && PER_COMMIT_CANARY_TAG.test(entry.tagName))
+    .filter(
+      (entry) => !entry.isDraft && entry.isPrerelease && PER_COMMIT_CANARY_TAG.test(entry.tagName)
+    )
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
     .slice(keep)
     .map((entry) => entry.tagName);
+}
+
+/**
+ * The GitHub CLI call that lists published releases for retention.
+ *
+ * @example
+ * listArgs() // ['gh', 'release', 'list', '--limit', '200', '--exclude-drafts', …]
+ */
+export function listArgs(): string[] {
+  return [
+    'gh',
+    'release',
+    'list',
+    '--limit',
+    '200',
+    '--exclude-drafts',
+    '--json',
+    'tagName,isPrerelease,isDraft,createdAt',
+  ];
 }
 
 /**
@@ -90,15 +112,7 @@ Flags:
 };
 
 async function listReleases(): Promise<readonly ReleaseListEntry[]> {
-  const listed = await captureCommand([
-    'gh',
-    'release',
-    'list',
-    '--limit',
-    '200',
-    '--json',
-    'tagName,isPrerelease,createdAt',
-  ]);
+  const listed = await captureCommand(listArgs());
   if (listed.exitCode !== 0) {
     throw new Error(`Could not list the repository releases: ${listed.stderr.trim()}`);
   }

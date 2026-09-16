@@ -58,6 +58,14 @@ describe('nightly distribution health workflow', () => {
     expect(workflow).not.toContain('Canary version:');
   });
 
+  test('asks GitHub to exclude drafts before canary selection', () => {
+    const workflow = readText(WORKFLOW_PATH);
+
+    // A newer canary draft has no published assets. The resolver must leave it
+    // out before selecting `. [0]`, which is the latest published canary.
+    expect(workflow).toContain('gh release list --limit 30 --exclude-drafts');
+  });
+
   test('admits the frozen sha-less canary tag, the way the installers still do', () => {
     const workflow = readText(WORKFLOW_PATH);
 

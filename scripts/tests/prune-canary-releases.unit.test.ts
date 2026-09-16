@@ -2,12 +2,13 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   deleteArgs,
+  listArgs,
   type ReleaseListEntry,
   selectCanaryReleasesToPrune,
 } from '../release/prune-canary-releases';
 
-function canary(tagName: string, createdAt: string): ReleaseListEntry {
-  return { tagName, isPrerelease: true, createdAt };
+function canary(tagName: string, createdAt: string, isDraft = false): ReleaseListEntry {
+  return { tagName, isPrerelease: true, isDraft, createdAt };
 }
 
 describe('selectCanaryReleasesToPrune', () => {
@@ -30,13 +31,30 @@ describe('selectCanaryReleasesToPrune', () => {
     expect(selectCanaryReleasesToPrune(entries, 1)).toEqual(['v0.1.1-canary.aaaaaaa']);
   });
 
+  test('does not let a newer interrupted-publish draft consume the keep-window', () => {
+    const entries = [
+      canary('v0.1.1-canary.aaaaaaa', '2026-09-10T00:00:00Z'),
+      canary('v0.1.1-canary.bbbbbbb', '2026-09-11T00:00:00Z'),
+      // A failed upload can leave this newer release unpublished. It cannot
+      // displace a published canary from the retention window.
+      canary('v0.1.1-canary.ccccccc', '2026-09-12T00:00:00Z', true),
+    ];
+
+    expect(selectCanaryReleasesToPrune(entries, 1)).toEqual(['v0.1.1-canary.aaaaaaa']);
+  });
+
   test('never touches the frozen rolling tag or a stable release', () => {
     const entries: ReleaseListEntry[] = [
       canary('v0.1.1-canary.9999999', '2026-09-12T00:00:00Z'),
       // The pre-immutability rolling tag: no sha, still serving old launchers.
       canary('v0.1.1-canary', '2026-07-05T00:00:00Z'),
-      { tagName: 'v0.1.1', isPrerelease: false, createdAt: '2026-07-05T00:00:00Z' },
-      { tagName: 'protocol-v0.2.0', isPrerelease: false, createdAt: '2026-09-10T00:00:00Z' },
+      { tagName: 'v0.1.1', isPrerelease: false, isDraft: false, createdAt: '2026-07-05T00:00:00Z' },
+      {
+        tagName: 'protocol-v0.2.0',
+        isPrerelease: false,
+        isDraft: false,
+        createdAt: '2026-09-10T00:00:00Z',
+      },
     ];
 
     expect(selectCanaryReleasesToPrune(entries, 0)).toEqual(['v0.1.1-canary.9999999']);
@@ -78,5 +96,20 @@ describe('deleteArgs', () => {
       '--cleanup-tag',
     ]);
     expect(deleteArgs('v0.1.1-canary.0a1b2c3')).not.toContain('--cleanup-tag=false');
+  });
+});
+
+describe('listArgs', () => {
+  test('asks GitHub to omit draft releases before retention selection', () => {
+    expect(listArgs()).toEqual([
+      'gh',
+      'release',
+      'list',
+      '--limit',
+      '200',
+      '--exclude-drafts',
+      '--json',
+      'tagName,isPrerelease,isDraft,createdAt',
+    ]);
   });
 });

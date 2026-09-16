@@ -105,7 +105,7 @@ jobs:
             # cannot call a release they still accept unpublished. Deriving the
             # tag from the npm version instead would turn a failed GitHub
             # publish into a 404 halfway through this run.
-            release_tag="$(gh release list --limit 30 --json tagName,isPrerelease \
+            release_tag="$(gh release list --limit 30 --exclude-drafts --json tagName,isPrerelease \
               --jq 'map(select(.isPrerelease and (.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-canary(\\.g?[0-9a-f]{7,40})?$")))) | .[0].tagName // empty')"
             if [ -z "$release_tag" ]; then
               echo "No canary pre-release is published." >&2
