@@ -5,12 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createReleaseAssetPlan, selectCanaryAssets } from '../lib/release-assets';
-import { rollingAssetName, stageCanaryAssets } from '../release/stage-canary-assets';
+import { stageCanaryAssets } from '../release/stage-canary-assets';
 
-/** The sha-stamped version the binaries were compiled with and report. */
+/** The sha-stamped version the binaries report, their file names and their tag. */
 const VERSION = '1.2.3-canary.abcdef0';
-/** The rolling version their filenames and tag carry. */
-const CARGO_VERSION = '1.2.3-canary';
 const SOURCE_SHA = 'abcdef0123456789abcdef0123456789abcdef01';
 
 let workDir: string;
@@ -29,7 +27,6 @@ function seedBuiltAssets(): void {
 function stage() {
   return stageCanaryAssets({
     version: VERSION,
-    cargoVersion: CARGO_VERSION,
     sourceSha: SOURCE_SHA,
     inDir,
     outDir,
@@ -49,41 +46,27 @@ afterEach(() => {
   rmSync(workDir, { force: true, recursive: true });
 });
 
-describe('rollingAssetName', () => {
-  test('rewrites the version segment for hub and runtime names alike', () => {
-    expect(rollingAssetName(`mangostudio-${VERSION}-linux-x64`, VERSION, CARGO_VERSION)).toBe(
-      'mangostudio-1.2.3-canary-linux-x64'
-    );
-    expect(
-      rollingAssetName(`mangostudio-runtime-${VERSION}-windows-x64.exe`, VERSION, CARGO_VERSION)
-    ).toBe('mangostudio-runtime-1.2.3-canary-windows-x64.exe');
-    expect(
-      rollingAssetName(`mangostudio-${VERSION}-linux-x64.tar.gz`, VERSION, CARGO_VERSION)
-    ).toBe('mangostudio-1.2.3-canary-linux-x64.tar.gz');
-  });
-
-  test('refuses a name that does not carry the built version', () => {
-    expect(() => rollingAssetName('mangostudio-9.9.9-linux-x64', VERSION, CARGO_VERSION)).toThrow(
-      /does not carry version/
-    );
-  });
-});
-
 describe('stageCanaryAssets', () => {
-  test('stages every archive plus the curated raw pairs under rolling names', () => {
+  test('stages every archive plus the curated raw pairs under their built names', () => {
     const staged = stage();
 
-    expect(staged).toContain('mangostudio-1.2.3-canary-linux-x64');
-    expect(staged).toContain('mangostudio-runtime-1.2.3-canary-linux-x64');
-    expect(staged).toContain('mangostudio-runtime-1.2.3-canary-windows-x64.exe');
-    expect(staged).toContain('mangostudio-1.2.3-canary-linux-arm64.tar.gz');
+    expect(staged).toContain(`mangostudio-${VERSION}-linux-x64`);
+    expect(staged).toContain(`mangostudio-runtime-${VERSION}-linux-x64`);
+    expect(staged).toContain(`mangostudio-runtime-${VERSION}-windows-x64.exe`);
+    expect(staged).toContain(`mangostudio-${VERSION}-linux-arm64.tar.gz`);
     // Curated: the uncurated platforms contribute an archive but no raw pair.
-    expect(staged).not.toContain('mangostudio-runtime-1.2.3-canary-linux-arm64');
-    expect(staged).not.toContain('mangostudio-1.2.3-canary-linux-arm64');
-    expect(staged.every((name) => !name.includes('abcdef0'))).toBe(true);
+    expect(staged).not.toContain(`mangostudio-runtime-${VERSION}-linux-arm64`);
+    expect(staged).not.toContain(`mangostudio-${VERSION}-linux-arm64`);
+    // The sha stays in every name: one tag per commit, so nothing is rewritten
+    // onto a rolling version that several builds would share.
+    expect(
+      staged
+        .filter((name) => name.startsWith('mangostudio-'))
+        .every((name) => name.includes('abcdef0'))
+    ).toBe(true);
   });
 
-  test('stages the install scripts under their own names, never renamed', () => {
+  test('stages the install scripts under their own names, which carry no version', () => {
     const staged = stage();
 
     expect(staged).toContain('install.sh');
@@ -101,7 +84,7 @@ describe('stageCanaryAssets', () => {
       schemaVersion: 1,
       channel: 'canary',
       version: VERSION,
-      assetVersion: CARGO_VERSION,
+      assetVersion: VERSION,
       sourceSha: SOURCE_SHA,
       builtAt: '2026-08-05T00:00:00.000Z',
     });

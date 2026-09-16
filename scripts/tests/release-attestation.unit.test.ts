@@ -30,10 +30,10 @@ describe('release provenance for checksums and install scripts', () => {
     expect(job).toContain('attestations: write');
     expect(job).toContain('id-token: write');
     // Attest what is about to be uploaded, not something staged afterwards.
-    expect(job.indexOf(ATTEST_ACTION)).toBeLessThan(job.indexOf('create_or_update_release'));
+    expect(job.indexOf(ATTEST_ACTION)).toBeLessThan(job.indexOf('publish_release'));
   });
 
-  test('the rolling canary attests the same subjects from the staged set', () => {
+  test('each canary release attests the same subjects from the staged set', () => {
     const job = jobBlock(readWorkflow('canary.yml'), 'github-release-canary');
     expect(job).toContain(ATTEST_ACTION);
     expect(job).toContain('github-canary-assets/SHA256SUMS');
@@ -42,7 +42,7 @@ describe('release provenance for checksums and install scripts', () => {
     expect(job).toContain('attestations: write');
     expect(job).toContain('id-token: write');
     expect(job.indexOf('stage-canary-assets.ts')).toBeLessThan(job.indexOf(ATTEST_ACTION));
-    expect(job.indexOf(ATTEST_ACTION)).toBeLessThan(job.indexOf('create_or_update_release'));
+    expect(job.indexOf(ATTEST_ACTION)).toBeLessThan(job.indexOf('publish_release'));
   });
 
   test("ci.yml's canary caller grants the ceiling the called workflow needs", () => {

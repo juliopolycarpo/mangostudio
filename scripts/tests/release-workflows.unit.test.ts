@@ -675,20 +675,21 @@ describe('release workflow binary gate', () => {
     const githubReleaseBlock = extractJobBlock(workflow, 'github-release');
     const cargoPublishBlock = extractJobBlock(workflow, 'cargo-publish');
 
-    // Release creation/update lives in the shared helper so canary and stable
-    // share the post-failure view probe; the workflow only sources and calls it.
-    expect(githubReleaseBlock).toContain('source scripts/release/create-or-update-release.sh');
-    expect(githubReleaseBlock).toContain('create_or_update_release "$tag" release-assets/* --');
+    // Release publication lives in the shared helper so canary and stable
+    // share the state probe; the workflow only sources and calls it.
+    expect(githubReleaseBlock).toContain('source scripts/release/publish-release.sh');
+    expect(githubReleaseBlock).toContain('publish_release "$tag" release-assets/* --');
     expect(githubReleaseBlock).toContain('--notes-file RELEASE_NOTES.md');
     expect(githubReleaseBlock).not.toContain('retry_command 3 30 gh release create');
     expect(githubReleaseBlock).not.toContain('if gh release create "$tag"');
 
-    const helper = readText('scripts/release/create-or-update-release.sh');
-    expect(helper).toContain('Stateful retry: scripts/release/retry.sh cannot model');
+    const helper = readText('scripts/release/publish-release.sh');
     expect(helper).toContain('if gh release create "$tag"');
-    expect(helper).toContain('if gh release view "$tag" >/dev/null 2>&1; then');
-    expect(helper).toContain('retry_command 3 30 gh release edit');
-    expect(helper).toContain('retry_command 3 30 upload_release_assets');
+    // Immutable releases: assets go up with create, and nothing edits or
+    // uploads onto a release that is already published.
+    expect(helper).not.toContain('gh release edit');
+    expect(helper).not.toContain('gh release upload');
+    expect(helper).toContain('gh release delete "$tag" --yes --cleanup-tag=false');
 
     expect(cargoPublishBlock).toContain(
       'Stateful retry: scripts/release/retry.sh only repeats one command'
@@ -884,12 +885,11 @@ describe('release workflow binary gate', () => {
     expect(npmBlock).toContain('uses: ./.github/actions/publish-npm-distribution');
     expect(npmBlock).toContain('dist-tag: canary');
 
-    // GitHub Releases: fixed <root>-canary asset names, with the full per-SHA
-    // canary version retained in notes for traceability.
+    // GitHub Releases: one release per green commit, tagged and named for the
+    // sha-stamped version, because an immutable release cannot be republished.
     const releaseBlock = extractJobBlock(workflow, 'github-release-canary');
     expect(releaseBlock).toContain('scope: assets');
     expect(releaseBlock).toContain(`VERSION: ${'$'}{{ inputs.version }}`);
-    expect(releaseBlock).toContain(`CARGO_VERSION: ${cargoVersionInput}`);
     // Staging is a named selection in TypeScript, not a shell glob: a glob over
     // the release plan silently absorbed every raw hub binary the moment raw
     // assets shipped, while never matching a raw runtime binary.
@@ -897,17 +897,26 @@ describe('release workflow binary gate', () => {
     expect(releaseBlock).toContain(`SOURCE_SHA: ${'$'}{{ inputs.source_sha }}`);
     expect(releaseBlock).not.toContain('cp "$asset"');
     expect(releaseBlock).not.toContain('sha256sum mangostudio-');
-    expect(releaseBlock).toContain(`tag="v${cargoVersionVar}"`);
-    expect(releaseBlock).toContain(`Canary version: ${versionVar}`);
-    expect(releaseBlock).toContain('source scripts/release/create-or-update-release.sh');
-    expect(releaseBlock).toContain('create_or_update_release "$tag" github-canary-assets/* --');
+    expect(releaseBlock).toContain(`tag="v${versionVar}"`);
+    expect(releaseBlock).toContain('source scripts/release/publish-release.sh');
+    expect(releaseBlock).toContain('publish_release "$tag" github-canary-assets/* --');
     expect(releaseBlock).toContain('--prerelease');
+    expect(releaseBlock).toContain('--latest=false');
+    // The tag pins the commit that went green, not whatever main points at by
+    // the time this job runs.
+    expect(releaseBlock).toContain('--target "$SOURCE_SHA"');
     expect(releaseBlock).toContain('--notes "$notes"');
     // Canary must not fall back to a bare create retry that wedges on
     // 422 already_exists after a partial create.
     expect(releaseBlock).not.toContain('retry_command 3 30 gh release create');
-    expect(releaseBlock).not.toContain(`tag="v${versionVar}"`);
-    expect(workflow).not.toContain('prune-canary-releases.sh');
+    // The rolling tag is gone: nothing may republish `v<root>-canary`, whose
+    // name an immutable release has already burned.
+    expect(releaseBlock).not.toContain(`tag="v${cargoVersionVar}"`);
+    expect(workflow).not.toContain(cargoVersionInput);
+    // One release per commit needs a keep-window, or the repository accumulates
+    // a full asset set per merge.
+    expect(releaseBlock).toContain('bun ./scripts/release/prune-canary-releases.ts');
+    expect(releaseBlock).toContain('continue-on-error: true');
   });
 
   test('canary ends with an always-run per-channel summary', () => {

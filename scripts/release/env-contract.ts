@@ -34,10 +34,11 @@ export const RELEASE_SCRIPT_ENV_CONTRACTS = {
   'scripts/release/stage-canary-assets.ts': {
     requirements: [
       { env: ['VERSION'], unlessArgsInclude: '--version' },
-      { env: ['CARGO_VERSION'], unlessArgsInclude: '--cargo-version' },
       { env: ['SOURCE_SHA'], unlessArgsInclude: '--source-sha' },
     ],
   },
+  // No required env: the keep-window is a flag and `gh` reads GH_TOKEN itself.
+  'scripts/release/prune-canary-releases.ts': {},
   'scripts/release/stage-docker-ctx.ts': {
     requirements: [{ env: ['VERSION'], whenArgsInclude: '--release-assets' }],
   },
