@@ -1,7 +1,9 @@
 name: Cargo Shim
 
-# Lints, tests, and builds the crates.io launcher crate. This is the only Rust
-# in the repository, so the heavy lane only runs when Rust paths change — but
+# Lints, tests, and builds the crates.io launcher crate. It is its own cargo
+# workspace, on its own version line and toolchain, and the root Cargo.toml
+# excludes it; the Mango Protocol crate is owned by protocol-ci.yml. The heavy
+# lane only runs when this crate's paths change — but
 # the workflow itself triggers on every PR: path detection happens in the
 # cheap `changes` job so the `Cargo Shim / Gate` check below always reports
 # and is safe to require in branch protection (a path-filtered workflow that
