@@ -291,26 +291,43 @@ describe('PROTOCOL_IMPORT_TIP', () => {
     return { ok: proc.exitCode === 0, out: proc.stdout.toString().trim() };
   };
 
+  // The assertions below read history and tags, and a default checkout has
+  // neither: `actions/checkout` fetches depth 1 with no tags, and even a plain
+  // `git clone` of this repository comes back shallow (measured: 129 of 785
+  // commits, `v0.1.1` unreachable). They run wherever the objects are present —
+  // a developer's full clone, and any CI job checked out with `fetch-depth: 0` —
+  // and are skipped, not silently passed, where they are not.
+  const hasImportedHistory =
+    run(['cat-file', '-e', `${PROTOCOL_IMPORT_TIP}^{commit}`]).ok &&
+    run(['rev-parse', '--verify', 'protocol-v0.2.0^{commit}']).ok;
+
   test('is a full object name, since it is handed to git rev-list', () => {
     // An abbreviation resolves today and can grow ambiguous as history does.
+    // Unconditional: this one is a property of the constant, not of the clone.
     expect(PROTOCOL_IMPORT_TIP).toMatch(/^[0-9a-f]{40}$/);
   });
 
-  test('names a commit that exists', () => {
+  test.skipIf(!hasImportedHistory)('names a commit that exists', () => {
     expect(run(['rev-parse', '--verify', `${PROTOCOL_IMPORT_TIP}^{commit}`]).out).toBe(
       PROTOCOL_IMPORT_TIP
     );
   });
 
-  test('both protocol release tags are behind it, so the range excludes them', () => {
-    // This is what makes `<tip>..HEAD` mean "everything this repository
-    // committed": the imported history is entirely reachable from the tip.
-    for (const tag of ['protocol-v0.1.0', 'protocol-v0.2.0']) {
-      expect(run(['merge-base', '--is-ancestor', tag, PROTOCOL_IMPORT_TIP]).ok, tag).toBe(true);
+  test.skipIf(!hasImportedHistory)(
+    'both protocol release tags are behind it, so the range excludes them',
+    () => {
+      // This is what makes `<tip>..HEAD` mean "everything this repository
+      // committed": the imported history is entirely reachable from the tip.
+      for (const tag of ['protocol-v0.1.0', 'protocol-v0.2.0']) {
+        expect(run(['merge-base', '--is-ancestor', tag, PROTOCOL_IMPORT_TIP]).ok, tag).toBe(true);
+      }
     }
-  });
+  );
 
-  test('it is itself behind HEAD, so the range is not empty of the merge', () => {
-    expect(run(['merge-base', '--is-ancestor', PROTOCOL_IMPORT_TIP, 'HEAD']).ok).toBe(true);
-  });
+  test.skipIf(!hasImportedHistory)(
+    'it is itself behind HEAD, so the range is not empty of the merge',
+    () => {
+      expect(run(['merge-base', '--is-ancestor', PROTOCOL_IMPORT_TIP, 'HEAD']).ok).toBe(true);
+    }
+  );
 });

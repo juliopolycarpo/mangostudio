@@ -57,8 +57,11 @@ try {
   const specifiers = subpaths.map((subpath) =>
     subpath === '.'
       ? manifest.name
-      : // `./schema/*` is a wildcard; probe the document the spec actually has.
-        `${manifest.name}/${subpath.slice(2).replace('*', '1/protocol.json')}`
+      : // A wildcard subpath such as `./schema/*` is probed against a document
+        // the spec actually has. `replaceAll`, not `replace`: the latter
+        // substitutes only the first `*`, which would silently probe a
+        // half-resolved specifier if a subpath ever carried two.
+        `${manifest.name}/${subpath.slice(2).replaceAll('*', '1/protocol.json')}`
   );
   await Bun.write(join(project, 'probe.mjs'), probeSource(specifiers));
 
