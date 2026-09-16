@@ -143,6 +143,11 @@ export function protocolTag(version: string): string {
 /**
  * The version a protocol tag names, or null when the ref is not one.
  *
+ * No caller parses a `protocol-v*` ref back to a version today; this is the
+ * inverse of `protocolTag`, kept so the tag grammar has one definition in both
+ * directions rather than a second one appearing the first time something needs
+ * to read a ref. Do not read it as a dependency of the release path.
+ *
  * @example
  * protocolVersion('protocol-v0.2.1'); // '0.2.1'
  */
