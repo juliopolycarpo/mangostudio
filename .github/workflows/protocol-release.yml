@@ -9,16 +9,20 @@ name: Protocol Release
 # The tag prefix is what keeps the two trains apart: release.yml fires on an
 # anchored `v*.*.*`, which `protocol-v0.2.1` cannot match.
 #
-# Two things bind a run to its tag, and the workflow only owns the first. The
-# `resolve` step below refuses any ref that is not the exact `protocol-v$version`
-# tag, which is what makes `workflow_dispatch` — where the operator picks both
-# the ref and the version — as safe as the push trigger. The second is the
-# `protocol-release` environment every credential-bearing job names: it must be
-# provisioned with a deployment rule admitting only `protocol-v*` tags, and it is
-# deliberately not the `release` environment, which holds the Homebrew/Scoop
-# tokens this train has no business reaching. GitHub creates a named environment
-# on first use with no rules at all, so until that rule exists the `resolve`
-# guard is the only thing enforcing tag-only releases.
+# Two things bind a run to its tag, and neither is redundant. The `resolve` step
+# below refuses any ref that is not the exact `protocol-v$version` tag, which is
+# what makes `workflow_dispatch` — where the operator picks the ref and the
+# version independently — as safe as the push trigger. The `protocol-release`
+# environment every credential-bearing job names carries the other half: one
+# deployment rule, the `protocol-v*` **tag** pattern, and no branch rule at all,
+# so a run from a branch cannot reach the token exchanges even if the step guard
+# were edited away. Deliberately not the `release` environment, which holds the
+# Homebrew/Scoop tokens this train has no business reaching.
+#
+# The environment is repository state, not a file here: a rule deleted in
+# settings cannot fail a test. `protocol-release` must keep exactly one policy,
+# `protocol-v*` of type `tag` — check with
+# `gh api repos/juliopolycarpo/mangostudio/environments/protocol-release/deployment-branch-policies`.
 
 on:
   push:
