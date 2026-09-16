@@ -124,8 +124,9 @@ changed when the tree moved here, so both registries were repointed on 2026-09-1
 publisher does not replace the old one — npm allows up to ten per package, crates.io several — so
 the `juliopolycarpo/mango-protocol` configurations are still live and remain the fallback until a
 release from this repository succeeds. They are deleted with the archive step, not before, and
-crates.io's "Require trusted publishing for all new versions" stays off for the same reason: until
-the new identity is proven, enabling it would leave no path at all.
+crates.io's "Require trusted publishing for all new versions" stays off for a related but distinct
+reason: it would block the token/manual fallback used for the hand-published first version below,
+and that fallback stays available until a release from this repository succeeds.
 
 Neither registry lets a name that does not exist yet be configured, so this is the recipe for a
 future rename, not for today: both `@mangostudio/protocol` and `mango-protocol` exist and are
