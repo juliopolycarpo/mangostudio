@@ -1,0 +1,15 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/spec/schema/**",
+        "$TURBO_ROOT$/tsconfig.json",
+        "$TURBO_ROOT$/LICENSE"
+      ],
+      "outputs": ["dist/**", "schema/**", "LICENSE"]
+    }
+  }
+}

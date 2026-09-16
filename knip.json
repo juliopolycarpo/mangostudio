@@ -10,11 +10,15 @@
         "scripts/bench/startup.ts",
         "scripts/ci/{distribution-identity,evaluate-gate,frontend-bundle-report,verify-cross-runtimes}.ts",
         "scripts/examples/external-api-smoke.ts",
-        "scripts/qa-gate/{collect,collect-test-metrics,render-coverage-summary,render-report}.ts",
+        "scripts/protocol/*.test.ts",
+        "scripts/protocol/fixtures/generate-*.ts",
+        "scripts/protocol/verify-{spec,roundtrip,schema-equality}.ts",
+        "scripts/protocol/{check,test,fix,check-versions,release-prepare}.ts",
         "scripts/qa-gate/**/*.unit.test.ts",
         "scripts/qa-gate/publish/*.mjs",
-        "scripts/release/{archive-assets,bundle-distribution,distribution-manifest,extract-distribution,fill-dry-run-checksums,pack-npm,prepare-release,publish-npm,push-dist-repo,stage-docker-ctx,update-homebrew,update-scoop,verify-checksum}.ts",
+        "scripts/qa-gate/{collect,collect-test-metrics,render-coverage-summary,render-report}.ts",
         "scripts/release/*.sh",
+        "scripts/release/{archive-assets,bundle-distribution,distribution-manifest,extract-distribution,fill-dry-run-checksums,pack-npm,prepare-release,publish-npm,push-dist-repo,stage-docker-ctx,update-homebrew,update-scoop,verify-checksum}.ts",
         "scripts/tests/**/*.test.ts"
       ],
       "project": [".claude/hooks/*.mjs", ".codex/hooks/*.mjs", "scripts/**/*.{ts,mjs}"]
@@ -48,6 +52,10 @@
       ],
       "project": ["src/**/*.ts", "tests/**/*.ts"],
       "ignore": ["src/services/external-agents/codex/protocol/**"]
+    },
+    "packages/protocol": {
+      "entry": ["src/{index,stdio,ipc,in-process,ws,spawn,testing}.ts", "tests/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tests/**/*.ts"]
     },
     "packages/cli": {
       "project": ["bin/**/*.js"]

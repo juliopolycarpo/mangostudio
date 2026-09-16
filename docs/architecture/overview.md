@@ -11,6 +11,22 @@ MangoStudio follows a modular DDD-inspired architecture across four workspaces. 
 | `apps/runtime`  | Host-machine execution runtime | TypeScript, Bun, shared runtime protocol                               |
 | `apps/shared`   | Framework-agnostic contracts   | TypeScript types, TypeBox schemas, i18n dictionaries                   |
 
+### Published alongside the application
+
+The repository also hosts the **Mango Protocol** — the wire contract the hub and the runtime
+speak — on its own version line and its own `protocol-v*` release train. It is not one of the
+four application workspaces and does not follow their lifecycle.
+
+| Path                     | Ships as                                  | Stack                                       |
+| ------------------------ | ----------------------------------------- | ------------------------------------------- |
+| `spec/`                  | The normative spec, schemas and fixtures  | Markdown, JSON Schema 2020-12               |
+| `packages/protocol/`     | `@mangostudio/protocol` on npm            | TypeScript, TypeBox                         |
+| `crates/mango-protocol/` | `mango-protocol` on crates.io             | Rust, serde, tokio                          |
+| `packages/cargo-shim/`   | `mangostudio` on crates.io (the launcher) | Rust, on its own version line and toolchain |
+
+`packages/protocol/AGENTS.md` is the contributor guide for that tree, including the
+contract-change procedure every wire change follows. `docs/protocol/` holds the adoption guides.
+
 ## API Module Architecture
 
 The API is organized into domain modules under `apps/api/src/modules/`. Each module follows a DDD-inspired structure:

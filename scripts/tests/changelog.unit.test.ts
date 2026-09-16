@@ -9,6 +9,7 @@ import {
   runChangelog,
   wrapPreviewComment,
 } from '../lib/changelog';
+import { PROTOCOL_IMPORT_TIP } from '../lib/protocol';
 
 // Fixed baseline so the parser tests do not depend on the root package.json.
 const BASELINE_VERSION = '0.1.0';
@@ -31,12 +32,14 @@ describe('cliffArgs', () => {
       'v0.1.0',
       '--output',
       'CHANGELOG.md',
+      `${PROTOCOL_IMPORT_TIP}..HEAD`,
     ]);
     expect(cliffArgs({ kind: 'init', version: 'v2.0.0' })).toEqual([
       '--tag',
       'v2.0.0',
       '--output',
       'CHANGELOG.md',
+      `${PROTOCOL_IMPORT_TIP}..HEAD`,
     ]);
   });
 
@@ -46,12 +49,14 @@ describe('cliffArgs', () => {
       'v1.2.3',
       '--output',
       'CHANGELOG.md',
+      `${PROTOCOL_IMPORT_TIP}..HEAD`,
     ]);
     expect(cliffArgs({ kind: 'release', version: '1.2.3' })).toEqual([
       '--tag',
       'v1.2.3',
       '--output',
       'CHANGELOG.md',
+      `${PROTOCOL_IMPORT_TIP}..HEAD`,
     ]);
   });
 
@@ -180,7 +185,13 @@ describe('runChangelog', () => {
   test('init passes git-cliff output through and propagates exit code', () => {
     const fake = new FakeCliff({ stdout: '', exitCode: 0 });
     const { output, exitCode } = runChangelog({ kind: 'init', version: '0.1.0' }, fake.run);
-    expect(fake.lastArgs).toEqual(['--tag', 'v0.1.0', '--output', 'CHANGELOG.md']);
+    expect(fake.lastArgs).toEqual([
+      '--tag',
+      'v0.1.0',
+      '--output',
+      'CHANGELOG.md',
+      `${PROTOCOL_IMPORT_TIP}..HEAD`,
+    ]);
     expect(output).toBe('');
     expect(exitCode).toBe(0);
   });

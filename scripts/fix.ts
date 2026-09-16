@@ -1,4 +1,5 @@
 import { ROOT_BIOME_PATHS, ROOT_DIR } from './lib/config';
+import { touchesProtocolSurface } from './lib/protocol';
 import {
   assertNoUnexpectedArguments,
   exitWithResults,
@@ -51,6 +52,11 @@ header('Fix');
 
 let effectiveWorkspaces = workspaces;
 let effectiveIncludeRoot = includeRoot;
+// rustfmt reads the whole cargo workspace, so it is keyed on the protocol
+// surface rather than on `includeRoot` — the same predicate scripts/check.ts
+// scopes its protocol lane with. Staging a README would otherwise reformat
+// every crate in the repository.
+let includeProtocol = includeRoot;
 
 if (flags['--staged']) {
   const files = getStagedFiles();
@@ -61,6 +67,7 @@ if (flags['--staged']) {
   const mapped = mapFilesToWorkspaces(files);
   effectiveWorkspaces = mapped.workspaces;
   effectiveIncludeRoot = mapped.includeRoot;
+  includeProtocol = touchesProtocolSurface(files);
 } else if (flags['--changed']) {
   const base = values['--base'] ?? resolveDefaultBase();
   const files = getChangedFiles(base);
@@ -71,6 +78,7 @@ if (flags['--staged']) {
   const mapped = mapFilesToWorkspaces(files);
   effectiveWorkspaces = mapped.workspaces;
   effectiveIncludeRoot = mapped.includeRoot;
+  includeProtocol = touchesProtocolSurface(files);
 }
 
 const results: RunResult[] = [];
@@ -99,6 +107,14 @@ if (effectiveIncludeRoot) {
     cwd: ROOT_DIR,
   });
   results.push(rootDprintResult);
+}
+
+if (includeProtocol) {
+  // rustfmt over the protocol crate. Biome and dprint above already cover the
+  // package's TypeScript and its markdown; nothing else here speaks Rust.
+  results.push(
+    await runCommand('root:protocol:fix', ['bun', './scripts/protocol/fix.ts'], { cwd: ROOT_DIR })
+  );
 }
 
 if (results.length === 0) {

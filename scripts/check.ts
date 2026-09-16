@@ -14,6 +14,7 @@ import {
   assertNoDisallowedWorkspaceDependencies,
 } from './lib/dependency-policy';
 import { assertNoProductionNodeEnvBranches } from './lib/no-node-env-branches';
+import { touchesProtocolSurface } from './lib/protocol';
 import { assertVersionsInLockstep } from './lib/release-version';
 import {
   assertNoUnexpectedArguments,
@@ -35,8 +36,9 @@ function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
 
 Runs Biome, dprint, madge circular checks, tsc typechecks, Knip code health,
-generated contract-artifact freshness, and workflow static analysis
-(actionlint, zizmor, ShellCheck) in parallel.
+generated contract-artifact freshness, the Mango Protocol lanes (spec, schema
+equality, fixtures, Cargo) and workflow static analysis (actionlint, zizmor,
+ShellCheck) in parallel.
 Default workspace selection: --all
 
 Workspace flags:
@@ -140,6 +142,10 @@ let includeCodeHealth = includeRoot;
 // against, so staleness has to be caught in the pull request that caused it —
 // including on the scoped run the pre-commit hook uses.
 let includeContractArtifacts = includeRoot;
+// The protocol is not a `WorkspaceName`, so the Turbo fan-out above never
+// reaches it: its lane is wired here explicitly. Scoped runs skip it unless a
+// protocol path changed.
+let includeProtocol = includeRoot;
 
 if (flags['--staged']) {
   const files = getStagedFiles();
@@ -153,6 +159,7 @@ if (flags['--staged']) {
   includeActionsLint = touchesActionsLintSurface(files);
   includeCodeHealth = touchesCodeHealthSurface(files);
   includeContractArtifacts = touchesContractArtifactSurface(files);
+  includeProtocol = touchesProtocolSurface(files);
 } else if (flags['--changed']) {
   const base = values['--base'] ?? resolveDefaultBase();
   const files = getChangedFiles(base);
@@ -166,6 +173,7 @@ if (flags['--staged']) {
   includeActionsLint = touchesActionsLintSurface(files);
   includeCodeHealth = touchesCodeHealthSurface(files);
   includeContractArtifacts = touchesContractArtifactSurface(files);
+  includeProtocol = touchesProtocolSurface(files);
 }
 
 const tasks: Array<() => Promise<RunResult>> = [];
@@ -184,6 +192,20 @@ if (includeContractArtifacts) {
   info('\nContract artifacts');
   tasks.push(() =>
     runCommand('root:contract-artifacts', ['bun', 'run', 'contracts:check'], { cwd: ROOT_DIR })
+  );
+}
+
+if (includeProtocol) {
+  info('\nMango Protocol');
+  // `--ts-only` deliberately: the Rust half (Clippy over the feature powerset,
+  // `cargo doc`, the cross-language round trip) is a 25-minute cold lane, and
+  // CI's Check job runs this script under a 10-minute budget with no Cargo
+  // cache. `.github/workflows/protocol-ci.yml` owns that half, path-filtered.
+  // Run `bun run protocol:check` for the full gate before a protocol change.
+  tasks.push(() =>
+    runCommand('root:protocol', ['bun', './scripts/protocol/check.ts', '--ts-only'], {
+      cwd: ROOT_DIR,
+    })
   );
 }
 

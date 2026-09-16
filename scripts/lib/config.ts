@@ -61,6 +61,10 @@ export const ROOT_BIOME_PATHS: string[] = [
   'apps/runtime/turbo.json',
   'tests/browser-smoke',
   'apps/frontend/build.ts',
+  // The normative JSON Schema documents under spec/schema; the conformance
+  // corpus under spec/fixtures is data and is excluded from the formatter in
+  // biome.json, because both SDKs assert on its exact bytes.
+  'spec',
   'apps/api/tests',
   'apps/frontend/tests',
   'apps/shared/tests',
@@ -80,6 +84,14 @@ export const ROOT_DPRINT_PATHS: string[] = [
   'packages',
   'lefthook.yml',
   'dprint.json',
+  // The Mango Protocol tree: the normative spec prose, the Rust crate's own
+  // markdown, and the four TOML files its workspace needs at the root.
+  'spec',
+  'crates',
+  'Cargo.toml',
+  'deny.toml',
+  'rustfmt.toml',
+  'rust-toolchain.toml',
 ];
 
 export const WORKSPACE_DPRINT_PATHS: Record<WorkspaceName, string[]> = {

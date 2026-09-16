@@ -1,18 +1,10 @@
 # CodeQL advanced-setup configuration for .github/workflows/codeql.yml.
 #
 # Query selection stays in the workflow's matrix (`queries: security-extended`);
-# this file exists only to bound what gets extracted.
-name: mangostudio
-
-# `mango-protocol/` is the standalone protocol repository imported with its
-# history by plan 075, waiting to be relocated into `packages/protocol`,
-# `crates/mango-protocol` and `spec/`. Its TypeScript is published from its own
-# release train and has never been scanned by this repository's
-# security-extended suite, so extracting it would turn an unrelated alert into a
-# red "Code scanning results" check on the import pull request. The relocation
-# pull request drops this entry along with the directory.
+# this file carries the analysis name and any bound on what gets extracted.
 #
-# `paths-ignore` applies to interpreted languages, which is exactly the
-# `javascript-typescript` / `build-mode: none` analysis this repository runs.
-paths-ignore:
-  - mango-protocol
+# Nothing is bounded. The one entry this file ever held was `mango-protocol/`,
+# the standalone protocol repository imported with its history and waiting to be
+# relocated; the relocation dropped the directory and the entry with it, and the
+# protocol's TypeScript is scanned with the rest of the repository from here on.
+name: mangostudio

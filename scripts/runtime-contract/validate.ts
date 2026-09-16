@@ -5,9 +5,12 @@
  * generated file", not "is the generated file correct" — a catalog that breaks
  * the protocol's grammar is byte-stable too, and the first thing to notice
  * would be a peer in another language failing to parse it. So the schema is
- * read from the installed SDK (`@mangostudio/protocol/schema/1/`), which is the
- * same document a peer would fetch from the published URL, and applied on every
- * run of either mode.
+ * read from `spec/schema/1/`, the normative documents the protocol package
+ * publishes verbatim under `@mangostudio/protocol/schema/1/` and a peer fetches
+ * from the published URL, and applied on every run of either mode. The spec
+ * files are read rather than the package subpath because the package copies
+ * them in at build time: on a clean checkout the copy does not exist yet, and
+ * nothing in the workspace graph builds it.
  *
  * ajv rather than TypeBox here on purpose: the published document is plain JSON
  * Schema 2020-12 with a `$ref` across files, and re-expressing it as TypeBox to
@@ -28,8 +31,8 @@ const CATALOG_ARTIFACT = `${ARTIFACT_DIR}/catalog.json`;
  */
 async function compileCatalogValidator(): Promise<ValidateFunction> {
   const [catalog, protocol] = await Promise.all([
-    import('@mangostudio/protocol/schema/1/catalog.json', { with: { type: 'json' } }),
-    import('@mangostudio/protocol/schema/1/protocol.json', { with: { type: 'json' } }),
+    import('../../spec/schema/1/catalog.json', { with: { type: 'json' } }),
+    import('../../spec/schema/1/protocol.json', { with: { type: 'json' } }),
   ]);
   const ajv = new Ajv2020({ strict: false, allErrors: true });
   ajv.addSchema(protocol.default);
@@ -37,7 +40,7 @@ async function compileCatalogValidator(): Promise<ValidateFunction> {
   const validate = ajv.getSchema(CATALOG_SCHEMA_URL);
   if (!validate) {
     throw new Error(
-      `The protocol SDK does not publish a schema at ${CATALOG_SCHEMA_URL}; received ids: ${Object.keys(ajv.schemas).join(', ')}.`
+      `spec/schema/1/ declares no schema with $id ${CATALOG_SCHEMA_URL}; received ids: ${Object.keys(ajv.schemas).join(', ')}.`
     );
   }
   return validate;

@@ -2,6 +2,8 @@
 // the PR preview formatting in one testable place; scripts/changelog.ts wires
 // these to the actual binary.
 
+import { PROTOCOL_IMPORT_TIP } from './protocol';
+
 /** Default base ref the PR preview diffs against. */
 const DEFAULT_PREVIEW_BASE = 'origin/main';
 
@@ -30,8 +32,22 @@ export function cliffArgs(mode: ChangelogMode): string[] {
   switch (mode.kind) {
     case 'init':
     case 'release':
-      return ['--tag', `v${stripLeadingV(mode.version)}`, '--output', 'CHANGELOG.md'];
+      // Both modes regenerate the whole file from history, and this repository
+      // has two disjoint ones: the Mango Protocol arrived through a merge of an
+      // unrelated root with its original SHAs. The range is what keeps its 87
+      // commits out of the application's changelog — cliff.toml's
+      // `exclude_paths` cannot, because they carry the upstream tree's
+      // root-relative paths (measured: path rules alone leave 40 of them in).
+      return [
+        '--tag',
+        `v${stripLeadingV(mode.version)}`,
+        '--output',
+        'CHANGELOG.md',
+        `${PROTOCOL_IMPORT_TIP}..HEAD`,
+      ];
     case 'preview':
+      // Already a range, and one that starts at origin/main, so the imported
+      // history is never in it.
       return ['--strip', 'all', `${mode.base}..${mode.head}`];
   }
 }

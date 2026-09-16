@@ -157,10 +157,14 @@ describe('labeler coverage', () => {
     expect(runtimeSection).toContain('- "apps/runtime/**"');
     expect(runtimeSection).toContain('- "apps/shared/src/runtime-contract/**"');
     expect(runtimeSection).toContain('- "apps/api/src/services/runtime-client/**"');
-    // The imported protocol tree is the hub/runtime wire contract; without a
-    // glob a protocol-only pull request reaches the classification gate with
-    // no area: or type: label.
-    expect(runtimeSection).toContain('- "mango-protocol/**"');
+    // The Mango Protocol is the hub/runtime wire contract; without these globs a
+    // protocol-only pull request reaches the classification gate with no area:
+    // or type: label. `docs/protocol/**` needs none — `docs/**` already carries
+    // `area: docs`.
+    expect(runtimeSection).toContain('- "spec/**"');
+    expect(runtimeSection).toContain('- "packages/protocol/**"');
+    expect(runtimeSection).toContain('- "crates/**"');
+    expect(runtimeSection).toContain('- "scripts/protocol/**"');
   });
 
   test('classifies the repository status feature as area: git', () => {
@@ -179,9 +183,20 @@ describe('labeler coverage', () => {
     const dependabot = readText('.github/dependabot.yml');
 
     // One block per ecosystem; each must carry the auto-label so none of the
-    // shipped ecosystems loses dependency classification.
+    // shipped ecosystems loses dependency classification. Asserted as a named
+    // set rather than a count, so adding an ecosystem fails by name instead of
+    // by an off-by-one nobody can read. Two cargo blocks on purpose: the
+    // crates.io launcher under packages/cargo-shim is on its own version line
+    // and toolchain, and the Mango Protocol workspace is at the repository root
+    // with a second, nightly-only lockfile under crates/mango-protocol/fuzz.
     const ecosystemBlocks = dependabot.split('package-ecosystem:').slice(1);
-    expect(ecosystemBlocks).toHaveLength(4);
+    expect(ecosystemBlocks.map((block) => block.trim().split('\n')[0])).toEqual([
+      'github-actions',
+      'bun',
+      'cargo',
+      'cargo',
+      'docker',
+    ]);
     for (const block of ecosystemBlocks) {
       expect(block).toContain('"type: dependencies"');
     }

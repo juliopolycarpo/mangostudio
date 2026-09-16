@@ -1,0 +1,111 @@
+name: Protocol Fuzz
+
+on:
+  schedule:
+    # 03:17 UTC daily: off the hour, so it does not compete with every other
+    # project's midnight cron for shared runner capacity.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One scheduled run at a time. A cold cache builds tokio, jsonschema and regex
+# under sanitizer instrumentation before the 300s run starts, so two overlapping
+# runs would fight over the same cache entry for no extra coverage.
+concurrency:
+  group: protocol-fuzz-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: Fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    # A cold cache builds tokio, jsonschema and regex under sanitizer
+    # instrumentation before the 300s run even starts; 10 was too tight for a
+    # first scheduled run.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: decode_line
+            # The ceiling under test starts at the codec's own floor of 4096,
+            # which the default -max_len (~4096) can only just reach; a line
+            # over the limit needs room past it.
+            features: ""
+            extra_args: "-max_len=16384"
+          - target: line_decoder_push
+            # Same reason as decode_line: the too-large refusal is the path
+            # where the whole-push and split-push decoders once disagreed.
+            features: ""
+            extra_args: "-max_len=16384"
+          - target: chunk_reassembler_push
+            # The default libFuzzer -max_len (~4096) never reaches a
+            # multi-chunk message; the chunk framing's own floor is 2048.
+            features: ""
+            extra_args: "-max_len=65536"
+          - target: validate
+            features: ""
+            extra_args: ""
+          - target: catalog_parse
+            features: ""
+            extra_args: ""
+          - target: session_frames
+            # Needs the session and the port seam; see the fuzz Cargo.toml.
+            features: "tokio"
+            extra_args: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The root rust-toolchain.toml pins a stable channel for the rest of the
+      # repository, and that file applies here too (rustup resolves it by
+      # directory, not by cargo workspace); the fuzz crate has no toolchain file
+      # of its own, so every invocation below selects nightly explicitly with
+      # `+nightly` instead. libFuzzer instrumentation needs `-Z` flags only
+      # nightly accepts.
+      - run: rustup toolchain install nightly --profile minimal
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: crates/mango-protocol/fuzz
+      - uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+        with:
+          tool: cargo-fuzz
+      - name: Run the target for 5 minutes
+        working-directory: crates/mango-protocol/fuzz
+        # Matrix values reach the shell through `env:`, never through `${{ }}`
+        # inside the script: an expression is substituted before the shell sees
+        # it, so a value carrying shell syntax would execute rather than be
+        # read. EXTRA_ARGS is deliberately word-split — it is a list of
+        # libFuzzer flags, and the matrix above is its only writer.
+        env:
+          EXTRA_ARGS: ${{ matrix.extra_args }}
+          FEATURES: ${{ matrix.features }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          features=()
+          if [ -n "$FEATURES" ]; then
+            features=(--features "$FEATURES")
+          fi
+          extra=()
+          if [ -n "$EXTRA_ARGS" ]; then
+            # shellcheck disable=SC2206 # a flag list, split on purpose
+            extra=($EXTRA_ARGS)
+          fi
+          cargo +nightly fuzz run "${features[@]}" "$TARGET" -- \
+            -max_total_time=300 -timeout=30 "${extra[@]}"
+      - name: Upload the corpus and any crashing input
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: |
+            crates/mango-protocol/fuzz/corpus/${{ matrix.target }}
+            crates/mango-protocol/fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore
+          retention-days: 14

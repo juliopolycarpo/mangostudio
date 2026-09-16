@@ -13,8 +13,7 @@
       "!apps/frontend/src/routeTree.gen.ts",
       "!apps/runtime/src/services/external-agents/codex/protocol",
       "!apps/runtime/src/services/external-agents/*/contract",
-      "!apps/shared/src/runtime-contract/generated",
-      "!mango-protocol"
+      "!apps/shared/src/runtime-contract/generated"
     ]
   },
   "formatter": {
@@ -29,7 +28,7 @@
     "bracketSpacing": true,
     "expand": "auto",
     "useEditorconfig": true,
-    "includes": ["**", "!**/*.{md,mdx}"]
+    "includes": ["**", "!**/*.{md,mdx}", "!spec/fixtures/**"]
   },
   "linter": {
     "enabled": true,
