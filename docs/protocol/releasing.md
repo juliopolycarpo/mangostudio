@@ -35,13 +35,21 @@ deliberately not one of the manifests below.
    bun run protocol:release:prepare 0.2.1
    ```
 
-3. Review the diff, commit, tag and push. The tag must be signed.
+3. Review the diff and merge the release preparation through a pull request. After it lands,
+   tag the commit on `main`. The tag must be signed and its commit must be reachable from
+   `origin/main`; a commit from the preparation branch that was rewritten by a squash merge
+   will be refused.
 
    ```sh
-   git add -A && git commit -m "chore(release): protocol-v0.2.1"
+   git switch main
+   git pull --ff-only origin main
+   bun ./scripts/protocol/check-versions.ts 0.2.1
    git tag -s protocol-v0.2.1 -m "protocol-v0.2.1"
-   git push origin main protocol-v0.2.1
+   git push origin protocol-v0.2.1
    ```
+
+   To retry through `workflow_dispatch`, select the same `protocol-v0.2.1` tag as the ref
+   and supply `0.2.1` as the version. Dispatching from a branch is refused.
 
 4. Watch the `Protocol Release` workflow. It verifies the manifests match the tag, runs
    `bun run protocol:check` and `bun run protocol:test`, proves the published tarball with
@@ -142,7 +150,16 @@ both. So a failure in either publish job says nothing about the other — an npm
 leave `mango-protocol` on crates.io, and vice versa. Check both registries before deciding what is
 left to do.
 
-Every job is re-runnable: each publish job skips a version already on its registry, and the
-release job refreshes the assets of a release that already exists instead of failing on it. Fix
-the cause and re-run the whole workflow. Never delete a tag that published anything; cut the next
-patch.
+Each publish job skips a version already on its registry. A published GitHub release is
+immutable, so a rerun skips it without uploading assets again. Fix the cause and rerun the
+failed jobs.
+
+A failed release creation can leave a draft with incomplete assets. The workflow refuses that
+draft; delete only the draft, preserve the tag, then rerun the failed job:
+
+```sh
+gh release delete protocol-v0.2.1 --cleanup-tag=false
+```
+
+Never delete or move a tag that published anything. If the release needs code changes, merge
+them through a new release preparation pull request and cut the next patch.
