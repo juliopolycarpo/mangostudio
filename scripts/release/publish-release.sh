@@ -107,8 +107,8 @@ publish_release() {
         # A draft is always leftover: this helper never leaves one behind on a
         # successful call. Its assets may be incomplete, and a draft carries no
         # immutability, so deleting beats inspecting. The tag it may already
-        # have created stays: `gh release create` reuses an existing tag, and
-        # deleting a tag is what the `release tags` ruleset refuses.
+        # have created stays — `gh release create` reuses an existing tag, and
+        # on the stable train the `release tags` ruleset refuses deleting one.
         echo "Deleting the leftover draft release for ${tag} before republishing"
         gh release delete "$tag" --yes --cleanup-tag=false || return
         ;;

@@ -126,7 +126,9 @@ mangostudio upgrade --canary 1234abc
 - **GitHub Releases** (`github-release-canary`): uma pre-release `v<versão>`
   por commit verde em `main`, com seus assets e `SHA256SUMS`. Releases antigas
   são podadas por `scripts/release/prune-canary-releases.ts` (mantém 14 por
-  padrão).
+  padrão), junto com suas tags — o ruleset `release tags` exclui
+  `refs/tags/v*-canary.*`; qualquer outra tag `v*` continua sem poder ser
+  apagada nem movida.
 - **npm** (`npm-canary`): `mangostudio@<versão>` na dist-tag `canary`, então
   `latest` nunca aponta para um canary.
 

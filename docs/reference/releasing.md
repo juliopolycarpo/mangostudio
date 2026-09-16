@@ -159,11 +159,17 @@ Two consequences worth knowing:
 - **Nothing reconstructs a canary tag from a version.** `install.sh --canary`,
   `install.ps1 -Canary` and the hub's own update check all resolve the newest
   canary pre-release from the release list.
-- **Old canary releases are pruned** to a keep-window
+- **Old canary releases are pruned**, tag included, to a keep-window
   (`scripts/release/prune-canary-releases.ts`, 14 by default — roughly eight
   days at the current merge rate, and ~15 GB of release storage at ~1.1 GB per
   release). A hub older than the window can no longer download its own runtime
   pair and has to upgrade first; it is told exactly that.
+
+  Deleting the tag is possible only because the `release tags` ruleset excludes
+  `refs/tags/v*-canary.*`. Every other `v*` tag stays undeletable and unmovable,
+  the frozen `v<root>-canary` one included — it carries no dot. The tag's *name*
+  is reserved forever once an immutable release has used it either way, so
+  pruning frees the ref, never the name.
 
 `canary-manifest.json` ships beside the assets, is listed in `SHA256SUMS` like
 everything else, and records the source commit, the build time, and the digest

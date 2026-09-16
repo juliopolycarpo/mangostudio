@@ -48,7 +48,7 @@ export interface ReleaseListEntry {
  * `keep`, newest first by creation time.
  *
  * @example
- * selectCanaryReleasesToPrune(entries, 10) // ['v0.1.1-canary.0a1b2c3', …]
+ * selectCanaryReleasesToPrune(entries, 14) // ['v0.1.1-canary.0a1b2c3', …]
  */
 export function selectCanaryReleasesToPrune(
   entries: readonly ReleaseListEntry[],
@@ -62,12 +62,25 @@ export function selectCanaryReleasesToPrune(
     .map((entry) => entry.tagName);
 }
 
+/**
+ * The `gh` call that retires one canary release, tag included.
+ *
+ * `--cleanup-tag` is what keeps a tag per green commit from accumulating
+ * forever. It works only because the `release tags` ruleset excludes
+ * `refs/tags/v*-canary.*`; every other `v*` tag is still undeletable, and so is
+ * the frozen `v<root>-canary` one, which carries no dot and stays protected.
+ * The tag's *name* is burned either way once an immutable release has used it,
+ * so deleting it frees the ref, never the name.
+ * // Usage: deleteArgs('v0.1.1-canary.0a1b2c3')
+ */
+export function deleteArgs(tag: string): string[] {
+  return ['gh', 'release', 'delete', tag, '--yes', '--cleanup-tag'];
+}
+
 const printHelp = (): never => {
   console.log(`Usage: bun ./scripts/release/prune-canary-releases.ts [flags]
 
-Deletes canary pre-releases older than the newest --keep of them. Tags are left
-in place: the \`release tags\` ruleset refuses deleting a v* tag, and a tag that
-carried an immutable release can never be reused regardless.
+Deletes canary pre-releases older than the newest --keep of them, and their tags.
 
 Flags:
   --keep <n>   How many canary releases to keep (default: ${DEFAULT_KEEP})
@@ -116,17 +129,7 @@ async function main(): Promise<void> {
       info(`Would delete ${tag}`);
       continue;
     }
-    // --cleanup-tag=false: the tag outlives its release on purpose. Deleting it
-    // is what the `release tags` ruleset refuses, and its name is burned either
-    // way once an immutable release has used it.
-    const deleted = await runCommand(`delete ${tag}`, [
-      'gh',
-      'release',
-      'delete',
-      tag,
-      '--yes',
-      '--cleanup-tag=false',
-    ]);
+    const deleted = await runCommand(`delete ${tag}`, deleteArgs(tag));
     if (deleted.exitCode !== 0) throw new Error(`Could not delete the canary release ${tag}.`);
   }
   success(`Pruned ${stale.length} canary release(s), keeping the newest ${keep}.`);

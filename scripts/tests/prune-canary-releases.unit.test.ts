@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  deleteArgs,
   type ReleaseListEntry,
   selectCanaryReleasesToPrune,
 } from '../release/prune-canary-releases';
@@ -60,5 +61,22 @@ describe('selectCanaryReleasesToPrune', () => {
 
   test('refuses a negative keep-window rather than deleting everything', () => {
     expect(() => selectCanaryReleasesToPrune([], -1)).toThrow(/must not be negative/);
+  });
+});
+
+describe('deleteArgs', () => {
+  test('retires the tag with the release', () => {
+    // A tag per green commit accumulates forever otherwise. This is deletable
+    // only because the `release tags` ruleset excludes `refs/tags/v*-canary.*`;
+    // the frozen `v<root>-canary` tag carries no dot and stays protected.
+    expect(deleteArgs('v0.1.1-canary.0a1b2c3')).toEqual([
+      'gh',
+      'release',
+      'delete',
+      'v0.1.1-canary.0a1b2c3',
+      '--yes',
+      '--cleanup-tag',
+    ]);
+    expect(deleteArgs('v0.1.1-canary.0a1b2c3')).not.toContain('--cleanup-tag=false');
   });
 });
