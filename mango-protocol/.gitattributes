@@ -1,0 +1,27 @@
+# Normalize line endings to LF on commit; checkout as-is.
+*                          text=auto eol=lf
+*.ts                       text eol=lf
+*.js                       text eol=lf
+*.mjs                      text eol=lf
+*.rs                       text eol=lf
+*.json                     text eol=lf
+*.jsonc                    text eol=lf
+*.ndjson                   text eol=lf
+*.toml                     text eol=lf
+*.yml                      text eol=lf
+*.yaml                     text eol=lf
+*.md                       text eol=lf
+*.txt                      text eol=lf
+*.sh                       text eol=lf
+
+# Lockfiles: binary-ish, keep merges quiet and language stats clean.
+bun.lock                   binary linguist-generated=true
+Cargo.lock                 text eol=lf linguist-generated=true
+
+# Fixture corpus is data, not source: exact bytes matter.
+spec/fixtures/**           -text linguist-generated=false
+
+node_modules/**            linguist-vendored=true
+docs/**                    linguist-documentation=true
+spec/**/*.md               linguist-documentation=true
+*.md                       linguist-documentation=true

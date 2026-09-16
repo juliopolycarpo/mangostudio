@@ -1,0 +1,94 @@
+{
+  "name": "example.files",
+  "version": "1.0.0",
+  "methods": [
+    {
+      "name": "fs.read-file",
+      "description": "Reads a UTF-8 file inside the workspace.",
+      "params": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "capabilities": [
+        "fs.read"
+      ]
+    },
+    {
+      "name": "fs.watch",
+      "params": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "streamId"
+        ],
+        "properties": {
+          "streamId": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ],
+  "events": [
+    {
+      "topic": "fs.changed",
+      "payload": {
+        "type": "object",
+        "required": [
+          "path",
+          "kind"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "create"
+              },
+              {
+                "type": "string",
+                "const": "modify"
+              },
+              {
+                "type": "string",
+                "const": "delete"
+              }
+            ]
+          }
+        }
+      },
+      "stream": true
+    }
+  ]
+}

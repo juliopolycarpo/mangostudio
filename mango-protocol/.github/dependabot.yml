@@ -1,0 +1,43 @@
+# Dependabot configuration — https://docs.github.com/code-security/dependabot/dependabot-version-updates
+#
+# One grouping style across all three ecosystems: minor and patch bumps are grouped into a
+# single weekly PR so they don't spam review one-dependency-at-a-time, while a major bump always
+# gets its own PR — a major can carry a breaking change that needs a human read, not a rubber
+# stamp alongside nine patch bumps.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "build(deps)"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # Bun is a GA package-ecosystem (>=1.1.39, text-based bun.lock only — we're on 1.4.2/bun.lock,
+  # not the legacy binary bun.lockb). "/" covers the workspace root; package.json's `workspaces`
+  # field is what pulls packages/protocol in, same as `bun install` does.
+  - package-ecosystem: bun
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "build(deps)"

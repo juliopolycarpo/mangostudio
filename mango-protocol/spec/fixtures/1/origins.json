@@ -1,0 +1,90 @@
+{
+  "$comment": "Origin allow-list cases for the WebSocket acceptor (spec/transports/websocket.md, Origin). verdict: accept | reject. origin is absent when the upgrade carried no Origin header. allowed is the acceptor's configured list.",
+  "cases": [
+    {
+      "name": "y_absent_origin_is_not_a_browser",
+      "verdict": "accept",
+      "allowed": [],
+      "$comment": "No Origin means no browser attached one; the credential check governs such a dialler, not this list."
+    },
+    {
+      "name": "y_exact_match",
+      "verdict": "accept",
+      "origin": "https://app.example",
+      "allowed": ["https://app.example"]
+    },
+    {
+      "name": "y_exact_match_with_port",
+      "verdict": "accept",
+      "origin": "https://app.example:8443",
+      "allowed": ["https://other.example", "https://app.example:8443"]
+    },
+    {
+      "name": "n_empty_allow_list_refuses_every_origin",
+      "verdict": "reject",
+      "origin": "https://app.example",
+      "allowed": [],
+      "$comment": "An acceptor that serves only native clients configures nothing and refuses every browser."
+    },
+    {
+      "name": "n_suffix_is_not_a_match",
+      "verdict": "reject",
+      "origin": "https://app.example.attacker.test",
+      "allowed": ["https://app.example"],
+      "$comment": "A suffix or endsWith comparison would admit any domain the attacker registers under."
+    },
+    {
+      "name": "n_prefix_is_not_a_match",
+      "verdict": "reject",
+      "origin": "https://app.example",
+      "allowed": ["https://app.example.attacker.test"]
+    },
+    {
+      "name": "n_substring_is_not_a_match",
+      "verdict": "reject",
+      "origin": "https://notapp.example",
+      "allowed": ["https://app.example"]
+    },
+    {
+      "name": "n_scheme_must_match",
+      "verdict": "reject",
+      "origin": "http://app.example",
+      "allowed": ["https://app.example"]
+    },
+    {
+      "name": "n_port_must_match",
+      "verdict": "reject",
+      "origin": "https://app.example:8443",
+      "allowed": ["https://app.example"],
+      "$comment": "A different port is a different origin; the default port is never implied."
+    },
+    {
+      "name": "n_trailing_slash_is_not_an_origin",
+      "verdict": "reject",
+      "origin": "https://app.example/",
+      "allowed": ["https://app.example"],
+      "$comment": "A serialised origin has no path, so a value carrying one never matches."
+    },
+    {
+      "name": "n_null_is_a_value_not_an_absence",
+      "verdict": "reject",
+      "origin": "null",
+      "allowed": ["https://app.example"],
+      "$comment": "Browsers send the literal null for a sandboxed or file origin; it is admitted only when listed."
+    },
+    {
+      "name": "n_wildcard_is_not_special",
+      "verdict": "reject",
+      "origin": "https://app.example",
+      "allowed": ["*"],
+      "$comment": "There is no wildcard in this comparison; a list entry is one exact origin."
+    },
+    {
+      "name": "n_case_differs",
+      "verdict": "reject",
+      "origin": "https://APP.example",
+      "allowed": ["https://app.example"],
+      "$comment": "A browser lowercases the scheme and host it sends; anything else did not come from one."
+    }
+  ]
+}

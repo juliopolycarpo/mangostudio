@@ -1,0 +1,25 @@
+# Format:
+# type(scope): short imperative summary
+#
+# Examples:
+# feat(frontend): add connector status badge
+# fix(api): return explicit auth error on expired session
+# refactor(shared): simplify model detection helpers
+#
+# Types:
+# feat, fix, refactor, perf, docs, test, chore, ci, migration
+#
+# Suggested scopes:
+# ts, rs, spec, schema, fixtures, docs, ci, build, deps, release
+
+
+#
+# Rules:
+# - Write in English
+# - Use imperative mood
+# - Keep subject <= 72 chars
+# - No trailing period
+# - One concern per commit
+#
+# What, why, validation (if applicable) and refs (if applicable)
+# -

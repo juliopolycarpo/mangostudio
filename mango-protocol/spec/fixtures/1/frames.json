@@ -1,0 +1,686 @@
+{
+  "$comment": "Mango Protocol 1 frame conformance corpus. verdict: accept | reject | implementation-defined. line is one NDJSON record without its terminator. expected is a subset match on known members.",
+  "cases": [
+    {
+      "name": "y_hello_minimal",
+      "verdict": "accept",
+      "line": "{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},\"peer\":{\"name\":\"fixture\",\"version\":\"0.0.0\",\"role\":\"tool\"},\"capabilities\":{}}",
+      "expected": {
+        "type": "hello",
+        "protocol": {
+          "major": 1,
+          "minor": 0
+        },
+        "peer": {
+          "name": "fixture",
+          "version": "0.0.0",
+          "role": "tool"
+        },
+        "capabilities": {}
+      }
+    },
+    {
+      "name": "y_hello_limits_and_capabilities",
+      "verdict": "accept",
+      "line": "{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},\"peer\":{\"name\":\"fixture\",\"version\":\"0.0.0\",\"role\":\"tool\"},\"capabilities\":{\"fsRead\":true,\"shells\":[\"bash\",\"zsh\"],\"nested\":{\"a\":1}},\"limits\":{\"maxFrameBytes\":4096}}",
+      "expected": {
+        "type": "hello",
+        "protocol": {
+          "major": 1,
+          "minor": 0
+        },
+        "peer": {
+          "name": "fixture",
+          "version": "0.0.0",
+          "role": "tool"
+        },
+        "capabilities": {
+          "fsRead": true,
+          "shells": [
+            "bash",
+            "zsh"
+          ],
+          "nested": {
+            "a": 1
+          }
+        },
+        "limits": {
+          "maxFrameBytes": 4096
+        }
+      }
+    },
+    {
+      "name": "y_hello_max_in_flight",
+      "verdict": "accept",
+      "line": "{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":1},\"peer\":{\"name\":\"fixture\",\"version\":\"0.0.0\",\"role\":\"tool\"},\"capabilities\":{},\"limits\":{\"maxFrameBytes\":65536,\"maxInFlight\":16}}",
+      "expected": {
+        "type": "hello",
+        "limits": {
+          "maxFrameBytes": 65536,
+          "maxInFlight": 16
+        }
+      }
+    },
+    {
+      "name": "y_hello_max_in_flight_alone",
+      "verdict": "accept",
+      "line": "{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":1},\"peer\":{\"name\":\"fixture\",\"version\":\"0.0.0\",\"role\":\"tool\"},\"capabilities\":{},\"limits\":{\"maxInFlight\":1}}",
+      "expected": {
+        "type": "hello",
+        "limits": {
+          "maxInFlight": 1
+        }
+      }
+    },
+    {
+      "name": "n_hello_max_in_flight_zero",
+      "verdict": "reject",
+      "reason": "schema",
+      "line": "{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":1},\"peer\":{\"name\":\"fixture\",\"version\":\"0.0.0\",\"role\":\"tool\"},\"capabilities\":{},\"limits\":{\"maxInFlight\":0}}"
+    },
+    {
+      "name": "n_hello_max_in_flight_not_an_integer",
+      "verdict": "reject",
+      "reason": "schema",
+      "line": "{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":1},\"peer\":{\"name\":\"fixture\",\"version\":\"0.0.0\",\"role\":\"tool\"},\"capabilities\":{},\"limits\":{\"maxInFlight\":1.5}}"
+    },
+    {
+      "name": "y_hello_future_minor",
+      "verdict": "accept",
+      "line": "{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":7},\"peer\":{\"name\":\"fixture\",\"version\":\"0.0.0\",\"role\":\"tool\"},\"capabilities\":{}}",
+      "expected": {
+        "type": "hello",
+        "protocol": {
+          "major": 1,
+          "minor": 7
+        },
+        "peer": {
+          "name": "fixture",
+          "version": "0.0.0",
+          "role": "tool"
+        },
+        "capabilities": {}
+      },
+      "note": "Decoding accepts any minor; negotiation happens in the session."
+    },
+    {
+      "name": "y_hello_unknown_members_ignored",
+      "verdict": "accept",
+      "line": "{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},\"peer\":{\"name\":\"fixture\",\"version\":\"0.0.0\",\"role\":\"tool\"},\"capabilities\":{},\"x-vendor\":{\"trace\":\"abc\"},\"future\":1}",
+      "expected": {
+        "type": "hello",
+        "protocol": {
+          "major": 1,
+          "minor": 0
+        },
+        "peer": {
+          "name": "fixture",
+          "version": "0.0.0",
+          "role": "tool"
+        },
+        "capabilities": {}
+      },
+      "note": "Unknown members are ignored; expected lists known members only."
+    },
+    {
+      "name": "y_req_object_params",
+      "verdict": "accept",
+      "line": "{\"type\":\"req\",\"id\":\"r-1\",\"method\":\"fs.read-file\",\"params\":{\"path\":\"/etc/hosts\"}}",
+      "expected": {
+        "type": "req",
+        "id": "r-1",
+        "method": "fs.read-file",
+        "params": {
+          "path": "/etc/hosts"
+        }
+      }
+    },
+    {
+      "name": "y_req_null_params",
+      "verdict": "accept",
+      "line": "{\"type\":\"req\",\"id\":\"r-2\",\"method\":\"runtime.health\",\"params\":null}",
+      "expected": {
+        "type": "req",
+        "id": "r-2",
+        "method": "runtime.health",
+        "params": null
+      }
+    },
+    {
+      "name": "y_req_array_params",
+      "verdict": "accept",
+      "line": "{\"type\":\"req\",\"id\":\"r-3\",\"method\":\"a.b\",\"params\":[1,\"two\",null]}",
+      "expected": {
+        "type": "req",
+        "id": "r-3",
+        "method": "a.b",
+        "params": [
+          1,
+          "two",
+          null
+        ]
+      }
+    },
+    {
+      "name": "y_req_deep_method",
+      "verdict": "accept",
+      "line": "{\"type\":\"req\",\"id\":\"r-4\",\"method\":\"runtime.update.begin-transfer\",\"params\":{}}",
+      "expected": {
+        "type": "req",
+        "id": "r-4",
+        "method": "runtime.update.begin-transfer",
+        "params": {}
+      }
+    },
+    {
+      "name": "y_req_reserved_rpc_method_decodes",
+      "verdict": "accept",
+      "line": "{\"type\":\"req\",\"id\":\"r-5\",\"method\":\"rpc.discover\",\"params\":{}}",
+      "expected": {
+        "type": "req",
+        "id": "r-5",
+        "method": "rpc.discover",
+        "params": {}
+      },
+      "note": "Schema-valid; the session answers INVALID_REQUEST because rpc. is reserved."
+    },
+    {
+      "name": "y_req_unicode",
+      "verdict": "accept",
+      "line": "{\"type\":\"req\",\"id\":\"r-6\",\"method\":\"text.echo\",\"params\":{\"text\":\"héllo · ünicode · 🥭 · line\\nbreak · tab\\t\"}}",
+      "expected": {
+        "type": "req",
+        "id": "r-6",
+        "method": "text.echo",
+        "params": {
+          "text": "héllo · ünicode · 🥭 · line\nbreak · tab\t"
+        }
+      }
+    },
+    {
+      "name": "y_req_id_max_length",
+      "verdict": "accept",
+      "line": "{\"type\":\"req\",\"id\":\"iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii\",\"method\":\"a.b\",\"params\":{}}",
+      "expected": {
+        "type": "req",
+        "id": "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+        "method": "a.b",
+        "params": {}
+      }
+    },
+    {
+      "name": "y_res_null_result",
+      "verdict": "accept",
+      "line": "{\"type\":\"res\",\"id\":\"r-1\",\"result\":null}",
+      "expected": {
+        "type": "res",
+        "id": "r-1",
+        "result": null
+      }
+    },
+    {
+      "name": "y_res_object_result",
+      "verdict": "accept",
+      "line": "{\"type\":\"res\",\"id\":\"r-1\",\"result\":{\"content\":\"…\",\"hash\":\"sha256:00\"}}",
+      "expected": {
+        "type": "res",
+        "id": "r-1",
+        "result": {
+          "content": "…",
+          "hash": "sha256:00"
+        }
+      }
+    },
+    {
+      "name": "y_res_ignores_error_member",
+      "verdict": "accept",
+      "line": "{\"type\":\"res\",\"id\":\"r-1\",\"result\":1,\"error\":{\"code\":\"X\",\"message\":\"ignored\"}}",
+      "expected": {
+        "type": "res",
+        "id": "r-1",
+        "result": 1
+      },
+      "note": "error is not a member of res; it is unknown and ignored."
+    },
+    {
+      "name": "y_err_minimal",
+      "verdict": "accept",
+      "line": "{\"type\":\"err\",\"id\":\"r-1\",\"error\":{\"code\":\"INTERNAL\",\"message\":\"boom\"}}",
+      "expected": {
+        "type": "err",
+        "id": "r-1",
+        "error": {
+          "code": "INTERNAL",
+          "message": "boom"
+        }
+      }
+    },
+    {
+      "name": "y_err_details",
+      "verdict": "accept",
+      "line": "{\"type\":\"err\",\"id\":\"r-1\",\"error\":{\"code\":\"DENIED\",\"message\":\"fsRead was not granted\",\"details\":{\"capability\":\"fsRead\",\"kind\":\"consent_denied\"}}}",
+      "expected": {
+        "type": "err",
+        "id": "r-1",
+        "error": {
+          "code": "DENIED",
+          "message": "fsRead was not granted",
+          "details": {
+            "capability": "fsRead",
+            "kind": "consent_denied"
+          }
+        }
+      }
+    },
+    {
+      "name": "y_err_unknown_code_preserved",
+      "verdict": "accept",
+      "line": "{\"type\":\"err\",\"id\":\"r-1\",\"error\":{\"code\":\"SOME_FUTURE_CODE_2\",\"message\":\"kept as received\"}}",
+      "expected": {
+        "type": "err",
+        "id": "r-1",
+        "error": {
+          "code": "SOME_FUTURE_CODE_2",
+          "message": "kept as received"
+        }
+      }
+    },
+    {
+      "name": "y_evt_topic_only",
+      "verdict": "accept",
+      "line": "{\"type\":\"evt\",\"topic\":\"runtime.heartbeat\",\"seq\":0,\"payload\":{\"at\":1}}",
+      "expected": {
+        "type": "evt",
+        "topic": "runtime.heartbeat",
+        "seq": 0,
+        "payload": {
+          "at": 1
+        }
+      }
+    },
+    {
+      "name": "y_evt_stream_end",
+      "verdict": "accept",
+      "line": "{\"type\":\"evt\",\"topic\":\"terminal.output\",\"seq\":3,\"streamId\":\"t-7\",\"payload\":{\"data\":\"bye\"},\"end\":true}",
+      "expected": {
+        "type": "evt",
+        "topic": "terminal.output",
+        "seq": 3,
+        "streamId": "t-7",
+        "payload": {
+          "data": "bye"
+        },
+        "end": true
+      }
+    },
+    {
+      "name": "y_evt_large_seq",
+      "verdict": "accept",
+      "line": "{\"type\":\"evt\",\"topic\":\"a.b\",\"seq\":9007199254740991,\"payload\":null}",
+      "expected": {
+        "type": "evt",
+        "topic": "a.b",
+        "seq": 9007199254740991,
+        "payload": null
+      }
+    },
+    {
+      "name": "y_cancel",
+      "verdict": "accept",
+      "line": "{\"type\":\"cancel\",\"id\":\"r-1\"}",
+      "expected": {
+        "type": "cancel",
+        "id": "r-1"
+      }
+    },
+    {
+      "name": "y_ping",
+      "verdict": "accept",
+      "line": "{\"type\":\"ping\"}",
+      "expected": {
+        "type": "ping"
+      }
+    },
+    {
+      "name": "y_pong",
+      "verdict": "accept",
+      "line": "{\"type\":\"pong\"}",
+      "expected": {
+        "type": "pong"
+      }
+    },
+    {
+      "name": "y_ping_unknown_member",
+      "verdict": "accept",
+      "line": "{\"type\":\"ping\",\"x-at\":123}",
+      "expected": {
+        "type": "ping"
+      }
+    },
+    {
+      "name": "y_close_minimal",
+      "verdict": "accept",
+      "line": "{\"type\":\"close\",\"code\":4000}",
+      "expected": {
+        "type": "close",
+        "code": 4000
+      }
+    },
+    {
+      "name": "y_close_reason",
+      "verdict": "accept",
+      "line": "{\"type\":\"close\",\"code\":4409,\"reason\":\"superseded by a newer connection\"}",
+      "expected": {
+        "type": "close",
+        "code": 4409,
+        "reason": "superseded by a newer connection"
+      }
+    },
+    {
+      "name": "y_close_unlisted_code_in_range",
+      "verdict": "accept",
+      "line": "{\"type\":\"close\",\"code\":4777}",
+      "expected": {
+        "type": "close",
+        "code": 4777
+      }
+    },
+    {
+      "name": "y_whitespace_padding",
+      "verdict": "accept",
+      "line": "  {\"type\":\"pong\"}  ",
+      "expected": {
+        "type": "pong"
+      }
+    },
+    {
+      "name": "n_empty_object",
+      "verdict": "reject",
+      "line": "{}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_unknown_type",
+      "verdict": "reject",
+      "line": "{\"type\":\"nope\"}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_type_not_string",
+      "verdict": "reject",
+      "line": "{\"type\":1}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_not_object_array",
+      "verdict": "reject",
+      "line": "[]",
+      "reason": "schema"
+    },
+    {
+      "name": "n_not_object_string",
+      "verdict": "reject",
+      "line": "\"req\"",
+      "reason": "schema"
+    },
+    {
+      "name": "n_not_object_number",
+      "verdict": "reject",
+      "line": "42",
+      "reason": "schema"
+    },
+    {
+      "name": "n_not_object_null",
+      "verdict": "reject",
+      "line": "null",
+      "reason": "schema"
+    },
+    {
+      "name": "n_invalid_json_truncated",
+      "verdict": "reject",
+      "line": "{\"type\":\"ping\"",
+      "reason": "invalid-json"
+    },
+    {
+      "name": "n_invalid_json_single_quotes",
+      "verdict": "reject",
+      "line": "{'type':'ping'}",
+      "reason": "invalid-json"
+    },
+    {
+      "name": "n_invalid_json_bom",
+      "verdict": "reject",
+      "line": "﻿{\"type\":\"ping\"}",
+      "reason": "invalid-json"
+    },
+    {
+      "name": "n_req_missing_id",
+      "verdict": "reject",
+      "line": "{\"type\":\"req\",\"method\":\"a.b\",\"params\":{}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_req_numeric_id",
+      "verdict": "reject",
+      "line": "{\"type\":\"req\",\"id\":1,\"method\":\"a.b\",\"params\":{}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_req_empty_id",
+      "verdict": "reject",
+      "line": "{\"type\":\"req\",\"id\":\"\",\"method\":\"a.b\",\"params\":{}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_req_id_too_long",
+      "verdict": "reject",
+      "line": "{\"type\":\"req\",\"id\":\"iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii\",\"method\":\"a.b\",\"params\":{}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_req_missing_params",
+      "verdict": "reject",
+      "line": "{\"type\":\"req\",\"id\":\"r\",\"method\":\"a.b\"}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_req_method_single_segment",
+      "verdict": "reject",
+      "line": "{\"type\":\"req\",\"id\":\"r\",\"method\":\"fs\",\"params\":{}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_req_method_uppercase",
+      "verdict": "reject",
+      "line": "{\"type\":\"req\",\"id\":\"r\",\"method\":\"Fs.read\",\"params\":{}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_req_method_empty_segment",
+      "verdict": "reject",
+      "line": "{\"type\":\"req\",\"id\":\"r\",\"method\":\"fs..read\",\"params\":{}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_req_method_trailing_dash",
+      "verdict": "reject",
+      "line": "{\"type\":\"req\",\"id\":\"r\",\"method\":\"fs.read-\",\"params\":{}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_req_method_leading_digit",
+      "verdict": "reject",
+      "line": "{\"type\":\"req\",\"id\":\"r\",\"method\":\"1fs.read\",\"params\":{}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_res_missing_result",
+      "verdict": "reject",
+      "line": "{\"type\":\"res\",\"id\":\"r\"}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_err_missing_message",
+      "verdict": "reject",
+      "line": "{\"type\":\"err\",\"id\":\"r\",\"error\":{\"code\":\"INTERNAL\"}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_err_empty_message",
+      "verdict": "reject",
+      "line": "{\"type\":\"err\",\"id\":\"r\",\"error\":{\"code\":\"INTERNAL\",\"message\":\"\"}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_err_lowercase_code",
+      "verdict": "reject",
+      "line": "{\"type\":\"err\",\"id\":\"r\",\"error\":{\"code\":\"denied\",\"message\":\"x\"}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_err_code_too_long",
+      "verdict": "reject",
+      "line": "{\"type\":\"err\",\"id\":\"r\",\"error\":{\"code\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"message\":\"x\"}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_err_details_array",
+      "verdict": "reject",
+      "line": "{\"type\":\"err\",\"id\":\"r\",\"error\":{\"code\":\"INTERNAL\",\"message\":\"x\",\"details\":[1]}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_err_error_null",
+      "verdict": "reject",
+      "line": "{\"type\":\"err\",\"id\":\"r\",\"error\":null}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_evt_negative_seq",
+      "verdict": "reject",
+      "line": "{\"type\":\"evt\",\"topic\":\"a.b\",\"seq\":-1,\"payload\":null}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_evt_float_seq",
+      "verdict": "reject",
+      "line": "{\"type\":\"evt\",\"topic\":\"a.b\",\"seq\":1.5,\"payload\":null}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_evt_end_false",
+      "verdict": "reject",
+      "line": "{\"type\":\"evt\",\"topic\":\"a.b\",\"seq\":0,\"payload\":null,\"end\":false}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_evt_missing_payload",
+      "verdict": "reject",
+      "line": "{\"type\":\"evt\",\"topic\":\"a.b\",\"seq\":0}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_evt_bad_topic",
+      "verdict": "reject",
+      "line": "{\"type\":\"evt\",\"topic\":\"Topic\",\"seq\":0,\"payload\":null}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_evt_empty_stream_id",
+      "verdict": "reject",
+      "line": "{\"type\":\"evt\",\"topic\":\"a.b\",\"seq\":0,\"streamId\":\"\",\"payload\":null}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_cancel_missing_id",
+      "verdict": "reject",
+      "line": "{\"type\":\"cancel\"}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_close_code_low",
+      "verdict": "reject",
+      "line": "{\"type\":\"close\",\"code\":3999}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_close_code_high",
+      "verdict": "reject",
+      "line": "{\"type\":\"close\",\"code\":5000}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_close_string_code",
+      "verdict": "reject",
+      "line": "{\"type\":\"close\",\"code\":\"4000\"}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_close_reason_too_long",
+      "verdict": "reject",
+      "line": "{\"type\":\"close\",\"code\":4000,\"reason\":\"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\"}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_hello_major_string",
+      "verdict": "reject",
+      "line": "{\"type\":\"hello\",\"protocol\":{\"major\":\"1\",\"minor\":0},\"peer\":{\"name\":\"fixture\",\"version\":\"0.0.0\",\"role\":\"tool\"},\"capabilities\":{}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_hello_major_zero",
+      "verdict": "reject",
+      "line": "{\"type\":\"hello\",\"protocol\":{\"major\":0,\"minor\":0},\"peer\":{\"name\":\"fixture\",\"version\":\"0.0.0\",\"role\":\"tool\"},\"capabilities\":{}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_hello_missing_peer",
+      "verdict": "reject",
+      "line": "{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},\"capabilities\":{}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_hello_bad_role",
+      "verdict": "reject",
+      "line": "{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},\"peer\":{\"name\":\"fixture\",\"version\":\"0.0.0\",\"role\":\"Runtime\"},\"capabilities\":{}}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_hello_null_capabilities",
+      "verdict": "reject",
+      "line": "{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},\"peer\":{\"name\":\"fixture\",\"version\":\"0.0.0\",\"role\":\"tool\"},\"capabilities\":null}",
+      "reason": "schema"
+    },
+    {
+      "name": "n_hello_null_limits",
+      "verdict": "reject",
+      "line": "{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},\"peer\":{\"name\":\"fixture\",\"version\":\"0.0.0\",\"role\":\"tool\"},\"capabilities\":{},\"limits\":null}",
+      "reason": "schema",
+      "note": "Optional members are absent, never null."
+    },
+    {
+      "name": "n_hello_limits_too_small",
+      "verdict": "reject",
+      "line": "{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},\"peer\":{\"name\":\"fixture\",\"version\":\"0.0.0\",\"role\":\"tool\"},\"capabilities\":{},\"limits\":{\"maxFrameBytes\":4095}}",
+      "reason": "schema"
+    },
+    {
+      "name": "i_duplicate_keys",
+      "verdict": "implementation-defined",
+      "line": "{\"type\":\"ping\",\"type\":\"pong\"}",
+      "note": "Parsers differ on duplicate members; a decoder MUST NOT crash and SHOULD refuse."
+    },
+    {
+      "name": "i_unsafe_integer_seq",
+      "verdict": "implementation-defined",
+      "line": "{\"type\":\"evt\",\"topic\":\"a.b\",\"seq\":9007199254740993,\"payload\":null}",
+      "note": "Above 2^53; a decoder MAY refuse or MAY round."
+    },
+    {
+      "name": "i_deep_nesting",
+      "verdict": "implementation-defined",
+      "line": "{\"type\":\"req\",\"id\":\"r\",\"method\":\"a.b\",\"params\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+      "note": "200 levels; a decoder MAY refuse for depth and MUST NOT crash."
+    }
+  ]
+}

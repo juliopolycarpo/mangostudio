@@ -1,0 +1,92 @@
+[package]
+name = "mango-protocol"
+version.workspace = true
+authors.workspace = true
+categories = ["network-programming", "encoding"]
+edition.workspace = true
+keywords = ["mangostudio", "protocol", "rpc", "json-schema", "ndjson"]
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
+rust-version.workspace = true
+description = "Mango Protocol wire types and codec: one JSON-Schema contract for MangoStudio hubs, runtimes and tools"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# JSON Schema emission used by the repo's equality check; not needed to speak the protocol.
+schema = ["dep:schemars"]
+# The Port trait, the session, and the contract builder (schema-validated params/results).
+tokio = [
+  "dep:tokio",
+  "dep:tokio-util",
+  "dep:jsonschema",
+  "tokio/fs",
+  "tokio/io-std",
+  "tokio/io-util",
+  "tokio/net",
+]
+# The reusable conformance suite, exercised through a Fixture, not this crate's own MemoryPort.
+testing = ["tokio"]
+# The spawn launcher and the ssh argv preset it is usually given.
+spawn = ["tokio", "tokio/process", "dep:nix"]
+# The WebSocket dialler and acceptor, with client-side TLS for wss://.
+websocket = [
+  "tokio",
+  "dep:futures-util",
+  "dep:tokio-tungstenite",
+  "dep:rustls",
+  "dep:webpki-roots",
+]
+
+[dependencies]
+futures-util = { version = "0.3", optional = true, default-features = false, features = ["sink"] }
+jsonschema = { version = "0.56", optional = true, default-features = false }
+# `ring`, not the `aws-lc-rs` default: it builds without cmake or nasm, which
+# is what keeps the Windows and aarch64 CI lanes from needing a C toolchain.
+rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "std", "tls12"] }
+schemars = { version = "1.2", optional = true, features = ["derive"] }
+serde = { version = "1.0.219", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
+tokio = { version = "1.53", optional = true, default-features = false, features = ["rt", "sync", "time", "macros"] }
+tokio-tungstenite = { version = "0.30", optional = true, default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
+tokio-util = { version = "0.7", optional = true, default-features = false }
+webpki-roots = { version = "1", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+# `SIGTERM`: step 2 of the termination sequence, which `std` and `tokio` can
+# only spell as `SIGKILL`.
+nix = { version = "0.31", optional = true, default-features = false, features = ["signal"] }
+
+[target.'cfg(windows)'.dependencies]
+# The named pipe's security descriptor and the client's process id; nothing
+# else in the crate needs a platform binding.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Pipes"] }
+
+[dev-dependencies]
+proptest = { version = "1.11", default-features = false, features = ["std"] }
+tokio = { version = "1.53", features = ["macros", "rt", "rt-multi-thread", "test-util"] }
+
+[[example]]
+name = "emit_schema"
+required-features = ["schema"]
+
+[[example]]
+name = "emit_catalog_schema"
+required-features = ["schema"]
+
+[[example]]
+name = "roundtrip"
+
+[[example]]
+name = "session_pair"
+required-features = ["tokio"]
+
+[[example]]
+name = "conformance_peer"
+required-features = ["testing", "websocket", "spawn"]
+
+[package.metadata.docs.rs]
+all-features = true

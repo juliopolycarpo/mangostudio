@@ -1,0 +1,98 @@
+# cargo-deny configuration for mango-protocol's Rust crate.
+#
+# Run with `cargo deny check`; CI runs each check separately in the `deny` job. Evaluated
+# with `--all-features`, so a duplicate or license only reachable behind a feature (e.g.
+# `websocket`'s rustls chain) still shows up here even though the default feature set is empty.
+
+[graph]
+all-features = true
+
+[output]
+feature-depth = 1
+
+# advisories: RUSTSEC vulnerabilities and unmaintained/yanked crates.
+[advisories]
+ignore = []
+
+# licenses: every license in the dependency graph must be explicitly allowed. Nothing here is
+# copyleft; everything is permissive.
+[licenses]
+version = 2
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "ISC",
+  "BSD-3-Clause",
+  "Unicode-3.0", # unicode-ident (proc-macro2's tokenizer)
+  "Unlicense", # memchr / aho-corasick dual-license under Unlicense OR MIT
+  "Zlib", # foldhash (ahash's replacement hasher, via jsonschema)
+  "CDLA-Permissive-2.0", # webpki-roots' bundled Mozilla root store
+  "MIT-0", # borrow-or-share (referencing's dependency, via jsonschema)
+]
+confidence-threshold = 0.8
+
+# No [[licenses.clarify]] for ring: the classic clarify pinning it to "MIT AND ISC AND OpenSSL"
+# (cargo-deny's own template still carries it) is left over from before ring 0.17 started
+# declaring a proper SPDX expression in Cargo.toml. ring 0.17.14 declares `Apache-2.0 AND ISC`
+# directly, which the allow list above already covers - verified by running this check with
+# ring's LICENSE untouched and no clarify present. Adding the stale clarify back would either be
+# a no-op (its license-files hash doesn't match this LICENSE, so cargo-deny silently ignores it
+# and falls through to the Cargo.toml field anyway) or, if the hash were fixed to match, break
+# the check outright ("OpenSSL" isn't on the allow list). Confirmed empirically: swapping the
+# clarify's `expression` for an unrelated, disallowed license and re-running still reports
+# `licenses ok` - proof the block isn't consulted.
+
+[licenses.private]
+ignore = false
+
+# bans: no wildcard version requirements, no banned crates, and duplicate versions are a hard
+# deny with named exceptions rather than a blanket "warn" — a new, unnamed duplicate should fail
+# the check and force a look, not scroll past in a log nobody reads.
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+
+skip = [
+  # ring 0.17 pins an old windows-sys for its Windows RNG shim; our own Windows bindings (the
+  # named-pipe security descriptor) and tokio's (mio/socket2) are on 0.61. Bumping ring's pin
+  # isn't ours to do, and rustls' `ring` feature is the one already chosen over `aws-lc-rs` (see
+  # the comment on the crate's `rustls` dependency) specifically to avoid a cmake/nasm
+  # requirement in CI, so skip rather than fight the duplicate. (windows-targets itself only has
+  # one version in the graph — it's windows-sys@0.52.0's dependency, not independently doubled.)
+  { crate = "windows-sys@0.52.0", reason = "pulled in only by ring 0.17's RNG shim; our own windows-sys is 0.61" },
+
+  # getrandom has three majors in the graph because three unrelated dependency chains each pin
+  # their own: ring 0.17 wants 0.2, rand 0.10 (tungstenite's frame-masking key) wants 0.4. We
+  # keep 0.3 uncontested — it's ahash's (via jsonschema), the chain most likely to move next.
+  { crate = "getrandom@0.2.17", reason = "ring 0.17's RNG shim; ring does not track getrandom's latest major" },
+  { crate = "getrandom@0.4.3", reason = "pulled in by rand 0.10, used by tungstenite only for WebSocket frame masking keys" },
+
+  # r-efi is a UEFI target binding, unreachable on every platform this crate builds for. It is
+  # duplicated only because it rides along as getrandom 0.3's and 0.4's own UEFI shim; skipping
+  # it here is downstream of the getrandom decision above, not an independent call.
+  { crate = "r-efi@6.0.0", reason = "getrandom 0.4's UEFI shim; unreachable, see the getrandom@0.4.3 skip above" },
+
+  # strum 0.28 (an enum-name dependency of jsonschema, for its keyword tables) has not moved off
+  # syn 2 yet; every other proc-macro in the graph (schemars, serde, thiserror, tokio-macros) is
+  # already on syn 3. Not ours to fix — strum's move, not a dependency we control.
+  { crate = "syn@2.0.119", reason = "strum_macros 0.28 (via jsonschema) hasn't moved to syn 3 yet" },
+
+  # tokio-tungstenite's `rustls-tls-webpki-roots` feature (needed for `connect`/`handshake`)
+  # drags in its own webpki-roots 0.26 and a default TLS connector we never call: PR#4 built the
+  # `Connector` explicitly with our own rustls `ClientConfig` and webpki-roots 1.0 root store,
+  # precisely so `ring` stays out of the process default (see the `rustls` dependency comment).
+  # Dropping tokio-tungstenite's default-TLS feature would remove this, but that is a transport
+  # code change, not a supply-chain one — left as a follow-up, not done here.
+  { crate = "webpki-roots@0.26.11", reason = "tokio-tungstenite's own default TLS connector, unused — we build ours explicitly, see the rustls dependency comment" },
+]
+
+# sources: only crates.io. No git dependencies anywhere in this graph, and none are expected —
+# a git dependency here would mean a fork nobody can audit landed in a published crate.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mangostudio.dev/protocol/schema/1/catalog.json",
+  "title": "Mango Protocol 1 catalog document",
+  "description": "Describes an application contract: its methods, events and capabilities. A description, not a wire message.",
+  "type": "object",
+  "required": ["name", "version", "methods"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "description": {
+      "type": "string"
+    },
+    "protocol": {
+      "$ref": "protocol.json#/$defs/protocolVersion",
+      "description": "Lowest wire version the contract needs."
+    },
+    "methods": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/method"
+      }
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/event"
+      }
+    },
+    "capabilities": {
+      "$ref": "#/$defs/schema",
+      "description": "JSON Schema of the hello.capabilities object this contract expects."
+    }
+  },
+  "$defs": {
+    "schema": {
+      "type": "object",
+      "description": "A JSON Schema 2020-12 document."
+    },
+    "method": {
+      "type": "object",
+      "required": ["name", "params", "result"],
+      "properties": {
+        "name": {
+          "$ref": "protocol.json#/$defs/method"
+        },
+        "description": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/schema"
+        },
+        "result": {
+          "$ref": "#/$defs/schema"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "Members of hello.capabilities the responder requires before serving this method."
+        },
+        "deprecated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "event": {
+      "type": "object",
+      "required": ["topic", "payload"],
+      "properties": {
+        "topic": {
+          "$ref": "protocol.json#/$defs/topic"
+        },
+        "description": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/schema"
+        },
+        "stream": {
+          "type": "boolean",
+          "description": "True when events on this topic carry a streamId and an end marker."
+        }
+      }
+    }
+  }
+}

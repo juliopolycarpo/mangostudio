@@ -1,0 +1,295 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mangostudio.dev/protocol/schema/1/protocol.json",
+  "title": "Mango Protocol 1 frames",
+  "description": "Every frame a Mango Protocol 1 peer may send. Objects are open: decoders ignore unknown members. Normative companion of spec/mango-protocol-1.md.",
+  "$ref": "#/$defs/frame",
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Request identifier, unique among the sender's in-flight requests."
+    },
+    "method": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^[a-z](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z](?:[a-z0-9-]*[a-z0-9])?)+$",
+      "description": "Dot-separated lowercase segments; a segment starts with a letter and never ends with a dash. The rpc. segment is reserved."
+    },
+    "topic": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^[a-z](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z](?:[a-z0-9-]*[a-z0-9])?)+$",
+      "description": "Event topic, same grammar as a method name; the rpc. segment is reserved."
+    },
+    "protocolVersion": {
+      "type": "object",
+      "required": ["major", "minor"],
+      "properties": {
+        "major": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minor": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "peer": {
+      "type": "object",
+      "required": ["name", "version", "role"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "maxFrameBytes": {
+          "type": "integer",
+          "minimum": 4096,
+          "maximum": 2147483647
+        },
+        "maxInFlight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "description": "Owned by the application contract; the protocol defines no member."
+    },
+    "errorCode": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "errorPayload": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/errorCode"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "details": {
+          "type": "object"
+        }
+      }
+    },
+    "closeCode": {
+      "type": "integer",
+      "minimum": 4000,
+      "maximum": 4999
+    },
+    "hello": {
+      "type": "object",
+      "description": "Handshake; both peers send one as soon as the transport opens.",
+      "required": ["type", "protocol", "peer", "capabilities"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "hello"
+        },
+        "protocol": {
+          "$ref": "#/$defs/protocolVersion"
+        },
+        "peer": {
+          "$ref": "#/$defs/peer"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/capabilities"
+        },
+        "limits": {
+          "$ref": "#/$defs/limits"
+        }
+      }
+    },
+    "req": {
+      "type": "object",
+      "description": "Request. Exactly one res or err answers it.",
+      "required": ["type", "id", "method", "params"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "req"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "method": {
+          "$ref": "#/$defs/method"
+        },
+        "params": {}
+      }
+    },
+    "res": {
+      "type": "object",
+      "description": "Successful response.",
+      "required": ["type", "id", "result"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "res"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "result": {}
+      }
+    },
+    "err": {
+      "type": "object",
+      "description": "Failed response.",
+      "required": ["type", "id", "error"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "err"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "error": {
+          "$ref": "#/$defs/errorPayload"
+        }
+      }
+    },
+    "evt": {
+      "type": "object",
+      "description": "Event; seq counts per stream key (streamId, else topic).",
+      "required": ["type", "topic", "seq", "payload"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "evt"
+        },
+        "topic": {
+          "$ref": "#/$defs/topic"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "streamId": {
+          "$ref": "#/$defs/id"
+        },
+        "payload": {},
+        "end": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "cancel": {
+      "type": "object",
+      "description": "Advisory request to stop; the original response still follows.",
+      "required": ["type", "id"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "cancel"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "ping": {
+      "type": "object",
+      "description": "Liveness probe.",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "ping"
+        }
+      }
+    },
+    "pong": {
+      "type": "object",
+      "description": "Liveness answer.",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "pong"
+        }
+      }
+    },
+    "close": {
+      "type": "object",
+      "description": "Farewell sent before the transport closes.",
+      "required": ["type", "code"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "close"
+        },
+        "code": {
+          "$ref": "#/$defs/closeCode"
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 1024
+        }
+      }
+    },
+    "frame": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/hello"
+        },
+        {
+          "$ref": "#/$defs/req"
+        },
+        {
+          "$ref": "#/$defs/res"
+        },
+        {
+          "$ref": "#/$defs/err"
+        },
+        {
+          "$ref": "#/$defs/evt"
+        },
+        {
+          "$ref": "#/$defs/cancel"
+        },
+        {
+          "$ref": "#/$defs/ping"
+        },
+        {
+          "$ref": "#/$defs/pong"
+        },
+        {
+          "$ref": "#/$defs/close"
+        }
+      ]
+    }
+  }
+}

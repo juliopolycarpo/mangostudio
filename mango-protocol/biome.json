@@ -1,0 +1,97 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.12/schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": ["**", "!**/node_modules", "!**/dist", "!**/target", "!**/coverage"]
+  },
+  "formatter": {
+    "enabled": true,
+    "formatWithErrors": false,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineEnding": "lf",
+    "lineWidth": 100,
+    "useEditorconfig": true,
+    "includes": ["**", "!**/*.{md,mdx}", "!spec/fixtures/**"]
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "nursery": { "useAwaitThenable": "off" },
+      "performance": { "noDelete": "warn" },
+      "style": { "noNestedTernary": "off", "useBlockStatements": "off" }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteProperties": "asNeeded",
+      "trailingCommas": "es5",
+      "semicolons": "always",
+      "arrowParentheses": "always",
+      "quoteStyle": "single"
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/*.ts"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noArguments": "error",
+            "noBannedTypes": "error",
+            "noUselessThisAlias": "error",
+            "noUselessTypeConstraint": "error",
+            "useLiteralKeys": "error",
+            "useOptionalChain": "error"
+          },
+          "correctness": { "noUnusedVariables": "error", "noUnusedImports": "error" },
+          "nursery": {
+            "noBaseToString": "error",
+            "noFloatingPromises": "error",
+            "noImpliedEval": "error",
+            "noMisusedPromises": "error",
+            "noUnsafePlusOperands": "error"
+          },
+          "style": {
+            "noCommonJs": "error",
+            "noInferrableTypes": "error",
+            "noNamespace": "error",
+            "noNonNullAssertion": "error",
+            "noUselessElse": "error",
+            "useArrayLiterals": "error",
+            "useAsConstAssertion": "error",
+            "useConst": "error",
+            "useExponentiationOperator": "error",
+            "useImportType": "error",
+            "useNodejsImportProtocol": "error",
+            "useTemplate": "error",
+            "useThrowOnlyError": "error",
+            "useSpreadOverApply": "error"
+          },
+          "suspicious": {
+            "noConsole": { "level": "warn", "options": { "allow": ["warn", "error"] } },
+            "noEmptyBlockStatements": "error",
+            "noExplicitAny": "error",
+            "noExtraNonNullAssertion": "error",
+            "noMisleadingInstantiator": "error",
+            "noNonNullAssertedOptionalChain": "error",
+            "noTsIgnore": "error",
+            "noUnsafeDeclarationMerging": "error",
+            "noVar": "error",
+            "useAwait": "error",
+            "useNamespaceKeyword": "error",
+            "noDuplicateEnumValues": "error",
+            "noForIn": "error"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["scripts/**/*.ts"],
+      "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+    }
+  ],
+  "assist": { "enabled": true, "actions": { "source": { "organizeImports": "on" } } }
+}

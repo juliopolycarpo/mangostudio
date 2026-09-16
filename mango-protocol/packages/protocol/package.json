@@ -1,0 +1,86 @@
+{
+  "name": "@mangostudio/protocol",
+  "version": "0.2.0",
+  "license": "MIT",
+  "description": "Mango Protocol SDK: frames, codec, session, transports and contract helpers for MangoStudio hubs, runtimes and tools.",
+  "author": "Julio Polycarpo",
+  "homepage": "https://github.com/juliopolycarpo/mango-protocol",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/juliopolycarpo/mango-protocol.git",
+    "directory": "packages/protocol"
+  },
+  "bugs": {
+    "url": "https://github.com/juliopolycarpo/mango-protocol/issues"
+  },
+  "keywords": [
+    "mangostudio",
+    "protocol",
+    "rpc",
+    "json-schema",
+    "websocket",
+    "stdio",
+    "ipc"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "bun": ">=1.4",
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./stdio": {
+      "types": "./dist/stdio.d.ts",
+      "default": "./dist/stdio.js"
+    },
+    "./ipc": {
+      "types": "./dist/ipc.d.ts",
+      "default": "./dist/ipc.js"
+    },
+    "./in-process": {
+      "types": "./dist/in-process.d.ts",
+      "default": "./dist/in-process.js"
+    },
+    "./ws": {
+      "types": "./dist/ws.d.ts",
+      "default": "./dist/ws.js"
+    },
+    "./spawn": {
+      "types": "./dist/spawn.d.ts",
+      "default": "./dist/spawn.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    },
+    "./schema/*": "./schema/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "schema",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "bun ./build.ts",
+    "check": "biome check src tests && tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test --timeout 15000",
+    "prepack": "bun ./build.ts"
+  },
+  "dependencies": {
+    "typebox": "1.3.13"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.1",
+    "typescript": "7.0.2"
+  }
+}

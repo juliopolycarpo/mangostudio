@@ -1,0 +1,15 @@
+{
+  "$comment": "The greeting a runtime built on runtime-protocol 1.0.1 sends, captured from that codec before it was deleted and frozen here on purpose: these bytes are what an old binary still on somebody's machine puts on the wire, and a test proving a Mango Protocol 1 peer closes such a connection with 4426 is only worth anything if the input is the real thing. Never regenerate them - there is nothing left to regenerate them from, and rewriting them by hand would turn the assertion into a tautology about the build under test. `line` is the stdio record without its terminator; `chunks` is the same frame as the base64 of the WebSocket messages it becomes, which is one, since it fits.",
+  "cases": [
+    {
+      "name": "n_runtime_protocol_1_0_1",
+      "verdict": "reject",
+      "reason": "schema",
+      "closeCode": 4426,
+      "line": "{\"type\":\"hello\",\"protocolVersion\":\"1.0.1\",\"runtimeVersion\":\"9.9.9-legacy\",\"manifest\":{\"platform\":\"linux\",\"arch\":\"x64\",\"pathStyle\":\"posix\",\"homeDir\":\"/home/test\",\"shells\":[\"bash\"],\"git\":{\"available\":false},\"features\":{\"tools\":true,\"git\":false,\"probing\":false,\"mcp\":false,\"library\":false,\"checkpoints\":true}}}",
+      "chunks": [
+        "AQAAAAAAAAABeyJ0eXBlIjoiaGVsbG8iLCJwcm90b2NvbFZlcnNpb24iOiIxLjAuMSIsInJ1bnRpbWVWZXJzaW9uIjoiOS45LjktbGVnYWN5IiwibWFuaWZlc3QiOnsicGxhdGZvcm0iOiJsaW51eCIsImFyY2giOiJ4NjQiLCJwYXRoU3R5bGUiOiJwb3NpeCIsImhvbWVEaXIiOiIvaG9tZS90ZXN0Iiwic2hlbGxzIjpbImJhc2giXSwiZ2l0Ijp7ImF2YWlsYWJsZSI6ZmFsc2V9LCJmZWF0dXJlcyI6eyJ0b29scyI6dHJ1ZSwiZ2l0IjpmYWxzZSwicHJvYmluZyI6ZmFsc2UsIm1jcCI6ZmFsc2UsImxpYnJhcnkiOmZhbHNlLCJjaGVja3BvaW50cyI6dHJ1ZX19fQ=="
+      ]
+    }
+  ]
+}

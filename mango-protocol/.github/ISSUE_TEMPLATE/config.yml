@@ -1,0 +1,9 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: 💬 Questions and discussions
+    url: https://github.com/juliopolycarpo/mango-protocol/discussions
+    about: Ask usage questions or discuss a wire change before opening an issue.
+  - name: 🛡️ Security vulnerability report
+    url: https://github.com/juliopolycarpo/mango-protocol/security/advisories/new
+    about: Report a vulnerability privately. Do not open a public issue; see SECURITY.md.

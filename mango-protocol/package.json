@@ -1,0 +1,38 @@
+{
+  "name": "@mangostudio/protocol-root",
+  "private": true,
+  "license": "MIT",
+  "version": "0.2.0",
+  "description": "Mango Protocol: one JSON-Schema wire contract for MangoStudio hubs, runtimes and tools.",
+  "author": "Julio Polycarpo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/juliopolycarpo/mango-protocol.git"
+  },
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "packageManager": "bun@1.4.2",
+  "scripts": {
+    "check": "bun ./scripts/check.ts",
+    "test": "bun ./scripts/test.ts",
+    "fix": "bun ./scripts/fix.ts",
+    "build": "bun run --filter '@mangostudio/protocol' build",
+    "changelog": "git-cliff --config cliff.toml --output CHANGELOG.md",
+    "release:prepare": "bun ./scripts/release-prepare.ts",
+    "prepare": "lefthook install"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.7",
+    "@dprint/markdown": "^0.22.1",
+    "@dprint/toml": "^0.7.0",
+    "@types/bun": "^1.4.1",
+    "ajv": "^8",
+    "dprint": "^0.55.2",
+    "git-cliff": "^2.13.1",
+    "lefthook": "^2.1.10",
+    "typebox": "1.3.13",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,83 @@
+[package]
+name = "mango-protocol-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# A workspace of its own, deliberately not a member of the root workspace
+# (which excludes this directory: see the root Cargo.toml). cargo-fuzz needs
+# nightly and libFuzzer; pulling it into the stable workspace would make
+# `cargo clippy --all-targets --all-features` and `cargo hack clippy
+# --feature-powerset` try to build it on stable and fail.
+[workspace]
+
+[dependencies]
+arbitrary = { version = "1.4", features = ["derive"] }
+libfuzzer-sys = "0.4"
+mango-protocol = { path = "../crates/mango-protocol" }
+serde_json = "1.0"
+
+[dependencies.tokio]
+version = "1"
+optional = true
+features = ["rt", "time"]
+
+[features]
+# Gates the `session_frames` target, which needs the session and the port
+# seam: `cargo +nightly fuzz run --features tokio session_frames`.
+tokio = ["mango-protocol/tokio", "dep:tokio"]
+
+[profile.release]
+debug = 1
+
+[lints.cargo]
+# Every target name here matches its fuzz_targets/<name>.rs file stem, which
+# `cargo fuzz run <name>` expects verbatim; kebab-casing the binary would
+# desync the two for no benefit.
+non_kebab_case_bins = "allow"
+
+[[bin]]
+name = "decode_line"
+path = "fuzz_targets/decode_line.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "line_decoder_push"
+path = "fuzz_targets/line_decoder_push.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "chunk_reassembler_push"
+path = "fuzz_targets/chunk_reassembler_push.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "validate"
+path = "fuzz_targets/validate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "catalog_parse"
+path = "fuzz_targets/catalog_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "session_frames"
+path = "fuzz_targets/session_frames.rs"
+test = false
+doc = false
+bench = false
+required-features = ["tokio"]
