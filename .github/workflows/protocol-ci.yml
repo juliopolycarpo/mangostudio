@@ -217,8 +217,8 @@ jobs:
   # MSRV policy lives on `rust-version` in the workspace Cargo.toml: current stable minus two
   # minors is 1.96, but this crate holds at 1.97 because dropping further buys nothing today.
   # rust-toolchain.toml pins 1.98.1 for everything else, so 1.97.0 is installed and selected
-  # explicitly here — `RUSTUP_TOOLCHAIN` rather than `+1.97.0`, because the root toolchain file
-  # would otherwise win for every invocation that omits the plus form.
+  # explicitly here with the `+1.97.0` plus form, which outranks the root toolchain file. Any
+  # invocation added below that omits it would silently be checked against 1.98.1 instead.
   msrv:
     name: MSRV (1.97.0, policy on Cargo.toml's rust-version)
     needs: [changes]
