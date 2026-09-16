@@ -45,7 +45,11 @@ jobs:
   verify:
     name: Verify tag and manifests
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # `protocol-ci.yml` budgets 25 minutes for the Rust half alone, on a warm
+    # `Swatinem/rust-cache`. This job runs that half plus the TypeScript one,
+    # both test suites and the pack-and-consume lane, on a cache key no pull
+    # request populates — so 30 would time out a release mid-verify.
+    timeout-minutes: 45
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       prerelease: ${{ steps.resolve.outputs.prerelease }}
