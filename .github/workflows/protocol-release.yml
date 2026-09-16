@@ -237,6 +237,7 @@ jobs:
           flags=()
           if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
           gh release create "protocol-v$VERSION" \
+            --latest=false \
             --title "Mango Protocol v$VERSION" \
             --notes-file release-notes.md \
             "${flags[@]}" \
