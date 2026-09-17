@@ -17,7 +17,6 @@ import {
 } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
-import { probeRuntimeSlots } from '../../cli/runtime-slot-probe';
 import { getDb } from '../../db/database';
 import { getVersion } from '../../lib/config';
 import { resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';

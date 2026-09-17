@@ -8,10 +8,8 @@
 import { isAbsolute } from 'node:path';
 import type { LibraryLocationSettings } from '@mangostudio/shared/app-settings';
 import type {
-  LibraryLocationId,
   LibraryLocationStatus,
   PreparedPropagationOperation,
-  ResourceKind,
   RuntimeSettingsSourcesResult,
 } from '@mangostudio/shared/library';
 import { describeLocation, LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
@@ -31,7 +29,6 @@ import {
   listBackupSets,
   PathEscapeError,
   type ReadLibraryInstance,
-  type ReadLocationInstancesResult,
   readLibraryContent,
   readLibraryTree,
   readSettingsSources,

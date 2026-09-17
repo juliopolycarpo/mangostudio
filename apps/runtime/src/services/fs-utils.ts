@@ -23,12 +23,7 @@ import {
   isPathPrefix,
   resolvePathThroughExistingAncestor,
 } from '@mangostudio/shared/workspaces/host';
-import {
-  FileTooLargeError,
-  PathAccessError,
-  RegularFileWriteError,
-  RuntimeServiceError,
-} from '../errors';
+import { FileTooLargeError, PathAccessError, RegularFileWriteError } from '../errors';
 import type { RuntimePathFilter } from '../methods';
 
 export {

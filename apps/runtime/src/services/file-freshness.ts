@@ -2,7 +2,6 @@ import { stat } from 'node:fs/promises';
 import {
   FileNotReadError,
   PartialReadError,
-  RuntimeServiceError,
   StaleFileError,
   StaleLineNumbersError,
   UnobservedLineNumbersError,
