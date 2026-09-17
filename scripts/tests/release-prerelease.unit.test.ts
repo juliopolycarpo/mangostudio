@@ -24,6 +24,8 @@ import { extractJobBlock, extractStepBlocks } from './support/workflow-blocks';
 
 const RELEASE_WORKFLOW = '.github/workflows/release.yml';
 
+const releaseWorkflow = readText(RELEASE_WORKFLOW);
+
 /**
  * The shell script of one named step, dedented to column zero so it can be fed
  * to bash. Read out of the workflow rather than duplicated here: a copy would
@@ -33,7 +35,7 @@ const RELEASE_WORKFLOW = '.github/workflows/release.yml';
  * // Usage: stepScript('docker', 'Build and publish images (…)')
  */
 function stepScript(job: string, stepName: string): string {
-  const block = extractStepBlocks(extractJobBlock(readText(RELEASE_WORKFLOW), job)).find((step) =>
+  const block = extractStepBlocks(extractJobBlock(releaseWorkflow, job)).find((step) =>
     step.includes(`name: ${stepName}`)
   );
   expect(block, `${RELEASE_WORKFLOW} → ${job} has no step named "${stepName}"`).toBeDefined();
@@ -207,30 +209,41 @@ describe('the GitHub Release step marks a pre-release as one', () => {
       bin: { gh: argvRecorder('[ "$1" = "release" ] && [ "$2" = "view" ] && exit 1') },
     });
 
+  // Membership in the argument list, not a substring of the joined log: a
+  // `|--prerelease|` match also asserts that something follows it, so reordering
+  // the flags array fails the test for a reason it does not name.
+  const createArgv = (result: StepRun): string[] => {
+    const create = result.argv.find((call) => call.startsWith('release|create'));
+    // Named here rather than in each caller: without it a missing create call
+    // reports as "[''] does not contain --prerelease", which blames the flag
+    // for a publish that never happened.
+    expect(create, `no \`gh release create\` call was recorded:\n${result.output}`).toBeDefined();
+    return (create as string).split('|');
+  };
+  const hasFlag = (argv: readonly string[], flag: string): boolean =>
+    argv.some((part) => part === flag || part.startsWith(`${flag}=`));
+
   test('passes --prerelease and --latest=false for a pre-release version', () => {
     const result = publish('true');
     expect(result.exitCode, result.output).toBe(0);
-    const create = result.argv.find((call) => call.startsWith('release|create'));
-    expect(create).toBeDefined();
-    expect(create).toContain('|--prerelease|');
+    const argv = createArgv(result);
+    expect(argv).toContain('--prerelease');
     // `--prerelease` labels the release; the Latest marker is a separate field,
     // and it is the one `/releases/latest` — and therefore install.sh —
     // resolves.
-    expect(create).toContain('|--latest=false');
+    expect(argv).toContain('--latest=false');
   });
 
   test('passes neither for a stable version, and no empty argument in their place', () => {
     const result = publish('false');
     expect(result.exitCode, result.output).toBe(0);
-    const create = result.argv.find((call) => call.startsWith('release|create'));
-    expect(create).toBeDefined();
-    expect(create).not.toContain('--prerelease');
-    expect(create).not.toContain('--latest');
+    const argv = createArgv(result);
+    expect(hasFlag(argv, '--prerelease')).toBe(false);
+    expect(hasFlag(argv, '--latest')).toBe(false);
     // An unquoted or mis-quoted empty flags array would hand `gh` an empty
     // argument, which it reads as a positional asset path and rejects. The
     // argv log keeps boundaries visible precisely so this is observable.
-    expect(create).not.toContain('||');
-    expect(create?.endsWith('|')).toBe(false);
+    expect(argv).not.toContain('');
   });
 
   test('carries the release notes and the tag either way', () => {
