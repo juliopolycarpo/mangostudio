@@ -8,7 +8,13 @@
  */
 
 /**
- * True for addresses that never leave this machine.
+ * Recognizes localhost and the conventional IPv4/IPv6 loopback spellings.
+ *
+ * Deliberately excludes other 127/8 and IPv4-mapped IPv6 forms. This is a
+ * conservative allowlist shared by the runtime's listening warning and the
+ * hub's credential transport checks, not a complete IP address classifier.
+ * Widening it requires reviewing both callers' policies. The MCP transport
+ * guard separately accepts canonical 127/8 in its private-network check.
  *
  * @example
  * isLoopbackHostname('[::1]'); // true

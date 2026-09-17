@@ -175,7 +175,7 @@ SDK so a timed-out request is actually cancelled.
 Failures degrade instead of aborting the turn: a server tool error, an unreachable server, or a
 timeout is recorded as a typed error tool result and the turn continues. Oversized results are
 capped at 64 KiB with a truncation marker, runtime-side
-(`apps/runtime/src/services/mcp/content-mapping.ts`) so the cap applies before the wire.
+(`apps/shared/src/mcp/content-mapping.ts`) so the cap applies before the wire.
 
 Two deadlines compose. The runtime applies the server's `timeoutMs` to the MCP request; the hub
 applies a slightly later deadline to the protocol request carrying it. The runtime's always

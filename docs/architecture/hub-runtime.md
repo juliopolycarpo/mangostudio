@@ -60,7 +60,7 @@ neither waits for the other's, and there is no acknowledgement frame:
 ```text
 Runtime                                            Hub
   |--- hello(peer, capabilities: manifest) -------->|
-  |<-- hello(peer, capabilities: contracts, hub) ---|
+  |<-- hello(peer, capabilities: hub claims) -------|
   |                                                 |
   |<------------ req(id, method, params) -----------|
   |------------- res(id, result) | err(id, error) ->|
@@ -73,7 +73,9 @@ The runtime's `hello.capabilities` **is** the manifest: platform, architecture, 
 home directory, available shells, Git and `gh` availability, feature flags, and the vendor
 adapters it carries — plus a `contracts` entry naming `mangostudio.runtime` and the contract
 version. The hub's carries the same `contracts` entry and, unless the connector passed one of
-its own, `hub: { host, user }`: who is asking, for the runtime's audit log. The protocol
+its own, `hub: { host, user }`: who is asking, for the runtime's audit log. It can also carry
+`externalAgentIsolation: 'single-user' | 'withdrawn'` beside `hub`. The hub retains that claim
+for the connection and reapplies withdrawals when health refreshes replace the manifest. The protocol
 defines no member of `capabilities`, so deciding that what came back is a runtime manifest
 and not merely something that speaks the wire is the hub's own job, in `openHubSession`
 (`apps/api/src/services/runtime-client/hub-session.ts`).
