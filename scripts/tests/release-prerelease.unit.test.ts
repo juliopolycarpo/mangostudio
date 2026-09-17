@@ -120,7 +120,9 @@ function runStepScript(
 }
 
 describe('the resolve step classifies the version it is releasing', () => {
-  const resolve = (env: Record<string, string>): { version: string; prerelease: string } => {
+  const runResolveStep = (
+    env: Record<string, string>
+  ): { exitCode: number; stderr: string; outputLines: string[] } => {
     const dir = mkdtempSync(join(tmpdir(), 'release-resolve-'));
     const output = join(dir, 'github-output');
     writeFileSync(output, '');
@@ -139,17 +141,23 @@ describe('the resolve step classifies the version it is releasing', () => {
         stdout: 'pipe',
         stderr: 'pipe',
       });
-      expect(proc.exitCode, proc.stderr.toString()).toBe(0);
-      const written = Object.fromEntries(
-        readFileSync(output, 'utf8')
-          .split('\n')
-          .filter(Boolean)
-          .map((line) => line.split('=') as [string, string])
-      );
-      return { version: written.version, prerelease: written.prerelease };
+      return {
+        exitCode: proc.exitCode,
+        stderr: proc.stderr.toString(),
+        outputLines: readFileSync(output, 'utf8').split('\n').filter(Boolean),
+      };
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  };
+
+  const resolve = (env: Record<string, string>): { version: string; prerelease: string } => {
+    const { exitCode, stderr, outputLines } = runResolveStep(env);
+    expect(exitCode, stderr).toBe(0);
+    const written = Object.fromEntries(
+      outputLines.map((line) => line.split('=') as [string, string])
+    );
+    return { version: written.version, prerelease: written.prerelease };
   };
 
   test.each([
@@ -197,6 +205,22 @@ describe('the resolve step classifies the version it is releasing', () => {
       });
     }
   );
+
+  test('a dispatch input with an embedded newline cannot inject a second output key', () => {
+    // `.trim()` only strips the ends; the workflow strips every `[[:space:]]`
+    // character instead, so an embedded newline has nowhere to hide. A
+    // trim-only rewrite would let it through unmasked, and `echo
+    // "version=${version}"` would then split it into a second `$GITHUB_OUTPUT`
+    // line — handing whatever follows the newline a free output key.
+    const { exitCode, stderr, outputLines } = runResolveStep({
+      GITHUB_REF_NAME: 'v9.9.9',
+      INPUT_VERSION: '0.2.0\nmalicious=true',
+    });
+    expect(exitCode, stderr).toBe(0);
+    expect(outputLines.filter((line) => line.startsWith('version='))).toEqual([
+      'version=0.2.0malicious=true',
+    ]);
+  });
 });
 
 describe('the GitHub Release step marks a pre-release as one', () => {
