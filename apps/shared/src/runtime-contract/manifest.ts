@@ -179,9 +179,11 @@ export type RuntimeCapabilityManifest = Static<typeof RuntimeCapabilityManifestS
  * the hub answers the question only it can: whether more than one MangoStudio
  * user is reaching this runtime right now.
  *
- * `withdrawn` is therefore a refusal, not an absence: the hub knows of a second
- * owner and is telling the runtime to stop attesting. Absence means the hub
- * made no claim, which leaves the runtime's own attestation standing.
+ * `withdrawn` is therefore a refusal, not an absence: the hub has seen a second
+ * owner, or has not established the single-user binding at all, and is telling
+ * the runtime to stop attesting. Absence means the hub made no claim — which is
+ * what a hub says about a machine it does not speak for — and leaves the
+ * runtime's own attestation standing.
  *
  * It rides beside `hub` rather than inside it because {@link HubIdentitySchema}
  * refuses unknown members: a newer hub adding a key there would make every

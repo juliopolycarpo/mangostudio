@@ -36,10 +36,21 @@ through. This keeps transport placement out of tool executors.
 | Interactive terminal sessions (`terminal.*`)                                     | Runtime (`apps/runtime`)        | The PTY, the shell, its env and its lifetime; output streams back on `terminal.output` under an ack window. See [terminal.md](../features/terminal.md).                                                                                                                 |
 | Terminal registry, limits, Local isolation gate, and the browser socket relay    | Hub (`apps/api`)                | Who may open one, how many, for how long idle; `/api/terminal/:id` relays bytes with its own flow control because `/api/ws` is invalidation-only.                                                                                                                       |
 | Runtime contract: methods, capabilities, events, manifest, error vocabulary      | Shared (`apps/shared`)          | `apps/shared/src/runtime-contract/` defines it once; the hub's typed client and the runtime's handler map are both derived from that definition.                                                                                                                        |
+| Code both machines run on their own disk                                         | Shared (`apps/shared`)          | The library engine, the per-user service supervisor, path containment, spawn hardening. Behind a host-only export subpath (`/library/machine`, `/machine/service`, `/workspaces/host`, `/process/host`) so the browser bundle never resolves `node:fs`.                 |
 | Wire framing, negotiation, close codes, and liveness                             | `@mangostudio/protocol`         | The SDK owns the envelope and the transports. Both workspaces import it and neither restates it.                                                                                                                                                                        |
 
 The runtime must not import API modules or persist product state. The hub must not bypass
 the runtime client for execution that belongs to the runtime.
+
+**The hub does not import `@mangostudio/runtime` either.** One file does —
+`apps/api/src/services/runtime-client/connect-in-process-runtime.ts`, which builds the Local
+host and hands it a port — and a test walks `apps/api/src` to keep it that way. Everything
+else the two ends share is a contract in `@mangostudio/shared`, which is what lets the
+runtime be replaced by a process that is not a TypeScript module at all. Code that is not a
+contract but that *both machines genuinely run* — the library engine, the service
+supervisor, path containment — lives in shared too, behind a host-only subpath: the hub runs
+it on the hub's disk, a runtime runs it on the runtime's, and neither borrows the other's
+copy.
 
 ## Protocol
 
@@ -352,7 +363,7 @@ The old process keeps serving its old inode until restart. A hub-spawned slot ru
 with a distinct update code and the hub reconnects it; a manually launched `connect` or
 `serve` runtime keeps running and the card asks its owner to restart it. That restart no
 longer has to be a person: one user-level service manager
-(`apps/runtime/src/services/user-service-manager.ts`) now supervises both binaries — the
+(`apps/shared/src/machine/user-service.ts`) now supervises both binaries — the
 runtime through `mangostudio-runtime service` and the hub through `mangostudio service` —
 across systemd user units, launchd agents and per-user Scheduled Tasks. A runtime that a
 unit owns exits with the update code on commit and the supervisor's restart-on-failure
