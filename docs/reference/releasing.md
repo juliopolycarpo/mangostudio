@@ -48,7 +48,7 @@ once, and every channel reads that one output; nothing re-derives it.
 
 | Channel         | Stable tag (`v0.2.0`)                           | Pre-release tag (`v0.2.0-rc.1`)                         |
 | --------------- | ----------------------------------------------- | ------------------------------------------------------- |
-| GitHub Releases | published; Latest left to gh's default rule     | published, marked pre-release and **not** Latest        |
+| GitHub Releases | published; becomes Latest                       | published, marked pre-release and **not** Latest        |
 | npm             | `latest` dist-tag                               | `next` dist-tag; `latest` stays on the last stable      |
 | GHCR            | `:<version>`, `:latest`, `:bookworm`, `:alpine` | version-pinned tags only; the floating tags do not move |
 | Homebrew tap    | formula updated                                 | skipped                                                 |
@@ -63,8 +63,16 @@ pre-release versions from `cargo install` resolution itself, so the version is
 published and only reachable by asking for it (`--version 0.2.0-rc.1`).
 
 Only the pre-release row sets the Latest marker explicitly. A stable release
-leaves it to `gh release create`'s default, which GitHub decides from date and
-semver — so a backport cut after a newer minor does not steal the marker.
+sends no `make_latest` at all, and the REST API defaults that to `true` for a
+newly published release — so **every stable tag takes the marker, in tag-push
+order, not in semver order**. `gh`'s own `--latest` help calls the default
+"automatic based on date and version"; that describes the `make_latest=legacy`
+value, which `gh release create` has no way to send (cli/cli#13828). The
+practical consequence is a backport: cutting `v1.2.4` after `v2.0.0` already
+shipped repoints `/releases/latest` at the older line. Nothing in this workflow
+guards that today — if the release train ever serves more than one line, the
+backport's `github-release` job needs `--latest=false` the way the pre-release
+row does.
 
 That marker is the one thing every stable consumer agrees on, which is why the
 pre-release row pins it to `false`: `scripts/install/install.sh` and
@@ -78,10 +86,16 @@ what every running hub is offered as an upgrade.
 Install a pre-release explicitly:
 
 ```bash
+# The binary installer resolves /releases/latest only when no version is given.
+curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh \
+  | sh -s -- --version 0.2.0-rc.1
 npm install -g mangostudio@next
 docker pull ghcr.io/juliopolycarpo/mangostudio:0.2.0-rc.1
 cargo install mangostudio --version 0.2.0-rc.1
 ```
+
+`brew` and `scoop` have no pre-release form, by the same constraint that skips
+their jobs above.
 
 A pre-release is not the canary channel. Canary cuts a release from every green
 `main` commit and carries a curated asset subset; a pre-release tag is cut by
