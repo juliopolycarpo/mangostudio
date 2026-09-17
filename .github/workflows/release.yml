@@ -18,6 +18,14 @@ name: Release
 # pushes cannot skip that provenance gate; workflow_dispatch may set
 # allow_unverified_source=true as a recorded break-glass bypass only.
 #
+# A tag carrying a semver pre-release identifier (v0.2.0-rc.1) publishes the
+# same artifacts, but never as "the current version": the preparation job
+# resolves `prerelease` once and every channel reads it. The GitHub Release is
+# marked as a pre-release and is not Latest, npm publishes under `next`, the
+# floating GHCR tags stay on the last stable, and the Homebrew and Scoop jobs
+# are skipped because neither channel can express one. crates.io needs no gate
+# — it excludes pre-release versions from `cargo install` resolution itself.
+#
 # Prerequisites: channel secrets live on the `release` GitHub Environment and
 # are validated in the jobs that need them —
 # NPM_TOKEN for npm-publish is only used when workflow_dispatch sets
@@ -70,6 +78,7 @@ jobs:
       actions: read # read ci.yml's run and its Gate job for the tagged commit
     outputs:
       version: ${{ steps.resolve.outputs.version }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
       source_sha: ${{ steps.source.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -91,13 +100,39 @@ jobs:
         env:
           INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
+          # Both branches strip a leading `v`. The input is documented without
+          # one, and nothing downstream rejects it: check:versions normalizes
+          # before comparing, so `v0.2.0` clears every gate and first surfaces
+          # as the tag `vv0.2.0` — which immutable releases reserve forever.
+          #
+          # The dispatch branch drops whitespace before the `v`, the order
+          # normalizeVersion uses (`.trim()` then `^v`): a pasted " v0.2.0"
+          # would otherwise keep its space, clear the lockstep gate that trims
+          # it away, and only surface as the unusable tag "v v0.2.0" after the
+          # whole distribution is built. Every space goes, not only the ends:
+          # `echo "version=${version}"` writes one line per newline it is
+          # handed, so trimming alone would leave a pasted newline free to
+          # append its own keys to $GITHUB_OUTPUT — the same class of hazard as
+          # the env binding above. The tag-push branch needs none of it: a ref
+          # name cannot carry whitespace at all.
           if [ -n "$INPUT_VERSION" ]; then
-            version="$INPUT_VERSION"
+            version="${INPUT_VERSION//[[:space:]]/}"
+            version="${version#v}"
           else
             version="${GITHUB_REF_NAME#v}"
           fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "Releasing v${version}"
+          # One derivation of "is this a pre-release", read by every channel
+          # below, so `latest` means the same thing on the releases page, on
+          # npm, in the tap, in the bucket and on GHCR. A semver pre-release is
+          # exactly a version carrying a `-` identifier, which is also how the
+          # protocol train decides it.
+          case "$version" in
+            *-*) prerelease=true ;;
+            *) prerelease=false ;;
+          esac
+          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
+          echo "Releasing v${version} (prerelease=${prerelease})"
 
       - name: Verify versions are in lockstep
         # Fail before producing artifacts if the root and workspace package.json
@@ -209,7 +244,7 @@ jobs:
 
   github-release:
     name: Publish GitHub Release
-    needs: [build, verify-build]
+    needs: [prepare, build, verify-build]
     runs-on: ubuntu-latest
     # Publish credentials live only in this environment, restricted to v*.*.*
     # tags. No required reviewer, so a tag push still releases unattended.
@@ -252,7 +287,12 @@ jobs:
             release-assets/install.ps1
 
       - name: Generate release notes
-        run: bunx git-cliff --tag "v${{ needs.build.outputs.version }}" --latest --strip all > RELEASE_NOTES.md
+        # The tag reaches the shell through env, never interpolated into the
+        # script: GitHub substitutes an expression before bash parses the line,
+        # so a tag name carrying shell metacharacters would run as code here.
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: bunx git-cliff --tag "v${VERSION}" --latest --strip all > RELEASE_NOTES.md
 
       - name: Create the GitHub Release
         # Immutable releases: assets ride along with the create call, which
@@ -261,20 +301,36 @@ jobs:
         # its assets is reported rather than patched, because it cannot be.
         env:
           GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           source scripts/release/publish-release.sh
           tag="v${VERSION}"
+          # `--latest=false` alongside `--prerelease` because the two answer
+          # different questions: `--prerelease` labels the release, while the
+          # "Latest" marker is what `/releases/latest` resolves and what
+          # scripts/install/install.sh follows for a stable install. The label
+          # is what actually protects that marker — REST `make_latest` refuses
+          # to set a prerelease as latest — so `--latest=false` is a
+          # restatement, not the guard. It is passed anyway because a stable
+          # release sends no `make_latest` at all and therefore takes the
+          # marker by default; naming the field here is what makes the
+          # asymmetry between the two rows readable.
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then
+            flags+=(--prerelease --latest=false)
+          fi
           publish_release "$tag" release-assets/* -- \
             --title "$tag" \
-            --notes-file RELEASE_NOTES.md
+            --notes-file RELEASE_NOTES.md \
+            "${flags[@]}"
 
   docker:
     # Publishes container images from the Linux binaries already produced by
     # the build job. Nothing depends on this job, so a registry failure never
     # blocks the GitHub Release, npm, Homebrew, Scoop, or crates.io channels.
     name: Publish Docker images
-    needs: [build, verify-build]
+    needs: [prepare, build, verify-build]
     runs-on: ubuntu-latest
     environment: release
     timeout-minutes: 15
@@ -318,27 +374,34 @@ jobs:
       - name: Build and publish images (retrying transient registry failures)
         # Scripted buildx (not build-push-action) so retry_command can wrap each
         # multi-arch push; GHCR pushes occasionally fail transiently and a single
-        # retry avoids a full re-run. Tag sets are unchanged.
+        # retry avoids a full re-run. Floating tags are conditional below.
         env:
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
           VERSION: ${{ needs.build.outputs.version }}
           IMAGE: ghcr.io/${{ github.repository }}
         run: |
           source scripts/release/retry.sh
+          # Version-pinned tags always publish; the floating ones (`latest`,
+          # `bookworm`, `alpine`) name "the current version" and stay on the
+          # last stable release, so `docker pull ghcr.io/…/mangostudio` never
+          # lands on a release candidate.
+          bookworm_tags=(--tag "${IMAGE}:${VERSION}" --tag "${IMAGE}:${VERSION}-bookworm")
+          alpine_tags=(--tag "${IMAGE}:${VERSION}-alpine")
+          if [ "$PRERELEASE" != "true" ]; then
+            bookworm_tags+=(--tag "${IMAGE}:latest" --tag "${IMAGE}:bookworm")
+            alpine_tags+=(--tag "${IMAGE}:alpine")
+          fi
           retry_command 3 30 docker buildx build \
             --platform linux/amd64,linux/arm64 \
             --build-arg "VERSION=${VERSION}" \
-            --tag "${IMAGE}:${VERSION}" \
-            --tag "${IMAGE}:${VERSION}-bookworm" \
-            --tag "${IMAGE}:latest" \
-            --tag "${IMAGE}:bookworm" \
+            "${bookworm_tags[@]}" \
             --push \
             .
           retry_command 3 30 docker buildx build \
             --platform linux/amd64,linux/arm64 \
             --file Dockerfile.alpine \
             --build-arg "VERSION=${VERSION}" \
-            --tag "${IMAGE}:${VERSION}-alpine" \
-            --tag "${IMAGE}:alpine" \
+            "${alpine_tags[@]}" \
             --push \
             .
 
@@ -395,7 +458,7 @@ jobs:
 
   npm-publish:
     name: Publish npm packages
-    needs: [build, verify-build]
+    needs: [prepare, build, verify-build]
     runs-on: ubuntu-latest
     environment: release
     timeout-minutes: 10
@@ -433,6 +496,11 @@ jobs:
         name: Publish to npm
         uses: ./.github/actions/publish-npm-distribution
         with:
+          # A stable release publishes as `latest` (the empty default), which is
+          # the tag `npm install -g mangostudio` reads. A pre-release publishes
+          # under `next` instead, so it is installable by name without moving
+          # `latest` off the last stable version.
+          dist-tag: ${{ needs.prepare.outputs.prerelease == 'true' && 'next' || '' }}
           allow-legacy-token: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_legacy_npm_token }}
           node-auth-token: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_legacy_npm_token && secrets.NPM_TOKEN || '' }}
           node-version: "22.14.0"
@@ -442,8 +510,13 @@ jobs:
     # to the shared tap. Only the post-publish verify-homebrew check depends on
     # this job, so a tap failure never blocks the GitHub Release or npm
     # publication.
+    #
+    # Skipped for a pre-release: the tap holds one formula and `brew install
+    # mangostudio` has no channel to select, so publishing a release candidate
+    # there would hand it to every tap user.
     name: Update Homebrew tap
-    needs: [build, verify-build, github-release]
+    needs: [prepare, build, verify-build, github-release]
+    if: needs.prepare.outputs.prerelease != 'true'
     runs-on: ubuntu-latest
     environment: release
     timeout-minutes: 10
@@ -493,8 +566,13 @@ jobs:
     # Renders bucket/mangostudio.json from the released SHA256SUMS and pushes it
     # to the shared Scoop bucket. Nothing depends on this job, so a bucket
     # failure never blocks the GitHub Release or npm publication.
+    #
+    # Skipped for a pre-release, for the same reason as the Homebrew tap: the
+    # bucket carries one manifest and `scoop install mangostudio` cannot ask
+    # for a channel.
     name: Update Scoop bucket
-    needs: [build, verify-build, github-release]
+    needs: [prepare, build, verify-build, github-release]
+    if: needs.prepare.outputs.prerelease != 'true'
     runs-on: ubuntu-latest
     environment: release
     timeout-minutes: 10

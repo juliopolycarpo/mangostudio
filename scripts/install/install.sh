@@ -36,7 +36,7 @@ Usage: install.sh [flags]
 Installs MangoStudio into ~/.mango/dist/<version>/ and links ~/.local/bin/mangostudio.
 
 Flags:
-  --version <x.y.z>  Install a specific stable version
+  --version <x.y.z>  Install a specific version (stable or pre-release, e.g. 0.2.0-rc.1)
   --canary           Install the rolling canary pre-release
   --local <archive>  Install from a local archive (.tar.gz release archive or .tgz npm tarball)
   --use <version>    Point at an already installed version without downloading

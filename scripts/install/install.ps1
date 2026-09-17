@@ -51,7 +51,7 @@ function Show-Usage {
   Write-Host 'directory to the user PATH.'
   Write-Host ''
   Write-Host 'Flags:'
-  Write-Host '  -Version <x.y.z>  Install a specific stable version'
+  Write-Host '  -Version <x.y.z>  Install a specific version (stable or pre-release, e.g. 0.2.0-rc.1)'
   Write-Host '  -Canary           Install the rolling canary pre-release'
   Write-Host '  -Local <archive>  Install from a local archive (.zip release archive or .tgz npm tarball)'
   Write-Host '  -Use <version>    Point at an already installed version without downloading'

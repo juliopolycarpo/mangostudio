@@ -1,7 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import { readText } from './support/read-text';
-import { extractJobBlock, extractJobBlocks, extractStepBlocks } from './support/workflow-blocks';
+import {
+  extractJobBlock,
+  extractJobBlocks,
+  extractStepBlocks,
+  runScriptLines,
+} from './support/workflow-blocks';
 import { compositeActionFiles, workflowFiles } from './support/workflow-files';
+
+// Split so this file's own text cannot satisfy the scan it performs, the way
+// security-workflows.unit.test.ts already does for `matrix.language`.
+const EXPRESSION_OPEN = '$' + '{{';
 
 // A job that calls a reusable workflow inherits the called workflow's own job
 // timeouts, and GitHub rejects `timeout-minutes` on it outright. Anchored at
@@ -124,6 +133,107 @@ describe('workflow hygiene', () => {
     for (const file of files) {
       expect(readText(file), file).not.toMatch(CHECKOUT_USES);
     }
+  });
+
+  test('no run: script interpolates a workflow expression', () => {
+    // GitHub substitutes a `${{ }}` expression into the script *text* before
+    // bash ever parses it, so a value carrying shell metacharacters — a tag
+    // name, a PR title, an issue body — runs as code on the runner. Every such
+    // value must reach the script through `env:` and be read as "$VAR", where
+    // it is data. This holds repository-wide with no allowlist; an exemption
+    // would need a value proven to be free of metacharacters, which is a claim
+    // about GitHub's data, not about this repository.
+    const offenders: string[] = [];
+    for (const file of [...workflowFiles(), ...compositeActionFiles()]) {
+      for (const { line, text } of runScriptLines(readText(file))) {
+        if (text.includes(EXPRESSION_OPEN)) offenders.push(`${file}:${line}:${text.trimEnd()}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  test('the expression scan reads block scalars, not just inline run: lines', () => {
+    // The failure this guards against is silent: a walk that only matched
+    // `run: <command>` on one line would report a clean repository while every
+    // `run: |` script — the majority form here — went unread. Both forms are
+    // asserted against a fixture, then the fixture's conclusion is checked
+    // against a real workflow so the two cannot drift apart.
+    const fixture = [
+      'jobs:',
+      '  build:',
+      '    steps:',
+      '      - name: Inline',
+      '        run: echo inline',
+      '      - name: Block',
+      '        run: |',
+      '          echo first',
+      '',
+      '          echo last',
+      '        env:',
+      '          NOT_SCRIPT: value',
+      '      - run: echo bare',
+      '        env:',
+      '          ALSO_NOT_SCRIPT: value',
+    ].join('\n');
+
+    expect(runScriptLines(fixture).map(({ line }) => line)).toEqual([5, 8, 10, 13]);
+
+    // A `- run:` step's own `env:` block sits deeper than the list marker; only
+    // reading the indent of the `run:` key keeps it out of the script.
+    expect(runScriptLines(fixture).map(({ text }) => text.trim())).not.toContain(
+      'ALSO_NOT_SCRIPT: value'
+    );
+
+    // Split for the same reason release-workflows.unit.test.ts splits its own
+    // shell expansions: biome reads `${...}` in a plain string as a template
+    // literal someone forgot to tag.
+    const shellTag = 'tag="v$' + '{VERSION}"';
+    const release = runScriptLines(readText('.github/workflows/release.yml'));
+    expect(release.map(({ text }) => text.trim())).toContain(shellTag);
+  });
+
+  test('the expression scan does not read a defaults.run mapping as script', () => {
+    // `defaults.run` is the one place the Actions schema spells `run` as a
+    // mapping, and `working-directory` legitimately takes an expression. Read as
+    // script, a real workflow would be reported as a shell injection — a false
+    // red with no way to silence it, since the scan carries no allowlist. Three
+    // workflows already carry a `defaults.run` block; only the expression is new.
+    const fixture = [
+      'jobs:',
+      '  build:',
+      '    defaults:',
+      '      # A comment here must not become the key `run:` is recognised by.',
+      '      run:',
+      '        # Windows PowerShell 5.1, not the runner default.',
+      '        shell: powershell',
+      `        working-directory: ${EXPRESSION_OPEN} inputs.dir }}`,
+      '    steps:',
+      '      - run: echo real',
+    ].join('\n');
+
+    expect(runScriptLines(fixture).map(({ line }) => line)).toEqual([10]);
+  });
+
+  test('a script that writes YAML is read as script, not as structure', () => {
+    // A `run:` script that renders a workflow — a heredoc, a `cat >` — carries
+    // its own `defaults:` and `run:` lines. Read as structure, the second one
+    // re-opens the walk (or, after a `defaults:`, closes it), and every line of
+    // the real script past that point goes unread. In a gate with no allowlist
+    // that is a silent pass, which is the one outcome worse than a false red.
+    const fixture = [
+      'jobs:',
+      '  build:',
+      '    steps:',
+      '      - run: |',
+      "          cat > generated.yml <<'YAML'",
+      '          defaults:',
+      '            run:',
+      '              shell: bash',
+      '          YAML',
+      `          echo "${EXPRESSION_OPEN} github.event.issue.title }}"`,
+    ].join('\n');
+
+    expect(runScriptLines(fixture).map(({ line }) => line)).toEqual([5, 6, 7, 8, 9, 10]);
   });
 
   test('pull-request workflows key concurrency on the PR number, not the SHA', () => {

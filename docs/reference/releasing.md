@@ -39,6 +39,75 @@ to `main` after the release.
 | `CARGO_REGISTRY_TOKEN`      | `cargo-publish` (optional)                                   | Legacy crates.io token used only when `workflow_dispatch` sets `allow_legacy_cargo_token=true`                       |
 | *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, the canary channel, attestations | No extra setup — tag releases grant `packages: write` for GHCR and `id-token: write` for crates.io and npm OIDC auth |
 
+### Pre-release tags
+
+A tag carrying a semver pre-release identifier — `v0.2.0-rc.1`, `v1.0.0-beta.3`,
+anything with a `-` — takes the same train and builds the same artifacts, but is
+never published as *the current version*. `prepare` resolves the classification
+once, and every channel reads that one output; nothing re-derives it.
+
+| Channel         | Stable tag (`v0.2.0`)                           | Pre-release tag (`v0.2.0-rc.1`)                         |
+| --------------- | ----------------------------------------------- | ------------------------------------------------------- |
+| GitHub Releases | published; becomes Latest                       | published, marked pre-release and **not** Latest        |
+| npm             | `latest` dist-tag                               | `next` dist-tag; `latest` stays on the last stable      |
+| GHCR            | `:<version>`, `:latest`, `:bookworm`, `:alpine` | version-pinned tags only; the floating tags do not move |
+| Homebrew tap    | formula updated                                 | skipped                                                 |
+| Scoop bucket    | manifest updated                                | skipped                                                 |
+| crates.io       | published                                       | published                                               |
+
+The two skips are not omissions. The tap holds one formula and the bucket one
+manifest, and neither `brew install mangostudio` nor `scoop install mangostudio`
+can ask for a channel, so publishing a release candidate there would hand it to
+every user of those channels. crates.io needs no gate at all: it excludes
+pre-release versions from `cargo install` resolution itself, so the version is
+published and only reachable by asking for it (`--version 0.2.0-rc.1`).
+
+Only the pre-release row sets the Latest marker explicitly. A stable release
+sends no `make_latest` at all, and the REST API defaults that to `true` for a
+newly published release — so **every stable tag takes the marker, in tag-push
+order, not in semver order**. `gh`'s own `--latest` help calls the default
+"automatic based on date and version"; that describes the `make_latest=legacy`
+value, which `gh release create` has no way to send (cli/cli#13828). The
+practical consequence is a backport: cutting `v1.2.4` after `v2.0.0` already
+shipped repoints `/releases/latest` at the older line. Nothing in this workflow
+guards that today — if the release train ever serves more than one line, the
+backport's `github-release` job needs `--latest=false` the way the pre-release
+row does.
+
+That marker is the one thing every stable consumer agrees on:
+`scripts/install/install.sh` and `scripts/install/install.ps1` both resolve a
+stable install through `/releases/latest`, and so does the hub's own update
+check (`resolveStableLatestVersion` in
+`apps/api/src/modules/updates/infrastructure/release-index.ts`). An `-rc` tag
+published as a full release would be what a plain `curl … | bash` installs and
+what every running hub is offered as an upgrade.
+
+The pre-release row still pins the marker to `false` alongside `--prerelease`,
+but as a restatement rather than the thing doing the work: `make_latest`'s own
+contract is that "drafts and prereleases cannot be set as latest", so the
+`prerelease` flag alone already keeps the release off `/releases/latest` — on
+the create POST and on the draft→publish PATCH alike. Spelling both out keeps
+the two questions — *how is this release labelled* and *what does
+`/releases/latest` resolve to* — visible at the one call site that answers them.
+
+Install a pre-release explicitly:
+
+```bash
+# The binary installer resolves /releases/latest only when no version is given.
+curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh \
+  | bash -s -- --version 0.2.0-rc.1
+npm install -g mangostudio@next
+docker pull ghcr.io/juliopolycarpo/mangostudio:0.2.0-rc.1
+cargo install mangostudio --version 0.2.0-rc.1
+```
+
+`brew` and `scoop` have no pre-release form, by the same constraint that skips
+their jobs above.
+
+A pre-release is not the canary channel. Canary cuts a release from every green
+`main` commit and carries a curated asset subset; a pre-release tag is cut by
+hand and publishes the full stable artifact set.
+
 ### `release` environment
 
 Stable publish credentials live in the GitHub Environment named `release`, not
@@ -115,7 +184,9 @@ defines the naming contract and is covered by unit tests.
 
 ### What each channel publishes
 
-A stable release publishes everything. Canary does not: it cuts a release from
+A stable release publishes everything, and so does a pre-release tag — the
+difference there is which pointers move, not which assets are built (see
+[Pre-release tags](#pre-release-tags)). Canary does not: it cuts a release from
 every green `main` commit, so each asset it carries is paid for many times a day.
 
 | Channel             | Platform archives | Raw hub + runtime pairs                    |
