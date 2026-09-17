@@ -51,6 +51,57 @@ export function extractStepBlocksAtIndent(source: string, indent: number): strin
   });
 }
 
+/** One line of a `run:` script, with its 1-based position in the file. */
+export interface RunScriptLine {
+  readonly line: number;
+  readonly text: string;
+}
+
+/**
+ * Every line of every `run:` script in a workflow or composite-action manifest.
+ *
+ * Both spellings are covered, because a policy over script text is worthless if
+ * it can only see one of them: the inline `run: <command>`, and the block scalar
+ * (`run: |`) whose script is the indented lines that follow. A grep for `run:`
+ * and an expression on the same line reads only the first, which is the minority
+ * form here.
+ *
+ * Line-based rather than block-based on purpose: workflow job steps sit at
+ * indent 6 and composite-action steps at indent 4, so a walk that must reach
+ * every `run:` in the repository cannot assume either. The script ends at the
+ * first non-blank line indented no deeper than the `run:` key itself — which is
+ * the key's own column, not the line's, so a `- run:` step's sibling keys are
+ * not mistaken for script.
+ */
+export function runScriptLines(source: string): RunScriptLine[] {
+  const found: RunScriptLine[] = [];
+  let scriptIndent = -1;
+
+  source.split('\n').forEach((text, index) => {
+    const opener = /^(\s*)(-\s+)?run:(.*)$/.exec(text);
+    if (opener) {
+      const [, indent, marker, inline] = opener;
+      scriptIndent = indent.length + (marker?.length ?? 0);
+      if (
+        inline.trim() !== '' &&
+        !inline.trimStart().startsWith('|') &&
+        !inline.trimStart().startsWith('>')
+      ) {
+        found.push({ line: index + 1, text });
+      }
+      return;
+    }
+    if (scriptIndent < 0 || text.trim() === '') return;
+    if (text.search(/\S/) <= scriptIndent) {
+      scriptIndent = -1;
+      return;
+    }
+    found.push({ line: index + 1, text });
+  });
+
+  return found;
+}
+
 /** Isolate the body of the top-level `on:` trigger section. */
 export function extractOnBlock(workflow: string): string {
   return /\non:\n([\s\S]*?)(?=\n\S|$)/.exec(workflow)?.[1] ?? '';

@@ -252,7 +252,12 @@ jobs:
             release-assets/install.ps1
 
       - name: Generate release notes
-        run: bunx git-cliff --tag "v${{ needs.build.outputs.version }}" --latest --strip all > RELEASE_NOTES.md
+        # The tag reaches the shell through env, never interpolated into the
+        # script: GitHub substitutes an expression before bash parses the line,
+        # so a tag name carrying shell metacharacters would run as code here.
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: bunx git-cliff --tag "v${VERSION}" --latest --strip all > RELEASE_NOTES.md
 
       - name: Create the GitHub Release
         # Immutable releases: assets ride along with the create call, which
