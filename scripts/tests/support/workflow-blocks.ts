@@ -72,17 +72,31 @@ export interface RunScriptLine {
  * first non-blank line indented no deeper than the `run:` key itself — which is
  * the key's own column, not the line's, so a `- run:` step's sibling keys are
  * not mistaken for script.
+ *
+ * `defaults.run` is skipped, and that is a statement about the Actions schema
+ * rather than a special case: it is the one place `run` names a mapping
+ * (`shell:`, `working-directory:`) instead of a script, so reading its children
+ * as script text would report a legal `working-directory: ${…}` as an injection.
+ *
+ * // Usage: runScriptLines(readText('.github/workflows/ci.yml')) // [{ line: 42, text: '          bun run check' }, …]
  */
 export function runScriptLines(source: string): RunScriptLine[] {
   const found: RunScriptLine[] = [];
   let scriptIndent = -1;
+  let previousKey = '';
 
   source.split('\n').forEach((text, index) => {
+    const trimmed = text.trim();
+    if (trimmed === '') return;
+
     const opener = /^(\s*)(-\s+)?run:(.*)$/.exec(text);
     if (opener) {
       const [, indent, marker, inline] = opener;
-      scriptIndent = indent.length + (marker?.length ?? 0);
+      const isDefaultsMapping = previousKey === 'defaults:';
+      previousKey = trimmed;
+      scriptIndent = isDefaultsMapping ? -1 : indent.length + (marker?.length ?? 0);
       if (
+        !isDefaultsMapping &&
         inline.trim() !== '' &&
         !inline.trimStart().startsWith('|') &&
         !inline.trimStart().startsWith('>')
@@ -91,7 +105,12 @@ export function runScriptLines(source: string): RunScriptLine[] {
       }
       return;
     }
-    if (scriptIndent < 0 || text.trim() === '') return;
+
+    // A comment must not become the `previousKey` a `defaults:` block is
+    // recognised by, or one written between the two keys would re-open the
+    // mapping as a script.
+    if (!trimmed.startsWith('#')) previousKey = trimmed;
+    if (scriptIndent < 0) return;
     if (text.search(/\S/) <= scriptIndent) {
       scriptIndent = -1;
       return;

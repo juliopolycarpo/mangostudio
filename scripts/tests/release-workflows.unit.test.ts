@@ -209,6 +209,10 @@ describe('release workflow binary gate', () => {
     // inverted would divert every stable release to `next`.
     const prereleaseOutput = '$' + '{{ needs.prepare.outputs.prerelease';
     expect(release).toContain(`dist-tag: ${prereleaseOutput} == 'true' && 'next' || '' }}`);
+    // The count is what the replaced `not.toMatch(/^ {10}dist-tag:/m)` used to
+    // carry: asserting only that the conditional expression is present would let
+    // a second, unconditional `dist-tag:` be added elsewhere in the workflow.
+    expect(release.match(/^ +dist-tag:/gm) ?? []).toHaveLength(1);
     expect(canary).toContain('dist-tag: canary');
     expect(canary).toContain('allow-legacy-token: "true"');
     expect(canary).toContain(`node-auth-token: ${secretPrefix}NPM_TOKEN }}`);
@@ -511,10 +515,20 @@ describe('release workflow binary gate', () => {
 
     // A second derivation is the failure mode this shape exists to prevent: a
     // channel that re-answered "is this a pre-release" from $VERSION could drift
-    // from the rest of the train without anything failing.
-    const derivations = workflow.split('\n').filter((line) => line.includes('*-*'));
+    // from the rest of the train without anything failing. Scoped to `prepare`
+    // and then to "no other job assigns it": a whole-file scan for the literal
+    // glob `*-*` is neither necessary — a second derivation spells itself
+    // `*"-"*` or `*-rc.*` just as easily — nor sufficient, since an unrelated
+    // comment or a `--platform` list carrying `*-*` would red-fail the suite.
+    const derivations = extractJobBlock(workflow, 'prepare')
+      .split('\n')
+      .filter((line) => line.includes('*-*'));
     expect(derivations).toHaveLength(1);
     expect(derivations[0]).toContain('prerelease=true');
+    for (const { job, block } of extractJobBlocks(workflow)) {
+      if (job === 'prepare') continue;
+      expect(block, job).not.toContain('prerelease=');
+    }
   });
 
   test('post-publish verification covers broader npm, crates.io, and Homebrew installs', () => {

@@ -192,6 +192,28 @@ describe('workflow hygiene', () => {
     expect(release.map(({ text }) => text.trim())).toContain(shellTag);
   });
 
+  test('the expression scan does not read a defaults.run mapping as script', () => {
+    // `defaults.run` is the one place the Actions schema spells `run` as a
+    // mapping, and `working-directory` legitimately takes an expression. Read as
+    // script, a real workflow would be reported as a shell injection — a false
+    // red with no way to silence it, since the scan carries no allowlist. Three
+    // workflows already carry a `defaults.run` block; only the expression is new.
+    const fixture = [
+      'jobs:',
+      '  build:',
+      '    defaults:',
+      '      # A comment here must not become the key `run:` is recognised by.',
+      '      run:',
+      '        # Windows PowerShell 5.1, not the runner default.',
+      '        shell: powershell',
+      `        working-directory: ${EXPRESSION_OPEN} inputs.dir }}`,
+      '    steps:',
+      '      - run: echo real',
+    ].join('\n');
+
+    expect(runScriptLines(fixture).map(({ line }) => line)).toEqual([10]);
+  });
+
   test('pull-request workflows key concurrency on the PR number, not the SHA', () => {
     // Both blocks are matched as "the key line, then its indented body", so the
     // scan cannot run past `on:`/`concurrency:` into the rest of the workflow.

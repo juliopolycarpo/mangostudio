@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -26,7 +27,10 @@ const RELEASE_WORKFLOW = '.github/workflows/release.yml';
 /**
  * The shell script of one named step, dedented to column zero so it can be fed
  * to bash. Read out of the workflow rather than duplicated here: a copy would
- * keep passing after the workflow changed underneath it.
+ * keep passing after the workflow changed underneath it — which is also why the
+ * dedent is measured from the script's own first line instead of assuming the
+ * column job steps happen to sit at today.
+ * // Usage: stepScript('docker', 'Build and publish images (…)')
  */
 function stepScript(job: string, stepName: string): string {
   const block = extractStepBlocks(extractJobBlock(readText(RELEASE_WORKFLOW), job)).find((step) =>
@@ -35,7 +39,9 @@ function stepScript(job: string, stepName: string): string {
   expect(block, `${RELEASE_WORKFLOW} → ${job} has no step named "${stepName}"`).toBeDefined();
   const body = /\n\s+run: \|\n([\s\S]*)$/.exec(block as string)?.[1];
   expect(body, `step "${stepName}" has no \`run: |\` script`).toBeDefined();
-  return (body as string).replace(/^ {10}/gm, '');
+  const lines = (body as string).split('\n');
+  const indent = lines.find((line) => line.trim() !== '')?.search(/\S/) ?? 0;
+  return lines.map((line) => line.slice(indent)).join('\n');
 }
 
 /**
@@ -82,23 +88,33 @@ function runStepScript(
   writeFileSync(join(dir, 'RELEASE_NOTES.md'), 'notes\n');
 
   const argvLog = join(dir, 'argv.log');
-  const proc = Bun.spawnSync({
-    cmd: ['bash', '-c', script],
-    cwd: dir,
-    env: {
-      PATH: `${binDir}:${process.env.PATH ?? ''}`,
-      ARGV_LOG: argvLog,
-      ...options.env,
-    },
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
+  try {
+    const proc = Bun.spawnSync({
+      // The shell GitHub actually gives a `run:` with no `shell:` key on Linux:
+      // `bash -e {0}`. Not `-o pipefail`, which is only added when the step asks
+      // for `shell: bash` — asserting a stricter contract than production would
+      // let a script that CI still breaks on pass here.
+      cmd: ['bash', '--noprofile', '--norc', '-e', '-c', script],
+      cwd: dir,
+      env: {
+        PATH: `${binDir}:${process.env.PATH ?? ''}`,
+        ARGV_LOG: argvLog,
+        ...options.env,
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
 
-  return {
-    exitCode: proc.exitCode,
-    output: proc.stdout.toString() + proc.stderr.toString(),
-    argv: existsSync(argvLog) ? readFileSync(argvLog, 'utf8').split('\n').filter(Boolean) : [],
-  };
+    return {
+      exitCode: proc.exitCode,
+      output: proc.stdout.toString() + proc.stderr.toString(),
+      argv: existsSync(argvLog) ? readFileSync(argvLog, 'utf8').split('\n').filter(Boolean) : [],
+    };
+  } finally {
+    // `mkdtempSync` has no owner but this call: without the removal every run of
+    // this file leaves a temp tree behind, one per publish/build invocation.
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 describe('the resolve step classifies the version it is releasing', () => {
@@ -106,21 +122,32 @@ describe('the resolve step classifies the version it is releasing', () => {
     const dir = mkdtempSync(join(tmpdir(), 'release-resolve-'));
     const output = join(dir, 'github-output');
     writeFileSync(output, '');
-    const proc = Bun.spawnSync({
-      cmd: ['bash', '-c', stepScript('prepare', 'Resolve version')],
-      cwd: dir,
-      env: { PATH: process.env.PATH ?? '', GITHUB_OUTPUT: output, INPUT_VERSION: '', ...env },
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    expect(proc.exitCode, proc.stderr.toString()).toBe(0);
-    const written = Object.fromEntries(
-      readFileSync(output, 'utf8')
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => line.split('=') as [string, string])
-    );
-    return { version: written.version, prerelease: written.prerelease };
+    try {
+      const proc = Bun.spawnSync({
+        cmd: [
+          'bash',
+          '--noprofile',
+          '--norc',
+          '-e',
+          '-c',
+          stepScript('prepare', 'Resolve version'),
+        ],
+        cwd: dir,
+        env: { PATH: process.env.PATH ?? '', GITHUB_OUTPUT: output, INPUT_VERSION: '', ...env },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      expect(proc.exitCode, proc.stderr.toString()).toBe(0);
+      const written = Object.fromEntries(
+        readFileSync(output, 'utf8')
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => line.split('=') as [string, string])
+      );
+      return { version: written.version, prerelease: written.prerelease };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   };
 
   test.each([
@@ -140,6 +167,18 @@ describe('the resolve step classifies the version it is releasing', () => {
     expect(resolve({ GITHUB_REF_NAME: 'v9.9.9', INPUT_VERSION: version })).toEqual({
       version,
       prerelease,
+    });
+  });
+
+  test('a dispatch input keeps its leading v out of the resolved version', () => {
+    // The input is documented as "without the leading v", and nothing downstream
+    // catches one: `check:versions --expect` normalizes before comparing, so
+    // `v0.2.0` clears every gate and first surfaces as the tag `vv0.2.0` — a name
+    // immutable releases reserve permanently. The tag-push branch already strips
+    // it; this branch has to agree.
+    expect(resolve({ GITHUB_REF_NAME: 'v9.9.9', INPUT_VERSION: 'v0.2.0' })).toEqual({
+      version: '0.2.0',
+      prerelease: 'false',
     });
   });
 });
@@ -204,10 +243,13 @@ describe('the Docker step keeps the floating tags on the last stable', () => {
       }
     );
 
+  // No `part !== ''` filter: an empty argument is what a mis-quoted tag array
+  // produces, and dropping it here would hide the one failure the argv log keeps
+  // boundaries visible for — the same failure the GitHub Release case asserts on.
   const tags = (result: StepRun): string[] =>
     result.argv.flatMap((call) => {
       const parts = call.split('|');
-      return parts.filter((part, index) => parts[index - 1] === '--tag' && part !== '');
+      return parts.filter((_part, index) => parts[index - 1] === '--tag');
     });
 
   test('a pre-release publishes only version-pinned tags', () => {
