@@ -412,7 +412,10 @@ The two hellos cross: a session sends its own from its constructor, so the manif
 announced was composed before it could read the hub's refusal. The withdrawal is therefore applied
 on both sides — the hub withholds `identityIsolation` from the manifest it accepts, since it
 already knows what it refused, and the runtime honours the refusal from its next answer onward,
-which is what `runtime.health` and a refreshed manifest report.
+which is what `runtime.health` and a refreshed manifest report. The hub retains its claim on the
+connection and applies the same withdrawal rule to every manifest replacement, so an older peer
+that repeats its attestation in health cannot restore it. Discovery and environment status both
+read the accepted manifest.
 
 Withdrawing from everyone, rather than keeping it for whoever arrived first, is deliberate. The
 danger is not that the newcomer reaches the incumbent's `~/.claude`; it is that one vendor login

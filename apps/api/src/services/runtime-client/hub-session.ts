@@ -48,7 +48,9 @@ const HUB_PEER_NAME = 'mangostudio';
  * connector logs and an environment card reports.
  */
 export interface HubSession {
-  /** The manifest the runtime announced, as it arrived. */
+  /** The hub claim stays with this connection across manifest refreshes. */
+  readonly externalAgentIsolation?: HubExternalAgentIsolation;
+  /** The validated manifest after applying the hub claim. */
   readonly manifest: RuntimeCapabilityManifest;
   readonly runtimeVersion: string;
   request<K extends RuntimeMethod>(
@@ -159,6 +161,9 @@ export async function openHubSession(
     session,
     manifest,
     runtimeVersion: remote.peer.version,
+    ...(options.externalAgentIsolation
+      ? { externalAgentIsolation: options.externalAgentIsolation }
+      : {}),
     request: (method, params, requestOptions) => client.request(method, params, requestOptions),
     onEvent: (listener) => session.onEvent(listener),
     onClose: (listener) => session.onClose(listener),
@@ -180,15 +185,28 @@ function manifestOf(
   claimed?: HubExternalAgentIsolation
 ): RuntimeCapabilityManifest | undefined {
   if (!Value.Check(RuntimeCapabilityManifestSchema, capabilities)) return undefined;
-  if (claimed === 'withdrawn' && capabilities.identityIsolation !== undefined) {
-    const { identityIsolation: _withdrawn, ...withheld } = capabilities;
-    return manifestOf(withheld);
-  }
   // `contracts` rides in the same open object and is not part of the manifest.
   // Leaving it in would make every `refreshManifest` comparison see a change
   // that never happened and publish an invalidation for nothing.
   const { contracts: _announced, ...manifest } = capabilities as RuntimeCapabilityManifest & {
     readonly contracts?: unknown;
   };
-  return manifest;
+  return applyHubIsolationClaim(manifest, claimed);
+}
+
+/**
+ * Withholds a peer attestation this connection's hub has explicitly refused.
+ * Used for the handshake and every replacement, including older peers that
+ * repeat their original attestation in health reports.
+ *
+ * @example
+ * const accepted = applyHubIsolationClaim(manifest, 'withdrawn');
+ */
+export function applyHubIsolationClaim(
+  manifest: RuntimeCapabilityManifest,
+  claimed?: HubExternalAgentIsolation
+): RuntimeCapabilityManifest {
+  if (claimed !== 'withdrawn' || manifest.identityIsolation === undefined) return manifest;
+  const { identityIsolation: _withdrawn, ...withheld } = manifest;
+  return withheld;
 }

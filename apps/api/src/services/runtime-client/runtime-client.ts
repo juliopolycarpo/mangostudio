@@ -153,7 +153,7 @@ import { createDiagnosticLogger } from '../../lib/logger';
 import { McpConnectionError } from '../mcp/types';
 import { ToolArgumentError } from '../tools/arg-parsing';
 import { ToolExecutionTimedOutError } from '../tools/execution-timeout';
-import type { HubSession } from './hub-session';
+import { applyHubIsolationClaim, type HubSession } from './hub-session';
 import { createTargetPaths, type TargetPaths } from './target-paths';
 
 const logger = createDiagnosticLogger('runtime-client');
@@ -500,7 +500,7 @@ export class RuntimeClient {
     /** Named in the warning when this peer turns out not to enforce containment. */
     private readonly environmentId?: string
   ) {
-    this.runtimeManifest = hub.manifest;
+    this.runtimeManifest = applyHubIsolationClaim(hub.manifest, hub.externalAgentIsolation);
     this.fs = {
       readFile: (params, options) => this.request('fs.read-file', params, options),
       writeFile: (params, options) => this.request('fs.write-file', params, options),
@@ -676,7 +676,7 @@ export class RuntimeClient {
    * environment card see the new allow set without tearing the connection down.
    */
   replaceManifest(manifest: RuntimeCapabilityManifest): void {
-    this.runtimeManifest = manifest;
+    this.runtimeManifest = applyHubIsolationClaim(manifest, this.hub.externalAgentIsolation);
     this.targetPaths = undefined;
     this.pathPolicyEnforced = false;
   }

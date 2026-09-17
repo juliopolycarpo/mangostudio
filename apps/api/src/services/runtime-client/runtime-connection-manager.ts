@@ -1048,8 +1048,8 @@ export class RuntimeConnectionManager {
     }
     entry.health = health;
     entry.healthReadAtMs = entry.manifestReadAtMs;
-    const manifest = capabilityManifestFromHealth(health, client.manifest);
-    client.replaceManifest(manifest);
+    client.replaceManifest(capabilityManifestFromHealth(health, client.manifest));
+    const manifest = client.manifest;
     const changed = !Value.Equal(entry.status.manifest, manifest);
     // A peer that withdrew this consent has already closed its vendor sessions,
     // silently. Reported before the status is replaced, so the comparison is
@@ -1319,7 +1319,7 @@ export function createLocalRuntimeConnector(
       // asked for an attestation it did not get must not act as though it had.
       const entry = {
         connection,
-        identityAttested: connection.client.manifest?.identityIsolation !== undefined,
+        identityAttested: connection.client.manifest.identityIsolation !== undefined,
         onUnavailable,
       };
       active.add(entry);

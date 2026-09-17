@@ -17,6 +17,7 @@ import {
   staticConsentSource,
 } from '@mangostudio/runtime';
 import {
+  type HubExternalAgentIsolation,
   RUNTIME_CONTRACT,
   type RuntimeCapabilityManifest,
   type RuntimeMethod,
@@ -110,6 +111,7 @@ export interface TestRuntimeOptions {
   readonly consent?: RuntimeConsentSource;
   readonly runtimeVersion?: string;
   readonly hubVersion?: string;
+  readonly externalAgentIsolation?: HubExternalAgentIsolation;
   /** Records what the runtime side saw, including who the hub said it is. */
   readonly audit?: RuntimeAuditSink;
 }
@@ -143,6 +145,9 @@ export async function connectTestRuntime(options: TestRuntimeOptions): Promise<T
   const connection = await connectInProcessRuntime(definition, {
     hubVersion: options.hubVersion ?? 'hub-test',
     validateFrames: true,
+    ...(options.externalAgentIsolation
+      ? { externalAgentIsolation: options.externalAgentIsolation }
+      : {}),
   });
 
   return {
