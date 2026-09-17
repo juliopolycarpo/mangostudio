@@ -14,7 +14,15 @@ import {
   unlink,
 } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
-import { FileTooLargeError, PathAccessError, RuntimeServiceError } from '../errors';
+import {
+  FileTooLargeError,
+  PathAccessError,
+  RegularFileWriteError,
+  RuntimeServiceError,
+} from '../errors';
+
+export { RegularFileWriteError };
+
 import type { RuntimePathFilter } from '../methods';
 import { isPathPrefix, resolvePathThroughExistingAncestor } from './path-containment';
 
@@ -198,13 +206,6 @@ export async function assertRegularFilePath(resolvedPath: string, action: string
 
 export function isErrnoException(error: unknown, code: string): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error && error.code === code;
-}
-
-export class RegularFileWriteError extends RuntimeServiceError {
-  constructor(message: string) {
-    super('path_access', message);
-    this.name = 'RegularFileWriteError';
-  }
 }
 
 export interface AtomicWriteResult {

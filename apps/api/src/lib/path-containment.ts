@@ -5,10 +5,8 @@
  * unchanged.
  */
 
-import {
-  PathAccessError,
-  resolvePathThroughExistingAncestor as resolvePathThroughExistingAncestorRuntime,
-} from '@mangostudio/runtime';
+import { resolvePathThroughExistingAncestor as resolvePathThroughExistingAncestorRuntime } from '@mangostudio/runtime';
+import { PathAccessError } from '@mangostudio/shared/runtime-contract';
 
 export function resolvePathThroughExistingAncestor(inputPath: string): string {
   try {

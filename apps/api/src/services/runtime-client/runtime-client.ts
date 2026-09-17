@@ -5,18 +5,6 @@ import {
   type RequestOptions,
 } from '@mangostudio/protocol';
 import {
-  FileNotReadError,
-  GrepPatternError,
-  PartialReadError,
-  PathAccessError,
-  RuntimeConsentDeniedError,
-  RuntimeSnapshotConflictError,
-  ShellExecutionError,
-  StaleFileError,
-  StaleLineNumbersError,
-  UnobservedLineNumbersError,
-} from '@mangostudio/runtime';
-import {
   type ExternalAgentAckResult,
   type ExternalAgentCancelParams,
   type ExternalAgentCloseParams,
@@ -43,12 +31,17 @@ import {
   type RuntimeSettingsSourcesResult,
 } from '@mangostudio/shared/library';
 import {
+  FileNotReadError,
+  GrepPatternError,
+  PartialReadError,
+  PathAccessError,
   RUNTIME_EXTERNAL_AGENT_TOPIC,
   RUNTIME_TERMINAL_OUTPUT_TOPIC,
   type RuntimeApplyPatchParams,
   type RuntimeApplyPatchResult,
   type RuntimeBeforeSnapshot,
   type RuntimeCapabilityManifest,
+  RuntimeConsentDeniedError,
   type RuntimeCreateFileParams,
   type RuntimeCreateFileResult,
   type RuntimeDeleteFileParams,
@@ -120,6 +113,7 @@ import {
   type RuntimeShellResult,
   type RuntimeShellRunParams,
   type RuntimeSnapshotCaptureParams,
+  RuntimeSnapshotConflictError,
   type RuntimeSnapshotHashParams,
   type RuntimeSnapshotHashResult,
   type RuntimeSnapshotRevertParams,
@@ -149,6 +143,10 @@ import {
   type RuntimeWorkspaceValidateResult,
   type RuntimeWriteFileParams,
   type RuntimeWriteFileResult,
+  ShellExecutionError,
+  StaleFileError,
+  StaleLineNumbersError,
+  UnobservedLineNumbersError,
 } from '@mangostudio/shared/runtime-contract';
 import Value from 'typebox/value';
 import { createDiagnosticLogger } from '../../lib/logger';

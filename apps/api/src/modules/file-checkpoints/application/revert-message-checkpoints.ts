@@ -1,9 +1,9 @@
-import { RuntimeSnapshotConflictError } from '@mangostudio/runtime';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { RevertChatFileCheckpointsResponse } from '@mangostudio/shared/file-checkpoints';
 import {
   RUNTIME_ABSENT_HASH,
+  RuntimeSnapshotConflictError,
   type RuntimeSnapshotRevertParams,
 } from '@mangostudio/shared/runtime-contract';
 import type { Kysely } from 'kysely';

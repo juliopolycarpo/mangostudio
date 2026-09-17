@@ -1,15 +1,8 @@
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
-import { RuntimeServiceError } from '../errors';
+import { WorkspacePathError } from '../errors';
 
-export class WorkspacePathError extends RuntimeServiceError {
-  readonly code = 'VALIDATION';
-
-  constructor(message: string) {
-    super('workdir_validation', message, { code: 'VALIDATION' });
-    this.name = 'WorkspacePathError';
-  }
-}
+export { WorkspacePathError };
 
 function expandHome(path: string): string {
   if (path === '~') {

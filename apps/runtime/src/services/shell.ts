@@ -6,7 +6,10 @@
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
-import { RuntimeServiceError } from '../errors';
+import { RuntimeServiceError, ShellExecutionError } from '../errors';
+
+export { ShellExecutionError };
+
 import type { RuntimeShellResult } from '../methods';
 import { readStreamCapped } from './child-output';
 import { killProcessTree, OWN_PROCESS_GROUP } from './process-tree';
@@ -16,13 +19,6 @@ import { buildSpawnEnv, nodeSpawnEnvHost } from './spawn-env';
 
 /** Shell interpreters exposed as tools. */
 export type ShellKind = RuntimeShellResult['shell'];
-
-export class ShellExecutionError extends RuntimeServiceError {
-  constructor(message: string) {
-    super('shell_execution', message);
-    this.name = 'ShellExecutionError';
-  }
-}
 
 /** Why a shell child process ended, distinct from raw exitCode/signal facts. */
 type ShellTermination =

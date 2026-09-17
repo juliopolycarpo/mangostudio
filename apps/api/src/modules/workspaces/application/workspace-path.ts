@@ -3,4 +3,5 @@
  * callers keep stable import paths.
  */
 
-export { resolveWorkspacePath, WorkspacePathError } from '@mangostudio/runtime';
+export { resolveWorkspacePath } from '@mangostudio/runtime';
+export { WorkspacePathError } from '@mangostudio/shared/runtime-contract';

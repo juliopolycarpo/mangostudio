@@ -1,8 +1,7 @@
+export { assertFresh, clearFileFreshness } from '@mangostudio/runtime';
 export {
-  assertFresh,
-  clearFileFreshness,
   FileNotReadError,
   StaleFileError,
   StaleLineNumbersError,
   UnobservedLineNumbersError,
-} from '@mangostudio/runtime';
+} from '@mangostudio/shared/runtime-contract';

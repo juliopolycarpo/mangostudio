@@ -3,7 +3,7 @@
  * Searches files for lines matching a regular expression.
  */
 
-import { GrepPatternError } from '@mangostudio/runtime';
+import { GrepPatternError } from '@mangostudio/shared/runtime-contract';
 import { getRuntimeClient } from '../../runtime-client';
 import {
   clampIntegerSetting,

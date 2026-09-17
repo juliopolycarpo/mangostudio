@@ -14,7 +14,6 @@ import { RemoteError } from '@mangostudio/protocol';
 import {
   executeLibraryUndo,
   executePropagationWrites,
-  LIBRARY_BACKUP_MISSING_KIND,
   LibraryBackupMissingError,
   type PropagationWriteEngineDeps,
 } from '@mangostudio/runtime';
@@ -42,9 +41,10 @@ import {
   type ResourceKind,
 } from '@mangostudio/shared/library';
 import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
-import type {
-  RuntimeLibraryApplyParams,
-  RuntimeLibraryUndoParams,
+import {
+  LIBRARY_BACKUP_MISSING_KIND,
+  type RuntimeLibraryApplyParams,
+  type RuntimeLibraryUndoParams,
 } from '@mangostudio/shared/runtime-contract';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';

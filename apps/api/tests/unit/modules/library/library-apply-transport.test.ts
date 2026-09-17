@@ -3,11 +3,13 @@ import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import {
   createLibraryService,
   createLocalRuntimeManifest,
-  LIBRARY_BACKUP_MISSING_KIND,
   type RuntimeLibraryUndoParams,
-  RuntimeServiceError,
 } from '@mangostudio/runtime';
 import type { PropagationApplyRequest, PropagationPreview } from '@mangostudio/shared/library';
+import {
+  LIBRARY_BACKUP_MISSING_KIND,
+  RuntimeServiceError,
+} from '@mangostudio/shared/runtime-contract';
 import {
   applyLibraryPropagation,
   undoLibraryPropagation,

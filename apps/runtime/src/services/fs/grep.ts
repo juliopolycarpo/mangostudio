@@ -1,6 +1,9 @@
 import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { PathAccessError, RuntimeServiceError } from '../../errors';
+import { GrepPatternError, PathAccessError, RuntimeServiceError } from '../../errors';
+
+export { GrepPatternError };
+
 import type { RuntimeGrepParams, RuntimeGrepResult } from '../../methods';
 import { throwIfAborted } from '../cancellation';
 import { compilePolicyGuard } from '../fs-path-policy';
@@ -49,13 +52,6 @@ export function setGrepFileBudgetForTest(budgetMs: number | null): void {
 const GREP_MAX_PATTERN_LENGTH = 1000;
 
 const DEFAULT_FILE_GLOB = '**/*';
-
-export class GrepPatternError extends RuntimeServiceError {
-  constructor(message: string) {
-    super('grep_pattern', message);
-    this.name = 'GrepPatternError';
-  }
-}
 
 export async function grepRuntimeFiles(
   params: RuntimeGrepParams,

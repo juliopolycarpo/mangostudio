@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'bun:test';
-import { RuntimeConsentDeniedError } from '@mangostudio/runtime';
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
 import type {
   ExternalAgentCapabilities,
@@ -9,7 +8,10 @@ import {
   ExternalAgentDescriptorSchema,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
+import {
+  type RuntimeCapabilityManifest,
+  RuntimeConsentDeniedError,
+} from '@mangostudio/shared/runtime-contract';
 import Value from 'typebox/value';
 
 import type {

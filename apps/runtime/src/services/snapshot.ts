@@ -1,5 +1,8 @@
 import { unlink } from 'node:fs/promises';
-import { PathAccessError, RuntimeServiceError } from '../errors';
+import { PathAccessError, RuntimeServiceError, RuntimeSnapshotConflictError } from '../errors';
+
+export { RuntimeSnapshotConflictError };
+
 import {
   RUNTIME_ABSENT_HASH,
   type RuntimeBeforeSnapshot,
@@ -16,17 +19,6 @@ import {
   writeRegularFileAtomic,
 } from './fs-utils';
 import { assertInsideWorkdir, WorkdirContainmentError } from './path-containment';
-
-export class RuntimeSnapshotConflictError extends RuntimeServiceError {
-  constructor(readonly resolvedPath: string) {
-    super(
-      'snapshot_conflict',
-      `Cannot revert "${resolvedPath}": the file changed on disk since this assistant message completed.`,
-      { resolvedPath }
-    );
-    this.name = 'RuntimeSnapshotConflictError';
-  }
-}
 
 export class RuntimeSnapshotTooLargeError extends RuntimeServiceError {
   constructor(resolvedPath: string, sizeBytes: number) {
