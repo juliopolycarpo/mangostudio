@@ -78,6 +78,13 @@ export interface RunScriptLine {
  * (`shell:`, `working-directory:`) instead of a script, so reading its children
  * as script text would report a legal `working-directory: ${…}` as an injection.
  *
+ * Script text is claimed before anything is read as a key, because inside a
+ * block scalar nothing is one: a script that writes YAML — a heredoc rendering
+ * a workflow, a `cat >` of an action manifest — carries its own `run:` and
+ * `defaults:` lines, and reading those as structure would restart the walk
+ * mid-script or close it early. Either way the rest of a real script goes
+ * unread, which in a gate with no allowlist is a silent false negative.
+ *
  * // Usage: runScriptLines(readText('.github/workflows/ci.yml')) // [{ line: 42, text: '          bun run check' }, …]
  */
 export function runScriptLines(source: string): RunScriptLine[] {
@@ -88,6 +95,14 @@ export function runScriptLines(source: string): RunScriptLine[] {
   source.split('\n').forEach((text, index) => {
     const trimmed = text.trim();
     if (trimmed === '') return;
+
+    if (scriptIndent >= 0) {
+      if (text.search(/\S/) > scriptIndent) {
+        found.push({ line: index + 1, text });
+        return;
+      }
+      scriptIndent = -1;
+    }
 
     const opener = /^(\s*)(-\s+)?run:(.*)$/.exec(text);
     if (opener) {
@@ -110,12 +125,6 @@ export function runScriptLines(source: string): RunScriptLine[] {
     // recognised by, or one written between the two keys would re-open the
     // mapping as a script.
     if (!trimmed.startsWith('#')) previousKey = trimmed;
-    if (scriptIndent < 0) return;
-    if (text.search(/\S/) <= scriptIndent) {
-      scriptIndent = -1;
-      return;
-    }
-    found.push({ line: index + 1, text });
   });
 
   return found;

@@ -214,6 +214,28 @@ describe('workflow hygiene', () => {
     expect(runScriptLines(fixture).map(({ line }) => line)).toEqual([10]);
   });
 
+  test('a script that writes YAML is read as script, not as structure', () => {
+    // A `run:` script that renders a workflow — a heredoc, a `cat >` — carries
+    // its own `defaults:` and `run:` lines. Read as structure, the second one
+    // re-opens the walk (or, after a `defaults:`, closes it), and every line of
+    // the real script past that point goes unread. In a gate with no allowlist
+    // that is a silent pass, which is the one outcome worse than a false red.
+    const fixture = [
+      'jobs:',
+      '  build:',
+      '    steps:',
+      '      - run: |',
+      "          cat > generated.yml <<'YAML'",
+      '          defaults:',
+      '            run:',
+      '              shell: bash',
+      '          YAML',
+      `          echo "${EXPRESSION_OPEN} github.event.issue.title }}"`,
+    ].join('\n');
+
+    expect(runScriptLines(fixture).map(({ line }) => line)).toEqual([5, 6, 7, 8, 9, 10]);
+  });
+
   test('pull-request workflows key concurrency on the PR number, not the SHA', () => {
     // Both blocks are matched as "the key line, then its indented body", so the
     // scan cannot run past `on:`/`concurrency:` into the rest of the workflow.
