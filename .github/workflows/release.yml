@@ -309,9 +309,13 @@ jobs:
           # `--latest=false` alongside `--prerelease` because the two answer
           # different questions: `--prerelease` labels the release, while the
           # "Latest" marker is what `/releases/latest` resolves and what
-          # scripts/install/install.sh follows for a stable install. Leaving
-          # the marker to gh's automatic default would hand a release candidate
-          # to every `curl | sh`.
+          # scripts/install/install.sh follows for a stable install. The label
+          # is what actually protects that marker — REST `make_latest` refuses
+          # to set a prerelease as latest — so `--latest=false` is a
+          # restatement, not the guard. It is passed anyway because a stable
+          # release sends no `make_latest` at all and therefore takes the
+          # marker by default; naming the field here is what makes the
+          # asymmetry between the two rows readable.
           flags=()
           if [ "$PRERELEASE" = "true" ]; then
             flags+=(--prerelease --latest=false)

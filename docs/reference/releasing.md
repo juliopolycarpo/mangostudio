@@ -74,21 +74,28 @@ guards that today — if the release train ever serves more than one line, the
 backport's `github-release` job needs `--latest=false` the way the pre-release
 row does.
 
-That marker is the one thing every stable consumer agrees on, which is why the
-pre-release row pins it to `false`: `scripts/install/install.sh` and
-`scripts/install/install.ps1` both resolve a stable install through
-`/releases/latest`, and so does the hub's own update check
-(`resolveStableLatestVersion` in
+That marker is the one thing every stable consumer agrees on:
+`scripts/install/install.sh` and `scripts/install/install.ps1` both resolve a
+stable install through `/releases/latest`, and so does the hub's own update
+check (`resolveStableLatestVersion` in
 `apps/api/src/modules/updates/infrastructure/release-index.ts`). An `-rc` tag
-published as a full release would be what a plain `curl … | sh` installs and
+published as a full release would be what a plain `curl … | bash` installs and
 what every running hub is offered as an upgrade.
+
+The pre-release row still pins the marker to `false` alongside `--prerelease`,
+but as a restatement rather than the thing doing the work: `make_latest`'s own
+contract is that "drafts and prereleases cannot be set as latest", so the
+`prerelease` flag alone already keeps the release off `/releases/latest` — on
+the create POST and on the draft→publish PATCH alike. Spelling both out keeps
+the two questions — *how is this release labelled* and *what does
+`/releases/latest` resolve to* — visible at the one call site that answers them.
 
 Install a pre-release explicitly:
 
 ```bash
 # The binary installer resolves /releases/latest only when no version is given.
 curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh \
-  | sh -s -- --version 0.2.0-rc.1
+  | bash -s -- --version 0.2.0-rc.1
 npm install -g mangostudio@next
 docker pull ghcr.io/juliopolycarpo/mangostudio:0.2.0-rc.1
 cargo install mangostudio --version 0.2.0-rc.1
