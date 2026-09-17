@@ -15,13 +15,23 @@ import {
 } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import {
+  BINARY_SNIFF_BYTES,
+  READ_FILE_MAX_BINARY_VIEW_BYTES,
+  READ_FILE_MAX_BYTES,
+} from '@mangostudio/shared/runtime-contract';
+import {
   FileTooLargeError,
   PathAccessError,
   RegularFileWriteError,
   RuntimeServiceError,
 } from '../errors';
 
-export { RegularFileWriteError };
+export {
+  BINARY_SNIFF_BYTES,
+  READ_FILE_MAX_BINARY_VIEW_BYTES,
+  READ_FILE_MAX_BYTES,
+  RegularFileWriteError,
+};
 
 import {
   isPathPrefix,
@@ -43,21 +53,6 @@ export interface ReadFileWithObservedMtimeOptions {
   readonly maxBytes?: number;
 }
 
-export const READ_FILE_MAX_BYTES = 10 * 1024 * 1024;
-/**
- * Ceiling on a file read through `read_file`'s `hex` or `base64` view.
- *
- * Far below {@link READ_FILE_MAX_BYTES} because a byte view lands in the
- * model's context rather than being windowed away: base64 inflates by 4/3 and
- * hex by 2, so 256 KiB of file is already ~512 KiB of tokens.
- *
- * It shares a value with `READ_FILE_MAX_WINDOW_BYTES` and nothing else: that one
- * bounds the text a window may *emit*, while this bounds the bytes a view may
- * *consume* before transcoding inflates them. Deriving either from the other
- * would tie two budgets that are only coincidentally equal.
- */
-export const READ_FILE_MAX_BINARY_VIEW_BYTES = 256 * 1024;
-export const BINARY_SNIFF_BYTES = 8 * 1024;
 /** Floor for a bounded read's first buffer, so a `size: 0` hint costs one read. */
 const READ_CHUNK_BYTES = 64 * 1024;
 

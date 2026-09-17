@@ -4,17 +4,10 @@
  */
 
 import {
-  countTotalLines,
-  findWindowByteRange,
-  looksBinary,
   READ_FILE_MAX_BINARY_VIEW_BYTES,
-  READ_FILE_MAX_LINE_CHARS,
   READ_FILE_MAX_MAX_LINES,
   READ_FILE_MAX_START_LINE,
-  READ_FILE_MAX_WINDOW_BYTES,
   READ_FILE_MIN_MAX_LINES,
-} from '@mangostudio/runtime';
-import {
   RUNTIME_READ_FILE_VIEWS,
   type RuntimeReadFileView,
 } from '@mangostudio/shared/runtime-contract';
@@ -32,18 +25,6 @@ import {
 } from './_fs-utils';
 
 const READ_FILE_TOOL_NAME = 'read_file';
-
-export {
-  countTotalLines,
-  findWindowByteRange,
-  looksBinary,
-  READ_FILE_MAX_BINARY_VIEW_BYTES,
-  READ_FILE_MAX_LINE_CHARS,
-  READ_FILE_MAX_MAX_LINES,
-  READ_FILE_MAX_START_LINE,
-  READ_FILE_MAX_WINDOW_BYTES,
-  READ_FILE_MIN_MAX_LINES,
-};
 
 const READ_FILE_DEFAULT_START_LINE = 1;
 const READ_FILE_DEFAULT_MAX_LINES = 2000;

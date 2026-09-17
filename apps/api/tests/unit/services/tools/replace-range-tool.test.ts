@@ -2,6 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  FileNotReadError,
+  StaleFileError,
+  StaleLineNumbersError,
+} from '@mangostudio/shared/runtime-contract';
 import { executeEditFile } from '../../../../src/services/tools/builtin/edit-file';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
 import {
@@ -9,14 +14,9 @@ import {
   normalizeReplaceRangeToolSettings,
   register as registerReplaceRangeTool,
 } from '../../../../src/services/tools/builtin/replace-range';
-import {
-  clearFileFreshness,
-  FileNotReadError,
-  StaleFileError,
-  StaleLineNumbersError,
-} from '../../../../src/services/tools/file-freshness';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { clearFileFreshness } from '../../../support/runtime-file-freshness';
 
 let tempDir: string;
 

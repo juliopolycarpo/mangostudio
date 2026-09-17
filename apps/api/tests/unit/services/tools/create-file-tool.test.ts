@@ -8,9 +8,9 @@ import {
   register as registerCreateFileTool,
 } from '../../../../src/services/tools/builtin/create-file';
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
-import { clearFileFreshness } from '../../../../src/services/tools/file-freshness';
 import { clearRegistry, executeTool, getTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { clearFileFreshness } from '../../../support/runtime-file-freshness';
 
 let tempDir: string;
 

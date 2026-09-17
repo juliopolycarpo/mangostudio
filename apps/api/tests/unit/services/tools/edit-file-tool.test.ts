@@ -2,19 +2,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { FileNotReadError, StaleFileError } from '@mangostudio/shared/runtime-contract';
 import {
   executeEditFile,
   normalizeEditFileToolSettings,
   register as registerEditFileTool,
 } from '../../../../src/services/tools/builtin/edit-file';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
-import {
-  clearFileFreshness,
-  FileNotReadError,
-  StaleFileError,
-} from '../../../../src/services/tools/file-freshness';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { clearFileFreshness } from '../../../support/runtime-file-freshness';
 
 let tempDir: string;
 

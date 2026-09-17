@@ -5,7 +5,6 @@
  * service is testable without a supervisor, a state file, or a running server.
  */
 
-import type { UserServiceManager } from '@mangostudio/runtime';
 import type { InstallGuard } from '@mangostudio/shared/environments';
 import type {
   HubHealth,
@@ -26,6 +25,7 @@ import {
   MACHINE_LOG_TAIL_DEFAULT,
   MACHINE_LOG_TAIL_MAX,
 } from '@mangostudio/shared/machine';
+import type { UserServiceManager } from '@mangostudio/shared/machine/service';
 import { RuntimeServiceManagementError } from '@mangostudio/shared/runtime-contract';
 import {
   resolveRuntimeSlotConfig,

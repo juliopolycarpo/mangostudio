@@ -5,7 +5,6 @@
  * that owns it (see `pathPolicy` on the runtime filesystem methods).
  */
 
-import { readFileWithObservedMtime } from '@mangostudio/runtime';
 import {
   PathAccessError,
   type RuntimePathFilter,
@@ -16,7 +15,7 @@ import type { TargetPaths } from '../../runtime-client';
 import { normalizePathList, normalizeStringList, type PathListItem } from '../list-normalization';
 import type { WorkdirPolicy } from '../types';
 
-export { normalizePathList, normalizeStringList, PathAccessError, readFileWithObservedMtime };
+export { normalizePathList, normalizeStringList, PathAccessError };
 
 /**
  * Expands a leading `~` against the *target's* home directory. The hub's own

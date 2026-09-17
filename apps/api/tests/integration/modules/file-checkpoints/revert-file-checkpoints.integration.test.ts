@@ -26,10 +26,10 @@ import { executeEditFile } from '../../../../src/services/tools/builtin/edit-fil
 import { executeMoveFile } from '../../../../src/services/tools/builtin/move-file';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
-import { clearFileFreshness } from '../../../../src/services/tools/file-freshness';
 import type { ToolContext } from '../../../../src/services/tools/types';
 import { type ChatFixture, insertTestChat, type UserFixture } from '../../../support/factories';
 import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
+import { clearFileFreshness } from '../../../support/runtime-file-freshness';
 
 let tempDir: string;
 let outsideDir: string;

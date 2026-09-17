@@ -3,6 +3,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  decodePowerShellArgv,
+  renderLaunchdPlistFile,
+  renderSystemdUnitFile,
+  systemdUserUnitPath,
+} from '@mangostudio/shared/machine/service';
+import {
   type RuntimeServiceMode,
   RuntimeServiceStatusSchema,
 } from '@mangostudio/shared/runtime-home';
@@ -23,12 +29,6 @@ import {
   resolveInstallMode,
   runtimeUnitDefinition,
 } from '../../../src/services/runtime-service';
-import {
-  decodePowerShellArgv,
-  renderLaunchdPlistFile,
-  renderSystemdUnitFile,
-  systemdUserUnitPath,
-} from '../../../src/services/user-service-manager';
 
 const CURRENT = '/home/test/.mango/runtime/remote/current/mangostudio-runtime';
 

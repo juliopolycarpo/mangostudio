@@ -1,6 +1,7 @@
 /**
  * Hub-side library scan/hash cache. Instance-hash memos still live in
- * `@mangostudio/runtime`; grouped discovery memos stay on the hub so they
+ * `@mangostudio/shared/library/machine`; grouped discovery memos stay on the hub
+ * so they
  * never share scan slots with the runtime process singleton.
  */
 

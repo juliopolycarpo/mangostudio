@@ -76,22 +76,10 @@ export {
   withPathLocks,
 } from './services/file-freshness';
 export { GrepPatternError } from './services/fs/grep';
+export { countTotalLines, findWindowByteRange, looksBinary } from './services/fs/read-file';
 export {
-  countTotalLines,
-  findWindowByteRange,
-  looksBinary,
-  READ_FILE_MAX_LINE_CHARS,
-  READ_FILE_MAX_MAX_LINES,
-  READ_FILE_MAX_START_LINE,
-  READ_FILE_MAX_WINDOW_BYTES,
-  READ_FILE_MIN_MAX_LINES,
-} from './services/fs/read-file';
-export {
-  BINARY_SNIFF_BYTES,
   containsNulByte,
   type ObservedFileRead,
-  READ_FILE_MAX_BINARY_VIEW_BYTES,
-  READ_FILE_MAX_BYTES,
   readFileWithObservedMtime,
 } from './services/fs-utils';
 export {
@@ -165,19 +153,6 @@ export {
   hashFileAtPath,
   RuntimeSnapshotConflictError,
 } from './services/snapshot';
-export {
-  createUserServiceManager,
-  defaultUserServiceExecDeps,
-  isUserServiceAction,
-  USER_SERVICE_ACTIONS,
-  USER_SERVICE_NO_SESSION_BUS_ERROR,
-  type UserServiceAction,
-  type UserServiceDefinition,
-  type UserServiceExecDeps,
-  type UserServiceExecResult,
-  type UserServiceIdentity,
-  type UserServiceManager,
-} from './services/user-service-manager';
 export {
   browseWorkspace,
   MAX_WORKSPACE_DIRECTORY_ENTRIES,

@@ -3,21 +3,20 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  FileNotReadError,
+  StaleFileError,
+  StaleLineNumbersError,
+} from '@mangostudio/shared/runtime-contract';
+import {
   executeApplyPatch,
   normalizeApplyPatchToolSettings,
   register as registerApplyPatchTool,
 } from '../../../../src/services/tools/builtin/apply-patch';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
 import { executeReplaceRange } from '../../../../src/services/tools/builtin/replace-range';
-import {
-  assertFresh,
-  clearFileFreshness,
-  FileNotReadError,
-  StaleFileError,
-  StaleLineNumbersError,
-} from '../../../../src/services/tools/file-freshness';
 import { clearRegistry, executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { assertFresh, clearFileFreshness } from '../../../support/runtime-file-freshness';
 
 let tempDir: string;
 

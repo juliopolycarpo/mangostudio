@@ -70,6 +70,7 @@
     "./runtime-contract/errors": "./src/runtime-contract/errors.ts",
     "./runtime-home": "./src/runtime-home/index.ts",
     "./machine": "./src/machine/index.ts",
+    "./machine/service": "./src/machine/user-service.ts",
     "./updates": "./src/updates/index.ts",
     "./terminal": "./src/terminal/index.ts"
   },

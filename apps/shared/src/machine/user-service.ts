@@ -12,9 +12,9 @@
 import { chmod, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
-import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
-import type { UserServicePlatform, UserServiceStatus } from '@mangostudio/shared/runtime-home';
-import { RuntimeServiceManagementError } from '../errors';
+import { HIDDEN_WINDOW } from '../process';
+import { RuntimeServiceManagementError } from '../runtime-contract/service-errors';
+import type { UserServicePlatform, UserServiceStatus } from '../runtime-home';
 
 const USER_SERVICE_NO_SYSTEMD_ERROR = 'systemd is not available';
 const USER_SERVICE_UNSUPPORTED_PLATFORM_ERROR = 'unsupported platform';

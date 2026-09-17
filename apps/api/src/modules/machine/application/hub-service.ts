@@ -11,7 +11,7 @@ import {
   type UserServiceDefinition,
   type UserServiceExecDeps,
   type UserServiceManager,
-} from '@mangostudio/runtime';
+} from '@mangostudio/shared/machine/service';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import {
   getConfig,

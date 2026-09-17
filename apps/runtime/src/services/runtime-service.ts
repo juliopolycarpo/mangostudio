@@ -7,6 +7,14 @@
  */
 
 import {
+  createUserServiceManager,
+  defaultUserServiceExecDeps,
+  USER_SERVICE_NO_SESSION_BUS_ERROR,
+  type UserServiceExecDeps,
+  type UserServiceExecResult,
+  type UserServiceIdentity,
+} from '@mangostudio/shared/machine/service';
+import {
   RUNTIME_BINARY_BASENAME,
   type RuntimeServiceMode,
   type RuntimeServiceStatus,
@@ -22,14 +30,6 @@ import {
   readRuntimeSlotState,
   readServeToken,
 } from '../runtime-home';
-import {
-  createUserServiceManager,
-  defaultUserServiceExecDeps,
-  USER_SERVICE_NO_SESSION_BUS_ERROR,
-  type UserServiceExecDeps,
-  type UserServiceExecResult,
-  type UserServiceIdentity,
-} from './user-service-manager';
 
 export const RUNTIME_SERVICE_DOCS_URL =
   'https://github.com/juliopolycarpo/mangostudio/blob/main/docs/operations/remote-runtimes.md';

@@ -4,7 +4,7 @@
  * respawned, and a foreground instance is left to the terminal that owns it.
  */
 
-import type { UserServiceManager } from '@mangostudio/runtime';
+import type { UserServiceManager } from '@mangostudio/shared/machine/service';
 import { isStateLive, readState, removeState, type ServerState } from '../../lib/server-state';
 import {
   createHubServiceManager,

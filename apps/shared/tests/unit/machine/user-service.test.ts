@@ -2,9 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { chmod, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
-import { UserServiceStatusSchema } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
-import { RuntimeServiceManagementError } from '../../../src/errors';
 import {
   createUserServiceManager,
   currentUserName,
@@ -21,7 +19,9 @@ import {
   type UserServiceExecDeps,
   type UserServiceExecResult,
   type UserServiceIdentity,
-} from '../../../src/services/user-service-manager';
+} from '../../../src/machine/user-service';
+import { RuntimeServiceManagementError } from '../../../src/runtime-contract';
+import { UserServiceStatusSchema } from '../../../src/runtime-home';
 
 const IDENTITY: UserServiceIdentity = {
   unitName: 'example.service',
