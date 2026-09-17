@@ -9,6 +9,7 @@
  */
 
 import Type, { type Static } from 'typebox';
+import Value from 'typebox/value';
 import {
   ExternalAgentTargetIdSchema,
   ExternalIdentityIsolationSchema,
@@ -167,6 +168,48 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
   allow: Type.Optional(RuntimeCapabilityAllowSchema),
 });
 export type RuntimeCapabilityManifest = Static<typeof RuntimeCapabilityManifestSchema>;
+
+/**
+ * What a hub claims about who reaches the machine its runtime serves.
+ *
+ * The one isolation fact a runtime cannot establish about itself. Looking from
+ * inside, a machine that serves one MangoStudio user is indistinguishable from
+ * one that serves five through a shared account — so the runtime attests what
+ * it can prove (its own uid, its own credential home, an intact container) and
+ * the hub answers the question only it can: whether more than one MangoStudio
+ * user is reaching this runtime right now.
+ *
+ * `withdrawn` is therefore a refusal, not an absence: the hub knows of a second
+ * owner and is telling the runtime to stop attesting. Absence means the hub
+ * made no claim, which leaves the runtime's own attestation standing.
+ *
+ * It rides beside `hub` rather than inside it because {@link HubIdentitySchema}
+ * refuses unknown members: a newer hub adding a key there would make every
+ * older runtime discard the whole identity and log an unattributed session.
+ */
+export const HubExternalAgentIsolationSchema = Type.Union([
+  Type.Literal('single-user'),
+  Type.Literal('withdrawn'),
+]);
+export type HubExternalAgentIsolation = Static<typeof HubExternalAgentIsolationSchema>;
+
+/**
+ * The hub's isolation claim from its `hello.capabilities`, or undefined when it
+ * made none.
+ *
+ * Validated rather than trusted: `capabilities` is an open object, and a
+ * spelling this build does not recognise is a claim it cannot act on — which
+ * is not the same as a withdrawal, and must not be read as one.
+ *
+ * @example
+ * hubExternalAgentIsolationOf({ externalAgentIsolation: 'withdrawn' }); // 'withdrawn'
+ */
+export function hubExternalAgentIsolationOf(
+  capabilities: Readonly<Record<string, unknown>>
+): HubExternalAgentIsolation | undefined {
+  const claim = capabilities.externalAgentIsolation;
+  return Value.Check(HubExternalAgentIsolationSchema, claim) ? claim : undefined;
+}
 
 /**
  * Who is speaking for the hub on this connection. Additive-optional: older

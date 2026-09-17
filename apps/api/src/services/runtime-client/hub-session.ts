@@ -23,6 +23,7 @@ import {
   type SessionClosure,
 } from '@mangostudio/protocol';
 import {
+  type HubExternalAgentIsolation,
   type HubIdentity,
   RUNTIME_CONTRACT,
   RUNTIME_CONTRACT_NAME,
@@ -73,6 +74,15 @@ export interface OpenHubSessionOptions {
    * announce this process's own host and user; pass `null` to announce none.
    */
   readonly hub?: HubIdentity | null;
+  /**
+   * What this hub can say about who reaches the runtime's machine.
+   *
+   * Announced rather than injected at construction so every transport carries
+   * it — a runtime the hub did not spawn has no argv to receive it on — and so
+   * a reconnect re-states it rather than freezing the first answer for the life
+   * of a process.
+   */
+  readonly externalAgentIsolation?: HubExternalAgentIsolation;
   readonly handshakeTimeoutMs?: number;
   /**
    * Refuse a runtime whose release differs from the hub's. Set by the
@@ -109,6 +119,9 @@ export async function openHubSession(
     capabilities: {
       contracts: { [RUNTIME_CONTRACT_NAME]: RUNTIME_CONTRACT_VERSION },
       ...(hub ? { hub } : {}),
+      ...(options.externalAgentIsolation
+        ? { externalAgentIsolation: options.externalAgentIsolation }
+        : {}),
     },
     ...(options.handshakeTimeoutMs !== undefined
       ? { handshakeTimeoutMs: options.handshakeTimeoutMs }
@@ -123,7 +136,7 @@ export async function openHubSession(
     throw error;
   }
 
-  const manifest = manifestOf(remote.capabilities);
+  const manifest = manifestOf(remote.capabilities, options.externalAgentIsolation);
   if (!manifest) {
     session.close(CLOSE_CODES.PROTOCOL_ERROR, 'capabilities are not a runtime manifest');
     throw new RemoteError(
@@ -153,11 +166,24 @@ export async function openHubSession(
   };
 }
 
-/** The peer's `hello.capabilities` as a manifest, or undefined when it is not one. */
+/**
+ * The peer's `hello.capabilities` as a manifest, or undefined when it is not one.
+ *
+ * A withdrawal is applied here rather than trusted to the runtime, because the
+ * two hellos crossed: a session sends its own from the constructor, so the
+ * manifest in front of us was composed before the peer could have read this
+ * hub's refusal. The runtime honours it from the next answer onward — this is
+ * the one answer it could not.
+ */
 function manifestOf(
-  capabilities: Readonly<Record<string, unknown>>
+  capabilities: Readonly<Record<string, unknown>>,
+  claimed?: HubExternalAgentIsolation
 ): RuntimeCapabilityManifest | undefined {
   if (!Value.Check(RuntimeCapabilityManifestSchema, capabilities)) return undefined;
+  if (claimed === 'withdrawn' && capabilities.identityIsolation !== undefined) {
+    const { identityIsolation: _withdrawn, ...withheld } = capabilities;
+    return manifestOf(withheld);
+  }
   // `contracts` rides in the same open object and is not part of the manifest.
   // Leaving it in would make every `refreshManifest` comparison see a change
   // that never happened and publish an invalidation for nothing.
