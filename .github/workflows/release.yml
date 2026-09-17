@@ -374,7 +374,7 @@ jobs:
       - name: Build and publish images (retrying transient registry failures)
         # Scripted buildx (not build-push-action) so retry_command can wrap each
         # multi-arch push; GHCR pushes occasionally fail transiently and a single
-        # retry avoids a full re-run. Tag sets are unchanged.
+        # retry avoids a full re-run. Floating tags are conditional below.
         env:
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
           VERSION: ${{ needs.build.outputs.version }}
