@@ -39,6 +39,54 @@ to `main` after the release.
 | `CARGO_REGISTRY_TOKEN`      | `cargo-publish` (optional)                                   | Legacy crates.io token used only when `workflow_dispatch` sets `allow_legacy_cargo_token=true`                       |
 | *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, the canary channel, attestations | No extra setup — tag releases grant `packages: write` for GHCR and `id-token: write` for crates.io and npm OIDC auth |
 
+### Pre-release tags
+
+A tag carrying a semver pre-release identifier — `v0.2.0-rc.1`, `v1.0.0-beta.3`,
+anything with a `-` — takes the same train and builds the same artifacts, but is
+never published as *the current version*. `prepare` resolves the classification
+once, and every channel reads that one output; nothing re-derives it.
+
+| Channel         | Stable tag (`v0.2.0`)                           | Pre-release tag (`v0.2.0-rc.1`)                         |
+| --------------- | ----------------------------------------------- | ------------------------------------------------------- |
+| GitHub Releases | published; Latest left to gh's default rule     | published, marked pre-release and **not** Latest        |
+| npm             | `latest` dist-tag                               | `next` dist-tag; `latest` stays on the last stable      |
+| GHCR            | `:<version>`, `:latest`, `:bookworm`, `:alpine` | version-pinned tags only; the floating tags do not move |
+| Homebrew tap    | formula updated                                 | skipped                                                 |
+| Scoop bucket    | manifest updated                                | skipped                                                 |
+| crates.io       | published                                       | published                                               |
+
+The two skips are not omissions. The tap holds one formula and the bucket one
+manifest, and neither `brew install mangostudio` nor `scoop install mangostudio`
+can ask for a channel, so publishing a release candidate there would hand it to
+every user of those channels. crates.io needs no gate at all: it excludes
+pre-release versions from `cargo install` resolution itself, so the version is
+published and only reachable by asking for it (`--version 0.2.0-rc.1`).
+
+Only the pre-release row sets the Latest marker explicitly. A stable release
+leaves it to `gh release create`'s default, which GitHub decides from date and
+semver — so a backport cut after a newer minor does not steal the marker.
+
+That marker is the one thing every stable consumer agrees on, which is why the
+pre-release row pins it to `false`: `scripts/install/install.sh` and
+`scripts/install/install.ps1` both resolve a stable install through
+`/releases/latest`, and so does the hub's own update check
+(`resolveStableLatestVersion` in
+`apps/api/src/modules/updates/infrastructure/release-index.ts`). An `-rc` tag
+published as a full release would be what a plain `curl … | sh` installs and
+what every running hub is offered as an upgrade.
+
+Install a pre-release explicitly:
+
+```bash
+npm install -g mangostudio@next
+docker pull ghcr.io/juliopolycarpo/mangostudio:0.2.0-rc.1
+cargo install mangostudio --version 0.2.0-rc.1
+```
+
+A pre-release is not the canary channel. Canary cuts a release from every green
+`main` commit and carries a curated asset subset; a pre-release tag is cut by
+hand and publishes the full stable artifact set.
+
 ### `release` environment
 
 Stable publish credentials live in the GitHub Environment named `release`, not
@@ -115,7 +163,9 @@ defines the naming contract and is covered by unit tests.
 
 ### What each channel publishes
 
-A stable release publishes everything. Canary does not: it cuts a release from
+A stable release publishes everything, and so does a pre-release tag — the
+difference there is which pointers move, not which assets are built (see
+[Pre-release tags](#pre-release-tags)). Canary does not: it cuts a release from
 every green `main` commit, so each asset it carries is paid for many times a day.
 
 | Channel             | Platform archives | Raw hub + runtime pairs                    |

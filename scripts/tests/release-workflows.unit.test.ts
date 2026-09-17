@@ -201,9 +201,14 @@ describe('release workflow binary gate', () => {
     expect(release).toContain('allow-legacy-token:');
     expect(release).toContain('allow_legacy_npm_token');
     expect(release).not.toMatch(/^ {10}node-auth-token: \$\{\{ secrets\.NPM_TOKEN \}\}/m);
-    // A stable release must publish as `latest`: any dist-tag wired into the
-    // release job would divert it away from the tag every installer reads.
-    expect(release).not.toMatch(/^ {10}dist-tag:/m);
+    // A stable release must publish as `latest` — the tag every installer reads
+    // — so the release job's dist-tag is allowed exactly one value besides the
+    // empty default, and only for a pre-release. Asserted as the whole
+    // expression rather than as "no dist-tag at all": the empty branch is what
+    // keeps `latest` on the stable version, and a condition that silently
+    // inverted would divert every stable release to `next`.
+    const prereleaseOutput = '$' + '{{ needs.prepare.outputs.prerelease';
+    expect(release).toContain(`dist-tag: ${prereleaseOutput} == 'true' && 'next' || '' }}`);
     expect(canary).toContain('dist-tag: canary');
     expect(canary).toContain('allow-legacy-token: "true"');
     expect(canary).toContain(`node-auth-token: ${secretPrefix}NPM_TOKEN }}`);
@@ -464,12 +469,52 @@ describe('release workflow binary gate', () => {
     );
     expect(workflow).toContain('scripts/release/smoke-binary.sh "$binary_path" "$VERSION" 13003');
 
-    expectJobNeeds(workflow, 'github-release', String.raw`\[build, verify-build\]`);
-    expectJobNeeds(workflow, 'docker', String.raw`\[build, verify-build\]`);
-    expectJobNeeds(workflow, 'npm-publish', String.raw`\[build, verify-build\]`);
-    expectJobNeeds(workflow, 'homebrew', String.raw`\[build, verify-build, github-release\]`);
-    expectJobNeeds(workflow, 'scoop', String.raw`\[build, verify-build, github-release\]`);
+    // Every channel but cargo-publish also needs `prepare`, which is where the
+    // pre-release classification each of them reads is resolved.
+    expectJobNeeds(workflow, 'github-release', String.raw`\[prepare, build, verify-build\]`);
+    expectJobNeeds(workflow, 'docker', String.raw`\[prepare, build, verify-build\]`);
+    expectJobNeeds(workflow, 'npm-publish', String.raw`\[prepare, build, verify-build\]`);
+    expectJobNeeds(
+      workflow,
+      'homebrew',
+      String.raw`\[prepare, build, verify-build, github-release\]`
+    );
+    expectJobNeeds(workflow, 'scoop', String.raw`\[prepare, build, verify-build, github-release\]`);
     expectJobNeeds(workflow, 'cargo-publish', String.raw`\[build, verify-build, github-release\]`);
+  });
+
+  test('one pre-release decision reaches every channel that has a stable pointer', () => {
+    // The consequence of two channels disagreeing is not cosmetic: the GitHub
+    // "Latest" marker is what scripts/install/install.sh resolves, and npm
+    // `latest` is what `npm install -g mangostudio` reads. A release candidate
+    // that is a pre-release on one and the current version on the other is
+    // worse than one that is neither. So the rule is derived once, in `prepare`,
+    // and every channel reads that output.
+    const workflow = readText('.github/workflows/release.yml');
+    const outputPrefix = '$' + '{{ steps.resolve.outputs.';
+    const needsPrerelease = '$' + '{{ needs.prepare.outputs.prerelease }}';
+
+    expect(extractJobBlock(workflow, 'prepare')).toContain(`prerelease: ${outputPrefix}prerelease`);
+
+    // Channels that publish a moving pointer branch on it; cargo-publish does
+    // not, because crates.io excludes pre-release versions from `cargo install`
+    // resolution on its own.
+    for (const job of ['github-release', 'docker']) {
+      expect(extractJobBlock(workflow, job), job).toContain(`PRERELEASE: ${needsPrerelease}`);
+    }
+    for (const job of ['homebrew', 'scoop']) {
+      expect(extractJobBlock(workflow, job), job).toContain(
+        "if: needs.prepare.outputs.prerelease != 'true'"
+      );
+    }
+    expect(extractJobBlock(workflow, 'cargo-publish')).not.toContain('PRERELEASE');
+
+    // A second derivation is the failure mode this shape exists to prevent: a
+    // channel that re-answered "is this a pre-release" from $VERSION could drift
+    // from the rest of the train without anything failing.
+    const derivations = workflow.split('\n').filter((line) => line.includes('*-*'));
+    expect(derivations).toHaveLength(1);
+    expect(derivations[0]).toContain('prerelease=true');
   });
 
   test('post-publish verification covers broader npm, crates.io, and Homebrew installs', () => {
