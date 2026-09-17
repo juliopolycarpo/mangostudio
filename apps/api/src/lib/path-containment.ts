@@ -1,16 +1,16 @@
 /**
- * Re-exports the canonical path-containment algorithm from the runtime package.
+ * Wraps the shared path-containment algorithm for hub callers.
  * Library and safe-file callers keep this import path; too-many-symlinks is
  * remapped to the historical ELOOP ErrnoException so safe-file behavior is
  * unchanged.
  */
 
-import { resolvePathThroughExistingAncestor as resolvePathThroughExistingAncestorRuntime } from '@mangostudio/runtime';
 import { PathAccessError } from '@mangostudio/shared/runtime-contract';
+import { resolvePathThroughExistingAncestor as resolveThroughExistingAncestor } from '@mangostudio/shared/workspaces/host';
 
 export function resolvePathThroughExistingAncestor(inputPath: string): string {
   try {
-    return resolvePathThroughExistingAncestorRuntime(inputPath);
+    return resolveThroughExistingAncestor(inputPath);
   } catch (error) {
     if (error instanceof PathAccessError && /too many symbolic links/i.test(error.message)) {
       throw tooManySymlinksError(inputPath);

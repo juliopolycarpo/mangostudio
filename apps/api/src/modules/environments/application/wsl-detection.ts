@@ -8,8 +8,8 @@
  */
 
 import { execFile } from 'node:child_process';
-import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import type { WslDetection, WslDistribution } from '@mangostudio/shared/environments';
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { decodeWslOutput, parseWslDistributions } from '../domain/wsl-output';
 import { resolveWslExecutable } from '../infrastructure/wsl-executable';

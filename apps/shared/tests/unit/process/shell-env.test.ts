@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  isSecretEnvKey,
-  isSecretEnvValue,
-  sanitizeShellEnv,
-} from '../../../src/services/shell-env';
+import { isSecretEnvKey, isSecretEnvValue, sanitizeShellEnv } from '../../../src/process/shell-env';
 
 describe('isSecretEnvKey', () => {
   it('flags connector API keys in every shape', () => {

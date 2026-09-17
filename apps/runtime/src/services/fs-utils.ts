@@ -23,8 +23,11 @@ import {
 
 export { RegularFileWriteError };
 
+import {
+  isPathPrefix,
+  resolvePathThroughExistingAncestor,
+} from '@mangostudio/shared/workspaces/host';
 import type { RuntimePathFilter } from '../methods';
-import { isPathPrefix, resolvePathThroughExistingAncestor } from './path-containment';
 
 export interface ObservedFileRead {
   readonly bytes: Uint8Array;

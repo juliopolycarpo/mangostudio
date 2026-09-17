@@ -13,7 +13,7 @@
  */
 
 import { chmod as systemChmod } from 'node:fs/promises';
-import { HIDDEN_WINDOW } from './process-window';
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import { currentUserName } from './user-service-manager';
 
 const OWNER_ONLY_MODE = 0o600;

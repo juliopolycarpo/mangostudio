@@ -12,6 +12,7 @@ import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import type { EventInput } from '@mangostudio/protocol';
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import { writeRuntimeDiagnostic } from '../diagnostics';
 import { RuntimeToolArgumentError } from '../errors';
 import type {
@@ -21,7 +22,6 @@ import type {
   RuntimeInstallRunResult,
 } from '../methods';
 import { RUNTIME_INSTALL_OUTPUT_TOPIC } from '../methods';
-import { HIDDEN_WINDOW } from './process-window';
 import { buildSpawnEnv, findPathKey, nodeSpawnEnvHost, type SpawnEnvFs } from './spawn-env';
 
 const INSTALL_OUTPUT_LIMIT_BYTES = 1024 * 1024;

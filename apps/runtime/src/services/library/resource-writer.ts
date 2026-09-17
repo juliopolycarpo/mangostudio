@@ -8,7 +8,7 @@ import {
   resourceEntryName,
 } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
-import { resolvePathThroughExistingAncestor } from '../path-containment';
+import { resolvePathThroughExistingAncestor } from '@mangostudio/shared/workspaces/host';
 import { writeLibraryFileAtomic } from './atomic-write';
 import {
   assertBackupId,

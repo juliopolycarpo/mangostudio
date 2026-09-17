@@ -20,10 +20,10 @@
  */
 
 import { isPinnedGithubGraphqlDocument } from '@mangostudio/shared/github';
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import { RuntimeServiceError, RuntimeToolArgumentError } from '../errors';
 import type { RuntimeGhExecParams, RuntimeGhExecResult } from '../methods';
 import { readStreamCapped } from './child-output';
-import { HIDDEN_WINDOW } from './process-window';
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;

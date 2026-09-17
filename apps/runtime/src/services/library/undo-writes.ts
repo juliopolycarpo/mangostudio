@@ -10,7 +10,10 @@ import { resolve as resolvePath } from 'node:path';
 import type { LibraryUndoResult } from '@mangostudio/shared/library';
 import { getLibraryLocation } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
-import { isPathPrefix, resolvePathThroughExistingAncestor } from '../path-containment';
+import {
+  isPathPrefix,
+  resolvePathThroughExistingAncestor,
+} from '@mangostudio/shared/workspaces/host';
 import {
   type BackupEntry,
   type BackupStoreDeps,

@@ -4,8 +4,8 @@
  * provider or tool only updates one expectation list.
  */
 
+import type { RuntimeShellKind as ShellKind } from '@mangostudio/shared/runtime-contract';
 import type { ProviderType } from '@mangostudio/shared/types';
-import type { ShellKind } from '../../src/services/tools/builtin/_shell-exec';
 
 const EXPECTED_PROVIDER_TYPES = [
   'anthropic',

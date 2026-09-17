@@ -15,7 +15,6 @@
 
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import type {
   ContainerDetection,
   ContainerEngine,
@@ -32,6 +31,7 @@ import {
   containerProbeCommand,
   containerPullCommand,
 } from '@mangostudio/shared/environments';
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import type { LinuxPlatformId } from '@mangostudio/shared/runtime-home';
 import {
   PLATFORM_PROBE_SCRIPT,

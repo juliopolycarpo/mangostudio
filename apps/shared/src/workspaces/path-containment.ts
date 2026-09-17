@@ -1,7 +1,7 @@
 import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import { dirname, parse, resolve, sep } from 'node:path';
-import { PathAccessError } from '../errors';
-import { resolveWorkspacePath } from './workspace-path';
+import { PathAccessError } from '../runtime-contract/service-errors';
+import { resolveWorkspacePath } from './path';
 
 /** Bounds symlink traversal, including chains whose final target exists. */
 const MAX_SYMLINK_HOPS = 32;

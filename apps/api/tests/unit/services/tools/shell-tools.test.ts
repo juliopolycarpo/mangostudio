@@ -3,11 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { isShellAvailable } from '@mangostudio/shared/process/host';
+import type { RuntimeShellKind as ShellKind } from '@mangostudio/shared/runtime-contract';
 import { environmentToolchainRepository } from '../../../../src/modules/environments/infrastructure/environment-toolchain-repository';
-import {
-  isShellAvailable,
-  type ShellKind,
-} from '../../../../src/services/tools/builtin/_shell-exec';
 import {
   buildShellTool,
   normalizeShellToolSettings,

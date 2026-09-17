@@ -30,6 +30,7 @@ import {
   LIBRARY_LOCATION_DEFINITIONS,
   listLibraryTargetDescriptors,
 } from '@mangostudio/shared/library/host';
+import { WorkspacePathError } from '@mangostudio/shared/runtime-contract';
 import { Elysia, t } from 'elysia';
 import type { Static } from 'typebox';
 import { getDb } from '../../../db/database';
@@ -38,7 +39,6 @@ import {
   validateWorkdir,
   type WorkdirValidationResult,
 } from '../../workspaces/application/workdir-validation';
-import { WorkspacePathError } from '../../workspaces/application/workspace-path';
 import {
   environmentLibraryService,
   type LibraryScope,

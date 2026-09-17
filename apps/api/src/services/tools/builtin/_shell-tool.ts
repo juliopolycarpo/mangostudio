@@ -5,6 +5,10 @@
  */
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import type {
+  RuntimeShellResult as ShellCommandResult,
+  RuntimeShellKind as ShellKind,
+} from '@mangostudio/shared/runtime-contract';
 import {
   resolveToolchainParams,
   toolchainService,
@@ -24,7 +28,6 @@ import {
   normalizeStringList,
   resolveWorkdirRelativePath,
 } from './_fs-utils';
-import type { ShellCommandResult, ShellKind } from './_shell-exec';
 
 export const SHELL_DEFAULT_TIMEOUT_SECONDS = TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT;
 export const SHELL_MIN_TIMEOUT_SECONDS = TOOL_EXECUTION_TIMEOUT_SECONDS_MIN;

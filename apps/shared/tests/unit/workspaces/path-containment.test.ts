@@ -8,7 +8,7 @@ import {
   isPathPrefix,
   resolvePathForContainment,
   WorkdirContainmentError,
-} from '../../../src/services/path-containment';
+} from '../../../src/workspaces/path-containment';
 
 let rootDir: string;
 let outsideDir: string;

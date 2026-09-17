@@ -7,7 +7,8 @@ import type {
   ListDirectoryResponse,
   WorkdirValidationReason,
 } from '@mangostudio/shared/workspaces';
-import { RuntimeServiceError } from '../errors';
+import { resolveWorkspacePath } from '@mangostudio/shared/workspaces/host';
+import { RuntimeServiceError, WorkspacePathError } from '../errors';
 import type {
   RuntimeWorkspaceBrowseParams,
   RuntimeWorkspaceResolveContainedParams,
@@ -15,7 +16,6 @@ import type {
   RuntimeWorkspaceValidateResult,
 } from '../methods';
 import { throwIfAborted } from './cancellation';
-import { resolveWorkspacePath, WorkspacePathError } from './workspace-path';
 
 /** Protocol-layer cap on directory listing size. */
 export const MAX_WORKSPACE_DIRECTORY_ENTRIES = 5000;

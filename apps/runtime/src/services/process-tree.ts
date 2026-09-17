@@ -13,7 +13,7 @@
 
 import { spawn } from 'node:child_process';
 import { readdir, readFile } from 'node:fs/promises';
-import { HIDDEN_WINDOW } from './process-window';
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 
 /**
  * Makes the child lead its own process group so the group can be signalled as a

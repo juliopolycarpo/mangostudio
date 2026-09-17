@@ -222,15 +222,7 @@ export {
   type McpRequestOptions,
   type McpServerCapabilities,
 } from './services/mcp/types';
-export {
-  assertInsideWorkdir,
-  isInside,
-  isPathPrefix,
-  resolveContainmentRoot,
-  resolvePathForContainment,
-  resolvePathThroughExistingAncestor,
-  WorkdirContainmentError,
-} from './services/path-containment';
+
 export {
   createRuntimePathEnv,
   NODE_AUTH_SIGNAL_FS,
@@ -242,7 +234,7 @@ export {
   type ProbingService,
   probingService,
 } from './services/probing/service';
-export { HIDDEN_WINDOW } from './services/process-window';
+
 export {
   findShellExecutable,
   isShellAvailable,
@@ -253,11 +245,7 @@ export {
   ShellExecutionError,
   type ShellKind,
 } from './services/shell';
-export {
-  isSecretEnvKey,
-  type ShellEnvPolicy,
-  sanitizeShellEnv,
-} from './services/shell-env';
+
 export {
   captureFileSnapshot,
   hashFileAtPath,
@@ -284,7 +272,7 @@ export {
   WorkspaceBrowserError,
   WorkspaceContainmentError,
 } from './services/workspace';
-export { resolveWorkspacePath, WorkspacePathError } from './services/workspace-path';
+
 export {
   createRuntimeEventRelay,
   createRuntimeSession,
