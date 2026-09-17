@@ -10,7 +10,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { faker } from '@faker-js/faker';
-import type { RuntimeMutationResult, RuntimeMutationSnapshot } from '@mangostudio/runtime';
+import type {
+  RuntimeMutationResult,
+  RuntimeMutationSnapshot,
+} from '@mangostudio/shared/runtime-contract';
 import { getDb } from '../../../../src/db/database';
 import { revertMessageFileCheckpoints } from '../../../../src/modules/file-checkpoints/application/revert-message-checkpoints';
 import { hashCheckpointBytes } from '../../../../src/modules/file-checkpoints/infrastructure/checkpoint-blob-store';

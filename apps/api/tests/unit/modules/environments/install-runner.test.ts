@@ -6,7 +6,10 @@
 
 import { describe, expect, it } from 'bun:test';
 import type { EventFrame } from '@mangostudio/protocol';
-import { RUNTIME_INSTALL_OUTPUT_TOPIC, type RuntimeInstallRunResult } from '@mangostudio/runtime';
+import {
+  RUNTIME_INSTALL_OUTPUT_TOPIC,
+  type RuntimeInstallRunResult,
+} from '@mangostudio/shared/runtime-contract';
 import {
   createInstallRunner,
   type InstallLogLine,
