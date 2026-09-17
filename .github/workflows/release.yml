@@ -104,8 +104,20 @@ jobs:
           # one, and nothing downstream rejects it: check:versions normalizes
           # before comparing, so `v0.2.0` clears every gate and first surfaces
           # as the tag `vv0.2.0` — which immutable releases reserve forever.
+          #
+          # The dispatch branch drops whitespace before the `v`, the order
+          # normalizeVersion uses (`.trim()` then `^v`): a pasted " v0.2.0"
+          # would otherwise keep its space, clear the lockstep gate that trims
+          # it away, and only surface as the unusable tag "v v0.2.0" after the
+          # whole distribution is built. Every space goes, not only the ends:
+          # `echo "version=${version}"` writes one line per newline it is
+          # handed, so trimming alone would leave a pasted newline free to
+          # append its own keys to $GITHUB_OUTPUT — the same class of hazard as
+          # the env binding above. The tag-push branch needs none of it: a ref
+          # name cannot carry whitespace at all.
           if [ -n "$INPUT_VERSION" ]; then
-            version="${INPUT_VERSION#v}"
+            version="${INPUT_VERSION//[[:space:]]/}"
+            version="${version#v}"
           else
             version="${GITHUB_REF_NAME#v}"
           fi

@@ -181,6 +181,20 @@ describe('the resolve step classifies the version it is releasing', () => {
       prerelease: 'false',
     });
   });
+
+  test.each([' v0.2.0', '0.2.0 ', '\t0.2.0'])(
+    'a dispatch input of %j keeps whitespace out of the resolved version',
+    (input) => {
+      // normalizeVersion trims before it strips the `v`, so a pasted " v0.2.0"
+      // clears `check:versions --expect` — and then names the tag "v v0.2.0",
+      // which git refuses, after the whole distribution has already been built.
+      // The two normalizations have to agree, in that order.
+      expect(resolve({ GITHUB_REF_NAME: 'v9.9.9', INPUT_VERSION: input })).toEqual({
+        version: '0.2.0',
+        prerelease: 'false',
+      });
+    }
+  );
 });
 
 describe('the GitHub Release step marks a pre-release as one', () => {
