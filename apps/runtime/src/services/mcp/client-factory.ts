@@ -13,6 +13,11 @@ import type {
   McpResourceDescriptor,
   McpToolDescriptor,
 } from '@mangostudio/shared/mcp';
+import {
+  DEFAULT_MCP_TIMEOUT_MS,
+  flattenMcpContent,
+  normalizeMcpContent,
+} from '@mangostudio/shared/mcp';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -35,7 +40,6 @@ import type {
   RuntimeMcpSecrets,
   RuntimeMcpServerConfig,
 } from '../../methods';
-import { flattenMcpContent, normalizeMcpContent } from './content-mapping';
 import { flattenElicitationSchema } from './elicitation-schema';
 import { buildStdioEnv } from './stdio-env';
 import {
@@ -46,9 +50,6 @@ import {
   type McpRequestOptions,
   type McpServerCapabilities,
 } from './types';
-
-/** Request cap applied when neither the call nor the server row sets one. */
-export const DEFAULT_MCP_TIMEOUT_MS = 30_000;
 
 interface QueuedToolCall {
   enqueuedAt: number;

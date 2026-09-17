@@ -12,8 +12,8 @@ import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
  * can be routed to the call that caused it.
  */
 
-import { DEFAULT_MCP_TIMEOUT_MS } from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { DEFAULT_MCP_TIMEOUT_MS } from '@mangostudio/shared/mcp';
 import {
   RUNTIME_MCP_ELICITATION_TOPIC,
   RUNTIME_MCP_SESSION_TOPIC,

@@ -13,10 +13,6 @@ import { RemoteError } from '@mangostudio/protocol';
  * file became the transport call and the error translation around it.
  */
 
-import {
-  buildGhArgv as runtimeBuildGhArgv,
-  buildGhEnvironment as runtimeBuildGhEnvironment,
-} from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { RuntimeGhExecResult } from '@mangostudio/shared/runtime-contract';
 import { getRuntimeClient } from '../../../services/runtime-client';
@@ -143,18 +139,6 @@ export interface CreateGhCliOptions {
   readonly available?: (selection: GhRuntimeSelection) => Promise<boolean>;
   /** Resolves the cwd an environment-wide probe runs in. */
   readonly probeCwd?: (selection: GhRuntimeSelection) => Promise<string>;
-}
-
-/** Builds the direct argv passed to Bun.spawn on the runtime; no shell is involved. */
-export function buildGhArgv(args: readonly string[]): string[] {
-  return runtimeBuildGhArgv(args);
-}
-
-/** Keeps gh configuration and network settings without forwarding token variables. */
-export function buildGhEnvironment(
-  source: NodeJS.ProcessEnv = process.env
-): Record<string, string> {
-  return runtimeBuildGhEnvironment(source);
 }
 
 /**

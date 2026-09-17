@@ -5,7 +5,7 @@ import {
   MCP_RESULT_MAX_BYTES,
   MCP_RESULT_TRUNCATION_MARKER,
   normalizeMcpContent,
-} from '../../../../src/services/mcp/content-mapping';
+} from '../../../src/mcp/content-mapping';
 
 describe('normalizeMcpContent', () => {
   it('maps text, image, audio, and resource blocks to the project shapes', () => {

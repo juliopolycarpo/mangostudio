@@ -7,7 +7,7 @@
  * binary resources) stays hub-side in `rich-content.ts`.
  */
 
-import type { RuntimeMcpContentBlock } from '../../methods';
+import type { RuntimeMcpContentBlock } from '../runtime-contract/methods/mcp';
 
 /** Structural view of an SDK content block; kept SDK-free on purpose. */
 export interface McpContentBlockLike {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { DEFAULT_MCP_TIMEOUT_MS } from '@mangostudio/runtime';
+import { DEFAULT_MCP_TIMEOUT_MS } from '@mangostudio/shared/mcp';
 import {
   RUNTIME_MCP_CALL_GRACE_MS,
   requestDeadline,

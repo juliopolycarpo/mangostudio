@@ -5,7 +5,6 @@
  * its contents as chat attachments so a turn carries them as context.
  */
 
-import { capMcpResultText } from '@mangostudio/runtime';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
   GetMcpPromptBody,
@@ -16,6 +15,7 @@ import type {
   ReadMcpResourceBody,
   ReadMcpResourceResponse,
 } from '@mangostudio/shared/mcp';
+import { capMcpResultText } from '@mangostudio/shared/mcp';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { getMcpClient } from '../../../services/mcp/connection-manager';

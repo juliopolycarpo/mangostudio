@@ -19,8 +19,11 @@
  * leaked argv or stderr has no token in it to leak.
  */
 
-import { isPinnedGithubGraphqlDocument } from '@mangostudio/shared/github';
+import { isPinnedGithubGraphqlDocument, summarizeGhSubcommand } from '@mangostudio/shared/github';
 import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
+
+export { summarizeGhSubcommand };
+
 import { RuntimeServiceError, RuntimeToolArgumentError } from '../errors';
 import type { RuntimeGhExecParams, RuntimeGhExecResult } from '../methods';
 import { readStreamCapped } from './child-output';
@@ -228,20 +231,6 @@ export function mutateGh(
   signal?: AbortSignal
 ): Promise<RuntimeGhExecResult> {
   return runGh('gh.mutate', WRITE_SUBCOMMANDS, params, signal);
-}
-
-/**
- * Summarizes a `gh` argv down to its subcommand tokens, for audit lines.
- *
- * Never the full argv: `gh pr create --title ... --body ...` carries prose a
- * user wrote, and the audit scrubber is best-effort pattern matching. Two
- * tokens name the operation, which is what an audit trail is for.
- *
- * @example
- * summarizeGhSubcommand(['pr', 'create', '--title', 'Fix']); // ['pr', 'create']
- */
-export function summarizeGhSubcommand(args: readonly unknown[]): readonly string[] {
-  return args.filter((entry): entry is string => typeof entry === 'string').slice(0, 2);
 }
 
 async function runGh(

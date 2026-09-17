@@ -1,8 +1,4 @@
 import { RemoteError } from '@mangostudio/protocol';
-import {
-  buildGitArgv as runtimeBuildGitArgv,
-  buildGitEnvironment as runtimeBuildGitEnvironment,
-} from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { RuntimeGitExecResult } from '@mangostudio/shared/runtime-contract';
 import { getRuntimeClient } from '../../../services/runtime-client';
@@ -58,18 +54,6 @@ export class GitCliError extends Error {
     this.args = [...args];
     this.aborted = aborted;
   }
-}
-
-/** Builds the direct argv passed to Bun.spawn; no shell is involved. */
-export function buildGitArgv(args: readonly string[]): string[] {
-  return runtimeBuildGitArgv(args);
-}
-
-/** Keeps only process state Git needs, then forces deterministic non-interactive behavior. */
-export function buildGitEnvironment(
-  source: NodeJS.ProcessEnv = process.env
-): Record<string, string> {
-  return runtimeBuildGitEnvironment(source);
 }
 
 /**
