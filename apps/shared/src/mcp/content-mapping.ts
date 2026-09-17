@@ -5,6 +5,12 @@
  * happens here rather than hub-side: a server that dumps a megabyte of text
  * must not put a megabyte on the wire. Persistence of rich blocks (images,
  * binary resources) stays hub-side in `rich-content.ts`.
+ *
+ * Kept out of the `mcp` barrel on purpose: the capping measures UTF-8 with
+ * `Buffer`, which is a Node global the browser does not have, and the frontend
+ * value-imports that barrel for its schemas. Same split as
+ * `@mangostudio/shared/library/host` — Node-reaching shared code gets its own
+ * export subpath so the bundle never resolves it.
  */
 
 import type { RuntimeMcpContentBlock } from '../runtime-contract/methods/mcp';

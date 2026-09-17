@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setMcpTransportFactoryForTest } from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import { MCP_RESULT_TRUNCATION_MARKER } from '@mangostudio/shared/mcp';
+import { MCP_RESULT_TRUNCATION_MARKER } from '@mangostudio/shared/mcp/content-mapping';
 import { getDb } from '../../../../src/db/database';
 import { loadConfigForTest } from '../../../../src/lib/config';
 import { resolveTurnContext } from '../../../../src/modules/generation/application/resolve-turn-context';

@@ -13,11 +13,8 @@ import type {
   McpResourceDescriptor,
   McpToolDescriptor,
 } from '@mangostudio/shared/mcp';
-import {
-  DEFAULT_MCP_TIMEOUT_MS,
-  flattenMcpContent,
-  normalizeMcpContent,
-} from '@mangostudio/shared/mcp';
+import { DEFAULT_MCP_TIMEOUT_MS } from '@mangostudio/shared/mcp';
+import { flattenMcpContent, normalizeMcpContent } from '@mangostudio/shared/mcp/content-mapping';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';

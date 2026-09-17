@@ -15,7 +15,7 @@ import type {
   ReadMcpResourceBody,
   ReadMcpResourceResponse,
 } from '@mangostudio/shared/mcp';
-import { capMcpResultText } from '@mangostudio/shared/mcp';
+import { capMcpResultText } from '@mangostudio/shared/mcp/content-mapping';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { getMcpClient } from '../../../services/mcp/connection-manager';

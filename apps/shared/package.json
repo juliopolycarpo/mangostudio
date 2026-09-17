@@ -37,6 +37,7 @@
     "./i18n": "./src/i18n/index.ts",
     "./markdown": "./src/markdown/index.ts",
     "./mcp": "./src/mcp/index.ts",
+    "./mcp/content-mapping": "./src/mcp/content-mapping.ts",
     "./skills": "./src/skills/index.ts",
     "./todos": "./src/todos/index.ts",
     "./tool-executions": "./src/tool-executions/index.ts",
