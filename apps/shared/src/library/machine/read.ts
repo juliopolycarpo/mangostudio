@@ -6,7 +6,7 @@
 
 import { open, realpath } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { RuntimeToolArgumentError } from '../../runtime-contract';
+import { RuntimeToolArgumentError } from '../../runtime-contract/service-errors';
 import type { PathEnv } from '../../runtime-env';
 import { getLibraryLocation } from '../host';
 import type { LibraryLocationId, ResourceKind } from '../index';

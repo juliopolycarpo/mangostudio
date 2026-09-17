@@ -86,7 +86,7 @@ export async function connectLocalRuntime(
   // user who narrows that slot gets a read-only Local, which is the point of
   // being able to narrow it. Absence resolves to full, so the default is
   // unchanged and no install has to have run.
-  const [probe] = (await probeRuntimeSlots()).filter((slot) => slot.slot === 'host');
+  const probe = (await probeRuntimeSlots()).find((slot) => slot.slot === 'host');
   const identityIsolation = createSingleUserHostExternalAgentIsolation();
   const definition = createLocalRuntimeHost({
     runtimeVersion,

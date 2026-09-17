@@ -1,8 +1,7 @@
 /**
  * Hub-side re-exports of the library resource writer. Writes run in
- * `@mangostudio/shared/library/machine`; this path keeps Partial-deps ergonomics
- * and hub
- * config defaults for Local tests and orchestrators.
+ * `@mangostudio/shared/library/machine`; this path keeps Partial-deps
+ * ergonomics and hub config defaults for Local tests and orchestrators.
  */
 
 import {

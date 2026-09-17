@@ -71,7 +71,7 @@ function isWithheld(key: string, value: string, policy: ShellEnvPolicy): boolean
  *
  * @example
  * ```ts
- * import { HIDDEN_WINDOW, sanitizeShellEnv } from '@mangostudio/runtime';
+ * import { HIDDEN_WINDOW, sanitizeShellEnv } from '@mangostudio/shared/process';
  *
  * Bun.spawn(cmd, { env: sanitizeShellEnv({ allow: ['GITHUB_TOKEN'] }), ...HIDDEN_WINDOW });
  * ```

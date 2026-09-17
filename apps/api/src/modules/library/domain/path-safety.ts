@@ -1,8 +1,7 @@
 /**
  * Hub-side re-exports of library write-path safety. The checks run on the
  * machine that holds the files (`@mangostudio/shared/library/machine`); hub
- * orchestrators and
- * tests keep this import path.
+ * orchestrators and tests keep this import path.
  */
 
 export {

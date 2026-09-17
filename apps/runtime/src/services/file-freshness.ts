@@ -7,6 +7,7 @@ import {
   StaleLineNumbersError,
   UnobservedLineNumbersError,
 } from '../errors';
+import { type ObservedFileRead, readFileWithObservedMtime } from './fs-utils';
 
 export {
   FileNotReadError,
@@ -15,8 +16,6 @@ export {
   StaleLineNumbersError,
   UnobservedLineNumbersError,
 };
-
-import { type ObservedFileRead, readFileWithObservedMtime } from './fs-utils';
 
 /**
  * Read-before-destroy invariant and its actual boundary.

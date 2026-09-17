@@ -20,11 +20,16 @@ import {
   READ_FILE_MAX_BYTES,
 } from '@mangostudio/shared/runtime-contract';
 import {
+  isPathPrefix,
+  resolvePathThroughExistingAncestor,
+} from '@mangostudio/shared/workspaces/host';
+import {
   FileTooLargeError,
   PathAccessError,
   RegularFileWriteError,
   RuntimeServiceError,
 } from '../errors';
+import type { RuntimePathFilter } from '../methods';
 
 export {
   BINARY_SNIFF_BYTES,
@@ -32,12 +37,6 @@ export {
   READ_FILE_MAX_BYTES,
   RegularFileWriteError,
 };
-
-import {
-  isPathPrefix,
-  resolvePathThroughExistingAncestor,
-} from '@mangostudio/shared/workspaces/host';
-import type { RuntimePathFilter } from '../methods';
 
 export interface ObservedFileRead {
   readonly bytes: Uint8Array;

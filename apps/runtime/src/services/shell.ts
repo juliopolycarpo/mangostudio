@@ -6,19 +6,15 @@
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
-import { RuntimeServiceError, ShellExecutionError } from '../errors';
-
-export { ShellExecutionError };
-
 import { HIDDEN_WINDOW, type ShellEnvPolicy, sanitizeShellEnv } from '@mangostudio/shared/process';
 import { findShellExecutable, isShellAvailable } from '@mangostudio/shared/process/host';
+import { RuntimeServiceError, ShellExecutionError } from '../errors';
 import type { RuntimeShellResult } from '../methods';
 import { readStreamCapped } from './child-output';
 import { killProcessTree, OWN_PROCESS_GROUP } from './process-tree';
-
-export { findShellExecutable, isShellAvailable };
-
 import { buildSpawnEnv, nodeSpawnEnvHost } from './spawn-env';
+
+export { findShellExecutable, isShellAvailable, ShellExecutionError };
 
 /** Shell interpreters exposed as tools. */
 export type ShellKind = RuntimeShellResult['shell'];

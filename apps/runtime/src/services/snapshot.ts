@@ -1,10 +1,7 @@
 import { unlink } from 'node:fs/promises';
-import { PathAccessError, RuntimeServiceError, RuntimeSnapshotConflictError } from '../errors';
-
-export { RuntimeSnapshotConflictError };
-
 import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import { assertInsideWorkdir, WorkdirContainmentError } from '@mangostudio/shared/workspaces/host';
+import { PathAccessError, RuntimeServiceError, RuntimeSnapshotConflictError } from '../errors';
 import {
   RUNTIME_ABSENT_HASH,
   type RuntimeBeforeSnapshot,
@@ -19,6 +16,8 @@ import {
   moveRegularFileWithoutOverwrite,
   writeRegularFileAtomic,
 } from './fs-utils';
+
+export { RuntimeSnapshotConflictError };
 
 export class RuntimeSnapshotTooLargeError extends RuntimeServiceError {
   constructor(resolvedPath: string, sizeBytes: number) {

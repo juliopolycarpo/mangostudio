@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, extname, join, relative, sep } from 'node:path';
-import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import { parse as parseToml } from 'smol-toml';
 import { parseMarkdownFrontmatter } from '../../markdown';
+import { throwIfAborted } from '../../runtime-contract/cancellation';
 import type { LocationDefinition } from '../host';
 import {
   hashLibraryDirectory,
