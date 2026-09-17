@@ -13,9 +13,11 @@ import {
   READ_FILE_MAX_START_LINE,
   READ_FILE_MAX_WINDOW_BYTES,
   READ_FILE_MIN_MAX_LINES,
+} from '@mangostudio/runtime';
+import {
   RUNTIME_READ_FILE_VIEWS,
   type RuntimeReadFileView,
-} from '@mangostudio/runtime';
+} from '@mangostudio/shared/runtime-contract';
 import { getRuntimeClient } from '../../runtime-client';
 import { getBoundedOptionalInteger, getOptionalEnum, ToolArgumentError } from '../arg-parsing';
 import { registerTool } from '../registry';

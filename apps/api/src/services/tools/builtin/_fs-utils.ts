@@ -5,12 +5,11 @@
  * that owns it (see `pathPolicy` on the runtime filesystem methods).
  */
 
-import {
-  PathAccessError,
-  type RuntimePathFilter,
-  type RuntimePathPolicyParams,
-  readFileWithObservedMtime,
-} from '@mangostudio/runtime';
+import { PathAccessError, readFileWithObservedMtime } from '@mangostudio/runtime';
+import type {
+  RuntimePathFilter,
+  RuntimePathPolicyParams,
+} from '@mangostudio/shared/runtime-contract';
 import type { ToolParameterDescriptor } from '@mangostudio/shared/tool-settings';
 import type { TargetPaths } from '../../runtime-client';
 import { normalizePathList, normalizeStringList, type PathListItem } from '../list-normalization';

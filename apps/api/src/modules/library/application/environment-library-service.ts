@@ -9,11 +9,7 @@
  * entries are dropped rather than carried across the gap.
  */
 
-import {
-  libraryContentPath,
-  MAX_LIBRARY_CONTENT_BYTES,
-  type RuntimeLibraryScanEntry,
-} from '@mangostudio/runtime';
+import { libraryContentPath, MAX_LIBRARY_CONTENT_BYTES } from '@mangostudio/runtime';
 import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import type {
   LibraryLocationId,
@@ -23,6 +19,7 @@ import type {
   LibraryScanResult,
   ResourceKind,
 } from '@mangostudio/shared/library';
+import type { RuntimeLibraryScanEntry } from '@mangostudio/shared/runtime-contract';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { setBounded } from '../../../lib/bounded-map';

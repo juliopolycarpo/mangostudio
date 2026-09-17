@@ -6,18 +6,18 @@
  */
 
 import type {
+  McpPromptDescriptor,
+  McpResourceDescriptor,
+  McpToolDescriptor,
+} from '@mangostudio/shared/mcp';
+import type {
   RuntimeMcpCallResult,
   RuntimeMcpContentBlock,
   RuntimeMcpPromptResult,
   RuntimeMcpResourceContents,
   RuntimeMcpServerCapabilities,
   RuntimeMcpServerConfig,
-} from '@mangostudio/runtime';
-import type {
-  McpPromptDescriptor,
-  McpResourceDescriptor,
-  McpToolDescriptor,
-} from '@mangostudio/shared/mcp';
+} from '@mangostudio/shared/runtime-contract';
 
 /**
  * Runtime connection config derived from an `mcp_servers` row (no secrets),

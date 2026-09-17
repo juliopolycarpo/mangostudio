@@ -1,4 +1,5 @@
 import { RemoteError } from '@mangostudio/protocol';
+
 /**
  * Hub-side facade over the runtime's `gh.exec` / `gh.mutate` methods.
  *
@@ -13,11 +14,11 @@ import { RemoteError } from '@mangostudio/protocol';
  */
 
 import {
-  type RuntimeGhExecResult,
   buildGhArgv as runtimeBuildGhArgv,
   buildGhEnvironment as runtimeBuildGhEnvironment,
 } from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import type { RuntimeGhExecResult } from '@mangostudio/shared/runtime-contract';
 import { getRuntimeClient } from '../../../services/runtime-client';
 import {
   detailBoolean,

@@ -5,12 +5,25 @@ import {
   type RequestOptions,
 } from '@mangostudio/protocol';
 import {
+  FileNotReadError,
+  GrepPatternError,
+  PartialReadError,
+  PathAccessError,
+  RuntimeConsentDeniedError,
+  RuntimeSnapshotConflictError,
+  ShellExecutionError,
+  StaleFileError,
+  StaleLineNumbersError,
+  UnobservedLineNumbersError,
+} from '@mangostudio/runtime';
+import {
   type ExternalAgentAckResult,
   type ExternalAgentCancelParams,
   type ExternalAgentCloseParams,
   type ExternalAgentDiscoverParams,
   type ExternalAgentDiscoverResult,
   type ExternalAgentEventEnvelope,
+  ExternalAgentEventEnvelopeFrameSchema,
   type ExternalAgentListSessionsParams,
   type ExternalAgentListSessionsResult,
   type ExternalAgentOpenParams,
@@ -24,17 +37,18 @@ import {
   type ExternalAgentSteerResult,
   type ExternalAgentTurnParams,
   type ExternalAgentTurnResult,
-  FileNotReadError,
-  GrepPatternError,
-  PartialReadError,
-  PathAccessError,
+} from '@mangostudio/shared/external-agents';
+import {
+  directoryHashDomainOf,
+  type RuntimeSettingsSourcesResult,
+} from '@mangostudio/shared/library';
+import {
   RUNTIME_EXTERNAL_AGENT_TOPIC,
   RUNTIME_TERMINAL_OUTPUT_TOPIC,
   type RuntimeApplyPatchParams,
   type RuntimeApplyPatchResult,
   type RuntimeBeforeSnapshot,
   type RuntimeCapabilityManifest,
-  RuntimeConsentDeniedError,
   type RuntimeCreateFileParams,
   type RuntimeCreateFileResult,
   type RuntimeDeleteFileParams,
@@ -92,6 +106,7 @@ import {
   type RuntimeMoveFileParams,
   type RuntimeMoveFileResult,
   type RuntimeMutationResult,
+  type RuntimePathPolicyParams,
   type RuntimeProbeAgentClisParams,
   type RuntimeProbeAgentClisResult,
   type RuntimeProbeRuntimesParams,
@@ -105,7 +120,6 @@ import {
   type RuntimeShellResult,
   type RuntimeShellRunParams,
   type RuntimeSnapshotCaptureParams,
-  RuntimeSnapshotConflictError,
   type RuntimeSnapshotHashParams,
   type RuntimeSnapshotHashResult,
   type RuntimeSnapshotRevertParams,
@@ -135,17 +149,7 @@ import {
   type RuntimeWorkspaceValidateResult,
   type RuntimeWriteFileParams,
   type RuntimeWriteFileResult,
-  ShellExecutionError,
-  StaleFileError,
-  StaleLineNumbersError,
-  UnobservedLineNumbersError,
-} from '@mangostudio/runtime';
-import { ExternalAgentEventEnvelopeFrameSchema } from '@mangostudio/shared/external-agents';
-import {
-  directoryHashDomainOf,
-  type RuntimeSettingsSourcesResult,
-} from '@mangostudio/shared/library';
-import type { RuntimePathPolicyParams } from '@mangostudio/shared/runtime-contract';
+} from '@mangostudio/shared/runtime-contract';
 import Value from 'typebox/value';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { McpConnectionError } from '../mcp/types';
