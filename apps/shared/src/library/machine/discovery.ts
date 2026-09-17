@@ -6,16 +6,16 @@
  * method exists so a remote scan is one RPC.
  */
 
-import type { LibraryLocationSettings } from '@mangostudio/shared/app-settings';
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
+import type { LibraryLocationSettings } from '../../app-settings';
+import type { PathEnv } from '../../runtime-env';
+import { LIBRARY_LOCATION_DEFINITIONS } from '../host';
 import {
   enabledLibraryLocations,
   LIBRARY_SCOPES,
   type LibraryLocationId,
   type ResourceKind,
-} from '@mangostudio/shared/library';
-import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
-import { throwIfAborted } from '../cancellation';
+} from '../index';
 import { type LibraryCache, libraryCache } from './cache';
 import { type ReadLocationInstancesResult, readLocationInstances } from './instance-reader';
 

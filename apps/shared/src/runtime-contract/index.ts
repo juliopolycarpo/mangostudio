@@ -7,6 +7,7 @@
  * modules this barrel would otherwise pull into a cycle.
  */
 
+export * from './cancellation';
 export * from './contract';
 export * from './errors';
 export * from './events';

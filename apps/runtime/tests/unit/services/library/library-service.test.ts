@@ -11,14 +11,14 @@ import {
   libraryLocationsFor,
   withLibraryLocations,
 } from '@mangostudio/shared/app-settings';
-import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import {
-  createLibraryService,
   LibraryCache,
   MAX_LIBRARY_FILE_BYTES,
   readLibraryContent,
-} from '../../../../src/services/library';
-import { readLibraryTree } from '../../../../src/services/library/instance-reader';
+  readLibraryTree,
+} from '@mangostudio/shared/library/machine';
+import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
+import { createLibraryService } from '../../../../src/services/library/service';
 import { createRuntimePathEnv } from '../../../../src/services/probing/host-env';
 
 let root: string;

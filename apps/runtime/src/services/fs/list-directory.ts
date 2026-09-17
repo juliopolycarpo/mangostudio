@@ -1,8 +1,8 @@
 import type { Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import { PathAccessError } from '../../errors';
 import type { RuntimeListDirectoryParams, RuntimeListDirectoryResult } from '../../methods';
-import { throwIfAborted } from '../cancellation';
 
 export async function listRuntimeDirectory(
   params: RuntimeListDirectoryParams,

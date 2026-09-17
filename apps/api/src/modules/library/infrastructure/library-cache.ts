@@ -4,7 +4,7 @@
  * never share scan slots with the runtime process singleton.
  */
 
-import { LIBRARY_SCAN_CACHE_TTL_MS, LibraryCache } from '@mangostudio/runtime';
+import { LIBRARY_SCAN_CACHE_TTL_MS, LibraryCache } from '@mangostudio/shared/library/machine';
 
 export { LIBRARY_SCAN_CACHE_TTL_MS, LibraryCache };
 

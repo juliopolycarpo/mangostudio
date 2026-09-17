@@ -6,10 +6,10 @@
 
 import { open, realpath } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import type { LibraryLocationId, ResourceKind } from '@mangostudio/shared/library';
-import { getLibraryLocation } from '@mangostudio/shared/library/host';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
-import { RuntimeToolArgumentError } from '../../errors';
+import { RuntimeToolArgumentError } from '../../runtime-contract';
+import type { PathEnv } from '../../runtime-env';
+import { getLibraryLocation } from '../host';
+import type { LibraryLocationId, ResourceKind } from '../index';
 import { isPathWithin, SKILL_ENTRYPOINT } from './instance-reader';
 
 /** Default ceiling for a detail-view content read (hub passes its own when different). */

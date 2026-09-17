@@ -11,4 +11,4 @@ export {
   stagedRemovalDirectory,
   stageResourceRemoval,
   type TreeRemovalFs,
-} from '@mangostudio/runtime';
+} from '@mangostudio/shared/library/machine';

@@ -11,12 +11,6 @@ import { RemoteError } from '@mangostudio/protocol';
  * None of them is optional, and none of them should be relaxed for speed.
  */
 
-import {
-  executeLibraryUndo,
-  executePropagationWrites,
-  LibraryBackupMissingError,
-  type PropagationWriteEngineDeps,
-} from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   type AdapterStrategy,
@@ -41,6 +35,12 @@ import {
   type ResourceKind,
 } from '@mangostudio/shared/library';
 import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
+import {
+  executeLibraryUndo,
+  executePropagationWrites,
+  LibraryBackupMissingError,
+  type PropagationWriteEngineDeps,
+} from '@mangostudio/shared/library/machine';
 import {
   LIBRARY_BACKUP_MISSING_KIND,
   type RuntimeLibraryApplyParams,

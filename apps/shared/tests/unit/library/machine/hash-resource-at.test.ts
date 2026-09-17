@@ -6,7 +6,7 @@ import {
   hashResourceAt,
   LibraryHashInvalidError,
   PathEscapeError,
-} from '../../../../src/services/library/instance-reader';
+} from '../../../../src/library/machine/instance-reader';
 
 let root: string;
 

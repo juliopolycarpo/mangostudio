@@ -1,6 +1,6 @@
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import { FileTooLargeError, PathAccessError } from '../../errors';
 import type { RuntimeReadFileParams, RuntimeReadFileResult } from '../../methods';
-import { throwIfAborted } from '../cancellation';
 import { recordFileRead } from '../file-freshness';
 import {
   BINARY_SNIFF_BYTES,

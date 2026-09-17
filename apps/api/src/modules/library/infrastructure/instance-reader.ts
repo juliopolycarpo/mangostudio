@@ -10,4 +10,4 @@ export {
   MAX_LIBRARY_FILE_BYTES,
   readLocationInstances,
   readResourceFile,
-} from '@mangostudio/runtime';
+} from '@mangostudio/shared/library/machine';

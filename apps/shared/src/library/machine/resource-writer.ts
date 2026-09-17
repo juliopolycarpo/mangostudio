@@ -1,14 +1,10 @@
 import type { Dirent, Stats } from 'node:fs';
 import { cp, lstat, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import type { LibraryLocationId } from '@mangostudio/shared/library';
-import {
-  getLibraryLocation,
-  type LocationDefinition,
-  resourceEntryName,
-} from '@mangostudio/shared/library/host';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
-import { resolvePathThroughExistingAncestor } from '@mangostudio/shared/workspaces/host';
+import type { PathEnv } from '../../runtime-env';
+import { resolvePathThroughExistingAncestor } from '../../workspaces/host';
+import { getLibraryLocation, type LocationDefinition, resourceEntryName } from '../host';
+import type { LibraryLocationId } from '../index';
 import { writeLibraryFileAtomic } from './atomic-write';
 import {
   assertBackupId,

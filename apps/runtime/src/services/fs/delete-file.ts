@@ -1,11 +1,11 @@
 import { unlink } from 'node:fs/promises';
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import type {
   RuntimeBeforeSnapshot,
   RuntimeDeleteFileParams,
   RuntimeDeleteFileResult,
   RuntimeMutationResult,
 } from '../../methods';
-import { throwIfAborted } from '../cancellation';
 import {
   assertFresh,
   FileNotReadError,

@@ -3,6 +3,7 @@ import { PathAccessError, RuntimeServiceError, RuntimeSnapshotConflictError } fr
 
 export { RuntimeSnapshotConflictError };
 
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import { assertInsideWorkdir, WorkdirContainmentError } from '@mangostudio/shared/workspaces/host';
 import {
   RUNTIME_ABSENT_HASH,
@@ -11,7 +12,6 @@ import {
   type RuntimeSnapshotRevertParams,
   type RuntimeSnapshotRevertResult,
 } from '../methods';
-import { throwIfAborted } from './cancellation';
 import { forgetFile, recordFileRead, rekeyFile, withPathLocks } from './file-freshness';
 import {
   assertRegularFilePath,

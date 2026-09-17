@@ -8,4 +8,4 @@ export {
   assertExpectedResourceEntry,
   LibraryWriteError,
   resolveContainedResourcePath,
-} from '@mangostudio/runtime';
+} from '@mangostudio/shared/library/machine';

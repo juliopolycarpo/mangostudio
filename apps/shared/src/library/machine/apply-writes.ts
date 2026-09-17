@@ -11,7 +11,8 @@
  */
 
 import { resolve as resolvePath } from 'node:path';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '../../environments';
+import type { PathEnv } from '../../runtime-env';
 import type {
   LibraryLocationId,
   PreparedPropagationFile,
@@ -19,8 +20,7 @@ import type {
   PropagationApplied,
   PropagationApply,
   PropagationFailure,
-} from '@mangostudio/shared/library';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
+} from '../index';
 import {
   type BackupEntry,
   type BackupStoreDeps,

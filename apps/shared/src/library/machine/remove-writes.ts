@@ -9,16 +9,16 @@
  */
 
 import { resolve as resolvePath } from 'node:path';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '../../environments';
+import type { PathEnv } from '../../runtime-env';
+import type { LocationDefinition } from '../host';
 import type {
   PreparedRemovalOperation,
   RemovalApply,
   RemovalFailure,
   RemovalKept,
   RemovalRemoved,
-} from '@mangostudio/shared/library';
-import type { LocationDefinition } from '@mangostudio/shared/library/host';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
+} from '../index';
 import {
   type BackupEntry,
   type BackupStoreDeps,

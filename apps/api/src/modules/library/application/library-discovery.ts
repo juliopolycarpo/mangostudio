@@ -1,9 +1,3 @@
-import {
-  type LibraryCache,
-  type ReadLibraryInstance,
-  resolveLibraryScanTargets,
-  scanLibraryInstancesForPathEnv,
-} from '@mangostudio/runtime';
 import type { AppSettings } from '@mangostudio/shared/app-settings';
 import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import {
@@ -13,6 +7,12 @@ import {
   type ResourceKind,
   resourceKey,
 } from '@mangostudio/shared/library';
+import {
+  type LibraryCache,
+  type ReadLibraryInstance,
+  resolveLibraryScanTargets,
+  scanLibraryInstances,
+} from '@mangostudio/shared/library/machine';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
@@ -76,7 +76,9 @@ export function discoverLibraryResourcesFromSettings(
     (options.now ?? Date.now)(),
     force,
     async (): Promise<LibraryScanResult> => {
-      const scanned = await scanLibraryInstancesForPathEnv(locationSettings, pathEnv, {
+      const scanned = await scanLibraryInstances({
+        locationSettings,
+        pathEnv,
         force,
         now: options.now,
         cache,

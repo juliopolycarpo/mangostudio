@@ -10,7 +10,6 @@
  * best-effort is worse than no removal feature.
  */
 
-import { executeRemovalWrites, type RemovalWriteEngineDeps } from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
@@ -23,6 +22,10 @@ import type {
   RemovalPreviewRequest,
 } from '@mangostudio/shared/library';
 import { getLibraryLocation } from '@mangostudio/shared/library/host';
+import {
+  executeRemovalWrites,
+  type RemovalWriteEngineDeps,
+} from '@mangostudio/shared/library/machine';
 import type { RuntimeLibraryRemoveParams } from '@mangostudio/shared/runtime-contract';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';

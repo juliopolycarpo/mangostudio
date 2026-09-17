@@ -4,8 +4,8 @@ import { GrepPatternError, PathAccessError, RuntimeServiceError } from '../../er
 
 export { GrepPatternError };
 
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeGrepParams, RuntimeGrepResult } from '../../methods';
-import { throwIfAborted } from '../cancellation';
 import { compilePolicyGuard } from '../fs-path-policy';
 import { BINARY_SNIFF_BYTES, containsNulByte } from '../fs-utils';
 import { createGrepScanner, type GrepScanner } from './grep-scanner';

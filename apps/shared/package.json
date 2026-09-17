@@ -58,6 +58,7 @@
     "./file-checkpoints": "./src/file-checkpoints/index.ts",
     "./library": "./src/library/index.ts",
     "./library/host": "./src/library/host.ts",
+    "./library/machine": "./src/library/machine/index.ts",
     "./environments": "./src/environments/index.ts",
     "./external-agents": "./src/external-agents/index.ts",
     "./environments/detection": "./src/environments/detection/index.ts",
@@ -79,6 +80,7 @@
   "dependencies": {
     "@faker-js/faker": "^10.5.0",
     "@mangostudio/protocol": "workspace:*",
+    "smol-toml": "^1.7.0",
     "typebox": "1.3.13"
   }
 }

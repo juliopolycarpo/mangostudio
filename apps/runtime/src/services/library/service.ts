@@ -15,6 +15,30 @@ import type {
   RuntimeSettingsSourcesResult,
 } from '@mangostudio/shared/library';
 import { describeLocation, LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
+import {
+  collectBackupGarbage,
+  createBackupStoreDeps,
+  executeLibraryUndo,
+  executePropagationWrites,
+  executeRemovalWrites,
+  InstanceTooLargeError,
+  isPathWithin,
+  LibraryBackupMissingError,
+  type LibraryCache,
+  LibraryReadDeniedError,
+  libraryCache,
+  libraryLocationRoot,
+  listBackupSets,
+  PathEscapeError,
+  type ReadLibraryInstance,
+  type ReadLocationInstancesResult,
+  readLibraryContent,
+  readLibraryTree,
+  readSettingsSources,
+  scanLibraryInstances,
+  serializeRuntimeLibraryWrite,
+} from '@mangostudio/shared/library/machine';
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import {
   LIBRARY_BACKUP_MISSING_KIND,
@@ -42,25 +66,7 @@ import type {
   RuntimeLibraryUndoParams,
   RuntimeLibraryUndoResult,
 } from '../../methods';
-import { throwIfAborted } from '../cancellation';
 import { createRuntimePathEnv, NODE_LOCATION_FS_PROBE } from '../probing/host-env';
-import { executePropagationWrites } from './apply-writes';
-import { collectBackupGarbage, createBackupStoreDeps, listBackupSets } from './backup-store';
-import { type LibraryCache, libraryCache } from './cache';
-import { scanLibraryInstances } from './discovery';
-import {
-  InstanceTooLargeError,
-  isPathWithin,
-  PathEscapeError,
-  type ReadLibraryInstance,
-  type ReadLocationInstancesResult,
-  readLibraryTree,
-} from './instance-reader';
-import { LibraryReadDeniedError, libraryLocationRoot, readLibraryContent } from './read';
-import { executeRemovalWrites } from './remove-writes';
-import { readSettingsSources } from './settings-sources';
-import { executeLibraryUndo, LibraryBackupMissingError } from './undo-writes';
-import { serializeRuntimeLibraryWrite } from './write-queue';
 
 export interface LibraryHostAdapters {
   readonly createPathEnv: (overrides?: {
@@ -427,23 +433,3 @@ function backupStoreDepsFor(params: {
 }
 
 export const libraryService = createLibraryService();
-
-/** In-process scan used by the hub for Local parity and unit tests. */
-export function scanLibraryInstancesForPathEnv(
-  locationSettings: LibraryLocationSettings,
-  pathEnv: PathEnv,
-  options: {
-    readonly force?: boolean;
-    readonly now?: () => number;
-    readonly cache?: LibraryCache;
-    readonly kinds?: readonly ResourceKind[];
-    readonly locationPathOverrides?: Partial<Record<LibraryLocationId, string>>;
-    readonly cacheScan?: boolean;
-  } = {}
-): Promise<ReadLocationInstancesResult> {
-  return scanLibraryInstances({
-    locationSettings,
-    pathEnv,
-    ...options,
-  });
-}

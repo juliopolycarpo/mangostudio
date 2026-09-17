@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import {
   createPropagationWriteEngineDeps,
   executePropagationWrites,
-} from '../../../../src/services/library/apply-writes';
-import { hashResourceAt } from '../../../../src/services/library/instance-reader';
-import { executeLibraryUndo } from '../../../../src/services/library/undo-writes';
+} from '../../../../src/library/machine/apply-writes';
+import { hashResourceAt } from '../../../../src/library/machine/instance-reader';
+import { executeLibraryUndo } from '../../../../src/library/machine/undo-writes';
 
 let home: string;
 let backupRoot: string;

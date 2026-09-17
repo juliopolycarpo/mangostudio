@@ -21,19 +21,15 @@ import {
   readSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import type { PathEnv } from '../../runtime-env';
+import { getLibraryLocation, LIBRARY_TARGET_DEFINITIONS, type LocationDefinition } from '../host';
 import type {
   LibraryLocationId,
   RuntimeSettingsReadFailure,
   RuntimeSettingsRuleFile,
   RuntimeSettingsSource,
   RuntimeSettingsSourcesResult,
-} from '@mangostudio/shared/library';
-import {
-  getLibraryLocation,
-  LIBRARY_TARGET_DEFINITIONS,
-  type LocationDefinition,
-} from '@mangostudio/shared/library/host';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
+} from '../index';
 
 /** Ceiling for one settings source, matching the pre-relocation hub reader. */
 const MAX_SETTINGS_SOURCE_BYTES = 512 * 1024;

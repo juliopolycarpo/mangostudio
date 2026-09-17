@@ -45,7 +45,7 @@ import {
 } from '../application/environment-library-service';
 import { handleLibraryError } from './library-error';
 
-export { MAX_LIBRARY_CONTENT_BYTES } from '@mangostudio/runtime';
+export { MAX_LIBRARY_CONTENT_BYTES } from '@mangostudio/shared/library/machine';
 
 /** Narrowing that applies to anything a scan found, resource or not. */
 interface ScanFilters {

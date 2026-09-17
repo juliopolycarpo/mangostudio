@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
-import { readSettingsSources } from '../../../src/services/library/settings-sources';
+import { readSettingsSources } from '../../../../src/library/machine/settings-sources';
+import type { PathEnv } from '../../../../src/runtime-env';
 
 const tempDirs: string[] = [];
 

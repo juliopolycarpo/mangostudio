@@ -1,4 +1,4 @@
-import type { LibraryInvalidReason } from '@mangostudio/shared/library';
+import type { LibraryInvalidReason } from '../index';
 
 export interface CachedInstanceDisplay {
   readonly title?: string;

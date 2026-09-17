@@ -11,6 +11,7 @@ export {
   type BackupStoreDeps,
   backupExistingResource,
   type CreateBackupStoreDepsOptions,
+  collectBackupGarbage,
   createBackupId,
   createBackupStoreDeps,
   discardBackupSet,
@@ -36,13 +37,17 @@ export {
 } from './discovery';
 export {
   hashResourceAt,
+  InstanceTooLargeError,
+  isPathWithin,
   type LibraryInstanceReaderFs,
   MAX_LIBRARY_FILE_BYTES,
   MAX_LIBRARY_INSTANCE_BYTES,
   MAX_SKILL_ENTRYPOINT_BYTES,
+  PathEscapeError,
   type ReadLibraryInstance,
   type ReadLibraryInstancesOptions,
   type ReadLocationInstancesResult,
+  readLibraryTree,
   readLocationInstances,
   readResourceFile,
 } from './instance-reader';
@@ -58,6 +63,7 @@ export {
   type LibraryReadParams,
   type LibraryReadResult,
   libraryContentPath,
+  libraryLocationRoot,
   MAX_LIBRARY_CONTENT_BYTES,
   readLibraryContent,
 } from './read';
@@ -81,13 +87,6 @@ export {
   writeDirectoryResource,
   writeFileResource,
 } from './resource-writer';
-export {
-  createLibraryService,
-  type LibraryHostAdapters,
-  type LibraryService,
-  libraryService,
-  scanLibraryInstancesForPathEnv,
-} from './service';
 export { readSettingsSources } from './settings-sources';
 export {
   findStagedRemovalLeftovers,
@@ -105,3 +104,4 @@ export {
   LibraryBackupMissingError,
   type LibraryUndoEngineDeps,
 } from './undo-writes';
+export { serializeRuntimeLibraryWrite } from './write-queue';

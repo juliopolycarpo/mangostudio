@@ -11,7 +11,7 @@ import {
   pruneBackupSets,
   readBackupManifest,
   writeBackupManifest,
-} from '../../../../src/services/library/backup-store';
+} from '../../../../src/library/machine/backup-store';
 
 let root: string;
 let backupRoot: string;

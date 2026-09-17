@@ -1,5 +1,6 @@
 import { lstat, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import { PathAccessError, RuntimeToolArgumentError } from '../../errors';
 import type {
   RuntimeApplyPatchParams,
@@ -9,7 +10,6 @@ import type {
   RuntimePatchHunk,
   RuntimePatchOperation,
 } from '../../methods';
-import { throwIfAborted } from '../cancellation';
 import {
   FileNotReadError,
   forgetFile,

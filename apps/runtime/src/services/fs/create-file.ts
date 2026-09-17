@@ -1,12 +1,12 @@
 import { lstat, readlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import { PathAccessError } from '../../errors';
 import type {
   RuntimeCreateFileParams,
   RuntimeCreateFileResult,
   RuntimeMutationResult,
 } from '../../methods';
-import { throwIfAborted } from '../cancellation';
 import { recordFileRead, withPathLocks } from '../file-freshness';
 import { isErrnoException, writeRegularFileAtomic } from '../fs-utils';
 import { mutationSnapshot } from '../snapshot';

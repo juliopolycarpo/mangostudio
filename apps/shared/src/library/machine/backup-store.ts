@@ -15,12 +15,8 @@ import { randomBytes } from 'node:crypto';
 import type { Dirent, Stats } from 'node:fs';
 import { cp, lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import type {
-  BackupSetOperation,
-  LibraryBackupSet,
-  LibraryLocationId,
-} from '@mangostudio/shared/library';
-import { getLibraryLocation } from '@mangostudio/shared/library/host';
+import { getLibraryLocation } from '../host';
+import type { BackupSetOperation, LibraryBackupSet, LibraryLocationId } from '../index';
 
 export interface BackupEntry {
   readonly locationId: LibraryLocationId;

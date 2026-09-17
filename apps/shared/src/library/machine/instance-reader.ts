@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, extname, join, relative, sep } from 'node:path';
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
+import { parse as parseToml } from 'smol-toml';
+import { parseMarkdownFrontmatter } from '../../markdown';
+import type { LocationDefinition } from '../host';
 import {
   hashLibraryDirectory,
   hashLibraryFile,
@@ -12,11 +16,7 @@ import {
   type LibraryResourceRef,
   type LibraryUnreadableEntry,
   normalizeHashPath,
-} from '@mangostudio/shared/library';
-import type { LocationDefinition } from '@mangostudio/shared/library/host';
-import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
-import { parse as parseToml } from 'smol-toml';
-import { throwIfAborted } from '../cancellation';
+} from '../index';
 import type { CachedInstanceDisplay, CachedInstanceHash, LibraryCache } from './cache';
 
 const textDecoder = new TextDecoder();

@@ -1,11 +1,8 @@
 import { statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { isValidResourceSlug } from '@mangostudio/shared/library';
-import {
-  isPathPrefix,
-  resolvePathThroughExistingAncestor,
-} from '@mangostudio/shared/workspaces/host';
-import { RegularFileWriteError } from '../fs-utils';
+import { RegularFileWriteError } from '../../runtime-contract/service-errors';
+import { isPathPrefix, resolvePathThroughExistingAncestor } from '../../workspaces/host';
+import { isValidResourceSlug } from '../index';
 
 export type LibraryWriteFailure =
   | 'invalid-slug'

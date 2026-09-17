@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { serializeRuntimeLibraryWrite } from '../../../../src/services/library/write-queue';
+import { serializeRuntimeLibraryWrite } from '../../../../src/library/machine/write-queue';
 
 describe('serializeRuntimeLibraryWrite', () => {
   it('runs writes against one backup root one at a time', async () => {

@@ -22,8 +22,8 @@ import {
   writeSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { resolvePathThroughExistingAncestor } from '@mangostudio/shared/workspaces/host';
-import { RegularFileWriteError } from '../fs-utils';
+import { RegularFileWriteError } from '../../runtime-contract/service-errors';
+import { resolvePathThroughExistingAncestor } from '../../workspaces/host';
 
 export function writeLibraryFileAtomic(filePath: string, data: string | Uint8Array): void {
   const target = resolveWriteTarget(filePath);
