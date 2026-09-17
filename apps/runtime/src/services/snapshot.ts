@@ -1,5 +1,7 @@
 import { unlink } from 'node:fs/promises';
-import { PathAccessError, RuntimeServiceError } from '../errors';
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
+import { assertInsideWorkdir, WorkdirContainmentError } from '@mangostudio/shared/workspaces/host';
+import { PathAccessError, RuntimeServiceError, RuntimeSnapshotConflictError } from '../errors';
 import {
   RUNTIME_ABSENT_HASH,
   type RuntimeBeforeSnapshot,
@@ -7,7 +9,6 @@ import {
   type RuntimeSnapshotRevertParams,
   type RuntimeSnapshotRevertResult,
 } from '../methods';
-import { throwIfAborted } from './cancellation';
 import { forgetFile, recordFileRead, rekeyFile, withPathLocks } from './file-freshness';
 import {
   assertRegularFilePath,
@@ -15,18 +16,8 @@ import {
   moveRegularFileWithoutOverwrite,
   writeRegularFileAtomic,
 } from './fs-utils';
-import { assertInsideWorkdir, WorkdirContainmentError } from './path-containment';
 
-export class RuntimeSnapshotConflictError extends RuntimeServiceError {
-  constructor(readonly resolvedPath: string) {
-    super(
-      'snapshot_conflict',
-      `Cannot revert "${resolvedPath}": the file changed on disk since this assistant message completed.`,
-      { resolvedPath }
-    );
-    this.name = 'RuntimeSnapshotConflictError';
-  }
-}
+export { RuntimeSnapshotConflictError };
 
 export class RuntimeSnapshotTooLargeError extends RuntimeServiceError {
   constructor(resolvedPath: string, sizeBytes: number) {

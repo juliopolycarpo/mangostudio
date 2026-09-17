@@ -31,7 +31,6 @@
  *    external turn, and the converse is enforced where internal turns start.
  */
 
-import { RuntimeConsentDeniedError } from '@mangostudio/runtime';
 import type { InteractionMode } from '@mangostudio/shared';
 import {
   type ExternalAgentAttachment,
@@ -47,6 +46,7 @@ import {
   type ExternalTurnTerminalReason,
   type ExternalUsage,
 } from '@mangostudio/shared/external-agents';
+import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
 import type { TurnInterruptionReasonCode } from '@mangostudio/shared/turn-recovery';
 import type { Kysely } from 'kysely';
 import Value from 'typebox/value';

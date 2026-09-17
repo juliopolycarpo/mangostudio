@@ -1,10 +1,10 @@
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import { PathAccessError, RuntimeToolArgumentError } from '../../errors';
 import type {
   RuntimeEditFileParams,
   RuntimeEditFileResult,
   RuntimeMutationResult,
 } from '../../methods';
-import { throwIfAborted } from '../cancellation';
 import { FileNotReadError, readFreshFile, recordFileEdit, withPathLocks } from '../file-freshness';
 import {
   explainUnreadableMutationTarget,

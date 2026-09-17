@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'bun:test';
-import { RuntimeServiceManagementError } from '@mangostudio/runtime';
 import {
   MACHINE_CHECK_DETAIL_MAX,
   MACHINE_CHECK_LABEL_MAX,
@@ -9,6 +8,7 @@ import {
   MachineDoctorReportSchema,
   MachineStatusSchema,
 } from '@mangostudio/shared/machine';
+import { RuntimeServiceManagementError } from '@mangostudio/shared/runtime-contract';
 import { USER_SERVICE_ERROR_MAX } from '@mangostudio/shared/runtime-home';
 import {
   MachineUpdateStatusSchema,

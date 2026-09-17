@@ -9,14 +9,13 @@ import {
   PathAccessError,
   type RuntimePathFilter,
   type RuntimePathPolicyParams,
-  readFileWithObservedMtime,
-} from '@mangostudio/runtime';
+} from '@mangostudio/shared/runtime-contract';
 import type { ToolParameterDescriptor } from '@mangostudio/shared/tool-settings';
 import type { TargetPaths } from '../../runtime-client';
 import { normalizePathList, normalizeStringList, type PathListItem } from '../list-normalization';
 import type { WorkdirPolicy } from '../types';
 
-export { normalizePathList, normalizeStringList, PathAccessError, readFileWithObservedMtime };
+export { normalizePathList, normalizeStringList, PathAccessError };
 
 /**
  * Expands a leading `~` against the *target's* home directory. The hub's own

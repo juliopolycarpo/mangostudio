@@ -12,13 +12,13 @@
  * cannot be told, which the connection failure already reports.
  */
 
+import type { InstallRunStatus, ToolchainSelection } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   RUNTIME_INSTALL_OUTPUT_TOPIC,
   type RuntimeInstallOutputEvent,
   type RuntimeInstallRunResult,
-} from '@mangostudio/runtime';
-import type { InstallRunStatus, ToolchainSelection } from '@mangostudio/shared/environments';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+} from '@mangostudio/shared/runtime-contract';
 import { getInstallLogPath } from '../../../lib/mango-paths';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';

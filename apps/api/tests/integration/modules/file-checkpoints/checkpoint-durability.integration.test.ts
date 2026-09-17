@@ -10,14 +10,16 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { faker } from '@faker-js/faker';
-import type { RuntimeMutationResult, RuntimeMutationSnapshot } from '@mangostudio/runtime';
+import type {
+  RuntimeMutationResult,
+  RuntimeMutationSnapshot,
+} from '@mangostudio/shared/runtime-contract';
 import { getDb } from '../../../../src/db/database';
 import { revertMessageFileCheckpoints } from '../../../../src/modules/file-checkpoints/application/revert-message-checkpoints';
 import { hashCheckpointBytes } from '../../../../src/modules/file-checkpoints/infrastructure/checkpoint-blob-store';
 import { executeEditFile } from '../../../../src/services/tools/builtin/edit-file';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
-import { clearFileFreshness } from '../../../../src/services/tools/file-freshness';
 import {
   type FileMutationBeforeFields,
   withMutationPersistence,
@@ -25,6 +27,7 @@ import {
 import type { ToolContext } from '../../../../src/services/tools/types';
 import { type ChatFixture, insertTestChat, type UserFixture } from '../../../support/factories';
 import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
+import { clearFileFreshness } from '../../../support/runtime-file-freshness';
 
 let tempDir: string;
 let chat: ChatFixture;

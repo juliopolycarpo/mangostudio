@@ -10,16 +10,16 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  StaleLineNumbersError,
+  UnobservedLineNumbersError,
+} from '@mangostudio/shared/runtime-contract';
 import { executeDeleteFile } from '../../../../src/services/tools/builtin/delete-file';
 import { executeGlob } from '../../../../src/services/tools/builtin/glob';
 import { executeGrep } from '../../../../src/services/tools/builtin/grep';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
 import { executeReplaceRange } from '../../../../src/services/tools/builtin/replace-range';
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
-import {
-  StaleLineNumbersError,
-  UnobservedLineNumbersError,
-} from '../../../../src/services/tools/file-freshness';
 import type { ToolContext } from '../../../../src/services/tools/types';
 import { useToolRegistry } from './support/tool-registry-harness';
 

@@ -13,6 +13,7 @@ import { createInterface } from 'node:readline/promises';
 import { CLOSE_CODES, type Session, type SessionClosure } from '@mangostudio/protocol';
 import { stdioPort } from '@mangostudio/protocol/stdio';
 import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
+import { isUserServiceAction, type UserServiceAction } from '@mangostudio/shared/machine/service';
 import {
   isRuntimeSlot,
   RUNTIME_CONSENT_PRESETS,
@@ -52,7 +53,6 @@ import { parseListenAddress, serveRuntime } from './serve';
 import { resolveExternalAgentIsolation } from './services/external-agents/isolation';
 import { createRuntimeServiceManager, resolveInstallMode } from './services/runtime-service';
 import { RUNTIME_UPDATE_EXIT_CODE } from './services/runtime-update';
-import { isUserServiceAction, type UserServiceAction } from './services/user-service-manager';
 import { createRuntimeSession, whenRuntimeReleased } from './session';
 import {
   isRuntimeSetupProfile,

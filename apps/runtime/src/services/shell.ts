@@ -6,23 +6,18 @@
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
-import { RuntimeServiceError } from '../errors';
+import { HIDDEN_WINDOW, type ShellEnvPolicy, sanitizeShellEnv } from '@mangostudio/shared/process';
+import { findShellExecutable, isShellAvailable } from '@mangostudio/shared/process/host';
+import { ShellExecutionError } from '../errors';
 import type { RuntimeShellResult } from '../methods';
 import { readStreamCapped } from './child-output';
 import { killProcessTree, OWN_PROCESS_GROUP } from './process-tree';
-import { HIDDEN_WINDOW } from './process-window';
-import { type ShellEnvPolicy, sanitizeShellEnv } from './shell-env';
 import { buildSpawnEnv, nodeSpawnEnvHost } from './spawn-env';
+
+export { findShellExecutable, isShellAvailable, ShellExecutionError };
 
 /** Shell interpreters exposed as tools. */
 export type ShellKind = RuntimeShellResult['shell'];
-
-export class ShellExecutionError extends RuntimeServiceError {
-  constructor(message: string) {
-    super('shell_execution', message);
-    this.name = 'ShellExecutionError';
-  }
-}
 
 /** Why a shell child process ended, distinct from raw exitCode/signal facts. */
 type ShellTermination =
@@ -68,8 +63,6 @@ const defaultDeps: ShellExecDependencies = {
   now: () => Date.now(),
 };
 
-const executableCache = new Map<ShellKind, string | null>();
-
 /**
  * How long the capture may keep running once the direct child is gone.
  *
@@ -82,37 +75,6 @@ const executableCache = new Map<ShellKind, string | null>();
 const LEFTOVER_PIPE_GRACE_MS = 100;
 
 type TerminationClaim = 'timed_out' | 'aborted';
-
-/**
- * Resolves the executable path for a shell kind, honoring platform rules.
- * PowerShell is Windows-only per product requirement; bash/zsh follow PATH.
- * The PATH lookup is memoized — shell availability is stable for a process, so
- * startup registration and per-test expectations avoid repeated `Bun.which` scans.
- *
- * // Usage: findShellExecutable('bash') // => '/usr/bin/bash' | null
- */
-export function findShellExecutable(kind: ShellKind): string | null {
-  const cached = executableCache.get(kind);
-  if (cached !== undefined) return cached;
-
-  const resolved = resolveShellExecutable(kind);
-  executableCache.set(kind, resolved);
-  return resolved;
-}
-
-/** Performs the uncached PATH lookup for a shell kind. */
-function resolveShellExecutable(kind: ShellKind): string | null {
-  if (kind === 'powershell') {
-    if (process.platform !== 'win32') return null;
-    return Bun.which('pwsh') ?? Bun.which('powershell');
-  }
-  return Bun.which(kind);
-}
-
-/** Reports whether a shell kind can run on the current system. */
-export function isShellAvailable(kind: ShellKind): boolean {
-  return findShellExecutable(kind) !== null;
-}
 
 /**
  * Runs a command through the given shell and returns captured output.

@@ -1,4 +1,4 @@
-import { RuntimeServiceManagementError } from '@mangostudio/runtime';
+import { RuntimeServiceManagementError } from '@mangostudio/shared/runtime-contract';
 
 /**
  * Error type for user-facing CLI usage problems (bad flags, invalid ports).

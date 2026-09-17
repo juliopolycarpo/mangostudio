@@ -1,11 +1,11 @@
 import { lstat } from 'node:fs/promises';
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import { PathAccessError } from '../../errors';
 import type {
   RuntimeMutationResult,
   RuntimeWriteFileParams,
   RuntimeWriteFileResult,
 } from '../../methods';
-import { throwIfAborted } from '../cancellation';
 import { assertFresh, FileNotReadError, recordFileRead, withPathLocks } from '../file-freshness';
 import {
   explainUnreadableMutationTarget,

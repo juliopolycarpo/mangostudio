@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { createLibraryService, createLocalRuntimeManifest } from '@mangostudio/runtime';
+import type { PropagationApplyRequest, PropagationPreview } from '@mangostudio/shared/library';
 import {
-  createLibraryService,
-  createLocalRuntimeManifest,
   LIBRARY_BACKUP_MISSING_KIND,
   type RuntimeLibraryUndoParams,
   RuntimeServiceError,
-} from '@mangostudio/runtime';
-import type { PropagationApplyRequest, PropagationPreview } from '@mangostudio/shared/library';
+} from '@mangostudio/shared/runtime-contract';
 import {
   applyLibraryPropagation,
   undoLibraryPropagation,

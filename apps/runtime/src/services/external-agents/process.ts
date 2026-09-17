@@ -1,7 +1,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import { killProcessTree, OWN_PROCESS_GROUP, windowsTaskkillArguments } from '../process-tree';
-import { HIDDEN_WINDOW } from '../process-window';
 
 const DEFAULT_MAX_LINE_BYTES = 1024 * 1024;
 const DEFAULT_MAX_BUFFERED_BYTES = 2 * 1024 * 1024;

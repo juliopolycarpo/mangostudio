@@ -1,7 +1,7 @@
 /**
  * Hub-side re-exports of the library resource writer. Writes run in
- * `@mangostudio/runtime`; this path keeps Partial-deps ergonomics and hub
- * config defaults for Local tests and orchestrators.
+ * `@mangostudio/shared/library/machine`; this path keeps Partial-deps
+ * ergonomics and hub config defaults for Local tests and orchestrators.
  */
 
 import {
@@ -11,9 +11,9 @@ import {
   type ResourceWriteResult,
   type ResourceWriterDeps,
   type ResourceWriterFs,
-  writeDirectoryResource as writeDirectoryResourceRuntime,
-  writeFileResource as writeFileResourceRuntime,
-} from '@mangostudio/runtime';
+  writeDirectoryResource as writeDirectoryResourceEngine,
+  writeFileResource as writeFileResourceEngine,
+} from '@mangostudio/shared/library/machine';
 import { getConfig } from '../../../lib/config';
 
 export type {
@@ -36,12 +36,12 @@ export function writeDirectoryResource(
   input: DirectoryResourceWriteInput,
   overrides: Partial<ResourceWriterDeps> = {}
 ): Promise<ResourceWriteResult> {
-  return writeDirectoryResourceRuntime(input, { ...defaultWriterDeps(), ...overrides });
+  return writeDirectoryResourceEngine(input, { ...defaultWriterDeps(), ...overrides });
 }
 
 export function writeFileResource(
   input: FileResourceWriteInput,
   overrides: Partial<ResourceWriterDeps> = {}
 ): Promise<ResourceWriteResult> {
-  return writeFileResourceRuntime(input, { ...defaultWriterDeps(), ...overrides });
+  return writeFileResourceEngine(input, { ...defaultWriterDeps(), ...overrides });
 }

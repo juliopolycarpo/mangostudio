@@ -1,4 +1,5 @@
 import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
+import { hubExternalAgentIsolationOf } from '@mangostudio/shared/runtime-contract';
 import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,
@@ -46,6 +47,13 @@ export function createLocalRuntimeHost(options: {
     'registry' | 'runtimeVersion' | 'emit' | 'consent'
   > & {
     readonly adapters?: readonly ExternalAgentAdapter[];
+    /**
+     * What this process can prove about whose vendor credentials it will
+     * use. Derived by the caller, because only the caller knows what kind
+     * of process this is: `resolveExternalAgentIsolation()` for a spawned
+     * runtime, `createSingleUserHostExternalAgentIsolation()` for the one
+     * inside a hub.
+     */
     readonly identityIsolation?: ExternalIdentityIsolation;
   };
 }): RuntimeHostDefinition {
@@ -56,12 +64,19 @@ export function createLocalRuntimeHost(options: {
   // because they are built here, before this definition is bound to one. The
   // binding happens once: a reconnect calls this function again.
   const events = createRuntimeEventRelay();
+  // The hub is the only party that can see a second MangoStudio user arriving
+  // at this machine, and it says so after the handshake — so the attestation
+  // has to be readable per call, not captured once.
+  let hubWithdrewIsolation = false;
+  const identityIsolation = (): ExternalIdentityIsolation | undefined =>
+    hubWithdrewIsolation ? undefined : options.externalAgents?.identityIsolation;
   // A caller that named its own adapters gets exactly those — that is how the
   // test suites drive a fake peer. Everyone else gets the production set, so a
   // real runtime advertises what it can host without every call site listing it.
   const externalAgents = {
     ...options.externalAgents,
     adapters: options.externalAgents?.adapters ?? createDefaultExternalAgentAdapters(),
+    identityIsolation,
   };
   const registry = createRuntimeMethodHandlers({
     runtimeVersion: options.runtimeVersion,
@@ -74,16 +89,19 @@ export function createLocalRuntimeHost(options: {
 
   return {
     runtimeVersion: options.runtimeVersion,
-    manifest: () =>
-      createLocalRuntimeManifest(consent.current(), {
+    manifest: () => {
+      const attestation = identityIsolation();
+      return createLocalRuntimeManifest(consent.current(), {
         targetIds: registry.externalAgentRegistry.targetIds,
-        ...(options.externalAgents?.identityIsolation
-          ? { identityIsolation: options.externalAgents.identityIsolation }
-          : {}),
-      }),
+        ...(attestation ? { identityIsolation: attestation } : {}),
+      });
+    },
     handlers: registry.handlers,
     consent,
     isUpdateActive: registry.updateActive,
+    onHubCapabilities: (capabilities) => {
+      hubWithdrewIsolation = hubExternalAgentIsolationOf(capabilities) === 'withdrawn';
+    },
     onClose: () => registry.close(),
     events,
     ...(options.audit ? { audit: options.audit } : {}),

@@ -4,6 +4,7 @@ import type {
   ExternalIdentityIsolation,
 } from '@mangostudio/shared/external-agents';
 import { directoryHashDomainVersion } from '@mangostudio/shared/library';
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import {
   profileForAllow,
@@ -11,7 +12,6 @@ import {
   type RuntimeCapabilityAllow,
 } from '@mangostudio/shared/runtime-home';
 import { writeRuntimeDiagnostic } from './diagnostics';
-import { HIDDEN_WINDOW } from './services/process-window';
 import { isShellAvailable } from './services/shell';
 import { supportsPty } from './services/terminal/pty';
 

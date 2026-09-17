@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import { PathAccessError } from '../../errors';
 import type { RuntimeGlobParams, RuntimeGlobResult } from '../../methods';
-import { throwIfAborted } from '../cancellation';
 import { compilePolicyGuard } from '../fs-path-policy';
 
 export async function globRuntimePaths(

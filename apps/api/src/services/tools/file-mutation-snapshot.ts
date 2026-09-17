@@ -1,10 +1,10 @@
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import type { FileCheckpointOp } from '@mangostudio/shared/file-checkpoints';
 import type {
   RuntimeBeforeSnapshot,
   RuntimeMutationResult,
   RuntimeMutationSnapshot,
-} from '@mangostudio/runtime';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import type { FileCheckpointOp } from '@mangostudio/shared/file-checkpoints';
+} from '@mangostudio/shared/runtime-contract';
 import { getDb } from '../../db/database';
 import { createDiagnosticLogger } from '../../lib/logger';
 import {

@@ -10,7 +10,6 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { RuntimeLibraryApplyParams } from '@mangostudio/runtime';
 import {
   DEFAULT_APP_SETTINGS,
   libraryLocationsFor,
@@ -27,6 +26,7 @@ import type {
 } from '@mangostudio/shared/library';
 import { directoryHashDomainVersion, enabledLibraryLocations } from '@mangostudio/shared/library';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
+import type { RuntimeLibraryApplyParams } from '@mangostudio/shared/runtime-contract';
 import { getDb } from '../../../src/db/database';
 import { listDivergenceAcks } from '../../../src/modules/library/application/conflict-resolution';
 import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';

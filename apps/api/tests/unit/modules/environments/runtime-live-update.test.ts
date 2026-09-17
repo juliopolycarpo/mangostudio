@@ -3,7 +3,7 @@ import type {
   RuntimeUpdateBeginParams,
   RuntimeUpdateChunkParams,
   RuntimeUpdateCommitParams,
-} from '@mangostudio/runtime';
+} from '@mangostudio/shared/runtime-contract';
 import {
   type RuntimeUpdateProtocol,
   streamRuntimeUpdate,

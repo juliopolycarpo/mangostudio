@@ -2,8 +2,6 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { RemoteError } from '@mangostudio/protocol';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import {
-  buildGhArgv,
-  buildGhEnvironment,
   createGhCli,
   GhCliError,
   type GhCommandRunner,
@@ -98,30 +96,6 @@ afterEach(() => {
 });
 
 describe('hub gh CLI facade', () => {
-  it('re-exports argv and env helpers from the runtime', () => {
-    expect(buildGhArgv(['pr', 'view'])).toEqual(['gh', 'pr', 'view']);
-    expect(buildGhEnvironment({ PATH: '/bin', GH_HOST: 'github.example' })).toMatchObject({
-      PATH: '/bin',
-      GH_HOST: 'github.example',
-      GH_PROMPT_DISABLED: '1',
-      GH_NO_UPDATE_NOTIFIER: '1',
-      NO_COLOR: '1',
-      LC_ALL: 'C',
-    });
-  });
-
-  it('never forwards a token variable, because gh has its own credentials', () => {
-    const environment = buildGhEnvironment({
-      PATH: '/bin',
-      GH_TOKEN: 'secret-gh-token',
-      GITHUB_TOKEN: 'secret-actions-token',
-      GH_ENTERPRISE_TOKEN: 'secret-enterprise-token',
-    });
-    expect(environment).not.toHaveProperty('GH_TOKEN');
-    expect(environment).not.toHaveProperty('GITHUB_TOKEN');
-    expect(environment).not.toHaveProperty('GH_ENTERPRISE_TOKEN');
-  });
-
   it('executes against the explicitly selected environment runtime', async () => {
     const runtime = new FakeGhRuntime();
     runtime.install();

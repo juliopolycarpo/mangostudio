@@ -1,3 +1,4 @@
+export { summarizeGhSubcommand } from './audit';
 export {
   GITHUB_PR_REVIEW_THREADS_QUERY,
   isPinnedGithubGraphqlDocument,

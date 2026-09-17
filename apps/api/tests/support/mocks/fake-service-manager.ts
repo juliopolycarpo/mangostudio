@@ -1,4 +1,7 @@
-import type { UserServiceDefinition, UserServiceManager } from '@mangostudio/runtime';
+import type {
+  UserServiceDefinition,
+  UserServiceManager,
+} from '@mangostudio/shared/machine/service';
 import type { UserServiceStatus } from '@mangostudio/shared/runtime-home';
 
 /**

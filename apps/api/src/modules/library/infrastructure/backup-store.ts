@@ -5,21 +5,21 @@
  */
 
 import {
-  assertBackupId as assertBackupIdRuntime,
+  assertBackupId as assertBackupIdEngine,
   type BackupEntry,
   type BackupManifest,
   type BackupStoreDeps,
-  backupExistingResource as backupExistingResourceRuntime,
-  createBackupId as createBackupIdRuntime,
+  backupExistingResource as backupExistingResourceEngine,
+  createBackupId as createBackupIdEngine,
   createBackupStoreDeps,
-  discardBackupSet as discardBackupSetRuntime,
-  listBackupSets as listBackupSetsRuntime,
-  pruneBackupSets as pruneBackupSetsRuntime,
-  purgeBackupSet as purgeBackupSetRuntime,
-  readBackupManifest as readBackupManifestRuntime,
-  restoreBackupEntry as restoreBackupEntryRuntime,
-  writeBackupManifest as writeBackupManifestRuntime,
-} from '@mangostudio/runtime';
+  discardBackupSet as discardBackupSetEngine,
+  listBackupSets as listBackupSetsEngine,
+  pruneBackupSets as pruneBackupSetsEngine,
+  purgeBackupSet as purgeBackupSetEngine,
+  readBackupManifest as readBackupManifestEngine,
+  restoreBackupEntry as restoreBackupEntryEngine,
+  writeBackupManifest as writeBackupManifestEngine,
+} from '@mangostudio/shared/library/machine';
 import { getConfig } from '../../../lib/config';
 
 export type { BackupEntry, BackupManifest, BackupStoreDeps };
@@ -32,64 +32,64 @@ export const defaultBackupStoreDeps: BackupStoreDeps = createBackupStoreDeps({
 });
 
 export function createBackupId(deps: BackupStoreDeps = defaultBackupStoreDeps): string {
-  return createBackupIdRuntime(deps);
+  return createBackupIdEngine(deps);
 }
 
 export function assertBackupId(backupId: string): void {
-  assertBackupIdRuntime(backupId);
+  assertBackupIdEngine(backupId);
 }
 
 export function backupExistingResource(
-  input: Parameters<typeof backupExistingResourceRuntime>[0],
+  input: Parameters<typeof backupExistingResourceEngine>[0],
   deps: BackupStoreDeps = defaultBackupStoreDeps
 ): Promise<string> {
-  return backupExistingResourceRuntime(input, deps);
+  return backupExistingResourceEngine(input, deps);
 }
 
 export function writeBackupManifest(
   manifest: BackupManifest,
   deps: BackupStoreDeps = defaultBackupStoreDeps
 ): Promise<void> {
-  return writeBackupManifestRuntime(manifest, deps);
+  return writeBackupManifestEngine(manifest, deps);
 }
 
 export function readBackupManifest(
   backupId: string,
   deps: BackupStoreDeps = defaultBackupStoreDeps
 ): Promise<BackupManifest | null> {
-  return readBackupManifestRuntime(backupId, deps);
+  return readBackupManifestEngine(backupId, deps);
 }
 
 export function restoreBackupEntry(
   entry: BackupEntry,
   deps: BackupStoreDeps = defaultBackupStoreDeps
 ): Promise<void> {
-  return restoreBackupEntryRuntime(entry, deps);
+  return restoreBackupEntryEngine(entry, deps);
 }
 
 export function discardBackupSet(
   backupId: string,
   deps: BackupStoreDeps = defaultBackupStoreDeps
 ): Promise<void> {
-  return discardBackupSetRuntime(backupId, deps);
+  return discardBackupSetEngine(backupId, deps);
 }
 
 export function purgeBackupSet(
   backupId: string,
   deps: BackupStoreDeps = defaultBackupStoreDeps
 ): Promise<boolean> {
-  return purgeBackupSetRuntime(backupId, deps);
+  return purgeBackupSetEngine(backupId, deps);
 }
 
 export function pruneBackupSets(
   currentBackupId: string,
   deps: BackupStoreDeps = defaultBackupStoreDeps
 ): Promise<void> {
-  return pruneBackupSetsRuntime(currentBackupId, deps);
+  return pruneBackupSetsEngine(currentBackupId, deps);
 }
 
 export function listBackupSets(
   deps: BackupStoreDeps = defaultBackupStoreDeps
-): ReturnType<typeof listBackupSetsRuntime> {
-  return listBackupSetsRuntime(deps);
+): ReturnType<typeof listBackupSetsEngine> {
+  return listBackupSetsEngine(deps);
 }

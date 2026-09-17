@@ -27,8 +27,11 @@ import {
   type WebSocketPortHandle,
 } from '@mangostudio/protocol/ws';
 import { RUNTIME_HEARTBEAT_TOPIC } from '@mangostudio/shared/runtime-contract';
+import { isLoopbackHostname } from '@mangostudio/shared/utils/net';
 import { getRuntimeVersion } from './config';
 import { createRuntimeSession, type RuntimeHostDefinition, whenRuntimeReleased } from './session';
+
+export { isLoopbackHostname };
 
 const HANDSHAKE_TIMEOUT_MS = 15_000;
 /** Well under a typical reverse-proxy idle timeout, in both directions. */
@@ -102,17 +105,6 @@ export function parseListenAddress(value: string): RuntimeServeListen | null {
   const port = Number(portText);
   if (!Number.isInteger(port) || port < 0 || port > 65_535) return null;
   return { hostname, port };
-}
-
-/** True for addresses that never leave this machine. */
-export function isLoopbackHostname(hostname: string): boolean {
-  const normalized = hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  return (
-    normalized === '127.0.0.1' ||
-    normalized === 'localhost' ||
-    normalized === '::1' ||
-    normalized === '0:0:0:0:0:0:0:1'
-  );
 }
 
 export function bearerToken(header: string | null): string | null {

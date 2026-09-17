@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { renderSystemdUnitFile } from '@mangostudio/shared/machine/service';
 import {
   RUNTIME_CAPABILITY_KEYS,
   RUNTIME_CONSENT_PRESETS,
@@ -22,7 +23,6 @@ import {
   runtimeUnitDefinition,
   shouldCheckRuntimeService,
 } from '../../src/services/runtime-service';
-import { renderSystemdUnitFile } from '../../src/services/user-service-manager';
 import { parseAllowOverrides, type RuntimeSetupArgs, runRuntimeSetup } from '../../src/setup';
 
 const homes: string[] = [];

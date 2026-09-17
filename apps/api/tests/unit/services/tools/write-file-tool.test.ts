@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { FileNotReadError, StaleFileError } from '@mangostudio/shared/runtime-contract';
 import { PathAccessError } from '../../../../src/services/tools/builtin/_fs-utils';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
 import {
@@ -20,13 +21,9 @@ import {
   register as registerWriteFileTool,
   type WriteFileToolResult,
 } from '../../../../src/services/tools/builtin/write-file';
-import {
-  clearFileFreshness,
-  FileNotReadError,
-  StaleFileError,
-} from '../../../../src/services/tools/file-freshness';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { clearFileFreshness } from '../../../support/runtime-file-freshness';
 import { withTargetHome } from './support/target-home';
 import {
   EMPTY_STRING_ARGUMENTS,

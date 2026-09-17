@@ -61,6 +61,16 @@ export interface RuntimeHostDefinition {
   readonly audit?: RuntimeAuditSink;
   /** Points the services' emitter at one session for that session's lifetime. */
   readonly events: RuntimeEventRelay;
+  /**
+   * The hub's `hello.capabilities`, once both hellos have crossed.
+   *
+   * After the manifest has already been announced, necessarily: a session
+   * sends its own hello from the constructor, so nothing the hub says can
+   * reach this definition in time to change what it announced. What it can
+   * change is every answer after — `runtime.health`, a refreshed manifest,
+   * and what the handlers are willing to do.
+   */
+  readonly onHubCapabilities?: (capabilities: Readonly<Record<string, unknown>>) => void;
 }
 
 /**
@@ -175,7 +185,10 @@ export function createRuntimeSession(
   definition.audit?.setHub(null);
 
   session.ready.then(
-    (remote) => definition.audit?.setHub(hubIdentityOf(remote.capabilities)),
+    (remote) => {
+      definition.audit?.setHub(hubIdentityOf(remote.capabilities));
+      definition.onHubCapabilities?.(remote.capabilities);
+    },
     // A handshake that never completes is a closed session, and the close
     // listener below is what releases the definition; there is nothing else to
     // do with the rejection, and leaving it unhandled would surface as one.

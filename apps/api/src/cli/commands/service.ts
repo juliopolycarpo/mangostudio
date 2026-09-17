@@ -3,7 +3,7 @@
  * platform's per-user supervisor, and drive that unit afterwards.
  */
 
-import type { UserServiceManager } from '@mangostudio/runtime';
+import type { UserServiceManager } from '@mangostudio/shared/machine/service';
 import type { UserServiceStatus } from '@mangostudio/shared/runtime-home';
 import { getConfig, getConfigEnvFilePath } from '../../lib/config';
 import { ensureRuntimeDirs } from '../../lib/mango-paths';

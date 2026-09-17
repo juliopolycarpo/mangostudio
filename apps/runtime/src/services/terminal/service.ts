@@ -12,6 +12,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename } from 'node:path';
 import type { EventInput } from '@mangostudio/protocol';
+import { sanitizeShellEnv } from '@mangostudio/shared/process';
 import type { RuntimeShellKind } from '@mangostudio/shared/runtime-contract';
 import { RuntimeToolArgumentError } from '../../errors';
 import type {
@@ -29,7 +30,6 @@ import type {
 } from '../../methods';
 import { RUNTIME_TERMINAL_OUTPUT_TOPIC } from '../../methods';
 import { findShellExecutable, resolveWorkingDirectory, ShellExecutionError } from '../shell';
-import { sanitizeShellEnv } from '../shell-env';
 import { buildSpawnEnv, nodeSpawnEnvHost, type SpawnEnvFs } from '../spawn-env';
 import { TerminalNotFoundError } from './errors';
 import { createBunPtyPort, type PtyPort } from './pty';

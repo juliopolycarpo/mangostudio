@@ -23,6 +23,7 @@ import {
   type SessionClosure,
 } from '@mangostudio/protocol';
 import {
+  type HubExternalAgentIsolation,
   type HubIdentity,
   RUNTIME_CONTRACT,
   RUNTIME_CONTRACT_NAME,
@@ -47,7 +48,9 @@ const HUB_PEER_NAME = 'mangostudio';
  * connector logs and an environment card reports.
  */
 export interface HubSession {
-  /** The manifest the runtime announced, as it arrived. */
+  /** The hub claim stays with this connection across manifest refreshes. */
+  readonly externalAgentIsolation?: HubExternalAgentIsolation;
+  /** The validated manifest after applying the hub claim. */
   readonly manifest: RuntimeCapabilityManifest;
   readonly runtimeVersion: string;
   request<K extends RuntimeMethod>(
@@ -73,6 +76,15 @@ export interface OpenHubSessionOptions {
    * announce this process's own host and user; pass `null` to announce none.
    */
   readonly hub?: HubIdentity | null;
+  /**
+   * What this hub can say about who reaches the runtime's machine.
+   *
+   * Announced rather than injected at construction so every transport carries
+   * it — a runtime the hub did not spawn has no argv to receive it on — and so
+   * a reconnect re-states it rather than freezing the first answer for the life
+   * of a process.
+   */
+  readonly externalAgentIsolation?: HubExternalAgentIsolation;
   readonly handshakeTimeoutMs?: number;
   /**
    * Refuse a runtime whose release differs from the hub's. Set by the
@@ -109,6 +121,9 @@ export async function openHubSession(
     capabilities: {
       contracts: { [RUNTIME_CONTRACT_NAME]: RUNTIME_CONTRACT_VERSION },
       ...(hub ? { hub } : {}),
+      ...(options.externalAgentIsolation
+        ? { externalAgentIsolation: options.externalAgentIsolation }
+        : {}),
     },
     ...(options.handshakeTimeoutMs !== undefined
       ? { handshakeTimeoutMs: options.handshakeTimeoutMs }
@@ -123,7 +138,7 @@ export async function openHubSession(
     throw error;
   }
 
-  const manifest = manifestOf(remote.capabilities);
+  const manifest = manifestOf(remote.capabilities, options.externalAgentIsolation);
   if (!manifest) {
     session.close(CLOSE_CODES.PROTOCOL_ERROR, 'capabilities are not a runtime manifest');
     throw new RemoteError(
@@ -146,6 +161,9 @@ export async function openHubSession(
     session,
     manifest,
     runtimeVersion: remote.peer.version,
+    ...(options.externalAgentIsolation
+      ? { externalAgentIsolation: options.externalAgentIsolation }
+      : {}),
     request: (method, params, requestOptions) => client.request(method, params, requestOptions),
     onEvent: (listener) => session.onEvent(listener),
     onClose: (listener) => session.onClose(listener),
@@ -153,9 +171,18 @@ export async function openHubSession(
   };
 }
 
-/** The peer's `hello.capabilities` as a manifest, or undefined when it is not one. */
+/**
+ * The peer's `hello.capabilities` as a manifest, or undefined when it is not one.
+ *
+ * A withdrawal is applied here rather than trusted to the runtime, because the
+ * two hellos crossed: a session sends its own from the constructor, so the
+ * manifest in front of us was composed before the peer could have read this
+ * hub's refusal. The runtime honours it from the next answer onward — this is
+ * the one answer it could not.
+ */
 function manifestOf(
-  capabilities: Readonly<Record<string, unknown>>
+  capabilities: Readonly<Record<string, unknown>>,
+  claimed?: HubExternalAgentIsolation
 ): RuntimeCapabilityManifest | undefined {
   if (!Value.Check(RuntimeCapabilityManifestSchema, capabilities)) return undefined;
   // `contracts` rides in the same open object and is not part of the manifest.
@@ -164,5 +191,22 @@ function manifestOf(
   const { contracts: _announced, ...manifest } = capabilities as RuntimeCapabilityManifest & {
     readonly contracts?: unknown;
   };
-  return manifest;
+  return applyHubIsolationClaim(manifest, claimed);
+}
+
+/**
+ * Withholds a peer attestation this connection's hub has explicitly refused.
+ * Used for the handshake and every replacement, including older peers that
+ * repeat their original attestation in health reports.
+ *
+ * @example
+ * const accepted = applyHubIsolationClaim(manifest, 'withdrawn');
+ */
+export function applyHubIsolationClaim(
+  manifest: RuntimeCapabilityManifest,
+  claimed?: HubExternalAgentIsolation
+): RuntimeCapabilityManifest {
+  if (claimed !== 'withdrawn' || manifest.identityIsolation === undefined) return manifest;
+  const { identityIsolation: _withdrawn, ...withheld } = manifest;
+  return withheld;
 }

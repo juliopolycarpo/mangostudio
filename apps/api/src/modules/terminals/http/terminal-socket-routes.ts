@@ -9,7 +9,7 @@
  * real socket.
  */
 
-import type { RuntimeTerminalOutputEvent } from '@mangostudio/runtime';
+import type { RuntimeTerminalOutputEvent } from '@mangostudio/shared/runtime-contract';
 import {
   chunkTerminalBytes,
   decodeTerminalClientMessage,

@@ -52,7 +52,12 @@ export interface RuntimeMethodRegistryOptions {
     'registry' | 'runtimeVersion' | 'emit' | 'consent'
   > & {
     readonly adapters?: readonly ExternalAgentAdapter[];
-    readonly identityIsolation?: ExternalIdentityIsolation;
+    /**
+     * Read per call, not captured: the hub can withdraw the claim behind it
+     * after the handshake, and a health report that still carried the
+     * attestation would contradict the manifest beside it.
+     */
+    readonly identityIsolation?: () => ExternalIdentityIsolation | undefined;
   };
 }
 
@@ -62,6 +67,17 @@ export interface RuntimeMethodRegistry {
   readonly externalAgentRegistry: ExternalAgentAdapterRegistry;
   /** Releases everything the handlers hold open — MCP sessions today. */
   close(): Promise<void>;
+}
+
+/**
+ * The attestation to report right now, spread so an absent one is omitted
+ * rather than sent as `undefined`.
+ */
+function identityIsolationOf(options: RuntimeMethodRegistryOptions): {
+  identityIsolation?: ExternalIdentityIsolation;
+} {
+  const attestation = options.externalAgents?.identityIsolation?.();
+  return attestation ? { identityIsolation: attestation } : {};
 }
 
 /** Registers the protocol methods owned by the runtime in this release. */
@@ -178,9 +194,7 @@ export function createRuntimeMethodHandlers(
           ...(options.update?.env ? { env: options.update.env } : {}),
           externalAgents: {
             ...externalAgents.health,
-            ...(options.externalAgents?.identityIsolation
-              ? { identityIsolation: options.externalAgents.identityIsolation }
-              : {}),
+            ...identityIsolationOf(options),
           },
         }),
       'runtime.update.begin': (params) => update.begin(params),

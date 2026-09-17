@@ -1,10 +1,15 @@
 /**
- * Hub-side MCP boundary types. The SDK lives in `@mangostudio/runtime` now —
+ * Hub-side MCP boundary types. The SDK lives in the runtime now —
  * a server runs on the environment its row is bound to — so everything here
  * describes the hub's half: which server, on which environment, and the handle
  * shape the turn pipeline and the settings module call through.
  */
 
+import type {
+  McpPromptDescriptor,
+  McpResourceDescriptor,
+  McpToolDescriptor,
+} from '@mangostudio/shared/mcp';
 import type {
   RuntimeMcpCallResult,
   RuntimeMcpContentBlock,
@@ -12,12 +17,7 @@ import type {
   RuntimeMcpResourceContents,
   RuntimeMcpServerCapabilities,
   RuntimeMcpServerConfig,
-} from '@mangostudio/runtime';
-import type {
-  McpPromptDescriptor,
-  McpResourceDescriptor,
-  McpToolDescriptor,
-} from '@mangostudio/shared/mcp';
+} from '@mangostudio/shared/runtime-contract';
 
 /**
  * Runtime connection config derived from an `mcp_servers` row (no secrets),

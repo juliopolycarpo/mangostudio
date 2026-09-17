@@ -17,7 +17,7 @@ import type {
   RuntimeTerminalOutputEvent,
   RuntimeTerminalResizeParams,
   RuntimeTerminalWriteParams,
-} from '@mangostudio/runtime';
+} from '@mangostudio/shared/runtime-contract';
 import type {
   TerminalRuntimeClient,
   TerminalRuntimeTerminalClient,

@@ -8,6 +8,7 @@ import {
   UpdateChatBodySchema,
 } from '@mangostudio/shared/chat';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
+import { WorkspacePathError } from '@mangostudio/shared/runtime-contract';
 import { type Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -15,7 +16,6 @@ import { parseQueryInt } from '../../../utils/query';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
 import { modelUnavailableResponse } from '../../generation/http/model-unavailable-response';
 import { WorkdirValidationError } from '../../workspaces/application/workdir-validation';
-import { WorkspacePathError } from '../../workspaces/application/workspace-path';
 import {
   compactChatUseCase,
   EmptyChatCompactionError,

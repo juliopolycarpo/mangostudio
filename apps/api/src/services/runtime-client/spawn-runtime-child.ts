@@ -18,7 +18,7 @@
 import { statSync } from 'node:fs';
 import { RESERVED_ERROR_CODES, RemoteError, type SessionClosure } from '@mangostudio/protocol';
 import { type SpawnedPeer, spawnPort } from '@mangostudio/protocol/spawn';
-import { sanitizeShellEnv } from '@mangostudio/runtime';
+import { sanitizeShellEnv } from '@mangostudio/shared/process';
 import { createDiagnosticLogger } from '../../lib/logger';
 import type { RuntimeLaunchCommand } from '../../lib/runtime-paths';
 import { resolveHandshakeTimeoutMs } from './handshake-budget';

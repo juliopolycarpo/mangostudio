@@ -389,12 +389,33 @@ The attestation carries a `credentialHomeFingerprint`: a non-reversible digest o
 home's identity, never its contents and never a path that would leak a username. It exists so the
 hub can notice that the identity behind a session changed.
 
+Every attestation is derived by the process making it, from its own credential home — including
+the in-process one, which the hub used to construct and inject. It no longer does: a runtime that
+is a separate process could not receive an injected attestation, and the fingerprint is of a home
+only that process can read.
+
 The **hub** supplies the half a runtime cannot. From inside, a dedicated per-user SSH account and a
 shared service account four people's keys land in are indistinguishable — same uid, same `$HOME`,
 same everything. The hub is the only party that sees both the OS identity and which MangoStudio
 user each connection belongs to, so
 `apps/api/src/modules/external-agents/application/external-identity-isolation.ts` watches for one
 fingerprint claimed by two users and withdraws the attestation from **both**.
+
+That half travels on the wire. The hub announces `externalAgentIsolation: 'single-user' |
+'withdrawn'` in its `hello.capabilities` — beside `hub`, not inside it, because the hub identity
+object refuses unknown members and an older runtime would discard the whole thing — and the runtime
+stops attesting when it hears a withdrawal. It is announced rather than passed at spawn because
+most runtimes are not spawned by the hub at all, and because a claim frozen into an argv could not
+be revoked without restarting a machine the hub does not own.
+
+The two hellos cross: a session sends its own from its constructor, so the manifest the runtime
+announced was composed before it could read the hub's refusal. The withdrawal is therefore applied
+on both sides — the hub withholds `identityIsolation` from the manifest it accepts, since it
+already knows what it refused, and the runtime honours the refusal from its next answer onward,
+which is what `runtime.health` and a refreshed manifest report. The hub retains its claim on the
+connection and applies the same withdrawal rule to every manifest replacement, so an older peer
+that repeats its attestation in health cannot restore it. Discovery and environment status both
+read the accepted manifest.
 
 Withdrawing from everyone, rather than keeping it for whoever arrived first, is deliberate. The
 danger is not that the newcomer reaches the incumbent's `~/.claude`; it is that one vendor login

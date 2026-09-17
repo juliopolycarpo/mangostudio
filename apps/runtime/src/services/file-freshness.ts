@@ -1,6 +1,20 @@
 import { stat } from 'node:fs/promises';
-import { RuntimeServiceError } from '../errors';
+import {
+  FileNotReadError,
+  PartialReadError,
+  StaleFileError,
+  StaleLineNumbersError,
+  UnobservedLineNumbersError,
+} from '../errors';
 import { type ObservedFileRead, readFileWithObservedMtime } from './fs-utils';
+
+export {
+  FileNotReadError,
+  PartialReadError,
+  StaleFileError,
+  StaleLineNumbersError,
+  UnobservedLineNumbersError,
+};
 
 /**
  * Read-before-destroy invariant and its actual boundary.
@@ -96,81 +110,6 @@ const pathLockTails = new Map<string, Promise<void>>();
 
 // Subagents deliberately share their parent's chatId, so their reads and the
 // parent turn participate in the same freshness boundary in this first version.
-
-export class FileNotReadError extends RuntimeServiceError {
-  constructor(resolvedPath: string) {
-    super('file_not_read', `You must read "${resolvedPath}" with read_file before modifying it.`, {
-      resolvedPath,
-    });
-    this.name = 'FileNotReadError';
-  }
-}
-
-export class PartialReadError extends RuntimeServiceError {
-  constructor(resolvedPath: string, coveredThroughLine: number) {
-    const observed =
-      coveredThroughLine > 0
-        ? `only lines 1-${coveredThroughLine} have been read`
-        : 'it has not been read from line 1';
-    super(
-      'partial_read',
-      `Cannot modify "${resolvedPath}": ${observed} in this chat. A safe mutation requires a ` +
-        'complete view of the current file, so read the remaining lines with read_file ' +
-        '(startLine/maxLines) first.',
-      { resolvedPath, coveredThroughLine }
-    );
-    this.name = 'PartialReadError';
-  }
-}
-
-export class StaleFileError extends RuntimeServiceError {
-  constructor(resolvedPath: string) {
-    super(
-      'stale_file',
-      `"${resolvedPath}" changed on disk since it was last read (content hash mismatch). ` +
-        'Re-read the file and retry with the current content.',
-      { resolvedPath }
-    );
-    this.name = 'StaleFileError';
-  }
-}
-
-export class StaleLineNumbersError extends RuntimeServiceError {
-  constructor(resolvedPath: string, validThroughLine: number) {
-    const remaining =
-      validThroughLine > 0
-        ? `only lines 1-${validThroughLine} still match the last read`
-        : 'no line numbers still match the last read';
-    super(
-      'stale_line_numbers',
-      `Line numbers for "${resolvedPath}" are stale: an earlier edit in this chat changed the ` +
-        `file's line count, so ${remaining}. Re-read the file with read_file to get the ` +
-        'current numbering before replacing this range.',
-      { resolvedPath, validThroughLine }
-    );
-    this.name = 'StaleLineNumbersError';
-  }
-}
-
-/**
- * A line-addressed edit quoted numbers a byte view never assigned.
- *
- * Distinct from {@link StaleLineNumbersError}: the file did not change on disk
- * and no earlier splice shifted numbering. The model has to read the file as
- * text before `replace_range` can trust a line range.
- */
-export class UnobservedLineNumbersError extends RuntimeServiceError {
-  constructor(resolvedPath: string) {
-    super(
-      'unobserved_line_numbers',
-      `Line numbers for "${resolvedPath}" were never observed: the last read was a byte view ` +
-        '(hex or base64), which does not assign line numbers. Re-read the file as text with ' +
-        'read_file first, then retry replacing this range.',
-      { resolvedPath }
-    );
-    this.name = 'UnobservedLineNumbersError';
-  }
-}
 
 /**
  * Records the exact bytes a chat observed and returns their SHA-256 digest.

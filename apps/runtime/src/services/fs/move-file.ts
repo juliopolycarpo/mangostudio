@@ -1,10 +1,10 @@
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import { PathAccessError } from '../../errors';
 import type {
   RuntimeMoveFileParams,
   RuntimeMoveFileResult,
   RuntimeMutationResult,
 } from '../../methods';
-import { throwIfAborted } from '../cancellation';
 import { rekeyFile, withPathLocks } from '../file-freshness';
 import { assertRegularFilePath, moveRegularFileWithoutOverwrite } from '../fs-utils';
 import { captureFileSnapshot, hashFileAtPath, mutationSnapshot } from '../snapshot';

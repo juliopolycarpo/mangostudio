@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { FileNotReadError, StaleFileError } from '@mangostudio/shared/runtime-contract';
 import { PathAccessError } from '../../../../src/services/tools/builtin/_fs-utils';
 import {
   type DeleteFileToolResult,
@@ -14,13 +15,9 @@ import {
   register as registerReadFile,
 } from '../../../../src/services/tools/builtin/read-file';
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
-import {
-  clearFileFreshness,
-  FileNotReadError,
-  StaleFileError,
-} from '../../../../src/services/tools/file-freshness';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { clearFileFreshness } from '../../../support/runtime-file-freshness';
 import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
 
 let tempDir: string;

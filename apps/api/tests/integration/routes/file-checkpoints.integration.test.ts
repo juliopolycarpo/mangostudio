@@ -14,7 +14,6 @@ import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { fileCheckpointRoutes } from '../../../src/modules/file-checkpoints/http/file-checkpoint-routes';
 import { executeCreateFile } from '../../../src/services/tools/builtin/create-file';
-import { clearFileFreshness } from '../../../src/services/tools/file-freshness';
 import type { ToolContext } from '../../../src/services/tools/types';
 import {
   type ChatFixture,
@@ -23,6 +22,7 @@ import {
   type UserFixture,
 } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { clearFileFreshness } from '../../support/runtime-file-freshness';
 
 let user: UserFixture;
 let chat: ChatFixture;
