@@ -112,7 +112,8 @@ export async function assertServicePreconditions(
         'runtime_service_unconfigured',
         credentialsUnusableMessage(
           pairingState,
-          'No pairing token is stored. Run "mangostudio-runtime connect" with a token before installing the connect service.'
+          'No pairing token is stored. Run "mangostudio-runtime connect" with a token before installing the connect service.',
+          '"mangostudio-runtime connect"'
         )
       );
     }
@@ -130,7 +131,8 @@ export async function assertServicePreconditions(
       'runtime_service_unconfigured',
       credentialsUnusableMessage(
         serveState,
-        'No serve token is stored. Run "mangostudio-runtime serve" once before installing the serve service.'
+        'No serve token is stored. Run "mangostudio-runtime serve" once before installing the serve service.',
+        '"mangostudio-runtime serve"'
       )
     );
   }

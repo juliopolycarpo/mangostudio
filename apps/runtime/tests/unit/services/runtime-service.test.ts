@@ -29,7 +29,10 @@ import {
   resolveInstallMode,
   runtimeUnitDefinition,
 } from '../../../src/services/runtime-service';
-import { FUTURE_SCHEMA_CREDENTIALS_JSON } from '../../fixtures/runtime-credentials';
+import {
+  FUTURE_SCHEMA_CREDENTIALS_JSON,
+  NUMERIC_TOKEN_CREDENTIALS_JSON,
+} from '../../fixtures/runtime-credentials';
 
 const CURRENT = '/home/test/.mango/runtime/remote/current/mangostudio-runtime';
 
@@ -346,6 +349,46 @@ describe('runtime service refusals', () => {
 
       expect(message).toContain('schemaVersion 2');
       expect(message).not.toContain('No pairing token is stored');
+      // `service install` never writes credentials.json itself — only
+      // `connect`/`serve` do — so the remedy must name the command that
+      // will, not "this command".
+      expect(message).toContain('Move it aside, then run "mangostudio-runtime connect"');
+    } finally {
+      await rm(mangoHome, { recursive: true, force: true });
+    }
+  });
+
+  // #1078 review, second round: the refused remedy above used to be reused
+  // verbatim for `replaceable`, which told an operator "this command" would
+  // rewrite the file when `service install` never writes it at all. A
+  // replaceable file has no such universal remedy, so the message must fall
+  // through to the same generic instruction a missing file gets.
+  it('falls through to the generic "no token" message for a replaceable file, not the refused remedy', async () => {
+    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-svc-'));
+    const env = { MANGO_HOME: mangoHome };
+    try {
+      await writeRuntimeSlotConfig(
+        'remote',
+        { hubUrl: 'wss://hub.test/api/runtime', setup: { state: 'configured' } },
+        env
+      );
+      await Bun.write(
+        join(mangoHome, 'runtime/remote/credentials.json'),
+        NUMERIC_TOKEN_CREDENTIALS_JSON
+      );
+
+      let message = '';
+      try {
+        await assertServicePreconditions('connect', await readRuntimeSlotState('remote', env), env);
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+
+      expect(message).toContain('does not match the runtime credentials schema');
+      expect(message).toContain(
+        'No pairing token is stored. Run "mangostudio-runtime connect" with a token before installing the connect service.'
+      );
+      expect(message).not.toContain('Move it aside');
     } finally {
       await rm(mangoHome, { recursive: true, force: true });
     }

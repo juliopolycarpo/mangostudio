@@ -721,36 +721,48 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
 }
 
 /** A resolved (or absent) credential, plus whether its diagnostic was already logged. */
-interface ResolvedCredential<T> {
+export interface ResolvedCredential<T> {
   readonly token: T | null;
   /**
-   * True once a stored-but-unusable file's diagnostic has already gone to
-   * `log`. The caller's own generic "no token" line must not follow it — two
-   * different explanations for the same refusal read as a bug, not help.
+   * True only for a `refused` file, whose diagnostic and remedy have already
+   * gone to `log`. The caller's own generic "no token" line must not follow
+   * that — two different explanations for one refusal read as a bug, not
+   * help. A `replaceable` file is different: its diagnostic (already logged)
+   * is a heads-up, not a substitute for the caller's own accurate next step —
+   * `credentialsRemedy` has no universal sentence for it (see its docstring),
+   * so `diagnosed` stays false and the caller's line still prints.
    */
   readonly diagnosed: boolean;
 }
 
-async function resolveToken(
+/**
+ * Exported so its diagnostic wording can be asserted directly, without
+ * spawning a process: `resolveToken` never blocks past its return, but
+ * `serve` (`resolveServeToken` below) binds a listener and never exits on its
+ * own, which makes a real CLI spawn the wrong tool for testing the message it
+ * prints before that.
+ */
+export async function resolveToken(
   source: RuntimeConnectArgs['tokenSource'],
-  log: (message: string) => void
+  log: (message: string) => void,
+  env?: NodeJS.ProcessEnv
 ): Promise<ResolvedCredential<string>> {
   if (source === 'stdin') {
     const piped = (await Bun.stdin.text()).trim();
     return { token: piped.length > 0 ? piped : null, diagnosed: false };
   }
-  const fromEnv = loadRuntimeConfig().pairingToken;
+  const fromEnv = loadRuntimeConfig(env).pairingToken;
   if (fromEnv) return { token: fromEnv, diagnosed: false };
   if (source === 'env') return { token: null, diagnosed: false };
   // `--token` was not given and the environment is empty: fall back to whatever
   // a previous run stored, which is what makes an unattended restart work.
-  const state = await readRuntimeSlotCredentialsState(PAIRED_SLOT);
+  const state = await readRuntimeSlotCredentialsState(PAIRED_SLOT, env);
   if (state.error) {
     log(state.error);
     const remedy = credentialsRemedy(state);
     if (remedy) log(remedy);
   }
-  return { token: state.credentials.pairingToken ?? null, diagnosed: state.error !== null };
+  return { token: state.credentials.pairingToken ?? null, diagnosed: state.kind === 'refused' };
 }
 
 interface ResolvedServeToken {
@@ -762,9 +774,11 @@ interface ResolvedServeToken {
   readonly diagnosed: boolean;
 }
 
-async function resolveServeToken(
+/** Exported for the same reason `resolveToken` is — see its docstring. */
+export async function resolveServeToken(
   source: RuntimeServeArgs['tokenSource'],
-  log: (message: string) => void
+  log: (message: string) => void,
+  env?: NodeJS.ProcessEnv
 ): Promise<ResolvedServeToken> {
   if (source === 'stdin') {
     const piped = (await Bun.stdin.text()).trim();
@@ -774,13 +788,13 @@ async function resolveServeToken(
       diagnosed: false,
     };
   }
-  const fromEnv = loadRuntimeConfig().serveToken;
+  const fromEnv = loadRuntimeConfig(env).serveToken;
   if (source === 'env') {
     return { resolved: fromEnv ? { token: fromEnv, generated: false } : null, diagnosed: false };
   }
   if (fromEnv) return { resolved: { token: fromEnv, generated: false }, diagnosed: false };
 
-  const state = await readRuntimeSlotCredentialsState(PAIRED_SLOT);
+  const state = await readRuntimeSlotCredentialsState(PAIRED_SLOT, env);
   if (state.credentials.serveToken) {
     return {
       resolved: { token: state.credentials.serveToken, generated: false },
@@ -792,13 +806,13 @@ async function resolveServeToken(
     log(state.error);
     const remedy = credentialsRemedy(state);
     if (remedy) log(remedy);
-    diagnosed = true;
+    diagnosed = state.kind === 'refused';
     // A refused file is never bootstrapped over: the write below would only
     // throw the identical refusal a second time, from inside a lock this
     // call has not taken yet.
     if (state.kind === 'refused') return { resolved: null, diagnosed };
   }
-  const bootstrapped = await bootstrapServeToken(PAIRED_SLOT);
+  const bootstrapped = await bootstrapServeToken(PAIRED_SLOT, env);
   return {
     resolved: {
       token: bootstrapped.token,

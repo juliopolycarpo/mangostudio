@@ -528,38 +528,51 @@ function unsupportedCredentialsSchemaVersion(parsed: unknown): number | null {
 }
 
 /**
- * What to tell an operator once `error` has already been shown, or `null` for
- * `usable` — there is nothing to add to a message that was never printed.
+ * What to tell an operator once `error` has already been shown, or `null`
+ * when there is nothing this module can say for everybody.
  *
- * `replaceable` only needs the command repeated: passing a token (or letting
- * one generate) already replaces the file. `refused` needs a person, because
- * this process will not touch the file itself — moving it aside is what lets
- * the same command write a fresh one in its place.
+ * Only `refused` gets a sentence here, and it is the one genuinely universal
+ * remedy: an operator has to move the file aside before anything can use it
+ * again. `replaceable` has no such sentence — the accurate next step differs
+ * by caller. `connect` wants a token piped in (never `--token`: argv is
+ * world-readable, and `parseConnectArgs` refuses that form on purpose).
+ * `serve` is generally about to generate one in the same invocation, with
+ * nothing left for an operator to do. `service install` names whichever of
+ * those is unconfigured, never itself. Baking one sentence in here for that
+ * case previously told an operator to "rerun this command" no matter which
+ * command was asking — including `service install`, which never writes
+ * `credentials.json` at all. Every other caller supplies its own fallback to
+ * `credentialsUnusableMessage` instead.
+ *
+ * `writer` names the command that rewrites the file once it is moved aside:
+ * `resolveToken`/`resolveServeToken` leave it as "this command", because they
+ * are that command; `assertServicePreconditions` passes the mode it is
+ * checking, because `service install` is never the one writing.
  */
-export function credentialsRemedy(state: RuntimeSlotCredentialsState): string | null {
-  switch (state.kind) {
-    case 'usable':
-      return null;
-    case 'replaceable':
-      return 'Rerun this command with a token (or let it generate one); that replaces the file.';
-    case 'refused':
-      return 'Move it aside, then rerun this command; it will write a fresh credentials.json in its place.';
-  }
+export function credentialsRemedy(
+  state: RuntimeSlotCredentialsState,
+  writer = 'this command'
+): string | null {
+  if (state.kind !== 'refused') return null;
+  return `Move it aside, then run ${writer}; it will write a fresh credentials.json in its place.`;
 }
 
 /**
- * `state.error` plus its remedy, on one line, or `fallback` when the file was
- * absent or fine. The single place every caller — the thrown refusal below,
- * `resolveToken`/`resolveServeToken`, `assertServicePreconditions` — builds
- * its message, so the wording only has to be right once.
+ * `state.error` plus a remedy, on one line, or `fallback` alone when the file
+ * was absent or fine. `refused` gets the universal remedy from
+ * `credentialsRemedy`; every other unusable shape gets the diagnostic
+ * prefixed onto the caller's own accurate `fallback` instead, because there
+ * is no remedy this module could word once for every caller — see
+ * `credentialsRemedy`.
  */
 export function credentialsUnusableMessage(
   state: RuntimeSlotCredentialsState,
-  fallback: string
+  fallback: string,
+  writer?: string
 ): string {
   if (!state.error) return fallback;
-  const remedy = credentialsRemedy(state);
-  return remedy ? `${state.error} ${remedy}` : state.error;
+  const remedy = credentialsRemedy(state, writer);
+  return remedy ? `${state.error} ${remedy}` : `${state.error} ${fallback}`;
 }
 
 /**
