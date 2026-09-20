@@ -187,16 +187,14 @@ const MAX_SYMLINK_HOPS: u32 = 32;
 /// component at a time, and `..` applies to whatever the *previous*
 /// component actually resolved to — following it through a symlink first,
 /// if it was one. Folding `..` as a string operation before that walk runs
-/// (this function's own earlier shape, and `path-containment.ts`'s, both
-/// via `resolve()`) computes a different answer than the kernel would: for
-/// `root/link/../victim.txt` with `link` a symlink to somewhere outside
-/// `root`, a lexical fold cancels `link/..` before ever checking whether
-/// `link` is a symlink, landing back inside `root`; the kernel follows
-/// `link` first and applies `..` to *its* target's parent, landing outside
-/// `root`. The same failure reaches a caller with no `..` in the request at
-/// all if a symlink's own *target* text contains one (`link -> "s/../secret"`
-/// with `s` itself a symlink escaping `root`): splicing that target in
-/// unfolded is what makes the difference.
+/// — this function's own earlier shape — computes a different answer than
+/// the kernel would: for a symlink `link` pointing outside `root`, followed
+/// by a `..` segment, a lexical fold cancels the two before ever checking
+/// whether `link` is a symlink, landing back inside `root`; the kernel
+/// follows `link` first and applies `..` to *its* target's parent, landing
+/// outside `root`. The same failure reaches a caller with no `..` in the
+/// request at all if a symlink's own *target* text contains one: splicing
+/// that target in unfolded is what makes the difference.
 ///
 /// `..` is instead walked as an ordinary [`Component::ParentDir`], popping
 /// whatever `resolved` actually holds at that point (a no-op past the root
@@ -670,9 +668,10 @@ mod tests {
         assert!(matches!(error, WorkspaceContainmentError::Escaped { .. }));
     }
 
-    /// The exploit at the layer a caller actually goes through, mirroring
-    /// the first shape above: a mutation naming `link/../secret` must
-    /// never run, and must never have written outside `root` through it.
+    /// The same defect at the layer a caller actually goes through,
+    /// mirroring the first shape above: a mutation naming a path that
+    /// escapes through `link/..` must never run, and must never have
+    /// written outside `root` through it.
     #[cfg(unix)]
     #[test]
     fn guard_mutation_never_writes_outside_root_through_dot_dot_after_a_symlink() {
