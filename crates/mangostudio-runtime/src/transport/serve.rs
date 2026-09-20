@@ -1,12 +1,16 @@
 //! The `serve` transport: the hub dials in over WebSocket, authenticated by
 //! a bearer token this process holds. Mirrors `serve.ts`.
 //!
-//! One hub connection at a time. A new upgrade supersedes the previous one,
-//! and the replacement does not announce itself (does not build a session
-//! at all) until the superseded generation has fully released — see
-//! `ServeState`, the one `Mutex` that makes "which generation may become
-//! active" and "are we shutting down" the same synchronisation point (see
-//! [`crate::supervisor`]'s module docs for why that matters).
+//! One hub connection at a time. A new upgrade supersedes the previous one;
+//! if the previous generation had already published a real session by
+//! then, the replacement waits for it to fully release before building its
+//! own — but a previous generation still in its own placeholder window (one
+//! that has not yet reached `publish`, so it has no session and nothing to
+//! wait on) releases instantly, and the two may briefly overlap while the
+//! newer one constructs. See `ServeState`, the one `Mutex` that makes
+//! "which generation may become active" and "are we shutting down" the
+//! same synchronisation point (see [`crate::supervisor`]'s module docs for
+//! why that matters).
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -36,11 +40,36 @@ use crate::transport::{build_host, runtime_peer, tokens_equal};
 /// still not be the normal path.
 const SHUTDOWN_DRAIN_GRACE: Duration = Duration::from_secs(5);
 
-/// How many upgrades may be mid-authorisation at once: the one that is about
-/// to become active, plus the one that may be racing in to supersede it,
-/// plus a little slack for a same-instant retry. A dialler beyond this is
-/// refused with `RATE_LIMITED` before its upgrade completes, never queued
-/// behind an unbounded accept loop.
+/// Bounds one TCP peer's entire WebSocket upgrade — the handshake itself,
+/// `accept_websocket`'s subprotocol/origin checks, and this transport's own
+/// bearer check — from the moment its connection is accepted. Named
+/// separately from every other deadline in this crate: `mango_protocol`'s
+/// upgrade has no read timeout of its own (a peer that opens the TCP
+/// connection and never sends a byte otherwise never reaches the `authorize`
+/// callback at all), so without this a single silent peer holds its
+/// [`MAX_PENDING_HANDSHAKES`] permit — and its `OwnedTasks` slot — forever.
+const UPGRADE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long to back off after `listener.accept()` itself fails (an `EMFILE`
+/// once every pending-handshake permit is genuinely held by a slow peer, a
+/// transient `ECONNABORTED`, …) before trying again — never busy-loop the
+/// accept loop on a condition retrying immediately cannot fix.
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(50);
+
+/// How many TCP peers may be *mid-upgrade* at once — from the instant
+/// `listener.accept()` hands one to this transport to the instant its
+/// [`accept_websocket`] call (bounded by [`UPGRADE_TIMEOUT`]) settles one way
+/// or the other. Enforced by acquiring a permit atomically in the accept
+/// loop itself, before a connection task is ever spawned — a peer beyond
+/// this bound is refused (its raw socket dropped) before `OwnedTasks` grows
+/// at all, which is what keeps an unauthenticated flood from costing this
+/// process a task and a file descriptor per connection.
+///
+/// The permit is released the instant the upgrade settles, successfully or
+/// not — it does **not** cover a connection's session lifetime. An
+/// authenticated, long-lived hub connection holds no permit at all once its
+/// upgrade completes, so this bound is exactly "how many peers may be
+/// negotiating at once", never "how many may be connected".
 const MAX_PENDING_HANDSHAKES: usize = 4;
 
 /// The cadence a connected hub is told this runtime is still here, over the
@@ -75,9 +104,9 @@ pub async fn run(
         slot,
         mango_home,
         runtime_version,
-        pending_handshakes: Arc::new(Semaphore::new(MAX_PENDING_HANDSHAKES)),
         log: Box::new(log),
     });
+    let pending_handshakes = Arc::new(Semaphore::new(MAX_PENDING_HANDSHAKES));
     let mut owned = OwnedTasks::new();
 
     loop {
@@ -85,12 +114,31 @@ pub async fn run(
             biased;
             () = cancel.cancelled() => break,
             accepted = listener.accept() => {
-                let Ok((stream, _peer_addr)) = accepted else { continue };
-                let state = Arc::clone(&state);
-                let context = Arc::clone(&context);
-                owned.spawn(async move {
-                    handle_connection(stream, state, context).await;
-                });
+                match accepted {
+                    Ok((stream, _peer_addr)) => {
+                        // Acquired here, atomically, before anything is
+                        // spawned: `try_acquire_owned` is the check *and*
+                        // the reservation in one step, so there is no
+                        // window between "may I admit another mid-upgrade
+                        // peer" and actually counting this one against the
+                        // bound — a flood past `MAX_PENDING_HANDSHAKES`
+                        // never grows `OwnedTasks` at all.
+                        match Arc::clone(&pending_handshakes).try_acquire_owned() {
+                            Ok(permit) => {
+                                let state = Arc::clone(&state);
+                                let context = Arc::clone(&context);
+                                owned.spawn(async move {
+                                    handle_connection(stream, permit, state, context).await;
+                                });
+                            }
+                            Err(_) => drop(stream),
+                        }
+                    }
+                    Err(error) => {
+                        (context.log)(&format!("accept failed: {error}"));
+                        tokio::time::sleep(ACCEPT_ERROR_BACKOFF).await;
+                    }
+                }
             }
         }
     }
@@ -99,10 +147,13 @@ pub async fn run(
         release_active(previous, close_codes::RELEASED, "Runtime stopped").await;
     }
     let aborted = owned.join_all_or_abort(SHUTDOWN_DRAIN_GRACE).await;
-    debug_assert_eq!(
-        aborted, 0,
-        "a connection task outlived the shutdown grace without honouring its own session close"
-    );
+    if aborted > 0 {
+        // Reachable from the network (a peer that never completes its own
+        // teardown), not a programmer error — log it rather than assert.
+        (context.log)(&format!(
+            "{aborted} connection task(s) outlived the shutdown grace and were aborted"
+        ));
+    }
     Ok(())
 }
 
@@ -112,7 +163,6 @@ struct ConnectionContext {
     slot: RuntimeSlot,
     mango_home: std::path::PathBuf,
     runtime_version: String,
-    pending_handshakes: Arc<Semaphore>,
     log: Box<dyn Fn(&str) + Send + Sync>,
 }
 
@@ -255,37 +305,48 @@ async fn release_active(previous: ActiveGeneration, code: u16, reason: &str) {
 }
 
 /// Runs one accepted TCP connection from upgrade to release.
+///
+/// `permit` reserves this connection's [`MAX_PENDING_HANDSHAKES`] slot for
+/// exactly the upgrade below — bounded by [`UPGRADE_TIMEOUT`], since
+/// `accept_websocket` has no read timeout of its own and a peer that opens
+/// the socket and never speaks would otherwise hold it, and this task's
+/// `OwnedTasks` slot, forever.
 async fn handle_connection(
     stream: TcpStream,
+    permit: tokio::sync::OwnedSemaphorePermit,
     state: Arc<ServeState>,
     context: Arc<ConnectionContext>,
 ) {
-    // Held for the rest of this function on success: released automatically
-    // (Rust drops it) on every return path, including the early ones below,
-    // which is this crate's own "release every reservation on failure"
-    // beyond what `serve.ts` bounds at all.
-    let permit = context.pending_handshakes.clone().try_acquire_owned();
-    let has_slot = permit.is_ok();
     let token = context.token.clone();
-    let port = match accept_websocket(
-        stream,
-        AcceptOptions::from(WebSocketOptions::default()),
-        |upgrade| {
-            if !has_slot {
-                return Err(close_codes::RATE_LIMITED);
-            }
-            match upgrade.bearer() {
+    let upgraded = tokio::time::timeout(
+        UPGRADE_TIMEOUT,
+        accept_websocket(
+            stream,
+            AcceptOptions::from(WebSocketOptions::default()),
+            |upgrade| match upgrade.bearer() {
                 Some(presented) if tokens_equal(presented.as_bytes(), token.as_bytes()) => Ok(()),
                 _ => Err(close_codes::UNAUTHORIZED),
-            }
-        },
+            },
+        ),
     )
-    .await
-    {
-        Ok(port) => port,
-        Err(_) => return,
+    .await;
+    let port = match upgraded {
+        Ok(Ok(port)) => port,
+        // Refused (bad credential, bad subprotocol, …) or the peer vanished
+        // mid-upgrade: `accept_websocket` already told it why. Either way
+        // `permit` drops here, at this `return`, releasing the slot.
+        Ok(Err(_)) => return,
+        // The peer opened the socket and never finished a upgrade within
+        // `UPGRADE_TIMEOUT` — silent or slow-loris-ing. `stream` and `permit`
+        // both drop here; nothing was ever spent on it beyond one slot for
+        // one bounded wait.
+        Err(_elapsed) => return,
     };
-    let _permit = permit;
+    // The upgrade is over, successfully; this connection is no longer
+    // "pending" in the sense `MAX_PENDING_HANDSHAKES` bounds; whatever
+    // happens next (becoming active, losing the admission race, a healthy
+    // multi-hour session) must not keep holding this slot.
+    drop(permit);
 
     let (generation, previous) = match state.try_admit() {
         Admission::Admitted {
@@ -396,57 +457,91 @@ mod tests {
     use super::{ActiveGeneration, Admission, ServeState};
 
     /// The property `serve`'s single `Mutex` exists for: however many
-    /// connections race to admit at the exact instant shutdown begins,
-    /// every one of them gets exactly one outcome (admitted xor refused),
-    /// never both and never neither — proving the shared counter and the
-    /// admission decision can never observe a torn, half-updated state.
+    /// connections race to admit at the exact instant shutdown begins, none
+    /// of them may still be sitting in the active slot once everything
+    /// settles — shutdown having taken (and not given back) the slot is
+    /// exactly what must stop any of them from landing there afterwards.
+    ///
+    /// This replaces an earlier version of this test whose only assertion
+    /// was `admitted + refused == CONCURRENT`, which is true by
+    /// construction (`try_admit` returns exactly one variant, and each arm
+    /// increments exactly one counter) and does not exercise the mutex at
+    /// all — confirmed by deleting the `if inner.closed` check from
+    /// `try_admit` entirely and observing that assertion still pass. The
+    /// assertion below was measured, against the real defect of splitting
+    /// `closed` out of the `Mutex` into its own flag checked outside the
+    /// lock, to catch it on some fraction of single rounds — which is why
+    /// this repeats the whole barrier round, with a fresh [`ServeState`]
+    /// each time, rather than relying on one round to be enough.
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-    async fn every_concurrent_admission_gets_exactly_one_outcome() {
+    async fn no_admission_survives_in_the_active_slot_after_shutdown_takes_it() {
         const CONCURRENT: usize = 64;
-        let state = Arc::new(ServeState::new());
-        let barrier = Arc::new(Barrier::new(CONCURRENT + 1));
-        let admitted = Arc::new(AtomicUsize::new(0));
-        let refused = Arc::new(AtomicUsize::new(0));
+        const ROUNDS: usize = 200;
 
-        let mut admitters = Vec::new();
-        for _ in 0..CONCURRENT {
-            let state = Arc::clone(&state);
-            let barrier = Arc::clone(&barrier);
-            let admitted = Arc::clone(&admitted);
-            let refused = Arc::clone(&refused);
-            admitters.push(tokio::spawn(async move {
-                barrier.wait().await;
-                match state.try_admit() {
-                    Admission::Admitted { generation, .. } => {
-                        admitted.fetch_add(1, Ordering::SeqCst);
-                        // A connection that becomes active and finishes
-                        // immediately, exactly like a dial that is refused
-                        // at the handshake a moment later.
-                        state.clear_if_current(generation);
+        for _ in 0..ROUNDS {
+            let state = Arc::new(ServeState::new());
+            let barrier = Arc::new(Barrier::new(CONCURRENT + 1));
+            let admitted = Arc::new(AtomicUsize::new(0));
+            let refused = Arc::new(AtomicUsize::new(0));
+
+            let mut admitters = Vec::new();
+            for _ in 0..CONCURRENT {
+                let state = Arc::clone(&state);
+                let barrier = Arc::clone(&barrier);
+                let admitted = Arc::clone(&admitted);
+                let refused = Arc::clone(&refused);
+                admitters.push(tokio::spawn(async move {
+                    barrier.wait().await;
+                    match state.try_admit() {
+                        Admission::Admitted { .. } => {
+                            admitted.fetch_add(1, Ordering::SeqCst);
+                            // Deliberately does *not* call
+                            // `clear_if_current`: doing so would launder
+                            // the exact leak this test exists to catch — an
+                            // admission that landed after shutdown already
+                            // took the active slot, then promptly tidied
+                            // itself away before anything could observe it.
+                        }
+                        Admission::Refused => {
+                            refused.fetch_add(1, Ordering::SeqCst);
+                        }
                     }
-                    Admission::Refused => {
-                        refused.fetch_add(1, Ordering::SeqCst);
-                    }
-                }
-            }));
-        }
-        let shutdown_state = Arc::clone(&state);
-        let shutdown_barrier = Arc::clone(&barrier);
-        let shutdown = tokio::spawn(async move {
-            shutdown_barrier.wait().await;
-            shutdown_state.begin_shutdown()
-        });
+                }));
+            }
+            let shutdown_state = Arc::clone(&state);
+            let shutdown_barrier = Arc::clone(&barrier);
+            let shutdown = tokio::spawn(async move {
+                shutdown_barrier.wait().await;
+                shutdown_state.begin_shutdown()
+            });
 
-        for admitter in admitters {
-            admitter.await.unwrap();
-        }
-        let _ = shutdown.await.unwrap();
+            for admitter in admitters {
+                admitter.await.unwrap();
+            }
+            let _ = shutdown.await.unwrap();
 
-        assert_eq!(
-            admitted.load(Ordering::SeqCst) + refused.load(Ordering::SeqCst),
-            CONCURRENT,
-            "every concurrent try_admit must land in exactly one bucket"
-        );
+            // Documentation only, kept for readers, not load-bearing: every
+            // call lands in exactly one bucket by construction, which is
+            // exactly why this alone proved nothing (see the doc comment
+            // above).
+            assert_eq!(
+                admitted.load(Ordering::SeqCst) + refused.load(Ordering::SeqCst),
+                CONCURRENT
+            );
+
+            // The assertion that actually discriminates the defect.
+            let leaked = state
+                .inner
+                .lock()
+                .expect("ServeState mutex poisoned")
+                .active
+                .as_ref()
+                .map(|active| active.generation);
+            assert_eq!(
+                leaked, None,
+                "a generation was admitted after shutdown took the active slot"
+            );
+        }
     }
 
     /// The other half of the same invariant: once shutdown has run, no
