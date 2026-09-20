@@ -267,7 +267,10 @@ async fn run_one_connection(
     let options = SessionOptions::new(runtime_peer(&config.runtime_version))
         .with_handshake_timeout(HANDSHAKE_TIMEOUT)
         .with_capabilities(capabilities);
-    let (session, driver_handle) = Session::spawn(port, options);
+    // `Session::open`, never `Session::spawn`: see the identical comment in
+    // `transport::serve::handle_connection` for the handler-registration
+    // race this ordering closes.
+    let (session, driver) = Session::open(port, options);
     let guard = crate::serve::serve(
         &contract,
         &session,
@@ -277,6 +280,7 @@ async fn run_one_connection(
     )
     .expect("an empty registry always matches the embedded catalog");
     guard.persist();
+    let driver_handle = tokio::spawn(driver.run());
 
     // Owns exactly one job: if `cancel` fires while the connection below is
     // still being awaited, close it. Terminates on its own the moment
