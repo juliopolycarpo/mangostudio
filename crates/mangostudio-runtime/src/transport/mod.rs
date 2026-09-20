@@ -44,16 +44,11 @@ pub const RUNTIME_PEER_NAME: &str = "mangostudio-runtime";
 
 /// The event topic `serve` and `connect` both publish their keep-alive on.
 ///
-/// Mirrors `apps/shared/src/runtime-contract/events.ts`'s
-/// `RUNTIME_HEARTBEAT_TOPIC` (`"runtime.heartbeat"`) — hand-typed rather than
-/// imported from `mangostudio_runtime_contract::strings`, because that
-/// module mirrors only `strings.json` (generated from `strings.ts`); the
-/// event-topic contract lives in a sibling TypeScript file with no Rust
-/// mirror of its own yet. Whoever gives `mangostudio-runtime-contract` a
-/// generated home for event topics should replace this literal with it,
-/// the same way every runtime-home name already goes through
-/// `mangostudio_runtime_contract::strings::runtime_home`.
-pub(crate) const RUNTIME_HEARTBEAT_TOPIC: &str = "runtime.heartbeat";
+/// Taken from the embedded catalog rather than hand-typed a second time:
+/// [`mangostudio_runtime_contract::catalog::RUNTIME_HEARTBEAT_TOPIC`] is
+/// itself checked against `catalog.json` by that crate's own test, so this
+/// re-export can never drift from the topic the contract actually declares.
+pub(crate) use mangostudio_runtime_contract::catalog::RUNTIME_HEARTBEAT_TOPIC;
 
 /// Constant-time bearer-token comparison, mirroring `serve.ts`'s
 /// `tokensEqual` (`Buffer` lengths compared first — Node's own

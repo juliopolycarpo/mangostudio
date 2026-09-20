@@ -18,6 +18,12 @@ const CATALOG_JSON: &str = include_str!(concat!(
 
 static CATALOG: OnceLock<Catalog> = OnceLock::new();
 
+/// The topic a runtime publishes its keep-alive on, verified below against
+/// the embedded catalog (`runtime_heartbeat_topic_names_a_topic_the_catalog_actually_declares`)
+/// rather than left to a second, unverified hand-typed copy wherever a
+/// caller needs to name it.
+pub const RUNTIME_HEARTBEAT_TOPIC: &str = "runtime.heartbeat";
+
 /// Parses and validates `catalog.json`, once per process.
 ///
 /// # Panics
@@ -103,7 +109,7 @@ pub fn capabilities_of(method_name: &str) -> Option<&'static [String]> {
 
 #[cfg(test)]
 mod tests {
-    use super::{capabilities_of, catalog, event, method};
+    use super::{RUNTIME_HEARTBEAT_TOPIC, capabilities_of, catalog, event, method};
 
     #[test]
     fn parses_and_validates_the_embedded_catalog() {
@@ -135,6 +141,16 @@ mod tests {
     fn looks_up_a_known_topic_and_refuses_an_unknown_one() {
         assert!(event("runtime.heartbeat").is_some());
         assert!(event("no.such.topic").is_none());
+    }
+
+    /// [`RUNTIME_HEARTBEAT_TOPIC`] is a hand-typed literal only in the sense
+    /// every constant in this crate is: this test is what keeps it from
+    /// silently drifting out of step with `catalog.json`, the same
+    /// discipline `strings.rs` applies to its own constants against
+    /// `strings.json`.
+    #[test]
+    fn runtime_heartbeat_topic_names_a_topic_the_catalog_actually_declares() {
+        assert!(event(RUNTIME_HEARTBEAT_TOPIC).is_some());
     }
 
     #[test]
