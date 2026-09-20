@@ -279,9 +279,15 @@ impl FileAudit {
             "outcome".to_string(),
             Value::String(outcome_str(entry.outcome).to_string()),
         );
+        // Rounded to a whole millisecond, matching `audit-log.ts`'s own
+        // `Math.max(0, Math.round(durationMs))` (the `max(0, ...)` half is
+        // structurally unreachable here: `Duration` cannot be negative).
+        // Without the rounding, `serde_json` would serialise a value like
+        // `5.0` as `"5.0"` rather than `"5"` — a wire difference from every
+        // TypeScript-written line, which is always a whole number.
         object.insert(
             "durationMs".to_string(),
-            json!(entry.duration.as_secs_f64() * 1000.0),
+            json!((entry.duration.as_secs_f64() * 1000.0).round() as u64),
         );
         if let Some(capability) = &entry.capability {
             object.insert("capability".to_string(), Value::String(capability.clone()));
@@ -380,6 +386,32 @@ mod tests {
                 line,
             )
             .is_ok()
+        );
+    }
+
+    /// `durationMs` must land on the wire as a whole JSON number
+    /// (`5`, not `5.0`): `serde_json` serialises those two differently, and
+    /// only the former round-trips as the same `Number` a TypeScript-written
+    /// line (always an integer, via `Math.round`) would parse to.
+    #[tokio::test]
+    async fn duration_ms_serialises_as_a_whole_number_not_a_float() {
+        let dir = scratch_dir("duration-ms-integer");
+        let audit = FileAudit::new(
+            dir.join("audit.log"),
+            Arc::new(FixedWallClock::new(SystemTime::now())),
+        );
+        audit.record(entry("runtime.health", Outcome::Ok)).await;
+        let raw = std::fs::read_to_string(dir.join("audit.log")).unwrap();
+        assert!(
+            !raw.contains("durationMs\":12.0"),
+            "durationMs must serialise as an integer, not a float: {raw}"
+        );
+        let lines = read_lines(&dir.join("audit.log"));
+        assert_eq!(
+            lines[0]["durationMs"],
+            Value::from(12u64),
+            "the 12ms duration `entry(\"runtime.health\", ..)` builds must round-trip as the \
+             integer JSON number 12, matching what a TypeScript-written line would parse to"
         );
     }
 
