@@ -104,6 +104,7 @@ pub mod result_check;
 pub mod runtime_home;
 pub mod serve;
 pub mod setup;
+pub mod subprocess;
 pub mod supervisor;
 pub mod transport;
 pub mod workspace;

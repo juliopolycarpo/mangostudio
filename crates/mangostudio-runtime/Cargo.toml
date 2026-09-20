@@ -71,8 +71,12 @@ serde_json = { version = "1.0.140", default-features = false, features = ["std"]
 # design, see `cli.rs`, so the runtime is only built once that is done).
 # `net` and `signal` are this crate's own additions over what `mango-protocol`
 # needs for itself; `macros` is test-only (`#[tokio::test]`) but cheap enough
-# not to split into a separate dev-dependency entry.
-tokio = { version = "1.53", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+# not to split into a separate dev-dependency entry. `process` and `io-util`
+# back `crate::subprocess`'s bounded child runner (`tokio::process::Command`,
+# `AsyncReadExt::take` over its piped stdout/stderr) — this crate's first
+# blocking-adjacent work, see `crate::blocking`'s module docs for the pool it
+# shares the executor threads with.
+tokio = { version = "1.53", default-features = false, features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 # `CancellationToken`: the cooperative shutdown signal `serve`'s accept loop
 # and `connect`'s dial loop both watch. Same version `mango-protocol` itself
 # pins, so `cargo deny`'s duplicate-version check has nothing new to catch.
