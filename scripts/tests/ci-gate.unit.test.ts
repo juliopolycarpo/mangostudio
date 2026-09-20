@@ -210,7 +210,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
   });
 
   test('the push filter and the changes job both cover every ts-home fixture input', () => {
-    // `runtime-home-fixture-freshness`'s ts-home half depends on these four
+    // `runtime-home-fixture-freshness`'s ts-home half depends on these
     // TypeScript-side paths; a PR touching only one of them must still run
     // this workflow, or that job's regenerate-and-diff step never executes
     // and ts-home goes stale silently.
@@ -218,7 +218,10 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     const changesBlock = extractJobBlock(workflow, 'changes');
     const tsHomeInputs = [
       'apps/shared/src/runtime-home/',
+      'apps/shared/src/external-agents/',
+      'apps/shared/src/schema-helpers.ts',
       'apps/runtime/src/runtime-home.ts',
+      'apps/runtime/src/config.ts',
       'apps/runtime/scripts/generate-home-fixtures.ts',
       'apps/runtime/package.json',
     ];
