@@ -29,6 +29,7 @@ import {
   resolveInstallMode,
   runtimeUnitDefinition,
 } from '../../../src/services/runtime-service';
+import { FUTURE_SCHEMA_CREDENTIALS_JSON } from '../../fixtures/runtime-credentials';
 
 const CURRENT = '/home/test/.mango/runtime/remote/current/mangostudio-runtime';
 
@@ -312,6 +313,39 @@ describe('runtime service refusals', () => {
       await expect(
         assertServicePreconditions('connect', await readRuntimeSlotState('remote', env))
       ).rejects.toMatchObject({ kind: 'runtime_service_unconfigured' });
+    } finally {
+      await rm(mangoHome, { recursive: true, force: true });
+    }
+  });
+
+  // #1078 review: this used to say "No pairing token is stored" for a slot
+  // that plainly has a credentials.json — just one this build refuses to
+  // trust — which sends whoever reads it in a circle: install fails, connect
+  // (the fix it names) reports the real reason, install still fails the
+  // same way once they come back.
+  it('reports the credential diagnostic instead of a generic "no token" message', async () => {
+    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-svc-'));
+    const env = { MANGO_HOME: mangoHome };
+    try {
+      await writeRuntimeSlotConfig(
+        'remote',
+        { hubUrl: 'wss://hub.test/api/runtime', setup: { state: 'configured' } },
+        env
+      );
+      await Bun.write(
+        join(mangoHome, 'runtime/remote/credentials.json'),
+        FUTURE_SCHEMA_CREDENTIALS_JSON
+      );
+
+      let message = '';
+      try {
+        await assertServicePreconditions('connect', await readRuntimeSlotState('remote', env), env);
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+
+      expect(message).toContain('schemaVersion 2');
+      expect(message).not.toContain('No pairing token is stored');
     } finally {
       await rm(mangoHome, { recursive: true, force: true });
     }
