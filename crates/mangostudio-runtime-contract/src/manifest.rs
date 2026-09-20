@@ -206,7 +206,10 @@ pub struct RuntimeCapabilityManifest {
     pub path_style: PathStyle,
     /// The runtime process owner's home directory, in the host's own path style.
     pub home_dir: String,
-    /// Shells this runtime can open an interactive session with.
+    /// Shells this runtime can open an interactive session with. Mirrors
+    /// `RuntimeCapabilityManifestSchema`'s `uniqueItems: true`; serialised de-duplicated
+    /// regardless of what this `Vec` holds in memory, see [`serialize_unique`].
+    #[serde(serialize_with = "serialize_unique")]
     pub shells: Vec<RuntimeShellKind>,
     /// Whether `git` is on `PATH`, and which version.
     pub git: GitAvailability,
@@ -216,8 +219,13 @@ pub struct RuntimeCapabilityManifest {
     pub gh: Option<GitAvailability>,
     /// Every feature key, explicitly. See the type's own docs.
     pub features: RuntimeCapabilityFeatures,
-    /// Vendor CLIs this runtime hosts an adapter for. Absent means none.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    /// Vendor CLIs this runtime hosts an adapter for. Absent means none. Mirrors the same
+    /// `uniqueItems: true` constraint as `shells`; see [`serialize_unique_option`].
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        serialize_with = "serialize_unique_option"
+    )]
     pub external_agents: Option<Vec<ExternalAgentTarget>>,
     /// This runtime's positive attestation of per-user credential isolation.
     /// Absent is unproven, never a denial.
@@ -245,6 +253,49 @@ pub struct RuntimeCapabilityManifest {
     /// machine actually has. Absent on older peers.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub allow: Option<RuntimeCapabilityAllow>,
+}
+
+/// Keeps the first occurrence of each value in `items` and drops every later repeat,
+/// preserving the relative order of what remains.
+///
+/// `shells` and `external_agents` both mirror a JSON Schema `uniqueItems: true`
+/// constraint, but neither field's public `Vec` type stops a caller from constructing one
+/// with a repeated entry (`vec![RuntimeShellKind::Bash, RuntimeShellKind::Bash]` compiles
+/// fine). Left alone, that manifest would serialise with the duplicate intact and only fail
+/// [`crate::schemas::validate_manifest`] — the worst possible time to discover it. Used as
+/// both fields' `serialize_with`, so a duplicate cannot reach the wire no matter how the
+/// `Vec` behind it was built.
+fn dedup_preserving_order<T: Copy + PartialEq>(items: &[T]) -> Vec<T> {
+    let mut deduped: Vec<T> = Vec::with_capacity(items.len());
+    for &item in items {
+        if !deduped.contains(&item) {
+            deduped.push(item);
+        }
+    }
+    deduped
+}
+
+/// `serialize_with` for a `Vec<T>` field that must serialise with no duplicate entries. See
+/// [`dedup_preserving_order`].
+fn serialize_unique<T, S>(items: &[T], serializer: S) -> Result<S::Ok, S::Error>
+where
+    T: Copy + PartialEq + Serialize,
+    S: serde::Serializer,
+{
+    dedup_preserving_order(items).serialize(serializer)
+}
+
+/// `serialize_with` for an `Option<Vec<T>>` field that must serialise with no duplicate
+/// entries when present. See [`dedup_preserving_order`].
+fn serialize_unique_option<T, S>(items: &Option<Vec<T>>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    T: Copy + PartialEq + Serialize,
+    S: serde::Serializer,
+{
+    items
+        .as_ref()
+        .map(|items| dedup_preserving_order(items))
+        .serialize(serializer)
 }
 
 impl RuntimeCapabilityManifest {
@@ -306,7 +357,10 @@ impl RuntimeCapabilityManifest {
 mod tests {
     use serde_json::{Value, to_value};
 
-    use super::{GitAvailability, PathStyle, RuntimeCapabilityManifest, RuntimeShellKind};
+    use super::{
+        ExternalAgentTarget, GitAvailability, PathStyle, RuntimeCapabilityManifest,
+        RuntimeShellKind,
+    };
     use crate::schemas::validate_manifest;
 
     fn minimal() -> RuntimeCapabilityManifest {
@@ -350,6 +404,31 @@ mod tests {
     #[test]
     fn a_minimal_manifest_validates_against_manifest_schema_json() {
         let value = to_value(minimal()).expect("serialises");
+        assert!(validate_manifest(&value).is_ok(), "{value}");
+    }
+
+    /// `manifest.schema.json` pins `shells` to `uniqueItems: true`. Nothing in
+    /// `RuntimeCapabilityManifest`'s public `Vec<RuntimeShellKind>` type stops a caller from
+    /// building one with a repeat, so the wire itself must de-duplicate.
+    #[test]
+    fn a_duplicate_shell_is_deduplicated_on_the_wire() {
+        let mut manifest = minimal();
+        manifest.shells = vec![RuntimeShellKind::Bash, RuntimeShellKind::Bash];
+
+        let value = to_value(&manifest).expect("serialises");
+        assert_eq!(value["shells"], serde_json::json!(["bash"]));
+        assert!(validate_manifest(&value).is_ok(), "{value}");
+    }
+
+    /// Same guarantee as the shells test above, for `externalAgents`.
+    #[test]
+    fn a_duplicate_external_agent_is_deduplicated_on_the_wire() {
+        let mut manifest = minimal();
+        manifest.external_agents =
+            Some(vec![ExternalAgentTarget::Codex, ExternalAgentTarget::Codex]);
+
+        let value = to_value(&manifest).expect("serialises");
+        assert_eq!(value["externalAgents"], serde_json::json!(["codex"]));
         assert!(validate_manifest(&value).is_ok(), "{value}");
     }
 
