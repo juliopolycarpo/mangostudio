@@ -55,8 +55,8 @@
 //!
 //! # Runtime home
 //!
-//! `apps/runtime` is the TypeScript runtime host; this crate is lane A of the
-//! Rust rewrite's runtime foundation. It owns exactly four things, each
+//! `apps/runtime` is the TypeScript runtime host; this crate is the
+//! foundation of its Rust rewrite. It owns exactly four things, each
 //! mirroring one TypeScript module so the two hosts agree on-disk without
 //! either side reading the other's language:
 //!
@@ -80,8 +80,8 @@
 //! # Out of scope
 //!
 //! Consent resolution (`RUNTIME_CONSENT_PRESETS`, `profileForAllow`, the
-//! merged [`ResolvedRuntimeSlotConfig`]) is the dispatcher lane's job, not
-//! this one's — see [`runtime_home::DefaultSetupState`] for the one bit of
+//! merged [`ResolvedRuntimeSlotConfig`]) is a dispatcher's job, not this
+//! crate's — see [`runtime_home::DefaultSetupState`] for the one bit of
 //! that policy this crate does need (which slots start pre-consented) and
 //! why the rest stops there.
 

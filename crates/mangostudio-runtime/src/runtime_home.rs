@@ -6,7 +6,7 @@
 //! `mangostudio_runtime_contract::strings::runtime_home` — never hand-typed
 //! — and every shape read from or written to disk is checked against
 //! `mangostudio_runtime_contract::schemas::validate_runtime_home`, the same
-//! validator PR 002's dispatcher and the TypeScript side both build from
+//! validator the dispatcher and the TypeScript side both build from
 //! `runtime-home.schema.json`.
 //!
 //! # What this module does not do
@@ -16,18 +16,30 @@
 //! **not** resolve consent: `RUNTIME_CONSENT_PRESETS`, `profileForAllow`,
 //! and the fully-merged `ResolvedRuntimeSlotConfig` in
 //! `apps/shared/src/runtime-home/consent.ts` are capability policy, owned
-//! by the dispatcher lane that also owns the consent gate and audit log
-//! (see the crate-level docs). The one piece of that policy this module
-//! does need — which slots start pre-consented — is
-//! [`DefaultSetupState`], because a caller reading an absent or unusable
-//! `runtime.json` has to know which default it fell back to; the module
-//! stops there and hands the rest to whoever resolves capabilities.
+//! by whichever layer also owns the consent gate and audit log. The one
+//! piece of that policy this module does need — which slots start
+//! pre-consented — is [`DefaultSetupState`], because a caller reading an
+//! absent or unusable `runtime.json` has to know which default it fell
+//! back to; the module stops there and hands the rest to whoever resolves
+//! capabilities.
 //!
-//! Credential *validation* — what a future `schemaVersion`, an unreadable
-//! file, or a wrong-typed token should mean — is also out of scope: PR
-//! #1078 is still settling that on the TypeScript side, and this module
-//! reads/writes `credentials.json` as bytes and schema only, so it has
-//! nothing to un-settle when that lands.
+//! # Credentials: refuse, don't replace, when the file might carry
+//! # something newer
+//!
+//! `credentials.json` gets one rule `runtime.json` does not:
+//! [`write_runtime_slot_credentials`] refuses to touch a file it cannot
+//! read at all, or one that names a `schemaVersion` newer than this build
+//! speaks — see [`WriteError::Refused`] — instead of replacing it the way
+//! [`write_runtime_slot_config`] replaces an unusable `runtime.json`.
+//! Mirrors `readRuntimeSlotCredentialsState`'s `refused` outcome in
+//! `runtime-home.ts`: a build that cannot see what a newer schema version
+//! carries must not silently downgrade the file to the one it understands.
+//! Every other unusable shape (missing, corrupt JSON, a wrong-typed token
+//! at the schema version this build knows) is still replaced, matching
+//! that same function's `replaceable` outcome. Judging whether a *value*
+//! (a token's shape, its liveness) looks acceptable is still out of
+//! scope — this module only distinguishes "safe to overwrite" from
+//! "not for this build to decide" at the schema-version level.
 
 use std::path::{Path, PathBuf};
 
@@ -60,6 +72,12 @@ pub const CREDENTIALS_LOCK_FILE_NAME: &str = "credentials.lock";
 /// function's doc comment for why a post-create `chmod` leaves a window
 /// this does not.
 const OWNER_ONLY_MODE: u32 = 0o600;
+
+/// The only `credentials.json` shape this build reads or writes, mirroring
+/// `runtime-home.ts`'s own `CREDENTIALS_SCHEMA_VERSION`. A stored
+/// `schemaVersion` other than this is a build this one does not understand
+/// — see [`credentials_write_gate`].
+const CREDENTIALS_SCHEMA_VERSION: u32 = 1;
 
 /// One of the three places a runtime's bytes and consent can live.
 ///
@@ -138,15 +156,27 @@ impl std::str::FromStr for RuntimeSlot {
 /// both solve XDG config/cache/data resolution, a different problem from
 /// "what does this account call home".
 ///
-/// # Panics
-/// When the platform cannot resolve a home directory at all (no `HOME` or
-/// `USERPROFILE`, and no password-database entry either). This is the same
-/// situation Node's `os.homedir()` throws on; a runtime host with no home
-/// directory has no sound state directory to fall back to.
-#[must_use]
-pub fn home_dir() -> PathBuf {
-    std::env::home_dir()
-        .unwrap_or_else(|| panic!("could not resolve this account's home directory"))
+/// A `Result`, not a panic: unlike `os.homedir()` throwing into a
+/// JavaScript caller that can catch it, a panic here has no such catcher,
+/// and a `remote` slot is routinely a service account — exactly the case
+/// most likely to have neither a password-database entry nor `HOME`/
+/// `USERPROFILE` set. `readRuntimeSlotState` already models "could not
+/// resolve" as data on its result rather than an exception; this follows
+/// the same shape instead of being the one path in this crate a caller
+/// cannot recover from.
+///
+/// # Errors
+/// When `MANGO_HOME` was not the caller's override and the platform cannot
+/// resolve a home directory either. The message names all three places a
+/// value could have come from — `MANGO_HOME`, `HOME`, `USERPROFILE` — since
+/// this is the point a caller has nothing else to check.
+pub fn home_dir() -> std::io::Result<PathBuf> {
+    std::env::home_dir().ok_or_else(|| {
+        std::io::Error::other(
+            "could not resolve this account's home directory: MANGO_HOME is unset, and \
+             neither HOME (Unix) nor USERPROFILE (Windows) named one either",
+        )
+    })
 }
 
 /// `<home>/.mango`.
@@ -213,6 +243,15 @@ pub fn slot_version_dir(slot: RuntimeSlot, version: &str, mango_home: &Path) -> 
 
 /// The runtime binary's file name on this platform: `strings::BINARY_BASENAME`,
 /// with `.exe` appended on Windows.
+///
+/// Uses `cfg!(windows)` — this platform, not a parameter — which is only
+/// correct for a runtime describing paths on the machine it runs on.
+/// `apps/shared/src/runtime-home/paths.ts`'s `runtimeBinaryName` takes the
+/// platform as an argument instead, precisely because a *hub* builds paths
+/// for a `wsl` slot it is provisioning from the outside, on a different
+/// platform than its own. A future installer lane building paths for a
+/// slot other than "the one this process is" needs that same parameter,
+/// not this function.
 #[must_use]
 pub fn binary_name() -> String {
     if cfg!(windows) {
@@ -516,6 +555,19 @@ pub enum WriteError {
     Encode(serde_json::Error),
     /// The temp-file-then-rename publish failed.
     Io(std::io::Error),
+    /// [`write_runtime_slot_credentials`] refused to touch the existing
+    /// file: it could not be read at all, or it names a `schemaVersion`
+    /// this build does not speak. The file is untouched — mirrors
+    /// `RuntimeCredentialsRefusedError` in `runtime-home.ts`. Never
+    /// returned by [`write_runtime_slot_config`]: an unusable
+    /// `runtime.json` is still replaced, matching the TypeScript side.
+    Refused {
+        /// The file this write refused to replace.
+        path: PathBuf,
+        /// Why: names the path again (a caller may log this alone) and the
+        /// specific reason, but never a token value.
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for WriteError {
@@ -529,6 +581,7 @@ impl std::fmt::Display for WriteError {
             WriteError::Io(error) => {
                 write!(formatter, "could not publish the merged document: {error}")
             }
+            WriteError::Refused { reason, .. } => write!(formatter, "{reason}"),
         }
     }
 }
@@ -540,12 +593,13 @@ impl std::error::Error for WriteError {
             WriteError::SchemaInvalid(violation) => Some(violation),
             WriteError::Encode(error) => Some(error),
             WriteError::Io(error) => Some(error),
+            WriteError::Refused { .. } => None,
         }
     }
 }
 
 /// What a merged write did to what was there before.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug)]
 pub struct WriteOutcome {
     /// Set when the previous file was present but unusable (not the schema,
     /// not JSON, not readable) and this write replaced it outright rather
@@ -555,7 +609,13 @@ pub struct WriteOutcome {
     /// replaces", and the caller never learns that happened. This field is
     /// the difference: the replacement still happens (refusing to write
     /// would leave the slot permanently stuck), but it is never silent.
-    pub replaced_unusable: Option<String>,
+    ///
+    /// For `credentials.json` this can now only ever be
+    /// [`SlotFileError::Malformed`] or a [`SlotFileError::SchemaInvalid`]
+    /// that is not a `schemaVersion` mismatch: the two reasons that would
+    /// otherwise land here are intercepted earlier and returned as
+    /// [`WriteError::Refused`] instead, before this write ever runs.
+    pub replaced_unusable: Option<SlotFileError>,
 }
 
 /// Reads `path` as an object (or starts a fresh one, when absent or
@@ -602,8 +662,81 @@ fn merge_write(
     atomic::write_new_file(path, &bytes, mode).map_err(WriteError::Io)?;
 
     Ok(WriteOutcome {
-        replaced_unusable: state.error.map(|error| error.to_string()),
+        replaced_unusable: state.error,
     })
+}
+
+/// The file's `schemaVersion`, but only when it is a number this build does
+/// not speak. `None` for everything else — a document whose only problem is
+/// a wrong-shaped token, a document with no `schemaVersion` at all, and a
+/// document that is not an object — mirroring
+/// `unsupportedCredentialsSchemaVersion` in `runtime-home.ts` exactly: that
+/// function reads `typeof version === 'number'`, which JSON's single
+/// number type makes `as_f64` the faithful Rust equivalent of, rather than
+/// `as_u64`/`as_i64`, either of which would call a fractional or negative
+/// `schemaVersion` "not a number".
+fn unsupported_credentials_schema_version(parsed: &Value) -> Option<f64> {
+    let version = parsed.as_object()?.get("schemaVersion")?.as_f64()?;
+    (version != f64::from(CREDENTIALS_SCHEMA_VERSION)).then_some(version)
+}
+
+/// Whether an existing `credentials.json` may be replaced outright, or must
+/// be refused instead.
+enum CredentialsWriteGate {
+    /// Absent, fully valid, or unusable in a way a rewrite may repair
+    /// (corrupt JSON, or a schema violation that is not a version
+    /// mismatch) — [`merge_write`] may proceed.
+    Proceed,
+    /// This process cannot see what a replace would destroy: the file
+    /// could not be read at all, or it names a `schemaVersion` this build
+    /// does not speak. Carries the message for [`WriteError::Refused`].
+    Refuse(String),
+}
+
+/// Inspects `path` before a credentials write touches it, mirroring the
+/// `refused` half of `readRuntimeSlotCredentialsState` in
+/// `runtime-home.ts`. A second, independent read of the file from
+/// [`merge_write`]'s own — `runtime-home.ts` reads `credentials.json`
+/// through two separate functions for the same reason
+/// (`readRuntimeSlotCredentialsState` and the merge inside
+/// `writeCredentials`), because the two questions really are separate: this
+/// one decides whether a replace may happen at all, before the file is
+/// merged or trusted for anything else.
+fn credentials_write_gate(path: &Path) -> CredentialsWriteGate {
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return CredentialsWriteGate::Proceed;
+        }
+        Err(error) => {
+            return CredentialsWriteGate::Refuse(format!(
+                "{} could not be read ({error}).",
+                path.display()
+            ));
+        }
+    };
+
+    let parsed: Value = match serde_json::from_str(&raw) {
+        Ok(value) => value,
+        Err(_) => return CredentialsWriteGate::Proceed,
+    };
+
+    if validate_runtime_home(RuntimeHomeDocument::Credentials, &parsed).is_ok() {
+        return CredentialsWriteGate::Proceed;
+    }
+
+    match unsupported_credentials_schema_version(&parsed) {
+        Some(version) => CredentialsWriteGate::Refuse(format!(
+            "{} is schemaVersion {version}, which this build of the runtime does not understand.",
+            path.display()
+        )),
+        None => CredentialsWriteGate::Proceed,
+    }
 }
 
 /// Merges `update` into `slot`'s `runtime.json` under its lock and
@@ -664,8 +797,18 @@ fn write_runtime_slot_credentials_with(
 ) -> Result<(WriteOutcome, bool), WriteError> {
     let path = slot_credentials_path(slot, mango_home);
     let lock_path = slot_credentials_lock_path(slot, mango_home);
-    let fixed: [(&'static str, Value); 1] = [("schemaVersion", Value::from(1))];
+    let fixed: [(&'static str, Value); 1] =
+        [("schemaVersion", Value::from(CREDENTIALS_SCHEMA_VERSION))];
     lock::with_slot_lock(&lock_path, &lock::LockPolicy::default(), || {
+        // Checked under the same lock a repair would need anyway — see
+        // `credentials_write_gate`'s own doc comment for why this reads the
+        // file a second time rather than reusing `merge_write`'s read.
+        if let CredentialsWriteGate::Refuse(reason) = credentials_write_gate(&path) {
+            return Err(WriteError::Refused {
+                path: path.clone(),
+                reason,
+            });
+        }
         // `Some(OWNER_ONLY_MODE)`, not `None`: opened owner-only at creation
         // (see `merge_write`'s doc comment), with `restrict` below as the
         // belt-and-braces re-assertion `runtime-home.ts` also runs after
@@ -812,8 +955,10 @@ mod tests {
     #[test]
     fn home_dir_resolves_to_something_nonempty() {
         // What it resolves to is platform policy this crate deliberately
-        // does not second-guess; the contract is only that it answers.
-        assert!(!home_dir().as_os_str().is_empty());
+        // does not second-guess; the contract is only that it answers, on
+        // a machine that has an account to resolve at all — which every
+        // machine this test runs on does.
+        assert!(!home_dir().unwrap().as_os_str().is_empty());
     }
 
     #[test]
@@ -947,12 +1092,9 @@ mod tests {
         )
         .unwrap();
 
-        assert!(
-            outcome
-                .replaced_unusable
-                .unwrap()
-                .contains("not valid JSON")
-        );
+        let replaced = outcome.replaced_unusable.unwrap();
+        assert!(matches!(replaced, SlotFileError::Malformed { .. }));
+        assert!(replaced.to_string().contains("not valid JSON"));
         let stored = read_runtime_slot_config(RuntimeSlot::Host, &home)
             .stored
             .unwrap();
@@ -968,7 +1110,7 @@ mod tests {
             &[("version", Some(json!("0.1.0")))],
         )
         .unwrap();
-        assert_eq!(outcome.replaced_unusable, None);
+        assert!(outcome.replaced_unusable.is_none());
     }
 
     #[test]
@@ -1027,7 +1169,7 @@ mod tests {
             &[("pairingToken", Some(json!("mrt_x")))],
         )
         .unwrap();
-        assert_eq!(outcome.replaced_unusable, None);
+        assert!(outcome.replaced_unusable.is_none());
 
         let stored = read_runtime_slot_credentials(RuntimeSlot::Remote, &home)
             .stored
@@ -1118,6 +1260,60 @@ mod tests {
             .unwrap();
         assert_eq!(stored["pairingToken"], json!("second"));
         assert_eq!(stored["serveToken"], json!("serve"));
+    }
+
+    #[test]
+    fn a_future_credentials_schema_version_is_refused_not_replaced() {
+        // The row #1078 added on the TypeScript side: a `credentials.json`
+        // naming a `schemaVersion` this build does not speak carries fields
+        // (here, a pairing token and one this build has never heard of)
+        // that a silent replace would destroy without this process ever
+        // having seen them. `merge_write`'s general "replace what cannot be
+        // trusted" rule is correct for `runtime.json`; it is wrong here.
+        let home = scratch_home("future-schema-version");
+        let dir = slot_dir(RuntimeSlot::Remote, &home);
+        std::fs::create_dir_all(&dir).unwrap();
+        let raw = br#"{"schemaVersion":2,"pairingToken":"keep-me","futureOnly":"precious"}"#;
+        std::fs::write(dir.join("credentials.json"), raw).unwrap();
+
+        let error = write_runtime_slot_credentials(
+            RuntimeSlot::Remote,
+            &home,
+            &[("serveToken", Some(json!("new")))],
+        )
+        .expect_err("schemaVersion 2 is newer than this build speaks");
+        assert!(matches!(error, WriteError::Refused { .. }));
+
+        // Untouched: still exactly the bytes this test wrote, not a
+        // downgrade to `{"schemaVersion":1,"serveToken":"new"}`.
+        let after = std::fs::read(dir.join("credentials.json")).unwrap();
+        assert_eq!(after, raw);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_credentials_file_is_refused_not_replaced() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let home = scratch_home("unreadable-credentials");
+        let dir = slot_dir(RuntimeSlot::Remote, &home);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("credentials.json");
+        let raw = br#"{"schemaVersion":1,"pairingToken":"keep-me"}"#;
+        std::fs::write(&path, raw).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let error = write_runtime_slot_credentials(
+            RuntimeSlot::Remote,
+            &home,
+            &[("serveToken", Some(json!("new")))],
+        )
+        .expect_err("this process cannot read the file, so it cannot rule out destroying it");
+        assert!(matches!(error, WriteError::Refused { .. }));
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let after = std::fs::read(&path).unwrap();
+        assert_eq!(after, raw);
     }
 
     #[test]

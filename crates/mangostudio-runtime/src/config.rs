@@ -89,10 +89,10 @@ pub const MANGOSTUDIO_RUNTIME_SETUP: &str = "MANGOSTUDIO_RUNTIME_SETUP";
 ///
 /// - `validateHandlerResults` is `!production` in TypeScript, off in
 ///   production so an invalid result still reaches a caller who did nothing
-///   wrong rather than becoming a 500. PR 002 made that check unconditional
-///   in Rust instead — its acceptance criteria require an invalid result to
-///   never serialise as success, with no environment escape — so there is no
-///   flag left to read here, in either environment.
+///   wrong rather than becoming a 500. That check is unconditional in
+///   this Rust host instead — an invalid result must never serialise as
+///   success, with no environment escape — so there is no flag left to
+///   read here, in either environment.
 /// - `validateInProcessFrames` exists only for the hub-embeds-runtime
 ///   in-process transport, which is a Node concept
 ///   (`apps/api/src/services/runtime-client/connect-in-process-runtime.ts`).
@@ -137,24 +137,32 @@ fn trimmed(value: Option<String>) -> Option<String> {
 impl RuntimeConfig {
     /// Parses the runtime's environment variables out of `env`.
     ///
+    /// # Errors
+    /// When `MANGO_HOME` is unset (or blank) and [`home_dir`] cannot
+    /// resolve a platform default either — see that function's own doc
+    /// comment for why this is a `Result` and not a panic.
+    ///
     /// # Example
     /// ```
     /// use mangostudio_runtime::config::{MapEnv, RuntimeConfig};
     ///
     /// let env = MapEnv::from([("MANGOSTUDIO_RUNTIME_TOKEN", "  mrt_abc  ")]);
-    /// let config = RuntimeConfig::from_env(&env);
+    /// let config = RuntimeConfig::from_env(&env).unwrap();
     /// assert_eq!(config.pairing_token.as_deref(), Some("mrt_abc"));
     /// assert_eq!(config.serve_token, None);
     /// ```
-    pub fn from_env(env: &impl EnvSource) -> Self {
+    pub fn from_env(env: &impl EnvSource) -> std::io::Result<Self> {
         let home_override = trimmed(env.var(MANGO_HOME));
-        let mango_home = home_override.map_or_else(|| mango_home_dir(&home_dir()), PathBuf::from);
-        Self {
+        let mango_home = match home_override {
+            Some(value) => PathBuf::from(value),
+            None => mango_home_dir(&home_dir()?),
+        };
+        Ok(Self {
             pairing_token: trimmed(env.var(MANGOSTUDIO_RUNTIME_TOKEN)),
             serve_token: trimmed(env.var(MANGOSTUDIO_RUNTIME_SERVE_TOKEN)),
             mango_home,
             setup_profile: trimmed(env.var(MANGOSTUDIO_RUNTIME_SETUP)),
-        }
+        })
     }
 }
 
@@ -168,18 +176,21 @@ mod tests {
     fn trims_and_empties_the_pairing_token() {
         let env = MapEnv::from([("MANGOSTUDIO_RUNTIME_TOKEN", "  mrt_abc  ")]);
         assert_eq!(
-            RuntimeConfig::from_env(&env).pairing_token.as_deref(),
+            RuntimeConfig::from_env(&env)
+                .unwrap()
+                .pairing_token
+                .as_deref(),
             Some("mrt_abc")
         );
 
         let blank = MapEnv::from([("MANGOSTUDIO_RUNTIME_TOKEN", "   ")]);
-        assert_eq!(RuntimeConfig::from_env(&blank).pairing_token, None);
+        assert_eq!(RuntimeConfig::from_env(&blank).unwrap().pairing_token, None);
     }
 
     #[test]
     fn an_absent_token_is_none_not_empty_string() {
         let env = MapEnv::default();
-        assert_eq!(RuntimeConfig::from_env(&env).pairing_token, None);
+        assert_eq!(RuntimeConfig::from_env(&env).unwrap().pairing_token, None);
     }
 
     #[test]
@@ -188,7 +199,7 @@ mod tests {
             ("MANGOSTUDIO_RUNTIME_TOKEN", "pairing"),
             ("MANGOSTUDIO_RUNTIME_SERVE_TOKEN", "serve"),
         ]);
-        let config = RuntimeConfig::from_env(&env);
+        let config = RuntimeConfig::from_env(&env).unwrap();
         assert_eq!(config.pairing_token.as_deref(), Some("pairing"));
         assert_eq!(config.serve_token.as_deref(), Some("serve"));
     }
@@ -197,7 +208,7 @@ mod tests {
     fn mango_home_takes_the_trimmed_override_verbatim() {
         let env = MapEnv::from([("MANGO_HOME", "  /srv/mango  ")]);
         assert_eq!(
-            RuntimeConfig::from_env(&env).mango_home,
+            RuntimeConfig::from_env(&env).unwrap().mango_home,
             PathBuf::from("/srv/mango")
         );
     }
@@ -205,7 +216,7 @@ mod tests {
     #[test]
     fn a_blank_mango_home_override_falls_back_to_the_platform_default() {
         let env = MapEnv::from([("MANGO_HOME", "   ")]);
-        let config = RuntimeConfig::from_env(&env);
+        let config = RuntimeConfig::from_env(&env).unwrap();
         // Whatever the platform default is, it must not be the literal blank
         // string a naive `.map_or_else` bug would produce.
         assert_ne!(config.mango_home, PathBuf::from(""));
@@ -218,7 +229,10 @@ mod tests {
         // discarded here — `setup` is the surface that judges it.
         let env = MapEnv::from([("MANGOSTUDIO_RUNTIME_SETUP", "not-a-real-profile")]);
         assert_eq!(
-            RuntimeConfig::from_env(&env).setup_profile.as_deref(),
+            RuntimeConfig::from_env(&env)
+                .unwrap()
+                .setup_profile
+                .as_deref(),
             Some("not-a-real-profile")
         );
     }
