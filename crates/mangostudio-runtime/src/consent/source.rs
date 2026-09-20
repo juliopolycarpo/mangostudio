@@ -113,7 +113,7 @@ impl ConsentSource {
 
     /// Re-reads `runtime.json` if its fingerprint has changed since the
     /// last call (or if the last attempt could not be attributed to one —
-    /// see [`UNATTRIBUTED`]), and returns the resolved `allow` set either
+    /// see `UNATTRIBUTED`), and returns the resolved `allow` set either
     /// way.
     #[must_use]
     pub fn refresh(&self) -> ResolvedCapabilityAllow {

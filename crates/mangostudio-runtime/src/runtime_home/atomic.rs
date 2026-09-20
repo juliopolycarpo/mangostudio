@@ -49,7 +49,7 @@ pub trait Create {
     fn create(&self, path: &Path, bytes: &[u8], mode: Option<u32>) -> io::Result<()>;
 }
 
-/// The real [`write_temp_file`].
+/// The real `write_temp_file`.
 pub struct StdCreate;
 
 impl Create for StdCreate {
@@ -59,7 +59,7 @@ impl Create for StdCreate {
 }
 
 /// How many times to retry a rename that failed for a reason
-/// [`is_transient_windows_sharing_violation`] recognises, and how long to
+/// `is_transient_windows_sharing_violation` recognises, and how long to
 /// wait between attempts.
 ///
 /// Chosen for this crate, not mirrored from `runtime-home.ts`: Node's

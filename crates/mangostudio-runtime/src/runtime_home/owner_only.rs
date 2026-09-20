@@ -4,8 +4,9 @@
 //! `chmod 0600`. Windows has no mode bits to set — `chmod` there sets the
 //! read-only attribute and reports success, which would make a caller
 //! trust a file it never actually protected — so the real mechanism there
-//! is a DACL rewrite; see [`windows`] for how this crate does it without
-//! spawning `icacls.exe`.
+//! is a DACL rewrite; see this module's private `platform` implementation
+//! (`owner_only/windows.rs`) for how this crate does it without spawning
+//! `icacls.exe`.
 //!
 //! The answer is a `bool` rather than a `Result`, on both platforms, for
 //! the same reason the TypeScript version returns one: the caller has

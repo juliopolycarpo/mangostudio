@@ -18,7 +18,7 @@
 //! file with `O_EXCL`/`CREATE_NEW`, write a JSON body naming the holder,
 //! delete it when done, and poll/reclaim exactly as documented below. Every
 //! constant in [`LockPolicy::default`] and every reclaim rule in
-//! [`reclaim_if_abandoned`] is copied from `runtime-home.ts`, not chosen
+//! `reclaim_if_abandoned` is copied from `runtime-home.ts`, not chosen
 //! independently — a value picked separately here would make one side
 //! reclaim a lock the other still considers live.
 

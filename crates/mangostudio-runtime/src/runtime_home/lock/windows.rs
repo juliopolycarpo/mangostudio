@@ -1,8 +1,8 @@
 //! Windows halves of the lock protocol's two platform questions: is a pid
 //! still alive, and what does this machine call itself. Neither has a safe
 //! binding — `nix` is Unix-only — so this is one of this crate's two
-//! narrowly-scoped `unsafe` modules (the other is
-//! [`crate::runtime_home::owner_only::windows`]), mirroring
+//! narrowly-scoped `unsafe` modules (the other is `owner_only`'s own
+//! private `platform` implementation, `owner_only/windows.rs`), mirroring
 //! `mango-protocol`'s own `transports/ipc/windows/security.rs`: every call
 //! below carries a SAFETY comment, and nothing outside this file needs to.
 #![allow(
