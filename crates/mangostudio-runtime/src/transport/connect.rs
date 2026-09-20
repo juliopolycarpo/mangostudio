@@ -48,6 +48,32 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 /// `serve`'s own heartbeat — see `crate::transport::serve::HEARTBEAT_INTERVAL`.
 pub(crate) use crate::transport::serve::HEARTBEAT_INTERVAL;
 
+/// Bounds how long one dial's own teardown (the heartbeat task, the
+/// session's driver, the cancellation watcher, in that order) is awaited
+/// once each has already been told to stop. `mango_protocol`'s own port
+/// bounds its close-frame flush internally, but that is an internal
+/// safety net, not a substitute for this transport naming its own outer
+/// one — `serve`'s `SHUTDOWN_DRAIN_GRACE` makes exactly the same call for
+/// the same reason, and connect had no counterpart to it at all: every
+/// `join_owned` below used to be unconditional, so a peer holding a full
+/// receive window at exactly the wrong layer had no bound backing it up.
+const CONNECT_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+
+/// [`join_owned`], but gives up after [`CONNECT_SHUTDOWN_GRACE`] rather than
+/// waiting unconditionally — this dial's own teardown steps are still
+/// awaited normally (never aborted) up to that bound; past it, the task is
+/// simply left to the process's own exit (or, for a mid-loop teardown, the
+/// next dial's fresh state) to reclaim, the same reasoning `cli.rs` applies
+/// to a signal watcher whose cancellation no longer matters.
+async fn join_owned_with_grace<T>(handle: tokio::task::JoinHandle<T>, log: &impl Fn(&str)) {
+    if tokio::time::timeout(CONNECT_SHUTDOWN_GRACE, join_owned(handle))
+        .await
+        .is_err()
+    {
+        log("a teardown step outlived its shutdown grace and was left to finish on its own");
+    }
+}
+
 /// A source of jitter for [`backoff_delay`], `0.0..=1.0`. A trait, not a
 /// bare `rand::Rng`, since this crate takes no dependency on a random-number
 /// crate: [`RandomJitter`] is a small, dependency-free source good enough
@@ -287,14 +313,14 @@ async fn run_one_connection(
             log(&format!("Connected to {}.", config.hub_url));
             let closure = session.closed().await;
             heartbeat_cancel.cancel();
-            let _ = join_owned(heartbeat).await;
+            join_owned_with_grace(heartbeat, log).await;
             classify_closure(Some(&closure), true)
         }
     };
 
     session.close_now(close_codes::RELEASED, Some("Runtime stopping"));
-    let _ = join_owned(driver_handle).await;
-    let _ = join_owned(watcher).await;
+    join_owned_with_grace(driver_handle, log).await;
+    join_owned_with_grace(watcher, log).await;
     attempt
 }
 
