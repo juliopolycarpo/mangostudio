@@ -260,6 +260,62 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "second");
     }
 
+    #[test]
+    fn a_stray_temp_file_from_an_interrupted_write_is_ignored_and_survives_untouched() {
+        // What a SIGKILL, a lost machine, or a container torn down mid-write
+        // leaves behind: a `.tmp` sibling nobody ever renamed into place.
+        // Neither this crate nor `runtime-home.ts` sweeps these — a reader
+        // must simply never be confused by one, and a later writer must
+        // neither delete it (it is not this call's temp file) nor collide
+        // with it (its own temp name is unique per call).
+        let dir = scratch_dir("interrupted");
+        let path = dir.join("runtime.json");
+        std::fs::write(&path, b"real-contents").unwrap();
+        let stray = dir.join("runtime.json.999.deadbeef.tmp");
+        std::fs::write(&stray, b"orphaned-half-write").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "real-contents");
+
+        write_new_file(&path, b"published-over-it", None).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "published-over-it");
+        assert_eq!(
+            std::fs::read_to_string(&stray).unwrap(),
+            "orphaned-half-write"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writing_through_a_symlink_never_exposes_the_new_contents_at_the_links_old_target() {
+        // The security property the temp-file-then-rename shape buys for
+        // free: a rename replaces whatever `path` names *right now*, which
+        // for a symlink is the link itself, not whatever it used to point
+        // at. A planted symlink can redirect one write, but it can never
+        // make a later reader see this write's bytes at the original
+        // target — the rename severs the link rather than following it.
+        let dir = scratch_dir("symlink");
+        let real_target = dir.join("elsewhere.json");
+        std::fs::write(&real_target, b"never touch me").unwrap();
+        let path = dir.join("credentials.json");
+        std::os::unix::fs::symlink(&real_target, &path).unwrap();
+
+        write_new_file(&path, b"the actual secret", Some(0o600)).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&real_target).unwrap(),
+            "never touch me"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "the actual secret");
+        assert!(
+            std::fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_file(),
+            "the rename must replace the symlink itself with a regular file"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_stale_loosely_permissioned_file_is_tightened_by_the_next_write() {

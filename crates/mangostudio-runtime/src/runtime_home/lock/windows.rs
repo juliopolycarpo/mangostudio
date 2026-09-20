@@ -52,8 +52,8 @@ pub(super) fn is_process_alive(pid: u32) -> bool {
     // one.
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if handle.is_null() {
-        // SAFETY: no arguments; reads the calling thread's last-error slot,
-        // which `OpenProcess` just set.
+        // `last_os_error` is a safe call; it reads the calling thread's
+        // last-error slot, which `OpenProcess` just set.
         let access_denied = io::Error::last_os_error().raw_os_error() == Some(5); // ERROR_ACCESS_DENIED
         return access_denied;
     }

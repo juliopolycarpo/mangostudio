@@ -386,6 +386,44 @@ mod tests {
     }
 
     #[test]
+    fn waits_for_a_lock_held_by_a_genuinely_foreign_live_pid() {
+        // The case the test above cannot exercise: `std::process::id()` is
+        // trivially alive because it is *this* test. A separately spawned,
+        // still-running child proves `is_process_alive` actually queries the
+        // pid it is given rather than special-casing the caller's own.
+        let dir = scratch_dir("foreign-live-pid");
+        let lock = dir.join("runtime.lock");
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("`sleep` is on PATH on every Unix this crate targets");
+
+        create_lock_file(&lock).unwrap();
+        std::fs::write(
+            &lock,
+            serde_json::to_vec(&LockOwner {
+                pid: Some(child.id()),
+                host: platform::hostname().ok(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let policy = LockPolicy {
+            poll_interval: Duration::from_millis(5),
+            timeout: Duration::from_millis(60),
+            stale_after: Duration::from_secs(60),
+        };
+        let error = with_slot_lock(&lock, &policy, || unreachable!("must never acquire"))
+            .expect_err("the child is still running for the whole timeout");
+        assert!(matches!(error, LockError::TimedOut { .. }));
+
+        std::fs::remove_file(&lock).ok();
+        child.kill().ok();
+        child.wait().ok();
+    }
+
+    #[test]
     fn reclaims_a_lock_left_by_a_pid_that_no_longer_exists_on_this_host() {
         let dir = scratch_dir("dead-pid");
         let lock = dir.join("runtime.lock");

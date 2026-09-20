@@ -54,6 +54,13 @@ pub mod owner_only;
 /// for a name only this crate and its TypeScript counterpart ever read.
 pub const CREDENTIALS_LOCK_FILE_NAME: &str = "credentials.lock";
 
+/// The mode `credentials.json` is created with on Unix, mirroring
+/// `runtime-home.ts`'s `OWNER_ONLY`. Applied at `open(2)` via
+/// [`atomic::write_new_file`], never `chmod`ed on afterwards — see that
+/// function's doc comment for why a post-create `chmod` leaves a window
+/// this does not.
+const OWNER_ONLY_MODE: u32 = 0o600;
+
 /// One of the three places a runtime's bytes and consent can live.
 ///
 /// `strings::runtime_home::SLOTS` — `["host", "wsl", "remote"]` — is the
@@ -324,26 +331,92 @@ pub fn default_setup_state_for_slot(slot: RuntimeSlot) -> DefaultSetupState {
     }
 }
 
+/// Why a stored document could not be trusted, naming both the path and
+/// the underlying cause so a caller can match on the failure mode rather
+/// than parsing a message.
+#[derive(Debug)]
+pub enum SlotFileError {
+    /// Present but this process could not read it: a permissions failure,
+    /// or a directory sitting where the file belongs (`EISDIR` and kin).
+    Unreadable {
+        /// The file this process tried and failed to read.
+        path: PathBuf,
+        /// The underlying I/O failure.
+        source: std::io::Error,
+    },
+    /// Present and readable, but not valid JSON.
+    Malformed {
+        /// The file whose contents did not parse as JSON.
+        path: PathBuf,
+        /// The underlying parse failure.
+        source: serde_json::Error,
+    },
+    /// Valid JSON, but refused by `validate_runtime_home`.
+    SchemaInvalid {
+        /// The file whose contents failed schema validation.
+        path: PathBuf,
+        /// Which part of the schema rejected it.
+        source: Violation,
+    },
+}
+
+impl std::fmt::Display for SlotFileError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SlotFileError::Unreadable { path, source } => {
+                write!(
+                    formatter,
+                    "{} could not be read ({source}).",
+                    path.display()
+                )
+            }
+            SlotFileError::Malformed { path, source } => {
+                write!(
+                    formatter,
+                    "{} is not valid JSON ({source}).",
+                    path.display()
+                )
+            }
+            SlotFileError::SchemaInvalid { path, source } => {
+                write!(
+                    formatter,
+                    "{} does not match the runtime-home schema ({source}).",
+                    path.display()
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for SlotFileError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            SlotFileError::Unreadable { source, .. } => Some(source),
+            SlotFileError::Malformed { source, .. } => Some(source),
+            SlotFileError::SchemaInvalid { source, .. } => Some(source),
+        }
+    }
+}
+
 /// What was on disk at `path`, or why it could not be trusted.
 ///
 /// Mirrors the `{ stored, error }` half of `RuntimeSlotState` in
 /// `runtime-home.ts` (the `config` field — the fully-resolved,
 /// default-filled shape — is the consent-policy half this crate does not
 /// build; see the module docs).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Default)]
 pub struct SlotFileState {
     /// The file exactly as stored and schema-checked, or `None` when there
     /// was none, or when what was there could not be trusted (see
     /// `error`).
     pub stored: Option<Value>,
-    /// Set when a file was present but unusable: not readable, not JSON, or
-    /// not schema-valid. A caller must not read `stored: None` here the
-    /// same way it reads a genuine absence — for `host` and `wsl`,
-    /// [`default_setup_state_for_slot`] is `Configured`, and treating an
-    /// unreadable file as if it had never existed would silently widen
-    /// what that slot allows. `None` here (alongside `stored: None`) is the
-    /// one case that really is absence.
-    pub error: Option<String>,
+    /// Set when a file was present but unusable. A caller must not read
+    /// `stored: None` here the same way it reads a genuine absence — for
+    /// `host` and `wsl`, [`default_setup_state_for_slot`] is `Configured`,
+    /// and treating an unreadable file as if it had never existed would
+    /// silently widen what that slot allows. `None` here (alongside
+    /// `stored: None`) is the one case that really is absence.
+    pub error: Option<SlotFileError>,
 }
 
 /// Reads and schema-checks the document at `path`.
@@ -369,7 +442,10 @@ fn read_schema_checked(path: &Path, document: RuntimeHomeDocument) -> SlotFileSt
         Err(error) => {
             return SlotFileState {
                 stored: None,
-                error: Some(format!("{} could not be read ({error}).", path.display())),
+                error: Some(SlotFileError::Unreadable {
+                    path: path.to_path_buf(),
+                    source: error,
+                }),
             };
         }
     };
@@ -379,7 +455,10 @@ fn read_schema_checked(path: &Path, document: RuntimeHomeDocument) -> SlotFileSt
         Err(error) => {
             return SlotFileState {
                 stored: None,
-                error: Some(format!("{} is not valid JSON ({error}).", path.display())),
+                error: Some(SlotFileError::Malformed {
+                    path: path.to_path_buf(),
+                    source: error,
+                }),
             };
         }
     };
@@ -387,10 +466,10 @@ fn read_schema_checked(path: &Path, document: RuntimeHomeDocument) -> SlotFileSt
     if let Err(violation) = validate_runtime_home(document, &value) {
         return SlotFileState {
             stored: None,
-            error: Some(format!(
-                "{} does not match the runtime-home schema ({violation}).",
-                path.display()
-            )),
+            error: Some(SlotFileError::SchemaInvalid {
+                path: path.to_path_buf(),
+                source: violation,
+            }),
         };
     }
 
@@ -483,11 +562,18 @@ pub struct WriteOutcome {
 /// unusable), applies `update` (a key set to `None` is removed — the merge
 /// equivalent of `runtime-home.ts`'s `stripUndefined`), stamps every pair
 /// in `fixed`, validates the result, and publishes it atomically.
+///
+/// `mode` is threaded straight through to [`atomic::write_new_file`] so a
+/// secret-bearing document (`credentials.json`) is opened owner-only at
+/// *creation* rather than tightened after the fact: `write_temp_file`'s own
+/// doc comment explains why a post-publish `chmod` would leave a window a
+/// pre-set `mode` does not.
 fn merge_write(
     path: &Path,
     document: RuntimeHomeDocument,
     fixed: &[(&'static str, Value)],
     update: &[(&str, Option<Value>)],
+    mode: Option<u32>,
 ) -> Result<WriteOutcome, WriteError> {
     let state = read_schema_checked(path, document);
     let mut object = match state.stored {
@@ -513,10 +599,10 @@ fn merge_write(
     validate_runtime_home(document, &value).map_err(WriteError::SchemaInvalid)?;
     let mut bytes = serde_json::to_vec_pretty(&value).map_err(WriteError::Encode)?;
     bytes.push(b'\n');
-    atomic::write_new_file(path, &bytes, None).map_err(WriteError::Io)?;
+    atomic::write_new_file(path, &bytes, mode).map_err(WriteError::Io)?;
 
     Ok(WriteOutcome {
-        replaced_unusable: state.error,
+        replaced_unusable: state.error.map(|error| error.to_string()),
     })
 }
 
@@ -543,7 +629,7 @@ pub fn write_runtime_slot_config(
         ("slot", Value::from(slot.as_str())),
     ];
     lock::with_slot_lock(&lock_path, &lock::LockPolicy::default(), || {
-        merge_write(&path, RuntimeHomeDocument::SlotConfig, &fixed, update)
+        merge_write(&path, RuntimeHomeDocument::SlotConfig, &fixed, update, None)
     })
     .map_err(WriteError::Lock)?
 }
@@ -565,7 +651,18 @@ pub fn write_runtime_slot_credentials(
     let lock_path = slot_credentials_lock_path(slot, mango_home);
     let fixed: [(&'static str, Value); 1] = [("schemaVersion", Value::from(1))];
     lock::with_slot_lock(&lock_path, &lock::LockPolicy::default(), || {
-        let outcome = merge_write(&path, RuntimeHomeDocument::Credentials, &fixed, update)?;
+        // `Some(OWNER_ONLY_MODE)`, not `None`: opened owner-only at creation
+        // (see `merge_write`'s doc comment), with `restrict_to_owner` below
+        // as the belt-and-braces re-assertion `runtime-home.ts` also runs
+        // after every write — and the only mechanism at all on Windows,
+        // where a Unix file mode does nothing.
+        let outcome = merge_write(
+            &path,
+            RuntimeHomeDocument::Credentials,
+            &fixed,
+            update,
+            Some(OWNER_ONLY_MODE),
+        )?;
         Ok((outcome, owner_only::restrict_to_owner(&path)))
     })
     .map_err(WriteError::Lock)?
@@ -579,8 +676,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        DefaultSetupState, RuntimeSlot, WriteError, default_setup_state_for_slot, home_dir,
-        read_runtime_slot_config, read_runtime_slot_credentials, resolve_runtime_slot,
+        DefaultSetupState, RuntimeSlot, SlotFileError, WriteError, default_setup_state_for_slot,
+        home_dir, read_runtime_slot_config, read_runtime_slot_credentials, resolve_runtime_slot,
         slot_config_path, slot_current_binary_path, slot_dir, slot_for_path,
         write_runtime_slot_config, write_runtime_slot_credentials,
     };
@@ -709,7 +806,7 @@ mod tests {
         let home = scratch_home("absent");
         let state = read_runtime_slot_config(RuntimeSlot::Remote, &home);
         assert_eq!(state.stored, None);
-        assert_eq!(state.error, None);
+        assert!(state.error.is_none());
     }
 
     #[test]
@@ -721,7 +818,9 @@ mod tests {
 
         let state = read_runtime_slot_config(RuntimeSlot::Host, &home);
         assert_eq!(state.stored, None);
-        assert!(state.error.unwrap().contains("not valid JSON"));
+        let error = state.error.unwrap();
+        assert!(matches!(error, SlotFileError::Malformed { .. }));
+        assert!(error.to_string().contains("not valid JSON"));
     }
 
     #[test]
@@ -737,10 +836,11 @@ mod tests {
 
         let state = read_runtime_slot_config(RuntimeSlot::Host, &home);
         assert_eq!(state.stored, None);
+        let error = state.error.unwrap();
+        assert!(matches!(error, SlotFileError::SchemaInvalid { .. }));
         assert!(
-            state
-                .error
-                .unwrap()
+            error
+                .to_string()
                 .contains("does not match the runtime-home schema")
         );
     }
@@ -756,7 +856,9 @@ mod tests {
 
         let state = read_runtime_slot_config(RuntimeSlot::Host, &home);
         assert_eq!(state.stored, None);
-        assert!(state.error.unwrap().contains("could not be read"));
+        let error = state.error.unwrap();
+        assert!(matches!(error, SlotFileError::Unreadable { .. }));
+        assert!(error.to_string().contains("could not be read"));
     }
 
     #[test]
@@ -932,6 +1034,39 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn credentials_json_is_opened_owner_only_at_creation_not_chmoded_on_afterwards() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        use super::slot_credentials_path;
+
+        // The regression this guards: `merge_write` for `runtime.json`
+        // passes `mode: None` and relies on `restrict_to_owner` running
+        // afterwards. If a future edit accidentally shared that code path
+        // for credentials too, the file would be briefly (and, on a
+        // filesystem where the publishing rename and the `chmod` are not
+        // atomic together, not so briefly) world-readable with a live
+        // token in it. Checking the mode `write_runtime_slot_credentials`
+        // itself reports, immediately after the call returns with no
+        // intervening `restrict_to_owner` re-check, is what actually tells
+        // the two apart — `restrict_to_owner`'s own success does not, since
+        // it would paper over a late chmod just as well as an early one.
+        let home = scratch_home("credentials-mode-at-creation");
+        write_runtime_slot_credentials(
+            RuntimeSlot::Remote,
+            &home,
+            &[("pairingToken", Some(json!("mrt_mode_check")))],
+        )
+        .unwrap();
+
+        let mode = std::fs::metadata(slot_credentials_path(RuntimeSlot::Remote, &home))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+
     #[test]
     fn credentials_merge_keeps_the_other_token_across_a_rotation() {
         let home = scratch_home("credentials-merge");
@@ -985,7 +1120,7 @@ mod tests {
         .unwrap();
 
         let state = read_runtime_slot_config(RuntimeSlot::Wsl, &home);
-        assert_eq!(state.error, None);
+        assert!(state.error.is_none());
         assert!(state.stored.is_some());
     }
 }
