@@ -218,10 +218,16 @@ fn create_lock_file(path: &Path) -> io::Result<()> {
 /// Two questions, because neither alone is sound. A dead pid is the fast
 /// answer, but a pid means nothing unless it was recorded on *this*
 /// machine — a runtime home can sit on a mounted share — so it is only
-/// trusted when the hostnames agree. Age covers the rest, including a lock
-/// whose recorded pid has since been handed to something unrelated: every
-/// holder does one small write, so a lock that has survived far longer than
-/// any of them could is a leftover.
+/// trusted when the hostnames agree. Age covers a lock recorded on a
+/// foreign host: every holder does one small write, so a lock that has
+/// survived far longer than any of them could is a leftover.
+///
+/// Age is **not** consulted once a lock is `owned_here`, matching
+/// `reclaimAbandonedLock` in `runtime-home.ts` exactly (`ownedHere ?
+/// !isProcessAlive(pid) : age > SLOT_LOCK_STALE_MS`, not both). A same-host
+/// lock whose recorded pid is recycled by an unrelated long-lived process
+/// stays wedged past `stale_after` on both sides — a known, shared gap in
+/// this protocol, not one this crate can close alone.
 ///
 /// Hostnames are compared case-insensitively, unlike `runtime-home.ts`'s
 /// exact `===`: this crate's own `GetComputerNameExW`/`gethostname` call is
