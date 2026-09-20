@@ -298,24 +298,30 @@ fn resolve_through_existing_ancestor(candidate: &Path) -> Option<PathBuf> {
         hops += 1;
 
         let raw_target = std::fs::read_link(&step).ok()?;
-        if raw_target.is_absolute() {
-            let (target_root, target_segments) = split_into_root_and_segments(&raw_target);
+        // Whether the target replaces the walk or is relative to the
+        // link's own directory is decided by whether it *has* a root —
+        // never by `Path::is_absolute()`, which on Windows additionally
+        // requires a prefix. `\Users\ada` (`has_root()`, no prefix) and
+        // `C:foo` (prefix, no root) are both real, valid symlink targets
+        // that `is_absolute()` calls relative; splicing either onto the
+        // link's own directory instead of replacing `resolved` answers
+        // "contained" for a path the kernel would resolve somewhere else
+        // entirely. `split_into_root_and_segments` already draws exactly
+        // the line this needs: an empty returned root means the input was
+        // relative, on every platform this crate runs on.
+        let (target_root, target_segments) = split_into_root_and_segments(&raw_target);
+        if !target_root.as_os_str().is_empty() {
             resolved = target_root;
-            for segment in target_segments.into_iter().rev() {
-                pending.push_front(segment);
-            }
-        } else {
-            // A relative target is relative to the link's own directory —
-            // `resolved`, since `step` is `resolved` plus the link's own
-            // name — not to whatever directory this walk started from, and
-            // not touched here: only the target's own segments are
-            // spliced in, raw and unfolded, so a `..` inside the target's
-            // own text resolves against whatever precedes it after
-            // splicing rather than being folded in isolation.
-            let (_, target_segments) = split_into_root_and_segments(&raw_target);
-            for segment in target_segments.into_iter().rev() {
-                pending.push_front(segment);
-            }
+        }
+        // A relative target is relative to the link's own directory —
+        // `resolved`, since `step` is `resolved` plus the link's own
+        // name — not to whatever directory this walk started from, and
+        // not touched here: only the target's own segments are spliced
+        // in, raw and unfolded, so a `..` inside the target's own text
+        // resolves against whatever precedes it after splicing rather
+        // than being folded in isolation.
+        for segment in target_segments.into_iter().rev() {
+            pending.push_front(segment);
         }
     }
 
@@ -952,6 +958,57 @@ mod tests {
                 resolved,
                 Some(std::path::PathBuf::from("a").join("b").join("c.txt"))
             );
+        }
+
+        #[test]
+        fn a_rooted_target_without_a_prefix_is_not_absolute_but_the_split_finds_its_root() {
+            // The exact predicate trap the symlink-target-splicing fix
+            // depends on getting right: `\Users\ada` has a root but no
+            // prefix, so `Path::is_absolute()` calls it relative -- the
+            // wrong signal for "this target replaces the walk instead of
+            // being spliced onto the link's own directory".
+            // `split_into_root_and_segments` must still find a non-empty
+            // root for it, since that split -- not `is_absolute()` -- is
+            // what the walk keys off now.
+            let target = std::path::Path::new(r"\Users\ada");
+            assert!(target.has_root());
+            assert!(!target.is_absolute());
+            let (root, _) = split_into_root_and_segments(target);
+            assert!(!root.as_os_str().is_empty());
+        }
+
+        #[test]
+        fn a_drive_relative_target_is_not_is_absolute_but_the_split_still_finds_its_root() {
+            // The same trap from the other side: `C:foo` carries a prefix
+            // but no root (drive-relative), so it is also not
+            // `is_absolute()` despite naming a real location outside
+            // wherever the link itself lives.
+            let target = std::path::Path::new(r"C:foo");
+            assert!(!target.is_absolute());
+            let (root, _) = split_into_root_and_segments(target);
+            assert!(!root.as_os_str().is_empty());
+        }
+
+        #[test]
+        fn guard_mutation_never_runs_execute_for_a_symlink_to_a_rooted_no_prefix_target() {
+            // The real gate for the predicate fix above, not just the split
+            // assertion: a symlink whose stored target is rooted but
+            // carries no prefix must replace the walk, not splice onto the
+            // link's own directory. `\Windows\System32` is rooted on
+            // whatever drive the link itself lives on and is never a
+            // descendant of `root`, so this needs no fixture beyond the
+            // symlink.
+            let root = scratch_root("windows-rooted-no-prefix-target");
+            std::os::windows::fs::symlink_dir(r"\Windows\System32", root.join("link")).unwrap();
+
+            let result = guard_mutation(&root, &[r"link\secret"], || {
+                panic!("execute must never run for a target this walk resolves outside root")
+            });
+
+            assert!(matches!(
+                result,
+                Err(WorkspaceContainmentError::Escaped { .. })
+            ));
         }
     }
 }
