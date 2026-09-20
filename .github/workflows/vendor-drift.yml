@@ -23,7 +23,7 @@ name: Vendor drift
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feat/rust-runtime]
     paths:
       - "apps/runtime/src/services/external-agents/*/contract/**"
       - "apps/runtime/src/services/external-agents/codex/protocol/**"

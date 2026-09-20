@@ -72,7 +72,7 @@ describe('touchesProtocolSurface', () => {
   test.each([
     'apps/frontend/src/main.tsx',
     'package.json',
-    'packages/cargo-shim/src/main.rs',
+    'crates/mangostudio-launcher/src/main.rs',
     'docs/architecture/overview.md',
     'scripts/check.ts',
   ])('leaves %s alone', (file) => {
@@ -237,11 +237,11 @@ describe('protocol lane selection', () => {
 });
 
 describe('the protocol tree at the repository root', () => {
-  test('the cargo-shim lane pins its toolchain past the root rust-toolchain.toml', () => {
+  test('the launcher MSRV lane pins its toolchain past the root rust-toolchain.toml', () => {
     // rustup resolves `rust-toolchain.toml` by walking up from the working
     // directory, so the protocol workspace's file at the root overrides the one
-    // `dtolnay/rust-toolchain` installs for `packages/cargo-shim`. Measured from
-    // that directory: "1.98.1 (overridden by '<root>/rust-toolchain.toml')".
+    // `dtolnay/rust-toolchain` installs the launcher's declared MSRV. The root
+    // toolchain file would otherwise win when Cargo runs from the workspace.
     // Without the environment variable the crate silently stops being built
     // against its declared MSRV and the lane still reports green.
     const workflow = readText('.github/workflows/cargo-shim.yml');
@@ -251,12 +251,25 @@ describe('the protocol tree at the repository root', () => {
     expect(readText('rust-toolchain.toml')).not.toContain(`channel = "${pinned}"`);
   });
 
-  test('the cargo workspace excludes every nested crate it does not own', () => {
+  test('the cargo workspace owns the launcher and excludes only the fuzz workspace', () => {
     // A package nested under a workspace root that is neither a member nor
     // excluded makes cargo refuse to build it outright.
     const manifest = readText('Cargo.toml');
-    expect(manifest).toContain('members = ["crates/mango-protocol"]');
-    expect(manifest).toContain('exclude = ["crates/mango-protocol/fuzz", "packages/cargo-shim"]');
+    expect(manifest).toContain(
+      'members = ["crates/mango-protocol", "crates/mangostudio-launcher"]'
+    );
+    expect(manifest).toContain('exclude = ["crates/mango-protocol/fuzz"]');
+    expect(manifest).not.toContain('packages/cargo-shim');
+  });
+
+  test('the launcher shares build policy without inheriting the protocol version or MSRV', () => {
+    const manifest = readText('crates/mangostudio-launcher/Cargo.toml');
+
+    expect(manifest).toContain('version = "0.1.1"');
+    expect(manifest).not.toContain('version.workspace = true');
+    expect(manifest).toContain('edition.workspace = true');
+    expect(manifest).toContain('rust-version = "1.96.0"');
+    expect(manifest).toContain('[lints]\nworkspace = true');
   });
 
   test('the protocol package resolves from source and publishes from a build', () => {
@@ -296,10 +309,15 @@ describe('the protocol tree at the repository root', () => {
     // The gate fails a pull request with no area:/type: label, and none of the
     // protocol directories match any other glob.
     const labeler = readText('.github/labeler.yml');
-    for (const glob of ['spec/**', 'packages/protocol/**', 'crates/**', 'scripts/protocol/**']) {
+    for (const glob of [
+      'spec/**',
+      'packages/protocol/**',
+      'crates/mango-protocol/**',
+      'scripts/protocol/**',
+    ]) {
       expect(labeler, glob).toContain(`- "${glob}"`);
     }
-    expect(labeler).not.toContain('mango-protocol/**');
+    expect(labeler).not.toContain('- "crates/**"');
   });
 });
 

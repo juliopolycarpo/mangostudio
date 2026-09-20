@@ -165,7 +165,7 @@ function assertPlatformInputs(plan: PlatformArchivePlan): void {
 
 function writeChecksumManifest(plan: ReleaseAssetPlan): void {
   // Format contract is pinned by scripts/tests/support/SHA256SUMS.sample and
-  // consumed by verify-checksum.ts, cargo-shim, and the mangostudio.dev install scripts.
+  // consumed by verify-checksum.ts, the Cargo launcher, and the mangostudio.dev install scripts.
   const lines = plan.checksummedAssetPaths.map((assetPath) => {
     assertFile(assetPath, basename(assetPath));
     return `${sha256File(assetPath)}  ${basename(assetPath)}`;

@@ -21,8 +21,8 @@ import { findReleaseChecksum } from '../../environments/domain/wsl-runtime-relea
 import type { ExpectedDigest, ResolvedDownload } from '../domain/resolve-target';
 import { fetchReleaseChecksums } from './release-index';
 
-// The largest platform archive is well under this; mirrors the cargo shim's
-// own download cap for the same reason (see packages/cargo-shim/src/main.rs).
+// The largest platform archive is well under this; mirrors the Cargo launcher's
+// own download cap for the same reason (see crates/mangostudio-launcher/src/main.rs).
 // safeFetchBytes buffers the whole body before returning it, so this is also
 // roughly the worst-case memory this download costs, not just its disk cost.
 const MAX_DOWNLOAD_BYTES = 1024 * 1024 * 1024;

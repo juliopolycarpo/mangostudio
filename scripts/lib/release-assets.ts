@@ -194,7 +194,7 @@ export interface CanaryAssetSelection {
   /**
    * Every platform archive plus the frontend archive, unchanged. The Cargo
    * launcher resolves `mangostudio-<version>-<platform>.<ext>` for whatever
-   * host it was built for (`packages/cargo-shim/src/main.rs`), so narrowing
+   * host it was built for (`crates/mangostudio-launcher/src/main.rs`), so narrowing
    * archives to the curated platforms would strand canary launchers on the
    * other five.
    */

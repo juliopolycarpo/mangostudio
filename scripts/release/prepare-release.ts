@@ -14,7 +14,7 @@ import { error, header, log, success } from '../lib/runner';
 function printHelp(): never {
   console.log(`Usage: bun run release:prepare <version>
 
-Stages a release in the working tree: bumps the root, workspace, and cargo-shim
+Stages a release in the working tree: bumps the root, workspace, and launcher
 manifests to <version> in lockstep, regenerates CHANGELOG.md with git-cliff, and
 re-runs check:versions --expect <version> as a self-check. Nothing is committed
 or tagged.

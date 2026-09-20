@@ -16,7 +16,7 @@ copy-paste commands, or:
 | Homebrew           | `brew install juliopolycarpo/tap/mangostudio`                                                                                                                        |
 | Shell / PowerShell | `install.sh` / `install.ps1` from [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh) (mirrored at mangostudio.dev) |
 | Scoop              | `juliopolycarpo/scoop-bucket` → `scoop install mangostudio`                                                                                                          |
-| Cargo              | `cargo install mangostudio` — see [`packages/cargo-shim/README.md`](../../packages/cargo-shim/README.md)                                                             |
+| Cargo              | `cargo install mangostudio` — see [`crates/mangostudio-launcher/README.md`](../../crates/mangostudio-launcher/README.md)                                             |
 | Docker             | `ghcr.io/juliopolycarpo/mangostudio` — see [`docs/operations/deployment.md`](../operations/deployment.md#docker)                                                     |
 | Manual             | Download platform archives from GitHub Releases and verify `SHA256SUMS`                                                                                              |
 

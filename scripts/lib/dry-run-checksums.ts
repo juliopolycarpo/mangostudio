@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { ALL_BINARY_TARGETS, releaseArchiveFileName } from './release-targets';
 
-// Keep in lockstep with verify-checksum.ts, archive-assets.ts, cargo-shim,
+// Keep in lockstep with verify-checksum.ts, archive-assets.ts, the Cargo launcher,
 // and the mangostudio.dev install scripts; see scripts/tests/support/SHA256SUMS.sample.
 const CHECKSUM_LINE_PATTERN = /^([a-fA-F0-9]{64})\s+\*?(.+)$/;
 

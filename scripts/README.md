@@ -11,7 +11,7 @@ scripts/
 ├── dev.ts            Start dev servers (bun run dev)
 ├── build.ts          Build workspaces or standalone binaries (bun run build)
 ├── check.ts          Biome + dprint + madge + tsc + workflow static analysis, in parallel (bun run check)
-├── check-versions.ts Assert root + workspace + cargo-shim versions agree (bun run check:versions)
+├── check-versions.ts Assert application + launcher versions agree (bun run check:versions)
 ├── update-node-release-schedule.ts
 │                     Refresh bundled Node lifecycle and latest-patch data
 ├── fix.ts            Apply Biome + dprint fixes (bun run fix)
@@ -284,7 +284,7 @@ ignores require execution evidence documented in `docs/reference/testing.md`.
 The release version (build, npm packaging, and changelog) resolves through
 `lib/release-version.ts`: the root `package.json` version, overridable by the
 `VERSION` env var, validated as semver. `bun run check:versions` keeps the root,
-workspace, and `packages/cargo-shim/Cargo.toml`/`Cargo.lock` versions in
+workspace, `crates/mangostudio-launcher/Cargo.toml`, and its root `Cargo.lock` entry in
 lockstep; with `--expect <version>` it also requires `CHANGELOG.md` to carry the
 `<version>` release section (the release workflow's pre-build gate).
 

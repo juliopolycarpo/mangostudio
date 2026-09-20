@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { bumpLockstepVersions, setPackageVersion } from '../lib/prepare-release';
 import {
-  CARGO_SHIM_LOCKFILE,
-  CARGO_SHIM_MANIFEST,
   collectVersionConsistency,
+  LAUNCHER_MANIFEST,
   LOCKSTEP_PACKAGES,
   readPackageVersion,
+  WORKSPACE_CARGO_LOCKFILE,
 } from '../lib/release-version';
 
 // Named fake repo: seeds every lockstep manifest into an isolated temp dir so
@@ -38,7 +38,7 @@ class TempRepo {
       );
     }
     this.writeRaw(
-      CARGO_SHIM_MANIFEST,
+      LAUNCHER_MANIFEST,
       [
         '[package]',
         'name = "mangostudio"',
@@ -51,7 +51,7 @@ class TempRepo {
       ].join('\n')
     );
     this.writeRaw(
-      CARGO_SHIM_LOCKFILE,
+      WORKSPACE_CARGO_LOCKFILE,
       [
         'version = 4',
         '',
@@ -63,6 +63,10 @@ class TempRepo {
         'name = "mangostudio"',
         `version = "${version}"`,
         'dependencies = ["flate2"]',
+        '',
+        '[[package]]',
+        'name = "mango-protocol"',
+        'version = "0.2.0"',
         '',
       ].join('\n')
     );
@@ -122,13 +126,16 @@ describe('bumpLockstepVersions', () => {
     repo.seedLockstep('0.1.0');
     const bumped = bumpLockstepVersions('0.2.0', repo.dir);
 
-    expect(bumped).toEqual([...LOCKSTEP_PACKAGES, CARGO_SHIM_MANIFEST, CARGO_SHIM_LOCKFILE]);
+    expect(bumped).toEqual([...LOCKSTEP_PACKAGES, LAUNCHER_MANIFEST, WORKSPACE_CARGO_LOCKFILE]);
     const result = collectVersionConsistency(repo.dir);
     expect(result.expected).toBe('0.2.0');
     expect(result.mismatches).toHaveLength(0);
     // Dependency pins survive both cargo rewrites.
-    expect(repo.read(CARGO_SHIM_MANIFEST)).toContain('ureq = { version = "3"');
-    expect(repo.read(CARGO_SHIM_LOCKFILE)).toContain('name = "flate2"\nversion = "1.1.9"');
+    expect(repo.read(LAUNCHER_MANIFEST)).toContain('ureq = { version = "3"');
+    expect(repo.read(WORKSPACE_CARGO_LOCKFILE)).toContain('name = "flate2"\nversion = "1.1.9"');
+    expect(repo.read(WORKSPACE_CARGO_LOCKFILE)).toContain(
+      'name = "mango-protocol"\nversion = "0.2.0"'
+    );
   });
 
   test('normalizes a leading v before writing', () => {
@@ -150,10 +157,10 @@ describe('bumpLockstepVersions', () => {
 
   test('a missing cargo lockfile fails without touching the package manifests', () => {
     repo.seedLockstep('0.1.0');
-    rmSync(join(repo.dir, CARGO_SHIM_LOCKFILE));
+    rmSync(join(repo.dir, WORKSPACE_CARGO_LOCKFILE));
 
     expect(() => bumpLockstepVersions('0.2.0', repo.dir)).toThrow(/Cannot read Cargo lockfile/);
     expect(readPackageVersion(join(repo.dir, 'package.json'))).toBe('0.1.0');
-    expect(repo.read(CARGO_SHIM_MANIFEST)).toContain('version = "0.1.0"');
+    expect(repo.read(LAUNCHER_MANIFEST)).toContain('version = "0.1.0"');
   });
 });

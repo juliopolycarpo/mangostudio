@@ -1,4 +1,4 @@
-// Section-aware version stampers for the cargo-shim manifest and lockfile. They
+// Section-aware version stampers for the launcher manifest and workspace lockfile. They
 // mirror the readers in release-version.ts (readCargoManifestVersion /
 // readCargoLockVersion) so the canary job can rewrite an ephemeral prerelease
 // version into Cargo.toml + Cargo.lock without a TOML dependency, then publish

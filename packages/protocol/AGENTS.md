@@ -36,6 +36,12 @@ bun run protocol:test      # adds cargo test and the interop suites
 
 Both degrade to the TypeScript half with a warning when `cargo` is not on PATH.
 
+The Rust SDK is a member of the root Cargo workspace and uses the root `Cargo.lock`. The
+`mangostudio` launcher shares that workspace but not the protocol version or MSRV. Keep protocol
+path filters scoped to `crates/mango-protocol/**`; launcher-only changes must not enter the
+protocol changelog or masquerade as wire-contract changes. The fuzz crate remains an excluded
+nightly workspace with its own lockfile.
+
 ## Resolving from the workspace, publishing from a build
 
 `exports` points at `src/`, like every other workspace here. Nothing in the Turbo graph builds

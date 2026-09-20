@@ -322,6 +322,6 @@ Abra estes arquivos primeiro:
 - `scripts/release/pack-npm.ts`
 - `scripts/check-versions.ts`
 - `packages/cli/`
-- `packages/cargo-shim/`
+- `crates/mangostudio-launcher/`
 - `.github/workflows/pr-qa-report.yml`, `.github/workflows/release.yml`, `.github/workflows/cargo-shim.yml`
 - Referência: `releasing.md`

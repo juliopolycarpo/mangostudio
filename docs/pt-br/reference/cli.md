@@ -19,7 +19,7 @@ pré-compilado e sidecar do frontend. Veja a
 | Homebrew           | `brew install juliopolycarpo/tap/mangostudio`                                                                                                                       |
 | Shell / PowerShell | `install.sh` / `install.ps1` do [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh) (espelhado em mangostudio.dev) |
 | Scoop              | `juliopolycarpo/scoop-bucket` → `scoop install mangostudio`                                                                                                         |
-| Cargo              | `cargo install mangostudio` — veja [`packages/cargo-shim/README.md`](../../../packages/cargo-shim/README.md)                                                        |
+| Cargo              | `cargo install mangostudio` — veja [`crates/mangostudio-launcher/README.md`](../../../crates/mangostudio-launcher/README.md)                                        |
 | Docker             | `ghcr.io/juliopolycarpo/mangostudio` — veja [`deployment.md`](../operations/deployment.md#docker)                                                                   |
 | Manual             | Baixe arquivos de plataforma do GitHub Releases e verifique `SHA256SUMS`                                                                                            |
 

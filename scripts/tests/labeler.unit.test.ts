@@ -71,6 +71,9 @@ describe('labeler coverage', () => {
     expect(labeler).toContain('- "bun.lock"');
     expect(labeler).toContain('- "Dockerfile*"');
     expect(labeler).toContain('- "playwright.config.ts"');
+    expect(labeler).toContain('- "Cargo.toml"');
+    expect(labeler).toContain('- "Cargo.lock"');
+    expect(labeler).toContain('- "crates/**/*.md"');
   });
 
   test('classifies repo-meta and .github changes so the verify gate passes', () => {
@@ -163,7 +166,7 @@ describe('labeler coverage', () => {
     // `area: docs`.
     expect(runtimeSection).toContain('- "spec/**"');
     expect(runtimeSection).toContain('- "packages/protocol/**"');
-    expect(runtimeSection).toContain('- "crates/**"');
+    expect(runtimeSection).toContain('- "crates/mango-protocol/**"');
     expect(runtimeSection).toContain('- "scripts/protocol/**"');
   });
 
@@ -185,15 +188,12 @@ describe('labeler coverage', () => {
     // One block per ecosystem; each must carry the auto-label so none of the
     // shipped ecosystems loses dependency classification. Asserted as a named
     // set rather than a count, so adding an ecosystem fails by name instead of
-    // by an off-by-one nobody can read. Two cargo blocks on purpose: the
-    // crates.io launcher under packages/cargo-shim is on its own version line
-    // and toolchain, and the Mango Protocol workspace is at the repository root
-    // with a second, nightly-only lockfile under crates/mango-protocol/fuzz.
+    // by an off-by-one nobody can read. One Cargo block owns the root workspace
+    // and the second nightly-only lockfile under crates/mango-protocol/fuzz.
     const ecosystemBlocks = dependabot.split('package-ecosystem:').slice(1);
     expect(ecosystemBlocks.map((block) => block.trim().split('\n')[0])).toEqual([
       'github-actions',
       'bun',
-      'cargo',
       'cargo',
       'docker',
     ]);

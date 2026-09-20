@@ -50,6 +50,20 @@ Useful docs:
 - Cross-workspace imports must use package names, never relative paths.
 - Do not edit `apps/frontend/src/routeTree.gen.ts`; it is generated.
 
+## Rust workspace policy
+
+- `Cargo.toml` and the root `Cargo.lock` own every stable Rust crate in this repository. Add new
+  crates as workspace members instead of creating another lockfile or toolchain root.
+- `crates/mango-protocol/fuzz` is the sole exception. It is an excluded nightly-only workspace
+  with its own lockfile.
+- `rust-toolchain.toml` pins the development toolchain. The protocol inherits the workspace MSRV;
+  the published `mangostudio` launcher declares its lower MSRV explicitly. The launcher keeps the
+  application version, while `[workspace.package].version` remains the protocol version.
+- Check Rust changes with `cargo fmt --all -- --check`,
+  `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, and
+  `cargo test --workspace --all-targets --all-features --locked`. Protocol changes still run the
+  separate protocol gates listed in `packages/protocol/AGENTS.md`.
+
 ## Naming Shortcuts
 
 - Migration files: `NNN_description.ts`

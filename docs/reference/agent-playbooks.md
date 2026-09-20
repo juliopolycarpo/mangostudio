@@ -1047,6 +1047,6 @@ Open these first:
 - `scripts/release/pack-npm.ts`
 - `scripts/check-versions.ts`
 - `packages/cli/`
-- `packages/cargo-shim/`
+- `crates/mangostudio-launcher/`
 - `.github/workflows/pr-qa-report.yml`, `.github/workflows/release.yml`, `.github/workflows/cargo-shim.yml`
 - Reference: `docs/reference/releasing.md`

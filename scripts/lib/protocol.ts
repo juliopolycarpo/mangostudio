@@ -48,7 +48,7 @@ export const PROTOCOL_IMPORT_TIP = '97b458d8b5e47bf110106fb24b1dee501ee77f71';
  */
 export const PROTOCOL_PATHS: readonly string[] = [
   'packages/protocol/',
-  'crates/',
+  'crates/mango-protocol/',
   'spec/',
   'docs/protocol/',
   'scripts/protocol/',
