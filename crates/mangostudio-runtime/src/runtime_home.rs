@@ -343,6 +343,41 @@ pub fn resolve_runtime_slot_for_current_exe(mango_home: &Path) -> RuntimeSlot {
     resolve_runtime_slot(mango_home, current.as_slice())
 }
 
+/// `"provisioned"` when `executable_path` sits under `mango_home`'s runtime
+/// tree, `"bundled"` otherwise — mirroring `runtime-home.ts`'s
+/// `resolveRuntimeSource`, minus its third case: `"source-checkout"` there
+/// means "this process is Bun itself, interpreting `cli.ts` directly",
+/// which a compiled binary has no equivalent of.
+///
+/// # Example
+/// ```
+/// use std::path::Path;
+/// use mangostudio_runtime::runtime_home::resolve_runtime_source;
+///
+/// let home = Path::new("/home/ada/.mango");
+/// let provisioned = Path::new("/home/ada/.mango/runtime/remote/0.1.0/mangostudio-runtime");
+/// assert_eq!(resolve_runtime_source(home, Some(provisioned)), "provisioned");
+/// assert_eq!(
+///     resolve_runtime_source(home, Some(Path::new("/usr/local/bin/mangostudio-runtime"))),
+///     "bundled"
+/// );
+/// assert_eq!(resolve_runtime_source(home, None), "bundled");
+/// ```
+#[must_use]
+pub fn resolve_runtime_source(mango_home: &Path, executable_path: Option<&Path>) -> &'static str {
+    match executable_path.and_then(|path| slot_for_path(path, mango_home)) {
+        Some(_) => "provisioned",
+        None => "bundled",
+    }
+}
+
+/// [`resolve_runtime_source`] against this running process's own
+/// executable.
+#[must_use]
+pub fn resolve_runtime_source_for_current_exe(mango_home: &Path) -> &'static str {
+    resolve_runtime_source(mango_home, std::env::current_exe().ok().as_deref())
+}
+
 /// Whether a slot with no answer yet starts life pre-consented.
 ///
 /// The one piece of `apps/shared/src/runtime-home/consent.ts`'s
@@ -930,8 +965,9 @@ mod tests {
         CredentialsWriteGate, DefaultSetupState, RuntimeHomeDocument, RuntimeSlot, SlotFileError,
         WriteError, bootstrap_serve_token, credentials_write_gate, default_setup_state_for_slot,
         home_dir, merge_write_from_state, read_runtime_slot_config, read_runtime_slot_credentials,
-        resolve_runtime_slot, slot_config_path, slot_credentials_path, slot_current_binary_path,
-        slot_dir, slot_for_path, write_runtime_slot_config, write_runtime_slot_credentials,
+        resolve_runtime_slot, resolve_runtime_source, slot_config_path, slot_credentials_path,
+        slot_current_binary_path, slot_dir, slot_for_path, write_runtime_slot_config,
+        write_runtime_slot_credentials,
     };
 
     fn scratch_home(name: &str) -> PathBuf {
@@ -942,6 +978,25 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn resolve_runtime_source_tells_provisioned_from_bundled() {
+        let home = scratch_home("resolve-source");
+        let provisioned = home
+            .join("runtime")
+            .join("remote")
+            .join("0.1.0")
+            .join("mangostudio-runtime");
+        assert_eq!(
+            resolve_runtime_source(&home, Some(&provisioned)),
+            "provisioned"
+        );
+        assert_eq!(
+            resolve_runtime_source(&home, Some(Path::new("/usr/local/bin/mangostudio-runtime"))),
+            "bundled"
+        );
+        assert_eq!(resolve_runtime_source(&home, None), "bundled");
     }
 
     #[test]

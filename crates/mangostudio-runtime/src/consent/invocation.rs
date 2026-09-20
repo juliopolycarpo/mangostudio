@@ -39,24 +39,38 @@ use crate::runtime_home::{
 use crate::setup::SetupAuthority;
 
 /// The full sentence a hub's `ssh-failure.ts` classifier greps for
-/// (case-insensitively): [`RUNTIME_SETUP_PENDING_SIGNATURE`] itself, plus
+/// (case-insensitively): [`RUNTIME_SETUP_PENDING_SIGNATURE`] itself — kept
+/// byte-identical, never touched by the remediation text after it — plus
 /// the remediation a person reads. Every refusal path in this module — and
 /// in [`crate::transport`] — prints this exact sentence, built from the
 /// shared signature rather than a hand-typed copy of it, so the two can
 /// never drift apart.
+///
+/// The remediation names `--profile`, unlike `cli.ts`'s own
+/// `RUNTIME_SETUP_PENDING_MESSAGE`: that CLI prompts interactively when
+/// `setup` is run with no flags, so a bare `mangostudio-runtime setup`
+/// actually works there. This crate's own [`crate::setup`] takes no
+/// interactive input at all (see that module's doc comment), so the same
+/// bare command here only ever answers "setup needs
+/// --profile full|readonly|none" — a dead end, not a remedy. `--slot` is
+/// left out on purpose: `run_setup` already resolves it from
+/// the binary's own install location when omitted, which is right far more
+/// often than a fixed guess printed here would be.
 ///
 /// # Example
 ///
 /// ```
 /// use mangostudio_runtime::consent::invocation::setup_pending_message;
 ///
-/// assert!(setup_pending_message().starts_with("runtime setup is pending on this machine"));
+/// let message = setup_pending_message();
+/// assert!(message.starts_with("runtime setup is pending on this machine"));
+/// assert!(message.contains("mangostudio-runtime setup --profile"));
 /// ```
 #[must_use]
 pub fn setup_pending_message() -> String {
     format!(
-        "{RUNTIME_SETUP_PENDING_SIGNATURE}. Run \"mangostudio-runtime setup\" there before \
-         connecting it."
+        "{RUNTIME_SETUP_PENDING_SIGNATURE}. Run \"mangostudio-runtime setup --profile \
+         <full|readonly|none>\" there before connecting it."
     )
 }
 
@@ -160,6 +174,12 @@ fn decide_and_record(
 /// The "invocation is consent" branch: writes a `full` grant, attributed to
 /// [`SetupAuthority::Launch`], and reports it as granted and recorded.
 ///
+/// Also records `version` and `source` at the document's top level,
+/// matching `consentByInvocation`'s own `mergeRuntimeSlotConfig` call in
+/// `runtime-home.ts` — previously dropped here (`runtime_version` arrived
+/// unused, and nothing computed `source` at all), leaving this the one
+/// grant path in the crate that recorded no provenance for what it wrote.
+///
 /// A write failure here still lets this launch serve with `full` for its
 /// own lifetime rather than refusing an invocation over a disk error on the
 /// record-keeping alone — matching `runtime-home.ts`, which does not
@@ -167,7 +187,7 @@ fn decide_and_record(
 fn record_launch_grant(
     slot: RuntimeSlot,
     mango_home: &Path,
-    _runtime_version: &str,
+    runtime_version: &str,
     wall_clock: &dyn WallClock,
 ) -> InvocationConsent {
     let allow = consent_preset(ManifestProfile::Full);
@@ -186,6 +206,13 @@ fn record_launch_grant(
                 "at": format_iso8601_millis(wall_clock.now()),
                 "by": SetupAuthority::Launch.as_str(),
             })),
+        ),
+        ("version", Some(Value::String(runtime_version.to_string()))),
+        (
+            "source",
+            Some(Value::String(
+                crate::runtime_home::resolve_runtime_source_for_current_exe(mango_home).to_string(),
+            )),
         ),
     ];
     let _ = merge_write(
@@ -344,6 +371,27 @@ mod tests {
         assert_eq!(stored["setup"]["state"], "configured");
         assert_eq!(stored["setup"]["by"], "launch");
         assert_eq!(stored["profile"], "full");
+    }
+
+    /// The regression this guards: `record_launch_grant` used to take
+    /// `runtime_version` as an unused parameter and computed no `source` at
+    /// all, leaving this the one grant path in the crate with no
+    /// provenance for what it wrote — the same gap `runtime-home.ts`'s own
+    /// `mergeRuntimeSlotConfig` call closes with `version`/`source` fields.
+    #[test]
+    fn the_launch_grant_records_its_own_version_and_source() {
+        let home = scratch_home("remote-fresh-provenance");
+        let consent = consent_by_invocation(RuntimeSlot::Remote, &home, "9.9.9", &SystemWallClock);
+        assert!(consent.recorded);
+
+        let stored = read_runtime_slot_config(RuntimeSlot::Remote, &home)
+            .stored
+            .expect("the grant was written to disk");
+        assert_eq!(stored["version"], "9.9.9");
+        // The `cargo test` binary's own executable path is never under this
+        // scratch home, so this resolves deterministically to "bundled"
+        // without needing to fake `std::env::current_exe()`.
+        assert_eq!(stored["source"], "bundled");
     }
 
     #[test]
