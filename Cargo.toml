@@ -3,6 +3,7 @@ resolver = "3"
 members = [
   "crates/mango-protocol",
   "crates/mangostudio-launcher",
+  "crates/mangostudio-runtime",
   "crates/mangostudio-runtime-contract",
 ]
 # `crates/mango-protocol/fuzz` is its own workspace (see its Cargo.toml): a
@@ -42,3 +43,4 @@ all = "warn"
 # checks the two agree, so a forgotten bump here fails the build loudly rather
 # than silently pinning a stale minor.
 mango-protocol = { path = "crates/mango-protocol", version = "0.2.0" }
+mangostudio-runtime-contract = { path = "crates/mangostudio-runtime-contract", version = "0.2.0" }
