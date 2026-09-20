@@ -138,8 +138,11 @@ fn event_validators() -> &'static HashMap<&'static str, Validator> {
 ///
 /// # Errors
 /// A [`Violation`] naming `method` when the contract has no such method
-/// (`keyword` is `"unknownMethod"`, `schema_path` is empty), or naming the
-/// failing schema keyword and path when `params` fails the method's schema.
+/// (`keyword` is `"unknownSubject"`, `schema_path` is empty — the same
+/// keyword [`validate_event`] reports for an unknown topic, since both are
+/// "the contract has nothing by this name" rather than a schema mismatch),
+/// or naming the failing schema keyword and path when `params` fails the
+/// method's schema.
 ///
 /// # Example
 ///
@@ -378,6 +381,13 @@ mod tests {
     fn validate_event_checks_a_topic_payload() {
         assert!(validate_event("runtime.heartbeat", &json!({ "at": 0 })).is_ok());
         assert!(validate_event("runtime.heartbeat", &json!({})).is_err());
+    }
+
+    #[test]
+    fn an_unknown_topic_is_a_violation_naming_the_subject_not_a_panic() {
+        let violation = validate_event("no.such.topic", &json!({})).expect_err("unknown topic");
+        assert_eq!(violation.subject, "topic:no.such.topic");
+        assert_eq!(violation.keyword, "unknownSubject");
     }
 
     #[test]
