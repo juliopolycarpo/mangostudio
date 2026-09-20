@@ -253,7 +253,7 @@ export function collectVersionConsistency(rootDir: string = ROOT_DIR): VersionCo
         version: readCargoManifestVersion(join(rootDir, crate.manifest)),
       },
       {
-        path: WORKSPACE_CARGO_LOCKFILE,
+        path: `${WORKSPACE_CARGO_LOCKFILE} (${crate.crateName})`,
         version: readCargoLockVersion(join(rootDir, WORKSPACE_CARGO_LOCKFILE), crate.crateName),
       },
     ]),

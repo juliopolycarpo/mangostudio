@@ -322,17 +322,32 @@ describe('collectVersionConsistency', () => {
     }
   });
 
-  test('reports a Cargo.lock that missed the version bump', () => {
+  test('reports a Cargo.lock that missed the version bump, naming the launcher specifically', () => {
     repo.seedLockstep('0.2.0');
-    // Only the launcher's own lock entry drifts; the runtime crate's stays
-    // at the seeded version, so the mismatch names the launcher's entry
-    // specifically rather than both crates sharing one ambiguous report.
     repo.writeCargoLock([
       { crateName: LAUNCHER_CRATE, version: '0.1.0' },
       { crateName: RUNTIME_CRATE, version: '0.2.0' },
     ]);
     const result = collectVersionConsistency(repo.dir);
-    expect(result.mismatches).toEqual([{ path: WORKSPACE_CARGO_LOCKFILE, version: '0.1.0' }]);
+    expect(result.mismatches).toEqual([
+      { path: `${WORKSPACE_CARGO_LOCKFILE} (${LAUNCHER_CRATE})`, version: '0.1.0' },
+    ]);
+  });
+
+  test('reports a Cargo.lock that missed the version bump, naming the dispatcher specifically', () => {
+    // The sibling of the launcher case above: with two crates sharing one
+    // Cargo.lock, a report that only said "Cargo.lock" could not tell an
+    // operator which crate's entry drifted. Each crate's own lock entry
+    // needs its own label for exactly this reason.
+    repo.seedLockstep('0.2.0');
+    repo.writeCargoLock([
+      { crateName: LAUNCHER_CRATE, version: '0.2.0' },
+      { crateName: RUNTIME_CRATE, version: '0.1.0' },
+    ]);
+    const result = collectVersionConsistency(repo.dir);
+    expect(result.mismatches).toEqual([
+      { path: `${WORKSPACE_CARGO_LOCKFILE} (${RUNTIME_CRATE})`, version: '0.1.0' },
+    ]);
   });
 });
 
