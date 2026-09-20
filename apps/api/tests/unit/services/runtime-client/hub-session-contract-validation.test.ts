@@ -7,6 +7,7 @@ import {
   RUNTIME_TERMINAL_OUTPUT_TOPIC,
 } from '@mangostudio/shared/runtime-contract';
 import { openHubSession } from '../../../../src/services/runtime-client/hub-session';
+import { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 import { FakeHostileRuntimePeer } from '../../../support/mocks/fake-hostile-runtime-peer';
 
 describe('openHubSession — result validation', () => {
@@ -252,10 +253,12 @@ describe('openHubSession — event validation', () => {
     expect(received).toEqual([]);
   });
 
-  it('delivers an external-agent.event frame with no streamId, since no consumer depends on it', async () => {
+  it('delivers an external-agent.event frame with no streamId at the hub boundary', async () => {
     // Unlike `terminal.output`/`install.output`, `RuntimeClient.externalAgents
     // .onEvent` addresses by `payload.sessionId`, never `frame.streamId` — so
-    // a missing one here causes no downstream harm and is not fatal.
+    // a missing one here causes no downstream harm and is not fatal at this
+    // boundary. That claim about the client is a separate assertion, below —
+    // this one only proves the boundary itself does not drop or close.
     const peer = new FakeHostileRuntimePeer();
     const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
     const received: unknown[] = [];
@@ -273,6 +276,34 @@ describe('openHubSession — event validation', () => {
     await Promise.resolve();
 
     expect(received).toHaveLength(1);
+    hub.close();
+  });
+
+  it('delivers an external-agent.event frame with no streamId through RuntimeClient', async () => {
+    // The boundary not dropping the frame (test above) is not the same claim
+    // as the client delivering it: `terminal.onOutput` filters on
+    // `frame.streamId`, and if `externalAgents.onEvent` ever grew the same
+    // filter, the hub-level test alone would keep passing while the client
+    // silently discarded every frame — exactly the harm the exemption exists
+    // to avoid. This asserts through `RuntimeClient` itself.
+    const peer = new FakeHostileRuntimePeer();
+    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const client = new RuntimeClient(hub);
+    const received: unknown[] = [];
+    client.externalAgents.onEvent('session-1', (frame) => received.push(frame.event));
+
+    peer.emit({
+      topic: RUNTIME_EXTERNAL_AGENT_TOPIC,
+      payload: {
+        sessionId: 'session-1',
+        sequence: 1,
+        emittedAtMs: 0,
+        event: { type: 'completed' },
+      },
+    });
+    await Promise.resolve();
+
+    expect(received).toEqual([{ type: 'completed' }]);
     hub.close();
   });
 

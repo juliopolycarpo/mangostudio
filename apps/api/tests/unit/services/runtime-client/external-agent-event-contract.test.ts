@@ -7,8 +7,10 @@ import { FakeHostileRuntimePeer } from '../../../support/mocks/fake-hostile-runt
 /**
  * A well-addressed envelope around whatever `event` the test wants to send.
  * `streamId` mirrors `sessionId`, exactly as the real runtime sets it
- * (`supervisor.ts`'s `#emitEvent`) — the hub's session boundary now requires
- * one on every streamed topic.
+ * (`supervisor.ts`'s `#emitEvent`) — not because the hub's session boundary
+ * requires one on this topic (it does not: `externalAgents.onEvent`
+ * addresses by `payload.sessionId`, not `frame.streamId`), but so these
+ * tests match what a real peer actually sends.
  */
 function envelope(event: unknown) {
   return {
