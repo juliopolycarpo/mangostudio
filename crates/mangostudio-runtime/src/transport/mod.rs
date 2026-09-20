@@ -11,11 +11,11 @@
 //!
 //! Out of scope for every transport here, matching the crate's own current
 //! scope: every machine method group except `runtime.health` (see
-//! [`crate::health`]) is unimplemented, so
-//! [`crate::registry::Registry`] answers everything else with
-//! `METHOD_UNSUPPORTED`, and `hello.capabilities` is left empty rather than
-//! wired to [`crate::manifest::build_features`] — there is nothing yet for
-//! that manifest to describe.
+//! [`crate::health`]) and `workspace.*` (see [`crate::workspace_methods`])
+//! is unimplemented, so [`crate::registry::Registry`] answers everything
+//! else with `METHOD_UNSUPPORTED`, and `hello.capabilities` is left empty
+//! rather than wired to [`crate::manifest::build_features`] — there is
+//! nothing yet for that manifest to describe.
 
 pub mod connect;
 pub mod serve;
@@ -118,8 +118,10 @@ pub(crate) struct SessionHost {
 }
 
 /// Builds one [`SessionHost`] for `slot` under `mango_home`, announcing
-/// `runtime_version` from `runtime.health` — the one method this crate
-/// implements today (see [`crate::health`]).
+/// `runtime_version` from `runtime.health`, and also implementing
+/// `workspace.browse`, `workspace.validate`, and
+/// `workspace.resolve-contained` — the only methods this crate implements
+/// today (see [`crate::health`] and [`crate::workspace_methods`]).
 pub(crate) fn build_host(
     slot: RuntimeSlot,
     mango_home: &Path,
@@ -136,6 +138,7 @@ pub(crate) fn build_host(
         mango_home.to_path_buf(),
         runtime_version.to_string(),
     );
+    let registry = crate::workspace_methods::register(registry);
     let source = ConsentSource::new(slot, mango_home.to_path_buf());
     let authorization: Arc<dyn Authorization> = Arc::new(ConsentAuthorization::new(source));
     SessionHost {
@@ -340,13 +343,22 @@ mod tests {
     }
 
     #[test]
-    fn build_host_implements_only_runtime_health() {
+    fn build_host_implements_exactly_runtime_health_and_the_workspace_methods() {
         let home = std::env::temp_dir().join(format!(
             "mango-transport-build-host-test-{}-{}",
             std::process::id(),
             line!()
         ));
         let host = build_host(RuntimeSlot::Host, &home, "9.9.9");
-        assert_eq!(host.registry.implemented_methods(), vec!["runtime.health"]);
+        assert_eq!(
+            host.registry.implemented_methods(),
+            vec![
+                "runtime.health",
+                "workspace.browse",
+                "workspace.resolve-contained",
+                "workspace.validate",
+            ],
+            "nothing else must be implemented yet"
+        );
     }
 }

@@ -109,3 +109,5 @@ pub mod subprocess;
 pub mod supervisor;
 pub mod transport;
 pub mod workspace;
+pub mod workspace_methods;
+pub mod workspace_path;
