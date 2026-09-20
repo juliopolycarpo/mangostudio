@@ -17,7 +17,9 @@
 use std::collections::{HashMap, HashSet};
 
 use mangostudio_runtime_contract::catalog::catalog;
-use mangostudio_runtime_contract::schemas::{validate_event, validate_params, validate_result};
+use mangostudio_runtime_contract::schemas::{
+    Violation, validate_event, validate_params, validate_result,
+};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -74,19 +76,15 @@ fn corpus() -> CorpusDocument {
 
 /// This crate's own verdict for one fixture, using the same `validate_*`
 /// entry points a real dispatcher calls.
-fn verdict_of(fixture: &Fixture) -> Result<(), String> {
+fn verdict_of(fixture: &Fixture) -> Result<(), Violation> {
     match (&fixture.subject.kind, &fixture.subject.side) {
         (SubjectKind::Method, Some(Side::Params)) => {
             validate_params(&fixture.subject.name, &fixture.value)
-                .map_err(|error| error.to_string())
         }
         (SubjectKind::Method, Some(Side::Result)) => {
             validate_result(&fixture.subject.name, &fixture.value)
-                .map_err(|error| error.to_string())
         }
-        (SubjectKind::Topic, _) => {
-            validate_event(&fixture.subject.name, &fixture.value).map_err(|error| error.to_string())
-        }
+        (SubjectKind::Topic, _) => validate_event(&fixture.subject.name, &fixture.value),
         (SubjectKind::Method, None) => {
             panic!("a method fixture must name a side: {:?}", fixture.subject)
         }
@@ -139,6 +137,93 @@ fn every_fixture_gets_the_verdict_typebox_recorded() {
         "TypeBox and this crate's jsonschema validators disagree on {} fixture(s):\n{}",
         mismatches.len(),
         mismatches.join("\n")
+    );
+}
+
+/// The mutation family a fixture's `mutation` field names — `drop:sessionId` and
+/// `wrongType:cols` both collapse to `drop` and `wrongType`; `seed` and `extraProperty` carry
+/// no suffix and pass through unchanged.
+fn mutation_family(mutation: &str) -> &str {
+    mutation.split(':').next().unwrap_or(mutation)
+}
+
+/// The JSON Schema keyword(s) a validator should report for an invalid fixture in
+/// `mutation_family`, measured against the current corpus rather than guessed: every
+/// `(family, keyword)` pair this crate's own validators actually produce across all 500+
+/// invalid fixtures, grouped by family. `anyOf` shows up alongside the "obvious" keyword for
+/// every family here because a property that a mutation touches is often itself inside a
+/// method's `anyOf`-shaped result — the validator reports the outer branch mismatch, not the
+/// inner keyword, and both are the *right* reason to reject the fixture.
+///
+/// # Panics
+/// Panics naming the unrecognised family when the corpus grows a mutation kind this mapping
+/// does not cover — this must fail loudly rather than silently accept any keyword for an
+/// unmapped family (which would defeat the point of this test).
+fn expected_keywords_for(mutation_family: &str) -> &'static [&'static str] {
+    match mutation_family {
+        "drop" => &["required", "anyOf"],
+        "wrongType" => &["type", "anyOf"],
+        "extraProperty" => &["additionalProperties", "anyOf"],
+        "outOfRange" => &["minimum", "maximum"],
+        "wrongConst" => &["const", "anyOf", "type"],
+        other => panic!(
+            "runtime-contract conformance: no expected-keyword mapping for mutation family {other:?}. Add one to expected_keywords_for() in tests/conformance.rs."
+        ),
+    }
+}
+
+/// A validator that rejects every invalid fixture for the *wrong* reason — a mis-resolved
+/// `$ref` failing `required` regardless of what a fixture actually mutated, say — would still
+/// pass [`every_fixture_gets_the_verdict_typebox_recorded`] at 100%, since that test only
+/// checks valid-vs-invalid. This test additionally asserts the failing keyword this crate's
+/// validators report is consistent with what the fixture's own `mutation` field says it
+/// mutated, using the mapping in [`expected_keywords_for`].
+#[test]
+fn every_invalid_fixture_fails_for_the_keyword_its_mutation_predicts() {
+    let document = corpus();
+    let mut wrong_reason = Vec::new();
+
+    for fixture in &document.fixtures {
+        if fixture.expect != Expect::Invalid {
+            continue;
+        }
+        let family = mutation_family(&fixture.mutation);
+        let expected_keywords = expected_keywords_for(family);
+
+        // A TypeBox/jsonschema valid-vs-invalid disagreement here is already reported by
+        // `every_fixture_gets_the_verdict_typebox_recorded`; this test only has something to
+        // say about *why* a validator rejected a value it was supposed to reject anyway.
+        let Err(violation) = verdict_of(fixture) else {
+            continue;
+        };
+
+        if !expected_keywords.contains(&violation.keyword.as_str()) {
+            wrong_reason.push(format!(
+                "{}:{}{} mutation={} keyword={} expected one of {expected_keywords:?}",
+                match fixture.subject.kind {
+                    SubjectKind::Method => "method",
+                    SubjectKind::Topic => "topic",
+                },
+                fixture.subject.name,
+                fixture
+                    .subject
+                    .side
+                    .as_ref()
+                    .map(|side| format!(":{side:?}"))
+                    .unwrap_or_default(),
+                fixture.mutation,
+                violation.keyword,
+            ));
+        }
+    }
+
+    assert!(
+        wrong_reason.is_empty(),
+        "{} fixture(s) were rejected for a keyword their mutation does not predict — a \
+         validator can reject a value for the wrong reason and still pass a bare pass/fail \
+         check:\n{}",
+        wrong_reason.len(),
+        wrong_reason.join("\n")
     );
 }
 
