@@ -91,6 +91,7 @@
 //! and [`consent`] builds the rest on top of it rather than duplicating it.
 
 pub mod audit;
+pub mod cli;
 pub mod config;
 pub mod consent;
 pub mod manifest;
