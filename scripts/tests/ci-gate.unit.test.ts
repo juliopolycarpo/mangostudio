@@ -220,6 +220,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
       'apps/shared/src/runtime-home/',
       'apps/shared/src/external-agents/',
       'apps/shared/src/schema-helpers.ts',
+      'apps/shared/src/environments/toolchain-schemas.ts',
       'apps/runtime/src/runtime-home.ts',
       'apps/runtime/src/config.ts',
       'apps/runtime/scripts/generate-home-fixtures.ts',

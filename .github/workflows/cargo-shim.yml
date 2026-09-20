@@ -20,6 +20,7 @@ on:
       - "apps/shared/src/runtime-home/**"
       - "apps/shared/src/external-agents/**"
       - "apps/shared/src/schema-helpers.ts"
+      - "apps/shared/src/environments/toolchain-schemas.ts"
       - "apps/runtime/src/runtime-home.ts"
       - "apps/runtime/src/config.ts"
       - "apps/runtime/scripts/generate-home-fixtures.ts"
@@ -72,15 +73,15 @@ jobs:
 
           # The TypeScript-side paths this feeds — runtime-home.ts, the
           # runtime host's own config parser, the fixture generator,
-          # apps/shared/src/runtime-home, the external-agents and
-          # schema-helpers modules its schemas import from, and the
-          # package.json that names the generator's script — feed the
-          # ts-home half of `runtime-home-fixture-freshness`: a
-          # TypeScript-only PR touching only those must still run this
-          # workflow, or that job's own regenerate-and-diff step never runs
-          # and ts-home goes stale silently — the same gap the job itself
-          # exists to close.
-          relevant='^(crates/|apps/shared/src/runtime-contract/|apps/shared/src/runtime-home/|apps/shared/src/external-agents/|apps/shared/src/schema-helpers\.ts$|apps/runtime/src/runtime-home\.ts$|apps/runtime/src/config\.ts$|apps/runtime/scripts/generate-home-fixtures\.ts$|apps/runtime/package\.json$|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$)'
+          # apps/shared/src/runtime-home, and the whole chain its schemas
+          # import from (external-agents, schema-helpers,
+          # environments/toolchain-schemas), plus the package.json that
+          # names the generator's script — feed the ts-home half of
+          # `runtime-home-fixture-freshness`: a TypeScript-only PR touching
+          # only those must still run this workflow, or that job's own
+          # regenerate-and-diff step never runs and ts-home goes stale
+          # silently — the same gap the job itself exists to close.
+          relevant='^(crates/|apps/shared/src/runtime-contract/|apps/shared/src/runtime-home/|apps/shared/src/external-agents/|apps/shared/src/schema-helpers\.ts$|apps/shared/src/environments/toolchain-schemas\.ts$|apps/runtime/src/runtime-home\.ts$|apps/runtime/src/config\.ts$|apps/runtime/scripts/generate-home-fixtures\.ts$|apps/runtime/package\.json$|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$)'
           if grep -Eq "$relevant" "$RUNNER_TEMP/changed-files"; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
