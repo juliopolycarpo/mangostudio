@@ -357,11 +357,7 @@ export async function writePairingToken(
     const current = await requireReplaceableCredentials(slot, env);
     return await writeCredentials(
       slot,
-      {
-        schemaVersion: CREDENTIALS_SCHEMA_VERSION,
-        pairingToken: token,
-        ...(current.serveToken ? { serveToken: current.serveToken } : {}),
-      },
+      { ...current, schemaVersion: CREDENTIALS_SCHEMA_VERSION, pairingToken: token },
       env,
       ownerOnly
     );
@@ -390,11 +386,7 @@ export async function writeServeToken(
     const current = await requireReplaceableCredentials(slot, env);
     return await writeCredentials(
       slot,
-      {
-        schemaVersion: CREDENTIALS_SCHEMA_VERSION,
-        serveToken: token,
-        ...(current.pairingToken ? { pairingToken: current.pairingToken } : {}),
-      },
+      { ...current, schemaVersion: CREDENTIALS_SCHEMA_VERSION, serveToken: token },
       env,
       ownerOnly
     );

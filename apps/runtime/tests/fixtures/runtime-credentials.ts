@@ -88,6 +88,20 @@ export const MALFORMED_SIBLING_CREDENTIALS_JSON = JSON.stringify({
   serveToken: 12345,
 });
 
+/**
+ * A valid document at the current schema version carrying a field this
+ * build's schema does not name. TypeBox objects are additive-permissive, so
+ * this validates and reads exactly like `VALID_CREDENTIALS_JSON` — the fixture
+ * exists for the write side: `refreshToken` must survive a
+ * `writePairingToken`/`writeServeToken` rotation, the same invariant
+ * `mergeRuntimeSlotConfig` already holds for `runtime.json`.
+ */
+export const EXTRA_FIELD_CREDENTIALS_JSON = JSON.stringify({
+  schemaVersion: 1,
+  pairingToken: 'mrt_selector.extra',
+  refreshToken: 'rft_keepme',
+});
+
 export type RuntimeCredentialsFixtureCase =
   | 'missing'
   | 'empty'
@@ -99,7 +113,8 @@ export type RuntimeCredentialsFixtureCase =
   | 'numericToken'
   | 'objectToken'
   | 'valid'
-  | 'malformedSibling';
+  | 'malformedSibling'
+  | 'extraField';
 
 export interface RuntimeCredentialsFixture {
   /** The file's exact bytes, or `null` when the case is "no file at all". */
@@ -234,5 +249,17 @@ export const RUNTIME_CREDENTIALS_FIXTURES: Readonly<
     errorSubstring: 'does not match the runtime credentials schema',
     tokensToNeverLeak: ['mrt_selector.good', '12345'],
     kind: 'replaceable',
+  },
+  // Valid and additive: reads exactly like `valid`. Its own assertion lives
+  // in `runtime-credentials-validation.test.ts` ("preserves a field a newer
+  // build wrote"), not this table — the table only sees single-write reads,
+  // and the invariant this fixture proves is about a *second* write.
+  extraField: {
+    raw: EXTRA_FIELD_CREDENTIALS_JSON,
+    readsPairingToken: 'mrt_selector.extra',
+    readsServeToken: null,
+    errorSubstring: null,
+    tokensToNeverLeak: [],
+    kind: 'usable',
   },
 };

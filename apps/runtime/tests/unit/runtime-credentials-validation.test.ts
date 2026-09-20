@@ -31,6 +31,7 @@ import {
 import {
   ARRAY_DOCUMENT_CREDENTIALS_JSON,
   EMPTY_CREDENTIALS_JSON,
+  EXTRA_FIELD_CREDENTIALS_JSON,
   FUTURE_SCHEMA_CREDENTIALS_JSON,
   INVALID_JSON_CREDENTIALS,
   MALFORMED_SIBLING_CREDENTIALS_JSON,
@@ -109,6 +110,22 @@ describe('runtime credentials validation', () => {
     expect(await readServeToken('remote', env)).toBeNull();
     const raw = await readRawCredentials('remote', env);
     expect(raw).not.toHaveProperty('serveToken', 12345);
+  });
+
+  it('preserves a field a newer build wrote at the same schema version', async () => {
+    // `mergeRuntimeSlotConfig` already holds this invariant for `runtime.json`
+    // (`{ ...stored, ...update }`); the credentials writers used to spread
+    // only the two fields they know about, so a `refreshToken` a newer build
+    // added disappeared the moment either token rotated.
+    const env = await isolatedEnv();
+    await writeRawCredentials('remote', EXTRA_FIELD_CREDENTIALS_JSON, env);
+
+    await writeServeToken('remote', 'srv_selector.rotated', env);
+
+    expect(await readPairingToken('remote', env)).toBe('mrt_selector.extra');
+    expect(await readServeToken('remote', env)).toBe('srv_selector.rotated');
+    const raw = await readRawCredentials('remote', env);
+    expect(raw).toHaveProperty('refreshToken', 'rft_keepme');
   });
 
   it('refuses to replace a credentials file from a schema version it does not understand', async () => {
