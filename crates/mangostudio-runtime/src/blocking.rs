@@ -49,10 +49,20 @@ fn blocking_pool() -> &'static Semaphore {
 /// process.
 ///
 /// The permit is acquired before `f` is ever handed to `spawn_blocking`,
-/// and released — via the guard's own `Drop` — as soon as `f` returns,
-/// whether it returned normally or panicked. A caller past the bound
-/// simply waits its turn on the semaphore; nothing here drops or reorders
-/// work.
+/// and moved *into* the spawned closure itself rather than merely held by
+/// this function's own stack frame — so it is released exactly when `f`
+/// actually finishes running on its blocking-pool thread, whether it
+/// returned normally or panicked, never merely when a caller stops
+/// awaiting this function's own future. A future that gets dropped early
+/// (raced inside a `tokio::select!`, wrapped in a `tokio::time::timeout`
+/// that expired) does not stop `f` from running to completion — blocking
+/// work cannot be interrupted once started — and it must not silently
+/// return its permit to the pool while that still-running work keeps
+/// occupying a real OS thread the semaphore no longer knows about; doing
+/// so let more than [`MAX_CONCURRENT_BLOCKING_TASKS`] closures run at
+/// once, precisely when callers were already timing out because the
+/// pool was under pressure. A caller past the bound simply waits its
+/// turn on the semaphore; nothing here drops or reorders work.
 ///
 /// # Panics
 /// Panics if `f` itself panics (the original payload is re-raised, not
@@ -77,11 +87,19 @@ where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    let _permit = blocking_pool()
+    let permit = blocking_pool()
         .acquire()
         .await
         .expect("the blocking pool's semaphore is never closed, so acquiring it never fails");
-    match tokio::task::spawn_blocking(f).await {
+    match tokio::task::spawn_blocking(move || {
+        // Held for the whole call, dropped only once `f` itself returns —
+        // see this function's own doc comment for why that must not be
+        // "until whoever called this stops awaiting it" instead.
+        let _permit = permit;
+        f()
+    })
+    .await
+    {
         Ok(value) => value,
         Err(join_error) if join_error.is_panic() => {
             std::panic::resume_unwind(join_error.into_panic())
@@ -94,12 +112,29 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, OnceLock};
 
-    use tokio::sync::mpsc;
+    use tokio::sync::{Mutex, mpsc};
 
     use super::{MAX_CONCURRENT_BLOCKING_TASKS, run_blocking};
+
+    /// [`blocking_pool`](super::blocking_pool)'s semaphore is one process-wide
+    /// `static`, shared by every test in this binary regardless of which
+    /// test's own Tokio runtime asks for it — Rust's default test harness
+    /// runs test functions concurrently, so two tests that each try to
+    /// saturate every permit at once would otherwise deadlock each other
+    /// (each waiting on "started" signals the other's held tasks can never
+    /// send, since there are not `2 * MAX_CONCURRENT_BLOCKING_TASKS` permits
+    /// to go around). Every test below that saturates the whole pool holds
+    /// this lock first, serialising just those tests against each other
+    /// without affecting `a_successful_closure_returns_its_value` or any
+    /// other test elsewhere in the crate that calls `run_blocking` for one
+    /// ordinary permit at a time.
+    fn pool_saturation_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[tokio::test]
     async fn a_successful_closure_returns_its_value() {
@@ -128,6 +163,7 @@ mod tests {
     /// even spawned.
     #[tokio::test]
     async fn a_task_past_the_bound_waits_for_a_permit_to_free() {
+        let _exclusive = pool_saturation_test_lock().lock().await;
         let (started_tx, mut started_rx) = mpsc::unbounded_channel::<usize>();
         let mut held = Vec::new();
         for i in 0..MAX_CONCURRENT_BLOCKING_TASKS {
@@ -194,6 +230,99 @@ mod tests {
         );
 
         // Release the remaining held tasks so nothing outlives the test.
+        for (handle, release_tx) in held {
+            let _ = release_tx.send(());
+            handle.await.expect("every held task must complete cleanly");
+        }
+    }
+
+    /// Regression test: dropping the future a caller was awaiting on
+    /// `run_blocking` (a `tokio::select!` branch losing a race, a
+    /// `tokio::time::timeout` expiring) must not release that call's permit
+    /// while its closure is still genuinely running on the blocking pool —
+    /// blocking work cannot be interrupted once started, so a permit
+    /// released early lets more than `MAX_CONCURRENT_BLOCKING_TASKS`
+    /// closures run at once.
+    ///
+    /// Saturates every permit, including one held by a task this test then
+    /// aborts (simulating a caller giving up), and proves a further task
+    /// still cannot proceed until the aborted call's own closure actually
+    /// finishes and drops its permit — not merely until the abort itself
+    /// returns.
+    #[tokio::test]
+    async fn an_aborted_callers_permit_is_not_released_until_its_closure_actually_finishes() {
+        let _exclusive = pool_saturation_test_lock().lock().await;
+        let (started_tx, mut started_rx) = mpsc::unbounded_channel::<usize>();
+        let mut held = Vec::new();
+        for i in 0..(MAX_CONCURRENT_BLOCKING_TASKS - 1) {
+            let started_tx = started_tx.clone();
+            let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+            let handle = tokio::spawn(run_blocking(move || {
+                started_tx
+                    .send(i)
+                    .expect("the test still holds the receiver");
+                let _ = release_rx.recv();
+            }));
+            held.push((handle, release_tx));
+        }
+
+        // The last permit is held by a task this test aborts, not one it
+        // awaits normally — the one difference from the test above.
+        let (victim_release_tx, victim_release_rx) = std::sync::mpsc::channel::<()>();
+        let victim_started_tx = started_tx.clone();
+        let victim = tokio::spawn(run_blocking(move || {
+            victim_started_tx
+                .send(MAX_CONCURRENT_BLOCKING_TASKS - 1)
+                .expect("the test still holds the receiver");
+            let _ = victim_release_rx.recv();
+        }));
+        drop(started_tx);
+
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..MAX_CONCURRENT_BLOCKING_TASKS {
+            seen.insert(
+                started_rx
+                    .recv()
+                    .await
+                    .expect("every held task, including the victim, must signal it started"),
+            );
+        }
+        assert_eq!(seen.len(), MAX_CONCURRENT_BLOCKING_TASKS);
+
+        // Simulates a caller giving up on `run_blocking` while its closure
+        // is still running — the exact shape a `tokio::select!` losing a
+        // race, or a `tokio::time::timeout` expiring, produces.
+        victim.abort();
+        let _ = victim.await;
+
+        let extra_ran = Arc::new(AtomicBool::new(false));
+        let extra_ran_flag = Arc::clone(&extra_ran);
+        let extra = tokio::spawn(run_blocking(move || {
+            extra_ran_flag.store(true, Ordering::SeqCst);
+        }));
+
+        for _ in 0..64 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !extra_ran.load(Ordering::SeqCst),
+            "the aborted call's permit must still be held while its closure keeps running on \
+             the blocking pool, even though nothing is awaiting that call's own future anymore"
+        );
+
+        // The victim's closure only finishes now, dropping its permit —
+        // which is what must let the extra task proceed.
+        victim_release_tx
+            .send(())
+            .expect("the victim's closure is still blocked on this channel");
+        extra
+            .await
+            .expect("the extra task must complete once the victim's permit actually frees");
+        assert!(
+            extra_ran.load(Ordering::SeqCst),
+            "the extra task must have actually run its closure"
+        );
+
         for (handle, release_tx) in held {
             let _ = release_tx.send(());
             handle.await.expect("every held task must complete cleanly");
