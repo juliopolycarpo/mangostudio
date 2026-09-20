@@ -69,6 +69,98 @@ async fn a_panicking_handler_still_produces_an_audit_entry() {
 }
 
 #[tokio::test]
+async fn a_successful_call_records_outcome_ok() {
+    let audit = Arc::new(RecordingAudit::new());
+    let registry = Registry::with_ports(Arc::clone(&audit) as _, Arc::new(SystemClock)).implement(
+        "runtime.health",
+        |_params: serde_json::Value, _context| async move {
+            Ok::<_, mango_protocol::RemoteError>(health_result())
+        },
+    );
+
+    let (hub, runtime) = open_pair().await;
+    let contract =
+        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
+    let guard = mangostudio_runtime::serve::serve(
+        &contract,
+        &runtime,
+        registry,
+        Arc::new(DenyingAuthorization),
+        "host",
+    )
+    .expect("runtime.health is declared by the catalog");
+    guard.persist();
+
+    let result = within("the request", hub.request("runtime.health", json!({})))
+        .await
+        .expect("a valid result succeeds");
+    assert_eq!(result["slot"], json!("host"));
+
+    let entries = audit.entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].outcome, Outcome::Ok);
+    assert_eq!(entries[0].code, None);
+}
+
+/// The central ordering invariant this crate exists to enforce: a result the
+/// contract's own schema refuses must never be recorded as `Outcome::Ok`,
+/// and must never reach the wire as anything but `INTERNAL`.
+///
+/// Demonstrated to matter: swapping `Registry::implement`'s own
+/// `check_result` call for `ServeOptions::validate_results = true` (the
+/// refactor `crate::result_check`'s docblock exists to forbid) makes every
+/// other test in this crate keep passing while this one starts failing,
+/// because that refactor validates only *after* `Contract::serve`'s own
+/// pipeline has already returned the unchecked value to this wrapper, which
+/// has already told the audit port `Outcome::Ok`.
+#[tokio::test]
+async fn a_schema_invalid_result_is_never_recorded_as_ok() {
+    let audit = Arc::new(RecordingAudit::new());
+    // `terminal.list`'s result requires `sessions` to be an array; returning
+    // a string is a value this handler's own `R` type (`serde_json::Value`)
+    // happily serialises, so only the schema check catches it.
+    let registry = Registry::with_ports(Arc::clone(&audit) as _, Arc::new(SystemClock)).implement(
+        "terminal.list",
+        |_params: serde_json::Value, _context| async move {
+            Ok::<_, mango_protocol::RemoteError>(json!({ "sessions": "not-an-array" }))
+        },
+    );
+
+    let (hub, runtime) = open_pair().await;
+    let contract =
+        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
+    // `terminal.list` needs `shell`; grant it so the request reaches the
+    // handler at all — this test is about the result check, not consent.
+    let guard = mangostudio_runtime::serve::serve(
+        &contract,
+        &runtime,
+        registry,
+        Arc::new(support::GrantingAuthorization),
+        "host",
+    )
+    .expect("terminal.list is declared by the catalog");
+    guard.persist();
+
+    let error = within("the request", hub.request("terminal.list", json!({})))
+        .await
+        .expect_err("a schema-invalid result must never reach the wire as success");
+    assert_eq!(error.code, codes::INTERNAL);
+
+    let entries = audit.entries();
+    assert_eq!(
+        entries.len(),
+        1,
+        "the invalid result must be recorded exactly once, got {entries:?}"
+    );
+    assert_eq!(
+        entries[0].outcome,
+        Outcome::Error,
+        "a schema-invalid result must never be recorded as Outcome::Ok"
+    );
+    assert_eq!(entries[0].code.as_deref(), Some(codes::INTERNAL));
+}
+
+#[tokio::test]
 async fn a_panicking_audit_sink_leaves_a_successful_result_untouched_on_the_wire() {
     let registry = Registry::with_ports(Arc::new(PanickingAudit), Arc::new(SystemClock)).implement(
         "runtime.health",
