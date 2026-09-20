@@ -415,10 +415,21 @@ async fn handle_connection(
     let host = build_host(context.slot, &context.mango_home, &context.runtime_version);
     let contract = Contract::from_catalog(catalog().clone())
         .expect("the embedded catalog compiles into a contract");
+    // No request is in flight yet to cancel this against — a fresh token
+    // that never fires, bounded only by `GIT_PROBE_TIMEOUT` internally. See
+    // `hello_capabilities`'s own doc comment.
+    let capabilities = crate::transport::hello_capabilities(
+        context.slot,
+        &context.mango_home,
+        &host.registry,
+        &CancellationToken::new(),
+    )
+    .await;
     // `SessionOptions::new`'s defaults already match `serve.ts`'s own
     // `HANDSHAKE_TIMEOUT_MS`/`LIVENESS_INTERVAL_MS` (15s/20s), so nothing is
     // overridden here — see `mango_protocol::session::{DEFAULT_HANDSHAKE_TIMEOUT, DEFAULT_LIVENESS_INTERVAL}`.
-    let options = SessionOptions::new(runtime_peer(&context.runtime_version));
+    let options =
+        SessionOptions::new(runtime_peer(&context.runtime_version)).with_capabilities(capabilities);
     debug_assert_eq!(options.handshake_timeout, DEFAULT_HANDSHAKE_TIMEOUT);
     debug_assert_eq!(options.liveness_interval, Some(DEFAULT_LIVENESS_INTERVAL));
     let (session, driver_handle) = Session::spawn(port, options);

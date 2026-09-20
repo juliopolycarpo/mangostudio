@@ -45,7 +45,9 @@ use std::sync::{Mutex, OnceLock};
 
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::CallContext;
-use mangostudio_runtime_contract::manifest::{GitAvailability, RuntimeShellKind};
+use mangostudio_runtime_contract::manifest::{
+    GitAvailability, PathStyle, RuntimeCapabilityAllow, RuntimeCapabilityManifest, RuntimeShellKind,
+};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
@@ -154,6 +156,101 @@ async fn build_health_report(
         "audit": resolved.audit,
         "lastError": state.error.as_ref().map(ToString::to_string),
     }))
+}
+
+/// Builds this session's `hello.capabilities`, from the exact platform,
+/// shell, and git facts [`build_health_report`] itself reports for `slot` —
+/// gated the same way, plus [`crate::manifest::build_features`]'s
+/// implementation-aware narrowing on top of what the owner granted.
+///
+/// Called once per connection, before `hello` is sent — never per-request,
+/// the way `runtime.health` is. A caller with no request-scoped
+/// cancellation of its own (every transport's connection setup, which has
+/// no in-flight RPC to cancel this against) passes a token that never
+/// fires; [`GIT_PROBE_TIMEOUT`] still bounds the probe itself.
+pub(crate) async fn build_capability_manifest(
+    slot: RuntimeSlot,
+    mango_home: &Path,
+    registry: &Registry,
+    cancel: &CancellationToken,
+) -> RuntimeCapabilityManifest {
+    let state = read_runtime_slot_config(slot, mango_home);
+    let fallback_source = resolve_source(mango_home);
+    let resolved = resolve_runtime_slot_config(slot, state.stored.as_ref(), fallback_source);
+
+    let shells: Vec<RuntimeShellKind> = if resolved.allow.shell {
+        detect_shells().await
+    } else {
+        Vec::new()
+    };
+
+    let git = if resolved.allow.git {
+        match probe_git(None, cancel).await {
+            Ok(availability) => availability,
+            Err(GitProbeCancelled) => GitAvailability {
+                available: false,
+                version: None,
+            },
+        }
+    } else {
+        GitAvailability {
+            available: false,
+            version: None,
+        }
+    };
+
+    // Mirrors `build_health_report`'s own `unwrap_or_default()`: a `HOME`
+    // this process cannot resolve is already reported as an empty
+    // `homeDir` by `runtime.health` today, and this reuses that same
+    // fallback rather than inventing a second, stricter behaviour for the
+    // identical fact reached through a different call site.
+    let home_dir_value = home_dir()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let platform = node_platform();
+    let path_style = if platform == "win32" {
+        PathStyle::Win32
+    } else {
+        PathStyle::Posix
+    };
+    let allow = wire_allow(resolved.allow);
+
+    let mut manifest = RuntimeCapabilityManifest::new(
+        platform,
+        node_arch(),
+        path_style,
+        home_dir_value,
+        shells,
+        git.clone(),
+    );
+    manifest.features = crate::manifest::build_features(registry, &allow, git.available);
+    manifest.profile = Some(resolved.profile);
+    manifest.allow = Some(allow);
+    manifest
+}
+
+/// [`crate::consent::presets::ResolvedCapabilityAllow`] (a fully-resolved,
+/// slot-specific decision) as the wire shape `hello.capabilities.allow` and
+/// [`crate::manifest::build_features`] both expect. The one field that
+/// differs is `external_agents`: a plain `bool` on the resolved side,
+/// `Option<bool>` on the wire — see [`RuntimeCapabilityAllow`]'s own doc
+/// comment for why absence there means an on-disk file predating the key,
+/// which a freshly resolved decision can never be.
+fn wire_allow(
+    resolved: crate::consent::presets::ResolvedCapabilityAllow,
+) -> RuntimeCapabilityAllow {
+    RuntimeCapabilityAllow {
+        fs_read: resolved.fs_read,
+        fs_write: resolved.fs_write,
+        shell: resolved.shell,
+        git: resolved.git,
+        probing: resolved.probing,
+        mcp: resolved.mcp,
+        library: resolved.library,
+        checkpoints: resolved.checkpoints,
+        update: resolved.update,
+        external_agents: Some(resolved.external_agents),
+    }
 }
 
 /// `"provisioned"` when the running executable sits inside `mango_home`'s
@@ -423,7 +520,11 @@ mod tests {
     use mangostudio_runtime_contract::catalog::method;
     use tokio_util::sync::CancellationToken;
 
-    use super::{build_health_report, invalidate_git_probe_cache, parse_git_version, probe_git};
+    use super::{
+        build_capability_manifest, build_health_report, invalidate_git_probe_cache, node_platform,
+        parse_git_version, probe_git,
+    };
+    use crate::registry::Registry;
     use crate::result_check::{check_result, compile_result_schema};
     use crate::runtime_home::{RuntimeSlot, write_runtime_slot_config};
 
@@ -478,6 +579,50 @@ mod tests {
         assert_eq!(result["setup"]["state"], "configured");
         assert!(result["git"].get("available").is_some());
         assert!(result["lastError"].is_null());
+    }
+
+    /// Regression test for the handshake this manifest exists to unblock: a
+    /// hub refuses `hello.capabilities` unless it validates as a complete
+    /// `RuntimeCapabilityManifest` (`RuntimeCapabilityManifestSchema` in
+    /// `apps/shared/src/runtime-contract/manifest.ts`), and `SessionOptions`
+    /// defaults `capabilities` to an empty map — every transport that never
+    /// called this function announced `{}` and every real hub closed the
+    /// connection with `PROTOCOL_ERROR` before a single method could be
+    /// called. Confirmed against a real, compiled binary: see
+    /// `apps/api/tests/integration/services/rust-runtime-qualification.integration.test.ts`.
+    #[tokio::test]
+    async fn a_never_before_seen_host_slot_builds_a_schema_valid_manifest() {
+        let home = scratch_home("capabilities-host");
+        let cancel = CancellationToken::new();
+        let registry = Registry::new();
+
+        let manifest =
+            build_capability_manifest(RuntimeSlot::Host, &home, &registry, &cancel).await;
+
+        assert_eq!(manifest.platform, node_platform());
+        assert!(!manifest.home_dir.is_empty());
+        assert_eq!(
+            manifest.profile,
+            Some(mangostudio_runtime_contract::manifest::ManifestProfile::Full)
+        );
+        assert!(
+            manifest.allow.as_ref().is_some_and(|allow| allow.shell),
+            "a pre-consented host slot grants shell"
+        );
+        // An empty registry backs nothing, so every capability-gated feature
+        // must report false even though `allow` granted it — the same
+        // fail-closed contract `crate::manifest::build_features` already has
+        // its own tests for.
+        assert!(!manifest.features.fs_read);
+        assert!(!manifest.features.tools);
+        assert!(manifest.features.toolchain, "toolchain is unconditional");
+
+        let wire = serde_json::to_value(&manifest).expect("serialises");
+        assert!(
+            mangostudio_runtime_contract::schemas::validate_manifest(&wire).is_ok(),
+            "a manifest this crate builds for `hello` must validate against the same schema the \
+             hub checks it with: {wire}"
+        );
     }
 
     #[cfg(unix)]

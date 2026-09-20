@@ -13,9 +13,13 @@
 //! scope: every machine method group except `runtime.health` (see
 //! [`crate::health`]) and `workspace.*` (see [`crate::workspace_methods`])
 //! is unimplemented, so [`crate::registry::Registry`] answers everything
-//! else with `METHOD_UNSUPPORTED`, and `hello.capabilities` is left empty
-//! rather than wired to [`crate::manifest::build_features`] — there is
-//! nothing yet for that manifest to describe.
+//! else with `METHOD_UNSUPPORTED`. `hello.capabilities` is wired to this
+//! module's own `hello_capabilities`, which shapes `crate::health`'s
+//! `build_capability_manifest` into the `Map` `hello` carries — without it, a
+//! hub refuses every
+//! connection outright (`manifestOf` in `hub-session.ts` closes with
+//! `PROTOCOL_ERROR` on an empty object), so this is not optional scaffolding
+//! for a later plan the way the rest of this module's method-group gap is.
 
 pub mod connect;
 pub mod serve;
@@ -144,6 +148,32 @@ pub(crate) fn build_host(
     SessionHost {
         registry,
         authorization,
+    }
+}
+
+/// [`crate::health::build_capability_manifest`], shaped as the `Map`
+/// [`mango_protocol::session::SessionOptions::with_capabilities`] wants.
+///
+/// `registry` is `host.registry` from the very [`SessionHost`] this
+/// session is about to serve: [`crate::manifest::build_features`] gates
+/// each feature on whether *this* registry actually implements every
+/// method that capability requires, so a manifest built against any other
+/// registry could announce a feature this connection cannot back.
+pub(crate) async fn hello_capabilities(
+    slot: RuntimeSlot,
+    mango_home: &Path,
+    registry: &Registry,
+    cancel: &CancellationToken,
+) -> serde_json::Map<String, serde_json::Value> {
+    let manifest =
+        crate::health::build_capability_manifest(slot, mango_home, registry, cancel).await;
+    match serde_json::to_value(&manifest) {
+        Ok(serde_json::Value::Object(map)) => map,
+        // `RuntimeCapabilityManifest` always serialises to an object; this
+        // arm exists only so a future change to that type cannot panic a
+        // live connection's handshake over a serialisation shape it no
+        // longer holds.
+        _ => serde_json::Map::new(),
     }
 }
 

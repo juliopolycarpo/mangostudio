@@ -254,8 +254,19 @@ async fn run_one_connection(
     let host = build_host(config.slot, &config.mango_home, &config.runtime_version);
     let contract = Contract::from_catalog(catalog().clone())
         .expect("the embedded catalog compiles into a contract");
+    // Bounded by this dial's own `cancel`, unlike `stdio`/`serve`'s
+    // connection setup: a shutdown mid-probe stops the wait instead of
+    // running it out. See `hello_capabilities`'s own doc comment.
+    let capabilities = crate::transport::hello_capabilities(
+        config.slot,
+        &config.mango_home,
+        &host.registry,
+        cancel,
+    )
+    .await;
     let options = SessionOptions::new(runtime_peer(&config.runtime_version))
-        .with_handshake_timeout(HANDSHAKE_TIMEOUT);
+        .with_handshake_timeout(HANDSHAKE_TIMEOUT)
+        .with_capabilities(capabilities);
     let (session, driver_handle) = Session::spawn(port, options);
     let guard = crate::serve::serve(
         &contract,
