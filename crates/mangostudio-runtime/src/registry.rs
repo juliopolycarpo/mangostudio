@@ -155,6 +155,15 @@ impl Registry {
                  implement a method its own contract knows about"
             )
         });
+        assert!(
+            !self
+                .implemented
+                .iter()
+                .any(|implemented| implemented == &method_name),
+            "\"{method_name}\" is already implemented; Session::handle's own HashMap::insert \
+             would silently shadow the first handler, and implemented_methods() would report \
+             the name twice"
+        );
         let validator = Arc::new(compile_result_schema(&declared.result));
         let handler = Arc::new(handler);
         let audit = Arc::clone(&self.audit);
@@ -365,5 +374,16 @@ mod tests {
             .implement("no.such.method", |_params: Value, _context| async move {
                 Ok::<_, mango_protocol::RemoteError>(json!({}))
             });
+    }
+
+    #[test]
+    #[should_panic(expected = "\"runtime.health\" is already implemented")]
+    fn implementing_the_same_method_twice_panics_instead_of_silently_shadowing() {
+        let handler = |_params: Value, _context| async move {
+            Ok::<_, mango_protocol::RemoteError>(health_result())
+        };
+        let _ = Registry::new()
+            .implement("runtime.health", handler)
+            .implement("runtime.health", handler);
     }
 }
