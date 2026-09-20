@@ -423,10 +423,12 @@ async fn handle_connection(
     }
 
     let heartbeat_cancel = CancellationToken::new();
+    let heartbeat_context = Arc::clone(&context);
     let heartbeat = tokio::spawn(crate::transport::heartbeat_loop(
         session.clone(),
         HEARTBEAT_INTERVAL,
         heartbeat_cancel.clone(),
+        move |message: &str| (heartbeat_context.log)(message),
     ));
 
     let _closure: SessionClosure = join_owned(driver_handle).await;

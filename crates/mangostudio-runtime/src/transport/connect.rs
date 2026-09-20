@@ -186,7 +186,7 @@ pub async fn run(
     config: ConnectConfig,
     cancel: CancellationToken,
     jitter: &dyn Jitter,
-    log: impl Fn(&str),
+    log: impl Fn(&str) + Clone + Send + Sync + 'static,
 ) -> ConnectOutcome {
     let mut failures: u32 = 0;
     loop {
@@ -233,7 +233,7 @@ pub async fn run(
 async fn run_one_connection(
     config: &ConnectConfig,
     cancel: &CancellationToken,
-    log: &impl Fn(&str),
+    log: &(impl Fn(&str) + Clone + Send + Sync + 'static),
 ) -> ConnectionAttempt {
     let dial_deadline = ConnectDeadline::default()
         .with_timeout(HANDSHAKE_TIMEOUT)
@@ -305,10 +305,12 @@ async fn run_one_connection(
         }
         Ok(_) => {
             let heartbeat_cancel = CancellationToken::new();
+            let heartbeat_log = log.clone();
             let heartbeat = tokio::spawn(heartbeat_loop(
                 session.clone(),
                 HEARTBEAT_INTERVAL,
                 heartbeat_cancel.clone(),
+                heartbeat_log,
             ));
             log(&format!("Connected to {}.", config.hub_url));
             let closure = session.closed().await;

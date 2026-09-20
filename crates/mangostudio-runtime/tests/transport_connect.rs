@@ -60,7 +60,7 @@ impl CollectingLog {
         Self::default()
     }
 
-    fn sink(&self) -> impl Fn(&str) + Send + Sync + 'static {
+    fn sink(&self) -> impl Fn(&str) + Clone + Send + Sync + 'static {
         let messages = Arc::clone(&self.messages);
         move |message: &str| messages.lock().unwrap().push(message.to_string())
     }

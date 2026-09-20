@@ -33,7 +33,7 @@ use crate::consent::source::ConsentSource;
 use crate::ports::audit::Audit;
 use crate::ports::authorization::Authorization;
 use crate::ports::clock::SystemClock;
-use crate::ports::wall_clock::{SystemWallClock, format_iso8601_millis};
+use crate::ports::wall_clock::{SystemWallClock, epoch_millis};
 use crate::registry::Registry;
 use crate::runtime_home::{RuntimeSlot, slot_audit_log_path};
 
@@ -135,10 +135,21 @@ pub(crate) fn build_host(slot: RuntimeSlot, mango_home: &Path) -> SessionHost {
 /// event, at the identical cadence, and stop it the identical way (from
 /// their own owned scope, before that scope awaits the session's driver a
 /// second time; never a detached, fire-and-forget timer).
+///
+/// `at` is [`epoch_millis`], an integer — matching `runtime.heartbeat`'s
+/// declared schema (`{ "type": "integer" }`) and `serve.ts`'s own
+/// `Date.now()`, not [`crate::ports::wall_clock::format_iso8601_millis`]'s
+/// string. Every payload goes
+/// through [`crate::event_check::checked_emit`] rather than
+/// [`Session::emit`] directly, so a future drift back to the wrong shape
+/// fails this loop's own log instead of reaching a hub that validates
+/// events — which is exactly the check this crate lacked when it shipped
+/// the string in the first place.
 pub(crate) async fn heartbeat_loop(
     session: Session,
     interval: Duration,
     cancel: CancellationToken,
+    log: impl Fn(&str),
 ) {
     let mut ticks = tokio::time::interval(interval);
     // The first tick fires immediately; consumed so the beat below waits a
@@ -149,12 +160,15 @@ pub(crate) async fn heartbeat_loop(
             biased;
             () = cancel.cancelled() => return,
             _ = ticks.tick() => {
-                let _ = session.emit(EventInput {
+                let input = EventInput {
                     topic: RUNTIME_HEARTBEAT_TOPIC.to_string(),
-                    payload: serde_json::json!({ "at": format_iso8601_millis(std::time::SystemTime::now()) }),
+                    payload: serde_json::json!({ "at": epoch_millis(std::time::SystemTime::now()) }),
                     stream_id: None,
                     end: false,
-                });
+                };
+                if let Err(error) = crate::event_check::checked_emit(&session, input) {
+                    log(&format!("heartbeat payload rejected by its own contract: {error}"));
+                }
             }
         }
     }
@@ -200,7 +214,13 @@ mod tests {
 
         let cancel = CancellationToken::new();
         let interval = std::time::Duration::from_secs(60);
-        let heartbeat = tokio::spawn(heartbeat_loop(publisher.clone(), interval, cancel.clone()));
+        let log = |message: &str| panic!("the heartbeat must never need to log: {message}");
+        let heartbeat = tokio::spawn(heartbeat_loop(
+            publisher.clone(),
+            interval,
+            cancel.clone(),
+            log,
+        ));
 
         // No beat before the first full interval: the loop consumes the
         // interval's own immediate first tick so a freshly connected
@@ -223,16 +243,37 @@ mod tests {
         );
 
         tokio::time::advance(interval / 2 + std::time::Duration::from_millis(1)).await;
-        let first = events
-            .recv()
+        // A bound wider than `interval`, not narrower: paused time's
+        // auto-advance jumps to the *nearest* pending timer once nothing
+        // else is ready, and the heartbeat's own next tick is a real,
+        // still-pending timer at this point (advancing partway through the
+        // interval does not itself fire it — only genuine idleness inside
+        // an unbounded wait does). A timeout shorter than `interval` — five
+        // seconds was tried — is nearer than that tick and wins the jump
+        // every time, elapsing before the tick that would have delivered
+        // the event ever gets to fire; measured directly by injecting the
+        // string-payload regression below, which this bound must catch
+        // through a rejection, not through starving the tick that would
+        // otherwise have proven it fixed.
+        let first = tokio::time::timeout(interval * 2, events.recv())
             .await
+            .expect("a heartbeat must actually be sent, not silently dropped")
             .expect("the publisher session is still open");
         assert_eq!(first.topic, RUNTIME_HEARTBEAT_TOPIC);
+        // The regression this guards: `at` shipped as an ISO-8601 string
+        // once, against a schema that declares it an integer — an assertion
+        // that only checks "an event was emitted" cannot see that mismatch
+        // at all.
+        assert!(
+            first.payload["at"].is_u64(),
+            "\"at\" must be an integer (epoch milliseconds), not {:?}",
+            first.payload["at"]
+        );
 
         tokio::time::advance(interval).await;
-        let second = events
-            .recv()
+        let second = tokio::time::timeout(interval * 2, events.recv())
             .await
+            .expect("a second heartbeat must actually be sent, not silently dropped")
             .expect("the publisher session is still open");
         assert_eq!(second.topic, RUNTIME_HEARTBEAT_TOPIC);
         assert_eq!(
