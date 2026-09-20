@@ -343,6 +343,41 @@ pub fn resolve_runtime_slot_for_current_exe(mango_home: &Path) -> RuntimeSlot {
     resolve_runtime_slot(mango_home, current.as_slice())
 }
 
+/// `"provisioned"` when `executable_path` sits under `mango_home`'s runtime
+/// tree, `"bundled"` otherwise — mirroring `runtime-home.ts`'s
+/// `resolveRuntimeSource`, minus its third case: `"source-checkout"` there
+/// means "this process is Bun itself, interpreting `cli.ts` directly",
+/// which a compiled binary has no equivalent of.
+///
+/// # Example
+/// ```
+/// use std::path::Path;
+/// use mangostudio_runtime::runtime_home::resolve_runtime_source;
+///
+/// let home = Path::new("/home/ada/.mango");
+/// let provisioned = Path::new("/home/ada/.mango/runtime/remote/0.1.0/mangostudio-runtime");
+/// assert_eq!(resolve_runtime_source(home, Some(provisioned)), "provisioned");
+/// assert_eq!(
+///     resolve_runtime_source(home, Some(Path::new("/usr/local/bin/mangostudio-runtime"))),
+///     "bundled"
+/// );
+/// assert_eq!(resolve_runtime_source(home, None), "bundled");
+/// ```
+#[must_use]
+pub fn resolve_runtime_source(mango_home: &Path, executable_path: Option<&Path>) -> &'static str {
+    match executable_path.and_then(|path| slot_for_path(path, mango_home)) {
+        Some(_) => "provisioned",
+        None => "bundled",
+    }
+}
+
+/// [`resolve_runtime_source`] against this running process's own
+/// executable.
+#[must_use]
+pub fn resolve_runtime_source_for_current_exe(mango_home: &Path) -> &'static str {
+    resolve_runtime_source(mango_home, std::env::current_exe().ok().as_deref())
+}
+
 /// Whether a slot with no answer yet starts life pre-consented.
 ///
 /// The one piece of `apps/shared/src/runtime-home/consent.ts`'s
@@ -647,7 +682,16 @@ pub struct WriteOutcome {
 /// *creation* rather than tightened after the fact: `write_temp_file`'s own
 /// doc comment explains why a post-publish `chmod` would leave a window a
 /// pre-set `mode` does not.
-fn merge_write(
+///
+/// `pub(crate)`, not private: [`crate::consent::invocation`] needs to read,
+/// decide, and write `runtime.json` inside the *same* [`lock::with_slot_lock`]
+/// call — a decision taken from one read must publish from that read, never
+/// a second one that could observe a concurrent writer's change in between —
+/// so it calls this directly rather than going through
+/// [`write_runtime_slot_config`], which takes its own lock and would
+/// deadlock (the lock file has no re-entrant acquire) if called from inside
+/// a closure already holding it.
+pub(crate) fn merge_write(
     path: &Path,
     document: RuntimeHomeDocument,
     fixed: &[(&'static str, Value)],
@@ -822,6 +866,46 @@ pub fn write_runtime_slot_credentials(
     write_runtime_slot_credentials_with(slot, mango_home, update, owner_only::restrict_to_owner)
 }
 
+/// Generates a fresh `serveToken` credential and stores it, mirroring
+/// `runtime-home.ts`'s `bootstrapServeToken`: 32 bytes from the operating
+/// system's CSPRNG, base64url-encoded (matching Node's
+/// `Buffer#toString('base64url')` — unpadded, `+`/`/` replaced by `-`/`_`),
+/// written through [`write_runtime_slot_credentials`] so it gets the exact
+/// same owner-only handling any other credential does.
+///
+/// Called once, the moment `serve` finds no token anywhere else to use — see
+/// `crate::cli`'s token resolution — never regenerated on top of an existing
+/// one, the same way `resolveServeToken` only reaches this after every other
+/// source came back empty.
+///
+/// # Errors
+/// See [`WriteError`].
+///
+/// # Panics
+/// If the operating system's random source is unavailable. A serve token is
+/// a bearer credential; a caller here needs a hard failure, never a silently
+/// weaker fallback.
+pub fn bootstrap_serve_token(
+    slot: RuntimeSlot,
+    mango_home: &Path,
+) -> Result<(String, bool), WriteError> {
+    let token = generate_serve_token();
+    let (_, restricted) = write_runtime_slot_credentials(
+        slot,
+        mango_home,
+        &[("serveToken", Some(Value::String(token.clone())))],
+    )?;
+    Ok((token, restricted))
+}
+
+/// 32 CSPRNG bytes, base64url (no padding) encoded.
+fn generate_serve_token() -> String {
+    use base64::Engine as _;
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).expect("the operating system's CSPRNG must be available");
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
 /// [`write_runtime_slot_credentials`] with an injectable `restrict` step, so
 /// a test can observe the file's state *before* re-restricting it rather
 /// than only after — the two are indistinguishable from the outside once
@@ -879,10 +963,11 @@ mod tests {
 
     use super::{
         CredentialsWriteGate, DefaultSetupState, RuntimeHomeDocument, RuntimeSlot, SlotFileError,
-        WriteError, credentials_write_gate, default_setup_state_for_slot, home_dir,
-        merge_write_from_state, read_runtime_slot_config, read_runtime_slot_credentials,
-        resolve_runtime_slot, slot_config_path, slot_credentials_path, slot_current_binary_path,
-        slot_dir, slot_for_path, write_runtime_slot_config, write_runtime_slot_credentials,
+        WriteError, bootstrap_serve_token, credentials_write_gate, default_setup_state_for_slot,
+        home_dir, merge_write_from_state, read_runtime_slot_config, read_runtime_slot_credentials,
+        resolve_runtime_slot, resolve_runtime_source, slot_config_path, slot_credentials_path,
+        slot_current_binary_path, slot_dir, slot_for_path, write_runtime_slot_config,
+        write_runtime_slot_credentials,
     };
 
     fn scratch_home(name: &str) -> PathBuf {
@@ -893,6 +978,25 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn resolve_runtime_source_tells_provisioned_from_bundled() {
+        let home = scratch_home("resolve-source");
+        let provisioned = home
+            .join("runtime")
+            .join("remote")
+            .join("0.1.0")
+            .join("mangostudio-runtime");
+        assert_eq!(
+            resolve_runtime_source(&home, Some(&provisioned)),
+            "provisioned"
+        );
+        assert_eq!(
+            resolve_runtime_source(&home, Some(Path::new("/usr/local/bin/mangostudio-runtime"))),
+            "bundled"
+        );
+        assert_eq!(resolve_runtime_source(&home, None), "bundled");
     }
 
     #[test]
@@ -1439,5 +1543,42 @@ mod tests {
         let state = read_runtime_slot_config(RuntimeSlot::Wsl, &home);
         assert!(state.error.is_none());
         assert!(state.stored.is_some());
+    }
+
+    #[test]
+    fn bootstrap_serve_token_generates_32_random_bytes_of_base64url_with_no_padding() {
+        let home = scratch_home("bootstrap-serve-token");
+        let (token, _restricted) = bootstrap_serve_token(RuntimeSlot::Remote, &home).unwrap();
+
+        // 32 bytes of base64url, unpadded: ceil(32 * 4 / 3) = 43 characters.
+        assert_eq!(token.len(), 43, "{token}");
+        assert!(
+            token
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            "expected only the base64url alphabet, got {token:?}"
+        );
+        assert!(!token.contains('='), "base64url here must not be padded");
+        assert!(!token.contains('+'), "base64url replaces + with -");
+        assert!(!token.contains('/'), "base64url replaces / with _");
+    }
+
+    #[test]
+    fn bootstrap_serve_token_never_repeats_across_calls() {
+        let home = scratch_home("bootstrap-serve-token-unique");
+        let (first, _) = bootstrap_serve_token(RuntimeSlot::Remote, &home).unwrap();
+        let (second, _) = bootstrap_serve_token(RuntimeSlot::Remote, &home).unwrap();
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn bootstrap_serve_token_persists_through_the_credentials_writer() {
+        let home = scratch_home("bootstrap-serve-token-persist");
+        let (token, _) = bootstrap_serve_token(RuntimeSlot::Remote, &home).unwrap();
+
+        let stored = read_runtime_slot_credentials(RuntimeSlot::Remote, &home)
+            .stored
+            .expect("bootstrap_serve_token must have written credentials.json");
+        assert_eq!(stored["serveToken"], json!(token));
     }
 }

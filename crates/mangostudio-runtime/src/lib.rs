@@ -91,8 +91,10 @@
 //! and [`consent`] builds the rest on top of it rather than duplicating it.
 
 pub mod audit;
+pub mod cli;
 pub mod config;
 pub mod consent;
+pub mod event_check;
 pub mod manifest;
 pub mod panic;
 pub mod ports;
@@ -101,4 +103,6 @@ pub mod result_check;
 pub mod runtime_home;
 pub mod serve;
 pub mod setup;
+pub mod supervisor;
+pub mod transport;
 pub mod workspace;

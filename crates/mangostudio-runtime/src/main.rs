@@ -1,55 +1,25 @@
-//! `mangostudio-runtime`: deliberately thin for now.
+//! `mangostudio-runtime`'s process entry point.
 //!
-//! Real transports and argument parsing are a later change — this binary
-//! answers only `--version` and `--help`, so the release pipeline has
-//! something to build and ship alongside `mangostudio` before the dispatcher
-//! this crate's library half provides is wired to an actual transport.
+//! Everything real lives in [`mangostudio_runtime::cli`]: this binary only
+//! collects `argv` and the real process environment, and hands both to it.
 
 use std::env;
 use std::process::ExitCode;
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+use mangostudio_runtime::cli;
+use mangostudio_runtime::config::ProcessEnv;
 
 fn main() -> ExitCode {
-    let mut args = env::args().skip(1);
-    match args.next().as_deref() {
-        Some("--version" | "-v") => {
-            println!("mangostudio-runtime {VERSION}");
-            ExitCode::SUCCESS
-        }
-        Some("--help" | "-h") => {
-            print_help();
-            ExitCode::SUCCESS
-        }
-        Some(other) => {
-            eprintln!("mangostudio-runtime: unrecognised argument \"{other}\"");
-            eprintln!();
-            print_help();
-            ExitCode::FAILURE
-        }
-        None => {
-            print_help();
-            ExitCode::SUCCESS
-        }
+    let args: Vec<String> = env::args().skip(1).collect();
+    let code = cli::run(&args, &ProcessEnv);
+    match u8::try_from(code) {
+        Ok(code) => ExitCode::from(code),
+        Err(_) => ExitCode::FAILURE,
     }
-}
-
-fn print_help() {
-    println!(
-        "mangostudio-runtime {VERSION}\n\
-         \n\
-         Usage: mangostudio-runtime [--version | --help]\n\
-         \n\
-         This build serves no transport yet: real argument parsing and\n\
-         transports land in a later change.\n\
-         \n\
-         Options:\n\
-         \x20\x20-v, --version  Print the version and exit\n\
-         \x20\x20-h, --help     Print this message and exit"
-    );
 }
 
 // Exercising this binary's behaviour needs `CARGO_BIN_EXE_mangostudio-runtime`,
 // which Cargo only populates for an integration test crate (under `tests/`),
-// not for a unit test compiled into the binary itself — see
-// `tests/cli.rs`.
+// not for a unit test compiled into the binary itself — see `tests/cli.rs`.
+// `cli::run`'s own dispatch and exit-code logic is unit-tested directly in
+// `src/cli.rs`.

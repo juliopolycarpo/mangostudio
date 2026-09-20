@@ -112,6 +112,34 @@ pub fn format_iso8601_millis(at: SystemTime) -> String {
     format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
 }
 
+/// Milliseconds since the Unix epoch `at` represents — the same integer
+/// `Date.now()` produces on the TypeScript side. Distinct from
+/// [`format_iso8601_millis`]: a `setup.state.at`/audit `ts` is read by a
+/// person and is declared a `string` in the contract, but
+/// `runtime.heartbeat`'s `at` is declared an `integer` — the two are not
+/// interchangeable render targets for the same instant, and using the
+/// string formatter for the latter is exactly the mismatch
+/// [`crate::event_check::checked_emit`] exists to catch before it reaches
+/// the wire.
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime::ports::wall_clock::epoch_millis;
+/// use std::time::{Duration, UNIX_EPOCH};
+///
+/// let at = UNIX_EPOCH + Duration::from_millis(1_700_000_000_123);
+/// assert_eq!(epoch_millis(at), 1_700_000_000_123);
+/// ```
+#[must_use]
+pub fn epoch_millis(at: SystemTime) -> u64 {
+    let millis = at
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    u64::try_from(millis).unwrap_or(u64::MAX)
+}
+
 /// Howard Hinnant's `civil_from_days`: the proleptic Gregorian
 /// (year, month, day) for `days` days since the Unix epoch
 /// (1970-01-01 = day 0). Public domain —
@@ -134,7 +162,7 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 mod tests {
     use std::time::{Duration, UNIX_EPOCH};
 
-    use super::{FixedWallClock, WallClock, format_iso8601_millis};
+    use super::{FixedWallClock, WallClock, epoch_millis, format_iso8601_millis};
 
     #[test]
     fn the_system_wall_clock_moves_forward() {
@@ -151,6 +179,15 @@ mod tests {
         assert_eq!(fixed.now(), fixed.now());
         fixed.set(UNIX_EPOCH + Duration::from_secs(60));
         assert_eq!(fixed.now(), UNIX_EPOCH + Duration::from_secs(60));
+    }
+
+    #[test]
+    fn epoch_millis_matches_javascripts_date_now_for_the_same_instant() {
+        assert_eq!(epoch_millis(UNIX_EPOCH), 0);
+        assert_eq!(
+            epoch_millis(UNIX_EPOCH + Duration::from_millis(1_700_000_000_123)),
+            1_700_000_000_123
+        );
     }
 
     #[test]

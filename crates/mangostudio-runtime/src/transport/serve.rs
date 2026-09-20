@@ -1,0 +1,735 @@
+//! The `serve` transport: the hub dials in over WebSocket, authenticated by
+//! a bearer token this process holds. Mirrors `serve.ts`.
+//!
+//! One hub connection at a time. A new upgrade supersedes the previous one;
+//! if the previous generation had already published a real session by
+//! then, the replacement waits for it to fully release before building its
+//! own — but a previous generation still in its own placeholder window (one
+//! that has not yet reached `publish`, so it has no session and nothing to
+//! wait on) releases instantly, and the two may briefly overlap while the
+//! newer one constructs. See `ServeState`, the one `Mutex` that makes
+//! "which generation may become active" and "are we shutting down" the
+//! same synchronisation point (see [`crate::supervisor`]'s module docs for
+//! why that matters).
+
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use mango_protocol::close::close_codes;
+use mango_protocol::contract::Contract;
+use mango_protocol::port::{Port, PortTx};
+use mango_protocol::session::{
+    DEFAULT_HANDSHAKE_TIMEOUT, DEFAULT_LIVENESS_INTERVAL, Session, SessionClosure, SessionOptions,
+};
+use mango_protocol::transports::websocket::server::{AcceptOptions, accept_websocket};
+use mango_protocol::transports::websocket::{WebSocketOptions, WebSocketPort};
+use mangostudio_runtime_contract::catalog::catalog;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{Semaphore, oneshot};
+use tokio_util::sync::CancellationToken;
+
+use crate::runtime_home::RuntimeSlot;
+use crate::supervisor::{OwnedTasks, join_owned};
+use crate::transport::{build_host, runtime_peer, tokens_equal};
+
+/// How long `stop()` waits for a straggling connection task (one still in
+/// its own upgrade or supersession handoff, never a healthy session, which
+/// has no timeout at all) before giving up and aborting it. Named
+/// separately from every other grace in this crate — see
+/// [`crate::supervisor`]'s cancellation section for why an abort here would
+/// still not be the normal path.
+const SHUTDOWN_DRAIN_GRACE: Duration = Duration::from_secs(5);
+
+/// Bounds one TCP peer's entire WebSocket upgrade — the handshake itself,
+/// `accept_websocket`'s subprotocol/origin checks, and this transport's own
+/// bearer check — from the moment its connection is accepted. Named
+/// separately from every other deadline in this crate: `mango_protocol`'s
+/// upgrade has no read timeout of its own (a peer that opens the TCP
+/// connection and never sends a byte otherwise never reaches the `authorize`
+/// callback at all), so without this a single silent peer holds its
+/// [`MAX_PENDING_HANDSHAKES`] permit — and its `OwnedTasks` slot — forever.
+const UPGRADE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long to back off after `listener.accept()` itself fails (an `EMFILE`
+/// once every pending-handshake permit is genuinely held by a slow peer, a
+/// transient `ECONNABORTED`, …) before trying again — never busy-loop the
+/// accept loop on a condition retrying immediately cannot fix.
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(50);
+
+/// How many TCP peers may be *mid-upgrade* at once — from the instant
+/// `listener.accept()` hands one to this transport to the instant its
+/// [`accept_websocket`] call (bounded by [`UPGRADE_TIMEOUT`]) settles one way
+/// or the other. Enforced by acquiring a permit atomically in the accept
+/// loop itself, before a connection task is ever spawned — a peer beyond
+/// this bound is refused (its raw socket dropped) before `OwnedTasks` grows
+/// at all, which is what keeps an unauthenticated flood from costing this
+/// process a task and a file descriptor per connection.
+///
+/// The permit is released the instant the upgrade settles, successfully or
+/// not — it does **not** cover a connection's session lifetime. An
+/// authenticated, long-lived hub connection holds no permit at all once its
+/// upgrade completes, so this bound is exactly "how many peers may be
+/// negotiating at once", never "how many may be connected".
+const MAX_PENDING_HANDSHAKES: usize = 4;
+
+/// The cadence a connected hub is told this runtime is still here, over the
+/// `RUNTIME_HEARTBEAT_TOPIC` event. Shared with `connect`'s own heartbeat —
+/// see that module's constant of the same value for why sharing one name is
+/// correct here (it is the same behaviour in both transports) rather than
+/// the brief's warning against reusing one timeout across unrelated
+/// concerns.
+pub(crate) const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Runs `serve` over an already-bound `listener` until `cancel` fires, then
+/// drains every in-flight connection and returns.
+///
+/// Takes an already-bound [`TcpListener`], not an address: binding is a
+/// separate, synchronous decision `cli.rs` makes (and can fail on) before
+/// there is anything to run — and a caller that needs to know the listener
+/// is actually accepting connections before proceeding (a test dialling
+/// it, a health check) has no race to win against this function's own
+/// internal bind.
+pub async fn run(
+    listener: TcpListener,
+    token: String,
+    slot: RuntimeSlot,
+    mango_home: std::path::PathBuf,
+    runtime_version: String,
+    cancel: CancellationToken,
+    log: impl Fn(&str) + Send + Sync + 'static,
+) -> std::io::Result<()> {
+    let state = Arc::new(ServeState::new());
+    let context = Arc::new(ConnectionContext {
+        token,
+        slot,
+        mango_home,
+        runtime_version,
+        log: Box::new(log),
+    });
+    let pending_handshakes = Arc::new(Semaphore::new(MAX_PENDING_HANDSHAKES));
+    let mut owned = OwnedTasks::new();
+
+    loop {
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => break,
+            // Ordered before `accept`, not after: `biased` polls branches
+            // in source order and never reaches a later one while an
+            // earlier one is ready, and `listener.accept()` stays ready
+            // for as long as the kernel backlog holds connections — which
+            // is precisely the unauthenticated flood this reap exists to
+            // survive. A reap listed after `accept` is starved on exactly
+            // that path, so completed tasks would only ever be reaped at
+            // shutdown under the load that motivated adding this at all —
+            // measured directly (see this crate's own tests) by racing
+            // `reap_one` against a branch that never once returns Pending,
+            // which is the abstract shape of a saturated accept loop.
+            //
+            // Reordering is safe on the *idle* path too: `reap_one` on an
+            // empty `OwnedTasks` awaits `std::future::pending()`, which
+            // never resolves, so `biased` still falls through to `accept`
+            // on every poll where nothing is finished — this only changes
+            // which branch wins when *both* are ready, never which one is
+            // considered first.
+            _ = owned.reap_one() => {}
+            accepted = listener.accept() => {
+                match accepted {
+                    Ok((stream, _peer_addr)) => {
+                        // Acquired here, atomically, before anything is
+                        // spawned: `try_acquire_owned` is the check *and*
+                        // the reservation in one step, so there is no
+                        // window between "may I admit another mid-upgrade
+                        // peer" and actually counting this one against the
+                        // bound — a flood past `MAX_PENDING_HANDSHAKES`
+                        // never grows `OwnedTasks` at all.
+                        match Arc::clone(&pending_handshakes).try_acquire_owned() {
+                            Ok(permit) => {
+                                let state = Arc::clone(&state);
+                                let context = Arc::clone(&context);
+                                owned.spawn(async move {
+                                    handle_connection(stream, permit, state, context).await;
+                                });
+                            }
+                            Err(_) => drop(stream),
+                        }
+                    }
+                    Err(error) => {
+                        (context.log)(&format!("accept failed: {error}"));
+                        tokio::time::sleep(ACCEPT_ERROR_BACKOFF).await;
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(previous) = state.begin_shutdown() {
+        release_active(previous, close_codes::RELEASED, "Runtime stopped").await;
+    }
+    let aborted = owned.join_all_or_abort(SHUTDOWN_DRAIN_GRACE).await;
+    if aborted > 0 {
+        // Reachable from the network (a peer that never completes its own
+        // teardown), not a programmer error — log it rather than assert.
+        (context.log)(&format!(
+            "{aborted} connection task(s) outlived the shutdown grace and were aborted"
+        ));
+    }
+    Ok(())
+}
+
+/// What every accepted connection needs, shared read-only across them.
+struct ConnectionContext {
+    token: String,
+    slot: RuntimeSlot,
+    mango_home: std::path::PathBuf,
+    runtime_version: String,
+    log: Box<dyn Fn(&str) + Send + Sync>,
+}
+
+/// One admitted generation: enough for a later caller to supersede it
+/// (`session`, to close it) and to know once it has fully finished
+/// (`released`, which resolves — successfully or not, the value carries no
+/// meaning — the instant the owning task's local sender drops, at any of
+/// its return points).
+struct ActiveGeneration {
+    generation: u64,
+    session: Option<Session>,
+    released: Option<oneshot::Receiver<()>>,
+}
+
+impl ActiveGeneration {
+    fn placeholder(generation: u64) -> Self {
+        Self {
+            generation,
+            session: None,
+            released: None,
+        }
+    }
+}
+
+/// One of [`ServeState::try_admit`]'s two outcomes.
+enum Admission {
+    /// This call is now the active generation. `previous`, if any, must be
+    /// released (see [`release_active`]) before this generation may build a
+    /// session.
+    Admitted {
+        generation: u64,
+        previous: Option<ActiveGeneration>,
+    },
+    /// Shutdown had already started; nothing was claimed.
+    Refused,
+}
+
+/// The one synchronisation point admission and shutdown share. See the
+/// module docs and [`crate::supervisor`]'s "Admission and shutdown share one
+/// synchronisation point" section.
+struct ServeState {
+    inner: Mutex<Inner>,
+}
+
+struct Inner {
+    closed: bool,
+    generation: u64,
+    active: Option<ActiveGeneration>,
+}
+
+impl ServeState {
+    fn new() -> Self {
+        Self {
+            inner: Mutex::new(Inner {
+                closed: false,
+                generation: 0,
+                active: None,
+            }),
+        }
+    }
+
+    /// Claims the next generation, unless shutdown has already started.
+    /// Mirrors `serve.ts`'s synchronous `active = entry` — the slot is
+    /// claimed by a placeholder immediately, before any session exists, so
+    /// a *third* connection racing in behind this one already sees this
+    /// generation as current rather than the one it is about to supersede.
+    fn try_admit(&self) -> Admission {
+        let mut inner = self.inner.lock().expect("ServeState mutex poisoned");
+        if inner.closed {
+            return Admission::Refused;
+        }
+        inner.generation += 1;
+        let generation = inner.generation;
+        let previous = inner
+            .active
+            .replace(ActiveGeneration::placeholder(generation));
+        Admission::Admitted {
+            generation,
+            previous,
+        }
+    }
+
+    /// True when `generation` is still the active one and shutdown has not
+    /// started — the re-check every `.await` point in [`handle_connection`]
+    /// runs before doing the next irreversible thing.
+    fn still_current(&self, generation: u64) -> bool {
+        let inner = self.inner.lock().expect("ServeState mutex poisoned");
+        !inner.closed
+            && inner
+                .active
+                .as_ref()
+                .is_some_and(|active| active.generation == generation)
+    }
+
+    /// Replaces the placeholder for `generation` with the real thing, unless
+    /// it has already stopped being current. Returns whether it took.
+    fn publish(&self, generation: u64, active: ActiveGeneration) -> bool {
+        let mut inner = self.inner.lock().expect("ServeState mutex poisoned");
+        if inner.closed
+            || inner.active.as_ref().map(|current| current.generation) != Some(generation)
+        {
+            return false;
+        }
+        inner.active = Some(active);
+        true
+    }
+
+    /// Clears the active slot, but only if it is still `generation` — a
+    /// generation that has already been superseded must not clear the
+    /// *newer* one out from under it.
+    fn clear_if_current(&self, generation: u64) {
+        let mut inner = self.inner.lock().expect("ServeState mutex poisoned");
+        if inner.active.as_ref().map(|active| active.generation) == Some(generation) {
+            inner.active = None;
+        }
+    }
+
+    /// Stops admitting anything new and hands back whatever was active, for
+    /// the caller to release.
+    fn begin_shutdown(&self) -> Option<ActiveGeneration> {
+        let mut inner = self.inner.lock().expect("ServeState mutex poisoned");
+        inner.closed = true;
+        inner.active.take()
+    }
+}
+
+/// Closes `previous`'s session (if it had one yet) and waits for its owning
+/// task to fully finish — including that task's own heartbeat teardown and
+/// driver join — before returning. Both a supersession and a shutdown reach
+/// this same function, so both "a new connection took over" and "the
+/// process is stopping" join the identical teardown path rather than each
+/// inventing its own.
+async fn release_active(previous: ActiveGeneration, code: u16, reason: &str) {
+    if let Some(session) = &previous.session {
+        session.close_now(code, Some(reason));
+    }
+    if let Some(released) = previous.released {
+        let _ = released.await;
+    }
+}
+
+/// Runs one accepted TCP connection from upgrade to release.
+///
+/// `permit` reserves this connection's [`MAX_PENDING_HANDSHAKES`] slot for
+/// exactly the upgrade below — bounded by [`UPGRADE_TIMEOUT`], since
+/// `accept_websocket` has no read timeout of its own and a peer that opens
+/// the socket and never speaks would otherwise hold it, and this task's
+/// `OwnedTasks` slot, forever.
+async fn handle_connection(
+    stream: TcpStream,
+    permit: tokio::sync::OwnedSemaphorePermit,
+    state: Arc<ServeState>,
+    context: Arc<ConnectionContext>,
+) {
+    let token = context.token.clone();
+    let runtime_version = context.runtime_version.clone();
+    // The health-check peek and the upgrade itself share this one timeout,
+    // not two separate ones: `TcpStream::peek` waits for bytes exactly the
+    // way `accept_websocket` does, so a peer that opens the socket and
+    // never sends anything at all — not even a health check — must not be
+    // able to hold this slot any longer by arriving before the part of
+    // this function that used to be the only bounded step.
+    let classified = tokio::time::timeout(UPGRADE_TIMEOUT, async move {
+        if is_health_check(&stream).await {
+            respond_health(stream, &runtime_version).await;
+            return None;
+        }
+        Some(
+            accept_websocket(
+                stream,
+                // A hub built before `mango.v1` was mandatory still gets
+                // its socket: letting it through unlabelled is what lets
+                // its session answer `hello` with a real close code
+                // instead of a bare HTTP refusal it has no vocabulary for
+                // — mirrors `serve.ts`'s own compatibility policy exactly.
+                AcceptOptions::from(WebSocketOptions::default()).with_subprotocol_optional(),
+                |upgrade| match upgrade.bearer() {
+                    Some(presented) if tokens_equal(presented.as_bytes(), token.as_bytes()) => {
+                        Ok(())
+                    }
+                    _ => Err(close_codes::UNAUTHORIZED),
+                },
+            )
+            .await,
+        )
+    })
+    .await;
+    let port = match classified {
+        // A health check was answered; nothing to upgrade at all. `permit`
+        // drops here — a health check never counted against
+        // `MAX_PENDING_HANDSHAKES` in `serve.ts` either.
+        Ok(None) => return,
+        Ok(Some(Ok(port))) => port,
+        // Refused (bad credential, bad subprotocol, …) or the peer vanished
+        // mid-upgrade: `accept_websocket` already told it why. Either way
+        // `permit` drops here, at this `return`, releasing the slot.
+        Ok(Some(Err(_))) => return,
+        // The peer opened the socket and never finished a upgrade within
+        // `UPGRADE_TIMEOUT` — silent or slow-loris-ing. `stream` and `permit`
+        // both drop here; nothing was ever spent on it beyond one slot for
+        // one bounded wait.
+        Err(_elapsed) => return,
+    };
+    // The upgrade is over, successfully; this connection is no longer
+    // "pending" in the sense `MAX_PENDING_HANDSHAKES` bounds; whatever
+    // happens next (becoming active, losing the admission race, a healthy
+    // multi-hour session) must not keep holding this slot.
+    drop(permit);
+
+    let (generation, previous) = match state.try_admit() {
+        Admission::Admitted {
+            generation,
+            previous,
+        } => (generation, previous),
+        Admission::Refused => {
+            close_port(port, close_codes::RELEASED, "Runtime stopped").await;
+            return;
+        }
+    };
+
+    if let Some(previous) = previous {
+        release_active(previous, close_codes::SUPERSEDED, "Superseded").await;
+        (context.log)("A new hub connection superseded the previous one.");
+    }
+    if !state.still_current(generation) {
+        state.clear_if_current(generation);
+        close_port(port, close_codes::RELEASED, "Runtime stopped").await;
+        return;
+    }
+
+    let host = build_host(context.slot, &context.mango_home);
+    let contract = Contract::from_catalog(catalog().clone())
+        .expect("the embedded catalog compiles into a contract");
+    // `SessionOptions::new`'s defaults already match `serve.ts`'s own
+    // `HANDSHAKE_TIMEOUT_MS`/`LIVENESS_INTERVAL_MS` (15s/20s), so nothing is
+    // overridden here — see `mango_protocol::session::{DEFAULT_HANDSHAKE_TIMEOUT, DEFAULT_LIVENESS_INTERVAL}`.
+    let options = SessionOptions::new(runtime_peer(&context.runtime_version));
+    debug_assert_eq!(options.handshake_timeout, DEFAULT_HANDSHAKE_TIMEOUT);
+    debug_assert_eq!(options.liveness_interval, Some(DEFAULT_LIVENESS_INTERVAL));
+    let (session, driver_handle) = Session::spawn(port, options);
+    let guard = crate::serve::serve(
+        &contract,
+        &session,
+        host.registry,
+        host.authorization,
+        context.slot.as_str(),
+    )
+    .expect("an empty registry always matches the embedded catalog");
+    guard.persist();
+
+    let (released_tx, released_rx) = oneshot::channel();
+    let published = state.publish(
+        generation,
+        ActiveGeneration {
+            generation,
+            session: Some(session.clone()),
+            released: Some(released_rx),
+        },
+    );
+    if !published {
+        session.close_now(close_codes::RELEASED, Some("Runtime stopped"));
+        let _ = join_owned(driver_handle).await;
+        return;
+    }
+    // Held for the rest of this function: dropped on every return path from
+    // here on (including a handshake failure below), which is what
+    // `release_active` waits on.
+    let _released_tx = released_tx;
+
+    if session.ready().await.is_err() {
+        state.clear_if_current(generation);
+        session.close_now(close_codes::RELEASED, Some("Handshake failed"));
+        let _ = join_owned(driver_handle).await;
+        return;
+    }
+    if !state.still_current(generation) {
+        // Superseded or stopped in the instant between publishing and the
+        // handshake completing; the superseding/stopping call already owns
+        // closing this session, so this task only needs to reap its driver.
+        let _ = join_owned(driver_handle).await;
+        return;
+    }
+
+    let heartbeat_cancel = CancellationToken::new();
+    let heartbeat_context = Arc::clone(&context);
+    let heartbeat = tokio::spawn(crate::transport::heartbeat_loop(
+        session.clone(),
+        HEARTBEAT_INTERVAL,
+        heartbeat_cancel.clone(),
+        move |message: &str| (heartbeat_context.log)(message),
+    ));
+
+    let _closure: SessionClosure = join_owned(driver_handle).await;
+    heartbeat_cancel.cancel();
+    let _ = join_owned(heartbeat).await;
+
+    state.clear_if_current(generation);
+    (context.log)("Hub connection ended.");
+}
+
+/// Closes a port nothing ever became a session over — a refused admission,
+/// or one that lost the race before a session was ever built.
+async fn close_port<S>(port: WebSocketPort<S>, code: u16, reason: &str)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let (tx, _rx) = port.split();
+    tx.close(code, Some(reason.to_string())).await;
+}
+
+/// The exact bytes a plain `GET /health` request line starts with, checked
+/// via [`TcpStream::peek`] — which does not remove anything from the
+/// socket's read queue, so a stream that turns out *not* to be a health
+/// check is handed to [`accept_websocket`] completely untouched.
+const HEALTH_CHECK_PREFIX: &[u8] = b"GET /health ";
+
+/// True when `stream`'s first bytes are a `GET /health` request line.
+///
+/// `serve.ts` serves this over the same listener a hub upgrades on; the
+/// Rust accept loop had no equivalent, so a plain health check (or a
+/// Direct URL user opening the address in a browser) fell straight into
+/// `accept_websocket`, which has no vocabulary for anything but a
+/// WebSocket upgrade and would reject it as a failed handshake.
+async fn is_health_check(stream: &TcpStream) -> bool {
+    let mut buffer = [0u8; HEALTH_CHECK_PREFIX.len()];
+    matches!(
+        stream.peek(&mut buffer).await,
+        Ok(n) if n >= buffer.len() && buffer == *HEALTH_CHECK_PREFIX
+    )
+}
+
+/// How much of a health check's own request line/headers this will read
+/// looking for the end of them before giving up — a GET has no body, so
+/// nothing legitimate runs past a few hundred bytes; this only bounds a
+/// peer that never finishes sending them.
+const MAX_HEALTH_CHECK_REQUEST_BYTES: usize = 8192;
+
+/// Reads and discards `stream`'s pending bytes up to the end of the request
+/// headers (`\r\n\r\n`), or until [`MAX_HEALTH_CHECK_REQUEST_BYTES`] is
+/// reached, or the peer stops sending.
+///
+/// [`is_health_check`] only *peeks* the first bytes — nothing has actually
+/// been read off the socket yet by the time this runs, so the peer's whole
+/// request (everything past what the peek buffer happened to cover) is
+/// still sitting unread in the kernel's receive buffer. Draining it here,
+/// before [`respond_health`] writes anything, is what keeps this from
+/// closing with unread data still queued: BSD-derived stacks (macOS
+/// included) answer a close with unread bytes pending by sending an RST
+/// instead of a FIN, discarding whatever was just written along with it —
+/// measured as this exact failure on macOS CI (`ConnectionReset` on the
+/// client's read) while the identical code passed on Linux, which is more
+/// forgiving of this precise timing.
+async fn drain_request_headers(stream: &mut TcpStream) {
+    let mut accumulated = Vec::new();
+    let mut chunk = [0u8; 512];
+    loop {
+        match tokio::io::AsyncReadExt::read(stream, &mut chunk).await {
+            Ok(0) => return, // the peer closed its write half; nothing left to drain
+            Ok(n) => {
+                accumulated.extend_from_slice(&chunk[..n]);
+                if accumulated.windows(4).any(|window| window == b"\r\n\r\n") {
+                    return;
+                }
+                if accumulated.len() >= MAX_HEALTH_CHECK_REQUEST_BYTES {
+                    return;
+                }
+            }
+            Err(_) => return,
+        }
+    }
+}
+
+/// Answers a health check with the same shape `serve.ts` does
+/// (`Response.json({ status: 'ok', version })`), then closes the
+/// connection — this is a one-shot HTTP response, never a kept-alive
+/// socket, since nothing here speaks HTTP beyond this one reply.
+async fn respond_health(mut stream: TcpStream, runtime_version: &str) {
+    drain_request_headers(&mut stream).await;
+    let body = serde_json::json!({ "status": "ok", "version": runtime_version }).to_string();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes()).await;
+    let _ = tokio::io::AsyncWriteExt::shutdown(&mut stream).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use tokio::sync::{Barrier, oneshot};
+
+    use super::{ActiveGeneration, Admission, ServeState};
+
+    /// The property `serve`'s single `Mutex` exists for: however many
+    /// connections race to admit at the exact instant shutdown begins, none
+    /// of them may still be sitting in the active slot once everything
+    /// settles — shutdown having taken (and not given back) the slot is
+    /// exactly what must stop any of them from landing there afterwards.
+    ///
+    /// This replaces an earlier version of this test whose only assertion
+    /// was `admitted + refused == CONCURRENT`, which is true by
+    /// construction (`try_admit` returns exactly one variant, and each arm
+    /// increments exactly one counter) and does not exercise the mutex at
+    /// all — confirmed by deleting the `if inner.closed` check from
+    /// `try_admit` entirely and observing that assertion still pass. The
+    /// assertion below was measured, against the real defect of splitting
+    /// `closed` out of the `Mutex` into its own flag checked outside the
+    /// lock, to catch it on some fraction of single rounds — which is why
+    /// this repeats the whole barrier round, with a fresh [`ServeState`]
+    /// each time, rather than relying on one round to be enough.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn no_admission_survives_in_the_active_slot_after_shutdown_takes_it() {
+        const CONCURRENT: usize = 64;
+        const ROUNDS: usize = 200;
+
+        for _ in 0..ROUNDS {
+            let state = Arc::new(ServeState::new());
+            let barrier = Arc::new(Barrier::new(CONCURRENT + 1));
+            let admitted = Arc::new(AtomicUsize::new(0));
+            let refused = Arc::new(AtomicUsize::new(0));
+
+            let mut admitters = Vec::new();
+            for _ in 0..CONCURRENT {
+                let state = Arc::clone(&state);
+                let barrier = Arc::clone(&barrier);
+                let admitted = Arc::clone(&admitted);
+                let refused = Arc::clone(&refused);
+                admitters.push(tokio::spawn(async move {
+                    barrier.wait().await;
+                    match state.try_admit() {
+                        Admission::Admitted { .. } => {
+                            admitted.fetch_add(1, Ordering::SeqCst);
+                            // Deliberately does *not* call
+                            // `clear_if_current`: doing so would launder
+                            // the exact leak this test exists to catch — an
+                            // admission that landed after shutdown already
+                            // took the active slot, then promptly tidied
+                            // itself away before anything could observe it.
+                        }
+                        Admission::Refused => {
+                            refused.fetch_add(1, Ordering::SeqCst);
+                        }
+                    }
+                }));
+            }
+            let shutdown_state = Arc::clone(&state);
+            let shutdown_barrier = Arc::clone(&barrier);
+            let shutdown = tokio::spawn(async move {
+                shutdown_barrier.wait().await;
+                shutdown_state.begin_shutdown()
+            });
+
+            for admitter in admitters {
+                admitter.await.unwrap();
+            }
+            let _ = shutdown.await.unwrap();
+
+            // Documentation only, kept for readers, not load-bearing: every
+            // call lands in exactly one bucket by construction, which is
+            // exactly why this alone proved nothing (see the doc comment
+            // above).
+            assert_eq!(
+                admitted.load(Ordering::SeqCst) + refused.load(Ordering::SeqCst),
+                CONCURRENT
+            );
+
+            // The assertion that actually discriminates the defect.
+            let leaked = state
+                .inner
+                .lock()
+                .expect("ServeState mutex poisoned")
+                .active
+                .as_ref()
+                .map(|active| active.generation);
+            assert_eq!(
+                leaked, None,
+                "a generation was admitted after shutdown took the active slot"
+            );
+        }
+    }
+
+    /// The other half of the same invariant: once shutdown has run, no
+    /// later `try_admit` may succeed — admission and shutdown reading the
+    /// same flag under the same lock is what this asserts.
+    #[test]
+    fn nothing_is_admitted_once_shutdown_has_started() {
+        let state = ServeState::new();
+        state.begin_shutdown();
+        assert!(matches!(state.try_admit(), Admission::Refused));
+    }
+
+    /// `release_active`'s completion signal actually fires: a caller that
+    /// awaits it after the owning generation's local sender drops observes
+    /// that drop as a resolved receiver, not a hang.
+    #[tokio::test]
+    async fn a_released_generations_signal_resolves_once_its_owner_drops_the_sender() {
+        let (tx, rx) = oneshot::channel::<()>();
+        let previous = ActiveGeneration {
+            generation: 1,
+            session: None,
+            released: Some(rx),
+        };
+        drop(tx); // the owning task's implicit drop on return
+        super::release_active(
+            previous,
+            mango_protocol::close::close_codes::RELEASED,
+            "test",
+        )
+        .await;
+    }
+
+    /// `still_current`/`publish`/`clear_if_current` must never let a
+    /// superseded generation clear the *newer* one that replaced it — the
+    /// exact bug a naive `active = None` (rather than a generation-checked
+    /// clear) would reintroduce.
+    #[test]
+    fn a_superseded_generation_cannot_clear_the_generation_that_replaced_it() {
+        let state = ServeState::new();
+        let first = match state.try_admit() {
+            Admission::Admitted { generation, .. } => generation,
+            Admission::Refused => unreachable!(),
+        };
+        assert!(state.publish(first, ActiveGeneration::placeholder(first)));
+
+        let second = match state.try_admit() {
+            Admission::Admitted {
+                generation,
+                previous,
+            } => {
+                assert!(
+                    previous.is_some(),
+                    "the first generation must be handed back to release"
+                );
+                generation
+            }
+            Admission::Refused => unreachable!(),
+        };
+        assert!(state.publish(second, ActiveGeneration::placeholder(second)));
+
+        // The (already-superseded) first generation's own task finally
+        // finishes and tries to clear itself — it must be a no-op now.
+        state.clear_if_current(first);
+        assert!(
+            state.still_current(second),
+            "clearing a stale generation must never clear the current one"
+        );
+    }
+}
