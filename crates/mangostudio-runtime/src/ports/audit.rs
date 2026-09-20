@@ -9,20 +9,41 @@
 //!
 //! One parity gap against the TypeScript runtime, stated rather than hidden:
 //! `gateHandlers` measures one duration per call, from before its own
-//! consent check to after the handler returns. This crate cannot do that —
-//! [`crate::ports::authorization::AuthorizationGuard`] and
+//! consent check to after the handler returns. This crate does not do that
+//! — [`crate::ports::authorization::AuthorizationGuard`] and
 //! [`crate::registry::Registry::implement`]'s wrapper are two separate
-//! `mango_protocol` seams with no shared start time — so a `denied` entry's
-//! [`AuditEntry::duration`] measures only the authorization check, and an
-//! `ok`/`error` entry's measures only the handler (plus this crate's own
-//! result check). Both are real durations; neither is the TypeScript
-//! runtime's single end-to-end one.
+//! `mango_protocol` seams with no shared start time passed between them, so
+//! a `denied` entry's [`AuditEntry::duration`] measures only the
+//! authorization check, and an `ok`/`error` entry's measures only the
+//! handler (plus this crate's own result check). A shared seam is workable
+//! (a start-instant map keyed on `CallContext::id`, populated by the guard
+//! and consumed by the wrapper) but not built here. Concretely, this means
+//! an `ok`/`error` entry's duration *excludes* the authorization step, which
+//! in the TypeScript runtime is a disk read — comparing the two runtimes'
+//! audit logs side by side would otherwise read as a real speedup that is
+//! purely an artefact of where each one starts the clock.
 //!
 //! The default, [`NoopAudit`], records nothing. That is the fail-closed
 //! choice for an audit sink specifically: unlike authorization, where
 //! refusing is the safe default, an audit sink that fabricated entries would
 //! be worse than one that stays silent, so "does nothing" is what "safe"
 //! means here.
+//!
+//! ## Why `AuditEntry` carries no `params`
+//!
+//! `apps/runtime/src/consent-gate.ts`'s `record` call passes `params`, and
+//! `audit-log.ts` renders a redacted summary of them
+//! (`summarizeAuditArgs(method, params)`) into the line — the "what was
+//! asked" half of an audit entry this type does not carry. That summarizer
+//! is real, method-aware redaction logic (which argument of which method is
+//! safe to log, truncated how) that this crate has no way to build yet: it
+//! implements no methods, so it has no params shapes to reason about safely.
+//! Carrying raw, unredacted `params` here instead would risk exactly the
+//! leak this crate's other seams (`panic::catch_panics`, `result_check`) all
+//! exist to prevent — a file's contents or a shell command ending up in a
+//! log line. Deliberately omitted for this PR; a later change that
+//! implements methods is what should also design the redaction and add the
+//! field.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -101,11 +122,16 @@ impl Audit for NoopAudit {
 
 /// Locks `mutex`, recovering the guard even if a prior holder panicked.
 ///
-/// Mirrors `mango_protocol::session::shared::lock` (private to that crate,
-/// so this is a deliberate re-derivation, not a reuse): every critical
-/// section behind a port's own `Mutex` in this crate is a short, panic-free
-/// push onto a log — never held across a handler's `.await` — so poisoning
-/// here can never reflect a corrupted invariant. Recovering avoids turning
+/// This is silent reuse of state a panic interrupted — plainly stated,
+/// because that is a real trade-off, not a free recovery. It is safe here
+/// only because it is convention, not something the type system enforces:
+/// every critical section behind a port's own `Mutex` in this crate is a
+/// short, panic-free push onto a log, and *never held across a handler's*
+/// `.await`. Since `lock` is `pub`, nothing stops a future caller from
+/// wrapping a `.await` inside its critical section — doing so would silently
+/// reuse a torn invariant, and this function would not detect it. Mirrors
+/// `mango_protocol::session::shared::lock` (private to that crate, so this
+/// is a deliberate re-derivation, not a reuse): recovering avoids turning
 /// one handler's panic into a second, unrelated panic in an audit sink that
 /// had nothing to do with the first one.
 ///

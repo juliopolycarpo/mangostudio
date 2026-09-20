@@ -88,10 +88,20 @@ pub fn build_features(
     let update = allow.update && capability_ready(registry, "update");
     let external_agents =
         allow.external_agents == Some(true) && capability_ready(registry, "externalAgents");
-    // Mirrors `manifest.ts`'s own `tools` formula exactly: an `||` over the
-    // eight capabilities that make a runtime worth calling a tool host at
-    // all. `update` and `externalAgents` are deliberately excluded, matching
-    // the TypeScript source.
+    // NOT a mirror of `manifest.ts`'s own `tools` line: that formula ORs the
+    // *raw* `allow.*` flags, with no implementation gate at all (every
+    // method already has a handler in that runtime, so there is nothing to
+    // gate). ORing the *already-gated* `fs_read`/`fs_write`/… above instead
+    // is deliberate: `manifest.ts`'s formula would make an empty registry
+    // advertise `tools: true` purely from a fully-granted `allow`, which is
+    // exactly what this crate's own tests forbid. The eight capabilities
+    // summed here — `update` and `externalAgents` excluded — match the
+    // TypeScript source's choice of which flags count.
+    //
+    // One further divergence worth stating plainly: `git` here also folds in
+    // `git_available`, so a host with `allow.git = true`, all three `git.*`
+    // methods implemented, but no `git` binary present answers TypeScript's
+    // `tools: true` and this crate's `tools: false`.
     let tools = fs_read || fs_write || shell || git || mcp || probing || library || checkpoints;
     RuntimeCapabilityFeatures {
         tools,
