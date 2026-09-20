@@ -1,5 +1,10 @@
-//! The MangoStudio hub/runtime dispatcher: `mangostudio-runtime-contract`'s
-//! catalog, served over a `mango-protocol` session.
+//! The MangoStudio runtime host, Rust half: the contract dispatcher and
+//! the runtime-home state it will run against.
+//!
+//! # Dispatch
+//!
+//! `mangostudio-runtime-contract`'s catalog, served over a `mango-protocol`
+//! session.
 //!
 //! This crate builds on `mango_protocol::contract::Contract`,
 //! `ContractHandlers`, `Guard` and `ServeOptions` — it does not implement a
@@ -47,10 +52,44 @@
 //! assert!(registry.implemented_methods().is_empty());
 //! assert!(!registry.unimplemented_methods().is_empty());
 //! ```
+//!
+//! # Runtime home
+//!
+//! `apps/runtime` is the TypeScript runtime host; this crate is lane A of the
+//! Rust rewrite's runtime foundation. It owns exactly four things, each
+//! mirroring one TypeScript module so the two hosts agree on-disk without
+//! either side reading the other's language:
+//!
+//! - [`config`] mirrors `apps/runtime/src/config.ts`: every environment
+//!   variable this host reads, parsed in one place.
+//! - [`runtime_home`] mirrors `apps/runtime/src/runtime-home.ts` and
+//!   `apps/shared/src/runtime-home/paths.ts`: the `~/.mango/runtime/<slot>`
+//!   layout, slot resolution, and reading `runtime.json`/`credentials.json`
+//!   as schema-checked bytes.
+//! - [`runtime_home::lock`] reimplements the pid-file lock protocol from
+//!   `runtime-home.ts` bit for bit — not an OS lock, which a Node process on
+//!   the same machine cannot see or honour. See that module's docs for why.
+//! - [`runtime_home::atomic`] and [`runtime_home::owner_only`] mirror the
+//!   temp-file-then-rename publication in `runtime-home.ts` and the
+//!   mode/ACL split in `apps/runtime/src/services/owner-only.ts`.
+//!
+//! Every shape read from or written to disk is validated against
+//! `mangostudio_runtime_contract::schemas::validate_runtime_home` — this
+//! crate hand-writes no duplicate of `runtime-home.schema.json`.
+//!
+//! # Out of scope
+//!
+//! Consent resolution (`RUNTIME_CONSENT_PRESETS`, `profileForAllow`, the
+//! merged [`ResolvedRuntimeSlotConfig`]) is the dispatcher lane's job, not
+//! this one's — see [`runtime_home::DefaultSetupState`] for the one bit of
+//! that policy this crate does need (which slots start pre-consented) and
+//! why the rest stops there.
 
+pub mod config;
 pub mod manifest;
 pub mod panic;
 pub mod ports;
 pub mod registry;
 pub mod result_check;
+pub mod runtime_home;
 pub mod serve;
