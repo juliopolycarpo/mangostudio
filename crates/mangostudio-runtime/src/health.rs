@@ -386,10 +386,13 @@ fn git_probe_cache() -> &'static Mutex<HashMap<PathBuf, (String, GitAvailability
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Clears every cached `git` probe result. Exposed for tests (each of which
-/// wants a clean cache) and for a future "the operator changed `PATH`"
-/// hook — nothing in this crate calls it outside `#[cfg(test)]` yet.
-#[cfg(test)]
+/// Clears every cached `git` probe result. Test-only: every caller lives in
+/// this module's `#[cfg(unix)]` git-probe tests, each of which wants a clean
+/// cache before it runs its own fake `git`. Not a production "the operator
+/// changed `PATH`" hook — this function never compiles into a release
+/// build, so it cannot be one; a real hook for that would need its own,
+/// non-`#[cfg(test)]` entry point.
+#[cfg(all(test, unix))]
 fn invalidate_git_probe_cache() {
     git_probe_cache()
         .lock()
@@ -514,19 +517,28 @@ fn parse_git_version(output: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
-    use mango_protocol::error::codes;
     use mangostudio_runtime_contract::catalog::method;
     use tokio_util::sync::CancellationToken;
 
-    use super::{
-        build_capability_manifest, build_health_report, invalidate_git_probe_cache, node_platform,
-        parse_git_version, probe_git,
-    };
+    use super::{build_capability_manifest, build_health_report, node_platform, parse_git_version};
     use crate::registry::Registry;
     use crate::result_check::{check_result, compile_result_schema};
-    use crate::runtime_home::{RuntimeSlot, write_runtime_slot_config};
+    use crate::runtime_home::RuntimeSlot;
+    // Every caller of these lives behind `#[cfg(unix)]` below (the `git`
+    // probe tests write and run a real Unix shell script) — gating the
+    // imports the same way keeps a Windows build from reporting them (and,
+    // fail-closed, `invalidate_git_probe_cache` itself) unused, which
+    // `-D warnings` turns into a hard build failure rather than a lint note.
+    #[cfg(unix)]
+    use super::{invalidate_git_probe_cache, probe_git};
+    #[cfg(unix)]
+    use crate::runtime_home::write_runtime_slot_config;
+    #[cfg(unix)]
+    use mango_protocol::error::codes;
+    #[cfg(unix)]
+    use std::path::Path;
 
     fn scratch_home(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
