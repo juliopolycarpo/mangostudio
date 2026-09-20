@@ -38,6 +38,49 @@ use crate::runtime_home::{
 };
 use crate::setup::SetupAuthority;
 
+/// A `mangostudio-runtime setup` invocation this CLI can actually run
+/// without prompting — `--profile` is always named, since [`crate::setup`]
+/// takes no interactive input at all (see that module's doc comment) and a
+/// bare `mangostudio-runtime setup` only ever answers "setup needs
+/// --profile full|readonly|none", a dead end rather than a remedy.
+/// `cli.ts` gets away with the bare form because it prompts when `setup`
+/// runs with no flags; this crate has no equivalent to fall back on.
+///
+/// Every message that tells an operator to run `setup` builds it through
+/// here, so a hand-typed copy elsewhere cannot drift back to the bare form
+/// the way it once did: [`setup_pending_message`] and the invocation-is-
+/// consent grant notice both name a command a person can actually run.
+///
+/// `slot` is `None` for [`setup_pending_message`]: `run_setup` already
+/// resolves the slot from the binary's own install location when `--slot`
+/// is omitted, which is right far more often than a fixed guess printed
+/// here would be. A caller that already knows exactly which slot it means
+/// — the invocation-is-consent grant, always [`RuntimeSlot::Remote`] —
+/// passes `Some` instead, since naming it removes any doubt.
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime::consent::invocation::setup_command;
+/// use mangostudio_runtime::runtime_home::RuntimeSlot;
+///
+/// assert_eq!(setup_command(None), "mangostudio-runtime setup --profile <full|readonly|none>");
+/// assert_eq!(
+///     setup_command(Some(RuntimeSlot::Remote)),
+///     "mangostudio-runtime setup --slot remote --profile <full|readonly|none>"
+/// );
+/// ```
+#[must_use]
+pub fn setup_command(slot: Option<RuntimeSlot>) -> String {
+    match slot {
+        Some(slot) => format!(
+            "mangostudio-runtime setup --slot {} --profile <full|readonly|none>",
+            slot.as_str()
+        ),
+        None => "mangostudio-runtime setup --profile <full|readonly|none>".to_string(),
+    }
+}
+
 /// The full sentence a hub's `ssh-failure.ts` classifier greps for
 /// (case-insensitively): [`RUNTIME_SETUP_PENDING_SIGNATURE`] itself — kept
 /// byte-identical, never touched by the remediation text after it — plus
@@ -45,17 +88,6 @@ use crate::setup::SetupAuthority;
 /// in [`crate::transport`] — prints this exact sentence, built from the
 /// shared signature rather than a hand-typed copy of it, so the two can
 /// never drift apart.
-///
-/// The remediation names `--profile`, unlike `cli.ts`'s own
-/// `RUNTIME_SETUP_PENDING_MESSAGE`: that CLI prompts interactively when
-/// `setup` is run with no flags, so a bare `mangostudio-runtime setup`
-/// actually works there. This crate's own [`crate::setup`] takes no
-/// interactive input at all (see that module's doc comment), so the same
-/// bare command here only ever answers "setup needs
-/// --profile full|readonly|none" — a dead end, not a remedy. `--slot` is
-/// left out on purpose: `run_setup` already resolves it from
-/// the binary's own install location when omitted, which is right far more
-/// often than a fixed guess printed here would be.
 ///
 /// # Example
 ///
@@ -69,8 +101,8 @@ use crate::setup::SetupAuthority;
 #[must_use]
 pub fn setup_pending_message() -> String {
     format!(
-        "{RUNTIME_SETUP_PENDING_SIGNATURE}. Run \"mangostudio-runtime setup --profile \
-         <full|readonly|none>\" there before connecting it."
+        "{RUNTIME_SETUP_PENDING_SIGNATURE}. Run \"{}\" there before connecting it.",
+        setup_command(None)
     )
 }
 

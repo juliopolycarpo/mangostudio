@@ -322,3 +322,61 @@ fn connect_with_a_token_persists_it_before_dialling() {
     let stored: serde_json::Value = serde_json::from_str(&written).unwrap();
     assert_eq!(stored["pairingToken"], "the-pairing-token");
 }
+
+/// A fresh slot's invocation-is-consent grant reports a command the
+/// operator can actually run: this crate's own `setup` takes no
+/// interactive input, so a bare `mangostudio-runtime setup` (what `cli.ts`
+/// can get away with, since it prompts) only ever answers "setup needs
+/// --profile full|readonly|none" — a dead end reintroduced here minutes
+/// after being removed from `setup_pending_message`.
+#[test]
+fn connect_on_a_fresh_slot_reports_a_setup_command_that_actually_works() {
+    use std::io::{BufRead as _, BufReader};
+
+    let home = scratch_mango_home("connect-recorded-grant-message");
+    let mut child = Command::new(binary_path())
+        .args(["connect", "--hub", "ws://127.0.0.1:1/"])
+        .env("MANGO_HOME", &home)
+        .env("MANGOSTUDIO_RUNTIME_TOKEN", "irrelevant-token")
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+
+    let stderr = child.stderr.take().expect("stderr was piped");
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut lines = Vec::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while std::time::Instant::now() < deadline {
+        match receiver.recv_timeout(std::time::Duration::from_millis(100)) {
+            Ok(line) => {
+                let found_it = line.contains("recorded full permissions");
+                lines.push(line);
+                if found_it {
+                    break;
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+
+    let recorded_line = lines
+        .iter()
+        .find(|line| line.contains("recorded full permissions"))
+        .unwrap_or_else(|| panic!("a fresh slot must report the recorded grant: {lines:?}"));
+    assert!(
+        recorded_line.contains("--profile"),
+        "the reported command must name --profile, or it is the same dead end \
+         setup_pending_message was fixed for: {recorded_line:?}"
+    );
+}

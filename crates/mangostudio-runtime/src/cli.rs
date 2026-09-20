@@ -24,7 +24,7 @@ use mangostudio_runtime_contract::manifest::ManifestProfile;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{EnvSource, RuntimeConfig};
-use crate::consent::invocation::consent_by_invocation;
+use crate::consent::invocation::{consent_by_invocation, setup_command};
 use crate::ports::wall_clock::SystemWallClock;
 use crate::runtime_home::{
     RuntimeSlot, read_runtime_slot_config, resolve_runtime_slot_for_current_exe,
@@ -439,9 +439,9 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
     }
     if consent.recorded {
         eprintln!(
-            "mangostudio-runtime: recorded full permissions for this machine. Run \
-             \"mangostudio-runtime setup --slot {}\" to narrow them.",
-            RuntimeSlot::Remote.as_str()
+            "mangostudio-runtime: recorded full permissions for this machine. Run \"{}\" to \
+             narrow them.",
+            setup_command(Some(RuntimeSlot::Remote))
         );
     }
 
@@ -478,11 +478,14 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         }
     };
 
-    let _ = write_runtime_slot_config(
+    if let Err(error) = write_runtime_slot_config(
         RuntimeSlot::Remote,
         &home,
         &[("serveListen", Some(serde_json::Value::String(raw_listen)))],
-    );
+    ) {
+        eprintln!("mangostudio-runtime: {error}");
+        return 1;
+    }
 
     let Ok(runtime) = build_runtime() else {
         eprintln!("mangostudio-runtime: could not start the async runtime.");
@@ -583,17 +586,20 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
     }
     if consent.recorded {
         eprintln!(
-            "mangostudio-runtime: recorded full permissions for this machine. Run \
-             \"mangostudio-runtime setup --slot {}\" to narrow them.",
-            RuntimeSlot::Remote.as_str()
+            "mangostudio-runtime: recorded full permissions for this machine. Run \"{}\" to \
+             narrow them.",
+            setup_command(Some(RuntimeSlot::Remote))
         );
     }
 
-    let _ = write_runtime_slot_config(
+    if let Err(error) = write_runtime_slot_config(
         RuntimeSlot::Remote,
         &home,
         &[("hubUrl", Some(serde_json::Value::String(hub_url.clone())))],
-    );
+    ) {
+        eprintln!("mangostudio-runtime: {error}");
+        return 1;
+    }
     match crate::runtime_home::write_runtime_slot_credentials(
         RuntimeSlot::Remote,
         &home,
@@ -942,6 +948,66 @@ mod tests {
                 &env
             ),
             1
+        );
+    }
+
+    /// `cli.ts`'s `writeRuntimeSlotConfig(...)` call has no catch, so a
+    /// failed remember aborts `runConnect` outright. This port's own
+    /// `write_runtime_slot_config` for `hubUrl` used to be `let _ = ...`:
+    /// the pairing token would still land on disk (a later, now-fatal
+    /// write) while the hub URL silently did not, and the next flagless
+    /// `connect` would exit on "no hub URL" with nothing explaining why.
+    ///
+    /// Forces the failure through the schema rather than the filesystem:
+    /// `runtime.json`'s own `hubUrl` field caps at 2048 characters
+    /// (`runtime-home.schema.json`), which `--hub`'s own parsing does not
+    /// enforce at all, so an oversized value reaches this write and fails
+    /// it with `WriteError::SchemaInvalid` — without touching permissions
+    /// on the slot directory, which `consent_by_invocation`'s own lock
+    /// file lives in too and would fail *that* step instead of this one
+    /// if denied.
+    ///
+    /// `run` runs on its own thread here, joined with a bounded wait: the
+    /// regression this guards is not a wrong exit code but a *silent*
+    /// continue, which reaches `connect::run`'s real dial loop against a
+    /// `--hub` this test never intends to answer — measured directly by
+    /// reverting the fix, which made this hang past `cargo test`'s own
+    /// external timeout rather than fail with any assertion at all. A
+    /// bounded `recv_timeout` turns that into a fast, clear failure
+    /// instead.
+    #[test]
+    fn connect_reports_and_exits_when_it_cannot_remember_the_hub_url() {
+        let oversized_hub_url = format!("wss://hub.example/{}", "x".repeat(2048));
+        let env = scratch_env("connect-huburl-write-fails");
+        let home = crate::config::RuntimeConfig::from_env(&env)
+            .unwrap()
+            .mango_home;
+        let env = MapEnv::from([
+            ("MANGO_HOME", home.to_str().unwrap()),
+            ("MANGOSTUDIO_RUNTIME_TOKEN", "irrelevant"),
+        ]);
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let exit_code = run(
+                &[
+                    "connect".to_string(),
+                    "--hub".to_string(),
+                    oversized_hub_url,
+                ],
+                &env,
+            );
+            let _ = sender.send(exit_code);
+        });
+
+        let exit_code = receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect(
+                "a failed hubUrl remember must exit promptly, not silently continue toward a dial",
+            );
+        assert_eq!(
+            exit_code, 1,
+            "a failed hubUrl remember must exit non-zero, not silently continue toward a dial"
         );
     }
 }
