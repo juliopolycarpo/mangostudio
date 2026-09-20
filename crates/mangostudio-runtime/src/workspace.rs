@@ -93,16 +93,99 @@ pub fn resolve_contained_workspace_path(
     };
     let normalized = requested.replace('\\', "/");
     let candidate = real_root.join(normalized);
-    let Ok(real_path) = std::fs::canonicalize(&candidate) else {
+    // Whether the exact candidate exists is tracked separately from whether
+    // it *resolves* (below): a not-yet-existing leaf inside the root must
+    // still answer `Ok(None)`, but a not-yet-existing leaf reached through a
+    // symlink that escapes the root must still be caught as an escape —
+    // conflating the two (a bare `canonicalize(candidate)`, which fails
+    // identically for both) is exactly the gap this function used to have.
+    let exists = std::fs::canonicalize(&candidate).is_ok();
+    let Some(real_path) = resolve_through_existing_ancestor(&candidate) else {
         return Ok(None);
     };
 
     match real_path.strip_prefix(&real_root) {
-        Ok(relative) if !relative.as_os_str().is_empty() => Ok(Some(relative.to_path_buf())),
+        Ok(relative) if !relative.as_os_str().is_empty() => {
+            if exists {
+                Ok(Some(relative.to_path_buf()))
+            } else {
+                Ok(None)
+            }
+        }
         _ => Err(WorkspaceContainmentError {
             requested_path: requested.to_string(),
         }),
     }
+}
+
+/// Resolves `candidate` to its real, symlink-free identity, following it
+/// through the *nearest existing ancestor* when `candidate` itself does not
+/// exist yet — mirrors `resolvePathThroughExistingAncestor`'s own reason for
+/// existing: a plain `canonicalize` requires the whole path to exist, so a
+/// not-yet-created file behind a symlinked *directory* (`link -> /outside`,
+/// requesting `link/new.txt`) would otherwise never be resolved at all, and
+/// a naive "cannot resolve, so not found" reading would let the write land
+/// at `/outside/new.txt` unnoticed. Walks lexically up from `candidate`
+/// until something on disk actually exists, canonicalizes that ancestor,
+/// then reattaches the not-yet-existing tail through
+/// [`lexically_normalize`] — folding any `..` the tail itself carries
+/// (`nope/../../etc/x` with no `nope` on disk) against the now-canonical
+/// prefix, rather than leaving it for a caller's `strip_prefix` to be
+/// fooled by.
+///
+/// `None` when not even `candidate`'s own root ancestor can be
+/// canonicalized (a transient I/O error, most often) — never `Some` of a
+/// path this function could not actually verify against the filesystem.
+///
+/// Walks candidate prefixes by raw [`Component`](std::path::Component),
+/// not by [`Path::file_name`]/[`Path::parent`]: those two return `None` the
+/// moment a path *ends* in a `..` component (by design — a trailing `..`
+/// has no "file name" of its own), which a tail like `nope/../../etc/x`
+/// runs into as soon as `nope` is stripped back off. Working with raw
+/// components sidesteps that entirely; a `..` is just another component to
+/// carry until [`lexically_normalize`] folds it.
+fn resolve_through_existing_ancestor(candidate: &Path) -> Option<PathBuf> {
+    if let Ok(real) = std::fs::canonicalize(candidate) {
+        return Some(real);
+    }
+    let components: Vec<std::path::Component<'_>> = candidate.components().collect();
+    for split in (1..components.len()).rev() {
+        let prefix: PathBuf = components[..split].iter().collect();
+        let Ok(canonical_prefix) = std::fs::canonicalize(&prefix) else {
+            continue;
+        };
+        let mut combined = canonical_prefix;
+        for component in &components[split..] {
+            combined.push(component.as_os_str());
+        }
+        return Some(lexically_normalize(&combined));
+    }
+    None
+}
+
+/// Collapses `.` and `..` components in `path` without touching the
+/// filesystem. Only ever called on a path whose existing prefix is already
+/// canonical (see [`resolve_through_existing_ancestor`]) — a `..` that pops
+/// past that prefix is not a bug to guard against, it is exactly the escape
+/// [`resolve_contained_workspace_path`] exists to catch, so this function
+/// lets it pop freely rather than clamping at some artificial floor.
+fn lexically_normalize(path: &Path) -> PathBuf {
+    let mut stack: Vec<std::path::Component<'_>> = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if matches!(stack.last(), Some(std::path::Component::Normal(_))) {
+                    stack.pop();
+                }
+                // Past the root prefix, `..` has nowhere further to go and
+                // is simply dropped — `/..` normalizes to `/`, the same
+                // floor a real filesystem enforces.
+            }
+            other => stack.push(other),
+        }
+    }
+    stack.into_iter().collect()
 }
 
 /// Re-runs [`resolve_contained_workspace_path`] for every path `targets`
@@ -115,14 +198,12 @@ pub fn resolve_contained_workspace_path(
 /// The first [`WorkspaceContainmentError`] any of `targets` produces;
 /// `execute` never runs in that case. `targets` that do not yet exist
 /// (`resolve_contained_workspace_path` returning `Ok(None)`) do not block a
-/// mutation that is about to create them — inherited from that function,
-/// which cannot resolve, and so cannot judge, a path with nothing at the
-/// end of it yet. A target that both escapes `root` *and* does not exist is
-/// a gap this shares with `resolveContainedWorkspacePath`, not one this
-/// crate introduces; closing it needs a resolvable-*parent* check this
-/// module does not build; a later lane that actually creates files should
-/// resolve the *parent directory* it writes into (which does exist) rather
-/// than the not-yet-created leaf.
+/// mutation that is about to create them. A target that both escapes `root`
+/// *and* does not exist yet is still refused, not silently answered `None`
+/// — `resolve_contained_workspace_path` resolves through the nearest
+/// existing ancestor precisely so a symlinked directory (or a literal `..`
+/// past a component that was never created) cannot hide an escape behind
+/// "nothing there to judge".
 ///
 /// # Example
 ///
@@ -200,19 +281,30 @@ pub struct BoundedListing {
 /// ```
 pub fn list_directory_bounded(dir: &Path) -> std::io::Result<BoundedListing> {
     let mut entries = Vec::new();
-    let mut truncated = false;
     for item in std::fs::read_dir(dir)? {
         let item = item?;
-        if entries.len() >= MAX_WORKSPACE_DIRECTORY_ENTRIES {
-            truncated = true;
-            break;
-        }
         let is_directory = item.file_type().is_ok_and(|kind| kind.is_dir());
         entries.push(DirectoryEntry {
             name: item.file_name().to_string_lossy().into_owned(),
             is_directory,
         });
     }
+    // Sorted before truncating, so the cap drops a stable, name-ordered tail
+    // rather than an arbitrary subset of whatever order `read_dir` happened
+    // to yield — mirrors `browseWorkspace`'s own case-insensitive-then-
+    // case-sensitive sort, though with a plain lowercase fold rather than
+    // `Intl.Collator`'s locale-aware one: this crate has no ICU collation
+    // dependency to reach for, so the two orderings can diverge on
+    // locale-specific rules (e.g. some accented letters), while still
+    // agreeing on plain ASCII and case-only differences.
+    entries.sort_by(|left, right| {
+        left.name
+            .to_lowercase()
+            .cmp(&right.name.to_lowercase())
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    let truncated = entries.len() > MAX_WORKSPACE_DIRECTORY_ENTRIES;
+    entries.truncate(MAX_WORKSPACE_DIRECTORY_ENTRIES);
     Ok(BoundedListing { entries, truncated })
 }
 
@@ -282,6 +374,36 @@ mod tests {
         assert!(matches!(error, WorkspaceContainmentError { .. }));
     }
 
+    /// The gap a bare `canonicalize(candidate)` has: a symlinked directory
+    /// escaping the root, requesting a leaf *inside it that does not exist
+    /// yet*. `canonicalize` fails on the whole path (the leaf is missing)
+    /// the same way it would for an ordinary not-yet-created file, so
+    /// without resolving through the symlinked ancestor first, this would
+    /// wrongly answer `Ok(None)` — "safe to create" — for a write that
+    /// actually lands outside the root entirely.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_escape_is_refused_even_for_a_leaf_that_does_not_exist_yet() {
+        let root = scratch_root("symlink-escape-not-yet");
+        let outside = scratch_root("symlink-escape-not-yet-target");
+        std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+
+        let error = resolve_contained_workspace_path(&root, "link/new.txt").unwrap_err();
+        assert!(matches!(error, WorkspaceContainmentError { .. }));
+    }
+
+    /// The same gap, reached through a literal `..` inside a not-yet-existing
+    /// component rather than a symlink: `nope` never exists on disk, so a
+    /// plain `canonicalize` of the whole candidate fails the same way a
+    /// harmless not-yet-created file would, and the escape hides behind
+    /// that unless the `..`s are folded against a canonical prefix first.
+    #[test]
+    fn a_dot_dot_escape_through_a_nonexistent_component_is_refused() {
+        let root = scratch_root("dotdot-through-nonexistent");
+        let error = resolve_contained_workspace_path(&root, "nope/../../etc/passwd").unwrap_err();
+        assert!(matches!(error, WorkspaceContainmentError { .. }));
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_symlink_that_stays_inside_the_root_is_still_allowed() {
@@ -338,6 +460,25 @@ mod tests {
                 .iter()
                 .any(|entry| entry.name == "two" && entry.is_directory)
         );
+    }
+
+    /// A cap that truncates an unsorted listing drops an arbitrary tail
+    /// (whatever order `read_dir` happened to yield), which is not even
+    /// stable across two calls on the same directory. Sorting first makes
+    /// "which entries survive the cap" a name-ordered, reproducible answer.
+    #[test]
+    fn a_directory_listing_is_sorted_case_insensitively_before_being_bounded() {
+        let dir = scratch_root("listing-sorted");
+        for name in ["banana", "Apple", "cherry", "apple2"] {
+            std::fs::write(dir.join(name), b"").unwrap();
+        }
+        let listing = list_directory_bounded(&dir).unwrap();
+        let names: Vec<&str> = listing
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["Apple", "apple2", "banana", "cherry"]);
     }
 
     #[test]
