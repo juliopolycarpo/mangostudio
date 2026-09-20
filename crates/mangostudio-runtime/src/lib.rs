@@ -28,8 +28,11 @@
 //!   before it can reach `mango_protocol`'s dispatcher, which would otherwise
 //!   put the raw panic payload on the wire, verbatim and unredacted.
 //! - [`ports`] — small, named, fail-closed seams (`Authorization`, `Audit`,
-//!   `Clock`) that a later change implements for real. Every default refuses
-//!   or does nothing; none of them ever grants or fabricates an outcome.
+//!   `Clock`, `CallExclusivity`) that a later change implements for real.
+//!   Every default refuses or does nothing; none of them ever grants or
+//!   fabricates an outcome.
+//! - [`consent`] — the real [`ports::authorization::Authorization`]: what
+//!   `runtime.json` grants, re-read on every call.
 //! - [`manifest`] — builds the `hello.capabilities` manifest this runtime
 //!   announces, gated on both consent (what the machine's owner granted) and
 //!   implementation (what this registry actually serves).
@@ -77,15 +80,18 @@
 //! `mangostudio_runtime_contract::schemas::validate_runtime_home` — this
 //! crate hand-writes no duplicate of `runtime-home.schema.json`.
 //!
-//! # Out of scope
+//! # Consent
 //!
-//! Consent resolution (`RUNTIME_CONSENT_PRESETS`, `profileForAllow`, the
-//! merged [`ResolvedRuntimeSlotConfig`]) is a dispatcher's job, not this
-//! crate's — see [`runtime_home::DefaultSetupState`] for the one bit of
-//! that policy this crate does need (which slots start pre-consented) and
-//! why the rest stops there.
+//! [`consent`] is the resolution this crate's `runtime_home` module used to
+//! leave to "a dispatcher's job, not this crate's": `RUNTIME_CONSENT_PRESETS`,
+//! `profileForAllow`, and a real [`ports::authorization::Authorization`] that
+//! reads `runtime.json`'s `allow` set fresh on every call. `runtime_home`
+//! still owns the one piece of that policy it always needed —
+//! [`runtime_home::DefaultSetupState`], which slots start pre-consented —
+//! and [`consent`] builds the rest on top of it rather than duplicating it.
 
 pub mod config;
+pub mod consent;
 pub mod manifest;
 pub mod panic;
 pub mod ports;
