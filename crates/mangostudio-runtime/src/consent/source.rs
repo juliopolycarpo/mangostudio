@@ -256,8 +256,19 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn an_unchanged_file_is_not_re_read() {
+        if nix::unistd::Uid::effective().is_root() {
+            // Root reads through a `chmod 000` file anyway, so the re-read
+            // this test tries to rule out would succeed either way and
+            // return the same, unchanged content — passing regardless of
+            // whether the cache hit ever fired.
+            eprintln!("skipping an_unchanged_file_is_not_re_read: running as root");
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt as _;
+
         let home = scratch_home("cache-hit");
         write_runtime_slot_config(
             RuntimeSlot::Host,
@@ -268,23 +279,20 @@ mod tests {
         let source = ConsentSource::new(RuntimeSlot::Host, home.clone());
         assert!(source.refresh().shell);
 
-        // Delete the file out from under the cached fingerprint check
-        // without touching the config path stat again: if `refresh` did
-        // not skip re-reading, it would immediately see "absent" and
-        // downgrade — proving the cache hit path never even calls
-        // `read_runtime_slot_config` a second time when nothing changed.
-        let stat_before = std::fs::metadata(crate::runtime_home::slot_config_path(
-            RuntimeSlot::Host,
-            &home,
-        ))
-        .unwrap();
-        assert!(source.refresh().shell, "unchanged file, must hit the cache");
-        let stat_after = std::fs::metadata(crate::runtime_home::slot_config_path(
-            RuntimeSlot::Host,
-            &home,
-        ))
-        .unwrap();
-        assert_eq!(stat_before.len(), stat_after.len());
+        // Removes read permission without touching mtime or size, so the
+        // fingerprint the cache keys on is unchanged — `stat(2)` needs no
+        // read bit, only `open(2)` does. A genuine cache hit returns the
+        // previous answer without ever calling `read_runtime_slot_config`
+        // again; a re-read that ran anyway would hit `EACCES` and fail
+        // closed to `none`, which the regression below tells apart from a
+        // real cache hit.
+        let path = crate::runtime_home::slot_config_path(RuntimeSlot::Host, &home);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        assert!(
+            source.refresh().shell,
+            "an unchanged fingerprint must hit the cache, not re-read and fail closed"
+        );
     }
 
     /// The security property the module exists for: a file that was
@@ -302,6 +310,16 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn revocation_by_removing_read_permission_fails_closed_to_none() {
+        if nix::unistd::Uid::effective().is_root() {
+            // Root reads through a `chmod 000` file anyway, so the
+            // revocation this test forces would never actually take
+            // effect and `after.shell` would still be `true` — a failure,
+            // not a pass, if this ran unguarded under root.
+            eprintln!(
+                "skipping revocation_by_removing_read_permission_fails_closed_to_none: running as root"
+            );
+            return;
+        }
         use std::os::unix::fs::PermissionsExt as _;
 
         let home = scratch_home("revoke-permission");
