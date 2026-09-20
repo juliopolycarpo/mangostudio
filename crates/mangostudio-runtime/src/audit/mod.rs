@@ -6,7 +6,7 @@
 //!
 //! # Why `AuditEntry` still carries no `params`
 //!
-//! [`crate::ports::audit`]'s own docs already state PR 002's reason for
+//! [`crate::ports::audit`]'s own module docs already give the reason for
 //! leaving `params` off [`crate::ports::audit::AuditEntry`]: this crate
 //! implements no methods, so it has no params shapes to redact safely.
 //! That reasoning has not changed — this change still implements no
