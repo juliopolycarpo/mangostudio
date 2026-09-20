@@ -7,6 +7,7 @@
 //! file cannot claim `readonly` while granting a shell.
 
 use mangostudio_runtime_contract::manifest::{ManifestProfile, capability_keys};
+use serde::Serialize;
 
 use crate::runtime_home::{DefaultSetupState, RuntimeSlot, default_setup_state_for_slot};
 
@@ -14,7 +15,14 @@ use crate::runtime_home::{DefaultSetupState, RuntimeSlot, default_setup_state_fo
 /// partially-populated `runtime.json` can leave one, because every reader of
 /// this type already applied a slot's defaults. Mirrors TypeScript's
 /// `ResolvedRuntimeCapabilityAllow`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+///
+/// `Serialize` (`fsRead`, `fsWrite`, … — `serde`'s own `camelCase` renaming
+/// of `fs_read`, `fs_write`, … needs no per-field override) is what lets
+/// [`crate::health`] hand this straight to `serde_json::json!` for
+/// `runtime.health`'s `allow` field, rather than re-typing the same ten
+/// keys as a `serde_json::Value` by hand a second time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResolvedCapabilityAllow {
     /// Reading files.
     pub fs_read: bool,
@@ -284,5 +292,21 @@ mod tests {
         assert_eq!(default_consent_for_slot(RuntimeSlot::Host), FULL);
         assert_eq!(default_consent_for_slot(RuntimeSlot::Wsl), FULL);
         assert_eq!(default_consent_for_slot(RuntimeSlot::Remote), NONE);
+    }
+
+    /// `serde`'s own `camelCase` renaming must actually produce the wire
+    /// names `capability_keys()` promises (`fs_read` -> `fsRead`, and so
+    /// on) — the property [`crate::health`]'s `runtime.health` result
+    /// depends on to hand this type straight to `serde_json::json!`.
+    #[test]
+    fn serialises_with_the_wire_capability_names() {
+        let value = serde_json::to_value(FULL).unwrap();
+        for key in capability_keys() {
+            assert_eq!(
+                value.get(key),
+                Some(&serde_json::Value::Bool(true)),
+                "expected {key} present and true in the serialised form"
+            );
+        }
     }
 }
