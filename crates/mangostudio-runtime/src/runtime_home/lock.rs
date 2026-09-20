@@ -277,8 +277,21 @@ fn reclaim_if_abandoned(path: &Path, policy: &LockPolicy) -> bool {
     if !abandoned {
         return false;
     }
-    let _ = std::fs::remove_file(path);
-    true
+    // `true` here is what tells `with_slot_lock` to retry `create_lock_file`
+    // immediately, with no deadline check and no sleep in between — correct
+    // only when the path really is clear. `NotFound` means another waiter's
+    // own reclaim already won the race (mirroring `reclaimAbandonedLock`'s
+    // swallowed-`ENOENT` intent), so the file is gone either way and a
+    // retry is exactly right. Any other error — a read-only directory, a
+    // Windows handle still open on the file — means the stale file is
+    // still sitting there: reporting `true` anyway would send the caller
+    // straight back into the same `AlreadyExists` with nothing changed,
+    // spinning instead of backing off to its poll interval and deadline.
+    match std::fs::remove_file(path) {
+        Ok(()) => true,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => true,
+        Err(_) => false,
+    }
 }
 
 #[cfg(test)]
@@ -287,6 +300,8 @@ mod tests {
     use std::sync::{Arc, Barrier};
     use std::time::Duration;
 
+    #[cfg(unix)]
+    use super::reclaim_if_abandoned;
     use super::{LockError, LockOwner, LockPolicy, create_lock_file, platform, with_slot_lock};
 
     fn scratch_dir(name: &str) -> std::path::PathBuf {
@@ -519,6 +534,60 @@ mod tests {
             .expect_err("an empty, fresh lock file must not be reclaimed as abandoned");
         assert!(matches!(error, LockError::TimedOut { .. }));
         std::fs::remove_file(&lock).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stale_lock_that_fails_to_delete_is_not_reported_as_reclaimed() {
+        if nix::unistd::Uid::effective().is_root() {
+            // Root bypasses a directory's write-permission check entirely,
+            // which would make `remove_file` succeed anyway and this test
+            // pass without ever exercising the branch it exists to guard.
+            eprintln!(
+                "skipping a_stale_lock_that_fails_to_delete_is_not_reported_as_reclaimed: running as root"
+            );
+            return;
+        }
+
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = scratch_dir("undeletable-stale-lock");
+        let lock = dir.join("runtime.lock");
+        create_lock_file(&lock).unwrap();
+        std::fs::write(
+            &lock,
+            serde_json::to_vec(&LockOwner {
+                pid: Some(std::process::id()),
+                host: Some("definitely-not-this-host.invalid".to_string()),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        set_lock_age(&lock, Duration::from_secs(61));
+
+        let original_mode = std::fs::metadata(&dir).unwrap().permissions().mode();
+        // A directory without write permission refuses `unlink` on anything
+        // inside it, regardless of the file's own permissions.
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let policy = LockPolicy {
+            stale_after: Duration::from_secs(60),
+            ..LockPolicy::default()
+        };
+
+        let reclaimed = reclaim_if_abandoned(&lock, &policy);
+
+        // Restored before any assertion, so a failure here still leaves the
+        // scratch directory cleanable.
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(original_mode)).unwrap();
+
+        assert!(
+            !reclaimed,
+            "remove_file must have failed under a read-only directory, so this must not report a reclaim"
+        );
+        assert!(
+            lock.exists(),
+            "the lock file must still be there, since the delete never actually happened"
+        );
     }
 
     /// Backdates a lock file's mtime by `age`, so a stale-floor test does not

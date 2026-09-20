@@ -59,7 +59,7 @@ tokio = { version = "1.53", features = ["macros", "rt", "rt-multi-thread", "sync
 [target.'cfg(unix)'.dependencies]
 # `signal`: `kill(pid, 0)` for lock-holder liveness, mirroring `process.kill(pid, 0)` on the
 # TypeScript side. `hostname`: `gethostname()` for the lock body's `host` field.
-nix = { version = "0.31", default-features = false, features = ["signal", "hostname"] }
+nix = { version = "0.31", default-features = false, features = ["signal", "hostname", "user"] }
 
 [target.'cfg(windows)'.dependencies]
 # Win32_Foundation: HANDLE, BOOL, CloseHandle, LocalFree, STILL_ACTIVE.
