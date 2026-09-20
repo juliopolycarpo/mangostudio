@@ -65,9 +65,15 @@ The wire shape mirrors `apps/runtime/src/result-check.ts` exactly: code `INTERNA
 violation — structurally unreachable through the `jsonschema` crate's own `Validator::validate`,
 which always returns a violation in its `Err` case, but stated for parity with the TypeScript
 source), details `{ method, path, reason }`, and `path` computed the same way: the instance-path
-JSON pointer, with `/{property}` appended when the failing keyword is `required` (mirroring
-`result-check.ts`'s own `required`-only special case, not `mango_protocol::contract`'s broader one,
-which also special-cases `additionalProperties`), defaulting to `/` for a root violation.
+JSON pointer, with `/{property}` appended when the failing keyword is `required` or
+`additionalProperties`, defaulting to `/` for a root violation. `result-check.ts` needs no
+`additionalProperties` special case of its own because TypeBox's `instancePath` already points at
+an unexpected property directly; `jsonschema`'s does not (it points at the container), so this
+crate appends the property itself — the same reason
+`mango_protocol::contract::params::first_violation` carries the identical special case. Getting
+this wrong is silent: 48 of the catalog's result schemas are closed
+(`additionalProperties: false`), and a Rust struct that grows a field its schema does not declare
+would otherwise report `path: "/"` instead of naming the extra field.
 
 `reason` is rendered with `jsonschema::ValidationError::masked()`, not the validator's default
 `Display`. The default embeds the offending instance in the message (`"sensitive data" is not of

@@ -79,13 +79,22 @@ pub fn compile_result_schema(schema: &Value) -> Validator {
 /// - details: `{ "method": method, "path": path, "reason": reason }`
 ///
 /// `path` is the instance-path JSON pointer the violation occurred at, with
-/// `/{property}` appended when the failing keyword is `required` (the
-/// pointer alone stops one level short for a property that never appears in
-/// the document at all), defaulting to `/` for a document-root violation.
-/// Mirrors `result-check.ts`'s own `required`-only special case, not
-/// `mango_protocol::contract::params::first_violation`'s broader one (which
-/// also special-cases `additionalProperties`) — this crate's brief is to
-/// match the TypeScript wire shape, not the Rust SDK's own.
+/// `/{property}` appended when the failing keyword is `required` or
+/// `additionalProperties` (the pointer alone stops one level short for a
+/// property that either never appears in the document at all, or that the
+/// document was not supposed to carry), defaulting to `/` for a
+/// document-root violation.
+///
+/// This mirrors `apps/runtime/src/result-check.ts`'s wire shape, but not by
+/// mirroring its code: `result-check.ts` special-cases only `required`
+/// because TypeBox's own `instancePath` already points at an unexpected
+/// property directly — there is nothing left for it to append. `jsonschema`
+/// does not do that: an `additionalProperties` violation's `instance_path()`
+/// points at the *container*, not the offending key, so this crate has to
+/// append it itself to land on the same wire `path` TypeScript would report.
+/// The special case matches
+/// `mango_protocol::contract::params::first_violation`'s for exactly that
+/// reason, not by coincidence.
 ///
 /// # Example
 ///
@@ -119,6 +128,9 @@ pub fn check_result(
     };
     let property = match error.kind() {
         ValidationErrorKind::Required { property } => property.as_str(),
+        ValidationErrorKind::AdditionalProperties { unexpected } => {
+            unexpected.first().map(String::as_str)
+        }
         _ => None,
     };
     let instance_path = error.instance_path().as_str();
@@ -152,6 +164,18 @@ mod tests {
         }))
     }
 
+    /// A closed schema, matching the shape 48 of the catalog's actual result
+    /// schemas use (`additionalProperties: false` alongside named
+    /// properties) — the shape this test's regression can only fire on.
+    fn closed_sessions_schema() -> jsonschema::Validator {
+        compile_result_schema(&json!({
+            "type": "object",
+            "required": ["sessions"],
+            "properties": { "sessions": { "type": "array" } },
+            "additionalProperties": false,
+        }))
+    }
+
     #[test]
     fn a_valid_result_passes() {
         let validator = sessions_schema();
@@ -172,6 +196,23 @@ mod tests {
         assert_eq!(details["method"], json!("terminal.list"));
         assert_eq!(details["path"], json!("/sessions"));
         assert!(!details["reason"].as_str().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_unexpected_property_points_at_the_property_itself_not_the_document_root() {
+        let validator = closed_sessions_schema();
+        let error = check_result(
+            "terminal.list",
+            &validator,
+            &json!({ "sessions": [], "sessionCount": 3 }),
+        )
+        .expect_err("sessionCount is not a declared property");
+        let details = error.details.expect("details present");
+        assert_eq!(details["path"], json!("/sessionCount"));
+        assert_eq!(
+            error.message,
+            "Result of \"terminal.list\" does not match the contract at /sessionCount: Additional properties are not allowed ('sessionCount' was unexpected)."
+        );
     }
 
     #[test]
