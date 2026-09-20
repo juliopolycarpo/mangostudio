@@ -318,6 +318,68 @@ mod tests {
         );
     }
 
+    /// `serve`'s accept loop races `reap_one` against `listener.accept()`
+    /// inside a `biased` `select!`, and `accept()` stays ready for as long
+    /// as the kernel backlog holds connections — precisely the
+    /// unauthenticated flood the incremental reap exists to survive. This
+    /// models that load abstractly, as the one property that actually
+    /// matters to `tokio::select!`'s own semantics: a competing branch
+    /// that is *never* once `Pending`, rather than an OS-level TCP flood
+    /// (which cannot deterministically guarantee that in a test).
+    ///
+    /// Measured, not assumed: with the two branches in the reverse order —
+    /// `accept`-analogue first, `reap_one` second, the order this crate
+    /// shipped in originally — every one of these 50 rounds reaps zero
+    /// completed tasks, because `biased` never once reaches the
+    /// second branch while the first stays ready. Listing `reap_one`
+    /// first is what this test proves fixes it: an empty `OwnedTasks`
+    /// awaits `std::future::pending()` (see `reap_one_on_an_empty_set_never_resolves`),
+    /// which never reports `Ready`, so `biased` still falls through to the
+    /// competing branch on every round where nothing is finished — this
+    /// changes only which branch wins when *both* are ready, never which
+    /// one is polled first.
+    #[tokio::test]
+    async fn reap_one_is_not_starved_by_a_continuously_ready_competing_branch() {
+        let mut owned = OwnedTasks::new();
+        for _ in 0..50 {
+            owned.spawn(async {});
+        }
+        // Let every spawned task actually run to completion before racing
+        // the reap against anything — otherwise this measures scheduling
+        // latency, not the `select!` ordering under test.
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            owned.len(),
+            50,
+            "every spawned task must have finished by now"
+        );
+
+        let mut reaped = 0;
+        for _ in 0..50 {
+            tokio::select! {
+                biased;
+                _ = owned.reap_one() => { reaped += 1; }
+                () = std::future::ready(()) => {
+                    // The `listener.accept()` analogue: ready on every
+                    // single poll, exactly like a kernel backlog that
+                    // never once drains during a flood.
+                }
+            }
+        }
+        assert_eq!(
+            reaped, 50,
+            "reap_one must still be serviced every round even though the competing branch is \
+             always ready"
+        );
+        assert_eq!(
+            owned.len(),
+            0,
+            "every finished task's entry must have been drained"
+        );
+    }
+
     #[tokio::test]
     async fn join_all_waits_for_every_owned_task_cooperatively() {
         let mut owned = OwnedTasks::new();

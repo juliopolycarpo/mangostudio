@@ -113,6 +113,25 @@ pub async fn run(
         tokio::select! {
             biased;
             () = cancel.cancelled() => break,
+            // Ordered before `accept`, not after: `biased` polls branches
+            // in source order and never reaches a later one while an
+            // earlier one is ready, and `listener.accept()` stays ready
+            // for as long as the kernel backlog holds connections — which
+            // is precisely the unauthenticated flood this reap exists to
+            // survive. A reap listed after `accept` is starved on exactly
+            // that path, so completed tasks would only ever be reaped at
+            // shutdown under the load that motivated adding this at all —
+            // measured directly (see this crate's own tests) by racing
+            // `reap_one` against a branch that never once returns Pending,
+            // which is the abstract shape of a saturated accept loop.
+            //
+            // Reordering is safe on the *idle* path too: `reap_one` on an
+            // empty `OwnedTasks` awaits `std::future::pending()`, which
+            // never resolves, so `biased` still falls through to `accept`
+            // on every poll where nothing is finished — this only changes
+            // which branch wins when *both* are ready, never which one is
+            // considered first.
+            _ = owned.reap_one() => {}
             accepted = listener.accept() => {
                 match accepted {
                     Ok((stream, _peer_addr)) => {
@@ -140,13 +159,6 @@ pub async fn run(
                     }
                 }
             }
-            // Reaps a finished connection task's `OwnedTasks` entry the
-            // instant it completes, rather than only at shutdown: `serve`
-            // is routinely bound to more than loopback, so a long-lived
-            // process here can outlive a great many historical
-            // connections, and none of them needs to leave a dead entry
-            // behind for the whole of that uptime.
-            _ = owned.reap_one() => {}
         }
     }
 
