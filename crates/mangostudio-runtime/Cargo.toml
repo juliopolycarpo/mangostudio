@@ -5,9 +5,10 @@ name = "mangostudio-runtime"
 # archive ships this binary alongside `mangostudio`/`mangostudio-runtime` built
 # from the same tag (see the launcher's own `binstall` metadata), and a hub's
 # `requireMatchingRelease` check compares this against the app release, never
-# the protocol version. `scripts/check-versions.ts`'s lockstep set does not
-# cover this manifest yet — bump it by hand alongside the root version until
-# it does.
+# the protocol version. `scripts/lib/release-version.ts`'s `APP_VERSIONED_CRATES`
+# enforces this lockstep (via `bun run check:versions`) and
+# `bumpLockstepVersions` bumps it on release — this manifest's version is
+# never hand-maintained.
 version = "0.1.1"
 authors.workspace = true
 categories = ["command-line-utilities", "network-programming"]
