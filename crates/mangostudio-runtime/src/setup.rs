@@ -221,6 +221,84 @@ pub fn resolve_profile_source(
     }
 }
 
+/// Parses `raw` — `MANGOSTUDIO_RUNTIME_SETUP`'s value, as
+/// [`crate::config::RuntimeConfig::setup_profile`] reads it verbatim and
+/// unvalidated — into a real profile. Mirrors `isRuntimeSetupProfile`:
+/// only `full`, `readonly`, and `none` are values someone can *set*;
+/// `custom` is never one of them, it is what any other capability
+/// combination is called after the fact.
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime::setup::parse_setup_profile;
+/// use mangostudio_runtime_contract::manifest::ManifestProfile;
+///
+/// assert_eq!(parse_setup_profile("readonly"), Some(ManifestProfile::Readonly));
+/// assert_eq!(parse_setup_profile("custom"), None);
+/// assert_eq!(parse_setup_profile("not-a-profile"), None);
+/// ```
+#[must_use]
+pub fn parse_setup_profile(raw: &str) -> Option<ManifestProfile> {
+    match raw {
+        "full" => Some(ManifestProfile::Full),
+        "readonly" => Some(ManifestProfile::Readonly),
+        "none" => Some(ManifestProfile::None),
+        _ => None,
+    }
+}
+
+/// [`resolve_profile_source`], but starting from `MANGOSTUDIO_RUNTIME_SETUP`'s
+/// raw string rather than an already-parsed profile — the bridge
+/// [`crate::config::RuntimeConfig`] (which parses every environment variable
+/// exactly once, unvalidated) and this module (which judges whether the
+/// value it received means anything) are deliberately kept on either side
+/// of, matching `setup.ts`'s own two-step read.
+///
+/// An environment value that does not parse is only fatal when `flag` is
+/// absent — mirrors `setup.ts`'s own reasoning: "the command that repairs a
+/// machine whose `MANGOSTUDIO_RUNTIME_SETUP` went stale is precisely an
+/// explicit `setup --profile … --yes`", so a flag must be able to override a
+/// broken environment rather than being refused because of it.
+///
+/// # Errors
+/// The exact message `setup.ts` raises for an unparseable
+/// `MANGOSTUDIO_RUNTIME_SETUP`, naming the bad value, when `flag` is absent.
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime::setup::resolve_profile_source_from_raw_env;
+/// use mangostudio_runtime_contract::manifest::ManifestProfile;
+///
+/// let error = resolve_profile_source_from_raw_env(None, Some("sandbox")).unwrap_err();
+/// assert_eq!(
+///     error,
+///     "MANGOSTUDIO_RUNTIME_SETUP is \"sandbox\", which is not a profile. Use full, readonly, or none."
+/// );
+///
+/// // A flag outranks a broken environment value rather than being refused because of it.
+/// let resolved =
+///     resolve_profile_source_from_raw_env(Some(ManifestProfile::Full), Some("sandbox")).unwrap();
+/// assert!(resolved.is_some());
+/// ```
+pub fn resolve_profile_source_from_raw_env(
+    flag: Option<ManifestProfile>,
+    raw_env: Option<&str>,
+) -> Result<Option<(ManifestProfile, SetupAuthority)>, String> {
+    let env_profile = raw_env.and_then(parse_setup_profile);
+    if flag.is_none()
+        && let Some(raw) = raw_env
+        && env_profile.is_none()
+    {
+        return Err(format!(
+            "MANGOSTUDIO_RUNTIME_SETUP is \"{raw}\", which is not a profile. Use full, \
+             readonly, or none."
+        ));
+    }
+    Ok(resolve_profile_source(flag, env_profile))
+}
+
 /// What a non-interactive setup call actually wrote.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetupOutcome {
@@ -454,6 +532,50 @@ mod tests {
     #[test]
     fn resolve_profile_source_is_none_when_neither_answers() {
         assert_eq!(resolve_profile_source(None, None), None);
+    }
+
+    #[test]
+    fn parse_setup_profile_accepts_only_the_three_real_profiles() {
+        assert_eq!(parse_setup_profile("full"), Some(ManifestProfile::Full));
+        assert_eq!(
+            parse_setup_profile("readonly"),
+            Some(ManifestProfile::Readonly)
+        );
+        assert_eq!(parse_setup_profile("none"), Some(ManifestProfile::None));
+        assert_eq!(parse_setup_profile("custom"), None);
+        assert_eq!(parse_setup_profile("Full"), None);
+    }
+
+    #[test]
+    fn an_unparseable_environment_value_is_fatal_only_without_a_flag() {
+        let error = resolve_profile_source_from_raw_env(None, Some("sandbox")).unwrap_err();
+        assert_eq!(
+            error,
+            "MANGOSTUDIO_RUNTIME_SETUP is \"sandbox\", which is not a profile. Use full, \
+             readonly, or none."
+        );
+    }
+
+    #[test]
+    fn a_flag_outranks_a_broken_environment_value_instead_of_being_refused_by_it() {
+        let resolved =
+            resolve_profile_source_from_raw_env(Some(ManifestProfile::Full), Some("sandbox"))
+                .unwrap();
+        assert_eq!(resolved, Some((ManifestProfile::Full, SetupAuthority::Cli)));
+    }
+
+    #[test]
+    fn a_valid_environment_value_resolves_and_is_attributed_to_env() {
+        let resolved = resolve_profile_source_from_raw_env(None, Some("readonly")).unwrap();
+        assert_eq!(
+            resolved,
+            Some((ManifestProfile::Readonly, SetupAuthority::Env))
+        );
+    }
+
+    #[test]
+    fn no_flag_and_no_environment_value_resolves_to_nothing_and_is_not_an_error() {
+        assert_eq!(resolve_profile_source_from_raw_env(None, None), Ok(None));
     }
 
     #[test]
