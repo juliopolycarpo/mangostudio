@@ -139,14 +139,22 @@ jobs:
       - run: cargo metadata --manifest-path crates/mango-protocol/fuzz/Cargo.toml --locked --no-deps --format-version 1
 
   runtime-home-fixture-freshness:
-    # `tests/fixtures/rust-home` is committed output, not built at test time:
-    # `ts_compat.rs` reads a TypeScript-written fixture directly, and
-    # `apps/runtime/tests/unit/runtime-home-rust-compat.test.ts` reads this
-    # one. Neither test regenerates it, so if `write_runtime_slot_config`'s
-    # output shape ever changes, both keep passing against a stale fixture
-    # and silently stop proving anything about the direction it covers. This
-    # job is the freshness check that gap needs: it is the only place
-    # `generate_rust_fixture.rs`'s `#[ignore]`d regenerator actually runs.
+    # Both `tests/fixtures/rust-home` and `tests/fixtures/ts-home` are
+    # committed output, not built at test time: `ts_compat.rs` reads
+    # `ts-home` directly, and `generate_rust_fixture.rs`'s own
+    # `#[ignore]`d regenerator (plus
+    # `apps/runtime/tests/unit/runtime-home-rust-compat.test.ts`) reads
+    # `rust-home`. Nothing else regenerates either one, so if either
+    # language's write shape ever changes, both keep passing against a
+    # stale fixture and silently stop proving anything about the direction
+    # they cover. This job is the freshness check that gap needs for both
+    # directions: it is the only place either regenerator actually runs.
+    #
+    # Each freshness check stages the fixture directory before diffing the
+    # index against `HEAD`, not a plain `git diff --exit-code` against the
+    # worktree: staging is what makes a brand-new file the regenerator
+    # starts emitting show up as a failure too, not only a changed byte in
+    # a file that already existed.
     name: Runtime-home fixture freshness
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
@@ -163,8 +171,23 @@ jobs:
 
       - run: cargo test -p mangostudio-runtime --test generate_rust_fixture --locked -- --ignored
 
-      - name: Fail if regenerating changed the committed fixture
-        run: git diff --exit-code -- crates/mangostudio-runtime/tests/fixtures/rust-home
+      - name: Fail if regenerating changed the committed rust-home fixture
+        run: |
+          git add -A -- crates/mangostudio-runtime/tests/fixtures/rust-home
+          git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/rust-home
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run --filter @mangostudio/runtime fixtures:home
+
+      - name: Fail if regenerating changed the committed ts-home fixture
+        run: |
+          git add -A -- crates/mangostudio-runtime/tests/fixtures/ts-home
+          git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/ts-home
 
   gate:
     # Stable required check ("Cargo Shim / Gate"): all Rust lanes may skip only

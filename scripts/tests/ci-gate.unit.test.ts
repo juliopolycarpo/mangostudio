@@ -226,6 +226,30 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(msrvBlock).toContain('cargo test -p mangostudio --all-targets --locked');
   });
 
+  test('the fixture freshness lane regenerates and diffs both rust-home and ts-home', () => {
+    const freshnessBlock = extractJobBlock(workflow, 'runtime-home-fixture-freshness');
+
+    // Regenerate, then stage before diffing against `HEAD` — a plain
+    // `git diff --exit-code` against the worktree would miss a brand-new
+    // file either regenerator started emitting.
+    expect(freshnessBlock).toContain(
+      'cargo test -p mangostudio-runtime --test generate_rust_fixture --locked -- --ignored'
+    );
+    expect(freshnessBlock).toContain(
+      'git add -A -- crates/mangostudio-runtime/tests/fixtures/rust-home'
+    );
+    expect(freshnessBlock).toContain(
+      'git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/rust-home'
+    );
+    expect(freshnessBlock).toContain('bun run --filter @mangostudio/runtime fixtures:home');
+    expect(freshnessBlock).toContain(
+      'git add -A -- crates/mangostudio-runtime/tests/fixtures/ts-home'
+    );
+    expect(freshnessBlock).toContain(
+      'git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/ts-home'
+    );
+  });
+
   test('gate needs every mandatory job and accepts the Rust skip only when irrelevant', () => {
     const gateBlock = extractJobBlock(workflow, 'gate');
 
