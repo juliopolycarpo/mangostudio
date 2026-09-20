@@ -21,6 +21,9 @@ export interface ManifestVersion {
 export const MANIFESTS = {
   protocolPackage: 'packages/protocol/package.json',
   cargoWorkspace: 'Cargo.toml',
+  // Same file as `cargoWorkspace`, a different section — kept as its own display label so a
+  // lockstep failure names which of Cargo.toml's two version fields drifted.
+  cargoWorkspaceDependency: 'Cargo.toml ([workspace.dependencies] mango-protocol)',
   cargoLock: 'Cargo.lock',
 } as const;
 
@@ -44,6 +47,7 @@ export async function readVersions(root = ROOT_DIR): Promise<ManifestVersion[]> 
   return [
     { file: MANIFESTS.protocolPackage, version: protocolPackage.version },
     { file: MANIFESTS.cargoWorkspace, version: workspaceVersion(cargo) },
+    { file: MANIFESTS.cargoWorkspaceDependency, version: workspaceDependencyVersion(cargo) },
     { file: MANIFESTS.cargoLock, version: lockedCrateVersion(lock) },
   ];
 }
@@ -73,6 +77,27 @@ export function workspaceVersion(cargoToml: string): string {
   const section = cargoToml.split(/^\[workspace\.package\]$/m)[1];
   const match = section?.match(/^version = "([^"]+)"$/m);
   if (!match?.[1]) throw new Error('Cargo.toml has no version under [workspace.package].');
+  return match[1];
+}
+
+/**
+ * The version pinned in `[workspace.dependencies]`'s `mango-protocol` entry — a `path`
+ * dependency between workspace members that `deny.toml`'s `bans.wildcards = "deny"` requires
+ * to also carry an explicit `version`, kept in lockstep with `[workspace.package].version` by
+ * hand rather than structurally, since Cargo has no "same as the workspace version" shorthand
+ * for a dependency requirement the way it does for a member crate's own `version.workspace =
+ * true`.
+ *
+ * @example
+ * workspaceDependencyVersion(
+ *   'mango-protocol = { path = "crates/mango-protocol", version = "0.1.0" }\n'
+ * ); // '0.1.0'
+ */
+export function workspaceDependencyVersion(cargoToml: string): string {
+  const match = cargoToml.match(/mango-protocol\s*=\s*\{[^}]*version\s*=\s*"([^"]+)"/);
+  if (!match?.[1]) {
+    throw new Error('Cargo.toml has no mango-protocol entry under [workspace.dependencies].');
+  }
   return match[1];
 }
 
@@ -115,5 +140,13 @@ export async function writeVersions(version: string, root = ROOT_DIR): Promise<v
   const [head, tail] = cargo.split(/^\[workspace\.package\]$/m);
   if (tail === undefined) throw new Error('Cargo.toml has no [workspace.package] section.');
   const nextTail = tail.replace(/^version = "[^"]+"$/m, `version = "${version}"`);
-  await Bun.write(cargoPath, `${head}[workspace.package]${nextTail}`);
+  const withWorkspaceVersion = `${head}[workspace.package]${nextTail}`;
+
+  const dependencyPattern = /(mango-protocol\s*=\s*\{[^}]*version\s*=\s*")[^"]+(")/;
+  if (!dependencyPattern.test(withWorkspaceVersion)) {
+    throw new Error('Cargo.toml has no mango-protocol entry under [workspace.dependencies].');
+  }
+  const withDependencyVersion = withWorkspaceVersion.replace(dependencyPattern, `$1${version}$2`);
+
+  await Bun.write(cargoPath, withDependencyVersion);
 }
