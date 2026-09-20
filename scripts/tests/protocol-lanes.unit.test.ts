@@ -255,9 +255,9 @@ describe('the protocol tree at the repository root', () => {
     // A package nested under a workspace root that is neither a member nor
     // excluded makes cargo refuse to build it outright.
     const manifest = readText('Cargo.toml');
-    expect(manifest).toContain(
-      'members = ["crates/mango-protocol", "crates/mangostudio-launcher"]'
-    );
+    expect(manifest).toContain('"crates/mango-protocol"');
+    expect(manifest).toContain('"crates/mangostudio-launcher"');
+    expect(manifest).toContain('"crates/mangostudio-runtime-contract"');
     expect(manifest).toContain('exclude = ["crates/mango-protocol/fuzz"]');
     expect(manifest).not.toContain('packages/cargo-shim');
   });
