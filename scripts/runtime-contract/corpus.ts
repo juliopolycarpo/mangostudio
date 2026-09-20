@@ -24,6 +24,17 @@ import { RUNTIME_CONTRACT } from '@mangostudio/shared/runtime-contract';
 import type { TSchema } from 'typebox';
 import Value from 'typebox/value';
 
+/**
+ * Thrown by {@link patternSeed} and {@link manualCreate} for the specific shapes that are
+ * unsatisfiable outright — an unrecognised `pattern`, or a `uniqueItems` array needing more
+ * distinct items than the repair can invent — as opposed to a schema shape `manualCreate`
+ * simply does not recognise as one of the ones it repairs. The distinction matters inside an
+ * `anyOf`: a branch `manualCreate` does not recognise just is not this branch, so the loop
+ * tries the next one; a `CorpusSeedError` means the corpus generator itself needs a fix, and
+ * must not be swallowed by that same fallback.
+ */
+class CorpusSeedError extends Error {}
+
 /** Which side of a method a fixture exercises, or the whole payload of a topic. */
 type CorpusSide = 'params' | 'result';
 
@@ -71,7 +82,7 @@ function patternSeed(pattern: string): string {
     case '^sha256:[a-f0-9]{64}$':
       return `sha256:${'0'.repeat(64)}`;
     default:
-      throw new Error(
+      throw new CorpusSeedError(
         `runtime-contract corpus: no seed generator for pattern ${JSON.stringify(pattern)}. ` +
           'Add one to patternSeed() in scripts/runtime-contract/corpus.ts.'
       );
@@ -107,7 +118,7 @@ function manualCreate(schema: TSchema): unknown {
   if (asRecord.type === 'array' && asRecord.uniqueItems === true) {
     const minItems = (asRecord.minItems as number | undefined) ?? 0;
     if (minItems > 1) {
-      throw new Error(
+      throw new CorpusSeedError(
         `runtime-contract corpus: a uniqueItems array needs ${minItems} distinct items and ` +
           'manualCreate() only ever invents one. Extend manualCreate() in ' +
           'scripts/runtime-contract/corpus.ts.'
@@ -120,7 +131,11 @@ function manualCreate(schema: TSchema): unknown {
     for (const branch of asRecord.anyOf as TSchema[]) {
       try {
         return createSeed(branch);
-      } catch {
+      } catch (cause) {
+        // A `CorpusSeedError` means a leaf is unsatisfiable outright, not that this branch
+        // was merely the wrong one — that must reach the caller, not fall through to the
+        // next branch and hand the corpus a degenerate seed from an unrelated shape.
+        if (cause instanceof CorpusSeedError) throw cause;
         // Not this branch — try the next one.
       }
     }

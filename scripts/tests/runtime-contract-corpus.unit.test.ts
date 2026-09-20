@@ -117,6 +117,23 @@ describe('runtime contract corpus', () => {
         /unknown-pattern/
       );
     });
+
+    test('an unrecognised pattern inside a union branch still fails loudly, instead of silently seeding a later branch', () => {
+      // Before the fix, the `anyOf` fallback in `manualCreate()` swallowed *any* throw from a
+      // branch, including this one's unsatisfiable pattern, and fell through to `Type.Null()`
+      // — a degenerate one-fixture seed of `null` that still passed
+      // "every subject has at least one valid seed", just with zero mutations.
+      const schema = Type.Union([
+        Type.Object(
+          { id: Type.String({ pattern: '^completely-unknown-pattern$' }) },
+          { additionalProperties: false }
+        ),
+        Type.Null(),
+      ]);
+      expect(() =>
+        buildFixturesForSubject({ kind: 'topic', name: 't.union-unknown' }, schema)
+      ).toThrow(/completely-unknown-pattern/);
+    });
   });
 
   describe('objectShapeOf', () => {
