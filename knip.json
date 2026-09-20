@@ -46,11 +46,12 @@
     "apps/runtime": {
       "entry": [
         "src/cli.ts",
+        "scripts/*.ts",
         "tests/**/*.test.ts",
         "tests/support/external-agent-fixture.ts",
         "tests/support/codex-rate-limit-fixtures.ts"
       ],
-      "project": ["src/**/*.ts", "tests/**/*.ts"],
+      "project": ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
       "ignore": ["src/services/external-agents/codex/protocol/**"]
     },
     "packages/protocol": {
