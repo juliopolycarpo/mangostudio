@@ -123,7 +123,7 @@ pub struct FileAudit {
     max_files: u32,
     wall_clock: Arc<dyn WallClock>,
     state: Mutex<State>,
-    /// Serialises `append_line`'s read-size, maybe-rotate, then-write
+    /// Serialises `append_line_locked`'s read-size, maybe-rotate, then-write
     /// sequence, kept separate from `state`: two `record` calls dispatched
     /// as concurrent tasks (mango_protocol's `JoinSet`, not TypeScript's
     /// single-threaded event loop) can both read the file's current length
@@ -205,12 +205,14 @@ impl FileAudit {
         Ok(())
     }
 
-    fn append_line(&self, line: &str) -> std::io::Result<()> {
-        // Held across the whole read-size, maybe-rotate, then-write
-        // sequence — see `write_lock`'s own doc comment for why a partial
-        // hold (or none at all) lets two concurrent callers both decide to
-        // rotate from the same stale length.
-        let _write_guard = lock(&self.write_lock);
+    /// The read-size, maybe-rotate, then-write sequence itself, assuming
+    /// `write_lock` is already held — [`FileAudit::drain_buffer`] is the
+    /// sole caller, and takes `write_lock` itself before calling in;
+    /// nothing here takes it again, or draining a batch would deadlock
+    /// against its own outer lock. See `write_lock`'s own doc comment for
+    /// why a partial hold (or none at all) lets two concurrent callers both
+    /// decide to rotate from the same stale length.
+    fn append_line_locked(&self, line: &str) -> std::io::Result<()> {
         // Mirrors `writeBatch`'s own `mkdir(dirname(path), { recursive:
         // true })`: a slot whose runtime-home directory does not exist yet
         // would otherwise fail every write with `ENOENT`, buffer forever,
@@ -263,22 +265,31 @@ impl FileAudit {
         self.drain_buffer();
     }
 
-    /// Retries every buffered line, oldest first. Stops at the first one
-    /// that still fails, putting it (and everything after it) back so
-    /// ordering is preserved for the next attempt.
+    /// Retries every currently buffered line, oldest first, stopping at the
+    /// first one that still fails and putting it back so ordering is
+    /// preserved for the next attempt. Holds `write_lock` for the whole
+    /// drain rather than re-acquiring it one line at a time: two `record`
+    /// calls each buffering their own line and then racing to drain used
+    /// to let each drain snapshot a different, disjoint slice of
+    /// `state.buffered` and then interleave their writes in whatever order
+    /// the two drains happened to acquire the per-line lock, not the order
+    /// the lines were buffered in. Popping from the front of the shared
+    /// queue one at a time — instead of collecting a snapshot first — means
+    /// a line another thread buffers while this drain is already running
+    /// still gets picked up by this same drain; that thread's own call to
+    /// `drain_buffer` then simply finds an empty queue once it gets its
+    /// turn at `write_lock`, and returns immediately.
     fn drain_buffer(&self) {
-        let pending: Vec<String> = lock(&self.state).buffered.drain(..).collect();
-        if pending.is_empty() {
-            self.clear_error();
-            return;
-        }
-        for (index, line) in pending.iter().enumerate() {
-            if let Err(error) = self.append_line(line) {
+        let _write_guard = lock(&self.write_lock);
+        loop {
+            let Some(line) = lock(&self.state).buffered.pop_front() else {
+                self.clear_error();
+                return;
+            };
+            if let Err(error) = self.append_line_locked(&line) {
                 let dropped = {
                     let mut state = lock(&self.state);
-                    for remaining in pending[index..].iter().rev() {
-                        state.buffered.push_front(remaining.clone());
-                    }
+                    state.buffered.push_front(line);
                     state.dropped
                 };
                 let suffix = if dropped > 0 {
@@ -290,7 +301,6 @@ impl FileAudit {
                 return;
             }
         }
-        self.clear_error();
     }
 
     fn build_line(&self, entry: &AuditEntry, hub_label: &str) -> String {
@@ -349,7 +359,7 @@ mod tests {
     use serde_json::Value;
 
     use super::{FileAudit, HubIdentity};
-    use crate::ports::audit::{Audit, AuditEntry, Outcome};
+    use crate::ports::audit::{Audit, AuditEntry, Outcome, lock};
     use crate::ports::wall_clock::FixedWallClock;
 
     fn scratch_dir(name: &str) -> std::path::PathBuf {
@@ -539,7 +549,7 @@ mod tests {
 
     #[test]
     fn concurrent_writers_at_the_rotation_boundary_lose_no_lines() {
-        // The regression this guards: `append_line`'s read-size,
+        // The regression this guards: `append_line_locked`'s read-size,
         // maybe-rotate, then-write sequence used to run under no lock at
         // all. Two `record` calls dispatched as concurrent tasks (this
         // crate's real shape — `mango_protocol`'s `JoinSet`, not
@@ -596,6 +606,57 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_line_queued_before_a_race_begins_is_never_written_after_one_queued_during_it() {
+        // The regression this guards: `drain_buffer` used to snapshot the
+        // whole buffer into a local `Vec` under `state`'s lock, then
+        // release that lock before writing anything. Two independent
+        // drains racing this way could each grab a disjoint slice of the
+        // queue and then compete for the per-line write lock on their own,
+        // with no guarantee the drain holding the earlier slice won it
+        // first — a line queued later could land on disk before one
+        // queued earlier. FIRST is queued here before the race starts, so
+        // its position ahead of every racer is established independently
+        // of which thread the barrier happens to schedule first; the only
+        // correct outcome is FIRST written before all of them, however the
+        // race lands. Racing many concurrent writers rather than one
+        // widens the window the bug needs: any single racer landing its
+        // own disjoint slice ahead of FIRST's is enough to fail.
+        const RACERS: usize = 8;
+        for attempt in 0..200 {
+            let dir = scratch_dir(&format!("drain-order-{attempt}"));
+            let audit = Arc::new(FileAudit::new(
+                dir.join("audit.log"),
+                Arc::new(FixedWallClock::new(SystemTime::now())),
+            ));
+            lock(&audit.state).buffered.push_back("FIRST".to_string());
+
+            let barrier = Arc::new(Barrier::new(RACERS));
+            let threads: Vec<_> = (0..RACERS)
+                .map(|racer| {
+                    let audit = Arc::clone(&audit);
+                    let barrier = Arc::clone(&barrier);
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        audit.write_or_buffer(format!("RACER-{racer}"));
+                    })
+                })
+                .collect();
+            for thread in threads {
+                thread.join().unwrap();
+            }
+
+            let contents = std::fs::read_to_string(dir.join("audit.log")).unwrap_or_default();
+            let lines: Vec<&str> = contents.lines().collect();
+            assert_eq!(
+                lines.first().copied(),
+                Some("FIRST"),
+                "attempt {attempt}: FIRST was queued before any racer could even exist and must \
+                 never be written after one — got {lines:?}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn a_write_that_cannot_land_is_buffered_and_reported_in_the_sidecar_error_file() {
         // A directory sitting where the log file belongs makes every write
@@ -631,7 +692,7 @@ mod tests {
         // A directory sitting where the log file belongs blocks every
         // write with EISDIR, deterministically — the same trick the
         // sidecar-error test above uses. A merely *missing* parent
-        // directory no longer buffers anything: `append_line` creates it
+        // directory no longer buffers anything: `append_line_locked` creates it
         // on demand, mirroring `writeBatch`'s own `mkdir(..., { recursive:
         // true })`.
         std::fs::create_dir(&path).unwrap();
