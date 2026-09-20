@@ -1,8 +1,8 @@
 // Lockstep version bump used by scripts/release/prepare-release.ts. Rewrites
 // every manifest release-version.ts checks (workspace package.json files plus
-// the launcher manifest and its entry in the shared Cargo.lock) in two phases — transform everything,
-// then write — so a bad manifest fails before any file changes and a partial
-// bump is impossible.
+// every APP_VERSIONED_CRATES manifest and its entry in the shared Cargo.lock)
+// in two phases — transform everything, then write — so a bad manifest fails
+// before any file changes and a partial bump is impossible.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -10,8 +10,7 @@ import { join } from 'node:path';
 import { setCargoLockVersion, setCargoManifestVersion } from './cargo-version';
 import { ROOT_DIR } from './config';
 import {
-  LAUNCHER_CRATE,
-  LAUNCHER_MANIFEST,
+  APP_VERSIONED_CRATES,
   LOCKSTEP_PACKAGES,
   normalizeVersion,
   readCargoLockVersion,
@@ -49,9 +48,10 @@ export function setPackageVersion(raw: string, version: string): string {
   return updated;
 }
 
-/** Bump every lockstep manifest (root + workspace package.json files, the
- * launcher Cargo.toml, and its entry in the shared Cargo.lock) to `version`. Returns the
- * repo-relative paths written, in write order.
+/** Bump every lockstep manifest (root + workspace package.json files, every
+ * `APP_VERSIONED_CRATES` entry's Cargo.toml, and each one's entry in the
+ * shared Cargo.lock) to `version`. Returns the repo-relative paths written,
+ * in write order.
  * // Usage: bumpLockstepVersions('0.2.0') */
 export function bumpLockstepVersions(
   version: string,
@@ -67,24 +67,28 @@ export function bumpLockstepVersions(
     return { relativePath, path, content: setPackageVersion(readFileSync(path, 'utf8'), target) };
   });
 
-  const manifestPath = join(rootDir, LAUNCHER_MANIFEST);
   const lockPath = join(rootDir, WORKSPACE_CARGO_LOCKFILE);
-  // The release-version readers surface a missing file or section with their
-  // established messages before the stampers transform the raw source.
-  readCargoManifestVersion(manifestPath);
-  readCargoLockVersion(lockPath, LAUNCHER_CRATE);
-  writes.push(
-    {
-      relativePath: LAUNCHER_MANIFEST,
+  let lockContent: string;
+  try {
+    lockContent = readFileSync(lockPath, 'utf8');
+  } catch (cause) {
+    throw new Error(`Cannot read Cargo lockfile at ${lockPath}`, { cause });
+  }
+  for (const crate of APP_VERSIONED_CRATES) {
+    const manifestPath = join(rootDir, crate.manifest);
+    // The release-version readers surface a missing file, section, or lock
+    // entry with their established messages before the stampers transform
+    // the raw source.
+    readCargoManifestVersion(manifestPath);
+    readCargoLockVersion(lockPath, crate.crateName);
+    writes.push({
+      relativePath: crate.manifest,
       path: manifestPath,
       content: setCargoManifestVersion(readFileSync(manifestPath, 'utf8'), target),
-    },
-    {
-      relativePath: WORKSPACE_CARGO_LOCKFILE,
-      path: lockPath,
-      content: setCargoLockVersion(readFileSync(lockPath, 'utf8'), LAUNCHER_CRATE, target),
-    }
-  );
+    });
+    lockContent = setCargoLockVersion(lockContent, crate.crateName, target);
+  }
+  writes.push({ relativePath: WORKSPACE_CARGO_LOCKFILE, path: lockPath, content: lockContent });
 
   for (const write of writes) {
     writeFileSync(write.path, write.content);

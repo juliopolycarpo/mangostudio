@@ -32,6 +32,12 @@
           - "packages/protocol/**"
           - "crates/mango-protocol/**"
           - "scripts/protocol/**"
+          # The Rust runtime foundation: the embedded contract crate and the
+          # dispatcher that serves it. Same reasoning as the protocol crates
+          # above — a change scoped only to one of these would otherwise
+          # carry no area: or type: label.
+          - "crates/mangostudio-runtime-contract/**"
+          - "crates/mangostudio-runtime/**"
 
 "area: git":
   - changed-files:

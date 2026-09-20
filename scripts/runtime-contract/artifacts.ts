@@ -41,6 +41,7 @@ import {
   RuntimeSlotConfigSchema,
   RuntimeSlotCredentialsSchema,
 } from '@mangostudio/shared/runtime-home';
+import { corpusDocument } from './corpus';
 
 /** Where the committed artifacts live, relative to the repository root. */
 export const ARTIFACT_DIR = 'apps/shared/src/runtime-contract/generated';
@@ -173,6 +174,7 @@ export const CONTRACT_ARTIFACTS: readonly ContractArtifact[] = [
   { name: 'health.schema.json', build: healthDocument },
   { name: 'install-output.schema.json', build: installOutputDocument },
   { name: 'strings.json', build: stringsDocument },
+  { name: 'conformance-corpus.json', build: corpusDocument },
 ];
 
 /**

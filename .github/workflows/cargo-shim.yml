@@ -16,6 +16,7 @@ on:
     branches: [main]
     paths:
       - "crates/**"
+      - "apps/shared/src/runtime-contract/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "deny.toml"
@@ -62,7 +63,7 @@ jobs:
             exit 1
           fi
 
-          relevant='^(crates/|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$)'
+          relevant='^(crates/|apps/shared/src/runtime-contract/|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$)'
           if grep -Eq "$relevant" "$RUNNER_TEMP/changed-files"; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
