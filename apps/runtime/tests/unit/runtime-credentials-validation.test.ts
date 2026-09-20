@@ -6,6 +6,12 @@
  * the next write. See `apps/runtime/src/runtime-home.ts`'s
  * `readRuntimeSlotCredentialsState` and `requireReplaceableCredentials`.
  *
+ * Also covers the two review findings from the same PR: a writer discarding a
+ * field a newer build wrote at the *same* schema version (`writePairingToken`/
+ * `writeServeToken` used to spread only the two fields they know about), and
+ * a generic `rejects.toThrow()` that would pass for any thrown value, not
+ * specifically `RuntimeCredentialsRefusedError`.
+ *
  * Fixture bytes live in `../fixtures/runtime-credentials.ts`, named so a
  * second implementation of this layer can drive the same cases.
  */
@@ -14,6 +20,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  RuntimeCredentialsRefusedError,
   readPairingToken,
   readRuntimeSlotCredentialsState,
   readServeToken,
@@ -22,13 +29,16 @@ import {
   writeServeToken,
 } from '../../src/runtime-home';
 import {
+  ARRAY_DOCUMENT_CREDENTIALS_JSON,
   EMPTY_CREDENTIALS_JSON,
   FUTURE_SCHEMA_CREDENTIALS_JSON,
   INVALID_JSON_CREDENTIALS,
   MALFORMED_SIBLING_CREDENTIALS_JSON,
+  NULL_DOCUMENT_CREDENTIALS_JSON,
   NUMERIC_TOKEN_CREDENTIALS_JSON,
   OBJECT_TOKEN_CREDENTIALS_JSON,
   RUNTIME_CREDENTIALS_FIXTURES,
+  TRUNCATED_AFTER_TOKEN_CREDENTIALS_JSON,
   VALID_CREDENTIALS_JSON,
 } from '../fixtures/runtime-credentials';
 
@@ -61,6 +71,14 @@ async function readRawCredentials(
   return JSON.parse(
     await Bun.file(join(runtimeSlotDir(slot, env), 'credentials.json')).text()
   ) as unknown;
+}
+
+/** Whether a refused write left its lock behind. It must not: the `finally` in `withSlotLock` always removes it. */
+async function credentialsLockExists(
+  slot: 'host' | 'wsl' | 'remote',
+  env: NodeJS.ProcessEnv
+): Promise<boolean> {
+  return await Bun.file(join(runtimeSlotDir(slot, env), 'credentials.lock')).exists();
 }
 
 describe('runtime credentials validation', () => {
@@ -97,13 +115,15 @@ describe('runtime credentials validation', () => {
     const env = await isolatedEnv();
     await writeRawCredentials('remote', FUTURE_SCHEMA_CREDENTIALS_JSON, env);
 
-    await expect(writeServeToken('remote', 'srv_selector.new', env)).rejects.toThrow(
-      /schemaVersion 2/
-    );
+    const rejection = writeServeToken('remote', 'srv_selector.new', env);
+    await expect(rejection).rejects.toBeInstanceOf(RuntimeCredentialsRefusedError);
+    await expect(rejection).rejects.toThrow(/schemaVersion 2/);
 
     // The file on disk must be untouched — not downgraded to schemaVersion 1.
     const raw = (await readRawCredentials('remote', env)) as { schemaVersion: unknown };
     expect(raw.schemaVersion).toBe(2);
+    // A refusal must not leave the next writer waiting out the lock timeout.
+    expect(await credentialsLockExists('remote', env)).toBe(false);
   });
 
   it('never quotes a token value in the refusal for an unsupported schema version', async () => {
@@ -170,19 +190,65 @@ describe('runtime credentials validation', () => {
 
     const state = await readRuntimeSlotCredentialsState('remote', env);
     expect(state.error).toContain('could not be read');
-    expect(state.mayReplaceOnWrite).toBe(false);
+    expect(state.kind).toBe('refused');
 
-    await expect(writePairingToken('remote', 'mrt_selector.new', env)).rejects.toThrow(
-      /could not be read/
-    );
+    const rejection = writePairingToken('remote', 'mrt_selector.new', env);
+    await expect(rejection).rejects.toBeInstanceOf(RuntimeCredentialsRefusedError);
+    await expect(rejection).rejects.toThrow(/could not be read/);
+    expect(await credentialsLockExists('remote', env)).toBe(false);
+  });
+
+  // A duplicated path would read
+  // "…/credentials.json could not be read (EISDIR: … open '…/credentials.json')."
+  // — the error code alone, not the raw `Error#message`, avoids saying the
+  // same path twice.
+  it('names the unreadable path only once', async () => {
+    const env = await isolatedEnv();
+    await mkdir(join(runtimeSlotDir('remote', env), 'credentials.json'), { recursive: true });
+
+    const state = await readRuntimeSlotCredentialsState('remote', env);
+    const path = join(runtimeSlotDir('remote', env), 'credentials.json');
+    expect(state.error?.split(path).length).toBe(2);
+  });
+
+  // `unsupportedCredentialsSchemaVersion` guards its `schemaVersion` lookup
+  // with a `typeof`/`null`/`Array.isArray` check before it does anything
+  // else; drop that guard and either fixture throws a `TypeError` instead of
+  // producing a diagnostic.
+  it('never throws on a null credentials.json document', async () => {
+    const env = await isolatedEnv();
+    await writeRawCredentials('remote', NULL_DOCUMENT_CREDENTIALS_JSON, env);
+
+    const state = await readRuntimeSlotCredentialsState('remote', env);
+    expect(state.kind).toBe('replaceable');
+    expect(await readPairingToken('remote', env)).toBeNull();
+  });
+
+  it('never throws on an array credentials.json document', async () => {
+    const env = await isolatedEnv();
+    await writeRawCredentials('remote', ARRAY_DOCUMENT_CREDENTIALS_JSON, env);
+
+    const state = await readRuntimeSlotCredentialsState('remote', env);
+    expect(state.kind).toBe('replaceable');
+    expect(await readPairingToken('remote', env)).toBeNull();
+  });
+
+  it('never quotes a token truncated mid-write', async () => {
+    const env = await isolatedEnv();
+    await writeRawCredentials('remote', TRUNCATED_AFTER_TOKEN_CREDENTIALS_JSON, env);
+
+    const state = await readRuntimeSlotCredentialsState('remote', env);
+    expect(state.error).toContain('is not valid JSON');
+    expect(state.error).not.toContain('mrt_selector.truncated');
   });
 });
 
 /**
  * The decision table `RUNTIME_CREDENTIALS_FIXTURES` settled, exercised
- * mechanically: every case reads the tokens the table says it must, and every
- * case is either replaceable by an ordinary rotation or refuses one — never
- * silently something in between.
+ * mechanically: every case reads the tokens the table says it must, reports
+ * the diagnostic the table says without leaking a token, and is either
+ * replaceable by an ordinary rotation or refuses one — never silently
+ * something in between.
  */
 describe.each(Object.entries(RUNTIME_CREDENTIALS_FIXTURES))(
   'credentials fixture: %s',
@@ -205,25 +271,26 @@ describe.each(Object.entries(RUNTIME_CREDENTIALS_FIXTURES))(
       } else {
         expect(state.error).toContain(fixture.errorSubstring);
       }
-      // Every fixture's raw bytes carry a `mrt_`/`srv_`-prefixed token or a
-      // bare number; neither belongs in a diagnostic.
-      if (fixture.raw !== null) expect(state.error ?? '').not.toContain(fixture.raw);
+      for (const token of fixture.tokensToNeverLeak) {
+        expect(state.error ?? '').not.toContain(token);
+      }
     });
 
     it(
-      fixture.mayReplaceOnWrite
-        ? 'lets an ordinary rotation replace it'
-        : 'refuses an ordinary rotation',
+      fixture.kind === 'refused'
+        ? 'refuses an ordinary rotation'
+        : 'lets an ordinary rotation replace it',
       async () => {
         const env = await isolatedEnv();
         if (fixture.raw !== null) await writeRawCredentials('remote', fixture.raw, env);
 
         const attempt = writePairingToken('remote', 'mrt_selector.attempt', env);
-        if (fixture.mayReplaceOnWrite) {
+        if (fixture.kind === 'refused') {
+          await expect(attempt).rejects.toBeInstanceOf(RuntimeCredentialsRefusedError);
+          expect(await credentialsLockExists('remote', env)).toBe(false);
+        } else {
           await attempt;
           expect(await readPairingToken('remote', env)).toBe('mrt_selector.attempt');
-        } else {
-          await expect(attempt).rejects.toThrow();
         }
       }
     );

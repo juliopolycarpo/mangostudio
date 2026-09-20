@@ -416,51 +416,72 @@ export async function bootstrapServeToken(
   return { token, restricted };
 }
 
-/** What was in `credentials.json`, plus why it could not be trusted when that happened. */
-export interface RuntimeSlotCredentialsState {
-  /**
-   * Safe to authenticate with. Equal to what was stored when the whole file
-   * validated; `{ schemaVersion: 1 }` — no tokens — for every unusable shape,
-   * because a document that fails the schema on any field is not a source of
-   * individually-trustworthy siblings, and a file this process could not read
-   * or does not speak the version of is never read for its tokens at all.
-   */
-  readonly credentials: RuntimeSlotCredentials;
-  /** Diagnostic text, or null when the file was absent or fully valid. Never includes a token value. */
-  readonly error: string | null;
-  /**
-   * False when this process could not read the file at all, or when it read
-   * one naming a `schemaVersion` this build does not speak. Every
-   * other unusable shape — corrupt JSON, a schema mismatch on a field — may be
-   * silently replaced by the next write, same as the tolerant `catch` this
-   * replaces. Those two cases must not be: overwriting a version this build
-   * cannot parse with `schemaVersion: 1` is exactly the silent downgrade
-   * #1060 reported, and overwriting a file this process could not even open
-   * risks the identical loss for a reason this process cannot see through.
-   */
-  readonly mayReplaceOnWrite: boolean;
-}
+/**
+ * What was in `credentials.json`, plus why it could not be trusted when that
+ * happened. A union rather than an `error` string paired with an independent
+ * `mayReplaceOnWrite` flag, because those two were never actually independent
+ * — `error: null` only ever meant `usable`, and typing them separately let a
+ * fourth, meaningless combination compile.
+ */
+export type RuntimeSlotCredentialsState =
+  | {
+      /** The file was absent, or present and fully valid. Nothing to tell anybody. */
+      readonly kind: 'usable';
+      readonly credentials: RuntimeSlotCredentials;
+      readonly error: null;
+    }
+  | {
+      /**
+       * Present but unusable in a way that carries no information worth
+       * keeping — corrupt JSON, or a document that fails the schema for a
+       * reason other than its `schemaVersion`. The next write may discard it
+       * outright, the same tolerant recovery the pre-#1056 `catch` gave every
+       * unusable file.
+       */
+      readonly kind: 'replaceable';
+      readonly credentials: RuntimeSlotCredentials;
+      readonly error: string;
+    }
+  | {
+      /**
+       * Present but this process refuses to touch it: either it could not be
+       * read at all, or it names a `schemaVersion` this build does not speak.
+       * In both cases this process cannot see what a silent replace would
+       * destroy, which is exactly the loss #1060 reported.
+       */
+      readonly kind: 'refused';
+      readonly credentials: RuntimeSlotCredentials;
+      readonly error: string;
+    };
 
 /**
  * Reads `credentials.json` and says whether it can be trusted or replaced.
  *
  * Exported for the same reason `readRuntimeSlotState` is: a caller with a
- * better diagnostic to offer than "no token stored" — `assertServicePreconditions`,
- * `doctor` — needs `error` and `mayReplaceOnWrite` alongside the tokens
- * themselves, not just the pass/fail `readPairingToken` gives.
+ * better diagnostic to offer than "no token stored" — `resolveToken` in
+ * `cli.ts`, `assertServicePreconditions` — needs `error` and `kind` alongside
+ * the tokens themselves, not just the pass/fail `readPairingToken` gives.
  */
 export async function readRuntimeSlotCredentialsState(
   slot: RuntimeSlot,
   env?: NodeJS.ProcessEnv
 ): Promise<RuntimeSlotCredentialsState> {
   const path = runtimeSlotCredentialsPath(slot, homeOptions(env));
-  const unusable = (
-    error: string | null,
-    mayReplaceOnWrite = true
-  ): RuntimeSlotCredentialsState => ({
-    credentials: { schemaVersion: CREDENTIALS_SCHEMA_VERSION },
+  const empty: RuntimeSlotCredentials = { schemaVersion: CREDENTIALS_SCHEMA_VERSION };
+  const usable = (): RuntimeSlotCredentialsState => ({
+    kind: 'usable',
+    credentials: empty,
+    error: null,
+  });
+  const replaceable = (error: string): RuntimeSlotCredentialsState => ({
+    kind: 'replaceable',
+    credentials: empty,
     error,
-    mayReplaceOnWrite,
+  });
+  const refused = (error: string): RuntimeSlotCredentialsState => ({
+    kind: 'refused',
+    credentials: empty,
+    error,
   });
 
   let raw: string;
@@ -468,12 +489,14 @@ export async function readRuntimeSlotCredentialsState(
     raw = await readFile(path, 'utf8');
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'ENOTDIR') return unusable(null);
+    if (code === 'ENOENT' || code === 'ENOTDIR') return usable();
     // Present but unreadable is not absent, and unlike absent it must not be
     // silently replaceable either: this process cannot see what is in the
     // file, so it cannot rule out that a rename would destroy a version it
     // has never heard of — the exact risk a future schemaVersion carries.
-    return unusable(`${path} could not be read (${describe(error)}).`, false);
+    // The error code, not the full message: Node's message already repeats
+    // `path` inside itself, and printing both would say it twice.
+    return refused(`${path} could not be read (${code ?? describe(error)}).`);
   }
 
   let parsed: unknown;
@@ -482,33 +505,29 @@ export async function readRuntimeSlotCredentialsState(
   } catch {
     // Never echoes the parser's message: it can quote back a fragment of
     // `raw`, and `raw` is exactly the file that must never be pasted anywhere.
-    return unusable(`${path} is not valid JSON.`);
+    return replaceable(`${path} is not valid JSON.`);
   }
 
   if (Value.Check(RuntimeSlotCredentialsSchema, parsed)) {
-    return { credentials: parsed, error: null, mayReplaceOnWrite: true };
+    return { kind: 'usable', credentials: parsed, error: null };
   }
 
   const futureVersion = unsupportedCredentialsSchemaVersion(parsed);
   if (futureVersion !== null) {
-    return unusable(
-      `${path} is schemaVersion ${futureVersion}, which this build of the runtime does not understand.`,
-      false
+    return refused(
+      `${path} is schemaVersion ${futureVersion}, which this build of the runtime does not understand.`
     );
   }
-  return unusable(`${path} does not match the runtime credentials schema.`);
+  return replaceable(`${path} does not match the runtime credentials schema.`);
 }
 
 /**
  * The file's `schemaVersion`, when it is a number this build does not speak —
  * null for everything else, including a document whose only problem is a
- * wrong-shaped token.
- *
- * Kept separate from the general schema check so the two failure shapes never
- * share a code path: a wrong-shaped document is safe for the next write to
- * replace outright (nothing in it was trustworthy anyway), but a numbered
- * version this build has never heard of might hold fields only a newer
- * runtime understands, and replacing it would delete them for good.
+ * wrong-shaped token, and including a document that is not an object at all
+ * (`null`, an array, a bare string): `schemaVersion` is only ever read off a
+ * plain object, so anything else answers "not a version mismatch" and falls
+ * through to the generic schema-mismatch diagnostic instead of throwing here.
  */
 function unsupportedCredentialsSchemaVersion(parsed: unknown): number | null {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
@@ -517,26 +536,59 @@ function unsupportedCredentialsSchemaVersion(parsed: unknown): number | null {
 }
 
 /**
+ * What to tell an operator once `error` has already been shown, or `null` for
+ * `usable` — there is nothing to add to a message that was never printed.
+ *
+ * `replaceable` only needs the command repeated: passing a token (or letting
+ * one generate) already replaces the file. `refused` needs a person, because
+ * this process will not touch the file itself — moving it aside is what lets
+ * the same command write a fresh one in its place.
+ */
+export function credentialsRemedy(state: RuntimeSlotCredentialsState): string | null {
+  switch (state.kind) {
+    case 'usable':
+      return null;
+    case 'replaceable':
+      return 'Rerun this command with a token (or let it generate one); that replaces the file.';
+    case 'refused':
+      return 'Move it aside, then rerun this command; it will write a fresh credentials.json in its place.';
+  }
+}
+
+/**
+ * `state.error` plus its remedy, on one line, or `fallback` when the file was
+ * absent or fine. The single place every caller — the thrown refusal below,
+ * `resolveToken`/`resolveServeToken`, `assertServicePreconditions` — builds
+ * its message, so the wording only has to be right once.
+ */
+export function credentialsUnusableMessage(
+  state: RuntimeSlotCredentialsState,
+  fallback: string
+): string {
+  if (!state.error) return fallback;
+  const remedy = credentialsRemedy(state);
+  return remedy ? `${state.error} ${remedy}` : state.error;
+}
+
+/**
  * The credentials a writer may merge its new token into, or a refusal.
  *
- * Every unusable shape but one collapses to `{ schemaVersion: 1 }` here, which
- * is what makes rotating a pairing or serve token double as the repair for a
- * missing, corrupt, or wrong-shaped file — the same tolerant behaviour the
- * pre-#1056 `catch` gave every unusable file, preserved because a `connect` or
- * `serve` failing over a file it cannot use would be worse than replacing it.
- * The one exception is a schema version this build does not understand: only
- * an operator can judge whether it is safe to discard, so this throws instead
- * of guessing, under the same lock a deliberate repair would need anyway.
+ * `replaceable` collapses to `{ schemaVersion: 1 }` here, which is what makes
+ * rotating a pairing or serve token double as the repair for a corrupt or
+ * wrong-shaped file — the same tolerant behaviour the pre-#1056 `catch` gave
+ * every unusable file, preserved because a `connect` or `serve` failing over
+ * a file it cannot use would be worse than replacing it. `refused` is the one
+ * exception: only an operator can judge whether it is safe to discard, so
+ * this throws instead of guessing, under the same lock a deliberate repair
+ * would need anyway.
  */
 async function requireReplaceableCredentials(
   slot: RuntimeSlot,
   env?: NodeJS.ProcessEnv
 ): Promise<RuntimeSlotCredentials> {
   const state = await readRuntimeSlotCredentialsState(slot, env);
-  if (!state.mayReplaceOnWrite) {
-    throw new RuntimeCredentialsRefusedError(
-      `${state.error} Move it aside and rerun this command to issue a fresh credential.`
-    );
+  if (state.kind === 'refused') {
+    throw new RuntimeCredentialsRefusedError(credentialsUnusableMessage(state, state.error));
   }
   return state.credentials;
 }

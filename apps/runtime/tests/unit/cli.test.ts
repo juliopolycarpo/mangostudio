@@ -13,6 +13,7 @@ import {
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import { parseRuntimeCliArgs, RUNTIME_CLI_USAGE } from '../../src/cli';
 import { LEGACY_HELLO_1_0_1_NDJSON_LINE } from '../fixtures/legacy-hello-1-0-1';
+import { FUTURE_SCHEMA_CREDENTIALS_JSON } from '../fixtures/runtime-credentials';
 
 const CLI_ENTRY = join(import.meta.dir, '../../src/cli.ts');
 const SPAWN_TIMEOUT_MS = 15_000;
@@ -453,6 +454,60 @@ describe('mangostudio-runtime binary', () => {
       // what is asserted is that it is not still the unstarted one.
       expect(peer.pid).toBeDefined();
       expect(await peer.terminate()).not.toEqual({ code: 0, signal: null });
+    },
+    SPAWN_TIMEOUT_MS
+  );
+
+  // #1078 review: a refusal from `writePairingToken` used to propagate past
+  // `connect`'s `instanceof` catch as an unhandled rejection the moment
+  // `RuntimeCredentialsRefusedError` stopped being the class actually thrown
+  // — which a generic `rejects.toThrow()` in the unit suite could not catch.
+  // No hub is needed: the refusal fires before `connectToHub` is ever called.
+  it(
+    'refuses a connect over a future schema version without crashing',
+    async () => {
+      const home = await isolatedHome();
+      await Bun.write(
+        join(home, 'runtime/remote/credentials.json'),
+        FUTURE_SCHEMA_CREDENTIALS_JSON
+      );
+
+      const run = await runCli(['connect', '--hub', 'ws://127.0.0.1:9/'], {
+        env: { MANGO_HOME: home, MANGOSTUDIO_RUNTIME_TOKEN: 'mrt_selector.env' },
+      });
+
+      expect(run.exitCode).toBe(1);
+      expect(run.stderr).toContain('schemaVersion 2');
+      // A crash would print the class name and a stack frame; a clean
+      // refusal prints neither.
+      expect(run.stderr).not.toContain('RuntimeCredentialsRefusedError');
+      expect(run.stderr).not.toMatch(/^\s+at /m);
+    },
+    SPAWN_TIMEOUT_MS
+  );
+
+  // #1078 review: `resolveToken` used to collapse every unusable
+  // `credentials.json` to a bare `null`, so `connect` printed "No pairing
+  // token" for a slot that plainly has one — indistinguishable from a fresh
+  // box, and a restart-looping unattended service would never learn why.
+  it(
+    'explains a stored pairing token it refuses to trust, instead of saying none is stored',
+    async () => {
+      const home = await isolatedHome();
+      await Bun.write(
+        join(home, 'runtime/remote/credentials.json'),
+        FUTURE_SCHEMA_CREDENTIALS_JSON
+      );
+
+      // No --token and no MANGOSTUDIO_RUNTIME_TOKEN: `connect` falls back to
+      // whatever is stored, which is the path that used to lose the reason.
+      const run = await runCli(['connect', '--hub', 'ws://127.0.0.1:9/'], {
+        env: { MANGO_HOME: home },
+      });
+
+      expect(run.exitCode).toBe(1);
+      expect(run.stderr).toContain('schemaVersion 2');
+      expect(run.stderr).not.toContain('No pairing token');
     },
     SPAWN_TIMEOUT_MS
   );

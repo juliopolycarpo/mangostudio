@@ -25,10 +25,10 @@ import {
 import { loadRuntimeConfig } from '../config';
 import { RuntimeServiceManagementError } from '../errors';
 import {
+  credentialsUnusableMessage,
   type RuntimeSlotState,
-  readPairingToken,
+  readRuntimeSlotCredentialsState,
   readRuntimeSlotState,
-  readServeToken,
 } from '../runtime-home';
 
 export const RUNTIME_SERVICE_DOCS_URL =
@@ -106,11 +106,14 @@ export async function assertServicePreconditions(
         'Connect is not configured. Run "mangostudio-runtime connect --hub <url>" once before "service install --mode connect".'
       );
     }
-    const token = await readPairingToken(PAIRED_SLOT, env);
-    if (!token) {
+    const pairingState = await readRuntimeSlotCredentialsState(PAIRED_SLOT, env);
+    if (!pairingState.credentials.pairingToken) {
       throw new RuntimeServiceManagementError(
         'runtime_service_unconfigured',
-        'No pairing token is stored. Run "mangostudio-runtime connect" with a token before installing the connect service.'
+        credentialsUnusableMessage(
+          pairingState,
+          'No pairing token is stored. Run "mangostudio-runtime connect" with a token before installing the connect service.'
+        )
       );
     }
     return;
@@ -121,11 +124,14 @@ export async function assertServicePreconditions(
       'Serve is not configured. Run "mangostudio-runtime serve --listen <host:port>" once before "service install --mode serve".'
     );
   }
-  const serveToken = await readServeToken(PAIRED_SLOT, env);
-  if (!serveToken) {
+  const serveState = await readRuntimeSlotCredentialsState(PAIRED_SLOT, env);
+  if (!serveState.credentials.serveToken) {
     throw new RuntimeServiceManagementError(
       'runtime_service_unconfigured',
-      'No serve token is stored. Run "mangostudio-runtime serve" once before installing the serve service.'
+      credentialsUnusableMessage(
+        serveState,
+        'No serve token is stored. Run "mangostudio-runtime serve" once before installing the serve service.'
+      )
     );
   }
 }
