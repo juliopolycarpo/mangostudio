@@ -138,11 +138,46 @@ jobs:
 
       - run: cargo metadata --manifest-path crates/mango-protocol/fuzz/Cargo.toml --locked --no-deps --format-version 1
 
+  runtime-home-fixture-freshness:
+    # `tests/fixtures/rust-home` is committed output, not built at test time:
+    # `ts_compat.rs` reads a TypeScript-written fixture directly, and
+    # `apps/runtime/tests/unit/runtime-home-rust-compat.test.ts` reads this
+    # one. Neither test regenerates it, so if `write_runtime_slot_config`'s
+    # output shape ever changes, both keep passing against a stale fixture
+    # and silently stop proving anything about the direction it covers. This
+    # job is the freshness check that gap needs: it is the only place
+    # `generate_rust_fixture.rs`'s `#[ignore]`d regenerator actually runs.
+    name: Runtime-home fixture freshness
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: rustup show active-toolchain
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - run: cargo test -p mangostudio-runtime --test generate_rust_fixture --locked -- --ignored
+
+      - name: Fail if regenerating changed the committed fixture
+        run: git diff --exit-code -- crates/mangostudio-runtime/tests/fixtures/rust-home
+
   gate:
     # Stable required check ("Cargo Shim / Gate"): all Rust lanes may skip only
     # after the changes job proves the pull request has no Rust workspace diff.
     name: Gate
-    needs: [changes, workspace, launcher-msrv, fuzz-workspace]
+    needs:
+      [
+        changes,
+        workspace,
+        launcher-msrv,
+        fuzz-workspace,
+        runtime-home-fixture-freshness,
+      ]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -160,6 +195,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv fuzz-workspace' || '' }}
+          ALLOWED_SKIPS: ${{ needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv fuzz-workspace runtime-home-fixture-freshness' || '' }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
