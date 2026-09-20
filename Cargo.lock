@@ -532,6 +532,8 @@ dependencies = [
 name = "mangostudio-runtime"
 version = "0.1.1"
 dependencies = [
+ "base64",
+ "getrandom 0.3.4",
  "jsonschema",
  "mango-protocol",
  "mangostudio-runtime-contract",

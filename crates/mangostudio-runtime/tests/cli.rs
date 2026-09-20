@@ -112,6 +112,70 @@ fn serve_prints_the_setup_pending_signature_on_a_slot_armed_pending() {
     );
 }
 
+/// `serve` with no token anywhere — no `--token`, no
+/// `MANGOSTUDIO_RUNTIME_SERVE_TOKEN`, nothing stored — generates one,
+/// prints it exactly once, and persists it through the owner-only
+/// credentials writer, mirroring `cli.ts`'s `resolveServeToken` falling
+/// through to `bootstrapServeToken`.
+#[test]
+fn serve_with_no_token_anywhere_generates_one_prints_it_once_and_persists_it() {
+    use std::io::{BufRead as _, BufReader};
+
+    let home = scratch_mango_home("serve-bootstrap-token");
+    let mut child = Command::new(binary_path())
+        .args(["serve", "--listen", "0"])
+        .env("MANGO_HOME", &home)
+        .env_remove("MANGOSTUDIO_RUNTIME_SERVE_TOKEN")
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+
+    let stderr = child.stderr.take().expect("stderr was piped");
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            let found = line.contains("serve token (shown once):");
+            let _ = sender.send(line);
+            if found {
+                break;
+            }
+        }
+    });
+
+    let mut printed_line = None;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        match receiver.recv_timeout(std::time::Duration::from_millis(200)) {
+            Ok(line) => {
+                if line.contains("serve token (shown once):") {
+                    printed_line = Some(line);
+                    break;
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+
+    let printed_line = printed_line.expect("serve must print the generated token exactly once");
+    let printed_token = printed_line
+        .rsplit_once(": ")
+        .map(|(_, token)| token.trim())
+        .expect("the line names the token after a colon");
+
+    let credentials =
+        std::fs::read_to_string(home.join("runtime").join("remote").join("credentials.json"))
+            .expect("bootstrap_serve_token must have written credentials.json");
+    let stored: serde_json::Value = serde_json::from_str(&credentials).unwrap();
+    assert_eq!(
+        stored["serveToken"],
+        serde_json::Value::String(printed_token.to_string()),
+        "the printed token and the persisted one must be the same value"
+    );
+}
+
 /// `setup --profile` writes a real answer non-interactively and exits `0`.
 #[test]
 fn setup_writes_a_profile_and_exits_zero() {

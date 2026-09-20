@@ -411,12 +411,37 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         return 1;
     }
 
-    let Some(token) = resolve_token(args.token_source, "serveToken", env) else {
-        eprintln!(
-            "mangostudio-runtime: no serve token. Pipe one in with --token stdin, or set \
-             MANGOSTUDIO_RUNTIME_SERVE_TOKEN."
-        );
-        return 1;
+    let token = match resolve_token(args.token_source, "serveToken", env) {
+        Some(token) => token,
+        // Only the default source falls all the way through to generating
+        // one: an explicit `--token stdin`/`--token env` that came back
+        // empty is a caller naming a specific source, not asking for a
+        // fresh credential — mirrors `resolveServeToken`'s own precedence.
+        None if args.token_source == TokenSource::EnvOrStored => {
+            match crate::runtime_home::bootstrap_serve_token(RuntimeSlot::Remote, &home) {
+                Ok((token, restricted)) => {
+                    if !restricted {
+                        eprintln!(
+                            "mangostudio-runtime: warning: the serve token file could not be \
+                             restricted to this user."
+                        );
+                    }
+                    eprintln!("mangostudio-runtime: serve token (shown once): {token}");
+                    token
+                }
+                Err(error) => {
+                    eprintln!("mangostudio-runtime: could not generate a serve token: {error}");
+                    return 1;
+                }
+            }
+        }
+        None => {
+            eprintln!(
+                "mangostudio-runtime: no serve token. Pipe one in with --token stdin, or set \
+                 MANGOSTUDIO_RUNTIME_SERVE_TOKEN."
+            );
+            return 1;
+        }
     };
 
     let _ = write_runtime_slot_config(
@@ -533,9 +558,11 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
 /// Resolves a bearer credential per [`TokenSource`]: `Stdin` reads one
 /// trimmed line, `Env` reads only the environment variable, and the default
 /// falls back to `credentials.json`'s `field` when the environment is
-/// empty. Never generates one — see this module's own doc comment on why
-/// `serve`'s auto-bootstrap (`bootstrapServeToken` in `cli.ts`) is out of
-/// scope here.
+/// empty. Never generates one itself — `run_serve` is the only caller that
+/// falls through to [`crate::runtime_home::bootstrap_serve_token`] on the
+/// default source, mirroring `resolveServeToken`'s own precedence in
+/// `cli.ts` (an explicit `stdin`/`env` source that came back empty is
+/// refused, never silently upgraded to a freshly generated credential).
 fn resolve_token(source: TokenSource, field: &str, env: &impl EnvSource) -> Option<String> {
     match source {
         TokenSource::Stdin => {
