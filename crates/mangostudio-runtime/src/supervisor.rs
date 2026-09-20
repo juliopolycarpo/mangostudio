@@ -71,6 +71,26 @@
 //! last-resort for a task that ignored its cancellation token, and that
 //! path is itself tested to *not* fire on the happy path (see
 //! `transport::serve`'s tests).
+//!
+//! # Two named limits this crate does not own yet
+//!
+//! Every resource this crate actually spawns or admits has a named bound —
+//! see each transport module's own constants. Two the wider bounded-resource
+//! brief for this crate names have **no owner here on purpose**:
+//!
+//! - **Blocking workers.** Nothing in [`crate::transport`] does blocking
+//!   filesystem/hash/PTY work; [`crate::registry::Registry`] is empty (no
+//!   machine method groups are in scope), so there is no blocking handler
+//!   work yet to run off a Tokio executor thread, and therefore nothing to
+//!   size a worker pool for. The plan that adds a filesystem, process, or
+//!   terminal method group owns naming and bounding this.
+//! - **Output tails.** A tail is process/PTY output, and this crate spawns
+//!   no processes and opens no PTY. The plan that adds process or terminal
+//!   methods owns this bound too.
+//!
+//! Inventing either now would be unused infrastructure guessing at a shape
+//! neither method group has settled yet; leaving the gap named here is
+//! preferred over that guess.
 
 use std::future::Future;
 use std::time::Duration;
