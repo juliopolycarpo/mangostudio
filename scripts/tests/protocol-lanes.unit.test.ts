@@ -254,9 +254,15 @@ describe('the protocol tree at the repository root', () => {
   test('the cargo workspace owns the launcher and excludes only the fuzz workspace', () => {
     // A package nested under a workspace root that is neither a member nor
     // excluded makes cargo refuse to build it outright.
+    //
+    // Every crate under `crates/` must be listed here individually: this
+    // test only proves each named member is present, so a new crate added
+    // to the workspace without a matching line here would still pass —
+    // add it the same commit the crate lands in.
     const manifest = readText('Cargo.toml');
     expect(manifest).toContain('"crates/mango-protocol"');
     expect(manifest).toContain('"crates/mangostudio-launcher"');
+    expect(manifest).toContain('"crates/mangostudio-runtime"');
     expect(manifest).toContain('"crates/mangostudio-runtime-contract"');
     expect(manifest).toContain('exclude = ["crates/mango-protocol/fuzz"]');
     expect(manifest).not.toContain('packages/cargo-shim');
