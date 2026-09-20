@@ -11,5 +11,12 @@
 //!   future before it can reach `mango_protocol`'s dispatcher, which would
 //!   otherwise put the raw panic payload on the wire, verbatim and
 //!   unredacted.
+//! - [`result_check`] — validates a handler's result against the contract
+//!   before it is serialised, from *inside* the audit-recording wrapper
+//!   rather than via
+//!   [`mango_protocol::contract::ServeOptions::validate_results`]. See the
+//!   module docs for why the placement matters and why this crate always
+//!   runs the check, unlike the TypeScript runtime's production opt-out.
 
 pub mod panic;
+pub mod result_check;
