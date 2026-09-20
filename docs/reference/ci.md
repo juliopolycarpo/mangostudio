@@ -1,7 +1,7 @@
 # Continuous Integration
 
-How MangoStudio gates merges on `main`, and which GitHub checks are safe to
-require in branch protection.
+How MangoStudio gates merges on `main` and the temporary `feat/rust-runtime`
+integration branch, and which GitHub checks are safe to require in repository rules.
 
 ## Aggregate gates
 
@@ -14,7 +14,7 @@ shapes, or path filters.
 | Workflow check name      | Workflow                                | Role                                                                                                                                                                              |
 | ------------------------ | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CI / Gate`              | `.github/workflows/ci.yml`              | Always reports; Canary also depends on this gate; accepts `distribution` and `smoke` skips when only documentation-surface paths changed, and `qa-metrics` on `workflow_dispatch` |
-| `Cargo Shim / Gate`      | `.github/workflows/cargo-shim.yml`      | Always reports; accepts the Rust lane skip when no Rust path changed                                                                                                              |
+| `Cargo Shim / Gate`      | `.github/workflows/cargo-shim.yml`      | Stable legacy check name for the root Rust workspace; runs locked build/test on Linux, macOS and Windows, the launcher MSRV check, and fuzz-workspace resolution                  |
 | `Release Dry Run / Gate` | `.github/workflows/release-dry-run.yml` | Always reports; accepts each dry-run lane skip when irrelevant                                                                                                                    |
 
 Unit tests in `scripts/tests/ci-gate.unit.test.ts` derive each gate's expected
@@ -96,8 +96,9 @@ composite and asserts they have no external runtime imports.
 
 ## Branch protection / required checks
 
-Required checks on `main` should be the three stable gates above, plus the
-independent security / process checks that are not folded into those gates:
+Required checks on `main` and, while the Rust migration is active,
+`feat/rust-runtime` should be the three stable gates above, plus the independent
+security / process checks that are not folded into those gates:
 
 - `CI / Gate`
 - `Cargo Shim / Gate`
@@ -113,6 +114,8 @@ that every mandatory lane feeds a gate.
 
 Updating the repository ruleset itself is a GitHub settings operation, not a
 commit. After changing which checks are required, keep this section in sync.
+Publishing remains restricted to tags and pushes to `main`; a pull request that
+targets `feat/rust-runtime` must run checks without gaining a publish path.
 
 ## Related
 

@@ -1,22 +1,26 @@
 name: Cargo Shim
 
-# Lints, tests, and builds the crates.io launcher crate. It is its own cargo
-# workspace, on its own version line and toolchain, and the root Cargo.toml
-# excludes it; the Mango Protocol crate is owned by protocol-ci.yml. The heavy
-# lane only runs when this crate's paths change — but
-# the workflow itself triggers on every PR: path detection happens in the
-# cheap `changes` job so the `Cargo Shim / Gate` check below always reports
-# and is safe to require in branch protection (a path-filtered workflow that
-# never starts leaves a required check pending forever). Pushes to main keep
-# the path filter; required checks only apply to PRs.
+# The workflow name stays stable because repository rules require its Gate
+# check. The implementation now owns the complete root Cargo workspace: all
+# workspace members build and test on the three supported runner OSes, while
+# the published launcher keeps its explicit MSRV lane. The fuzz crate remains
+# excluded from stable workspace builds and is resolved through its own lock.
+#
+# Pull requests always start the workflow so the Gate check reports even when
+# the Rust lanes are irrelevant. Pushes to main keep a path filter.
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feat/rust-runtime]
   push:
     branches: [main]
     paths:
-      - "packages/cargo-shim/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "deny.toml"
+      - "rustfmt.toml"
+      - "rust-toolchain.toml"
       - ".github/workflows/cargo-shim.yml"
   workflow_dispatch:
 
@@ -33,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      cargo_shim: ${{ steps.changed.outputs.cargo_shim }}
+      rust: ${{ steps.changed.outputs.rust }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,42 +45,66 @@ jobs:
           persist-credentials: false
 
       - id: changed
-        name: Check cargo shim paths
+        name: Check Rust workspace paths
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo "cargo_shim=true" >> "$GITHUB_OUTPUT"
+            echo "rust=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
-          if grep -Eq '^(packages/cargo-shim/|\.github/workflows/cargo-shim\.yml$)' "$RUNNER_TEMP/changed-files"; then
-            echo "cargo_shim=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "cargo_shim=false" >> "$GITHUB_OUTPUT"
+          git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
+          if [ ! -s "$RUNNER_TEMP/changed-files" ]; then
+            echo "changes job: empty diff between $BASE_SHA and $HEAD_SHA; refusing to skip the Rust lanes" >&2
+            exit 1
           fi
 
-  cargo-shim:
-    name: fmt, clippy, test, build
+          relevant='^(crates/|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$)'
+          if grep -Eq "$relevant" "$RUNNER_TEMP/changed-files"; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rust=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  workspace:
+    name: Workspace (${{ matrix.os }})
     needs: [changes]
-    if: needs.changes.outputs.cargo_shim == 'true'
+    if: needs.changes.outputs.rust == 'true'
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: rustup show active-toolchain
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - run: cargo fmt --all -- --check
+
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - run: cargo test --workspace --all-targets --all-features --locked
+
+      - run: cargo build --workspace --locked
+
+  launcher-msrv:
+    name: Launcher MSRV
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: packages/cargo-shim
     env:
-      # The repository root carries `rust-toolchain.toml` for the Mango Protocol
-      # workspace, and rustup resolves that file by walking up from the working
-      # directory — so it overrides the toolchain the action below installs and
-      # this crate would silently stop being built against its MSRV. Measured:
-      # from `packages/cargo-shim`, `rustup show active-toolchain` reports
-      # "1.98.1 (overridden by '<root>/rust-toolchain.toml')". The environment
-      # variable outranks the file, which is the only lever that does not mean
-      # a second toolchain file to keep in sync.
+      # This outranks the root rust-toolchain.toml, so the launcher cannot
+      # silently drift from the floor declared in its Cargo.toml.
       RUSTUP_TOOLCHAIN: 1.96.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -86,21 +114,34 @@ jobs:
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: 1.96.0
-          components: rustfmt, clippy
+          components: clippy
 
-      - run: cargo fmt --check
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
-      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo check -p mangostudio --all-targets --locked
 
-      - run: cargo test --locked
+      - run: cargo clippy -p mangostudio --all-targets --locked -- -D warnings
 
-      - run: cargo build --locked
+      - run: cargo test -p mangostudio --all-targets --locked
+
+  fuzz-workspace:
+    name: Fuzz workspace metadata
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: cargo metadata --manifest-path crates/mango-protocol/fuzz/Cargo.toml --locked --no-deps --format-version 1
 
   gate:
-    # Always-reporting aggregate ("Cargo Shim / Gate"): accepts the Rust lane
-    # as skipped only when the `changes` job proved no Rust path changed.
+    # Stable required check ("Cargo Shim / Gate"): all Rust lanes may skip only
+    # after the changes job proves the pull request has no Rust workspace diff.
     name: Gate
-    needs: [changes, cargo-shim]
+    needs: [changes, workspace, launcher-msrv, fuzz-workspace]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -118,6 +159,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ needs.changes.outputs.cargo_shim == 'false' && 'cargo-shim' || '' }}
+          ALLOWED_SKIPS: ${{ needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv fuzz-workspace' || '' }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts

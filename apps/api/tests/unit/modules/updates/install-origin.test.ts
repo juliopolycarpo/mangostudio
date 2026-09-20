@@ -208,7 +208,7 @@ describe('restartLauncher', () => {
   const NPM = '/usr/local/lib/node_modules/mangostudio/bin/mangostudio.js';
 
   it("names cargo's Unix shim, the one launcher that execs in place", () => {
-    // packages/cargo-shim calls CommandExt::exec on Unix, so the pid the
+    // crates/mangostudio-launcher calls CommandExt::exec on Unix, so the pid the
     // restart spawned is the pid the hub writes to its state file.
     expect(restartLauncher({ manager: 'cargo', launcherPath: CARGO }, 'linux')).toBe(CARGO);
     expect(restartLauncher({ manager: 'cargo', launcherPath: CARGO }, 'darwin')).toBe(CARGO);

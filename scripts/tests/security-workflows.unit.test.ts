@@ -18,7 +18,7 @@ describe('security workflows', () => {
     const workflow = readText('.github/workflows/codeql.yml');
     const languageExpression = '$' + '{{ matrix.language }}';
 
-    expect(workflow).toContain('pull_request:\n    branches: [main]');
+    expect(workflow).toContain('pull_request:\n    branches: [main, feat/rust-runtime]');
     expect(workflow).toContain('push:\n    branches: [main]');
     expect(workflow).toContain('schedule:');
     expect(workflow).toContain('workflow_dispatch:');
@@ -38,7 +38,7 @@ describe('security workflows', () => {
   test('dependency review is a PR-only vulnerability gate with no license policy', () => {
     const workflow = readText('.github/workflows/dependency-review.yml');
 
-    expect(workflow).toContain('pull_request:\n    branches: [main]');
+    expect(workflow).toContain('pull_request:\n    branches: [main, feat/rust-runtime]');
     expect(workflow).not.toContain('push:');
     expect(workflow).toContain('permissions:\n  contents: read');
     expect(workflow).toContain('fail-on-severity: moderate');
@@ -86,8 +86,8 @@ describe('security workflows', () => {
 
   test('every shipped dependency ecosystem is covered by Dependabot', () => {
     const config = readText('.github/dependabot.yml');
-    // cargo-shim is published to crates.io and its Cargo.lock is enforced with
-    // --locked; without a cargo entry nothing ever updates it. Docker base
+    // The unified Cargo workspace publishes the launcher and enforces its root
+    // lockfile with --locked; without a cargo entry nothing ever updates it. Docker base
     // images ship on every release and need the same coverage.
     for (const ecosystem of ['github-actions', 'bun', 'cargo', 'docker']) {
       expect(config).toContain(`package-ecosystem: ${ecosystem}`);
@@ -100,7 +100,7 @@ describe('security workflows', () => {
     expect(bunBlock).toContain('prod-minor-patch:');
   });
 
-  test('the cargo shim has a classification label glob', () => {
-    expect(readText('.github/labeler.yml')).toContain('packages/cargo-shim/**');
+  test('the launcher has a classification label glob', () => {
+    expect(readText('.github/labeler.yml')).toContain('crates/mangostudio-launcher/**');
   });
 });

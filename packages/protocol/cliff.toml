@@ -111,7 +111,7 @@ sort_commits = "newest"
 # are the real ones.
 include_paths = [
   "packages/protocol/**",
-  "crates/**",
+  "crates/mango-protocol/**",
   "spec/**",
   "docs/protocol/**",
   "scripts/protocol/**",

@@ -21,10 +21,27 @@ const GATED_WORKFLOWS = [
   '.github/workflows/release-dry-run.yml',
 ] as const;
 
+const INTEGRATION_PR_WORKFLOWS = [
+  '.github/workflows/ci.yml',
+  '.github/workflows/cargo-shim.yml',
+  '.github/workflows/codeql.yml',
+  '.github/workflows/dependency-review.yml',
+  '.github/workflows/protocol-ci.yml',
+  '.github/workflows/release-dry-run.yml',
+  '.github/workflows/vendor-drift.yml',
+] as const;
+
 // GitHub expression opener, assembled out of band so the literal `${{` never
 // appears in a plain string — biome's noTemplateCurlyInString would flag it.
 // Interpolating it into a template literal is not flagged.
 const EXPR = '$' + '{{';
+
+describe('Rust integration branch coverage', () => {
+  test.each([...INTEGRATION_PR_WORKFLOWS])('%s runs for both protected PR targets', (path) => {
+    const onBlock = extractOnBlock(readText(path));
+    expect(onBlock).toContain('pull_request:\n    branches: [main, feat/rust-runtime]');
+  });
+});
 
 describe('gate result evaluation', () => {
   const skips = parseAllowedSkips('qa-metrics');
@@ -96,11 +113,11 @@ describe('ci.yml trigger and concurrency policy', () => {
    * one) has to come here and be justified, instead of quietly widening into a
    * branch allowlist.
    */
-  test('runs only for PRs to main, pushes to main, and manual dispatch', () => {
+  test('runs for PRs to main and the Rust integration branch, pushes to main, and manual dispatch', () => {
     const onBlock = extractOnBlock(workflow);
 
     expect(sectionKeys(onBlock)).toEqual(['pull_request', 'push', 'workflow_dispatch']);
-    expect(onBlock).toContain('pull_request:\n    branches: [main]');
+    expect(onBlock).toContain('pull_request:\n    branches: [main, feat/rust-runtime]');
     expect(onBlock).toContain('push:\n    branches: [main]');
     // No branch-prefix allowlist: development branches get CI via their PR.
     expect(onBlock).not.toContain('/**');
@@ -177,7 +194,7 @@ describe('CI / Gate aggregate', () => {
   });
 });
 
-describe('cargo-shim.yml always-reporting gate', () => {
+describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
   const workflow = readText('.github/workflows/cargo-shim.yml');
 
   test('triggers on every PR; only the push trigger keeps a path filter', () => {
@@ -186,18 +203,27 @@ describe('cargo-shim.yml always-reporting gate', () => {
     expect(sectionKeys(onBlock)).toEqual(['pull_request', 'push', 'workflow_dispatch']);
     // pull_request must not be path-filtered, or the Gate check would hang as
     // "expected" on non-Rust PRs.
-    expect(onBlock).toContain('pull_request:\n    branches: [main]\n  push:');
-    expect(onBlock).toContain('- "packages/cargo-shim/**"');
+    expect(onBlock).toContain('pull_request:\n    branches: [main, feat/rust-runtime]\n  push:');
+    expect(onBlock).toContain('- "crates/**"');
+    expect(onBlock).toContain('- "Cargo.toml"');
+    expect(onBlock).toContain('- "Cargo.lock"');
   });
 
-  test('the Rust lane runs only when the changes job saw a Rust path', () => {
-    const shimBlock = extractJobBlock(workflow, 'cargo-shim');
+  test('the workspace and launcher MSRV lanes run only when the changes job saw a Rust path', () => {
+    const workspaceBlock = extractJobBlock(workflow, 'workspace');
+    const msrvBlock = extractJobBlock(workflow, 'launcher-msrv');
 
-    expect(parseNeedsList(shimBlock)).toEqual(['changes']);
-    expect(shimBlock).toContain("if: needs.changes.outputs.cargo_shim == 'true'");
-    expect(workflow).toContain(
-      String.raw`grep -Eq '^(packages/cargo-shim/|\.github/workflows/cargo-shim\.yml$)'`
+    expect(parseNeedsList(workspaceBlock)).toEqual(['changes']);
+    expect(parseNeedsList(msrvBlock)).toEqual(['changes']);
+    expect(workspaceBlock).toContain("if: needs.changes.outputs.rust == 'true'");
+    expect(msrvBlock).toContain("if: needs.changes.outputs.rust == 'true'");
+    expect(workspaceBlock).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
+    expect(msrvBlock).toContain('components: clippy');
+    expect(msrvBlock).toContain('cargo check -p mangostudio --all-targets --locked');
+    expect(msrvBlock).toContain(
+      'cargo clippy -p mangostudio --all-targets --locked -- -D warnings'
     );
+    expect(msrvBlock).toContain('cargo test -p mangostudio --all-targets --locked');
   });
 
   test('gate needs every mandatory job and accepts the Rust skip only when irrelevant', () => {
@@ -205,7 +231,7 @@ describe('cargo-shim.yml always-reporting gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} needs.changes.outputs.cargo_shim == 'false' && 'cargo-shim' || '' }}`
+      `ALLOWED_SKIPS: ${EXPR} needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv fuzz-workspace' || '' }}`
     );
   });
 });
@@ -217,7 +243,9 @@ describe('release-dry-run.yml always-reporting gate', () => {
     const onBlock = extractOnBlock(workflow);
 
     expect(sectionKeys(onBlock)).toEqual(['pull_request', 'workflow_dispatch', 'schedule']);
-    expect(onBlock).toContain('pull_request:\n    branches: [main]\n  workflow_dispatch:');
+    expect(onBlock).toContain(
+      'pull_request:\n    branches: [main, feat/rust-runtime]\n  workflow_dispatch:'
+    );
   });
 
   test('each dry-run lane runs only when its relevance predicate is true', () => {
@@ -232,7 +260,8 @@ describe('release-dry-run.yml always-reporting gate', () => {
     expect(parseNeedsList(windowsBlock)).toEqual(['changes', 'dry-run-linux']);
     expect(windowsBlock).toContain("if: needs.changes.outputs.release == 'true'");
     expect(parseNeedsList(cargoBlock)).toEqual(['changes']);
-    expect(cargoBlock).toContain("if: needs.changes.outputs.cargo_shim == 'true'");
+    expect(cargoBlock).toContain("if: needs.changes.outputs.launcher == 'true'");
+    expect(cargoBlock).toContain('RUSTUP_TOOLCHAIN: 1.96.0');
   });
 
   test('non-PR events treat every lane as relevant (weekly drift check)', () => {
@@ -245,7 +274,7 @@ describe('release-dry-run.yml always-reporting gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.cargo_shim == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '') }}`
+      `ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.launcher == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '') }}`
     );
   });
 });

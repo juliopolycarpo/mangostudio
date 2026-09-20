@@ -12,12 +12,12 @@ name: Protocol CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feat/rust-runtime]
   push:
     branches: [main]
     paths:
       - "packages/protocol/**"
-      - "crates/**"
+      - "crates/mango-protocol/**"
       - "spec/**"
       - "docs/protocol/**"
       - "scripts/protocol/**"
@@ -78,7 +78,7 @@ jobs:
             exit 1
           fi
 
-          relevant='^(packages/protocol/|crates/|spec/|docs/protocol/|scripts/protocol/|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|scripts/lib/protocol\.ts$|\.github/workflows/protocol-ci\.yml$)'
+          relevant='^(packages/protocol/|crates/mango-protocol/|spec/|docs/protocol/|scripts/protocol/|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|scripts/lib/protocol\.ts$|\.github/workflows/protocol-ci\.yml$)'
           if grep -Eq "$relevant" "$RUNNER_TEMP/changed-files"; then
             echo "protocol=true" >> "$GITHUB_OUTPUT"
           else

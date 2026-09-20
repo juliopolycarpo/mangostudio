@@ -17,12 +17,16 @@ The repository also hosts the **Mango Protocol** — the wire contract the hub a
 speak — on its own version line and its own `protocol-v*` release train. It is not one of the
 four application workspaces and does not follow their lifecycle.
 
-| Path                     | Ships as                                  | Stack                                       |
-| ------------------------ | ----------------------------------------- | ------------------------------------------- |
-| `spec/`                  | The normative spec, schemas and fixtures  | Markdown, JSON Schema 2020-12               |
-| `packages/protocol/`     | `@mangostudio/protocol` on npm            | TypeScript, TypeBox                         |
-| `crates/mango-protocol/` | `mango-protocol` on crates.io             | Rust, serde, tokio                          |
-| `packages/cargo-shim/`   | `mangostudio` on crates.io (the launcher) | Rust, on its own version line and toolchain |
+| Path                           | Ships as                                  | Stack                                          |
+| ------------------------------ | ----------------------------------------- | ---------------------------------------------- |
+| `spec/`                        | The normative spec, schemas and fixtures  | Markdown, JSON Schema 2020-12                  |
+| `packages/protocol/`           | `@mangostudio/protocol` on npm            | TypeScript, TypeBox                            |
+| `crates/mango-protocol/`       | `mango-protocol` on crates.io             | Rust, serde, tokio                             |
+| `crates/mangostudio-launcher/` | `mangostudio` on crates.io (the launcher) | Rust, independent application version and MSRV |
+
+Both stable Rust crates belong to the root Cargo workspace and share its lockfile, edition,
+development toolchain, and lint policy. The protocol and application versions remain independent.
+`crates/mango-protocol/fuzz` is an excluded nightly-only workspace with its own lockfile.
 
 `packages/protocol/AGENTS.md` is the contributor guide for that tree, including the
 contract-change procedure every wire change follows. `docs/protocol/` holds the adoption guides.

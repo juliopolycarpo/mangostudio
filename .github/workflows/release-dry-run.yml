@@ -7,7 +7,7 @@ name: Release Dry Run
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feat/rust-runtime]
   workflow_dispatch:
   schedule:
     - cron: "0 7 * * 1"
@@ -29,7 +29,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       release: ${{ steps.changed.outputs.release }}
-      cargo_shim: ${{ steps.changed.outputs.cargo_shim }}
+      launcher: ${{ steps.changed.outputs.launcher }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -37,7 +37,7 @@ jobs:
           persist-credentials: false
 
       - id: changed
-        name: Check release and cargo shim paths
+        name: Check release and launcher paths
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
@@ -54,23 +54,31 @@ jobs:
         run: |
           if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "release=true" >> "$GITHUB_OUTPUT"
-            echo "cargo_shim=true" >> "$GITHUB_OUTPUT"
+            echo "launcher=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
+          # Keep both paths of a rename visible and fail closed if Git cannot
+          # produce a meaningful PR diff. Skipping release lanes must only be
+          # possible after classifying at least one changed path.
+          git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
 
-          release_pattern='^(\.github/workflows/release[^/]*\.yml$|\.github/workflows/canary\.yml$|scripts/release/|scripts/install/|scripts/build\.ts$|scripts/lib/|packages/cli/|packages/cargo-shim/|Dockerfile$)'
+          if [ ! -s "$RUNNER_TEMP/changed-files" ]; then
+            echo "changes job: empty diff between $BASE_SHA and $HEAD_SHA; refusing to skip release dry runs" >&2
+            exit 1
+          fi
+
+          release_pattern='^(\.github/workflows/release[^/]*\.yml$|\.github/workflows/canary\.yml$|scripts/release/|scripts/install/|scripts/build\.ts$|scripts/lib/|packages/cli/|crates/mangostudio-launcher/|Cargo\.(toml|lock)$|Dockerfile$)'
           if grep -Eq "$release_pattern" "$RUNNER_TEMP/changed-files"; then
             echo "release=true" >> "$GITHUB_OUTPUT"
           else
             echo "release=false" >> "$GITHUB_OUTPUT"
           fi
 
-          if grep -q '^packages/cargo-shim/' "$RUNNER_TEMP/changed-files"; then
-            echo "cargo_shim=true" >> "$GITHUB_OUTPUT"
+          if grep -Eq '^(crates/mangostudio-launcher/|Cargo\.(toml|lock)$)' "$RUNNER_TEMP/changed-files"; then
+            echo "launcher=true" >> "$GITHUB_OUTPUT"
           else
-            echo "cargo_shim=false" >> "$GITHUB_OUTPUT"
+            echo "launcher=false" >> "$GITHUB_OUTPUT"
           fi
 
   dry-run-linux:
@@ -407,12 +415,16 @@ jobs:
   dry-run-cargo:
     name: Cargo publish dry run
     needs: [changes]
-    if: needs.changes.outputs.cargo_shim == 'true'
+    if: needs.changes.outputs.launcher == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      # The root rust-toolchain.toml otherwise overrides the action's selected
+      # toolchain while Cargo walks up to the shared workspace manifest.
+      RUSTUP_TOOLCHAIN: 1.96.0
     defaults:
       run:
-        working-directory: packages/cargo-shim
+        working-directory: crates/mangostudio-launcher
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -447,6 +459,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1} {2}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.cargo_shim == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '') }}
+          ALLOWED_SKIPS: ${{ format('{0} {1} {2}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.launcher == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts

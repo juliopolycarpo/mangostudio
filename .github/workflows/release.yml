@@ -170,7 +170,7 @@ jobs:
           # ci.yml, cargo-shim.yml and release-dry-run.yml each expose a job
           # named "Gate", and the commit check-runs API carries no workflow
           # prefix — matching on the bare name could read the wrong gate (the
-          # release-prep commit bumps packages/cargo-shim, so "Cargo Shim /
+          # release-prep commit bumps crates/mangostudio-launcher, so "Cargo Shim /
           # Gate" is always present too). Resolve ci.yml's own main-push run for
           # this commit, then read that run's "Gate" job.
           run_id="$(gh api \
@@ -619,7 +619,7 @@ jobs:
             --file bucket/mangostudio.json:bucket/mangostudio.json
 
   cargo-publish:
-    # Publishes the thin launcher crate (packages/cargo-shim) so `cargo
+    # Publishes the thin launcher crate (crates/mangostudio-launcher) so `cargo
     # install mangostudio` resolves this release. Only the post-publish
     # verify-cargo check depends on this job, so a crates.io failure never
     # blocks the GitHub Release, npm, or Homebrew channels. Already-published
@@ -631,6 +631,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     timeout-minutes: 10
+    env:
+      # The root rust-toolchain.toml otherwise overrides the action's selected
+      # toolchain when Cargo enters the shared workspace.
+      RUSTUP_TOOLCHAIN: 1.96.0
     outputs:
       auth: ${{ steps.auth-mode.outputs.auth }}
     permissions:
@@ -725,7 +729,7 @@ jobs:
               ;;
           esac
           for attempt in 1 2 3; do
-            if (cd packages/cargo-shim && cargo publish --locked); then
+            if (cd crates/mangostudio-launcher && cargo publish --locked); then
               exit 0
             fi
             # Probe in a subshell so a transient or unreachable-index failure
@@ -876,6 +880,10 @@ jobs:
     needs: [build, cargo-publish, github-release]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Keep the registry install verification on the launcher's declared
+      # compiler floor instead of the root workspace toolchain.
+      RUSTUP_TOOLCHAIN: 1.96.0
     permissions:
       contents: read
     steps:

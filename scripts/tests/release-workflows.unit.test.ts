@@ -575,8 +575,21 @@ describe('release workflow binary gate', () => {
     );
   });
 
+  test('launcher publication and verification use the declared launcher MSRV', () => {
+    const workflow = readText('.github/workflows/release.yml');
+    const cargoPublish = extractJobBlock(workflow, 'cargo-publish');
+    const verifyCargo = extractJobBlock(workflow, 'verify-cargo');
+
+    expect(cargoPublish).toContain('RUSTUP_TOOLCHAIN: 1.96.0');
+    expect(verifyCargo).toContain('RUSTUP_TOOLCHAIN: 1.96.0');
+  });
+
   test('release dry run relevance pattern mirrors the release import graph', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
+    expect(workflow).toContain('git diff --no-renames --name-only');
+    expect(workflow).toContain('if [ ! -s "$RUNNER_TEMP/changed-files" ]; then');
+    expect(workflow).toContain('refusing to skip release dry runs');
+
     const source = /release_pattern='([^']+)'/.exec(workflow)?.[1];
     expect(source, 'release_pattern not found in the changes job').toBeDefined();
     const pattern = new RegExp(source as string);
@@ -590,7 +603,9 @@ describe('release workflow binary gate', () => {
     expect('scripts/build.ts').toMatch(pattern);
     expect('scripts/lib/release-assets.ts').toMatch(pattern);
     expect('packages/cli/package.json').toMatch(pattern);
-    expect('packages/cargo-shim/src/main.rs').toMatch(pattern);
+    expect('crates/mangostudio-launcher/src/main.rs').toMatch(pattern);
+    expect('Cargo.toml').toMatch(pattern);
+    expect('Cargo.lock').toMatch(pattern);
     expect('Dockerfile').toMatch(pattern);
 
     // …while unrelated app code does not.
@@ -753,7 +768,9 @@ describe('release workflow binary gate', () => {
     expect(cargoPublishBlock).toContain(
       'Stateful retry: scripts/release/retry.sh only repeats one command'
     );
-    expect(cargoPublishBlock).toContain('(cd packages/cargo-shim && cargo publish --locked)');
+    expect(cargoPublishBlock).toContain(
+      '(cd crates/mangostudio-launcher && cargo publish --locked)'
+    );
     expect(cargoPublishBlock).toContain(
       'CRATES_IO_INDEX_URL: https://index.crates.io/ma/ng/mangostudio'
     );

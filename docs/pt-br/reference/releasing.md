@@ -90,7 +90,8 @@ repositório para que os dois não divirjam.
 Existe **uma** versão de release. A `version` do `package.json` raiz é canônica;
 a variável de ambiente `VERSION` (definida pelo workflow a partir da tag) a
 sobrescreve. `bun run check:versions` valida lockstep entre root, workspaces,
-`packages/cli` e `packages/cargo-shim/Cargo.toml`/`Cargo.lock`.
+`packages/cli`, `crates/mangostudio-launcher/Cargo.toml` e a entrada do launcher
+no `Cargo.lock` raiz. A versão do protocolo no mesmo lockfile continua independente.
 
 ## Canal canary
 

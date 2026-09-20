@@ -2,14 +2,22 @@
 name = "mangostudio"
 # Lockstep with the root package.json — `bun run check:versions` enforces it.
 version = "0.1.1"
+authors.workspace = true
 categories = ["command-line-utilities"]
-edition = "2021"
+edition.workspace = true
 homepage = "https://mangostudio.dev"
 keywords = ["ai", "image-generation", "chat", "cli"]
-license = "MIT"
+license.workspace = true
 readme = "README.md"
-repository = "https://github.com/juliopolycarpo/mangostudio"
+repository.workspace = true
+# This published launcher keeps the existing stable-minus-two floor. It shares
+# the workspace edition and development toolchain without inheriting the
+# protocol crate's intentionally higher 1.97 floor.
+rust-version = "1.96.0"
 description = "AI-powered image generation and chat studio (launcher; downloads the prebuilt binary on first run)"
+
+[lints]
+workspace = true
 
 # Keep dependencies minimal: blocking HTTP with rustls (std has no TLS), no
 # async runtime. Archive handling is cfg-gated to match the release asset

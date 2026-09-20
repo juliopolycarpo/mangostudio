@@ -171,7 +171,7 @@ function prepareOutDir(outDir: string): void {
 }
 
 /**
- * Same manifest format the release job publishes — install.sh, the cargo shim
+ * Same manifest format the release job publishes — install.sh, the Cargo launcher
  * and verify-checksum.ts all parse it, so the shape is a pinned contract.
  */
 function writeChecksums(outDir: string, assetNames: readonly string[]): void {

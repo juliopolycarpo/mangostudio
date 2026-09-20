@@ -306,9 +306,9 @@ lockstep:
 - `package.json`
 - `apps/api/package.json`, `apps/frontend/package.json`, `apps/shared/package.json`
 - `packages/cli/package.json`
-- `packages/cargo-shim/Cargo.toml` **and** `packages/cargo-shim/Cargo.lock` (the
-  lockfile records the crate's own version and the release publishes with
-  `--locked`, so both must move together)
+- `crates/mangostudio-launcher/Cargo.toml` and the launcher's `mangostudio`
+  entry in the root `Cargo.lock` (the release publishes with `--locked`, so
+  both must move together without changing the protocol version)
 
 `bun run check:versions` enforces this; it also runs as part of `bun run check`.
 Pass `--expect <version>` to additionally require the committed version to match
@@ -358,7 +358,7 @@ embedded installer scripts against the committed ones, then builds and archives
 a windows-x64 binary and hands it to a second job that runs the same
 `install.ps1 --local` / `-Use` / `-Prune` / `-Uninstall` sequence on a real
 Windows PowerShell 5.1 runner. Finally it renders Homebrew and Scoop manifests
-into the runner temp directory. PRs that touch `packages/cargo-shim/**` also run
+into the runner temp directory. PRs that touch `crates/mangostudio-launcher/**` also run
 `cargo publish --dry-run --locked`; scheduled and manual dry-run runs include
 that cargo check as well.
 
@@ -636,7 +636,7 @@ summary, listed here in workflow order:
 | `npm-publish`     | Publishes the platform packages, then the `mangostudio` wrapper via npm Trusted Publishing (OIDC) by default; already-published versions are skipped, transient failures are retried, and provenance is **required** (never silently dropped). A legacy `NPM_TOKEN` path exists only when `workflow_dispatch` sets `allow_legacy_npm_token=true` and is labeled `legacy-explicit` in the summary. |
 | `homebrew`        | Renders `Formula/mangostudio.rb` from `SHA256SUMS` (`update-homebrew.ts`) and pushes it to `juliopolycarpo/homebrew-tap` (`push-dist-repo.ts`). No other job depends on it, so a tap failure never blocks npm or the Release.                                                                                                                                                                     |
 | `scoop`           | Renders `bucket/mangostudio.json` from `SHA256SUMS` (`update-scoop.ts`) and pushes it to `juliopolycarpo/scoop-bucket` (`push-dist-repo.ts`). No other job depends on it, so a bucket failure never blocks npm or the Release.                                                                                                                                                                    |
-| `cargo-publish`   | Publishes the `mangostudio` launcher crate (`packages/cargo-shim`) to crates.io using Trusted Publishing OIDC. Already-published versions are skipped before minting credentials. A legacy `CARGO_REGISTRY_TOKEN` path exists only when `workflow_dispatch` sets `allow_legacy_cargo_token=true` and is labeled `legacy-explicit` in the summary. Non-blocking for other channels.                |
+| `cargo-publish`   | Publishes the `mangostudio` launcher crate (`crates/mangostudio-launcher`) to crates.io using Trusted Publishing OIDC. Already-published versions are skipped before minting credentials. A legacy `CARGO_REGISTRY_TOKEN` path exists only when `workflow_dispatch` sets `allow_legacy_cargo_token=true` and is labeled `legacy-explicit` in the summary. Non-blocking for other channels.        |
 | `verify-release`  | Installs `mangostudio@<version>` from npm on Ubuntu, macOS, and Windows; downloads the matching release tarball, verifies `SHA256SUMS`, and runs `mangostudio --version`. Windows arm64 is published but not verified.                                                                                                                                                                            |
 | `verify-cargo`    | Installs `mangostudio` from crates.io, points the launcher at the GitHub Release assets, and checks `mangostudio --version`. Depends on `cargo-publish`.                                                                                                                                                                                                                                          |
 | `verify-homebrew` | Taps `juliopolycarpo/homebrew-tap`, `brew install`s the formula on macOS, and checks `mangostudio --version`. Depends on `homebrew`.                                                                                                                                                                                                                                                              |
@@ -806,12 +806,12 @@ The binstall binary does not use the launcher
 cache under `~/.mango/dist/`.
 
 `cargo install mangostudio` builds the thin Rust launcher from
-`packages/cargo-shim/` — the only Rust in the repository. On first run it
+`crates/mangostudio-launcher/` is the thin Rust launcher. On first run it
 downloads the platform archive matching the crate version from the GitHub
 release into `~/.mango/dist/<version>/` (verified against `SHA256SUMS`, same
 layout as the shell installer) and execs the real binary. Both install paths
 report the same `mangostudio --version`. See
-[`packages/cargo-shim/README.md`](../../packages/cargo-shim/README.md).
+[`crates/mangostudio-launcher/README.md`](../../crates/mangostudio-launcher/README.md).
 
 Design notes:
 
@@ -823,11 +823,12 @@ Design notes:
   deliver a complete install.
 - musl is detected at compile time (`target_env = "musl"`); Alpine users should
   prefer the shell installer, which detects musl at runtime.
-- The crate's CI lane (`.github/workflows/cargo-shim.yml`) triggers on every PR,
-  but a cheap `changes` job skips the Rust toolchain unless
-  `packages/cargo-shim/**` changed; the always-reporting `Cargo Shim / Gate`
-  check makes the lane safe to require in branch protection (see
-  [`ci.md`](./ci.md#branch-protection--required-checks)).
+- The root Rust CI lane (`.github/workflows/cargo-shim.yml`) triggers on every
+  PR to either protected target, but a cheap `changes` job skips the toolchain
+  when no Rust path changed. It builds and tests the locked workspace on Linux,
+  macOS and Windows, checks the launcher's declared MSRV, and resolves the
+  excluded fuzz workspace. The `Cargo Shim / Gate` name stays stable for
+  repository rules (see [`ci.md`](./ci.md#branch-protection--required-checks)).
 - The `cargo-publish` release job checks crates.io before publishing and
   re-checks between retries, so workflow re-runs converge instead of failing on
   "version already exists".
