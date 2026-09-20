@@ -4,6 +4,7 @@
 
 import { realpathSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { getRuntimeBinaryOverride } from './config';
 
 function isBunBinary(execPath: string): boolean {
   const executableName = basename(execPath).toLowerCase();
@@ -80,20 +81,49 @@ export interface RuntimeLaunchCommand {
 }
 
 /**
- * argv prefix for a runtime child process. A standalone install runs the
- * sibling binary; a source checkout runs the workspace entry through the
- * current Bun. Every element is a discrete argument — the transport never
- * accepts a command string to interpolate.
+ * Which of the four sources {@link resolveRuntimeLaunchCommand} tried actually
+ * chose the command, most specific first: `env` — `MANGOSTUDIO_RUNTIME_BINARY`;
+ * `config` — the environment's own `binaryPath`; `sibling` — the binary shipped
+ * beside a standalone hub install; `bun-source` — the TS runtime entry run
+ * through the current Bun, for a source checkout with no binary built. This is
+ * for logs and diagnostics, not the wire — it never leaves the hub process.
  */
-export function resolveRuntimeLaunchCommand(binaryPath?: string): RuntimeLaunchCommand {
+export type RuntimeLaunchSource = 'env' | 'config' | 'sibling' | 'bun-source';
+
+/**
+ * A resolved launch command plus which source picked it. `sshLaunch` and
+ * `wslLaunchCommand` build a plain {@link RuntimeLaunchCommand} of their
+ * own — the four sources here only describe how a local stdio launch is
+ * resolved, and neither of those is one of them.
+ */
+export interface ResolvedRuntimeLaunch extends RuntimeLaunchCommand {
+  readonly source: RuntimeLaunchSource;
+}
+
+/**
+ * argv prefix for a runtime child process, in priority order: an explicit
+ * `MANGOSTUDIO_RUNTIME_BINARY` override, the per-environment `binaryPath`, the
+ * sibling binary next to a standalone install, and finally the workspace
+ * entry run through the current Bun for a source checkout. Every element is a
+ * discrete argument — the transport never accepts a command string to
+ * interpolate.
+ */
+export function resolveRuntimeLaunchCommand(
+  binaryPath?: string,
+  env: NodeJS.ProcessEnv = process.env
+): ResolvedRuntimeLaunch {
+  const envOverride = getRuntimeBinaryOverride(env);
+  if (envOverride) return { command: envOverride, args: [], source: 'env' };
+
   const override = binaryPath?.trim();
-  if (override) return { command: override, args: [] };
+  if (override) return { command: override, args: [], source: 'config' };
 
   const sibling = getRuntimeBinaryPath();
-  if (sibling) return { command: sibling, args: [] };
+  if (sibling) return { command: sibling, args: [], source: 'sibling' };
 
   return {
     command: process.execPath,
     args: [join(import.meta.dir, '../../../runtime/src/cli.ts')],
+    source: 'bun-source',
   };
 }

@@ -19,6 +19,7 @@ import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
 import { getDb } from '../../db/database';
 import { getVersion } from '../../lib/config';
+import { createDiagnosticLogger } from '../../lib/logger';
 import { resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
 import {
   type EnvironmentStateTransitionRecorder,
@@ -1336,14 +1337,27 @@ export function createLocalRuntimeConnector(
   };
 }
 
+/** Where a stdio launch reports which of its four sources chose the binary. */
+const stdioLaunchLogger = createDiagnosticLogger('runtime-stdio');
+
 async function connectStdioRuntime(
   definition: RuntimeEnvironmentDefinition,
   onUnavailable: () => void
 ): Promise<ManagedRuntimeConnection> {
   const config = environmentConfigFor('stdio', definition.config);
+  const launch = resolveRuntimeLaunchCommand(config.binaryPath);
+  // Which source won is otherwise only inferable from the resolved command
+  // itself — a sibling binary and a `binaryPath` override can name the same
+  // path, and the fallback shares its interpreter with an override that
+  // happens to point at Bun.
+  stdioLaunchLogger.info('launch_selected', {
+    environmentId: definition.id,
+    source: launch.source,
+    command: launch.command,
+  });
   const connection = await spawnRuntimeChild({
     environmentId: definition.id,
-    launch: resolveRuntimeLaunchCommand(config.binaryPath),
+    launch,
     ...(config.cwd ? { cwd: config.cwd } : {}),
     hubVersion: getVersion(),
     onClosed: onUnavailable,

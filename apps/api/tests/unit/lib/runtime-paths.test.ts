@@ -7,6 +7,7 @@ import {
   getRuntimeBaseDir,
   getSourceFrontendDir,
   isStandaloneExecutable,
+  resolveRuntimeLaunchCommand,
 } from '../../../src/lib/runtime-paths';
 
 const originalExecPath = process.execPath;
@@ -82,5 +83,56 @@ describe('runtime paths', () => {
     setExecPath('/usr/bin/bun');
 
     expect(getSourceFrontendDir()).toBe(join(tempDir, 'apps', 'frontend', 'dist'));
+  });
+
+  describe('resolveRuntimeLaunchCommand', () => {
+    const RUNTIME_BINARY_NAME =
+      process.platform === 'win32' ? 'mangostudio-runtime.exe' : 'mangostudio-runtime';
+    // apps/api/tests/unit/lib -> apps, then the workspace entry the Bun
+    // fallback runs. Mirrors the integration test's own RUNTIME_ENTRY.
+    const RUNTIME_ENTRY = join(import.meta.dir, '../../../../runtime/src/cli.ts');
+
+    it('prefers MANGOSTUDIO_RUNTIME_BINARY over a configured binaryPath', () => {
+      setExecPath('/usr/bin/bun');
+
+      const launch = resolveRuntimeLaunchCommand('/configured/runtime', {
+        MANGOSTUDIO_RUNTIME_BINARY: '/env/runtime',
+      });
+
+      expect(launch).toEqual({ command: '/env/runtime', args: [], source: 'env' });
+    });
+
+    it('falls back to the configured binaryPath when no env override is set', () => {
+      setExecPath('/usr/bin/bun');
+
+      const launch = resolveRuntimeLaunchCommand('/configured/runtime', {});
+
+      expect(launch).toEqual({ command: '/configured/runtime', args: [], source: 'config' });
+    });
+
+    it('falls back to the sibling binary when neither env nor config name one', () => {
+      const executablePath = join(tempDir, 'dist', 'mangostudio');
+      setExecPath(executablePath);
+
+      const launch = resolveRuntimeLaunchCommand(undefined, {});
+
+      expect(launch).toEqual({
+        command: join(tempDir, 'dist', RUNTIME_BINARY_NAME),
+        args: [],
+        source: 'sibling',
+      });
+    });
+
+    it('falls back to the Bun/TS entry when nothing else names a binary', () => {
+      setExecPath('/usr/bin/bun');
+
+      const launch = resolveRuntimeLaunchCommand(undefined, {});
+
+      expect(launch).toEqual({
+        command: process.execPath,
+        args: [RUNTIME_ENTRY],
+        source: 'bun-source',
+      });
+    });
   });
 });
