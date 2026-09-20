@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
+import { readRuntimeAuditLog } from '../../src/audit-log';
 import { readPairingToken, readRuntimeSlotState, readServeToken } from '../../src/runtime-home';
 
 /**
@@ -53,5 +54,19 @@ describe('a runtime home written by the Rust crate', () => {
     expect(state.stored?.hubUrl).toBe('wss://hub.rust-fixture.test/api/runtime');
     expect(await readPairingToken('remote', env)).toBe('mrt_rust_fixture_remote_pairing_token');
     expect(await readServeToken('remote', env)).toBe('mrt_rust_fixture_remote_serve_token');
+  });
+
+  it('reads the host slot audit.log FileAudit wrote', async () => {
+    const records = await readRuntimeAuditLog({
+      path: join(FIXTURE_HOME, 'runtime', 'host', 'audit.log'),
+    });
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      method: 'runtime.health',
+      outcome: 'ok',
+      durationMs: 5,
+      hub: 'unidentified hub',
+      ts: '2025-01-01T00:00:00.000Z',
+    });
   });
 });
