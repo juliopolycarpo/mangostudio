@@ -123,6 +123,17 @@ pub struct FileAudit {
     max_files: u32,
     wall_clock: Arc<dyn WallClock>,
     state: Mutex<State>,
+    /// Serialises `append_line`'s read-size, maybe-rotate, then-write
+    /// sequence, kept separate from `state`: two `record` calls dispatched
+    /// as concurrent tasks (mango_protocol's `JoinSet`, not TypeScript's
+    /// single-threaded event loop) can both read the file's current length
+    /// near the rotation threshold and both decide to rotate, racing each
+    /// other's rename of `audit.log` to `audit.log.1` — one generation is
+    /// lost, and lines can land in whichever file wins. A dedicated lock
+    /// for just this sequence means a hub-label update (`set_hub`) never
+    /// has to wait on that I/O, which sharing `state`'s own lock would
+    /// force.
+    write_lock: Mutex<()>,
 }
 
 impl FileAudit {
@@ -144,6 +155,7 @@ impl FileAudit {
                 buffered: VecDeque::new(),
                 dropped: 0,
             }),
+            write_lock: Mutex::new(()),
         }
     }
 
@@ -194,6 +206,20 @@ impl FileAudit {
     }
 
     fn append_line(&self, line: &str) -> std::io::Result<()> {
+        // Held across the whole read-size, maybe-rotate, then-write
+        // sequence — see `write_lock`'s own doc comment for why a partial
+        // hold (or none at all) lets two concurrent callers both decide to
+        // rotate from the same stale length.
+        let _write_guard = lock(&self.write_lock);
+        // Mirrors `writeBatch`'s own `mkdir(dirname(path), { recursive:
+        // true })`: a slot whose runtime-home directory does not exist yet
+        // would otherwise fail every write with `ENOENT`, buffer forever,
+        // hit the `MAX_BUFFERED_RECORDS` cap, and never manage to write
+        // even the sidecar `.error` file explaining why — a silent no-op
+        // audit log instead of a directory that gets created on demand.
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         let incoming_len = (line.len() + 1) as u64;
         let current_len = std::fs::metadata(&self.path)
             .map(|meta| meta.len())
@@ -218,30 +244,23 @@ impl FileAudit {
         let _ = std::fs::remove_file(&self.error_path);
     }
 
-    /// Writes `line` now if possible; buffers it (dropping the oldest
-    /// buffered line past [`MAX_BUFFERED_RECORDS`]) and reports the failure
-    /// via the sidecar error file otherwise.
+    /// Buffers `line` (dropping the oldest buffered line past
+    /// [`MAX_BUFFERED_RECORDS`]) and attempts to drain the whole buffer,
+    /// oldest first. `line` always goes through the buffer, even when it
+    /// could be written immediately: writing it straight to disk first and
+    /// only *then* draining whatever was already buffered — the previous
+    /// shape here — let a brand-new line land ahead of an older one still
+    /// waiting its turn, reordering the file `drain_buffer`'s own doc
+    /// promises never happens.
     fn write_or_buffer(&self, line: String) {
-        match self.append_line(&line) {
-            Ok(()) => self.drain_buffer(),
-            Err(error) => {
-                let dropped = {
-                    let mut state = lock(&self.state);
-                    state.buffered.push_back(line);
-                    if state.buffered.len() > MAX_BUFFERED_RECORDS {
-                        state.buffered.pop_front();
-                        state.dropped += 1;
-                    }
-                    state.dropped
-                };
-                let suffix = if dropped > 0 {
-                    format!(" ({dropped} record(s) dropped)")
-                } else {
-                    String::new()
-                };
-                self.set_error(&format!("{error}{suffix}"));
-            }
+        let mut state = lock(&self.state);
+        state.buffered.push_back(line);
+        if state.buffered.len() > MAX_BUFFERED_RECORDS {
+            state.buffered.pop_front();
+            state.dropped += 1;
         }
+        drop(state);
+        self.drain_buffer();
     }
 
     /// Retries every buffered line, oldest first. Stops at the first one
@@ -255,12 +274,19 @@ impl FileAudit {
         }
         for (index, line) in pending.iter().enumerate() {
             if let Err(error) = self.append_line(line) {
-                let mut state = lock(&self.state);
-                for remaining in pending[index..].iter().rev() {
-                    state.buffered.push_front(remaining.clone());
-                }
-                drop(state);
-                self.set_error(&format!("{error}"));
+                let dropped = {
+                    let mut state = lock(&self.state);
+                    for remaining in pending[index..].iter().rev() {
+                        state.buffered.push_front(remaining.clone());
+                    }
+                    state.dropped
+                };
+                let suffix = if dropped > 0 {
+                    format!(" ({dropped} record(s) dropped)")
+                } else {
+                    String::new()
+                };
+                self.set_error(&format!("{error}{suffix}"));
                 return;
             }
         }
@@ -317,7 +343,7 @@ impl Audit for FileAudit {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, Barrier};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use serde_json::Value;
@@ -501,6 +527,75 @@ mod tests {
         );
     }
 
+    /// Reads every line in `path` as JSON, or an empty `Vec` when `path`
+    /// does not exist — a rotated generation a race never actually created
+    /// is exactly as valid an outcome as one that did, as long as no line
+    /// went missing entirely.
+    fn count_lines(path: &std::path::Path) -> usize {
+        std::fs::read_to_string(path)
+            .map(|contents| contents.lines().count())
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn concurrent_writers_at_the_rotation_boundary_lose_no_lines() {
+        // The regression this guards: `append_line`'s read-size,
+        // maybe-rotate, then-write sequence used to run under no lock at
+        // all. Two `record` calls dispatched as concurrent tasks (this
+        // crate's real shape — `mango_protocol`'s `JoinSet`, not
+        // TypeScript's single-threaded event loop) could both read the
+        // same stale file length near the threshold, both decide to
+        // rotate, and race each other's rename of `audit.log` to
+        // `audit.log.1` — one generation lost, lines landing in whichever
+        // file won. A `Barrier`, not a sleep: it makes both threads call
+        // `write_or_buffer` at essentially the same instant, and running
+        // many iterations is what turns "usually passes" into "never
+        // passes while the bug exists".
+        for attempt in 0..200 {
+            let dir = scratch_dir(&format!("rotate-race-{attempt}"));
+            let audit = Arc::new(
+                FileAudit::new(
+                    dir.join("audit.log"),
+                    Arc::new(FixedWallClock::new(SystemTime::now())),
+                )
+                // Any existing content at all exceeds this threshold, so
+                // both racing writers are certain to see a nonempty file
+                // and both decide a rotation is needed.
+                .with_rotation(1, 3),
+            );
+            // Seeds real content to rotate away, synchronously — no race
+            // on this first write, by construction (nothing else is
+            // running yet).
+            audit.write_or_buffer("SEED".to_string());
+
+            let barrier = Arc::new(Barrier::new(2));
+            let threads: Vec<_> = ["RACER-B", "RACER-C"]
+                .into_iter()
+                .map(|label| {
+                    let audit = Arc::clone(&audit);
+                    let barrier = Arc::clone(&barrier);
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        audit.write_or_buffer(label.to_string());
+                    })
+                })
+                .collect();
+            for thread in threads {
+                thread.join().unwrap();
+            }
+
+            let mut total = count_lines(&dir.join("audit.log"));
+            for index in 1..=3u32 {
+                total += count_lines(&dir.join(format!("audit.log.{index}")));
+            }
+            assert_eq!(
+                total, 3,
+                "attempt {attempt}: seed plus two concurrent writers must total 3 lines across \
+                 every generation combined — a lost or duplicated generation means fewer or more"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn a_write_that_cannot_land_is_buffered_and_reported_in_the_sidecar_error_file() {
         // A directory sitting where the log file belongs makes every write
@@ -532,23 +627,35 @@ mod tests {
     #[tokio::test]
     async fn close_drains_a_buffered_line_once_the_destination_becomes_writable() {
         let dir = scratch_dir("drain-on-close");
-        let path = dir.join("missing-subdir").join("audit.log");
+        let path = dir.join("audit.log");
+        // A directory sitting where the log file belongs blocks every
+        // write with EISDIR, deterministically — the same trick the
+        // sidecar-error test above uses. A merely *missing* parent
+        // directory no longer buffers anything: `append_line` creates it
+        // on demand, mirroring `writeBatch`'s own `mkdir(..., { recursive:
+        // true })`.
+        std::fs::create_dir(&path).unwrap();
         let audit = FileAudit::new(
             path.clone(),
             Arc::new(FixedWallClock::new(SystemTime::now())),
         );
         audit.record(entry("runtime.health", Outcome::Ok)).await;
-        assert!(!path.exists(), "buffered, not yet written");
 
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut error_path = path.clone().into_os_string();
+        error_path.push(".error");
+        let error_path = std::path::PathBuf::from(error_path);
+        assert!(
+            error_path.exists(),
+            "buffered and reported, not yet written"
+        );
+
+        std::fs::remove_dir(&path).unwrap();
         audit.close();
 
         let lines = read_lines(&path);
         assert_eq!(lines.len(), 1, "the buffered line must have been drained");
-        let mut error_path = path.into_os_string();
-        error_path.push(".error");
         assert!(
-            !std::path::PathBuf::from(error_path).exists(),
+            !error_path.exists(),
             "a successful drain must clear the sidecar error file"
         );
     }
@@ -556,7 +663,11 @@ mod tests {
     #[tokio::test]
     async fn the_buffer_drops_the_oldest_record_past_its_cap() {
         let dir = scratch_dir("buffer-cap");
-        let path = dir.join("missing-subdir").join("audit.log");
+        let path = dir.join("audit.log");
+        // Blocks every write with EISDIR — see the comment on the drain
+        // test above for why a missing parent directory can no longer be
+        // used to force buffering.
+        std::fs::create_dir(&path).unwrap();
         let audit = FileAudit::new(
             path.clone(),
             Arc::new(FixedWallClock::new(SystemTime::now())),
@@ -571,13 +682,65 @@ mod tests {
                 .await;
         }
 
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::remove_dir(&path).unwrap();
         audit.close();
         let lines = read_lines(&path);
         assert_eq!(lines.len(), 1_024, "the buffer must never exceed its cap");
         assert_eq!(
             lines[0]["method"], "runtime.health.1",
             "the oldest record (index 0) must have been the one dropped"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_new_record_never_lands_ahead_of_an_older_buffered_one() {
+        // The regression this guards: `write_or_buffer` used to try
+        // writing the new line straight to disk first, and only *then*
+        // drain whatever was already buffered — so a line that landed
+        // immediately could get ahead of an older one still waiting its
+        // turn. `record("FIRST")` while blocked, then `record("SECOND")`
+        // once unblocked, must read back `["FIRST", "SECOND"]`, never the
+        // reverse.
+        let dir = scratch_dir("order-preserved");
+        let path = dir.join("audit.log");
+        std::fs::create_dir(&path).unwrap();
+        let audit = FileAudit::new(
+            path.clone(),
+            Arc::new(FixedWallClock::new(SystemTime::now())),
+        );
+
+        audit.record(entry("FIRST", Outcome::Ok)).await;
+        std::fs::remove_dir(&path).unwrap();
+        audit.record(entry("SECOND", Outcome::Ok)).await;
+
+        let lines = read_lines(&path);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0]["method"], "FIRST");
+        assert_eq!(lines[1]["method"], "SECOND");
+    }
+
+    #[tokio::test]
+    async fn append_line_creates_a_missing_parent_directory() {
+        // The regression this guards: TypeScript's `writeBatch` does
+        // `mkdir(dirname(path), { recursive: true })` before every write.
+        // Without the Rust equivalent, a slot whose runtime-home directory
+        // does not exist yet would buffer every record, drop them past
+        // `MAX_BUFFERED_RECORDS`, and never manage to write even the
+        // sidecar `.error` file explaining why — a silent no-op audit log.
+        let dir = scratch_dir("missing-parent");
+        let path = dir.join("does-not-exist-yet").join("audit.log");
+        let audit = FileAudit::new(
+            path.clone(),
+            Arc::new(FixedWallClock::new(SystemTime::now())),
+        );
+
+        audit.record(entry("runtime.health", Outcome::Ok)).await;
+
+        let lines = read_lines(&path);
+        assert_eq!(
+            lines.len(),
+            1,
+            "a missing parent directory must be created on demand, not buffered against"
         );
     }
 }
