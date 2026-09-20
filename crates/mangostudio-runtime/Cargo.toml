@@ -40,7 +40,9 @@ path = "src/main.rs"
 # gate has to run the same validator the peer contract crate embeds, with an
 # instance-path pointer neither of those crates exposes publicly.
 jsonschema = { version = "0.56", default-features = false }
-mango-protocol = { workspace = true, features = ["tokio"] }
+# `websocket`: the `serve`/`connect` transports dial and accept over it.
+# `tokio` alone (the dispatcher's own dependency) has no socket of its own.
+mango-protocol = { workspace = true, features = ["tokio", "websocket"] }
 mangostudio-runtime-contract.workspace = true
 # Already pulled in transitively by `jsonschema`'s own `pattern` keyword
 # support, so a direct dependency costs nothing new in the dependency graph
@@ -52,9 +54,26 @@ mangostudio-runtime-contract.workspace = true
 regex = { version = "1.13", default-features = false, features = ["std", "unicode-perl"] }
 serde = { version = "1.0.219", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
+# A normal dependency, not a dev one: `main.rs` builds its own multi-thread
+# runtime for `stdio`/`serve`/`connect` (never `#[tokio::main]` — the
+# consent/setup/token/lock work those subcommands do first is synchronous by
+# design, see `cli.rs`, so the runtime is only built once that is done).
+# `net` and `signal` are this crate's own additions over what `mango-protocol`
+# needs for itself; `macros` is test-only (`#[tokio::test]`) but cheap enough
+# not to split into a separate dev-dependency entry.
+tokio = { version = "1.53", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+# `CancellationToken`: the cooperative shutdown signal `serve`'s accept loop
+# and `connect`'s dial loop both watch. Same version `mango-protocol` itself
+# pins, so `cargo deny`'s duplicate-version check has nothing new to catch.
+tokio-util = { version = "0.7", default-features = false }
 
 [dev-dependencies]
-tokio = { version = "1.53", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+# Only this crate's own tests use the spawn launcher, standing in for a hub
+# that execs this very binary and speaks to it over stdio — proving the real
+# `stdio` subcommand keeps stdout protocol-only end to end, not just in an
+# in-process duplex. The runtime binary itself never spawns anything.
+mango-protocol = { workspace = true, features = ["tokio", "spawn"] }
+tokio = { version = "1.53", features = ["test-util"] }
 
 [target.'cfg(unix)'.dependencies]
 # `signal`: `kill(pid, 0)` for lock-holder liveness, mirroring `process.kill(pid, 0)` on the
