@@ -140,6 +140,13 @@ pub async fn run(
                     }
                 }
             }
+            // Reaps a finished connection task's `OwnedTasks` entry the
+            // instant it completes, rather than only at shutdown: `serve`
+            // is routinely bound to more than loopback, so a long-lived
+            // process here can outlive a great many historical
+            // connections, and none of them needs to leave a dead entry
+            // behind for the whole of that uptime.
+            _ = owned.reap_one() => {}
         }
     }
 
@@ -318,24 +325,48 @@ async fn handle_connection(
     context: Arc<ConnectionContext>,
 ) {
     let token = context.token.clone();
-    let upgraded = tokio::time::timeout(
-        UPGRADE_TIMEOUT,
-        accept_websocket(
-            stream,
-            AcceptOptions::from(WebSocketOptions::default()),
-            |upgrade| match upgrade.bearer() {
-                Some(presented) if tokens_equal(presented.as_bytes(), token.as_bytes()) => Ok(()),
-                _ => Err(close_codes::UNAUTHORIZED),
-            },
-        ),
-    )
+    let runtime_version = context.runtime_version.clone();
+    // The health-check peek and the upgrade itself share this one timeout,
+    // not two separate ones: `TcpStream::peek` waits for bytes exactly the
+    // way `accept_websocket` does, so a peer that opens the socket and
+    // never sends anything at all — not even a health check — must not be
+    // able to hold this slot any longer by arriving before the part of
+    // this function that used to be the only bounded step.
+    let classified = tokio::time::timeout(UPGRADE_TIMEOUT, async move {
+        if is_health_check(&stream).await {
+            respond_health(stream, &runtime_version).await;
+            return None;
+        }
+        Some(
+            accept_websocket(
+                stream,
+                // A hub built before `mango.v1` was mandatory still gets
+                // its socket: letting it through unlabelled is what lets
+                // its session answer `hello` with a real close code
+                // instead of a bare HTTP refusal it has no vocabulary for
+                // — mirrors `serve.ts`'s own compatibility policy exactly.
+                AcceptOptions::from(WebSocketOptions::default()).with_subprotocol_optional(),
+                |upgrade| match upgrade.bearer() {
+                    Some(presented) if tokens_equal(presented.as_bytes(), token.as_bytes()) => {
+                        Ok(())
+                    }
+                    _ => Err(close_codes::UNAUTHORIZED),
+                },
+            )
+            .await,
+        )
+    })
     .await;
-    let port = match upgraded {
-        Ok(Ok(port)) => port,
+    let port = match classified {
+        // A health check was answered; nothing to upgrade at all. `permit`
+        // drops here — a health check never counted against
+        // `MAX_PENDING_HANDSHAKES` in `serve.ts` either.
+        Ok(None) => return,
+        Ok(Some(Ok(port))) => port,
         // Refused (bad credential, bad subprotocol, …) or the peer vanished
         // mid-upgrade: `accept_websocket` already told it why. Either way
         // `permit` drops here, at this `return`, releasing the slot.
-        Ok(Err(_)) => return,
+        Ok(Some(Err(_))) => return,
         // The peer opened the socket and never finished a upgrade within
         // `UPGRADE_TIMEOUT` — silent or slow-loris-ing. `stream` and `permit`
         // both drop here; nothing was ever spent on it beyond one slot for
@@ -447,6 +478,41 @@ where
 {
     let (tx, _rx) = port.split();
     tx.close(code, Some(reason.to_string())).await;
+}
+
+/// The exact bytes a plain `GET /health` request line starts with, checked
+/// via [`TcpStream::peek`] — which does not remove anything from the
+/// socket's read queue, so a stream that turns out *not* to be a health
+/// check is handed to [`accept_websocket`] completely untouched.
+const HEALTH_CHECK_PREFIX: &[u8] = b"GET /health ";
+
+/// True when `stream`'s first bytes are a `GET /health` request line.
+///
+/// `serve.ts` serves this over the same listener a hub upgrades on; the
+/// Rust accept loop had no equivalent, so a plain health check (or a
+/// Direct URL user opening the address in a browser) fell straight into
+/// `accept_websocket`, which has no vocabulary for anything but a
+/// WebSocket upgrade and would reject it as a failed handshake.
+async fn is_health_check(stream: &TcpStream) -> bool {
+    let mut buffer = [0u8; HEALTH_CHECK_PREFIX.len()];
+    matches!(
+        stream.peek(&mut buffer).await,
+        Ok(n) if n >= buffer.len() && buffer == *HEALTH_CHECK_PREFIX
+    )
+}
+
+/// Answers a health check with the same shape `serve.ts` does
+/// (`Response.json({ status: 'ok', version })`), then closes the
+/// connection — this is a one-shot HTTP response, never a kept-alive
+/// socket, since nothing here speaks HTTP beyond this one reply.
+async fn respond_health(mut stream: TcpStream, runtime_version: &str) {
+    let body = serde_json::json!({ "status": "ok", "version": runtime_version }).to_string();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes()).await;
+    let _ = tokio::io::AsyncWriteExt::shutdown(&mut stream).await;
 }
 
 #[cfg(test)]

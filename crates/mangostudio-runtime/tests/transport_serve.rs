@@ -364,3 +364,53 @@ async fn a_peer_past_the_pending_handshake_bound_is_dropped_before_spawning() {
     cancel.cancel();
     server.await.unwrap().unwrap();
 }
+
+/// `GET /health` answers over the same listener a hub upgrades on, exactly
+/// like `serve.ts` does — a plain HTTP request, not a WebSocket upgrade
+/// attempt, must never fall into `accept_websocket` and come back as a
+/// failed handshake.
+#[tokio::test]
+async fn get_health_answers_status_and_version_over_the_same_listener() {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let (addr, listener) = bind_ephemeral().await;
+    let cancel = CancellationToken::new();
+    let home = scratch_home("health-check");
+    let server = tokio::spawn(run(
+        listener,
+        TOKEN.to_string(),
+        RuntimeSlot::Remote,
+        home,
+        "1.2.3".to_string(),
+        cancel.clone(),
+        |_message| {},
+    ));
+
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    stream
+        .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+
+    let mut response = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut response))
+        .await
+        .expect("a health check must answer promptly, not hang like an unauthorised upgrade")
+        .unwrap();
+    let response = String::from_utf8(response).unwrap();
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "expected a 200 status line: {response:?}"
+    );
+    let body_start = response
+        .find("\r\n\r\n")
+        .expect("a response has a header/body separator")
+        + 4;
+    let body: serde_json::Value = serde_json::from_str(&response[body_start..]).unwrap();
+    assert_eq!(body["status"], "ok");
+    assert_eq!(body["version"], "1.2.3");
+
+    cancel.cancel();
+    server.await.unwrap().unwrap();
+}

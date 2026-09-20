@@ -145,6 +145,30 @@ impl OwnedTasks {
         while self.tasks.join_next().await.is_some() {}
     }
 
+    /// Reaps one already-finished owned task, without waiting for any that
+    /// are still running — `None` when nothing is owned at all, so a
+    /// caller can put this directly in a `select!` alongside a branch that
+    /// may stay pending indefinitely, without it becoming a busy
+    /// `Ready(None)` on every poll: [`tokio::task::JoinSet::join_next`]
+    /// resolves to `None` immediately on an empty set, which inside a
+    /// `loop { select! { ... } }` with nothing else ready would otherwise
+    /// spin.
+    ///
+    /// Discards the result exactly like [`OwnedTasks::join_all`] does — a
+    /// panic here is caught the same way it always was, just reaped
+    /// incrementally rather than only at shutdown. Without this, `serve`'s
+    /// accept loop only ever reaped a finished connection task at
+    /// shutdown, so a long-lived process (routinely bound to more than
+    /// loopback) accumulated one dead `JoinSet` entry per historical
+    /// connection for its entire uptime.
+    pub async fn reap_one(&mut self) -> Option<()> {
+        if self.tasks.is_empty() {
+            std::future::pending().await
+        } else {
+            self.tasks.join_next().await.map(|_| ())
+        }
+    }
+
     /// [`OwnedTasks::join_all`], but gives up and aborts whatever is left
     /// once `grace` has passed — a bounded last resort for a task that did
     /// not honour its cancellation token, never the normal path. A caller
@@ -256,6 +280,43 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::OwnedTasks;
+
+    /// `reap_one` drains a finished task's entry without waiting for a
+    /// sibling that is still running — the property `serve`'s accept loop
+    /// leans on to avoid accumulating one dead entry per historical
+    /// connection.
+    #[tokio::test]
+    async fn reap_one_drains_a_finished_tasks_entry_without_waiting_for_the_rest() {
+        let mut owned = OwnedTasks::new();
+        owned.spawn(async {});
+        owned.spawn(std::future::pending::<()>());
+        assert_eq!(owned.len(), 2);
+
+        // Let the immediately-finishing task actually run to completion —
+        // it was only just spawned, not yet polled.
+        tokio::task::yield_now().await;
+
+        assert_eq!(owned.reap_one().await, Some(()));
+        assert_eq!(
+            owned.len(),
+            1,
+            "the finished task's entry must be gone, the pending one must remain"
+        );
+    }
+
+    /// `reap_one` on an empty set never resolves — the documented reason a
+    /// caller may put it in a `select!` alongside a branch that legitimately
+    /// stays pending, without it turning into a busy spin.
+    #[tokio::test]
+    async fn reap_one_on_an_empty_set_never_resolves() {
+        let mut owned = OwnedTasks::new();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), owned.reap_one())
+                .await
+                .is_err(),
+            "an empty set must never resolve reap_one, not resolve it to None"
+        );
+    }
 
     #[tokio::test]
     async fn join_all_waits_for_every_owned_task_cooperatively() {
