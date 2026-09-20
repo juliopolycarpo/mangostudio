@@ -38,11 +38,12 @@ import { createLocalRuntimeHost, createSlotRuntimeHost } from './runtime';
 import {
   bootstrapServeToken,
   consentByInvocation,
+  credentialsRemedy,
   RUNTIME_SETUP_PENDING_MESSAGE,
-  readPairingToken,
+  RuntimeCredentialsRefusedError,
   readRuntimeSlotConfig,
+  readRuntimeSlotCredentialsState,
   readRuntimeSlotState,
-  readServeToken,
   resolveRuntimeSlot,
   resolveRuntimeSource,
   runtimeSlotDir,
@@ -548,13 +549,16 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
     return 1;
   }
 
-  const token = await resolveToken(args.tokenSource);
-  if (!token) {
-    log(
-      'No pairing token. Pipe one in with --token -, or set MANGOSTUDIO_RUNTIME_TOKEN. It is never accepted as a command-line argument.'
-    );
+  const resolvedToken = await resolveToken(args.tokenSource, log);
+  if (!resolvedToken.token) {
+    if (!resolvedToken.diagnosed) {
+      log(
+        'No pairing token. Pipe one in with --token -, or set MANGOSTUDIO_RUNTIME_TOKEN. It is never accepted as a command-line argument.'
+      );
+    }
     return 1;
   }
+  const token = resolvedToken.token;
 
   const consent = await consentByInvocation(PAIRED_SLOT, runtimeVersion);
   if (!consent.granted) {
@@ -569,7 +573,14 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
   }
 
   await writeRuntimeSlotConfig(PAIRED_SLOT, { hubUrl });
-  const { restricted } = await writePairingToken(PAIRED_SLOT, token);
+  let restricted: boolean;
+  try {
+    ({ restricted } = await writePairingToken(PAIRED_SLOT, token));
+  } catch (error) {
+    if (!(error instanceof RuntimeCredentialsRefusedError)) throw error;
+    log(error.message);
+    return 1;
+  }
   if (!restricted) {
     log(
       process.platform === 'win32'
@@ -644,11 +655,21 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
 
   await writeRuntimeSlotConfig(PAIRED_SLOT, { serveListen: listenRaw });
 
-  const resolved = await resolveServeToken(args.tokenSource);
+  let serveTokenResolution: Awaited<ReturnType<typeof resolveServeToken>>;
+  try {
+    serveTokenResolution = await resolveServeToken(args.tokenSource, log);
+  } catch (error) {
+    if (!(error instanceof RuntimeCredentialsRefusedError)) throw error;
+    log(error.message);
+    return 1;
+  }
+  const { resolved, diagnosed } = serveTokenResolution;
   if (!resolved) {
-    log(
-      'No serve token. Pipe one in with --token -, set MANGOSTUDIO_RUNTIME_SERVE_TOKEN, or omit --token to generate one.'
-    );
+    if (!diagnosed) {
+      log(
+        'No serve token. Pipe one in with --token -, set MANGOSTUDIO_RUNTIME_SERVE_TOKEN, or omit --token to generate one.'
+      );
+    }
     return 1;
   }
 
@@ -699,40 +720,106 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
   return supervisedRestart.exitCodeAfterClose();
 }
 
-async function resolveToken(source: RuntimeConnectArgs['tokenSource']): Promise<string | null> {
-  if (source === 'stdin') {
-    const piped = (await Bun.stdin.text()).trim();
-    return piped.length > 0 ? piped : null;
-  }
-  const fromEnv = loadRuntimeConfig().pairingToken;
-  if (fromEnv) return fromEnv;
-  // `--token` was not given and the environment is empty: fall back to whatever
-  // a previous run stored, which is what makes an unattended restart work.
-  return source === 'env' ? null : await readPairingToken(PAIRED_SLOT);
+/** A resolved (or absent) credential, plus whether its diagnostic was already logged. */
+export interface ResolvedCredential<T> {
+  readonly token: T | null;
+  /**
+   * True only for a `refused` file, whose diagnostic and remedy have already
+   * gone to `log`. The caller's own generic "no token" line must not follow
+   * that — two different explanations for one refusal read as a bug, not
+   * help. A `replaceable` file is different: its diagnostic (already logged)
+   * is a heads-up, not a substitute for the caller's own accurate next step —
+   * `credentialsRemedy` has no universal sentence for it (see its docstring),
+   * so `diagnosed` stays false and the caller's line still prints.
+   */
+  readonly diagnosed: boolean;
 }
 
-async function resolveServeToken(source: RuntimeServeArgs['tokenSource']): Promise<{
-  readonly token: string;
-  readonly generated: boolean;
-  readonly restricted?: boolean;
-} | null> {
+/**
+ * Exported so its diagnostic wording can be asserted directly, without
+ * spawning a process: `resolveToken` never blocks past its return, but
+ * `serve` (`resolveServeToken` below) binds a listener and never exits on its
+ * own, which makes a real CLI spawn the wrong tool for testing the message it
+ * prints before that.
+ */
+export async function resolveToken(
+  source: RuntimeConnectArgs['tokenSource'],
+  log: (message: string) => void,
+  env?: NodeJS.ProcessEnv
+): Promise<ResolvedCredential<string>> {
+  if (source === 'stdin') {
+    const piped = (await Bun.stdin.text()).trim();
+    return { token: piped.length > 0 ? piped : null, diagnosed: false };
+  }
+  const fromEnv = loadRuntimeConfig(env).pairingToken;
+  if (fromEnv) return { token: fromEnv, diagnosed: false };
+  if (source === 'env') return { token: null, diagnosed: false };
+  // `--token` was not given and the environment is empty: fall back to whatever
+  // a previous run stored, which is what makes an unattended restart work.
+  const state = await readRuntimeSlotCredentialsState(PAIRED_SLOT, env);
+  if (state.error) {
+    log(state.error);
+    const remedy = credentialsRemedy(state);
+    if (remedy) log(remedy);
+  }
+  return { token: state.credentials.pairingToken ?? null, diagnosed: state.kind === 'refused' };
+}
+
+interface ResolvedServeToken {
+  readonly resolved: {
+    readonly token: string;
+    readonly generated: boolean;
+    readonly restricted?: boolean;
+  } | null;
+  readonly diagnosed: boolean;
+}
+
+/** Exported for the same reason `resolveToken` is — see its docstring. */
+export async function resolveServeToken(
+  source: RuntimeServeArgs['tokenSource'],
+  log: (message: string) => void,
+  env?: NodeJS.ProcessEnv
+): Promise<ResolvedServeToken> {
   if (source === 'stdin') {
     const piped = (await Bun.stdin.text()).trim();
     // Operator-supplied secrets stay out of credentials.json on purpose.
-    return piped.length > 0 ? { token: piped, generated: false } : null;
+    return {
+      resolved: piped.length > 0 ? { token: piped, generated: false } : null,
+      diagnosed: false,
+    };
   }
-  const fromEnv = loadRuntimeConfig().serveToken;
+  const fromEnv = loadRuntimeConfig(env).serveToken;
   if (source === 'env') {
-    return fromEnv ? { token: fromEnv, generated: false } : null;
+    return { resolved: fromEnv ? { token: fromEnv, generated: false } : null, diagnosed: false };
   }
-  if (fromEnv) return { token: fromEnv, generated: false };
-  const stored = await readServeToken(PAIRED_SLOT);
-  if (stored) return { token: stored, generated: false };
-  const bootstrapped = await bootstrapServeToken(PAIRED_SLOT);
+  if (fromEnv) return { resolved: { token: fromEnv, generated: false }, diagnosed: false };
+
+  const state = await readRuntimeSlotCredentialsState(PAIRED_SLOT, env);
+  if (state.credentials.serveToken) {
+    return {
+      resolved: { token: state.credentials.serveToken, generated: false },
+      diagnosed: false,
+    };
+  }
+  let diagnosed = false;
+  if (state.error) {
+    log(state.error);
+    const remedy = credentialsRemedy(state);
+    if (remedy) log(remedy);
+    diagnosed = state.kind === 'refused';
+    // A refused file is never bootstrapped over: the write below would only
+    // throw the identical refusal a second time, from inside a lock this
+    // call has not taken yet.
+    if (state.kind === 'refused') return { resolved: null, diagnosed };
+  }
+  const bootstrapped = await bootstrapServeToken(PAIRED_SLOT, env);
   return {
-    token: bootstrapped.token,
-    generated: true,
-    restricted: bootstrapped.restricted,
+    resolved: {
+      token: bootstrapped.token,
+      generated: true,
+      restricted: bootstrapped.restricted,
+    },
+    diagnosed,
   };
 }
 

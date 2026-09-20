@@ -11,8 +11,17 @@ import {
   type RuntimeCapabilityManifest,
 } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
-import { parseRuntimeCliArgs, RUNTIME_CLI_USAGE } from '../../src/cli';
+import {
+  parseRuntimeCliArgs,
+  RUNTIME_CLI_USAGE,
+  resolveServeToken,
+  resolveToken,
+} from '../../src/cli';
 import { LEGACY_HELLO_1_0_1_NDJSON_LINE } from '../fixtures/legacy-hello-1-0-1';
+import {
+  FUTURE_SCHEMA_CREDENTIALS_JSON,
+  NUMERIC_TOKEN_CREDENTIALS_JSON,
+} from '../fixtures/runtime-credentials';
 
 const CLI_ENTRY = join(import.meta.dir, '../../src/cli.ts');
 const SPAWN_TIMEOUT_MS = 15_000;
@@ -456,6 +465,164 @@ describe('mangostudio-runtime binary', () => {
     },
     SPAWN_TIMEOUT_MS
   );
+
+  // #1078 review: a refusal from `writePairingToken` used to propagate past
+  // `connect`'s `instanceof` catch as an unhandled rejection the moment
+  // `RuntimeCredentialsRefusedError` stopped being the class actually thrown
+  // — which a generic `rejects.toThrow()` in the unit suite could not catch.
+  // No hub is needed: the refusal fires before `connectToHub` is ever called.
+  it(
+    'refuses a connect over a future schema version without crashing',
+    async () => {
+      const home = await isolatedHome();
+      await Bun.write(
+        join(home, 'runtime/remote/credentials.json'),
+        FUTURE_SCHEMA_CREDENTIALS_JSON
+      );
+
+      const run = await runCli(['connect', '--hub', 'ws://127.0.0.1:9/'], {
+        env: { MANGO_HOME: home, MANGOSTUDIO_RUNTIME_TOKEN: 'mrt_selector.env' },
+      });
+
+      expect(run.exitCode).toBe(1);
+      expect(run.stderr).toContain('schemaVersion 2');
+      // A crash would print the class name and a stack frame; a clean
+      // refusal prints neither.
+      expect(run.stderr).not.toContain('RuntimeCredentialsRefusedError');
+      expect(run.stderr).not.toMatch(/^\s+at /m);
+    },
+    SPAWN_TIMEOUT_MS
+  );
+
+  // #1078 review: `resolveToken` used to collapse every unusable
+  // `credentials.json` to a bare `null`, so `connect` printed "No pairing
+  // token" for a slot that plainly has one — indistinguishable from a fresh
+  // box, and a restart-looping unattended service would never learn why.
+  it(
+    'explains a stored pairing token it refuses to trust, instead of saying none is stored',
+    async () => {
+      const home = await isolatedHome();
+      await Bun.write(
+        join(home, 'runtime/remote/credentials.json'),
+        FUTURE_SCHEMA_CREDENTIALS_JSON
+      );
+
+      // No --token and no MANGOSTUDIO_RUNTIME_TOKEN: `connect` falls back to
+      // whatever is stored, which is the path that used to lose the reason.
+      const run = await runCli(['connect', '--hub', 'ws://127.0.0.1:9/'], {
+        env: { MANGO_HOME: home },
+      });
+
+      expect(run.exitCode).toBe(1);
+      expect(run.stderr).toContain('schemaVersion 2');
+      expect(run.stderr).not.toContain('No pairing token');
+      // `connect` never generates a token and `--token <value>` is refused on
+      // purpose (argv is world-readable), so the accurate remedy here is
+      // "move it aside" — not the stdin/env instruction `replaceable` gets.
+      expect(run.stderr).toContain('Move it aside');
+      expect(run.stderr).not.toContain('Pipe one in with --token -');
+    },
+    SPAWN_TIMEOUT_MS
+  );
+
+  // #1078 review, second round: `diagnosed` was true for `replaceable` too,
+  // which suppressed the one accurate instruction `connect` has (pipe a
+  // token in) and substituted `credentialsRemedy`'s "rerun with a token" —
+  // the one form `parseConnectArgs` refuses on purpose.
+  it(
+    'shows the schema-mismatch diagnostic but keeps the connect token instruction for a replaceable file',
+    async () => {
+      const home = await isolatedHome();
+      await Bun.write(
+        join(home, 'runtime/remote/credentials.json'),
+        NUMERIC_TOKEN_CREDENTIALS_JSON
+      );
+
+      const run = await runCli(['connect', '--hub', 'ws://127.0.0.1:9/'], {
+        env: { MANGO_HOME: home },
+      });
+
+      expect(run.exitCode).toBe(1);
+      expect(run.stderr).toContain('does not match the runtime credentials schema');
+      expect(run.stderr).toContain('Pipe one in with --token -');
+      // "Move it aside" is the `refused` remedy; a `replaceable` file heals
+      // itself on the next write and must not be told to move anywhere.
+      expect(run.stderr).not.toContain('Move it aside');
+    },
+    SPAWN_TIMEOUT_MS
+  );
+});
+
+/** Collects every `log(...)` call in order, for asserting on wording without a process spawn. */
+function collectLogs(): {
+  readonly log: (message: string) => void;
+  readonly lines: readonly string[];
+} {
+  const lines: string[] = [];
+  return { log: (message: string) => lines.push(message), lines };
+}
+
+// #1078 review, second round: `resolveServeToken` never exits `serve` on its
+// own (it binds a listener and blocks), which is why these are direct calls
+// rather than a `runCli` spawn — a spawned `serve` here would simply hang.
+describe('resolveToken and resolveServeToken', () => {
+  it('reports the diagnostic and the refused remedy, and suppresses the generic fallback', async () => {
+    const home = await isolatedHome();
+    const env = { MANGO_HOME: home };
+    await Bun.write(join(home, 'runtime/remote/credentials.json'), FUTURE_SCHEMA_CREDENTIALS_JSON);
+    const { log, lines } = collectLogs();
+
+    const result = await resolveToken('stored', log, env);
+
+    expect(result.token).toBeNull();
+    expect(result.diagnosed).toBe(true);
+    expect(lines.join('\n')).toContain('schemaVersion 2');
+    expect(lines.join('\n')).toContain('Move it aside');
+  });
+
+  it('reports the diagnostic but leaves the fallback for the caller on a replaceable file', async () => {
+    const home = await isolatedHome();
+    const env = { MANGO_HOME: home };
+    await Bun.write(join(home, 'runtime/remote/credentials.json'), NUMERIC_TOKEN_CREDENTIALS_JSON);
+    const { log, lines } = collectLogs();
+
+    const result = await resolveToken('stored', log, env);
+
+    expect(result.token).toBeNull();
+    expect(result.diagnosed).toBe(false);
+    expect(lines.join('\n')).toContain('does not match the runtime credentials schema');
+    expect(lines.join('\n')).not.toContain('Move it aside');
+  });
+
+  it('reports the diagnostic and the refused remedy, and never attempts to bootstrap over it', async () => {
+    const home = await isolatedHome();
+    const env = { MANGO_HOME: home };
+    await Bun.write(join(home, 'runtime/remote/credentials.json'), FUTURE_SCHEMA_CREDENTIALS_JSON);
+    const { log, lines } = collectLogs();
+
+    const result = await resolveServeToken('stored', log, env);
+
+    expect(result.resolved).toBeNull();
+    expect(result.diagnosed).toBe(true);
+    expect(lines.join('\n')).toContain('schemaVersion 2');
+    expect(lines.join('\n')).toContain('Move it aside');
+  });
+
+  it('reports the diagnostic and still bootstraps a fresh token for a replaceable file', async () => {
+    const home = await isolatedHome();
+    const env = { MANGO_HOME: home };
+    await Bun.write(join(home, 'runtime/remote/credentials.json'), NUMERIC_TOKEN_CREDENTIALS_JSON);
+    const { log, lines } = collectLogs();
+
+    const result = await resolveServeToken('stored', log, env);
+
+    expect(result.resolved?.generated).toBe(true);
+    expect(result.resolved?.token.length ?? 0).toBeGreaterThan(0);
+    expect(lines.join('\n')).toContain('does not match the runtime credentials schema');
+    // Nothing was left for an operator to do: the token was just generated in
+    // this same call, so a "move it aside" sentence here would be false.
+    expect(lines.join('\n')).not.toContain('Move it aside');
+  });
 });
 
 interface StdioRuntimeOptions {
