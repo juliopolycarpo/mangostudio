@@ -8,7 +8,6 @@
 mod support;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use mango_protocol::contract::Contract;
 use mango_protocol::error::codes;
@@ -35,10 +34,20 @@ async fn a_panicking_concurrent_request_does_not_take_down_a_normal_one() {
     // it — the only way to prove the two requests were genuinely
     // in flight together, rather than merely sequenced by luck.
     let (release, released) = tokio::sync::watch::channel(false);
+    // Fired by the normal handler the instant it starts running, so the test
+    // can wait for proof that the handler *entered* — a fixed sleep only
+    // proves time passed, not that the task was scheduled in time.
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel::<()>();
+    let entered_tx = std::sync::Mutex::new(Some(entered_tx));
 
     let registry =
         Registry::new().implement("runtime.health", move |params: HealthParams, _context| {
             let mut released = released.clone();
+            if !params.trigger_panic
+                && let Some(sender) = entered_tx.lock().expect("never panics").take()
+            {
+                let _ = sender.send(());
+            }
             async move {
                 if params.trigger_panic {
                     panic!("the file contained /etc/shadow and token sk-secret-9f3a-canary");
@@ -72,7 +81,9 @@ async fn a_panicking_concurrent_request_does_not_take_down_a_normal_one() {
             .request("runtime.health", json!({ "triggerPanic": false }))
             .await
     });
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    within("the normal handler to start running", entered_rx)
+        .await
+        .expect("the handler fires its signal before awaiting the release gate");
 
     let panicked = within(
         "the panicking request",
