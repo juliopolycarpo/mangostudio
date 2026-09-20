@@ -661,6 +661,19 @@ fn parse_listen_address(value: &str) -> Option<SocketAddr> {
     if let Ok(port) = trimmed.parse::<u16>() {
         return Some(SocketAddr::from(([127, 0, 0, 1], port)));
     }
+    // A bracketed IPv6 literal, `[<addr>]:<port>` — handled before the
+    // generic `rfind(':')` split below, which would otherwise hand
+    // `to_socket_addrs` the host `"[::1]"`, brackets included:
+    // `IpAddr::from_str` does not accept those, so a literal that looks
+    // exactly like the standard `host:port` convention for IPv6 silently
+    // failed to parse at all.
+    if let Some(rest) = trimmed.strip_prefix('[') {
+        let (addr, after) = rest.split_once(']')?;
+        let port_text = after.strip_prefix(':')?.trim();
+        let ip: std::net::Ipv6Addr = addr.parse().ok()?;
+        let port: u16 = port_text.parse().ok()?;
+        return Some(SocketAddr::from((ip, port)));
+    }
     let separator = trimmed.rfind(':')?;
     if separator == 0 {
         return None;
@@ -705,6 +718,26 @@ mod tests {
     fn a_host_port_pair_resolves_the_host() {
         let addr = parse_listen_address("127.0.0.1:9090").unwrap();
         assert_eq!(addr.port(), 9090);
+    }
+
+    #[test]
+    fn a_bracketed_ipv6_literal_resolves_correctly() {
+        let addr = parse_listen_address("[::1]:8080").expect(
+            "a bracketed IPv6 literal must parse; the generic rfind(':') split would otherwise \
+             hand to_socket_addrs the bracketed host \"[::1]\", which IpAddr::from_str refuses",
+        );
+        assert_eq!(
+            addr.ip(),
+            std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST)
+        );
+        assert_eq!(addr.port(), 8080);
+    }
+
+    #[test]
+    fn a_bracketed_ipv6_literal_with_no_port_is_rejected() {
+        assert!(parse_listen_address("[::1]").is_none());
+        assert!(parse_listen_address("[::1]:").is_none());
+        assert!(parse_listen_address("[not-an-ip]:8080").is_none());
     }
 
     #[test]
