@@ -331,6 +331,59 @@ describe('RuntimeConnectionManager', () => {
     expect(await manager.getClient('user-1', 'devbox')).toBe(secondClient);
   });
 
+  it('does not let a cancelled attempt publish its connection over a newer one', async () => {
+    // Attempt A's handshake is held open by the test — a genuinely deferred
+    // connector, not a timing race — so it can be released only after attempt
+    // B has already published, proving the late arrival is discarded rather
+    // than assumed to lose a race it never actually ran.
+    const closedStale: string[] = [];
+    const staleConnection: ManagedRuntimeConnection = {
+      client: { manifest: TEST_MANIFEST } as RuntimeClient,
+      close: () => {
+        closedStale.push('closed');
+      },
+    };
+    const fresh = fakeConnection(() => undefined);
+    const signals: AbortSignal[] = [];
+    let releaseStale: ((connection: ManagedRuntimeConnection) => void) | undefined;
+    let attempts = 0;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: (_definition, _onUnavailable, context) => {
+          attempts += 1;
+          signals.push(context.signal);
+          if (attempts === 1) {
+            return new Promise((resolve) => {
+              releaseStale = resolve;
+            });
+          }
+          return Promise.resolve(fresh);
+        },
+      },
+    });
+
+    // Attempt A starts, then the caller gives up on it before it handshakes —
+    // a disconnect, or a second `connect()` call from real code.
+    const staleAttempt = manager.connect('user-1', 'devbox');
+    await Promise.resolve();
+    await Promise.resolve();
+    manager.disconnect('user-1', 'devbox');
+    expect(signals[0]?.aborted).toBe(true);
+
+    // Attempt B starts fresh and completes normally.
+    const freshClient = await manager.connect('user-1', 'devbox', { force: true });
+    expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
+
+    // A's handshake finally answers, after B has already published.
+    releaseStale?.(staleConnection);
+    await expect(staleAttempt).rejects.toThrow('Runtime connection was closed.');
+
+    expect(closedStale).toEqual(['closed']);
+    expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
+    expect(await manager.getClient('user-1', 'devbox')).toBe(freshClient);
+  });
+
   it('maps connector failures to UNAVAILABLE without caching a rejection', async () => {
     let attempts = 0;
     const connector: RuntimeEnvironmentConnector = () => {

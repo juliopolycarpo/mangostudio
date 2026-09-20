@@ -17,7 +17,7 @@
 
 import { statSync } from 'node:fs';
 import { RESERVED_ERROR_CODES, RemoteError, type SessionClosure } from '@mangostudio/protocol';
-import { type SpawnedPeer, spawnPort } from '@mangostudio/protocol/spawn';
+import { type SpawnedPeer, type SpawnOptions, spawnPort } from '@mangostudio/protocol/spawn';
 import { sanitizeShellEnv } from '@mangostudio/shared/process';
 import { createDiagnosticLogger } from '../../lib/logger';
 import type { RuntimeLaunchCommand } from '../../lib/runtime-paths';
@@ -88,6 +88,24 @@ export interface SpawnRuntimeChildOptions {
   readonly describeFailure?: (failure: RuntimeLaunchFailure) => string | undefined;
   /** Fires once when the child or its pipes die after a successful handshake. */
   readonly onClosed: () => void;
+  /**
+   * Aborted when the caller gives up before the handshake completes — a
+   * disconnect, a newer attempt superseding this one, or shutdown. Without
+   * this, a cancelled attempt still ran its spawn and handshake to completion
+   * and was only discarded afterwards; with it, the child is terminated the
+   * moment the signal fires instead of being left running for the full
+   * handshake timeout.
+   */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * Replaces the real launcher. Injected so a test can drive a handshake by
+ * hand — an in-process port pair, held open until the test releases it —
+ * instead of spawning a process and racing its actual timing.
+ */
+export interface SpawnRuntimeChildDeps {
+  readonly spawnPort?: (options: SpawnOptions) => SpawnedPeer;
 }
 
 /**
@@ -103,10 +121,14 @@ export interface SpawnRuntimeChildOptions {
  * await connection.hub.request('runtime.health', {});
  */
 export async function spawnRuntimeChild(
-  options: SpawnRuntimeChildOptions
+  options: SpawnRuntimeChildOptions,
+  deps: SpawnRuntimeChildDeps = {}
 ): Promise<SpawnedRuntimeConnection> {
-  const { launch } = options;
-  const peer = spawnPort({
+  const { launch, signal } = options;
+  if (signal?.aborted) throw cancelledError(launch.command);
+
+  const spawn = deps.spawnPort ?? spawnPort;
+  const peer = spawn({
     argv: [launch.command, ...launch.args, '--stdio'],
     ...(options.cwd ? { cwd: options.cwd } : {}),
     // The hub's own denylist rather than the SDK's allowlist: this child is a
@@ -122,15 +144,25 @@ export async function spawnRuntimeChild(
 
   let hub: ProtocolHubSession;
   try {
-    hub = await openHubSession(peer.port, {
-      hubVersion: options.hubVersion,
-      handshakeTimeoutMs: options.handshakeTimeoutMs ?? resolveHandshakeTimeoutMs(),
-      // Defaults to on: the runtime ships inside the hub's own distribution, so
-      // a binary from another release is a stale install rather than a peer to
-      // negotiate with.
-      requireMatchingRelease: options.requireMatchingRelease ?? true,
-    });
+    hub = await raceAgainstAbort(
+      openHubSession(peer.port, {
+        hubVersion: options.hubVersion,
+        handshakeTimeoutMs: options.handshakeTimeoutMs ?? resolveHandshakeTimeoutMs(),
+        // Defaults to on: the runtime ships inside the hub's own distribution, so
+        // a binary from another release is a stale install rather than a peer to
+        // negotiate with.
+        requireMatchingRelease: options.requireMatchingRelease ?? true,
+      }),
+      signal
+    );
   } catch (error) {
+    if (error instanceof SpawnCancelled) {
+      // Reject only once the child is actually being torn down, not merely
+      // requested to be — a caller that gave up must not see this settle
+      // before the process it named is on its way out.
+      await peer.terminate();
+      throw cancelledError(launch.command);
+    }
     // No compensating terminate: `openHubSession` closes the port on the way
     // out, and the launcher terminates the child whenever its port closes —
     // including when the port closed on its own and took the session with it.
@@ -293,6 +325,47 @@ function describeSessionClosure(closure: SessionClosure): string {
 function asRemoteFailure(error: unknown, message: string): RemoteError {
   const typed = error instanceof RemoteError ? error : null;
   return new RemoteError(typed?.code ?? RESERVED_ERROR_CODES.UNAVAILABLE, message, typed?.details);
+}
+
+/**
+ * Marks a rejection from {@link raceAgainstAbort}'s own sentinel promise, so
+ * the catch in `spawnRuntimeChild` can tell "the signal fired" from "the
+ * handshake itself failed" without inspecting `signal.aborted` — which a
+ * handshake failure landing in the same tick as an unrelated abort could also
+ * satisfy. Never escapes this module.
+ */
+class SpawnCancelled extends Error {}
+
+/** What a cancelled launch rejects with, once its child is being torn down. */
+function cancelledError(command: string): RemoteError {
+  return new RemoteError(
+    RESERVED_ERROR_CODES.CANCELLED,
+    `The connection to ${command} was cancelled before it finished handshaking.`
+  );
+}
+
+/**
+ * Races `promise` against `signal`, rejecting with {@link SpawnCancelled} the
+ * moment it aborts — the same idiom `isAuthorizedLocalWorkspace`
+ * (`runtime-connection-manager.ts`) uses: a `Promise.withResolvers` sentinel
+ * wired to the abort event, raced rather than substituted for the original.
+ * Whichever side loses is not awaited again once the race settles, so its
+ * eventual settlement is caught here instead of surfacing as unhandled — a
+ * handshake that fails after cancellation already started tearing its child
+ * down is not news to anyone still holding this promise.
+ *
+ * @example
+ * await raceAgainstAbort(openHubSession(port, opts), controller.signal);
+ */
+function raceAgainstAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  const aborted = Promise.withResolvers<never>();
+  const onAbort = () => aborted.reject(new SpawnCancelled());
+  signal.addEventListener('abort', onAbort, { once: true });
+  promise.catch(() => undefined);
+  return Promise.race([promise, aborted.promise]).finally(() => {
+    signal.removeEventListener('abort', onAbort);
+  });
 }
 
 function excerpt(stderr: string): string {
