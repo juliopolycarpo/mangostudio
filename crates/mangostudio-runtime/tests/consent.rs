@@ -2,9 +2,11 @@
 //! refuses a capability-bearing method and records the denial, and lets a
 //! zero-capability method through untouched; `GrantingAuthorization` and
 //! `PartiallyGrantingAuthorization` prove the guard actually consults its
-//! port's answer rather than passing every call by construction;
-//! `PanickingAuthorization` proves a misbehaving port still leaves an audit
-//! entry behind.
+//! port's answer rather than passing every call by construction. See
+//! `tests/audit_isolation.rs` for `PanickingAuthorization` and
+//! `PanickingAudit` exercised against this guard — that file is the home
+//! for every "a port panics" audit-recording test, on both the
+//! `Registry::implement` and `AuthorizationGuard` sides.
 
 #[path = "support/mod.rs"]
 mod support;
@@ -20,8 +22,8 @@ use mangostudio_runtime::registry::Registry;
 use mangostudio_runtime_contract::catalog::catalog;
 use serde_json::json;
 use support::{
-    GrantingAuthorization, PanickingAuthorization, PartiallyGrantingAuthorization, RecordingAudit,
-    health_result, open_pair, within,
+    GrantingAuthorization, PartiallyGrantingAuthorization, RecordingAudit, health_result,
+    open_pair, within,
 };
 
 #[tokio::test]
@@ -156,42 +158,4 @@ async fn partially_granting_authorization_names_only_the_ungranted_capability() 
     .expect_err("fsRead was not granted, even though checkpoints was");
     assert_eq!(denied.code, codes::DENIED);
     assert_eq!(denied.details.unwrap()["missing"], json!(["fsRead"]));
-}
-
-#[tokio::test]
-async fn a_panicking_authorization_port_still_produces_an_audit_entry() {
-    let audit = Arc::new(RecordingAudit::new());
-    let registry = Registry::with_ports(Arc::clone(&audit) as _, Arc::new(SystemClock)).implement(
-        "terminal.list",
-        |_params: serde_json::Value, _context| async move {
-            Ok::<_, mango_protocol::RemoteError>(json!({ "sessions": [] }))
-        },
-    );
-
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(PanickingAuthorization),
-        "host",
-    )
-    .expect("terminal.list is declared by the catalog");
-    guard.persist();
-
-    let error = within("terminal.list", hub.request("terminal.list", json!({})))
-        .await
-        .expect_err("a panicking authorization port becomes INTERNAL");
-    assert_eq!(error.code, codes::INTERNAL);
-
-    let entries = audit.entries();
-    assert_eq!(
-        entries.len(),
-        1,
-        "a panicking Authorization port must still leave exactly one audit entry, got {entries:?}"
-    );
-    assert_eq!(entries[0].outcome, Outcome::Error);
-    assert_eq!(entries[0].code.as_deref(), Some(codes::INTERNAL));
 }

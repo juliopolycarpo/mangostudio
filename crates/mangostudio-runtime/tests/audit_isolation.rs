@@ -20,7 +20,9 @@ use mangostudio_runtime::ports::clock::SystemClock;
 use mangostudio_runtime::registry::Registry;
 use mangostudio_runtime_contract::catalog::catalog;
 use serde_json::json;
-use support::{PanickingAudit, RecordingAudit, health_result, open_pair, within};
+use support::{
+    PanickingAudit, PanickingAuthorization, RecordingAudit, health_result, open_pair, within,
+};
 
 #[tokio::test]
 async fn a_panicking_handler_still_produces_an_audit_entry() {
@@ -186,4 +188,91 @@ async fn a_panicking_audit_sink_leaves_a_successful_result_untouched_on_the_wire
         .await
         .expect("a panicking audit sink must not turn a successful result into an error");
     assert_eq!(result["slot"], json!("host"));
+}
+
+/// The same panicking-sink corruption as above, but on `AuthorizationGuard`'s
+/// side of the pipeline, where it is the more important half: `334b28a2`
+/// named this exact case — a panicking sink turning an already-built
+/// `DENIED` into a redacted `INTERNAL` — as one of the two directions that
+/// bug fixed. Nothing in `tests/consent.rs` exercises a failing sink, only a
+/// healthy `RecordingAudit`, so this was unguarded until now. `serve()`
+/// builds `AuthorizationGuard` from the registry's own `Audit` port (see
+/// `serve.rs`), so a `PanickingAudit`-backed registry exercises it directly:
+/// the denial happens before the handler ever runs, so this registry's
+/// `terminal.list` implementation is never reached.
+#[tokio::test]
+async fn a_panicking_audit_sink_leaves_a_denial_as_denied_not_internal() {
+    let registry = Registry::with_ports(Arc::new(PanickingAudit), Arc::new(SystemClock)).implement(
+        "terminal.list",
+        |_params: serde_json::Value, _context| async move {
+            Ok::<_, mango_protocol::RemoteError>(json!({ "sessions": [] }))
+        },
+    );
+
+    let (hub, runtime) = open_pair().await;
+    let contract =
+        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
+    let guard = mangostudio_runtime::serve::serve(
+        &contract,
+        &runtime,
+        registry,
+        Arc::new(DenyingAuthorization),
+        "host",
+    )
+    .expect("terminal.list is declared by the catalog");
+    guard.persist();
+
+    let error = within("the request", hub.request("terminal.list", json!({})))
+        .await
+        .expect_err("shell was never granted");
+    assert_eq!(
+        error.code,
+        codes::DENIED,
+        "a panicking audit sink must not turn an already-built DENIED into INTERNAL"
+    );
+}
+
+/// The mirror case: a panicking `Authorization` port itself (not the sink)
+/// must still leave exactly one audit entry, correctly classified as
+/// `Outcome::Error` rather than `Outcome::Denied` — the guard never decided
+/// a real denial, so it must not be recorded as one.
+#[tokio::test]
+async fn a_panicking_authorization_port_records_error_not_denied() {
+    let audit = Arc::new(RecordingAudit::new());
+    let registry = Registry::with_ports(Arc::clone(&audit) as _, Arc::new(SystemClock)).implement(
+        "terminal.list",
+        |_params: serde_json::Value, _context| async move {
+            Ok::<_, mango_protocol::RemoteError>(json!({ "sessions": [] }))
+        },
+    );
+
+    let (hub, runtime) = open_pair().await;
+    let contract =
+        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
+    let guard = mangostudio_runtime::serve::serve(
+        &contract,
+        &runtime,
+        registry,
+        Arc::new(PanickingAuthorization),
+        "host",
+    )
+    .expect("terminal.list is declared by the catalog");
+    guard.persist();
+
+    let error = within("the request", hub.request("terminal.list", json!({})))
+        .await
+        .expect_err("a panicking authorization port becomes INTERNAL");
+    assert_eq!(error.code, codes::INTERNAL);
+
+    let entries = audit.entries();
+    assert_eq!(
+        entries.len(),
+        1,
+        "a panicking Authorization port must still leave exactly one audit entry, got {entries:?}"
+    );
+    assert_eq!(
+        entries[0].outcome,
+        Outcome::Error,
+        "a panic in the authorization check is not a real denial"
+    );
 }
