@@ -173,7 +173,29 @@ pub struct RuntimeCapabilityFeatures {
 /// asymmetry this type resolves. Build one with [`RuntimeCapabilityManifest::new`],
 /// which fills every feature `false` and every optional member `None`, then
 /// set only what the runtime actually supports and was consented.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// # Write-only, by design
+///
+/// This type derives `Serialize` only. Nothing in this repository deserialises a
+/// `RuntimeCapabilityManifest` today — the runtime builds one and hands it to a hub, and no
+/// hub-side reader parses one back into this type. That asymmetry is intentional, not an
+/// oversight: a contract-legal manifest from an older runtime (built before a feature like
+/// `fsRead` or `toolchain` existed) omits that key entirely, and the wire's own semantics (see
+/// the module docs) read an absent `features` key as **granted**, never as `false`. This
+/// struct makes every feature key mandatory precisely so a Rust-built manifest can never
+/// reproduce that omission by accident — which is exactly why it must not also be the type a
+/// peer's manifest is deserialised into. Adding `#[serde(default)]` to the newer feature
+/// fields would compile, but it would read a missing key as `false`, inverting the wire's
+/// "absent means granted" rule for exactly the peers this asymmetry exists to protect.
+///
+/// A future reader of a peer's manifest needs a *separate* type, with every feature field
+/// `Option<bool>`, and an asymmetric resolver: `unwrap_or(true)` for `tools`, `git`,
+/// `probing`, `mcp`, `library`, `checkpoints`, `fsRead`, `fsWrite`, `shell`, and `update` (the
+/// features that predate this manifest shape), `unwrap_or(false)` for `externalAgents` and
+/// `toolchain` (features that were never ambiguous — a peer that never announced them never
+/// had them). Build that type deliberately, with a test pinning both readings, rather than
+/// reaching for `#[serde(default)]` here.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeCapabilityManifest {
     /// The host operating system, e.g. `"linux"`, `"darwin"`, `"win32"`.
