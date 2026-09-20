@@ -51,7 +51,16 @@ export const RUNTIME_CRATE = 'mangostudio-runtime';
  * whose binary ships inside the app's own release archive. Add a new entry
  * the same commit a new app-versioned crate joins the workspace: nothing
  * about `Cargo.toml` enforces this lockstep on its own, only this list does,
- * for both `collectVersionConsistency` and `bumpLockstepVersions`. */
+ * for both `collectVersionConsistency` and `bumpLockstepVersions`.
+ *
+ * This is the **application** release version line (root `package.json`).
+ * It is a different table from `scripts/protocol/versions.ts`'s
+ * `WORKSPACE_DEPENDENCY_CRATES`, which tracks the **protocol** version
+ * (`protocol-v*`) pinned in `[workspace.dependencies]` — two version lines
+ * that never move together. A crate whose `[package].version` should track
+ * the protocol version instead (i.e. `version.workspace = true`, with a
+ * `[workspace.dependencies]` self-pin) belongs in that file's list, not
+ * this one. */
 export const APP_VERSIONED_CRATES: readonly { manifest: string; crateName: string }[] = [
   { manifest: LAUNCHER_MANIFEST, crateName: LAUNCHER_CRATE },
   { manifest: RUNTIME_MANIFEST, crateName: RUNTIME_CRATE },
