@@ -89,6 +89,82 @@ describe('runtime contract corpus', () => {
       expect(closedExtra?.expect).toBe('invalid');
     });
 
+    test('a too-short string violates minLength and a too-long string violates maxLength', () => {
+      const schema = Type.Object({ s: Type.String({ minLength: 3, maxLength: 5 }) });
+      const fixtures = buildFixturesForSubject({ kind: 'topic', name: 't.length' }, schema);
+      const tooShort = fixtures.find((fixture) => fixture.mutation === 'tooShort:s');
+      const tooLong = fixtures.find((fixture) => fixture.mutation === 'tooLong:s');
+      expect(tooShort?.value).toEqual({ s: 'aa' });
+      expect(tooShort?.expect).toBe('invalid');
+      expect(tooLong?.value).toEqual({ s: 'aaaaaa' });
+      expect(tooLong?.expect).toBe('invalid');
+    });
+
+    test('a property with no length bounds gets no tooShort/tooLong fixture', () => {
+      const schema = Type.Object({ s: Type.String() });
+      const fixtures = buildFixturesForSubject({ kind: 'topic', name: 't.nolength' }, schema);
+      expect(
+        fixtures.some(
+          (fixture) =>
+            fixture.mutation.startsWith('tooShort:') || fixture.mutation.startsWith('tooLong:')
+        )
+      ).toBe(false);
+    });
+
+    test('a value outside a required pattern is invalid', () => {
+      // `^[a-z0-9]+(?:-[a-z0-9]+)*$` is one of `patternSeed()`'s recognised patterns, so this
+      // schema gets a valid seed without needing a default.
+      const schema = Type.Object({ id: Type.String({ pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' }) });
+      const fixtures = buildFixturesForSubject({ kind: 'topic', name: 't.badpattern' }, schema);
+      const badPattern = fixtures.find((fixture) => fixture.mutation === 'badPattern:id');
+      expect(badPattern?.expect).toBe('invalid');
+    });
+
+    test('a duplicated item in a uniqueItems array is invalid', () => {
+      const schema = Type.Object({
+        items: Type.Array(Type.String(), { uniqueItems: true, maxItems: 3 }),
+      });
+      const fixtures = buildFixturesForSubject({ kind: 'topic', name: 't.dup' }, schema);
+      const dupItems = fixtures.find((fixture) => fixture.mutation === 'dupItems:items');
+      expect(dupItems).toBeDefined();
+      expect((dupItems?.value as { items: unknown[] } | undefined)?.items).toHaveLength(2);
+      expect(dupItems?.expect).toBe('invalid');
+    });
+
+    test('a uniqueItems array with fewer than two allowed items gets no dupItems fixture', () => {
+      const schema = Type.Object({
+        items: Type.Array(Type.String(), { uniqueItems: true, maxItems: 1 }),
+      });
+      const fixtures = buildFixturesForSubject({ kind: 'topic', name: 't.dup-narrow' }, schema);
+      expect(fixtures.some((fixture) => fixture.mutation.startsWith('dupItems:'))).toBe(false);
+    });
+
+    test('an array exceeding maxItems is invalid', () => {
+      const schema = Type.Object({ items: Type.Array(Type.String(), { maxItems: 2 }) });
+      const fixtures = buildFixturesForSubject({ kind: 'topic', name: 't.toomany' }, schema);
+      const tooManyItems = fixtures.find((fixture) => fixture.mutation === 'tooManyItems:items');
+      expect(tooManyItems).toBeDefined();
+      expect((tooManyItems?.value as { items: unknown[] } | undefined)?.items).toHaveLength(3);
+      expect(tooManyItems?.expect).toBe('invalid');
+    });
+
+    test('a uniqueItems array gets no tooManyItems fixture, only dupItems — duplicating to overflow would contaminate which keyword rejected it', () => {
+      const schema = Type.Object({
+        items: Type.Array(Type.String(), { uniqueItems: true, maxItems: 2 }),
+      });
+      const fixtures = buildFixturesForSubject({ kind: 'topic', name: 't.uniquemax' }, schema);
+      expect(fixtures.some((fixture) => fixture.mutation.startsWith('tooManyItems:'))).toBe(false);
+      expect(fixtures.some((fixture) => fixture.mutation === 'dupItems:items')).toBe(true);
+    });
+
+    test('a null value replacing a required non-nullable property is invalid', () => {
+      const schema = Type.Object({ a: Type.String() });
+      const fixtures = buildFixturesForSubject({ kind: 'topic', name: 't.null' }, schema);
+      const nullValue = fixtures.find((fixture) => fixture.mutation === 'nullValue:a');
+      expect(nullValue?.value).toEqual({ a: null });
+      expect(nullValue?.expect).toBe('invalid');
+    });
+
     test('a pattern-only string with no default is repaired rather than left to throw', () => {
       const schema = Type.Object({
         id: Type.String({ pattern: '^sha256:[a-f0-9]{64}$' }),

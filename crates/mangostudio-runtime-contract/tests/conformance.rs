@@ -149,11 +149,15 @@ fn mutation_family(mutation: &str) -> &str {
 
 /// The JSON Schema keyword(s) a validator should report for an invalid fixture in
 /// `mutation_family`, measured against the current corpus rather than guessed: every
-/// `(family, keyword)` pair this crate's own validators actually produce across all 500+
+/// `(family, keyword)` pair this crate's own validators actually produce across the corpus's
 /// invalid fixtures, grouped by family. `anyOf` shows up alongside the "obvious" keyword for
 /// every family here because a property that a mutation touches is often itself inside a
 /// method's `anyOf`-shaped result — the validator reports the outer branch mismatch, not the
-/// inner keyword, and both are the *right* reason to reject the fixture.
+/// inner keyword, and both are the *right* reason to reject the fixture. `badPattern` is
+/// included even though the current catalog's two top-level `pattern`-constrained properties
+/// are both optional and neither is ever present in a generated seed (`Value.Create` only
+/// populates required properties), so this family produces zero fixtures today — it stays
+/// mapped for the day a required or defaulted property gains a `pattern`.
 ///
 /// # Panics
 /// Panics naming the unrecognised family when the corpus grows a mutation kind this mapping
@@ -166,6 +170,12 @@ fn expected_keywords_for(mutation_family: &str) -> &'static [&'static str] {
         "extraProperty" => &["additionalProperties", "anyOf"],
         "outOfRange" => &["minimum", "maximum"],
         "wrongConst" => &["const", "anyOf", "type"],
+        "tooShort" => &["minLength", "anyOf"],
+        "tooLong" => &["maxLength", "anyOf"],
+        "badPattern" => &["pattern", "anyOf"],
+        "dupItems" => &["uniqueItems", "anyOf"],
+        "tooManyItems" => &["maxItems", "anyOf"],
+        "nullValue" => &["type", "anyOf"],
         other => panic!(
             "runtime-contract conformance: no expected-keyword mapping for mutation family {other:?}. Add one to expected_keywords_for() in tests/conformance.rs."
         ),

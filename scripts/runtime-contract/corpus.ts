@@ -45,14 +45,20 @@ export interface CorpusSubject {
   readonly side?: CorpusSide;
 }
 
-/** The five mechanical mutation families, plus the unmutated seed itself. */
+/** The mechanical mutation families, plus the unmutated seed itself. */
 type CorpusMutation =
   | 'seed'
   | `drop:${string}`
   | `wrongType:${string}`
   | 'extraProperty'
   | `outOfRange:${string}`
-  | `wrongConst:${string}`;
+  | `wrongConst:${string}`
+  | `tooShort:${string}`
+  | `tooLong:${string}`
+  | `badPattern:${string}`
+  | `dupItems:${string}`
+  | `tooManyItems:${string}`
+  | `nullValue:${string}`;
 
 /** One corpus entry: a value, why it exists, and TypeBox's own verdict on it. */
 export interface CorpusFixture {
@@ -235,6 +241,60 @@ function outsideConstValues(values: readonly unknown[]): unknown {
   return '__wrong_const__';
 }
 
+/** The declared string-length bounds of a property schema, or `null` when it has neither. */
+function stringLengthBoundsOf(
+  propertySchema: TSchema
+): { minLength?: number; maxLength?: number } | null {
+  const asRecord = propertySchema as unknown as Record<string, unknown>;
+  const minLength = asRecord.minLength as number | undefined;
+  const maxLength = asRecord.maxLength as number | undefined;
+  if (minLength === undefined && maxLength === undefined) return null;
+  return { minLength, maxLength };
+}
+
+/** The `pattern` a property schema pins a string to, or `null` when it declares none. */
+function patternOf(propertySchema: TSchema): string | null {
+  const asRecord = propertySchema as unknown as Record<string, unknown>;
+  return typeof asRecord.pattern === 'string' ? asRecord.pattern : null;
+}
+
+/**
+ * A string that fails `pattern`, tried against a small fixed set of candidates rather than
+ * generated — the same "narrow, reviewed, throws rather than guesses" discipline as
+ * {@link patternSeed}, in the opposite direction: that function invents a value a pattern
+ * accepts, this one needs one it refuses.
+ */
+function outsidePattern(pattern: string): string {
+  const regex = new RegExp(pattern);
+  const candidates = ['', '   ', '__unmatched_pattern__', '!!!!!!!!', 'ZZZZZZZZZZZZZZZZZZZZ'];
+  const rejected = candidates.find((candidate) => !regex.test(candidate));
+  if (rejected === undefined) {
+    throw new CorpusSeedError(
+      `runtime-contract corpus: no badPattern candidate fails pattern ${JSON.stringify(pattern)}. ` +
+        'Add one to outsidePattern() in scripts/runtime-contract/corpus.ts.'
+    );
+  }
+  return rejected;
+}
+
+/** A property schema's array shape, for the `dupItems`/`tooManyItems` mutations. */
+interface ArrayShape {
+  readonly items: TSchema;
+  readonly uniqueItems: boolean;
+  readonly maxItems?: number;
+}
+
+/** `null` when `propertySchema` is not an array schema with a declared `items` shape. */
+function arrayShapeOf(propertySchema: TSchema): ArrayShape | null {
+  const asRecord = propertySchema as unknown as Record<string, unknown>;
+  if (asRecord.type !== 'array' || !asRecord.items) return null;
+  return {
+    items: asRecord.items as TSchema,
+    uniqueItems: asRecord.uniqueItems === true,
+    maxItems: asRecord.maxItems as number | undefined,
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -246,8 +306,11 @@ function verdictOf(schema: TSchema, value: unknown): 'valid' | 'invalid' {
 
 /**
  * Builds every fixture for one subject: the seed, plus one mutation per
- * required key (dropped), one per present property (wrong type, and where
- * applicable out-of-range or wrong-const), and one extra-property fixture.
+ * required key (dropped), one per present property (wrong type, null, and
+ * where applicable out-of-range, wrong-const, too-short/too-long,
+ * pattern-violating, or array-shape-violating), and one extra-property
+ * fixture. The mutation engine only ever touches a subject's *top-level*
+ * properties — it does not recurse into a nested object's own properties.
  *
  * Each fixture's `expect` is computed by re-running `Value.Check`, never
  * assumed — most shapes in this contract are open objects, so an extra
@@ -324,6 +387,80 @@ export function buildFixturesForSubject(subject: CorpusSubject, schema: TSchema)
         expect: verdictOf(schema, mutated),
       });
     }
+
+    const lengthBounds = stringLengthBoundsOf(propertySchema);
+    if (lengthBounds && typeof currentValue === 'string') {
+      if (lengthBounds.minLength !== undefined && lengthBounds.minLength > 0) {
+        const tooShort = { ...seed, [propertyKey]: 'a'.repeat(lengthBounds.minLength - 1) };
+        fixtures.push({
+          subject,
+          mutation: `tooShort:${propertyKey}`,
+          value: tooShort,
+          expect: verdictOf(schema, tooShort),
+        });
+      }
+      if (lengthBounds.maxLength !== undefined) {
+        const tooLong = { ...seed, [propertyKey]: 'a'.repeat(lengthBounds.maxLength + 1) };
+        fixtures.push({
+          subject,
+          mutation: `tooLong:${propertyKey}`,
+          value: tooLong,
+          expect: verdictOf(schema, tooLong),
+        });
+      }
+    }
+
+    const pattern = patternOf(propertySchema);
+    if (pattern && typeof currentValue === 'string') {
+      const badPattern = { ...seed, [propertyKey]: outsidePattern(pattern) };
+      fixtures.push({
+        subject,
+        mutation: `badPattern:${propertyKey}`,
+        value: badPattern,
+        expect: verdictOf(schema, badPattern),
+      });
+    }
+
+    const arrayShape = arrayShapeOf(propertySchema);
+    if (arrayShape && Array.isArray(currentValue)) {
+      // `uniqueItems` and `maxItems` at once means duplicating an item to overflow `maxItems`
+      // would also trip `uniqueItems`, contaminating which keyword actually rejected the
+      // fixture — `dupItems` covers uniqueness on its own, so `tooManyItems` only fires when
+      // duplication is the *only* thing wrong with the result.
+      if (
+        arrayShape.uniqueItems &&
+        (arrayShape.maxItems === undefined || arrayShape.maxItems >= 2)
+      ) {
+        const oneItem = createSeed(arrayShape.items);
+        const dupItems = { ...seed, [propertyKey]: [oneItem, oneItem] };
+        fixtures.push({
+          subject,
+          mutation: `dupItems:${propertyKey}`,
+          value: dupItems,
+          expect: verdictOf(schema, dupItems),
+        });
+      }
+      if (arrayShape.maxItems !== undefined && !arrayShape.uniqueItems) {
+        const overflow = Array.from({ length: arrayShape.maxItems + 1 }, () =>
+          createSeed(arrayShape.items)
+        );
+        const tooManyItems = { ...seed, [propertyKey]: overflow };
+        fixtures.push({
+          subject,
+          mutation: `tooManyItems:${propertyKey}`,
+          value: tooManyItems,
+          expect: verdictOf(schema, tooManyItems),
+        });
+      }
+    }
+
+    const nullValue = { ...seed, [propertyKey]: null };
+    fixtures.push({
+      subject,
+      mutation: `nullValue:${propertyKey}`,
+      value: nullValue,
+      expect: verdictOf(schema, nullValue),
+    });
   }
 
   const withExtra = { ...seed, __unexpected_extra_field__: 'unexpected-value' };
