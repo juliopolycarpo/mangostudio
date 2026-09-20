@@ -2,8 +2,8 @@
 //!
 //! `apps/shared/src/runtime-contract/` is the single source of truth: a
 //! TypeBox schema for every method, event, and document the hub and a
-//! runtime exchange. This crate does not restate any of it. It embeds the six
-//! artifacts `bun run contracts:emit` writes under
+//! runtime exchange. This crate does not restate any of it. It embeds the
+//! seven artifacts `bun run contracts:emit` writes under
 //! `apps/shared/src/runtime-contract/generated/` with [`include_str!`],
 //! parses `catalog.json` into [`mango_protocol::Catalog`], compiles a
 //! `jsonschema` validator for every shape it declares, and mirrors the
@@ -11,10 +11,10 @@
 //! flags, runtime-home file names) as typed Rust.
 //!
 //! See `docs/architecture/runtime-contract.md` for why there is no Rust code
-//! generation, and how the conformance corpus in
-//! [`buildCorpus`](https://github.com/juliopolycarpo/mangostudio/blob/main/scripts/runtime-contract/corpus.ts)
-//! (checked into `generated/conformance-corpus.json`) proves this crate's
-//! validators agree with TypeBox's, not merely that both read the same text.
+//! generation, and how the conformance corpus built by `buildCorpus` in
+//! `scripts/runtime-contract/corpus.ts` (checked into
+//! `generated/conformance-corpus.json`) proves this crate's validators agree
+//! with TypeBox's, not merely that both read the same text.
 //!
 //! This crate is Tokio-free and carries no OS dependency: it is inventory and
 //! validation only. `mangostudio-runtime` (a later crate) is the dispatcher

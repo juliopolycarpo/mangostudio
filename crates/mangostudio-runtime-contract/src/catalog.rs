@@ -112,10 +112,12 @@ mod tests {
         assert!(catalog.validate().is_ok());
     }
 
-    /// The baseline the task calls out by name: 67 methods, 6 topics, as of
-    /// this writing. Read from the parsed catalog, never typed twice — a
-    /// method or topic added to the contract changes this assertion's
-    /// *inputs*, not a second count somewhere else that could fall behind.
+    /// A baseline regression assertion, not a duplication-free invariant: the
+    /// counts below are hand-typed against the catalog as of this writing
+    /// (67 methods, 6 topics), so a method or topic added to — or removed
+    /// from — the contract makes this specific assertion fail, prompting an
+    /// update to the numbers rather than proving the two counts can never
+    /// drift apart on their own.
     #[test]
     fn the_catalog_carries_the_current_baseline_of_methods_and_topics() {
         let catalog = catalog();

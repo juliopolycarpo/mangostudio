@@ -3,9 +3,10 @@
 //!
 //! Mirrors `apps/shared/src/runtime-contract/generated/strings.json`, which is
 //! itself emitted from `apps/shared/src/runtime-contract/strings.ts`. The
-//! constants below exist so PR 003's dispatcher and transports have a typed,
-//! documented home for these values; a test in this module asserts every one
-//! against the embedded JSON so the mirror cannot drift silently.
+//! constants below exist so the dispatcher in `crates/mangostudio-runtime` and
+//! its transports have a typed, documented home for these values; a test in
+//! this module asserts every one against the embedded JSON so the mirror
+//! cannot drift silently.
 
 // `strings.json` backs only the drift tests below — every constant a caller
 // actually uses is a plain literal, verified against the embedded text

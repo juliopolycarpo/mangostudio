@@ -8,8 +8,8 @@
 //! release of that crate stays a local, one-file fix.
 //!
 //! Every compile option mirrors `mango-protocol/src/contract/params.rs`
-//! exactly (draft 2020-12, offline, format assertions on): lane B's
-//! dispatcher compiles the same catalog through
+//! exactly (draft 2020-12, offline, format assertions on): the dispatcher in
+//! `crates/mangostudio-runtime` compiles the same catalog through
 //! [`mango_protocol::contract::Contract::from_catalog`], and a corpus that
 //! gated a validator built with different options would not be testing what
 //! the dispatcher actually runs.

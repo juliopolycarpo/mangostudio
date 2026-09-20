@@ -19,8 +19,8 @@ workspace = true
 
 [dependencies]
 # `mango-protocol.workspace = true` pulls in the default feature set only — no
-# Tokio, no OS dependency. The dispatcher (lane B) is the one that needs the
-# `tokio` feature's `Contract` builder.
+# Tokio, no OS dependency. The dispatcher in `crates/mangostudio-runtime` is
+# the one that needs the `tokio` feature's `Contract` builder.
 #
 # `jsonschema`'s `default-features = false` matches mango-protocol's own
 # `tokio`-gated dependency on it: the default feature pulls in `resolve-http`
