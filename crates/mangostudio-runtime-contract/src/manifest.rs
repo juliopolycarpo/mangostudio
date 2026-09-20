@@ -131,6 +131,35 @@ pub struct RuntimeCapabilityAllow {
     pub external_agents: Option<bool>,
 }
 
+/// Every consent capability's wire name, in `RuntimeCapabilityAllowSchema`'s
+/// own declared order.
+///
+/// The single source of truth a consent surface (a `--allow k=v` validator,
+/// a preset table) reads instead of hand-typing the list a second time —
+/// mirroring `RUNTIME_CAPABILITY_KEYS` in
+/// `apps/shared/src/runtime-home/consent.ts`, which derives the same list
+/// from `RuntimeCapabilityAllowSchema.properties` at runtime. This crate has
+/// no JSON Schema for `RuntimeCapabilityAllow` to reflect over the same way
+/// (it is a hand-written `struct`, not schema-derived), so the order is
+/// pinned here once and cross-checked in this module's own tests against
+/// [`RuntimeCapabilityAllow`]'s actual serialised field names, rather than
+/// trusted to stay in sync by inspection alone.
+#[must_use]
+pub fn capability_keys() -> [&'static str; 10] {
+    [
+        "fsRead",
+        "fsWrite",
+        "shell",
+        "git",
+        "probing",
+        "mcp",
+        "library",
+        "checkpoints",
+        "update",
+        "externalAgents",
+    ]
+}
+
 /// The `features` map: every key mandatory, `false` unless the capability is
 /// both implemented and consented.
 ///
@@ -367,8 +396,8 @@ mod tests {
     use serde_json::{Value, to_value};
 
     use super::{
-        ExternalAgentTarget, GitAvailability, PathStyle, RuntimeCapabilityManifest,
-        RuntimeShellKind,
+        ExternalAgentTarget, GitAvailability, PathStyle, RuntimeCapabilityAllow,
+        RuntimeCapabilityManifest, RuntimeShellKind, capability_keys,
     };
     use crate::schemas::validate_manifest;
 
@@ -439,6 +468,40 @@ mod tests {
         let value = to_value(&manifest).expect("serialises");
         assert_eq!(value["externalAgents"], serde_json::json!(["codex"]));
         assert!(validate_manifest(&value).is_ok(), "{value}");
+    }
+
+    /// `capability_keys` must name exactly the fields `RuntimeCapabilityAllow`
+    /// itself serialises — the regression this guards is the list drifting
+    /// from the struct it is supposed to describe (a renamed field, a
+    /// capability added to one but not the other).
+    #[test]
+    fn capability_keys_match_the_allow_structs_own_field_names() {
+        let all_true = RuntimeCapabilityAllow {
+            fs_read: true,
+            fs_write: true,
+            shell: true,
+            git: true,
+            probing: true,
+            mcp: true,
+            library: true,
+            checkpoints: true,
+            update: true,
+            external_agents: Some(true),
+        };
+        let value = to_value(all_true).expect("serialises");
+        let mut wire_keys: Vec<String> = value
+            .as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect();
+        wire_keys.sort();
+        let mut declared_keys: Vec<String> = capability_keys()
+            .iter()
+            .map(|key| (*key).to_string())
+            .collect();
+        declared_keys.sort();
+        assert_eq!(wire_keys, declared_keys);
     }
 
     /// Reads the feature key list from `manifest.schema.json` itself rather
