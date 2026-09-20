@@ -835,7 +835,14 @@ a fixed order and is reviewed as one.
 - Where the repository records all of this once: `scripts/lib/protocol.ts`
 
 The hub's own catalog is generated against this spec — see `scripts/runtime-contract/` and
-`apps/shared/src/runtime-contract/`.
+`apps/shared/src/runtime-contract/`. A non-TypeScript runtime embeds those generated artifacts
+rather than restating them: `crates/mangostudio-runtime-contract/`, its behavioural corpus at
+`generated/conformance-corpus.json`, and [runtime-contract.md](../architecture/runtime-contract.md).
+`crates/mangostudio-runtime/` serves that embedded contract over a `mango-protocol` session — its
+typed dispatcher, fail-closed ports, and panic isolation are covered in
+[runtime-dispatcher.md](../architecture/runtime-dispatcher.md). Its binary target shares a name
+with the existing Bun-compiled `mangostudio-runtime` execution host from the "Config, Runtime, And
+Standalone Build" section above; that document explains why the two do not collide today.
 
 ## Out-Of-Process Environments (stdio, WSL, paired WebSocket, Direct URL)
 

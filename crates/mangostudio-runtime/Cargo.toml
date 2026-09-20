@@ -1,0 +1,49 @@
+[package]
+name = "mangostudio-runtime"
+# Lockstep with the root `package.json` and `crates/mangostudio-launcher`, not
+# with `[workspace.package].version` (the protocol version): the release
+# archive ships this binary alongside `mangostudio`/`mangostudio-runtime` built
+# from the same tag (see the launcher's own `binstall` metadata), and a hub's
+# `requireMatchingRelease` check compares this against the app release, never
+# the protocol version. `scripts/lib/release-version.ts`'s `APP_VERSIONED_CRATES`
+# enforces this lockstep (via `bun run check:versions`) and
+# `bumpLockstepVersions` bumps it on release — this manifest's version is
+# never hand-maintained.
+version = "0.1.1"
+authors.workspace = true
+categories = ["command-line-utilities", "network-programming"]
+edition.workspace = true
+keywords = ["mangostudio", "runtime", "dispatcher", "json-schema"]
+license.workspace = true
+# The binary in this crate is a thin `--version`/`--help` shell for now — real
+# transports and CLI parsing land in a later crate change. Not published: it
+# depends on `mangostudio-runtime-contract`, which is itself `publish = false`.
+publish = false
+repository.workspace = true
+rust-version.workspace = true
+description = "MangoStudio hub/runtime dispatcher: the typed contract served over mango-protocol, with fail-closed ports and panic isolation"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "mangostudio-runtime"
+path = "src/main.rs"
+
+[dependencies]
+# The `tokio` feature is what brings in `Contract`/`ContractHandlers`/`Guard`/
+# `Session` — this crate's whole reason to exist is serving a contract over a
+# session, so it is a normal dependency, not optional.
+# This crate's own contact point with `jsonschema`, matching both
+# `mango-protocol`'s and `mangostudio-runtime-contract`'s compile options
+# exactly (draft 2020-12, offline, format assertions on): the result-check
+# gate has to run the same validator the peer contract crate embeds, with an
+# instance-path pointer neither of those crates exposes publicly.
+jsonschema = { version = "0.56", default-features = false }
+mango-protocol = { workspace = true, features = ["tokio"] }
+mangostudio-runtime-contract.workspace = true
+serde = { version = "1.0.219", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tokio = { version = "1.53", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }

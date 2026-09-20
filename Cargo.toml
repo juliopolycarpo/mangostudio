@@ -1,6 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["crates/mango-protocol", "crates/mangostudio-launcher"]
+members = [
+  "crates/mango-protocol",
+  "crates/mangostudio-launcher",
+  "crates/mangostudio-runtime",
+  "crates/mangostudio-runtime-contract",
+]
 # `crates/mango-protocol/fuzz` is its own workspace (see its Cargo.toml): a
 # cargo-fuzz crate needs nightly and libFuzzer, so it must never be pulled into
 # a stable build. Without this, `cargo clippy --all-targets --all-features` and
@@ -28,3 +33,14 @@ missing_docs = "warn"
 
 [workspace.lints.clippy]
 all = "warn"
+
+[workspace.dependencies]
+# Pinned with a version alongside the path so `cargo deny`'s wildcard check
+# (deny.toml's `bans.wildcards = "deny"`) has something to check: a bare
+# `path` dependency between workspace members is a wildcard requirement as
+# far as that lint is concerned. This duplicates `[workspace.package].version`
+# above; `scripts/protocol/versions.ts` (`bun ./scripts/protocol/check-versions.ts`)
+# checks the two agree, so a forgotten bump here fails the build loudly rather
+# than silently pinning a stale minor.
+mango-protocol = { path = "crates/mango-protocol", version = "0.2.0" }
+mangostudio-runtime-contract = { path = "crates/mangostudio-runtime-contract", version = "0.2.0" }
