@@ -30,22 +30,57 @@ use std::path::{Path, PathBuf};
 /// `MAX_WORKSPACE_DIRECTORY_ENTRIES`.
 pub const MAX_WORKSPACE_DIRECTORY_ENTRIES: usize = 5_000;
 
-/// A requested path resolved outside the workspace root it was asked to
-/// stay inside — a symlink or junction escape, most often. Carries the
-/// path exactly as requested, never the resolved target (which is exactly
-/// the value that must not be handed back to whoever asked for it).
+/// Why a requested path could not be trusted as contained in a workspace
+/// root.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkspaceContainmentError {
-    requested_path: String,
+pub enum WorkspaceContainmentError {
+    /// `requested` resolved to a real path outside `root` — a symlink or
+    /// junction escape, most often. Carries the path exactly as requested,
+    /// never the resolved target (which is exactly the value that must
+    /// never be handed back to whoever asked for it).
+    Escaped {
+        /// The path as the caller requested it, before resolution.
+        requested_path: String,
+    },
+    /// `root` itself does not resolve — a workspace whose directory has
+    /// vanished out from under it. Distinct from an ordinary "not yet
+    /// created" leaf: nothing about *this* is a question over `requested`
+    /// at all, and a mutation must refuse rather than treat a missing root
+    /// as "safe to create into".
+    RootUnavailable {
+        /// The root that could not be resolved.
+        root: PathBuf,
+    },
+    /// `requested` names a real filesystem entry this crate could not
+    /// verify at all — a symlink cycle, or a chain past the symlink-hop
+    /// cap — mirroring `path-containment.ts` throwing `PathAccessError`
+    /// for the same shape rather than treating it as absent. An entry that
+    /// exists but cannot be resolved is exactly as untrustworthy as one
+    /// that resolves outside `root`: neither may ever be read as "not
+    /// found yet, safe to create".
+    Unresolvable {
+        /// The path as the caller requested it, before resolution.
+        requested_path: String,
+    },
 }
 
 impl std::fmt::Display for WorkspaceContainmentError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "{:?} resolves outside the workspace root it was asked to stay inside",
-            self.requested_path
-        )
+        match self {
+            WorkspaceContainmentError::Escaped { requested_path } => write!(
+                formatter,
+                "{requested_path:?} resolves outside the workspace root it was asked to stay inside"
+            ),
+            WorkspaceContainmentError::RootUnavailable { root } => write!(
+                formatter,
+                "the workspace root {} could not be resolved",
+                root.display()
+            ),
+            WorkspaceContainmentError::Unresolvable { requested_path } => write!(
+                formatter,
+                "{requested_path:?} could not be resolved (a symlink cycle, or too long a chain)"
+            ),
+        }
     }
 }
 
@@ -54,15 +89,19 @@ impl std::error::Error for WorkspaceContainmentError {}
 /// Resolves `requested` against `root`, both taken to their real, symlink-
 /// free identity, and checks the result is still inside `root`.
 ///
-/// `Ok(None)` when `requested` does not resolve at all (most often: it does
-/// not exist yet, which is an ordinary state for a path about to be
-/// created, not a containment failure). `Err` when it *does* resolve, but
-/// outside `root` — the one outcome that must never be treated as "not
-/// found" and quietly retried against a default.
+/// `Ok(None)` when `requested` does not exist yet, which is an ordinary
+/// state for a path about to be created, not a containment failure. `Err`
+/// for every other way this could fail to answer "yes, safely inside" —
+/// `root` itself does not resolve, `requested` *does* resolve but outside
+/// `root`, or `requested` names something that exists but this crate could
+/// not verify at all (a symlink cycle, most often) — none of which may ever
+/// be treated as "not found" and quietly retried against a default.
 ///
 /// # Errors
-/// [`WorkspaceContainmentError`] when `requested` resolves to a real path
-/// outside `root`.
+/// [`WorkspaceContainmentError::RootUnavailable`] when `root` does not
+/// resolve. [`WorkspaceContainmentError::Escaped`] when `requested` resolves
+/// to a real path outside `root`. [`WorkspaceContainmentError::Unresolvable`]
+/// when `requested` exists but could not be resolved at all.
 ///
 /// # Example
 ///
@@ -83,13 +122,16 @@ pub fn resolve_contained_workspace_path(
     root: &Path,
     requested: &str,
 ) -> Result<Option<PathBuf>, WorkspaceContainmentError> {
-    // A root that does not itself resolve is a caller error (a workspace
-    // whose directory has vanished), not a containment question about the
-    // path it was asked to check — bubble it as "not found" rather than
-    // silently substituting a default, so a caller notices its own root is
-    // gone rather than every request against it quietly reading as "outside".
+    // A root that does not itself resolve means the workspace directory has
+    // vanished out from under this call — not a containment question about
+    // `requested` at all, and never safe to read as "not found yet, so
+    // proceed": `guard_mutation` treats `Ok(None)` as "target absent, create
+    // is fine", which for a vanished *root* would let every mutation through
+    // instead of refusing.
     let Ok(real_root) = std::fs::canonicalize(root) else {
-        return Ok(None);
+        return Err(WorkspaceContainmentError::RootUnavailable {
+            root: root.to_path_buf(),
+        });
     };
     let normalized = requested.replace('\\', "/");
     let candidate = real_root.join(normalized);
@@ -100,8 +142,17 @@ pub fn resolve_contained_workspace_path(
     // conflating the two (a bare `canonicalize(candidate)`, which fails
     // identically for both) is exactly the gap this function used to have.
     let exists = std::fs::canonicalize(&candidate).is_ok();
+    // `resolve_through_existing_ancestor` only ever answers `None` when it
+    // could not verify `candidate` at all (a symlink cycle, a chain past
+    // `MAX_SYMLINK_HOPS`, or a transient I/O error) — an ordinary
+    // not-yet-created leaf always resolves to `Some`, through its nearest
+    // existing ancestor. `None` is therefore never "safe, does not exist
+    // yet": mirrors `path-containment.ts` throwing `PathAccessError` for
+    // the same shape instead of treating it as absent.
     let Some(real_path) = resolve_through_existing_ancestor(&candidate) else {
-        return Ok(None);
+        return Err(WorkspaceContainmentError::Unresolvable {
+            requested_path: requested.to_string(),
+        });
     };
 
     match real_path.strip_prefix(&real_root) {
@@ -112,55 +163,114 @@ pub fn resolve_contained_workspace_path(
                 Ok(None)
             }
         }
-        _ => Err(WorkspaceContainmentError {
+        _ => Err(WorkspaceContainmentError::Escaped {
             requested_path: requested.to_string(),
         }),
     }
 }
 
+/// Bounds symlink traversal in [`resolve_through_existing_ancestor`],
+/// including a chain whose final target exists — mirrors `MAX_SYMLINK_HOPS`
+/// in `path-containment.ts` exactly (32), so neither side follows a cycle
+/// further than the other before giving up on it.
+const MAX_SYMLINK_HOPS: u32 = 32;
+
 /// Resolves `candidate` to its real, symlink-free identity, following it
 /// through the *nearest existing ancestor* when `candidate` itself does not
-/// exist yet — mirrors `resolvePathThroughExistingAncestor`'s own reason for
-/// existing: a plain `canonicalize` requires the whole path to exist, so a
-/// not-yet-created file behind a symlinked *directory* (`link -> /outside`,
-/// requesting `link/new.txt`) would otherwise never be resolved at all, and
-/// a naive "cannot resolve, so not found" reading would let the write land
-/// at `/outside/new.txt` unnoticed. Walks lexically up from `candidate`
-/// until something on disk actually exists, canonicalizes that ancestor,
-/// then reattaches the not-yet-existing tail through
-/// [`lexically_normalize`] — folding any `..` the tail itself carries
-/// (`nope/../../etc/x` with no `nope` on disk) against the now-canonical
-/// prefix, rather than leaving it for a caller's `strip_prefix` to be
-/// fooled by.
+/// exist yet — a faithful port of `resolvePathThroughExistingAncestor` in
+/// `path-containment.ts`, walking one path segment at a time from the root
+/// rather than shrinking a prefix from the leaf end.
 ///
-/// `None` when not even `candidate`'s own root ancestor can be
-/// canonicalized (a transient I/O error, most often) — never `Some` of a
-/// path this function could not actually verify against the filesystem.
+/// Every segment is `symlink_metadata`-ed — never a bare `canonicalize`,
+/// which cannot tell "this segment does not exist" apart from "this
+/// segment exists, but is a symlink whose target does not fully resolve".
+/// The two answers must never be conflated: an ordinary not-yet-created
+/// leaf is safe to treat as "not found yet, this write may create it", but
+/// a symlink *leaf* whose target is absent or outside `root` is a real,
+/// already-existing filesystem entry that a write would follow straight
+/// through to wherever it points — including a leaf reached by no further
+/// segments at all, which a prefix-shrinking walk that starts one segment
+/// short of the full path can never even inspect.
 ///
-/// Walks candidate prefixes by raw [`Component`](std::path::Component),
-/// not by [`Path::file_name`]/[`Path::parent`]: those two return `None` the
-/// moment a path *ends* in a `..` component (by design — a trailing `..`
-/// has no "file name" of its own), which a tail like `nope/../../etc/x`
-/// runs into as soon as `nope` is stripped back off. Working with raw
-/// components sidesteps that entirely; a `..` is just another component to
-/// carry until [`lexically_normalize`] folds it.
+/// A segment that turns out to be a symlink splices its target's own
+/// segments in at the front of what is left to walk, so a chain of
+/// symlinks resolves the same way one at a time, capped at
+/// [`MAX_SYMLINK_HOPS`] — past it, this returns `None`, the same "cannot
+/// verify" answer a real filesystem loop's `ELOOP` gives, and never `Some`
+/// of a guess.
+///
+/// `None` also when not even the empty prefix can be canonicalized (a
+/// transient I/O error, most often) — never `Some` of a path this function
+/// could not actually verify against the filesystem.
 fn resolve_through_existing_ancestor(candidate: &Path) -> Option<PathBuf> {
-    if let Ok(real) = std::fs::canonicalize(candidate) {
-        return Some(real);
-    }
-    let components: Vec<std::path::Component<'_>> = candidate.components().collect();
-    for split in (1..components.len()).rev() {
-        let prefix: PathBuf = components[..split].iter().collect();
-        let Ok(canonical_prefix) = std::fs::canonicalize(&prefix) else {
-            continue;
+    let (mut resolved, mut pending) = split_into_root_and_segments(&lexically_normalize(candidate));
+    let mut hops: u32 = 0;
+
+    while let Some(segment) = pending.pop_front() {
+        let step = resolved.join(&segment);
+        let Ok(metadata) = std::fs::symlink_metadata(&step) else {
+            // `step` does not exist at all: everything resolved so far is
+            // real, and the rest — this segment plus whatever is still
+            // pending — is the not-yet-created tail, reattached lexically
+            // rather than through the filesystem.
+            let real = std::fs::canonicalize(&resolved).ok()?;
+            let mut tail = real;
+            tail.push(&segment);
+            for remaining in &pending {
+                tail.push(remaining);
+            }
+            return Some(tail);
         };
-        let mut combined = canonical_prefix;
-        for component in &components[split..] {
-            combined.push(component.as_os_str());
+
+        if !metadata.is_symlink() {
+            resolved = step;
+            continue;
         }
-        return Some(lexically_normalize(&combined));
+
+        if hops >= MAX_SYMLINK_HOPS {
+            return None;
+        }
+        hops += 1;
+
+        let raw_target = std::fs::read_link(&step).ok()?;
+        // A relative target is relative to the link's own directory —
+        // `resolved`, since `step` is `resolved` plus the link's own name
+        // — not to whatever directory this walk started from.
+        let target = if raw_target.is_absolute() {
+            raw_target
+        } else {
+            resolved.join(&raw_target)
+        };
+        let (target_root, target_segments) =
+            split_into_root_and_segments(&lexically_normalize(&target));
+        resolved = target_root;
+        for segment in target_segments.into_iter().rev() {
+            pending.push_front(segment);
+        }
     }
-    None
+
+    // Every segment resolved as a real, non-symlink entry.
+    std::fs::canonicalize(&resolved).ok()
+}
+
+/// Splits an already lexically-normalized, absolute path into its root
+/// (whatever [`std::path::Component::Prefix`]/[`std::path::Component::RootDir`]
+/// contribute — platform-specific, opaque to the walk) and the ordinary
+/// name segments after it, in order.
+fn split_into_root_and_segments(
+    path: &Path,
+) -> (PathBuf, std::collections::VecDeque<std::ffi::OsString>) {
+    let mut root = PathBuf::new();
+    let mut segments = std::collections::VecDeque::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                root.push(component.as_os_str());
+            }
+            other => segments.push_back(other.as_os_str().to_os_string()),
+        }
+    }
+    (root, segments)
 }
 
 /// Collapses `.` and `..` components in `path` without touching the
@@ -348,7 +458,7 @@ mod tests {
         // parent, the system temp directory), so this resolves to something
         // real and must be caught as an escape, not silently answered `None`.
         let error = resolve_contained_workspace_path(&root, "..").unwrap_err();
-        assert!(matches!(error, WorkspaceContainmentError { .. }));
+        assert!(matches!(error, WorkspaceContainmentError::Escaped { .. }));
     }
 
     #[test]
@@ -371,7 +481,7 @@ mod tests {
         // exactly the case the module docs describe as a hub's own check
         // being unable to see.
         let error = resolve_contained_workspace_path(&root, "looks-inside/secret.txt").unwrap_err();
-        assert!(matches!(error, WorkspaceContainmentError { .. }));
+        assert!(matches!(error, WorkspaceContainmentError::Escaped { .. }));
     }
 
     /// The gap a bare `canonicalize(candidate)` has: a symlinked directory
@@ -389,7 +499,75 @@ mod tests {
         std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
 
         let error = resolve_contained_workspace_path(&root, "link/new.txt").unwrap_err();
-        assert!(matches!(error, WorkspaceContainmentError { .. }));
+        assert!(matches!(error, WorkspaceContainmentError::Escaped { .. }));
+    }
+
+    /// The gap the walk above cannot reach: the escaping symlink is not a
+    /// *directory* extended by a not-yet-existing leaf, it is the leaf
+    /// itself, dangling (its own target does not exist). A walk that starts
+    /// one segment short of the full path — testing only `root`, never
+    /// `root/link` — would canonicalize `root` on its very first try and
+    /// reattach `link` lexically without ever asking whether `link` itself
+    /// is a symlink, answering `Ok(None)` exactly as it would for an
+    /// ordinary not-yet-created file. `canonicalize(root/link)` cannot
+    /// distinguish that from "does not exist" either, since it follows the
+    /// link and fails on the absent target — only `symlink_metadata`, which
+    /// never follows the final component, can tell the two apart.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_symlink_leaf_escaping_the_root_is_refused_not_answered_not_found() {
+        let root = scratch_root("dangling-leaf");
+        let outside = scratch_root("dangling-leaf-target");
+        // Deliberately never created: the link's own target is absent.
+        let victim = outside.join("victim.txt");
+        std::os::unix::fs::symlink(&victim, root.join("link")).unwrap();
+
+        let error = resolve_contained_workspace_path(&root, "link").unwrap_err();
+        assert!(matches!(error, WorkspaceContainmentError::Escaped { .. }));
+    }
+
+    /// The exploit itself, at the layer a caller actually goes through: a
+    /// mutation naming a dangling symlink leaf that escapes the root must
+    /// never run, and must never have written through the link to wherever
+    /// it points.
+    #[cfg(unix)]
+    #[test]
+    fn guard_mutation_never_writes_through_a_dangling_symlink_leaf_escaping_the_root() {
+        let root = scratch_root("dangling-leaf-guard");
+        let outside = scratch_root("dangling-leaf-guard-target");
+        let victim = outside.join("victim.txt");
+        std::os::unix::fs::symlink(&victim, root.join("link")).unwrap();
+
+        let result = guard_mutation(&root, &["link"], || {
+            panic!("execute must never run for a dangling symlink leaf that escapes the root")
+        });
+
+        assert!(result.is_err());
+        assert!(
+            !victim.exists(),
+            "the mutation must never have written through the dangling link"
+        );
+    }
+
+    /// A symlink cycle exists as real filesystem entries on both ends, so
+    /// it must never be read the same way a genuinely absent path is — and
+    /// the hop cap this guards must actually terminate the walk rather than
+    /// spinning forever chasing `a -> b -> a`. This test finishing at all
+    /// is half the proof; the returned `Err` (never `Ok(None)`) is the
+    /// other half, matching `path-containment.ts` throwing `PathAccessError`
+    /// for the same shape instead of treating it as "not found".
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_cycle_terminates_and_is_never_read_as_absent() {
+        let root = scratch_root("symlink-cycle");
+        std::os::unix::fs::symlink(root.join("b"), root.join("a")).unwrap();
+        std::os::unix::fs::symlink(root.join("a"), root.join("b")).unwrap();
+
+        let result = resolve_contained_workspace_path(&root, "a");
+        assert!(
+            matches!(result, Err(WorkspaceContainmentError::Unresolvable { .. })),
+            "a symlink cycle must refuse, not answer Ok(None): got {result:?}"
+        );
     }
 
     /// The same gap, reached through a literal `..` inside a not-yet-existing
@@ -401,7 +579,7 @@ mod tests {
     fn a_dot_dot_escape_through_a_nonexistent_component_is_refused() {
         let root = scratch_root("dotdot-through-nonexistent");
         let error = resolve_contained_workspace_path(&root, "nope/../../etc/passwd").unwrap_err();
-        assert!(matches!(error, WorkspaceContainmentError { .. }));
+        assert!(matches!(error, WorkspaceContainmentError::Escaped { .. }));
     }
 
     #[cfg(unix)]
@@ -444,6 +622,28 @@ mod tests {
             ran,
             "a not-yet-existing target must not block its own creation"
         );
+    }
+
+    #[test]
+    fn guard_mutation_never_calls_execute_when_the_root_itself_has_vanished() {
+        // The containment bypass this guards: `Ok(None)` from
+        // `resolve_contained_workspace_path` is the same signal as "target
+        // does not exist yet, creating it is fine" — correct for a leaf
+        // under a live root, wrong for the root itself. A workspace whose
+        // directory was removed out from under it must refuse every
+        // mutation, not silently allow one against a root that is no
+        // longer there to contain anything.
+        let root = scratch_root("guard-vanished-root");
+        std::fs::remove_dir_all(&root).unwrap();
+
+        let result = guard_mutation(&root, &["brand-new.txt"], || {
+            panic!("execute must never run once the root itself has vanished")
+        });
+
+        assert!(matches!(
+            result,
+            Err(WorkspaceContainmentError::RootUnavailable { .. })
+        ));
     }
 
     #[test]
