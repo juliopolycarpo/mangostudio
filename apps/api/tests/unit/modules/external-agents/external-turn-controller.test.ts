@@ -378,6 +378,39 @@ describe('external turn controller', () => {
   });
 
   /**
+   * The failure this exercises is narrower than the test above: `error` here
+   * is otherwise well-shaped, and the only defect is `extra`, a field
+   * `ExternalAgentEventSchema`'s `error` branch does not declare. A wrong
+   * *type* on `error` (the test above) already failed a plain `Value.Check`
+   * before this repo ever tolerated an additive field at this boundary; an
+   * *additive* field on an otherwise-valid event did not, and would have
+   * passed as a valid `error` event, straight through to the controller,
+   * under the tolerant `checkContractCompatible` this fix replaced. That
+   * would have finalized the turn on a payload nobody reviewed rather than
+   * on `RuntimeClient`'s own redacted substitute.
+   */
+  it('settles the turn when a vendor error event carries a field the schema does not declare', async () => {
+    const { runtime, controller } = await realHarness();
+    try {
+      const running = startTurn(controller);
+      await waitFor(() => runtime.calls.turn.length === 1, 'the turn to reach the runtime');
+
+      runtime.emitRawFrame({
+        sessionId: runtime.sessionId(),
+        nativeTurnId: 'native-turn-1',
+        sequence: runtime.nextSequence(),
+        emittedAtMs: Date.now(),
+        event: { type: 'error', error: { code: 'x', message: 'y' }, extra: 1 },
+      });
+
+      const result = await running;
+      expect(result.reason).toBe('vendor-error');
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  /**
    * The discriminant is read off the one payload on this path that nothing has
    * validated — failing that validation is the entire reason the branch runs —
    * so its length is whatever the runtime put there.

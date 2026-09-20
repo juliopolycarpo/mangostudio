@@ -210,9 +210,11 @@ describe('openHubSession — event validation', () => {
     hub.onClose((c) => closure.resolve(c));
 
     // No `sequence`: the envelope itself is unaddressable, not just an event
-    // type this build has never heard of.
+    // type this build has never heard of. `streamId` is present and correct
+    // so this genuinely exercises the envelope check, not the frame guard.
     peer.emit({
       topic: RUNTIME_EXTERNAL_AGENT_TOPIC,
+      streamId: 'session-1',
       payload: { sessionId: 'session-1', event: { type: 'completed' } },
     });
 
@@ -235,6 +237,7 @@ describe('openHubSession — event validation', () => {
 
     peer.emit({
       topic: RUNTIME_EXTERNAL_AGENT_TOPIC,
+      streamId: 'session-1',
       payload: {
         sessionId: 'session-1',
         sequence: 1,
@@ -246,6 +249,49 @@ describe('openHubSession — event validation', () => {
 
     const closed = await closure.promise;
     expect(closed.code).toBe(CLOSE_CODES.PROTOCOL_ERROR);
+    expect(received).toEqual([]);
+  });
+
+  it('delivers an external-agent.event frame with no streamId, since no consumer depends on it', async () => {
+    // Unlike `terminal.output`/`install.output`, `RuntimeClient.externalAgents
+    // .onEvent` addresses by `payload.sessionId`, never `frame.streamId` — so
+    // a missing one here causes no downstream harm and is not fatal.
+    const peer = new FakeHostileRuntimePeer();
+    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const received: unknown[] = [];
+    hub.onEvent((frame) => received.push(frame));
+
+    peer.emit({
+      topic: RUNTIME_EXTERNAL_AGENT_TOPIC,
+      payload: {
+        sessionId: 'session-1',
+        sequence: 1,
+        emittedAtMs: 0,
+        event: { type: 'completed' },
+      },
+    });
+    await Promise.resolve();
+
+    expect(received).toHaveLength(1);
+    hub.close();
+  });
+
+  it('closes the session on a terminal.output frame missing its streamId, and names the frame not the payload', async () => {
+    const peer = new FakeHostileRuntimePeer();
+    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const received: unknown[] = [];
+    const closure = Promise.withResolvers<{ code: number; reason?: string }>();
+    hub.onEvent((frame) => received.push(frame));
+    hub.onClose((c) => closure.resolve(c));
+
+    // A well-formed `data` payload — the only thing wrong is the missing
+    // frame-level `streamId`, and the close reason must say so rather than
+    // naming a payload violation that does not exist.
+    peer.emit({ topic: RUNTIME_TERMINAL_OUTPUT_TOPIC, payload: { kind: 'data', data: 'hi' } });
+
+    const closed = await closure.promise;
+    expect(closed.code).toBe(CLOSE_CODES.PROTOCOL_ERROR);
+    expect(closed.reason).toContain('streamId');
     expect(received).toEqual([]);
   });
 
@@ -281,5 +327,29 @@ describe('openHubSession — event validation', () => {
     await Promise.resolve();
 
     expect(settled).toBe(true);
+  });
+
+  it('replays the close to a listener that subscribes after the session already closed', async () => {
+    // `Session.onClose` replays the closure on a microtask to a late
+    // subscriber — every real teardown consumer (`external-session-manager.ts`,
+    // `terminal-session-service.ts`, `mcp/runtime-session.ts`,
+    // `spawn-runtime-child.ts`'s connection eviction) registers after an
+    // awaited round trip, squarely inside that window. `onClose` must not
+    // fan out through a subscription taken once at `openHubSession` time,
+    // or exactly this replay is lost.
+    const peer = new FakeHostileRuntimePeer();
+    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+
+    hub.close();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    let fired = false;
+    hub.onClose(() => {
+      fired = true;
+    });
+    await Promise.resolve();
+
+    expect(fired).toBe(true);
   });
 });

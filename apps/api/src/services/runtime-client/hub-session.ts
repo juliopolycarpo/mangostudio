@@ -108,28 +108,29 @@ const DELIVER: EventFrameOutcome = { deliver: true, fatal: false };
  * on every `runtime.heartbeat` or `mcp.session` frame arriving.
  *
  * A payload can pass every check above and the frame still be unusable: the
- * catalog marks `terminal.output`, `install.output` and `external-agent.event`
- * as streams — one `streamId` per install run, terminal session, or
- * vendor-agent session — and every consumer of those topics
- * (`RuntimeClient.terminal.onOutput`, `install-runner.ts`,
- * `RuntimeClient.externalAgents.onEvent`) filters on it before ever looking at
- * the payload. A schema-valid frame with an absent or non-string `streamId`
- * would pass this boundary and then be silently discarded downstream — lost
- * terminal output or install logs on a connection that never reports
- * anything wrong. So a streamed topic's `streamId` is checked here too, with
- * the same fatal/non-fatal split its payload already gets.
+ * catalog marks `terminal.output` and `install.output` as streams — one
+ * `streamId` per terminal session or install run — and their consumers
+ * (`RuntimeClient.terminal.onOutput`, `install-runner.ts`) filter on it
+ * before ever looking at the payload. A schema-valid frame with an absent or
+ * non-string `streamId` would pass this boundary and then be silently
+ * discarded downstream — lost terminal output or install logs on a
+ * connection that never reports anything wrong. So a streamed topic's
+ * `streamId` is checked here too, with the same fatal/non-fatal split its
+ * payload already gets. `external-agent.event` is also marked `stream: true`
+ * in the catalog, but `RuntimeClient.externalAgents.onEvent` addresses by
+ * `payload.sessionId`, never `frame.streamId` — so a missing one there causes
+ * no downstream harm, and is not checked.
  */
 function evaluateEventFrame(frame: EventFrame): EventFrameOutcome {
   if (frame.topic === RUNTIME_EXTERNAL_AGENT_TOPIC) {
-    if (!hasStreamId(frame))
-      return fatalViolation(ExternalAgentEventEnvelopeFrameSchema, frame.payload);
     return fromCheck(
       checkAgainstContract(ExternalAgentEventEnvelopeFrameSchema, frame.payload),
       true
     );
   }
   if (frame.topic === RUNTIME_TERMINAL_OUTPUT_TOPIC) {
-    if (!hasStreamId(frame)) return fatalViolation(RuntimeTerminalOutputEventSchema, frame.payload);
+    if (!hasStreamId(frame))
+      return { deliver: false, fatal: true, violation: MISSING_STREAM_ID_VIOLATION };
     return evaluateTerminalOutputFrame(frame.payload);
   }
   const schema = catalogEventPayloadSchema(frame.topic);
@@ -310,7 +311,7 @@ export async function openHubSession(
 
   const client = RUNTIME_CONTRACT.client(session);
   const onEvent = attachValidatedEventFanOut(session);
-  const onClose = attachGuardedCloseFanOut(session);
+  const onClose = guardedOnClose(session);
   return {
     session,
     manifest,
@@ -353,13 +354,11 @@ async function requestValidated<K extends RuntimeMethod>(
 
 /**
  * Calls each of `listeners` with `value`, catching and logging any exception
- * so one throwing subscriber cannot stop delivery to the rest. Shared by the
- * event fan-out and the close fan-out below: a fatal contract violation now
- * closes the session to make other code settle in-flight work
- * (`external-session-manager.ts`'s reap, `terminal-session-service.ts`'s
- * `handleRuntimeDisconnected`, both driven by `onClose`), so an unguarded
- * `onClose` listener that threw would strand exactly the work this boundary
- * exists to unstick.
+ * so one throwing subscriber cannot stop delivery to the rest of this
+ * connection's event subscribers. `onClose` needs the same protection (a
+ * fatal contract violation now closes the session to make other code settle
+ * in-flight work, so a throwing `onClose` listener would strand it) but
+ * cannot share this dispatcher — see {@link guardedOnClose}.
  */
 function dispatchGuarded<T>(
   listeners: ReadonlySet<(value: T) => void>,
@@ -420,26 +419,36 @@ function attachValidatedEventFanOut(session: Session): HubSession['onEvent'] {
 }
 
 /**
- * Registers `listener` on a hub-owned fan-out over the session's close
- * notification, the same shape as {@link attachValidatedEventFanOut} and for
- * the same reason: a subscriber that throws must not stop another
- * subscriber's teardown from running.
+ * `session.onClose`, with a throwing `listener` caught and logged instead of
+ * escaping — the same protection {@link attachValidatedEventFanOut} gives
+ * event listeners, given to `onClose` one registration at a time rather than
+ * through a shared fan-out.
+ *
+ * One at a time on purpose: `Session.onClose` replays the closure on a
+ * microtask to a listener registered *after* the session already closed —
+ * `external-session-manager.ts`, `terminal-session-service.ts`,
+ * `mcp/runtime-session.ts` and `spawn-runtime-child.ts`'s connection-eviction
+ * path all register after an awaited round trip, squarely inside that
+ * window. A single fan-out built by calling `session.onClose` once at
+ * `openHubSession` time would have registered before the window and dropped
+ * every one of those late subscribers' replay.
  *
  * @example
- * const onClose = attachGuardedCloseFanOut(session);
+ * const onClose = guardedOnClose(session);
  * const off = onClose((closure) => console.warn(closure.code));
  */
-function attachGuardedCloseFanOut(session: Session): HubSession['onClose'] {
-  const listeners = new Set<(closure: SessionClosure) => void>();
-  session.onClose((closure) => {
-    dispatchGuarded(listeners, closure, (error) =>
-      logger.error('runtime_close_listener_threw', { code: closure.code, error })
-    );
-  });
-  return (listener) => {
-    listeners.add(listener);
-    return () => listeners.delete(listener);
-  };
+function guardedOnClose(session: Session): HubSession['onClose'] {
+  return (listener) =>
+    session.onClose((closure) => {
+      try {
+        listener(closure);
+      } catch (error) {
+        logger.error('runtime_close_listener_threw', {
+          code: closure.code,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
 }
 
 /**
