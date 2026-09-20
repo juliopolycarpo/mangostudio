@@ -622,6 +622,12 @@ mod tests {
         // race lands. Racing many concurrent writers rather than one
         // widens the window the bug needs: any single racer landing its
         // own disjoint slice ahead of FIRST's is enough to fail.
+        //
+        // 200 attempts, not 500 like the exclusivity races: measured
+        // against this file's pre-fix `drain_buffer` (snapshot-collect,
+        // then write outside the lock), 8 racers land roughly 2-2.5% of
+        // 200 attempts as a hit — consistently, across five repeated runs
+        // — for well over 95% confidence of at least one hit per run.
         const RACERS: usize = 8;
         for attempt in 0..200 {
             let dir = scratch_dir(&format!("drain-order-{attempt}"));

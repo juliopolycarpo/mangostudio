@@ -230,14 +230,16 @@ mod tests {
     /// 500 attempts is not an arbitrary round number: measured by reverting
     /// this file to its pre-fix shape (a separate `Mutex` each for `total`
     /// and `updates`, with `is_active()` called under neither) and counting
-    /// how many of 500 attempts actually produced a double-success, both
-    /// callers of this function land in the low single digits per 500 on
-    /// an 18-core machine — roughly 1-2% per attempt, not a rate a handful
-    /// of iterations would reliably catch. Compounded over 500 attempts
-    /// that is still better than 99% confidence of at least one hit per
-    /// run, which is what actually matters here: lowering this constant
-    /// materially weakens what a future regression on this file would need
-    /// to survive before merging.
+    /// how many of 500 attempts actually produced a double-success across
+    /// five repeated runs on an 18-core machine, `two_concurrent_update_begins`
+    /// landed 2-9 hits per 500 (0.4%-1.8% per attempt) and
+    /// `a_concurrent_update_and_an_ordinary_call` landed 5-15 (1%-3%) — not a
+    /// rate a handful of iterations would reliably catch, and not perfectly
+    /// stable either: the worst observed run (2/500) alone would only give
+    /// roughly 86% confidence of at least one hit, which is why this relies
+    /// on 500 attempts and not a single measurement of "it worked once".
+    /// Lowering this constant materially weakens what a future regression on
+    /// this file would need to survive before merging.
     fn assert_never_races<F>(race: F)
     where
         F: Fn(Arc<UpdateExclusivityTracker>) -> (bool, bool),
@@ -314,7 +316,7 @@ mod tests {
 
         use crate::ports::audit::lock;
 
-        struct BlocksOnFirstCall {
+        struct BlocksOnEveryCall {
             entered: mpsc::SyncSender<()>,
             // `is_active` takes `&self`, and `UpdateActivity` requires
             // `Sync` — a bare `Receiver` is `Send` but not `Sync`, so it
@@ -322,7 +324,7 @@ mod tests {
             release: Mutex<mpsc::Receiver<()>>,
         }
 
-        impl UpdateActivity for BlocksOnFirstCall {
+        impl UpdateActivity for BlocksOnEveryCall {
             fn is_active(&self) -> bool {
                 self.entered.send(()).unwrap();
                 lock(&self.release).recv().unwrap();
@@ -332,7 +334,7 @@ mod tests {
 
         let (entered_tx, entered_rx) = mpsc::sync_channel(0);
         let (release_tx, release_rx) = mpsc::channel();
-        let tracker = Arc::new(UpdateExclusivityTracker::new(Arc::new(BlocksOnFirstCall {
+        let tracker = Arc::new(UpdateExclusivityTracker::new(Arc::new(BlocksOnEveryCall {
             entered: entered_tx,
             release: Mutex::new(release_rx),
         })));
@@ -344,8 +346,13 @@ mod tests {
         // Blocks until the ordinary call's begin() is parked inside
         // is_active(), which under the fix means it is still holding
         // `claims` — the only thing that can make the assertion below mean
-        // anything, rather than just being lucky about scheduling.
-        entered_rx.recv().unwrap();
+        // anything, rather than just being lucky about scheduling. A bounded
+        // wait, not a bare `recv()`: a future regression that stops calling
+        // `is_active()` at all for an ordinary call must fail this test
+        // outright, not hang it forever.
+        entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("begin() must call is_active() for an ordinary call");
 
         let (update_result_tx, update_result_rx) = mpsc::channel();
         let update = {
