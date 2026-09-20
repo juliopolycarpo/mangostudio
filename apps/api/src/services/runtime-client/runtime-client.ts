@@ -11,7 +11,8 @@ import {
   type ExternalAgentDiscoverParams,
   type ExternalAgentDiscoverResult,
   type ExternalAgentEventEnvelope,
-  ExternalAgentEventEnvelopeFrameSchema,
+  type ExternalAgentEventEnvelopeFrame,
+  ExternalAgentEventSchema,
   type ExternalAgentListSessionsParams,
   type ExternalAgentListSessionsResult,
   type ExternalAgentOpenParams,
@@ -148,11 +149,11 @@ import {
   StaleLineNumbersError,
   UnobservedLineNumbersError,
 } from '@mangostudio/shared/runtime-contract';
-import Value from 'typebox/value';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { McpConnectionError } from '../mcp/types';
 import { ToolArgumentError } from '../tools/arg-parsing';
 import { ToolExecutionTimedOutError } from '../tools/execution-timeout';
+import { checkContractCompatible, schemaByDiscriminant } from './contract-compat';
 import { applyHubIsolationClaim, type HubSession } from './hub-session';
 import { createTargetPaths, type TargetPaths } from './target-paths';
 
@@ -554,20 +555,25 @@ export class RuntimeClient {
         this.hub.onEvent((frame) => {
           if (frame.topic !== RUNTIME_EXTERNAL_AGENT_TOPIC) return;
           // Every open session adds a listener on this topic, so the cheap
-          // session match runs before the envelope validation: a delta stream
-          // otherwise pays one full schema check per unrelated subscriber.
-          if ((frame.payload as { sessionId?: unknown } | null)?.sessionId !== sessionId) return;
-          // Only the frame — sessionId, sequence, nativeTurnId — is checked
-          // here. `event` is deliberately left unvalidated: a runtime newer
-          // than this hub's copy of `ExternalAgentEventSchema` can emit an
-          // event type this build has never heard of, and rejecting the whole
-          // envelope for that would drop its sequence number uncounted, so the
-          // *next*, perfectly ordinary event reads as a gap and ends the turn.
-          // The sequencer has to see every well-addressed envelope to keep
-          // counting; whether the event inside it means anything is decided
-          // downstream, per event, not here, per envelope. See #964.
-          if (!Value.Check(ExternalAgentEventEnvelopeFrameSchema, frame.payload)) return;
-          listener(frame.payload as ExternalAgentEventEnvelope);
+          // session match runs before the event-shape check below: a delta
+          // stream otherwise pays one full schema check per unrelated
+          // subscriber.
+          //
+          // The hub's session boundary already checked the *envelope* —
+          // sessionId, sequence, nativeTurnId — against
+          // `ExternalAgentEventEnvelopeFrameSchema` and would have closed the
+          // connection had it failed, so `frame.payload` is safe to read as
+          // one here. `event` travels past that boundary unchecked on
+          // purpose: a runtime newer than this hub's copy of
+          // `ExternalAgentEventSchema` can emit a `type` this build has never
+          // heard of, and the envelope check must not conflate that with a
+          // corrupt frame — dropping either loses a sequence number nothing
+          // else will ever cover, so the *next*, perfectly ordinary event
+          // reads as a gap and ends the turn. See #964. Whether a *known*
+          // type's own shape is malformed is `withKnownEventChecked`'s job.
+          const envelope = frame.payload as ExternalAgentEventEnvelopeFrame;
+          if (envelope.sessionId !== sessionId) return;
+          listener(withKnownEventChecked(envelope));
         }),
     };
     this.install = {
@@ -757,6 +763,75 @@ export class RuntimeClient {
   private peerIdentity(): { manifest: RuntimeCapabilityManifest; runtimeVersion: string } {
     return { manifest: this.runtimeManifest, runtimeVersion: this.hub.runtimeVersion };
   }
+}
+
+/**
+ * One branch schema per `type` this build's `ExternalAgentEventSchema` union
+ * names, read from the schema itself so the map checked against it can never
+ * drift from the union it mirrors.
+ */
+const EXTERNAL_AGENT_EVENT_SCHEMA_BY_TYPE = schemaByDiscriminant(ExternalAgentEventSchema, 'type');
+
+/**
+ * The one `type` a malformed shape can actually strand a turn on.
+ *
+ * `external-turn-transcript.ts`'s switch only finalizes on `'completed'` and
+ * `'error'`; `'completed'` finalizes on the type tag alone, so there is
+ * nothing under it left to be malformed. `'cancelled'` is documented there as
+ * "a marker, not a terminal" — dropping a broken one costs a reason label, not
+ * the turn. Every other type is progress or metadata: `external-turn-
+ * controller.ts` already treats *any* event that fails
+ * `Value.Check(ExternalAgentEventSchema, …)` — known type, malformed, or
+ * genuinely unrecognized — as inert (`unrecognized_event_type`) and moves on.
+ * Re-checking those here and replacing them would override that decision with
+ * a worse one: a malformed `usage` update should cost one progress line, not
+ * the whole turn.
+ */
+const SETTLING_EXTERNAL_AGENT_EVENT_TYPE = 'error';
+
+/**
+ * The envelope's `event`, substituted with a synthetic `error` only when its
+ * `type` is {@link SETTLING_EXTERNAL_AGENT_EVENT_TYPE} and its own shape fails
+ * that branch: a malformed `error` event is the one case where leaving it
+ * inert — the controller's ordinary path for anything else it cannot decode —
+ * would silently strand the turn instead of ending it (#988). Everything else
+ * passes through untouched.
+ */
+function withKnownEventChecked(
+  envelope: ExternalAgentEventEnvelopeFrame
+): ExternalAgentEventEnvelope {
+  const type = eventTypeOf(envelope.event);
+  if (type !== SETTLING_EXTERNAL_AGENT_EVENT_TYPE) {
+    return envelope as unknown as ExternalAgentEventEnvelope;
+  }
+  const schema = EXTERNAL_AGENT_EVENT_SCHEMA_BY_TYPE.get(type);
+  if (!schema) return envelope as unknown as ExternalAgentEventEnvelope;
+  const check = checkContractCompatible(schema, envelope.event);
+  if (check.ok) return envelope as unknown as ExternalAgentEventEnvelope;
+  const violation = check.violation;
+  logger.warn('external_agent_event_contract_violation', {
+    sessionId: envelope.sessionId,
+    type,
+    path: violation.path,
+    reason: violation.message,
+  });
+  return {
+    ...envelope,
+    event: {
+      type: 'error',
+      error: {
+        code: 'contract_violation',
+        message: `Event "${type}" does not match the contract at ${violation.path}: ${violation.message}.`,
+      },
+    },
+  };
+}
+
+/** `event.type` when `event` is an object that carries one as a string, else undefined. */
+function eventTypeOf(event: unknown): string | undefined {
+  if (typeof event !== 'object' || event === null) return undefined;
+  const type = (event as { type?: unknown }).type;
+  return typeof type === 'string' ? type : undefined;
 }
 
 /**
