@@ -170,14 +170,7 @@ jobs:
     # Stable required check ("Cargo Shim / Gate"): all Rust lanes may skip only
     # after the changes job proves the pull request has no Rust workspace diff.
     name: Gate
-    needs:
-      [
-        changes,
-        workspace,
-        launcher-msrv,
-        fuzz-workspace,
-        runtime-home-fixture-freshness,
-      ]
+    needs: [changes, workspace, launcher-msrv, fuzz-workspace, runtime-home-fixture-freshness]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
