@@ -156,6 +156,7 @@ pub fn write_new_file(path: &Path, bytes: &[u8], mode: Option<u32>) -> io::Resul
     write_new_file_with(
         &StdRename,
         &StdCreate,
+        &crate::runtime_home::owner_only::restrict_to_owner,
         path,
         bytes,
         mode,
@@ -165,9 +166,22 @@ pub fn write_new_file(path: &Path, bytes: &[u8], mode: Option<u32>) -> io::Resul
 
 /// [`write_new_file`] with an injectable [`Rename`], [`Create`], and
 /// [`RenameRetryPolicy`], for the retry and failure-cleanup tests.
+///
+/// `restrict` runs on the *temp* file, right after `create` and before the
+/// rename that publishes it — only when `mode` is `Some`, the same signal
+/// this crate already uses for "this document is owner-only". On Unix that
+/// makes it a harmless re-assertion of what `Create::create` already set
+/// via `OpenOptions`; on Windows, which has no mode bits, it is the only
+/// place the restriction happens at all, and it has to happen here: `mode`
+/// threaded into `Create::create` is a no-op there (see `write_temp_file`'s
+/// own doc comment), so restricting only the *published* path afterward —
+/// which every caller still does, belt-and-braces, matching
+/// `runtime-home.ts` — would leave the file world-readable under its real
+/// name for however long the gap between rename and that later call lasts.
 pub fn write_new_file_with(
     rename: &impl Rename,
     create: &impl Create,
+    restrict: &impl Fn(&Path) -> bool,
     path: &Path,
     bytes: &[u8],
     mode: Option<u32>,
@@ -187,6 +201,14 @@ pub fn write_new_file_with(
     if let Err(error) = create.create(&temp_path, bytes, mode) {
         let _ = std::fs::remove_file(&temp_path);
         return Err(error);
+    }
+
+    if mode.is_some() && !restrict(&temp_path) {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(io::Error::other(format!(
+            "could not restrict {} to its owner before publishing it",
+            temp_path.display()
+        )));
     }
 
     match rename_with_retry(rename, &temp_path, path, retry) {
@@ -259,6 +281,14 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// A `restrict` stub that panics if it is ever called — every test that
+    /// passes `None` for `mode` uses this, so a write that restricted a
+    /// plain (non-owner-only) document would show up as a test failure
+    /// rather than a silently-accepted `true`.
+    fn never_restricted(_: &Path) -> bool {
+        panic!("restrict must not run for a write whose mode is None");
     }
 
     #[test]
@@ -372,6 +402,87 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "fresh");
     }
 
+    #[test]
+    fn an_owner_only_write_restricts_the_temp_file_before_the_rename_publishes_it() {
+        // The regression this guards: a Windows temp file has no mode bits
+        // set at `create` time (`write_temp_file`'s own doc comment), so if
+        // `restrict` ran on the *published* path instead of the temp one —
+        // or ran after the rename — the file would sit under its real name,
+        // readable by whatever the directory's ACL already allowed, for the
+        // entire gap until a caller's own belt-and-braces restrict call
+        // catches up. Portable: it only ever inspects the path it is
+        // handed and whether `path` exists yet, neither of which is
+        // platform-specific.
+        let dir = scratch_dir("restrict-before-rename");
+        let path = dir.join("credentials.json");
+        let calls = std::cell::RefCell::new(Vec::new());
+        let restrict = |candidate: &Path| {
+            calls
+                .borrow_mut()
+                .push((candidate.to_path_buf(), path.exists()));
+            true
+        };
+
+        write_new_file_with(
+            &StdRename,
+            &StdCreate,
+            &restrict,
+            &path,
+            b"secret",
+            Some(0o600),
+            &RenameRetryPolicy::default(),
+        )
+        .unwrap();
+
+        let recorded = calls.into_inner();
+        assert_eq!(recorded.len(), 1, "restrict must run exactly once");
+        let (restricted_path, published_path_existed_yet) = &recorded[0];
+        assert_ne!(
+            restricted_path, &path,
+            "must restrict the temp file, not the file it is about to replace"
+        );
+        assert!(
+            restricted_path
+                .extension()
+                .is_some_and(|extension| extension == "tmp"),
+            "must restrict the temp file: got {restricted_path:?}"
+        );
+        assert!(
+            !published_path_existed_yet,
+            "must restrict before the rename publishes the final path"
+        );
+    }
+
+    #[test]
+    fn a_failed_restrict_fails_the_write_and_cleans_up_the_temp_file() {
+        let dir = scratch_dir("restrict-failure");
+        let path = dir.join("credentials.json");
+
+        let result = write_new_file_with(
+            &StdRename,
+            &StdCreate,
+            &|_: &Path| false,
+            &path,
+            b"secret",
+            Some(0o600),
+            &RenameRetryPolicy::default(),
+        );
+
+        assert!(result.is_err());
+        assert!(
+            !path.exists(),
+            "a file that could not be restricted must never be published"
+        );
+        let leftovers = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .count();
+        assert_eq!(
+            leftovers, 0,
+            "the temp file must be cleaned up when restrict refuses it"
+        );
+    }
+
     /// Always fails with `ERROR_ACCESS_DENIED` (5) — not a sharing
     /// violation, so [`rename_with_retry`] must never retry it, and a
     /// realistic stand-in for whatever unretryable reason a real rename can
@@ -406,6 +517,7 @@ mod tests {
         let result = write_new_file_with(
             &AlwaysAccessDenied,
             &StdCreate,
+            &never_restricted,
             &path,
             b"data",
             None,
@@ -432,6 +544,7 @@ mod tests {
         let result = write_new_file_with(
             &StdRename,
             &AlwaysFailsToCreate,
+            &never_restricted,
             &path,
             b"data",
             None,
@@ -547,7 +660,16 @@ mod tests {
             backoff: Duration::from_millis(1),
         };
 
-        write_new_file_with(&rename, &StdCreate, &path, b"payload", None, &policy).unwrap();
+        write_new_file_with(
+            &rename,
+            &StdCreate,
+            &never_restricted,
+            &path,
+            b"payload",
+            None,
+            &policy,
+        )
+        .unwrap();
 
         // `FlakyRename` never actually touches the filesystem on success —
         // it just records the call — so the real path is untouched. This
