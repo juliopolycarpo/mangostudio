@@ -17,6 +17,11 @@
 //!   [`mango_protocol::contract::ServeOptions::validate_results`]. See the
 //!   module docs for why the placement matters and why this crate always
 //!   runs the check, unlike the TypeScript runtime's production opt-out.
+//! - [`ports`] — small, named, fail-closed seams (`Authorization`, `Audit`,
+//!   `Clock`) that a later change implements for real. Every default
+//!   refuses or does nothing; none of them ever grants or fabricates an
+//!   outcome.
 
 pub mod panic;
+pub mod ports;
 pub mod result_check;
