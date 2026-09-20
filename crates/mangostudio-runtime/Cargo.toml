@@ -15,9 +15,8 @@ categories = ["command-line-utilities", "network-programming", "filesystem", "os
 edition.workspace = true
 keywords = ["mangostudio", "runtime", "dispatcher", "runtime-home", "json-schema"]
 license.workspace = true
-# The binary in this crate is a thin `--version`/`--help` shell for now — real
-# transports and CLI parsing land in a later crate change. Not published: it
-# depends on `mangostudio-runtime-contract`, which is itself `publish = false`.
+# Not published: it depends on `mangostudio-runtime-contract`, which is
+# itself `publish = false`.
 publish = false
 repository.workspace = true
 rust-version.workspace = true
