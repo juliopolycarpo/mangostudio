@@ -10,15 +10,21 @@
     reason = "OpenProcess/GetExitCodeProcess and GetComputerNameExW have no safe binding on \
               Windows; every call is documented with what makes it sound"
 )]
+// `clippy::all` (the workspace's own lint level) does not include this
+// restriction lint, so nothing in the repo's own gate would have caught a
+// `SAFETY`-less `unsafe` block here. Denying it locally, only in the two
+// modules that actually contain `unsafe`, gates the invariant the module
+// doc above promises rather than resting it on review.
+#![deny(clippy::undocumented_unsafe_blocks)]
 
 use std::io;
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, STILL_ACTIVE};
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
 use windows_sys::Win32::System::SystemInformation::{
     ComputerNamePhysicalDnsHostname, GetComputerNameExW,
 };
 use windows_sys::Win32::System::Threading::{
-    GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, WaitForSingleObject,
 };
 
 /// A `HANDLE` closed when it goes out of scope, so an early return (a
@@ -45,6 +51,15 @@ impl Drop for OwnedHandle {
 /// other failure (`ERROR_INVALID_PARAMETER` chief among them) means no such
 /// process, mirroring `runtime-home.ts`'s pid check on the platform it
 /// actually runs on.
+///
+/// Liveness itself is `WaitForSingleObject(handle, 0)`, not
+/// `GetExitCodeProcess` compared against `STILL_ACTIVE`: a process handle
+/// signals exactly once, at process exit, so a zero-timeout wait answers
+/// "has this happened yet" directly. `GetExitCodeProcess` answers a
+/// different question — what the exit code *was* — and `STILL_ACTIVE` is
+/// itself a real, obtainable exit code (`259`): a process that legitimately
+/// exited with status 259 would read back as eternally alive under that
+/// comparison, which would make every lock it ever held unreclaimable.
 pub(super) fn is_process_alive(pid: u32) -> bool {
     // SAFETY: `pid` is an arbitrary `u32` read back from a lock file, which
     // is exactly what `OpenProcess` is for — it validates the id itself and
@@ -58,12 +73,17 @@ pub(super) fn is_process_alive(pid: u32) -> bool {
         return access_denied;
     }
     let owned = OwnedHandle(handle);
-    let mut exit_code: u32 = 0;
     // SAFETY: `owned.0` is a live handle opened above and not yet closed
-    // (the `OwnedHandle` guard closes it on drop, after this call), and
-    // `exit_code` is a live out-parameter of the width the function writes.
-    let read = unsafe { GetExitCodeProcess(owned.0, &raw mut exit_code) };
-    read != 0 && exit_code == STILL_ACTIVE as u32
+    // (the `OwnedHandle` guard closes it on drop, after this call); `0` asks
+    // for an immediate return rather than blocking.
+    let wait = unsafe { WaitForSingleObject(owned.0, 0) };
+    // `WAIT_OBJECT_0`: the handle was already signalled, i.e. the process
+    // had already exited. Anything else — `WAIT_TIMEOUT` (still running) or
+    // `WAIT_FAILED` (this process could open it but something about the
+    // wait itself went wrong) — is treated as alive, the same conservative
+    // direction `EPERM` takes on Unix: an unclear answer must never cause a
+    // reclaim.
+    wait != WAIT_OBJECT_0
 }
 
 /// This machine's hostname, for the lock body's `host` field.

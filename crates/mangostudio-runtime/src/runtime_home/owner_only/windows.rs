@@ -23,6 +23,12 @@
     reason = "the token/SID lookup and the ACL rewrite have no safe binding on Windows; every \
               call is documented with what makes it sound"
 )]
+// `clippy::all` (the workspace's own lint level) does not include this
+// restriction lint, so nothing in the repo's own gate would have caught a
+// `SAFETY`-less `unsafe` block here. Denying it locally, only in the two
+// modules that actually contain `unsafe`, gates the invariant the module
+// doc above promises rather than resting it on review.
+#![deny(clippy::undocumented_unsafe_blocks)]
 
 use std::io;
 use std::os::windows::ffi::OsStrExt as _;
@@ -148,6 +154,14 @@ pub(super) fn restrict_to_owner(path: &Path) -> io::Result<()> {
     // below.
     let sid = unsafe { (*token_buffer.as_ptr().cast::<TOKEN_USER>()).User.Sid };
 
+    // SAFETY: `TRUSTEE_W` is `#[repr(C)]` plain data — two pointers
+    // (`pMultipleTrustee`, `ptstrName`) and two `i32` enums
+    // (`MultipleTrusteeOperation`, `TrusteeForm`/`TrusteeType`) — for which
+    // an all-zero bit pattern is a valid value: a null pointer is a valid
+    // `*mut TRUSTEE_W`/`PWSTR`, and `NO_MULTIPLE_TRUSTEE` is itself `0`.
+    // Every field this call actually reads (`TrusteeForm`, `TrusteeType`,
+    // `ptstrName`) is overwritten explicitly on the three lines below before
+    // `trustee` is used.
     let mut trustee: TRUSTEE_W = unsafe { core::mem::zeroed() };
     trustee.TrusteeForm = TRUSTEE_IS_SID;
     trustee.TrusteeType = TRUSTEE_IS_USER;

@@ -195,7 +195,13 @@ impl Drop for LockGuard<'_> {
 ///
 /// Unix opens it `0o600`: nothing in the protocol requires that (the
 /// TypeScript writer does not restrict it), but nothing forbids a Rust
-/// holder from being the stricter one either.
+/// holder from being the stricter one either. It is not free, though: a
+/// TypeScript process running under a *different* account than the Rust
+/// holder gets `EACCES` reading this lock's body back, which makes
+/// `reclaim_if_abandoned` return `false` on that side — a dead Rust
+/// holder's lock can then never be reclaimed by that other-account
+/// process, only time out at `policy.timeout` forever. Off-design for the
+/// per-account `~/.mango` this protocol assumes; noted rather than fixed.
 fn create_lock_file(path: &Path) -> io::Result<()> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -223,9 +229,18 @@ fn create_lock_file(path: &Path) -> io::Result<()> {
 /// same machine, and only *this* side needs the extra care — a Rust holder
 /// reading its own lock back always matches itself exactly.
 ///
-/// Racing to reclaim is safe: every caller that decides a lock is
-/// abandoned unlinks it and retries `create_new`, and exactly one of those
-/// retries wins the race, which is what the lock actually is.
+/// Two waiters racing to reclaim are **not** safe from each other, and this
+/// is a real, unfixed hole in the shared protocol, not a Rust-only one:
+/// both `reclaim_if_abandoned` here and `reclaimAbandonedLock` in
+/// `runtime-home.ts` read the body, decide, then `unlink` by path with no
+/// identity check on what is actually there. If waiter A reclaims and
+/// recreates the lock between waiter B's read and B's `unlink`, B deletes
+/// A's fresh lock — both then believe they hold it. Fixing only the Rust
+/// side would not close the window, since a TypeScript waiter can still
+/// blind-unlink a Rust winner's fresh lock; closing it needs an
+/// identity-checked delete (e.g. compare-and-unlink by inode, or a rename
+/// into place) on *both* sides at once, which is out of scope for this
+/// module alone.
 fn reclaim_if_abandoned(path: &Path, policy: &LockPolicy) -> bool {
     let Ok(raw) = std::fs::read(path) else {
         return false;
