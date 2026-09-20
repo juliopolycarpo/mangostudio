@@ -36,6 +36,28 @@ impl Rename for StdRename {
     }
 }
 
+/// Where the temp file is created and written, abstracted the same way
+/// [`Rename`] is: a permission failure at `create_new` (a directory this
+/// process cannot write into) is awkward to arrange portably and safely in
+/// a test — a fake makes that failure branch as directly testable as the
+/// rename failure branch already is.
+pub trait Create {
+    /// Creates `path` fresh (never overwriting one) and writes `bytes` to it.
+    ///
+    /// # Errors
+    /// Whatever the underlying create or write failed with.
+    fn create(&self, path: &Path, bytes: &[u8], mode: Option<u32>) -> io::Result<()>;
+}
+
+/// The real [`write_temp_file`].
+pub struct StdCreate;
+
+impl Create for StdCreate {
+    fn create(&self, path: &Path, bytes: &[u8], mode: Option<u32>) -> io::Result<()> {
+        write_temp_file(path, bytes, mode)
+    }
+}
+
 /// How many times to retry a rename that failed for a reason
 /// [`is_transient_windows_sharing_violation`] recognises, and how long to
 /// wait between attempts.
@@ -43,8 +65,8 @@ impl Rename for StdRename {
 /// Chosen for this crate, not mirrored from `runtime-home.ts`: Node's
 /// `rename()` can race the same Windows sharing violation, but nothing in
 /// scope here changes the TypeScript side, so its own retry behaviour (it
-/// has none) is not a constraint this has to match. A few hundred
-/// milliseconds is enough to ride out a transient antivirus scan or a
+/// has none) is not a constraint this has to match. Four retries at 20ms
+/// (80ms total) is enough to ride out a transient antivirus scan or a
 /// concurrent writer's own temp-then-rename without turning a real,
 /// lasting conflict into a long hang — the slot lock around every caller of
 /// this module already owns serialising real contention.
@@ -111,9 +133,12 @@ fn rename_with_retry(
 ///
 /// # Errors
 /// Any I/O failure creating the temporary file, writing to it, or renaming
-/// it into place. The temporary file is removed on a write failure; a
-/// rename failure leaves it behind for the next caller's temp name (which
-/// is unique per call) to ignore.
+/// it into place. The temporary file is removed on either kind of
+/// failure — a create/write failure and a rename failure both clean up
+/// after themselves; only a process that never reaches either `remove_file`
+/// call at all (a `SIGKILL` mid-write) leaves one behind, and a reader or a
+/// later writer must simply never be confused by that stray file when it
+/// happens.
 ///
 /// # Example
 /// ```
@@ -128,13 +153,21 @@ fn rename_with_retry(
 /// # std::fs::remove_dir_all(&dir).ok();
 /// ```
 pub fn write_new_file(path: &Path, bytes: &[u8], mode: Option<u32>) -> io::Result<()> {
-    write_new_file_with(&StdRename, path, bytes, mode, &RenameRetryPolicy::default())
+    write_new_file_with(
+        &StdRename,
+        &StdCreate,
+        path,
+        bytes,
+        mode,
+        &RenameRetryPolicy::default(),
+    )
 }
 
-/// [`write_new_file`] with an injectable [`Rename`] and [`RenameRetryPolicy`],
-/// for the retry test.
+/// [`write_new_file`] with an injectable [`Rename`], [`Create`], and
+/// [`RenameRetryPolicy`], for the retry and failure-cleanup tests.
 pub fn write_new_file_with(
     rename: &impl Rename,
+    create: &impl Create,
     path: &Path,
     bytes: &[u8],
     mode: Option<u32>,
@@ -151,7 +184,7 @@ pub fn write_new_file_with(
         temp_suffix()
     ));
 
-    if let Err(error) = write_temp_file(&temp_path, bytes, mode) {
+    if let Err(error) = create.create(&temp_path, bytes, mode) {
         let _ = std::fs::remove_file(&temp_path);
         return Err(error);
     }
@@ -213,8 +246,9 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        Rename, RenameRetryPolicy, StdRename, is_transient_windows_sharing_violation,
-        rename_with_retry, write_new_file, write_new_file_with,
+        Create, Rename, RenameRetryPolicy, StdCreate, StdRename,
+        is_transient_windows_sharing_violation, rename_with_retry, write_new_file,
+        write_new_file_with,
     };
 
     fn scratch_dir(name: &str) -> PathBuf {
@@ -338,27 +372,81 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "fresh");
     }
 
-    #[test]
-    fn a_write_failure_leaves_no_temp_file_behind() {
-        let dir = scratch_dir("write-failure");
-        // A directory can never be opened `write(true).create_new(true)` as
-        // a regular file, which is a portable way to force the create/write
-        // step to fail without needing platform-specific fault injection.
-        let path = dir.join("nested").join("runtime.json");
-        // Deliberately do not create `nested/` as a directory — no parent
-        // exists, but `write_new_file` creates it, so instead make the
-        // *target's* name collide with a directory it cannot write a file
-        // over.
-        std::fs::create_dir_all(&path).unwrap();
+    /// Always fails with `ERROR_ACCESS_DENIED` (5) — not a sharing
+    /// violation, so [`rename_with_retry`] must never retry it, and a
+    /// realistic stand-in for whatever unretryable reason a real rename can
+    /// fail for.
+    struct AlwaysAccessDenied;
+    impl Rename for AlwaysAccessDenied {
+        fn rename(&self, _from: &Path, _to: &Path) -> io::Result<()> {
+            Err(io::Error::from_raw_os_error(5))
+        }
+    }
 
-        let result = write_new_file(&path, b"data", None);
+    /// Always fails to create, standing in for a directory this process
+    /// cannot write into — realistic, but awkward to arrange portably and
+    /// safely (it would need a real permission change on a real directory)
+    /// compared to a fake at this seam.
+    struct AlwaysFailsToCreate;
+    impl Create for AlwaysFailsToCreate {
+        fn create(&self, _path: &Path, _bytes: &[u8], _mode: Option<u32>) -> io::Result<()> {
+            Err(io::Error::from_raw_os_error(5))
+        }
+    }
+
+    #[test]
+    fn a_rename_failure_leaves_no_temp_file_behind() {
+        let dir = scratch_dir("rename-failure");
+        let path = dir.join("runtime.json");
+        let policy = RenameRetryPolicy {
+            attempts: 1,
+            backoff: Duration::from_millis(1),
+        };
+
+        let result = write_new_file_with(
+            &AlwaysAccessDenied,
+            &StdCreate,
+            &path,
+            b"data",
+            None,
+            &policy,
+        );
+
         assert!(result.is_err());
         let leftovers = std::fs::read_dir(&dir)
             .unwrap()
             .filter_map(Result::ok)
             .count();
-        // Exactly the `path` directory itself remains — no `*.tmp` sibling.
-        assert_eq!(leftovers, 1);
+        assert_eq!(
+            leftovers, 0,
+            "the temp file created before the failing rename must be cleaned up"
+        );
+    }
+
+    #[test]
+    fn a_create_failure_leaves_no_temp_file_behind() {
+        let dir = scratch_dir("create-failure");
+        let path = dir.join("runtime.json");
+        let policy = RenameRetryPolicy::default();
+
+        let result = write_new_file_with(
+            &StdRename,
+            &AlwaysFailsToCreate,
+            &path,
+            b"data",
+            None,
+            &policy,
+        );
+
+        assert!(result.is_err());
+        let leftovers = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .count();
+        assert_eq!(
+            leftovers, 0,
+            "no temp file should exist when creation itself failed"
+        );
     }
 
     #[test]
@@ -435,12 +523,6 @@ mod tests {
 
     #[test]
     fn a_non_transient_error_is_never_retried() {
-        struct AlwaysAccessDenied;
-        impl Rename for AlwaysAccessDenied {
-            fn rename(&self, _from: &Path, _to: &Path) -> io::Result<()> {
-                Err(io::Error::from_raw_os_error(5)) // ERROR_ACCESS_DENIED
-            }
-        }
         let policy = RenameRetryPolicy {
             attempts: 5,
             backoff: Duration::from_millis(1),
@@ -465,7 +547,7 @@ mod tests {
             backoff: Duration::from_millis(1),
         };
 
-        write_new_file_with(&rename, &path, b"payload", None, &policy).unwrap();
+        write_new_file_with(&rename, &StdCreate, &path, b"payload", None, &policy).unwrap();
 
         // `FlakyRename` never actually touches the filesystem on success —
         // it just records the call — so the real path is untouched. This
