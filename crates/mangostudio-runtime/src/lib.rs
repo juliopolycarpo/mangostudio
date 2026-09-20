@@ -96,6 +96,7 @@ pub mod cli;
 pub mod config;
 pub mod consent;
 pub mod event_check;
+pub mod health;
 pub mod manifest;
 pub mod panic;
 pub mod ports;

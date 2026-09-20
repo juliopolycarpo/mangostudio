@@ -10,11 +10,12 @@
 //! literally.
 //!
 //! Out of scope for every transport here, matching the crate's own current
-//! scope: no machine method groups (an empty [`crate::registry::Registry`]
-//! answers every catalog method with `METHOD_UNSUPPORTED`), so
-//! `hello.capabilities` is left empty rather than wired to
-//! [`crate::manifest::build_features`] — there is nothing yet for that
-//! manifest to describe.
+//! scope: every machine method group except `runtime.health` (see
+//! [`crate::health`]) is unimplemented, so
+//! [`crate::registry::Registry`] answers everything else with
+//! `METHOD_UNSUPPORTED`, and `hello.capabilities` is left empty rather than
+//! wired to [`crate::manifest::build_features`] — there is nothing yet for
+//! that manifest to describe.
 
 pub mod connect;
 pub mod serve;
@@ -98,9 +99,10 @@ pub fn runtime_peer(runtime_version: &str) -> PeerInfo {
 }
 
 /// One connection's worth of what [`crate::serve::serve`] needs beyond the
-/// session itself: an empty [`Registry`] (methods are out of scope; the
-/// catalog's `rpc.discover` answer and `METHOD_UNSUPPORTED` are all this
-/// serves) recording through a real, on-disk [`crate::audit::FileAudit`],
+/// session itself: a [`Registry`] implementing only `runtime.health` (every
+/// other machine method group is out of scope; the catalog's `rpc.discover`
+/// answer and `METHOD_UNSUPPORTED` cover the rest) recording through a
+/// real, on-disk [`crate::audit::FileAudit`],
 /// and the real [`ConsentAuthorization`] reading `slot`'s `runtime.json`
 /// fresh on every call.
 ///
@@ -115,13 +117,25 @@ pub(crate) struct SessionHost {
     pub authorization: Arc<dyn Authorization>,
 }
 
-/// Builds one [`SessionHost`] for `slot` under `mango_home`.
-pub(crate) fn build_host(slot: RuntimeSlot, mango_home: &Path) -> SessionHost {
+/// Builds one [`SessionHost`] for `slot` under `mango_home`, announcing
+/// `runtime_version` from `runtime.health` — the one method this crate
+/// implements today (see [`crate::health`]).
+pub(crate) fn build_host(
+    slot: RuntimeSlot,
+    mango_home: &Path,
+    runtime_version: &str,
+) -> SessionHost {
     let audit: Arc<dyn Audit> = Arc::new(crate::audit::FileAudit::new(
         slot_audit_log_path(slot, mango_home),
         Arc::new(SystemWallClock),
     ));
     let registry = Registry::with_ports(Arc::clone(&audit), Arc::new(SystemClock));
+    let registry = crate::health::register(
+        registry,
+        slot,
+        mango_home.to_path_buf(),
+        runtime_version.to_string(),
+    );
     let source = ConsentSource::new(slot, mango_home.to_path_buf());
     let authorization: Arc<dyn Authorization> = Arc::new(ConsentAuthorization::new(source));
     SessionHost {
@@ -326,13 +340,13 @@ mod tests {
     }
 
     #[test]
-    fn build_host_produces_an_empty_registry_every_call() {
+    fn build_host_implements_only_runtime_health() {
         let home = std::env::temp_dir().join(format!(
             "mango-transport-build-host-test-{}-{}",
             std::process::id(),
             line!()
         ));
-        let host = build_host(RuntimeSlot::Host, &home);
-        assert!(host.registry.implemented_methods().is_empty());
+        let host = build_host(RuntimeSlot::Host, &home, "9.9.9");
+        assert_eq!(host.registry.implemented_methods(), vec!["runtime.health"]);
     }
 }

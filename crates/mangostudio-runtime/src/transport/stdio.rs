@@ -49,7 +49,7 @@ pub async fn run(runtime_version: &str, mango_home: &std::path::Path) -> std::io
         return Ok(1);
     }
 
-    let host = build_host(slot, mango_home);
+    let host = build_host(slot, mango_home, runtime_version);
     let contract = Contract::from_catalog(catalog().clone()).expect(
         "the embedded catalog compiles into a contract; a change to the catalog that broke this \
          would already fail mangostudio-runtime-contract's own build",

@@ -412,7 +412,7 @@ async fn handle_connection(
         return;
     }
 
-    let host = build_host(context.slot, &context.mango_home);
+    let host = build_host(context.slot, &context.mango_home, &context.runtime_version);
     let contract = Contract::from_catalog(catalog().clone())
         .expect("the embedded catalog compiles into a contract");
     // `SessionOptions::new`'s defaults already match `serve.ts`'s own

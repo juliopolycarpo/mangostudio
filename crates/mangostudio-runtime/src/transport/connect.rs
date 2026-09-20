@@ -251,7 +251,7 @@ async fn run_one_connection(
         }
     };
 
-    let host = build_host(config.slot, &config.mango_home);
+    let host = build_host(config.slot, &config.mango_home, &config.runtime_version);
     let contract = Contract::from_catalog(catalog().clone())
         .expect("the embedded catalog compiles into a contract");
     let options = SessionOptions::new(runtime_peer(&config.runtime_version))
