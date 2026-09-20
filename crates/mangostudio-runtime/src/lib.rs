@@ -90,6 +90,7 @@
 //! [`runtime_home::DefaultSetupState`], which slots start pre-consented —
 //! and [`consent`] builds the rest on top of it rather than duplicating it.
 
+pub mod audit;
 pub mod config;
 pub mod consent;
 pub mod manifest;

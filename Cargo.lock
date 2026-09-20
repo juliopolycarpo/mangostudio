@@ -536,6 +536,7 @@ dependencies = [
  "mango-protocol",
  "mangostudio-runtime-contract",
  "nix",
+ "regex",
  "serde",
  "serde_json",
  "tokio",
