@@ -188,13 +188,20 @@ pub struct RuntimeCapabilityFeatures {
 /// fields would compile, but it would read a missing key as `false`, inverting the wire's
 /// "absent means granted" rule for exactly the peers this asymmetry exists to protect.
 ///
-/// A future reader of a peer's manifest needs a *separate* type, with every feature field
-/// `Option<bool>`, and an asymmetric resolver: `unwrap_or(true)` for `tools`, `git`,
-/// `probing`, `mcp`, `library`, `checkpoints`, `fsRead`, `fsWrite`, `shell`, and `update` (the
-/// features that predate this manifest shape), `unwrap_or(false)` for `externalAgents` and
-/// `toolchain` (features that were never ambiguous — a peer that never announced them never
-/// had them). Build that type deliberately, with a test pinning both readings, rather than
-/// reaching for `#[serde(default)]` here.
+/// A future reader of a peer's manifest needs a *separate* type with a three-way split on
+/// `features`, matching `RuntimeCapabilityManifestSchema` in
+/// `apps/shared/src/runtime-contract/manifest.ts` exactly:
+/// - `tools`, `git`, `probing`, `mcp`, `library`, `checkpoints` — required `bool`, no absence
+///   reading applies. These six predate every optional feature key, so they were never
+///   optional on the wire to begin with; a manifest missing one of them is not an old peer,
+///   it is malformed.
+/// - `fsRead`, `fsWrite`, `shell`, `update` — `Option<bool>`, `unwrap_or(true)`: absent means
+///   an older peer that predates the key, assumed to still have the capability.
+/// - `externalAgents`, `toolchain` — `Option<bool>`, `unwrap_or(false)`: absent means an older
+///   peer that never announced them, and never had them.
+///
+/// Build that type deliberately, with a test pinning all three readings, rather than reaching
+/// for `#[serde(default)]` here.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeCapabilityManifest {
@@ -434,27 +441,39 @@ mod tests {
 
     /// Reads the feature key list from `manifest.schema.json` itself rather
     /// than typing it a second time — the regression this guards against is
-    /// a feature key this type has that the embedded schema does not (or the
-    /// reverse), which `manifest.schema.json`'s own `additionalProperties`
-    /// leniency would otherwise let slip past `validate_manifest`.
+    /// a feature key this type has that the embedded schema does not, *or*
+    /// the reverse (an extra key on the wire the schema never declared),
+    /// which `manifest.schema.json`'s own `additionalProperties` leniency
+    /// would otherwise let slip past `validate_manifest` undetected. Compares
+    /// the two key sets for exact equality, not just "every declared key is
+    /// present" — the same pattern `errors.rs`'s
+    /// `the_service_error_kinds_mirror_strings_json_exactly` uses.
     #[test]
     fn every_declared_feature_key_is_present_and_false_on_the_wire() {
         let schema: Value =
             serde_json::from_str(crate::schemas::MANIFEST_SCHEMA_JSON).expect("well-formed JSON");
-        let declared_keys = schema["properties"]["features"]["properties"]
+        let mut declared_keys = schema["properties"]["features"]["properties"]
             .as_object()
             .expect("features has named properties")
             .keys()
             .cloned()
             .collect::<Vec<_>>();
+        declared_keys.sort();
 
         let value = to_value(minimal()).expect("serialises");
         let features = value["features"].as_object().expect("features is present");
+        let mut wire_keys = features.keys().cloned().collect::<Vec<_>>();
+        wire_keys.sort();
 
         assert!(!declared_keys.is_empty());
-        for key in declared_keys {
+        assert_eq!(
+            wire_keys, declared_keys,
+            "features on the wire must have exactly the keys manifest.schema.json declares, no \
+             more and no fewer | wire: {wire_keys:?} | schema: {declared_keys:?}"
+        );
+        for key in &declared_keys {
             assert_eq!(
-                features.get(&key),
+                features.get(key),
                 Some(&Value::Bool(false)),
                 "expected features.{key} to be present and false | received: {features:?}"
             );
