@@ -209,6 +209,27 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(onBlock).toContain('- "Cargo.lock"');
   });
 
+  test('the push filter and the changes job both cover every ts-home fixture input', () => {
+    // `runtime-home-fixture-freshness`'s ts-home half depends on these four
+    // TypeScript-side paths; a PR touching only one of them must still run
+    // this workflow, or that job's regenerate-and-diff step never executes
+    // and ts-home goes stale silently.
+    const onBlock = extractOnBlock(workflow);
+    const changesBlock = extractJobBlock(workflow, 'changes');
+    const tsHomeInputs = [
+      'apps/shared/src/runtime-home/',
+      'apps/runtime/src/runtime-home.ts',
+      'apps/runtime/scripts/generate-home-fixtures.ts',
+      'apps/runtime/package.json',
+    ];
+
+    for (const input of tsHomeInputs) {
+      expect(onBlock).toContain(`"${input}${input.endsWith('/') ? '**' : ''}"`);
+      const escaped = input.replaceAll('.', String.raw`\.`).replace(/\/$/, '/');
+      expect(changesBlock).toContain(escaped);
+    }
+  });
+
   test('the workspace and launcher MSRV lanes run only when the changes job saw a Rust path', () => {
     const workspaceBlock = extractJobBlock(workflow, 'workspace');
     const msrvBlock = extractJobBlock(workflow, 'launcher-msrv');

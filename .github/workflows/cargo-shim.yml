@@ -17,6 +17,10 @@ on:
     paths:
       - "crates/**"
       - "apps/shared/src/runtime-contract/**"
+      - "apps/shared/src/runtime-home/**"
+      - "apps/runtime/src/runtime-home.ts"
+      - "apps/runtime/scripts/generate-home-fixtures.ts"
+      - "apps/runtime/package.json"
       - "Cargo.toml"
       - "Cargo.lock"
       - "deny.toml"
@@ -63,7 +67,14 @@ jobs:
             exit 1
           fi
 
-          relevant='^(crates/|apps/shared/src/runtime-contract/|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$)'
+          # The four TypeScript-side paths (runtime-home.ts, the fixture
+          # generator, apps/shared/src/runtime-home, and the package.json
+          # that names the generator's script) feed the ts-home half of
+          # `runtime-home-fixture-freshness`: a TypeScript-only PR touching
+          # only those must still run this workflow, or that job's own
+          # regenerate-and-diff step never runs and ts-home goes stale
+          # silently — the same gap the job itself exists to close.
+          relevant='^(crates/|apps/shared/src/runtime-contract/|apps/shared/src/runtime-home/|apps/runtime/src/runtime-home\.ts$|apps/runtime/scripts/generate-home-fixtures\.ts$|apps/runtime/package\.json$|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$)'
           if grep -Eq "$relevant" "$RUNNER_TEMP/changed-files"; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
