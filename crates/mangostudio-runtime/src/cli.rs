@@ -375,6 +375,15 @@ fn run_stdio(env: &impl EnvSource) -> i32 {
     }
 }
 
+/// Known ordering gap, inherited from `cli.ts` rather than introduced here:
+/// [`consent_by_invocation`] runs (and, on a never-before-answered slot,
+/// writes `setup.state = configured, profile: full`) *before* token
+/// resolution below can still fail this invocation outright. A `serve` with
+/// no token anywhere and nothing stored refuses after already recording the
+/// grant — permanently converting a `pending` slot that, in the end, never
+/// served anything. `serve.ts`/`connect.ts` order it the same way, so this
+/// is a follow-up worth fixing in both hosts together, not a divergence to
+/// paper over unilaterally here.
 fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
     let Some(home) = mango_home_or_report(env) else {
         return 1;
@@ -455,6 +464,19 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         return 1;
     };
     runtime.block_on(async move {
+        // Installed before anything else in this block, including the bind
+        // below: a signal is eagerly registered here (never lazily, inside
+        // a `select!` reached after setup work — see
+        // `crate::supervisor::ShutdownSignals`'s own doc comment for why
+        // that distinction matters) rather than after work that could
+        // itself stall.
+        let Ok(signals) = crate::supervisor::ShutdownSignals::install() else {
+            eprintln!("mangostudio-runtime: could not install signal handlers.");
+            return 1;
+        };
+        let cancel = CancellationToken::new();
+        let signal_task = signals.watch(cancel.clone());
+
         let listener = match tokio::net::TcpListener::bind(addr).await {
             Ok(listener) => listener,
             Err(error) => {
@@ -462,9 +484,8 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
                 return 1;
             }
         };
-        let cancel = install_signal_cancellation();
         let log = |message: &str| eprintln!("mangostudio-runtime: {message}");
-        match crate::transport::serve::run(
+        let code = match crate::transport::serve::run(
             listener,
             token,
             RuntimeSlot::Remote,
@@ -480,7 +501,13 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
                 eprintln!("mangostudio-runtime: {error}");
                 1
             }
-        }
+        };
+        // `serve::run`'s accept loop only ever returns once `cancel` fired,
+        // and the signal watcher above is the only holder of the sending
+        // side, so this task has already finished (or is about to) by now
+        // — never a wait on a signal that may never come.
+        let _ = crate::supervisor::join_owned(signal_task).await;
+        code
     })
 }
 
@@ -535,7 +562,14 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
         return 1;
     };
     runtime.block_on(async move {
-        let cancel = install_signal_cancellation();
+        // See the identical comment in `run_serve`: installed first, always.
+        let Ok(signals) = crate::supervisor::ShutdownSignals::install() else {
+            eprintln!("mangostudio-runtime: could not install signal handlers.");
+            return 1;
+        };
+        let cancel = CancellationToken::new();
+        let signal_task = signals.watch(cancel.clone());
+
         let jitter = RandomJitter::default();
         let log = |message: &str| eprintln!("mangostudio-runtime: {message}");
         let config = crate::transport::connect::ConnectConfig {
@@ -546,9 +580,23 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
             runtime_version: VERSION.to_string(),
         };
         match crate::transport::connect::run(config, cancel, &jitter, log).await {
-            crate::transport::connect::ConnectOutcome::Stopped => 0,
+            crate::transport::connect::ConnectOutcome::Stopped => {
+                // `cancel` only ever comes from `signal_task` here, so
+                // `Stopped` means it has already fired (and so finished, or
+                // is about to) — safe, and correct, to await it.
+                let _ = crate::supervisor::join_owned(signal_task).await;
+                0
+            }
             crate::transport::connect::ConnectOutcome::Refused { message } => {
                 eprintln!("mangostudio-runtime: {message}");
+                // The process is exiting on the hub's refusal, not the
+                // signal — `signal_task` may never resolve at all now, so
+                // awaiting it here would hang. It is not aborted either:
+                // simply dropping the handle detaches it, and the runtime
+                // this function's own local `runtime` is about to drop
+                // reclaims it the same way process exit reclaims every
+                // other resource, never a task this code chose to abandon
+                // while it still had something left to do.
                 1
             }
         }
@@ -624,32 +672,6 @@ fn parse_listen_address(value: &str) -> Option<SocketAddr> {
     }
     let port: u16 = port_text.parse().ok()?;
     (host, port).to_socket_addrs().ok()?.next()
-}
-
-/// A [`CancellationToken`] cancelled by `SIGINT`/`SIGTERM` (`Ctrl+C` alone
-/// on a platform with no `SIGTERM`), spawned as an owned task on the
-/// runtime this is called from.
-fn install_signal_cancellation() -> CancellationToken {
-    let cancel = CancellationToken::new();
-    let watcher = cancel.clone();
-    tokio::spawn(async move {
-        #[cfg(unix)]
-        {
-            let mut terminate =
-                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                    .expect("installing a SIGTERM handler cannot fail after the runtime exists");
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {}
-                _ = terminate.recv() => {}
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = tokio::signal::ctrl_c().await;
-        }
-        watcher.cancel();
-    });
-    cancel
 }
 
 #[cfg(test)]

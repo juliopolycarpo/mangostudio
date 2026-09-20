@@ -13,11 +13,12 @@
 //! | A `connect` heartbeat | the same dial's scope | stopped before that dial's driver is awaited |
 //! | Every `Session` driver | the code that called [`mango_protocol::session::Session::spawn`] | its `JoinHandle<SessionClosure>` is awaited, never aborted |
 //!
-//! **No fire-and-forget.** Every `tokio::spawn` in [`crate::transport`] hands
-//! its `JoinHandle` to something that awaits it before its own scope exits —
+//! **No fire-and-forget.** Every `tokio::spawn` in this crate hands its
+//! `JoinHandle` to something that awaits it before its own scope exits —
 //! [`OwnedTasks`] for a variable number of same-shaped tasks (accepted
 //! connections in `serve`), a named local variable for a single one (a
-//! dial's heartbeat, a session's driver).
+//! dial's heartbeat, a session's driver, `cli`'s own signal-to-cancellation
+//! watcher spawned by [`ShutdownSignals::watch`]).
 //!
 //! # State transitions
 //!
@@ -175,6 +176,75 @@ pub async fn join_owned<T>(handle: JoinHandle<T>) -> T {
     handle
         .await
         .expect("an owned task must run to completion, never be aborted or panic")
+}
+
+/// `SIGINT`/`SIGTERM` (Unix) or `CTRL_C` (Windows), unified behind one
+/// [`ShutdownSignals::wait`] — every handler **eagerly** registered by
+/// [`ShutdownSignals::install`], never inside `wait` itself.
+///
+/// That distinction is not cosmetic: `tokio::signal::ctrl_c()`'s own
+/// documentation says its listener is installed "when [the future is] first
+/// polled", not when it is called. A caller that only reaches for it lazily
+/// — inside a `select!` arm sitting after a stretch of its own setup work —
+/// loses any signal that arrives in that window to the process's default
+/// disposition: no cooperative close, no exit code this crate controls.
+/// `tokio::signal::unix::signal` and `tokio::signal::windows::ctrl_c` both
+/// register at the call itself, which is why [`ShutdownSignals::install`]
+/// is the only place either is ever called.
+pub struct ShutdownSignals {
+    #[cfg(unix)]
+    interrupt: tokio::signal::unix::Signal,
+    #[cfg(unix)]
+    terminate: tokio::signal::unix::Signal,
+    #[cfg(windows)]
+    ctrl_c: tokio::signal::windows::CtrlC,
+}
+
+impl ShutdownSignals {
+    /// Registers every platform handler immediately.
+    #[cfg(unix)]
+    pub fn install() -> std::io::Result<Self> {
+        Ok(Self {
+            interrupt: tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?,
+            terminate: tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?,
+        })
+    }
+
+    /// Registers every platform handler immediately.
+    #[cfg(windows)]
+    pub fn install() -> std::io::Result<Self> {
+        Ok(Self {
+            ctrl_c: tokio::signal::windows::ctrl_c()?,
+        })
+    }
+
+    /// Resolves once any registered signal arrives.
+    #[cfg(unix)]
+    pub async fn wait(&mut self) {
+        tokio::select! {
+            _ = self.interrupt.recv() => {}
+            _ = self.terminate.recv() => {}
+        }
+    }
+
+    /// Resolves once any registered signal arrives.
+    #[cfg(windows)]
+    pub async fn wait(&mut self) {
+        self.ctrl_c.recv().await;
+    }
+
+    /// Spawns an owned task that cancels `token` the first time a signal
+    /// arrives, and returns its `JoinHandle` — the caller decides how to
+    /// hold it (this crate's own rule is that every spawn does), not this
+    /// function, which would otherwise be exactly the fire-and-forget spawn
+    /// the rest of this module argues against.
+    #[must_use]
+    pub fn watch(mut self, token: tokio_util::sync::CancellationToken) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            self.wait().await;
+            token.cancel();
+        })
+    }
 }
 
 #[cfg(test)]

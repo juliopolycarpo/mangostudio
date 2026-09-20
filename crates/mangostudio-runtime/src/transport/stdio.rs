@@ -17,7 +17,7 @@ use mangostudio_runtime_contract::catalog::catalog;
 
 use crate::consent::invocation::stdio_consent;
 use crate::runtime_home::resolve_runtime_slot_for_current_exe;
-use crate::supervisor::join_owned;
+use crate::supervisor::{ShutdownSignals, join_owned};
 use crate::transport::{build_host, runtime_peer};
 
 /// Shorter than [`mango_protocol::session::DEFAULT_HANDSHAKE_TIMEOUT`]: a
@@ -40,7 +40,7 @@ pub async fn run(runtime_version: &str, mango_home: &std::path::Path) -> std::io
     // Registered *before* the session (and so before consent's own disk
     // I/O) opens anything: a signal that arrived in the gap between opening
     // the session and registering its handler would otherwise be lost.
-    let mut signals = Signals::install()?;
+    let mut signals = ShutdownSignals::install()?;
 
     let slot = resolve_runtime_slot_for_current_exe(mango_home);
     let consent = stdio_consent(slot, mango_home);
@@ -104,41 +104,6 @@ fn exit_code(closure: &mango_protocol::session::SessionClosure) -> i32 {
         return 1;
     }
     0
-}
-
-/// `SIGINT`/`SIGTERM`, unified behind one `wait()` — registered once, ahead
-/// of the session, so neither signal is lost in the gap `cli.ts`'s
-/// `process.once` registration also has to mind.
-struct Signals {
-    #[cfg(unix)]
-    terminate: tokio::signal::unix::Signal,
-}
-
-impl Signals {
-    #[cfg(unix)]
-    fn install() -> std::io::Result<Self> {
-        Ok(Self {
-            terminate: tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?,
-        })
-    }
-
-    #[cfg(not(unix))]
-    fn install() -> std::io::Result<Self> {
-        Ok(Self {})
-    }
-
-    #[cfg(unix)]
-    async fn wait(&mut self) {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = self.terminate.recv() => {}
-        }
-    }
-
-    #[cfg(not(unix))]
-    async fn wait(&mut self) {
-        let _ = tokio::signal::ctrl_c().await;
-    }
 }
 
 #[cfg(test)]
