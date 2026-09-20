@@ -16,7 +16,7 @@
 //! [`crate::transport::connect::run`]) runs inside the runtime this module
 //! builds for it.
 
-use std::io::Read as _;
+use std::io::BufRead as _;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 
@@ -614,8 +614,16 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
 fn resolve_token(source: TokenSource, field: &str, env: &impl EnvSource) -> Option<String> {
     match source {
         TokenSource::Stdin => {
+            // `read_line`, not `read_to_string`: the latter blocks until
+            // EOF, which an interactive terminal never sends on its own
+            // (a person would have to know to press Ctrl+D) — exactly the
+            // hang this doc comment's "one trimmed line" promises not to
+            // cause. `read_line` returns as soon as a newline arrives,
+            // which is what a piped `echo "$TOKEN" | mangostudio-runtime
+            // serve --token stdin` (or a person typing one line and
+            // pressing Enter) actually produces.
             let mut buffer = String::new();
-            std::io::stdin().read_to_string(&mut buffer).ok()?;
+            std::io::stdin().lock().read_line(&mut buffer).ok()?;
             let trimmed = buffer.trim();
             (!trimmed.is_empty()).then(|| trimmed.to_string())
         }

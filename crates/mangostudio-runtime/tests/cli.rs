@@ -1,6 +1,6 @@
-//! Exercises the thin `mangostudio-runtime` binary as a subprocess: only
-//! `--version` and `--help` exist yet, real argument parsing is a later
-//! change.
+//! Exercises the real `mangostudio-runtime` binary as a subprocess:
+//! `--version`/`--help`, `setup`, and the setup-pending and serve-token
+//! bootstrap paths of `serve`/`connect`.
 
 use std::process::Command;
 
@@ -50,11 +50,25 @@ fn an_unrecognised_argument_exits_non_zero() {
     assert!(!output.status.success());
 }
 
+/// A monotonic counter plus the wall clock, not just `process::id()` and
+/// `line!()`: a reused pid across separate `cargo test` invocations sharing
+/// a persistent `/tmp` degrades a test to silently reusing another run's
+/// leftover directory rather than failing loudly.
+fn unique_suffix() -> u128 {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    nanos.wrapping_add(u128::from(count))
+}
+
 fn scratch_mango_home(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
         "mango-runtime-binary-test-{name}-{}-{}",
         std::process::id(),
-        line!()
+        unique_suffix()
     ))
 }
 
@@ -130,28 +144,26 @@ fn serve_with_no_token_anywhere_generates_one_prints_it_once_and_persists_it() {
         .spawn()
         .expect("the binary runs");
 
+    // Collects *every* line for the whole window, rather than stopping at
+    // the first match: a reader that stops as soon as it sees one
+    // occurrence cannot tell "printed once" apart from "printed twice, and
+    // we only looked at the first" — the earlier version of this test made
+    // exactly that mistake.
     let stderr = child.stderr.take().expect("stderr was piped");
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            let found = line.contains("serve token (shown once):");
-            let _ = sender.send(line);
-            if found {
+            if sender.send(line).is_err() {
                 break;
             }
         }
     });
 
-    let mut printed_line = None;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut lines = Vec::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     while std::time::Instant::now() < deadline {
-        match receiver.recv_timeout(std::time::Duration::from_millis(200)) {
-            Ok(line) => {
-                if line.contains("serve token (shown once):") {
-                    printed_line = Some(line);
-                    break;
-                }
-            }
+        match receiver.recv_timeout(std::time::Duration::from_millis(100)) {
+            Ok(line) => lines.push(line),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
@@ -159,8 +171,16 @@ fn serve_with_no_token_anywhere_generates_one_prints_it_once_and_persists_it() {
     let _ = child.kill();
     let _ = child.wait();
 
-    let printed_line = printed_line.expect("serve must print the generated token exactly once");
-    let printed_token = printed_line
+    let token_lines: Vec<&String> = lines
+        .iter()
+        .filter(|line| line.contains("serve token (shown once):"))
+        .collect();
+    assert_eq!(
+        token_lines.len(),
+        1,
+        "expected exactly one token line, got {token_lines:?} in {lines:?}"
+    );
+    let printed_token = token_lines[0]
         .rsplit_once(": ")
         .map(|(_, token)| token.trim())
         .expect("the line names the token after a colon");
@@ -173,6 +193,52 @@ fn serve_with_no_token_anywhere_generates_one_prints_it_once_and_persists_it() {
         stored["serveToken"],
         serde_json::Value::String(printed_token.to_string()),
         "the printed token and the persisted one must be the same value"
+    );
+}
+
+/// `--token env`/`--token stdin` with nothing to read from that source must
+/// refuse outright — never falling back to generating one (that fallback
+/// is `EnvOrStored`-only) — and, just as importantly, must never have
+/// written `credentials.json` on the way to refusing.
+#[test]
+fn an_empty_explicit_token_source_refuses_without_writing_credentials() {
+    let home = scratch_mango_home("serve-empty-explicit-token-env");
+    let output = Command::new(binary_path())
+        .args(["serve", "--listen", "0", "--token", "env"])
+        .env("MANGO_HOME", &home)
+        .env_remove("MANGOSTUDIO_RUNTIME_SERVE_TOKEN")
+        .output()
+        .expect("the binary runs");
+    assert!(!output.status.success());
+    assert!(
+        !home
+            .join("runtime")
+            .join("remote")
+            .join("credentials.json")
+            .exists(),
+        "an explicit --token env that found nothing must never write a generated credential"
+    );
+
+    let home = scratch_mango_home("serve-empty-explicit-token-stdin");
+    let output = Command::new(binary_path())
+        .args(["serve", "--listen", "0", "--token", "stdin"])
+        .env("MANGO_HOME", &home)
+        // A closed stdin (immediate EOF), not `Stdio::piped()` left
+        // unwritten and unclosed: the latter would leave `read_line`
+        // blocked forever waiting for input `output()` never sends,
+        // deadlocking this test rather than exercising the empty-input
+        // refusal.
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the binary runs");
+    assert!(!output.status.success());
+    assert!(
+        !home
+            .join("runtime")
+            .join("remote")
+            .join("credentials.json")
+            .exists(),
+        "an explicit --token stdin that found nothing must never write a generated credential"
     );
 }
 
