@@ -225,7 +225,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
 
     for (const input of tsHomeInputs) {
       expect(onBlock).toContain(`"${input}${input.endsWith('/') ? '**' : ''}"`);
-      const escaped = input.replaceAll('.', String.raw`\.`).replace(/\/$/, '/');
+      const escaped = input.replaceAll('.', String.raw`\.`);
       expect(changesBlock).toContain(escaped);
     }
   });
