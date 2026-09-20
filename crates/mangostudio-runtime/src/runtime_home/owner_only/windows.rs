@@ -29,6 +29,11 @@
 // modules that actually contain `unsafe`, gates the invariant the module
 // doc above promises rather than resting it on review.
 #![deny(clippy::undocumented_unsafe_blocks)]
+// `Vec<u8>`'s allocation only promises byte alignment, never the alignment
+// a typed Win32 struct read out of it needs — this lint is what would have
+// caught reading a `TOKEN_USER` out of `current_user_token_buffer()`'s
+// buffer through a place projection instead of `read_unaligned`.
+#![deny(clippy::cast_ptr_alignment)]
 
 use std::io;
 use std::os::windows::ffi::OsStrExt as _;
@@ -42,7 +47,8 @@ use windows_sys::Win32::Security::Authorization::{
 };
 use windows_sys::Win32::Security::{
     ACL, DACL_SECURITY_INFORMATION, GetTokenInformation, NO_INHERITANCE,
-    PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSID, SID_AND_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
+    TokenUser,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     DELETE, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
@@ -147,12 +153,23 @@ fn current_user_token_buffer() -> io::Result<Vec<u8>> {
 /// `path`.
 pub(super) fn restrict_to_owner(path: &Path) -> io::Result<()> {
     let token_buffer = current_user_token_buffer()?;
+    // `TOKEN_USER { User: SID_AND_ATTRIBUTES { Sid: PSID, .. } }` puts `Sid`
+    // at offset 0 of the whole struct — `User` is `TOKEN_USER`'s only (and
+    // so first) field, and `Sid` is `SID_AND_ATTRIBUTES`'s first field, and
+    // `repr(C)` guarantees no padding before a struct's first field.
+    let sid_offset =
+        core::mem::offset_of!(TOKEN_USER, User) + core::mem::offset_of!(SID_AND_ATTRIBUTES, Sid);
     // SAFETY: `token_buffer` was sized and filled by `GetTokenInformation`
     // for `TokenUser` above, which documents its layout as one `TOKEN_USER`
-    // struct followed by the SID it points at — the pointer inside it is
-    // valid for as long as `token_buffer` is alive, which outlives every use
-    // below.
-    let sid = unsafe { (*token_buffer.as_ptr().cast::<TOKEN_USER>()).User.Sid };
+    // struct followed by the SID it points at, so `sid_offset` lands within
+    // `token_buffer` and `PSID` fits before its end. `read_unaligned`
+    // rather than a place projection through a cast pointer: `Vec<u8>`'s
+    // allocation only promises byte alignment, not the alignment a `PSID`
+    // (pointer-sized) read requires. The pointer `sid` copies out still
+    // points into `token_buffer`'s own backing allocation, which outlives
+    // every use of `sid` below.
+    let sid: PSID =
+        unsafe { std::ptr::read_unaligned(token_buffer.as_ptr().add(sid_offset).cast()) };
 
     // SAFETY: `TRUSTEE_W` is `#[repr(C)]` plain data — two pointers
     // (`pMultipleTrustee`, `ptstrName`) and two `i32` enums
