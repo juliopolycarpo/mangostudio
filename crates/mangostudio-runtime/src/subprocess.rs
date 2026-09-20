@@ -170,9 +170,14 @@ pub async fn run_bounded_child(
         .map_err(ChildRunError::SpawnFailed)?;
     let stdout = child.stdout.take().expect("stdout was requested as piped");
     let stderr = child.stderr.take().expect("stderr was requested as piped");
-    let stdout_reader = tokio::spawn(read_capped(stdout, budget.max_stdout_bytes));
-    let stderr_reader = tokio::spawn(read_capped(stderr, budget.max_stderr_bytes));
+    let mut stdout_reader = tokio::spawn(read_capped(stdout, budget.max_stdout_bytes));
+    let mut stderr_reader = tokio::spawn(read_capped(stderr, budget.max_stderr_bytes));
 
+    // Anchors `budget.deadline` to the instant this call actually started
+    // racing it below, so the reader join after `child.wait()` returns can
+    // still be measured against what is left of the *same* budget rather
+    // than getting one of its own.
+    let started = tokio::time::Instant::now();
     let outcome = tokio::select! {
         biased;
         () = cancel.cancelled() => Err(ChildRunError::Cancelled),
@@ -185,19 +190,64 @@ pub async fn run_bounded_child(
 
     match outcome {
         Ok(status) => {
-            let (stdout, stdout_truncated) = stdout_reader
-                .await
-                .expect("the stdout reader task must not panic");
-            let (stderr, stderr_truncated) = stderr_reader
-                .await
-                .expect("the stderr reader task must not panic");
-            Ok(ChildOutcome {
-                status_success: status.success(),
-                stdout,
-                stderr,
-                stdout_truncated,
-                stderr_truncated,
-            })
+            // The direct child has already exited, but that is not the same
+            // as "nothing is still holding the pipe": a descendant it
+            // backgrounded and left running (a shim's own hook, a
+            // credential helper) can inherit the write end and keep it open
+            // indefinitely. Without a bound here, the two `.await`s below
+            // used to wait for that descendant forever — reproduced live
+            // with a child that runs `sleep 20 & printf ok; exit 0` under a
+            // 300ms budget: `run_bounded_child` had not returned after 8s.
+            // Racing the join against what is left of `budget.deadline`
+            // closes that window; a bounded run never notices, since a
+            // reader that already has its EOF resolves this select
+            // immediately either way.
+            let remaining = budget.deadline.saturating_sub(started.elapsed());
+            let drained = {
+                let join_readers = async {
+                    let stdout_result = (&mut stdout_reader).await;
+                    let stderr_result = (&mut stderr_reader).await;
+                    (stdout_result, stderr_result)
+                };
+                tokio::pin!(join_readers);
+                tokio::select! {
+                    biased;
+                    () = cancel.cancelled() => Err(ChildRunError::Cancelled),
+                    () = tokio::time::sleep(remaining) => Err(ChildRunError::TimedOut),
+                    result = &mut join_readers => Ok(result),
+                }
+                // `join_readers` (and the `&mut` borrows of `stdout_reader`/
+                // `stderr_reader` it holds) is dropped here, at the end of
+                // this block — before either handle is touched again below,
+                // which is what the borrow checker needs to see to allow
+                // the `Err` arm's own `.abort()` calls on them.
+            };
+            match drained {
+                Ok((stdout_result, stderr_result)) => {
+                    let (stdout, stdout_truncated) =
+                        stdout_result.expect("the stdout reader task must not panic");
+                    let (stderr, stderr_truncated) =
+                        stderr_result.expect("the stderr reader task must not panic");
+                    Ok(ChildOutcome {
+                        status_success: status.success(),
+                        stdout,
+                        stderr,
+                        stdout_truncated,
+                        stderr_truncated,
+                    })
+                }
+                Err(error) => {
+                    // The readers themselves are still holding an open pipe
+                    // to whatever is still writing it — aborting them, not
+                    // merely dropping the join above, is what actually
+                    // closes this process's end (`ChildStdout`/`ChildStderr`
+                    // close their fd on drop, which the aborted task's own
+                    // teardown runs).
+                    stdout_reader.abort();
+                    stderr_reader.abort();
+                    Err(error)
+                }
+            }
         }
         Err(error) => {
             kill_and_reap(&mut child).await;
@@ -381,6 +431,45 @@ mod tests {
         assert!(matches!(error, ChildRunError::TimedOut));
 
         assert_process_is_gone(&pid_file);
+    }
+
+    /// Regression test for the reader-join half of the deadline: the direct
+    /// child can exit successfully well within budget while a descendant it
+    /// backgrounded (a shim's own hook, a credential helper) keeps the
+    /// inherited stdout pipe open indefinitely. Before the fix, only
+    /// `child.wait()` was bounded by `budget.deadline` — the two reader
+    /// joins afterward had no bound at all, so this reproduced a genuine
+    /// hang: measured directly against the pre-fix code, `run_bounded_child`
+    /// had not returned after 8 seconds (this test's own 2-second bound is
+    /// what actually catches that, not the assertion on the error variant
+    /// alone).
+    #[tokio::test]
+    async fn a_backgrounded_descendant_holding_the_pipe_does_not_hang_the_call() {
+        let dir = scratch_dir("orphan-pipe");
+        let sh = script(&dir, "orphan.sh", "sleep 20 & printf ok; exit 0");
+        let cancel = CancellationToken::new();
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            run_bounded_child(
+                &sh,
+                &[],
+                None::<&HashMap<String, String>>,
+                budget(Duration::from_millis(300)),
+                &cancel,
+            ),
+        )
+        .await
+        .expect(
+            "run_bounded_child must return within its own deadline, not hang on a descendant \
+             still holding the pipe open",
+        );
+
+        assert!(
+            matches!(result, Err(ChildRunError::TimedOut)),
+            "the direct child exited cleanly, but draining its output still overran the \
+             budget — expected TimedOut, got {result:?}"
+        );
     }
 
     /// The same proof as the deadline test, but for cooperative
