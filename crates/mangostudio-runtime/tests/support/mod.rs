@@ -13,10 +13,16 @@ use mango_protocol::port::port_pair;
 use mango_protocol::session::{Session, SessionOptions};
 use serde_json::{Value, json};
 
+pub mod granting_authorization;
 pub mod panicking_audit;
+pub mod panicking_authorization;
+pub mod partially_granting_authorization;
 pub mod recording_audit;
 
+pub use granting_authorization::GrantingAuthorization;
 pub use panicking_audit::PanickingAudit;
+pub use panicking_authorization::PanickingAuthorization;
+pub use partially_granting_authorization::PartiallyGrantingAuthorization;
 pub use recording_audit::RecordingAudit;
 
 /// Bounds a future so a regression that hangs (rather than fails) still ends
