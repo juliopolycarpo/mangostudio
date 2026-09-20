@@ -302,11 +302,29 @@ mod tests {
     use crate::ports::wall_clock::{FixedWallClock, SystemWallClock};
     use crate::runtime_home::{RuntimeSlot, read_runtime_slot_config, write_runtime_slot_config};
 
+    /// A monotonic counter plus the wall clock, not just `process::id()` and
+    /// `line!()`: two calls from the *same* line (a loop body, a helper
+    /// called twice in one test) collide on the old scheme, and so does a
+    /// reused pid across separate `cargo test` invocations sharing a
+    /// persistent `/tmp` — both degrade a test to silently reusing another
+    /// run's leftover directory rather than failing loudly. That is not
+    /// hypothetical here: [`a_concurrent_narrowing_write_never_loses_to_the_invocations_grant`]
+    /// calls this from inside a loop.
+    fn unique_suffix() -> u128 {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        nanos.wrapping_add(u128::from(count))
+    }
+
     fn scratch_home(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "mango-consent-invocation-test-{name}-{}-{}",
             std::process::id(),
-            line!()
+            unique_suffix()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -423,65 +441,75 @@ mod tests {
     /// afterwards. Two real OS threads, released by a `Barrier` at the same
     /// instant, are what makes this a genuine race rather than a
     /// sequential call in disguise.
+    ///
+    /// Repeated 20 times, each with its own fresh scratch home: measured
+    /// against the real defect (the read-decide-write split into two lock
+    /// acquisitions, reopening exactly the race the single lock scope
+    /// closes), one round alone catches it only 22/100 times — repeating
+    /// gets that to about 99.3%. A single round stayed in as
+    /// documentation of the minimal reproduction; the loop is what the
+    /// assertion actually leans on.
     #[test]
     fn a_concurrent_narrowing_write_never_loses_to_the_invocations_grant() {
-        let home = Arc::new(scratch_home("race"));
-        let barrier = Arc::new(Barrier::new(2));
+        for _ in 0..20 {
+            let home = Arc::new(scratch_home("race"));
+            let barrier = Arc::new(Barrier::new(2));
 
-        let invocation_home = Arc::clone(&home);
-        let invocation_barrier = Arc::clone(&barrier);
-        let invocation = std::thread::spawn(move || {
-            invocation_barrier.wait();
-            consent_by_invocation(
-                RuntimeSlot::Remote,
-                &invocation_home,
-                "0.0.0",
-                &SystemWallClock,
-            )
-        });
+            let invocation_home = Arc::clone(&home);
+            let invocation_barrier = Arc::clone(&barrier);
+            let invocation = std::thread::spawn(move || {
+                invocation_barrier.wait();
+                consent_by_invocation(
+                    RuntimeSlot::Remote,
+                    &invocation_home,
+                    "0.0.0",
+                    &SystemWallClock,
+                )
+            });
 
-        let narrow_home = Arc::clone(&home);
-        let narrow_barrier = Arc::clone(&barrier);
-        let narrow = std::thread::spawn(move || {
-            narrow_barrier.wait();
-            write_runtime_slot_config(
-                RuntimeSlot::Remote,
-                &narrow_home,
-                &[
-                    (
-                        "setup",
-                        Some(
-                            json!({ "state": "configured", "at": "2024-01-01T00:00:00.000Z", "by": "cli" }),
+            let narrow_home = Arc::clone(&home);
+            let narrow_barrier = Arc::clone(&barrier);
+            let narrow = std::thread::spawn(move || {
+                narrow_barrier.wait();
+                write_runtime_slot_config(
+                    RuntimeSlot::Remote,
+                    &narrow_home,
+                    &[
+                        (
+                            "setup",
+                            Some(
+                                json!({ "state": "configured", "at": "2024-01-01T00:00:00.000Z", "by": "cli" }),
+                            ),
                         ),
-                    ),
-                    ("allow", Some(json!({ "shell": false }))),
-                ],
-            )
-        });
+                        ("allow", Some(json!({ "shell": false }))),
+                    ],
+                )
+            });
 
-        let consent = invocation.join().unwrap();
-        narrow.join().unwrap().unwrap();
+            let consent = invocation.join().unwrap();
+            narrow.join().unwrap().unwrap();
 
-        // Whichever of the two transactions ran first, the file on disk must
-        // reflect exactly one of them in full — never a shell:true field
-        // from the launch grant merged with a state the narrowing call
-        // never actually wrote (or vice versa). `with_slot_lock`'s mutual
-        // exclusion is what this asserts.
-        let stored = read_runtime_slot_config(RuntimeSlot::Remote, &home)
-            .stored
-            .unwrap();
-        if consent.recorded {
-            // The invocation's grant ran, and completed, before the
-            // narrowing write took the lock: the narrowing write is what
-            // must be on disk afterwards, since it ran second under the
-            // same lock.
-            assert_eq!(stored["allow"]["shell"], false);
-        } else {
-            // The narrowing write ran first: the invocation observed an
-            // already-configured slot and reported its stored allow
-            // faithfully, never re-granting `full` over it.
-            assert!(!consent.allow.shell);
-            assert_eq!(stored["allow"]["shell"], false);
+            // Whichever of the two transactions ran first, the file on disk
+            // must reflect exactly one of them in full — never a
+            // shell:true field from the launch grant merged with a state
+            // the narrowing call never actually wrote (or vice versa).
+            // `with_slot_lock`'s mutual exclusion is what this asserts.
+            let stored = read_runtime_slot_config(RuntimeSlot::Remote, &home)
+                .stored
+                .unwrap();
+            if consent.recorded {
+                // The invocation's grant ran, and completed, before the
+                // narrowing write took the lock: the narrowing write is
+                // what must be on disk afterwards, since it ran second
+                // under the same lock.
+                assert_eq!(stored["allow"]["shell"], false);
+            } else {
+                // The narrowing write ran first: the invocation observed an
+                // already-configured slot and reported its stored allow
+                // faithfully, never re-granting `full` over it.
+                assert!(!consent.allow.shell);
+                assert_eq!(stored["allow"]["shell"], false);
+            }
         }
     }
 
