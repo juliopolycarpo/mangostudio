@@ -1,7 +1,7 @@
 /**
  * Hub-side re-exports of the library instance reader. The reader and its byte
- * caps live in `@mangostudio/runtime` (they run on the machine that holds the
- * files).
+ * caps live in `@mangostudio/shared/library/machine` (they run on the machine
+ * that holds the files).
  */
 
 export {
@@ -10,4 +10,4 @@ export {
   MAX_LIBRARY_FILE_BYTES,
   readLocationInstances,
   readResourceFile,
-} from '@mangostudio/runtime';
+} from '@mangostudio/shared/library/machine';

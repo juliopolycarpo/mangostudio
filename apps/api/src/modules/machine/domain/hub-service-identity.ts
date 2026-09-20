@@ -5,7 +5,7 @@
  * pulling the service manager in.
  */
 
-import type { UserServiceIdentity } from '@mangostudio/runtime';
+import type { UserServiceIdentity } from '@mangostudio/shared/machine/service';
 
 export const HUB_SERVICE_DOCS_URL =
   'https://github.com/juliopolycarpo/mangostudio/blob/main/docs/reference/cli.md#service';

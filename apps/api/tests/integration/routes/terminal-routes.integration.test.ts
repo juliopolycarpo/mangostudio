@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import type { TerminalAvailability, TerminalSessionResponse } from '@mangostudio/shared/terminal';
 import { getDb } from '../../../src/db/database';
 import { loadConfigForTest } from '../../../src/lib/config';
@@ -205,6 +206,12 @@ describe('terminal HTTP routes with a fake runtime', () => {
   });
 });
 
+/** What the in-process Local runtime answers about its own credential home. */
+const ATTESTED_LOCAL: RuntimeCapabilityManifest['identityIsolation'] = {
+  method: 'single-user-host',
+  credentialHomeFingerprint: 'sha256:terminal-routes-test',
+};
+
 describe('terminal HTTP routes on a shared Local runtime', () => {
   it('refuses a Local terminal once a second account has connected to the same runtime', async () => {
     loadConfigForTest({});
@@ -219,11 +226,20 @@ describe('terminal HTTP routes on a shared Local runtime', () => {
           enabled: true,
         }),
       connectors: {
+        // A real Local runtime attests its own credential home, and the hub
+        // reads that back off the manifest instead of assuming it from the
+        // claim it made — withholding it from the manifest when it has already
+        // announced a withdrawal. The fake stands in for both halves.
         'in-process': createLocalRuntimeConnector({
-          open: () =>
+          open: (options) =>
             Promise.resolve({
               client: new FakeTerminalRuntimeClient({
-                manifest: FAKE_TERMINAL_MANIFEST,
+                manifest: {
+                  ...FAKE_TERMINAL_MANIFEST,
+                  ...(options.externalAgentIsolation === 'single-user'
+                    ? { identityIsolation: ATTESTED_LOCAL }
+                    : {}),
+                },
               }) as unknown as RuntimeClient,
               close: () => Promise.resolve(),
             }),

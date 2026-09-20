@@ -14,9 +14,24 @@ import {
   unlink,
 } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
-import { FileTooLargeError, PathAccessError, RuntimeServiceError } from '../errors';
+import {
+  BINARY_SNIFF_BYTES,
+  READ_FILE_MAX_BINARY_VIEW_BYTES,
+  READ_FILE_MAX_BYTES,
+} from '@mangostudio/shared/runtime-contract';
+import {
+  isPathPrefix,
+  resolvePathThroughExistingAncestor,
+} from '@mangostudio/shared/workspaces/host';
+import { FileTooLargeError, PathAccessError, RegularFileWriteError } from '../errors';
 import type { RuntimePathFilter } from '../methods';
-import { isPathPrefix, resolvePathThroughExistingAncestor } from './path-containment';
+
+export {
+  BINARY_SNIFF_BYTES,
+  READ_FILE_MAX_BINARY_VIEW_BYTES,
+  READ_FILE_MAX_BYTES,
+  RegularFileWriteError,
+};
 
 export interface ObservedFileRead {
   readonly bytes: Uint8Array;
@@ -32,21 +47,6 @@ export interface ReadFileWithObservedMtimeOptions {
   readonly maxBytes?: number;
 }
 
-export const READ_FILE_MAX_BYTES = 10 * 1024 * 1024;
-/**
- * Ceiling on a file read through `read_file`'s `hex` or `base64` view.
- *
- * Far below {@link READ_FILE_MAX_BYTES} because a byte view lands in the
- * model's context rather than being windowed away: base64 inflates by 4/3 and
- * hex by 2, so 256 KiB of file is already ~512 KiB of tokens.
- *
- * It shares a value with `READ_FILE_MAX_WINDOW_BYTES` and nothing else: that one
- * bounds the text a window may *emit*, while this bounds the bytes a view may
- * *consume* before transcoding inflates them. Deriving either from the other
- * would tie two budgets that are only coincidentally equal.
- */
-export const READ_FILE_MAX_BINARY_VIEW_BYTES = 256 * 1024;
-export const BINARY_SNIFF_BYTES = 8 * 1024;
 /** Floor for a bounded read's first buffer, so a `size: 0` hint costs one read. */
 const READ_CHUNK_BYTES = 64 * 1024;
 
@@ -198,13 +198,6 @@ export async function assertRegularFilePath(resolvedPath: string, action: string
 
 export function isErrnoException(error: unknown, code: string): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error && error.code === code;
-}
-
-export class RegularFileWriteError extends RuntimeServiceError {
-  constructor(message: string) {
-    super('path_access', message);
-    this.name = 'RegularFileWriteError';
-  }
 }
 
 export interface AtomicWriteResult {

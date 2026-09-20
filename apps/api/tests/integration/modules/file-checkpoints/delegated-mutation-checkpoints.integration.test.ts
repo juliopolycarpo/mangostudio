@@ -26,6 +26,7 @@ import { join } from 'node:path';
 import { faker } from '@faker-js/faker';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { isShellAvailable } from '@mangostudio/shared/process/host';
 import { getDb } from '../../../../src/db/database';
 import {
   getAgentProfile,
@@ -40,7 +41,6 @@ import {
   registerProvider,
 } from '../../../../src/services/providers/core/provider-registry';
 import type { AgentEvent, AIProvider } from '../../../../src/services/providers/types';
-import { isShellAvailable } from '../../../../src/services/tools/builtin/_shell-exec';
 import { registerTools } from '../../../../src/services/tools/register-tools';
 import {
   type ChatFixture,

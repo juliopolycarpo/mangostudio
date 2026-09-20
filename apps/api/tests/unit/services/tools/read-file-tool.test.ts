@@ -2,26 +2,25 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PathAccessError } from '../../../../src/services/tools/builtin/_fs-utils';
 import {
-  countTotalLines,
-  executeReadFile,
-  findWindowByteRange,
-  looksBinary,
-  normalizeReadFileToolSettings,
   READ_FILE_MAX_BINARY_VIEW_BYTES,
   READ_FILE_MAX_LINE_CHARS,
   READ_FILE_MAX_MAX_LINES,
   READ_FILE_MAX_START_LINE,
   READ_FILE_MAX_WINDOW_BYTES,
   READ_FILE_MIN_MAX_LINES,
+} from '@mangostudio/shared/runtime-contract';
+import { PathAccessError } from '../../../../src/services/tools/builtin/_fs-utils';
+import {
+  executeReadFile,
+  normalizeReadFileToolSettings,
   type ReadFileToolResult,
   register as registerReadFileTool,
 } from '../../../../src/services/tools/builtin/read-file';
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
-import { clearFileFreshness } from '../../../../src/services/tools/file-freshness';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { clearFileFreshness } from '../../../support/runtime-file-freshness';
 import { withTargetHome } from './support/target-home';
 import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
 
@@ -96,32 +95,6 @@ describe('normalizeReadFileToolSettings', () => {
       { path: '/etc', enabled: true },
       { path: '/root', enabled: true },
     ]);
-  });
-});
-
-describe('countTotalLines / looksBinary / findWindowByteRange', () => {
-  it('counts empty, newline-only, and trailing-newline files', () => {
-    expect(countTotalLines(new Uint8Array())).toBe(0);
-    expect(countTotalLines(new TextEncoder().encode('\n'))).toBe(1);
-    expect(countTotalLines(new TextEncoder().encode('a\nb\n'))).toBe(2);
-    expect(countTotalLines(new TextEncoder().encode('a\nb'))).toBe(2);
-  });
-
-  it('detects a NUL byte in the first 8 KiB as binary', () => {
-    expect(looksBinary(new Uint8Array([0x00, 0x01]))).toBe(true);
-    expect(looksBinary(new TextEncoder().encode('plain text'))).toBe(false);
-  });
-
-  it('finds inclusive window byte ranges', () => {
-    const bytes = new TextEncoder().encode('one\ntwo\nthree');
-    expect(findWindowByteRange(bytes, 2, 2)).toEqual({ start: 4, end: 8 });
-    expect(findWindowByteRange(bytes, 1, 3)).toEqual({ start: 0, end: 13 });
-  });
-
-  it('returns an empty range for an inverted window instead of the rest of the file', () => {
-    const bytes = new TextEncoder().encode('one\ntwo\nthree');
-    expect(findWindowByteRange(bytes, 2, 1)).toEqual({ start: 4, end: 4 });
-    expect(findWindowByteRange(bytes, 1, 0)).toEqual({ start: 0, end: 0 });
   });
 });
 

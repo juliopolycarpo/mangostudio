@@ -36,9 +36,9 @@ import {
   type WingetOwnership,
 } from '@mangostudio/shared/environments/detection';
 import type { LocationFsProbe } from '@mangostudio/shared/library/host';
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
-import { throwIfAborted } from '../cancellation';
-import { HIDDEN_WINDOW } from '../process-window';
 
 const execFileAsync = promisify(execFile);
 

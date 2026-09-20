@@ -41,7 +41,12 @@ Useful docs:
 - The Mango Protocol (`spec/`, `packages/protocol/`, `crates/mango-protocol/`, `docs/protocol/`, `scripts/protocol/`) is one wire contract on its own `protocol-v*` release line. Any change under those paths follows `packages/protocol/AGENTS.md` and runs `bun run protocol:check && bun run protocol:test` — the repository gate runs only its TypeScript half.
 - Add hub environment parsing only in `apps/api/src/lib/config.ts`, and runtime-host
   environment parsing only in `apps/runtime/src/config.ts`.
-- Shared code must remain framework-agnostic.
+- Shared code must remain framework-agnostic. Shared code that reaches a Node builtin gets its
+  own export subpath (`@mangostudio/shared/library/host`, `/process/host`) so the browser bundle
+  never resolves it.
+- `apps/api` must not import `@mangostudio/runtime`. The only exception is
+  `apps/api/src/services/runtime-client/connect-in-process-runtime.ts`, and a test enforces it;
+  everything the two ends share is a contract in `@mangostudio/shared`.
 - Cross-workspace imports must use package names, never relative paths.
 - Do not edit `apps/frontend/src/routeTree.gen.ts`; it is generated.
 

@@ -3,11 +3,11 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { isShellAvailable } from '@mangostudio/shared/process/host';
 import {
   classifyMcpElicitationCancelReason,
   executeStandardToolCallsWithProgress,
 } from '../../../../src/modules/generation/application/standard-tool-execution';
-import { isShellAvailable } from '../../../../src/services/tools/builtin/_shell-exec';
 import { buildShellTool } from '../../../../src/services/tools/builtin/_shell-tool';
 import { TODO_WRITE_TOOL_NAME } from '../../../../src/services/tools/builtin/todo';
 import { clearRegistry, getAllTools, registerTool } from '../../../../src/services/tools/registry';

@@ -3,7 +3,7 @@
  * Resolves hub-owned path policy before delegating patch execution to the runtime.
  */
 
-import type { RuntimePatchOperation } from '@mangostudio/runtime';
+import type { RuntimePatchOperation } from '@mangostudio/shared/runtime-contract';
 import { getRuntimeClient } from '../../runtime-client';
 import { getRequiredTextArg, ToolArgumentError } from '../arg-parsing';
 import { withMutationPersistence } from '../file-mutation-snapshot';

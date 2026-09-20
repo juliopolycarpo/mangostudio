@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { faker } from '@faker-js/faker';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { isShellAvailable } from '@mangostudio/shared/process/host';
 import { getDb } from '../../../../src/db/database';
 import { listChatFileCheckpointSummaries } from '../../../../src/modules/file-checkpoints/application/list-chat-checkpoints';
 import { revertMessageFileCheckpoints } from '../../../../src/modules/file-checkpoints/application/revert-message-checkpoints';
@@ -24,7 +25,6 @@ import {
   closeAllMcpClients,
   setMcpClientConnectorForTest,
 } from '../../../../src/services/mcp/connection-manager';
-import { isShellAvailable } from '../../../../src/services/tools/builtin/_shell-exec';
 import { registerTools } from '../../../../src/services/tools/register-tools';
 import type { EffectiveToolSettings } from '../../../../src/services/tools/types';
 import { type ChatFixture, insertTestChat, type UserFixture } from '../../../support/factories';

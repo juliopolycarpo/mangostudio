@@ -9,8 +9,8 @@
  * that is not one cannot own its job control.
  */
 
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import { killProcessTree, OWN_PROCESS_GROUP } from '../process-tree';
-import { HIDDEN_WINDOW } from '../process-window';
 
 export interface PtySpawnInput {
   readonly argv: readonly string[];

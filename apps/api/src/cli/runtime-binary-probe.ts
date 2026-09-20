@@ -5,7 +5,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { HIDDEN_WINDOW } from '@mangostudio/runtime';
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import { getRuntimeBinaryPath } from '../lib/runtime-paths';
 
 const VERSION_PROBE_TIMEOUT_MS = 5_000;

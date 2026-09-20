@@ -14,6 +14,8 @@ import {
 import { getDb } from '../../../src/db/database';
 import { getVersion } from '../../../src/lib/config';
 import type { EnvironmentStateTransition } from '../../../src/modules/environments/application/record-environment-activity';
+import { createRuntimeAuthoritativeAgentDiscovery } from '../../../src/modules/external-agents/application/external-agent-discovery';
+import { createExternalIdentityIsolationRegistry } from '../../../src/modules/external-agents/application/external-identity-isolation';
 import { capabilityManifestFromHealth } from '../../../src/services/runtime-client/manifest-from-health';
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
@@ -26,6 +28,7 @@ import {
   setRuntimeConnectionManagerForTests,
 } from '../../../src/services/runtime-client/runtime-connection-manager';
 import { insertTestChat, insertTestUser } from '../../support/factories';
+import { connectTestRuntime } from '../../support/runtime-fixture';
 
 const TEST_MANIFEST: RuntimeCapabilityManifest = {
   platform: 'linux',
@@ -808,6 +811,81 @@ describe('RuntimeConnectionManager', () => {
 
     expect(await getRuntimeClient('user-1', 'devbox')).toBe(expected);
   });
+  const ATTESTED: RuntimeCapabilityManifest['identityIsolation'] = {
+    method: 'single-user-host',
+    credentialHomeFingerprint: 'sha256:test',
+  };
+
+  /** What the Local runtime answers a hub that did or did not withdraw its claim. */
+  const attestationFor = (
+    isolation: 'single-user' | 'withdrawn'
+  ): Pick<RuntimeCapabilityManifest, 'identityIsolation'> =>
+    isolation === 'single-user' ? { identityIsolation: ATTESTED } : {};
+
+  it.each(['withdrawn', 'single-user', undefined] as const)(
+    'preserves the hub isolation claim %s after a peer repeats its attestation',
+    async (claim) => {
+      const manifest: RuntimeCapabilityManifest = {
+        ...TEST_MANIFEST,
+        externalAgents: ['codex'],
+        features: { ...TEST_MANIFEST.features, externalAgents: true },
+        identityIsolation: ATTESTED,
+      };
+      let discoveryCalls = 0;
+      const runtime = await connectTestRuntime({
+        manifest,
+        ...(claim ? { externalAgentIsolation: claim } : {}),
+        handlers: {
+          'runtime.health': () => ({
+            ...HEALTH_REPORT,
+            allow: { ...HEALTH_REPORT.allow, externalAgents: true },
+            externalAgents: {
+              targets: ['codex'],
+              identityIsolation: ATTESTED,
+              liveSessionCount: 0,
+              liveSessions: [],
+            },
+          }),
+          'external-agent.discover': () => {
+            discoveryCalls += 1;
+            return { descriptors: [] };
+          },
+        },
+      });
+      const manager = new RuntimeConnectionManager({
+        resolveEnvironment: () => Promise.resolve(definition()),
+        connectors: { stdio: () => Promise.resolve(runtime) },
+      });
+      try {
+        const client = await manager.getClient('user-1', 'devbox');
+        const expected = claim === 'withdrawn' ? undefined : ATTESTED;
+        expect(client.manifest.identityIsolation).toEqual(expected);
+        const refreshed = await manager.refreshManifest('user-1', 'devbox');
+        const authority = createRuntimeAuthoritativeAgentDiscovery(
+          () => Promise.resolve(client),
+          1_000,
+          createExternalIdentityIsolationRegistry()
+        );
+        const [status] = await authority.describe(
+          { userId: 'user-1', environmentId: 'devbox' },
+          ['codex'],
+          { signal: new AbortController().signal }
+        );
+        if (claim === 'withdrawn') {
+          expect(status?.unavailableReason).toBe('isolation-unproven');
+          expect(discoveryCalls).toBe(0);
+        } else {
+          expect(discoveryCalls).toBe(1);
+        }
+        expect(client.manifest.identityIsolation).toEqual(expected);
+        expect(refreshed.manifest?.identityIsolation).toEqual(expected);
+        expect(manifest.identityIsolation).toEqual(ATTESTED);
+      } finally {
+        manager.disconnect('user-1', 'devbox');
+        await runtime.close();
+      }
+    }
+  );
 
   it('revokes Local attestation before serving a second MangoStudio user', async () => {
     const connector = createLocalRuntimeConnector();
@@ -909,7 +987,7 @@ describe('RuntimeConnectionManager', () => {
         return Promise.resolve(
           fakeConnection(() => undefined, {
             ...TEST_MANIFEST,
-            ...(options.identityIsolation ? { identityIsolation: options.identityIsolation } : {}),
+            ...attestationFor(options.externalAgentIsolation),
           })
         );
       },
@@ -939,12 +1017,12 @@ describe('RuntimeConnectionManager', () => {
   });
 
   it('binds the Local owner only after a successful connection', async () => {
-    const identities: Array<RuntimeCapabilityManifest['identityIsolation']> = [];
+    const claims: Array<'single-user' | 'withdrawn'> = [];
     let attempts = 0;
     const connector = createLocalRuntimeConnector({
       isWorkspaceAuthorized: () => true,
       open: (options) => {
-        identities.push(options.identityIsolation);
+        claims.push(options.externalAgentIsolation);
         attempts += 1;
         if (attempts === 1) {
           return Promise.reject(new Error('first handshake failed'));
@@ -952,7 +1030,7 @@ describe('RuntimeConnectionManager', () => {
         return Promise.resolve(
           fakeConnection(() => undefined, {
             ...TEST_MANIFEST,
-            ...(options.identityIsolation ? { identityIsolation: options.identityIsolation } : {}),
+            ...attestationFor(options.externalAgentIsolation),
           })
         );
       },
@@ -964,9 +1042,7 @@ describe('RuntimeConnectionManager', () => {
     const second = await connector(localDefinition('user-2'), () => undefined, connectContext());
 
     try {
-      expect(identities).toHaveLength(2);
-      expect(identities[0]).toMatchObject({ method: 'single-user-host' });
-      expect(identities[1]).toMatchObject({ method: 'single-user-host' });
+      expect(claims).toEqual(['single-user', 'single-user']);
       expect(second.client.manifest.identityIsolation).toMatchObject({
         method: 'single-user-host',
       });

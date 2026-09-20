@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { WorkspacePathError } from '@mangostudio/shared/runtime-contract';
 import { validateWorkdir } from '../../../src/services/workspace';
-import { WorkspacePathError } from '../../../src/services/workspace-path';
 
 const tempDirs: string[] = [];
 

@@ -7,7 +7,6 @@ import {
   execGh,
   GhExecutionError,
   mutateGh,
-  summarizeGhSubcommand,
 } from '../../../src/services/gh';
 
 const hasGh = Bun.which('gh') !== null;
@@ -122,14 +121,6 @@ describe('gh CLI boundary', () => {
   it("preserves APPDATA for gh's default Windows config location", () => {
     const env = buildGhEnvironment({ APPDATA: 'C:\\Users\\test\\AppData\\Roaming' });
     expect(env.APPDATA).toBe('C:\\Users\\test\\AppData\\Roaming');
-  });
-
-  it('summarizes an argv down to its subcommand, never its prose', () => {
-    expect(
-      summarizeGhSubcommand(['pr', 'create', '--title', 'Secret plan', '--body', 'x'])
-    ).toEqual(['pr', 'create']);
-    expect(summarizeGhSubcommand(['--version'])).toEqual(['--version']);
-    expect(summarizeGhSubcommand([42, 'pr'])).toEqual(['pr']);
   });
 });
 

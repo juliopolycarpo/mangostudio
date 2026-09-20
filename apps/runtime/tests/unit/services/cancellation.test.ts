@@ -13,7 +13,7 @@ import { DEFAULT_APP_SETTINGS, libraryLocationsFor } from '@mangostudio/shared/a
 import { clearFileFreshness } from '../../../src';
 import { withPathLocks } from '../../../src/services/file-freshness';
 import { runtimeFsService } from '../../../src/services/fs';
-import { createLibraryService } from '../../../src/services/library';
+import { createLibraryService } from '../../../src/services/library/service';
 import { createProbingService } from '../../../src/services/probing/service';
 import {
   captureFileSnapshot,

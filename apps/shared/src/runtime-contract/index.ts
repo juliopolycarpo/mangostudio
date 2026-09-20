@@ -7,10 +7,13 @@
  * modules this barrel would otherwise pull into a cycle.
  */
 
+export * from './cancellation';
 export * from './contract';
 export * from './errors';
 export * from './events';
+export * from './limits';
 export * from './manifest';
 export * from './methods';
 export * from './path-policy';
+export * from './service-errors';
 export * from './strings';

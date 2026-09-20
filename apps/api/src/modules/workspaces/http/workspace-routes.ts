@@ -1,5 +1,6 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
+import { WorkspacePathError } from '@mangostudio/shared/runtime-contract';
 import type { ListDirectoryResponse, ValidatePathResponse } from '@mangostudio/shared/workspaces';
 import { ListDirectoryQuerySchema, ValidatePathBodySchema } from '@mangostudio/shared/workspaces';
 import { Elysia } from 'elysia';
@@ -9,7 +10,6 @@ import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
 import { environmentRepository } from '../../environments/infrastructure/environment-repository';
 import { DirectoryBrowserError, listDirectory } from '../application/directory-browser';
 import { type RuntimeSelection, validateWorkdir } from '../application/workdir-validation';
-import { WorkspacePathError } from '../application/workspace-path';
 
 function handleDirectoryBrowserError(
   error: unknown,

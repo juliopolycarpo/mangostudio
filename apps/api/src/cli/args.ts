@@ -3,12 +3,12 @@
  * the -d/--detach flag.
  */
 
+import type { ResourceKind } from '@mangostudio/shared/library';
 import {
   isUserServiceAction,
   USER_SERVICE_ACTIONS,
   type UserServiceAction,
-} from '@mangostudio/runtime';
-import type { ResourceKind } from '@mangostudio/shared/library';
+} from '@mangostudio/shared/machine/service';
 import {
   UPGRADE_SHA_PATTERN,
   UPGRADE_VERSION_PATTERN,

@@ -1,10 +1,10 @@
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import { PathAccessError, RuntimeToolArgumentError } from '../../errors';
 import type {
   RuntimeMutationResult,
   RuntimeReplaceRangeParams,
   RuntimeReplaceRangeResult,
 } from '../../methods';
-import { throwIfAborted } from '../cancellation';
 import {
   assertLineNumbersCurrent,
   FileNotReadError,

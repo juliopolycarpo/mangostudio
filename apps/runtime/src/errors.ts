@@ -1,34 +1,39 @@
+/**
+ * The throw side of the error boundary: the classes come from the shared
+ * contract, and this module maps what a handler threw onto the wire.
+ *
+ * The class table lives in `@mangostudio/shared/runtime-contract` because both
+ * ends need it — the runtime to throw, the hub to rebuild from `details.kind`.
+ * What stays here is the part only a runtime does: flattening a class into a
+ * `RemoteError`, plus the two errors that never leave this process.
+ */
+
 import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import {
   CONSENT_DENIED_KIND,
+  PathAccessError,
   RUNTIME_UPDATE_REFUSED,
-  type RuntimeServiceErrorKind,
+  RuntimeServiceError,
 } from '@mangostudio/shared/runtime-contract';
 
-/**
- * The kind vocabulary is shared, not runtime-owned: it is what reaches a hub in
- * `details.kind` once the class is gone. See
- * `apps/shared/src/runtime-contract/errors.ts`.
- */
-export type { RuntimeServiceErrorKind };
-
-export class RuntimeServiceError extends Error {
-  constructor(
-    readonly kind: RuntimeServiceErrorKind,
-    message: string,
-    readonly data: Readonly<Record<string, unknown>> = {}
-  ) {
-    super(message);
-    this.name = 'RuntimeServiceError';
-  }
-}
-
-export class PathAccessError extends RuntimeServiceError {
-  constructor(message: string, data: Readonly<Record<string, unknown>> = {}) {
-    super('path_access', message, data);
-    this.name = 'PathAccessError';
-  }
-}
+export {
+  FileNotReadError,
+  GrepPatternError,
+  LIBRARY_BACKUP_MISSING_KIND,
+  PartialReadError,
+  PathAccessError,
+  RegularFileWriteError,
+  RuntimeConsentDeniedError,
+  RuntimeServiceError,
+  RuntimeServiceManagementError,
+  RuntimeSnapshotConflictError,
+  RuntimeToolArgumentError,
+  ShellExecutionError,
+  StaleFileError,
+  StaleLineNumbersError,
+  UnobservedLineNumbersError,
+  WorkspacePathError,
+} from '@mangostudio/shared/runtime-contract';
 
 /**
  * A read was refused because the file is past the ceiling the call carried.
@@ -47,13 +52,6 @@ export class FileTooLargeError extends PathAccessError {
   }
 }
 
-export class RuntimeToolArgumentError extends RuntimeServiceError {
-  constructor(message: string) {
-    super('tool_argument', message);
-    this.name = 'RuntimeToolArgumentError';
-  }
-}
-
 /** A live update was malformed, out of sequence, unsafe, or could not publish. */
 export class RuntimeUpdateError extends RuntimeServiceError {
   constructor(message: string, data: Readonly<Record<string, unknown>> = {}) {
@@ -61,35 +59,6 @@ export class RuntimeUpdateError extends RuntimeServiceError {
     this.name = 'RuntimeUpdateError';
   }
 }
-
-/** User-level service install/status refused or unsupported on this machine. */
-export class RuntimeServiceManagementError extends RuntimeServiceError {
-  constructor(
-    kind:
-      | 'runtime_service_unsupported'
-      | 'runtime_service_no_session_bus'
-      | 'runtime_service_setup_pending'
-      | 'runtime_service_unconfigured'
-      | 'runtime_service_binary_missing',
-    message: string,
-    data: Readonly<Record<string, unknown>> = {}
-  ) {
-    super(kind, message, data);
-    this.name = 'RuntimeServiceManagementError';
-  }
-}
-
-/**
- * Kind carried in `details.kind` when a named backup set is gone.
- *
- * The class does not survive the protocol boundary — `errorPayloadFor` flattens
- * every service error to code `INTERNAL` plus its kind — so this constant is
- * what lets the hub answer 404 instead of matching on the message text. It goes
- * in `details`, which is an open record on the wire. Consent refusals are the
- * exception: they travel as the reserved `DENIED` code.
- */
-export const LIBRARY_BACKUP_MISSING_KIND =
-  'library_backup_missing' satisfies RuntimeServiceErrorKind;
 
 /**
  * Maps what a runtime handler threw onto the wire error the peer receives.
@@ -101,7 +70,7 @@ export const LIBRARY_BACKUP_MISSING_KIND =
  * `AbortError` is left alone: the session maps it to `CANCELLED`.
  *
  * @example
- * throw toRemoteError(new LibraryBackupMissingError('set "a1" is gone'));
+ * throw toRemoteError(new RuntimeServiceError('library_backup_missing', 'set "a1" is gone'));
  * // RemoteError INTERNAL, details.kind === 'library_backup_missing'
  */
 export function toRemoteError(error: unknown): unknown {
@@ -126,25 +95,4 @@ export function toRemoteError(error: unknown): unknown {
     kind: error.kind,
     ...error.data,
   });
-}
-
-/**
- * The machine's owner has not granted a capability the method needs.
- *
- * Distinct from a crash so the turn pipeline can render a policy refusal
- * instead of treating the call as an infrastructure failure.
- */
-export class RuntimeConsentDeniedError extends Error {
-  constructor(
-    message: string,
-    readonly details: Readonly<{
-      readonly capability?: string;
-      readonly method?: string;
-      readonly slot?: string;
-      readonly missing?: readonly string[];
-    }> = {}
-  ) {
-    super(message);
-    this.name = 'RuntimeConsentDeniedError';
-  }
 }

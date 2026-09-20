@@ -37,7 +37,6 @@
  * `publishExternalAgentsInvalidation`.
  */
 
-import { RuntimeConsentDeniedError } from '@mangostudio/runtime';
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
 import type {
   ExternalAgentAccount,
@@ -55,6 +54,7 @@ import {
   externalRemedyFor,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
+import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
 import { onEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation-hooks';
 import { publishExternalAgentsInvalidation } from '../../../services/realtime/external-agents-invalidation';
 import { getRuntimeClient, type RuntimeClient } from '../../../services/runtime-client';

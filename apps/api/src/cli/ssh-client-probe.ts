@@ -7,7 +7,7 @@
  * that works in every other respect can still be unable to start one.
  */
 
-import { HIDDEN_WINDOW } from '@mangostudio/runtime';
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 
 const VERSION_PROBE_TIMEOUT_MS = 5_000;
 

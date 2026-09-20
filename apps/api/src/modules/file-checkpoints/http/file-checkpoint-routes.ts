@@ -1,4 +1,3 @@
-import { PathAccessError } from '@mangostudio/runtime';
 import {
   type ApiErrorResponse,
   ApiErrorResponseSchema,
@@ -10,6 +9,7 @@ import {
   type RevertChatFileCheckpointsResponse,
   RevertChatFileCheckpointsResponseSchema,
 } from '@mangostudio/shared/file-checkpoints';
+import { PathAccessError } from '@mangostudio/shared/runtime-contract';
 import { type Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';

@@ -24,7 +24,7 @@
 
 import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { HIDDEN_WINDOW } from '@mangostudio/runtime';
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
 import { setDevFrontendDir } from './dev-frontend-dir';
 

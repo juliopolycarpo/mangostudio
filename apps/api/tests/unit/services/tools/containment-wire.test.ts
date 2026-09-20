@@ -36,9 +36,9 @@ import { executeMoveFile } from '../../../../src/services/tools/builtin/move-fil
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
 import { executeReplaceRange } from '../../../../src/services/tools/builtin/replace-range';
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
-import { clearFileFreshness } from '../../../../src/services/tools/file-freshness';
 import type { ToolContext } from '../../../../src/services/tools/types';
 import { createLocalRuntimeDefinition } from '../../../support/local-runtime';
+import { clearFileFreshness } from '../../../support/runtime-file-freshness';
 
 const VERSION = 'test';
 

@@ -2,20 +2,20 @@ import type { Dirent } from 'node:fs';
 import { access, constants, readdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import type {
   DirectoryEntry,
   ListDirectoryResponse,
   WorkdirValidationReason,
 } from '@mangostudio/shared/workspaces';
-import { RuntimeServiceError } from '../errors';
+import { resolveWorkspacePath } from '@mangostudio/shared/workspaces/host';
+import { RuntimeServiceError, WorkspacePathError } from '../errors';
 import type {
   RuntimeWorkspaceBrowseParams,
   RuntimeWorkspaceResolveContainedParams,
   RuntimeWorkspaceResolveContainedResult,
   RuntimeWorkspaceValidateResult,
 } from '../methods';
-import { throwIfAborted } from './cancellation';
-import { resolveWorkspacePath, WorkspacePathError } from './workspace-path';
 
 /** Protocol-layer cap on directory listing size. */
 export const MAX_WORKSPACE_DIRECTORY_ENTRIES = 5000;

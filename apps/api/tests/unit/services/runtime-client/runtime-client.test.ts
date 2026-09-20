@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { PathAccessError, RuntimeConsentDeniedError } from '@mangostudio/runtime';
+import { PathAccessError, RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
 import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,

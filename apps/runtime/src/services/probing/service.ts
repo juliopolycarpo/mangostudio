@@ -47,6 +47,7 @@ import {
 } from '@mangostudio/shared/environments/detection';
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
 import { describeTargetLocations, getLibraryTarget } from '@mangostudio/shared/library/host';
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { RuntimeToolArgumentError } from '../../errors';
 import type {
@@ -58,7 +59,6 @@ import type {
   RuntimeProbeVersionManagersParams,
   RuntimeProbeVersionManagersResult,
 } from '../../methods';
-import { throwIfAborted } from '../cancellation';
 import {
   createBinaryScanDeps,
   createFnmDetectionDeps,

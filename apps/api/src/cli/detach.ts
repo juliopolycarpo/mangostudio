@@ -6,7 +6,7 @@
 
 import { closeSync, mkdirSync, openSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { HIDDEN_WINDOW } from '@mangostudio/runtime';
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import { RUNTIME_CONFIG_ENV_KEYS } from '../lib/config';
 import { ensureRuntimeDirs, getServerLogPath } from '../lib/mango-paths';
 import { isStandaloneExecutable } from '../lib/runtime-paths';

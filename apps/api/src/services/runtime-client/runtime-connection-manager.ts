@@ -1,9 +1,4 @@
 import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
-import {
-  createLocalRuntimeHost,
-  createSingleUserHostExternalAgentIsolation,
-  createSlotConsentSource,
-} from '@mangostudio/runtime';
 import type {
   EnvironmentConnectionState,
   EnvironmentConnectionStatus,
@@ -15,14 +10,13 @@ import {
   LOCAL_ENVIRONMENT_NAME,
   SshFailureReasonSchema,
 } from '@mangostudio/shared/environments';
-import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
 import {
+  type HubExternalAgentIsolation,
   narrowRuntimeErrorCode,
   type RuntimeErrorCode,
 } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
-import { probeRuntimeSlots } from '../../cli/runtime-slot-probe';
 import { getDb } from '../../db/database';
 import { getVersion } from '../../lib/config';
 import { resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
@@ -42,7 +36,7 @@ import { wslProvisioner } from '../../modules/environments/infrastructure/wsl-pr
 import { publishEnvironmentInvalidation } from '../realtime/environment-invalidation';
 import { connectContainerRuntime } from './connect-container-runtime';
 import { connectHttpRuntime } from './connect-http-runtime';
-import { connectInProcessRuntime } from './connect-in-process-runtime';
+import { connectLocalRuntime } from './connect-in-process-runtime';
 import { connectSshRuntime } from './connect-ssh-runtime';
 import { capabilityManifestFromHealth } from './manifest-from-health';
 import { RuntimeClient } from './runtime-client';
@@ -1053,8 +1047,8 @@ export class RuntimeConnectionManager {
     }
     entry.health = health;
     entry.healthReadAtMs = entry.manifestReadAtMs;
-    const manifest = capabilityManifestFromHealth(health, client.manifest);
-    client.replaceManifest(manifest);
+    client.replaceManifest(capabilityManifestFromHealth(health, client.manifest));
+    const manifest = client.manifest;
     const changed = !Value.Equal(entry.status.manifest, manifest);
     // A peer that withdrew this consent has already closed its vendor sessions,
     // silently. Reported before the status is replaced, so the comparison is
@@ -1144,31 +1138,17 @@ interface LocalRuntimeOpenOptions {
     canonicalPath: string,
     signal: AbortSignal
   ) => boolean | Promise<boolean>;
-  readonly identityIsolation?: ExternalIdentityIsolation;
+  /** See {@link HubExternalAgentIsolation}; `withdrawn` once a second owner is known. */
+  readonly externalAgentIsolation: HubExternalAgentIsolation;
 }
 
-async function connectLocalRuntime(
+async function openLocalRuntime(
   options: LocalRuntimeOpenOptions
 ): Promise<ManagedRuntimeConnection> {
-  const version = getVersion();
-  // Local runs in this process, but it is still a runtime on somebody's
-  // machine: it answers to the `host` slot's consent like every other one. A
-  // user who narrows that slot gets a read-only Local, which is the point of
-  // being able to narrow it. Absence resolves to full, so the default is
-  // unchanged and no install has to have run.
-  const [probe] = (await probeRuntimeSlots()).filter((slot) => slot.slot === 'host');
-  const definition = createLocalRuntimeHost({
-    runtimeVersion: version,
-    externalAgents: {
-      authorizeWorkspace: options.authorizeWorkspace,
-      ...(options.identityIsolation ? { identityIsolation: options.identityIsolation } : {}),
-    },
-    consent: createSlotConsentSource({
-      slot: 'host',
-      ...(probe && !probe.error ? { initial: probe.config.allow } : {}),
-    }),
+  const connection = await connectLocalRuntime({
+    authorizeWorkspace: options.authorizeWorkspace,
+    externalAgentIsolation: options.externalAgentIsolation,
   });
-  const connection = await connectInProcessRuntime(definition, { hubVersion: version });
   return {
     client: new RuntimeClient(connection.hub, options.onUnavailable, LOCAL_ENVIRONMENT_ID),
     close: () => connection.close(),
@@ -1270,7 +1250,7 @@ function advanceChainAfter(attempt: Promise<unknown>, deadlineMs: number): Promi
 export function createLocalRuntimeConnector(
   options: LocalRuntimeConnectorOptions = {}
 ): RuntimeEnvironmentConnector {
-  const open = options.open ?? connectLocalRuntime;
+  const open = options.open ?? openLocalRuntime;
   const isWorkspaceAuthorized = options.isWorkspaceAuthorized ?? isAuthorizedLocalWorkspace;
   const chainDeadlineMs = options.chainDeadlineMs ?? LOCAL_CHAIN_DEADLINE_MS;
   let ownerUserId: string | undefined;
@@ -1298,6 +1278,7 @@ export function createLocalRuntimeConnector(
           onUnavailable,
           authorizeWorkspace: (canonicalPath, signal) =>
             isWorkspaceAuthorized(definition, canonicalPath, signal),
+          externalAgentIsolation: 'withdrawn',
         });
       }
       if (ownerUserId !== undefined && ownerUserId !== definition.userId) {
@@ -1322,22 +1303,22 @@ export function createLocalRuntimeConnector(
         }
       }
 
-      const identityIsolation = multipleOwners
-        ? undefined
-        : createSingleUserHostExternalAgentIsolation();
       const connection = await open({
         onUnavailable,
         authorizeWorkspace: (canonicalPath, signal) =>
           isWorkspaceAuthorized(definition, canonicalPath, signal),
-        ...(identityIsolation ? { identityIsolation } : {}),
+        externalAgentIsolation: multipleOwners ? 'withdrawn' : 'single-user',
       });
       // Do not let a failed first handshake reserve the OS credential home.
       // Serialization above makes this the only successful claimant that can
       // observe the binding as empty.
       ownerUserId ??= definition.userId;
+      // Read back rather than assumed: the runtime is the side that decides
+      // whether it can prove anything about its credential home, and a hub that
+      // asked for an attestation it did not get must not act as though it had.
       const entry = {
         connection,
-        identityAttested: identityIsolation !== undefined,
+        identityAttested: connection.client.manifest.identityIsolation !== undefined,
         onUnavailable,
       };
       active.add(entry);

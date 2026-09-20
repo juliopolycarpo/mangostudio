@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { HIDDEN_WINDOW } from '@mangostudio/runtime';
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 
 export const BUILD_INFO_FILENAME = 'build-info.json';
 const UNKNOWN_BUILD_VALUE = 'unknown';

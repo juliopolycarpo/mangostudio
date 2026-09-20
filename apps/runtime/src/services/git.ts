@@ -3,10 +3,10 @@
  * Argv-array-only — never accepts a shell command string.
  */
 
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import { RuntimeServiceError, RuntimeToolArgumentError } from '../errors';
 import type { RuntimeGitExecParams, RuntimeGitExecResult } from '../methods';
 import { readStreamCapped } from './child-output';
-import { HIDDEN_WINDOW } from './process-window';
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;

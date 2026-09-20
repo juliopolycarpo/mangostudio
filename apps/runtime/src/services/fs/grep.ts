@@ -1,11 +1,13 @@
 import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { PathAccessError, RuntimeServiceError } from '../../errors';
+import { throwIfAborted } from '@mangostudio/shared/runtime-contract';
+import { GrepPatternError, PathAccessError, RuntimeServiceError } from '../../errors';
 import type { RuntimeGrepParams, RuntimeGrepResult } from '../../methods';
-import { throwIfAborted } from '../cancellation';
 import { compilePolicyGuard } from '../fs-path-policy';
 import { BINARY_SNIFF_BYTES, containsNulByte } from '../fs-utils';
 import { createGrepScanner, type GrepScanner } from './grep-scanner';
+
+export { GrepPatternError };
 
 /**
  * Wall-clock allowance for matching one file, enforced by terminating the
@@ -49,13 +51,6 @@ export function setGrepFileBudgetForTest(budgetMs: number | null): void {
 const GREP_MAX_PATTERN_LENGTH = 1000;
 
 const DEFAULT_FILE_GLOB = '**/*';
-
-export class GrepPatternError extends RuntimeServiceError {
-  constructor(message: string) {
-    super('grep_pattern', message);
-    this.name = 'GrepPatternError';
-  }
-}
 
 export async function grepRuntimeFiles(
   params: RuntimeGrepParams,

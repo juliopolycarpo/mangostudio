@@ -1,4 +1,5 @@
 import { RemoteError } from '@mangostudio/protocol';
+
 /**
  * The write half of library propagation: verify the preview still describes
  * reality, plan every operation, write with a backup and a post-write hash
@@ -10,14 +11,6 @@ import { RemoteError } from '@mangostudio/protocol';
  * None of them is optional, and none of them should be relaxed for speed.
  */
 
-import type { RuntimeLibraryApplyParams, RuntimeLibraryUndoParams } from '@mangostudio/runtime';
-import {
-  executeLibraryUndo,
-  executePropagationWrites,
-  LIBRARY_BACKUP_MISSING_KIND,
-  LibraryBackupMissingError,
-  type PropagationWriteEngineDeps,
-} from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   type AdapterStrategy,
@@ -42,6 +35,17 @@ import {
   type ResourceKind,
 } from '@mangostudio/shared/library';
 import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
+import {
+  executeLibraryUndo,
+  executePropagationWrites,
+  LibraryBackupMissingError,
+  type PropagationWriteEngineDeps,
+} from '@mangostudio/shared/library/machine';
+import {
+  LIBRARY_BACKUP_MISSING_KIND,
+  type RuntimeLibraryApplyParams,
+  type RuntimeLibraryUndoParams,
+} from '@mangostudio/shared/runtime-contract';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { getRuntimeClient } from '../../../services/runtime-client';

@@ -67,6 +67,16 @@ export const RUNTIME_SERVICE_ERROR_KINDS = [
 
 export type RuntimeServiceErrorKind = (typeof RUNTIME_SERVICE_ERROR_KINDS)[number];
 
+/**
+ * Kind carried in `details.kind` when a named backup set is gone.
+ *
+ * Named rather than spelled inline because two processes match on it: the
+ * runtime answers a missing set with this kind, and the hub reads it to answer
+ * 404 instead of matching on the message text.
+ */
+export const LIBRARY_BACKUP_MISSING_KIND =
+  'library_backup_missing' satisfies RuntimeServiceErrorKind;
+
 /** Application code: a live binary transfer was unsafe, malformed, busy, or out of sequence. */
 export const RUNTIME_UPDATE_REFUSED = 'RUNTIME_UPDATE_REFUSED';
 

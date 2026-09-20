@@ -1,6 +1,10 @@
+import {
+  READ_FILE_MAX_LINE_CHARS,
+  READ_FILE_MAX_WINDOW_BYTES,
+  throwIfAborted,
+} from '@mangostudio/shared/runtime-contract';
 import { FileTooLargeError, PathAccessError } from '../../errors';
 import type { RuntimeReadFileParams, RuntimeReadFileResult } from '../../methods';
-import { throwIfAborted } from '../cancellation';
 import { recordFileRead } from '../file-freshness';
 import {
   BINARY_SNIFF_BYTES,
@@ -12,11 +16,6 @@ import {
 
 const READ_FILE_DEFAULT_START_LINE = 1;
 const READ_FILE_DEFAULT_MAX_LINES = 2000;
-export const READ_FILE_MIN_MAX_LINES = 1;
-export const READ_FILE_MAX_MAX_LINES = 5000;
-export const READ_FILE_MAX_START_LINE = 10_000_000;
-export const READ_FILE_MAX_LINE_CHARS = 2000;
-export const READ_FILE_MAX_WINDOW_BYTES = 256 * 1024;
 const LINE_TRUNCATION_MARKER = '…[truncated]';
 const WINDOW_TRUNCATION_NOTICE = '\n\n[truncated: use startLine/maxLines to read more]';
 const NEWLINE = 0x0a;

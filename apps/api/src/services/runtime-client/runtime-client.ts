@@ -11,6 +11,7 @@ import {
   type ExternalAgentDiscoverParams,
   type ExternalAgentDiscoverResult,
   type ExternalAgentEventEnvelope,
+  ExternalAgentEventEnvelopeFrameSchema,
   type ExternalAgentListSessionsParams,
   type ExternalAgentListSessionsResult,
   type ExternalAgentOpenParams,
@@ -24,6 +25,12 @@ import {
   type ExternalAgentSteerResult,
   type ExternalAgentTurnParams,
   type ExternalAgentTurnResult,
+} from '@mangostudio/shared/external-agents';
+import {
+  directoryHashDomainOf,
+  type RuntimeSettingsSourcesResult,
+} from '@mangostudio/shared/library';
+import {
   FileNotReadError,
   GrepPatternError,
   PartialReadError,
@@ -92,6 +99,7 @@ import {
   type RuntimeMoveFileParams,
   type RuntimeMoveFileResult,
   type RuntimeMutationResult,
+  type RuntimePathPolicyParams,
   type RuntimeProbeAgentClisParams,
   type RuntimeProbeAgentClisResult,
   type RuntimeProbeRuntimesParams,
@@ -139,19 +147,13 @@ import {
   StaleFileError,
   StaleLineNumbersError,
   UnobservedLineNumbersError,
-} from '@mangostudio/runtime';
-import { ExternalAgentEventEnvelopeFrameSchema } from '@mangostudio/shared/external-agents';
-import {
-  directoryHashDomainOf,
-  type RuntimeSettingsSourcesResult,
-} from '@mangostudio/shared/library';
-import type { RuntimePathPolicyParams } from '@mangostudio/shared/runtime-contract';
+} from '@mangostudio/shared/runtime-contract';
 import Value from 'typebox/value';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { McpConnectionError } from '../mcp/types';
 import { ToolArgumentError } from '../tools/arg-parsing';
 import { ToolExecutionTimedOutError } from '../tools/execution-timeout';
-import type { HubSession } from './hub-session';
+import { applyHubIsolationClaim, type HubSession } from './hub-session';
 import { createTargetPaths, type TargetPaths } from './target-paths';
 
 const logger = createDiagnosticLogger('runtime-client');
@@ -498,7 +500,7 @@ export class RuntimeClient {
     /** Named in the warning when this peer turns out not to enforce containment. */
     private readonly environmentId?: string
   ) {
-    this.runtimeManifest = hub.manifest;
+    this.runtimeManifest = applyHubIsolationClaim(hub.manifest, hub.externalAgentIsolation);
     this.fs = {
       readFile: (params, options) => this.request('fs.read-file', params, options),
       writeFile: (params, options) => this.request('fs.write-file', params, options),
@@ -674,7 +676,7 @@ export class RuntimeClient {
    * environment card see the new allow set without tearing the connection down.
    */
   replaceManifest(manifest: RuntimeCapabilityManifest): void {
-    this.runtimeManifest = manifest;
+    this.runtimeManifest = applyHubIsolationClaim(manifest, this.hub.externalAgentIsolation);
     this.targetPaths = undefined;
     this.pathPolicyEnforced = false;
   }

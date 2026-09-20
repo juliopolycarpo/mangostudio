@@ -20,7 +20,6 @@
  * to say — and `ApiErrorResponse` stays for calls that actually failed.
  */
 
-import { summarizeGhSubcommand } from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   type ApiErrorResponse,
@@ -54,6 +53,7 @@ import {
   GithubPrsResponseSchema,
   type GithubPrThreadsResponse,
   GithubPrThreadsResponseSchema,
+  summarizeGhSubcommand,
 } from '@mangostudio/shared/github';
 import { Elysia } from 'elysia';
 import { getDb } from '../../../db/database';

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import {
   killLinuxProcessTree,
   killProcessTree,
@@ -10,7 +11,6 @@ import {
   startWindowsTaskkillTree,
   windowsTaskkillArguments,
 } from '../../../src/services/process-tree';
-import { HIDDEN_WINDOW } from '../../../src/services/process-window';
 import { waitUntilGone } from './support/process-lifetime';
 
 async function readFirstLine(stream: ReadableStream<Uint8Array>): Promise<string> {

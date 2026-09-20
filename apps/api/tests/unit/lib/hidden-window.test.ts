@@ -6,6 +6,13 @@
  * Rather than trust each call site to remember `...HIDDEN_WINDOW`, this walks
  * the real source tree and asserts it at every call. Precedent:
  * `apps/frontend/tests/unit/shared-browser-safety.test.ts`.
+ *
+ * `apps/shared/src` is walked here too, rather than from a third copy of this
+ * scanner: the spawn sites that moved there (the per-user service supervisor)
+ * run in *this* process when the hub drives them, so a console window they
+ * forget to hide is the hub's flash. The runtime's twin guards its own tree;
+ * one guard catching an offender is enough, and the offender path this prints
+ * is repo-relative either way.
  */
 
 import { describe, expect, it } from 'bun:test';
@@ -13,7 +20,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const REPO_ROOT = resolve(__dirname, '../../../../..');
-const API_SRC = join(REPO_ROOT, 'apps/api/src');
+const GUARDED_ROOTS = ['apps/api/src', 'apps/shared/src'].map((tree) => join(REPO_ROOT, tree));
 
 /**
  * Names `node:child_process` exports that can launch a subprocess. All of them
@@ -157,7 +164,7 @@ function spawnCallSites(source: string): SpawnCallSite[] {
 }
 
 describe('every child-process spawn hides its console window on Windows', () => {
-  const files = sourceFilesUnder(API_SRC);
+  const files = GUARDED_ROOTS.flatMap(sourceFilesUnder);
 
   it('scans a set of files that is neither empty nor accidentally tiny', () => {
     // Guards the walk itself: a broken glob would make the check below pass

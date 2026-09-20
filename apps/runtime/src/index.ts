@@ -76,22 +76,10 @@ export {
   withPathLocks,
 } from './services/file-freshness';
 export { GrepPatternError } from './services/fs/grep';
+export { countTotalLines, findWindowByteRange, looksBinary } from './services/fs/read-file';
 export {
-  countTotalLines,
-  findWindowByteRange,
-  looksBinary,
-  READ_FILE_MAX_LINE_CHARS,
-  READ_FILE_MAX_MAX_LINES,
-  READ_FILE_MAX_START_LINE,
-  READ_FILE_MAX_WINDOW_BYTES,
-  READ_FILE_MIN_MAX_LINES,
-} from './services/fs/read-file';
-export {
-  BINARY_SNIFF_BYTES,
   containsNulByte,
   type ObservedFileRead,
-  READ_FILE_MAX_BINARY_VIEW_BYTES,
-  READ_FILE_MAX_BYTES,
   readFileWithObservedMtime,
 } from './services/fs-utils';
 export {
@@ -110,104 +98,18 @@ export {
 } from './services/git';
 export { createInstallService } from './services/install';
 export {
-  assertBackupId,
-  assertExpectedResourceEntry,
-  type BackupEntry,
-  type BackupManifest,
-  type BackupStoreDeps,
-  backupExistingResource,
-  type CachedInstanceDisplay,
-  type CachedInstanceHash,
-  type ContainedResourcePath,
-  type CreateBackupStoreDepsOptions,
-  type CreateResourceWriterDepsOptions,
-  createBackupId,
-  createBackupStoreDeps,
   createLibraryService,
-  createLibraryUndoEngineDeps,
-  createPropagationWriteEngineDeps,
-  createRemovalWriteEngineDeps,
-  createResourceWriterDeps,
-  type DirectoryResourceWriteInput,
-  discardBackupSet,
-  type ExecuteLibraryUndoParams,
-  type ExecutePropagationWritesParams,
-  type ExecuteRemovalWritesParams,
-  executeLibraryUndo,
-  executePropagationWrites,
-  executeRemovalWrites,
-  type FileResourceWriteInput,
-  findStagedRemovalLeftovers,
-  findStagedRemovalsForLocations,
-  hashResourceAt,
-  LIBRARY_SCAN_CACHE_TTL_MS,
-  LibraryBackupMissingError,
-  LibraryCache,
   type LibraryHostAdapters,
-  type LibraryInstanceReaderFs,
-  LibraryReadDeniedError,
-  type LibraryReadParams,
-  type LibraryReadResult,
-  type LibraryScanOptions,
-  type LibraryScanTarget,
   type LibraryService,
-  type LibraryUndoEngineDeps,
-  LibraryWriteError,
-  type LibraryWriteFailure,
-  libraryCache,
-  libraryContentPath,
   libraryService,
-  listBackupSets,
-  MAX_LIBRARY_CONTENT_BYTES,
-  MAX_LIBRARY_FILE_BYTES,
-  MAX_LIBRARY_INSTANCE_BYTES,
-  MAX_SKILL_ENTRYPOINT_BYTES,
-  nodeTreeRemovalFs,
-  type PropagationWriteEngineDeps,
-  pruneBackupSets,
-  purgeBackupSet,
-  type ReadLibraryInstance,
-  type ReadLibraryInstancesOptions,
-  type ReadLocationInstancesResult,
-  type RemovalWriteEngineDeps,
-  type ResolvedDestination,
-  type ResourceWriteResult,
-  type ResourceWriterDeps,
-  type ResourceWriterFs,
-  readBackupManifest,
-  readLibraryContent,
-  readLocationInstances,
-  readResourceFile,
-  readSettingsSources,
-  requireWritableLocation,
-  resolveContainedResourcePath,
-  resolveLibraryScanTargets,
-  resolveResourceDestination,
-  restoreBackupEntry,
-  type StagedRemoval,
-  scanLibraryInstances,
-  scanLibraryInstancesForPathEnv,
-  stagedRemovalDirectory,
-  stageResourceRemoval,
-  type TreeRemovalFs,
-  writeBackupManifest,
-  writeDirectoryResource,
-  writeFileResource,
-} from './services/library';
+} from './services/library/service';
 export {
   classifyMcpCallFailure,
   connectMcpClient,
-  DEFAULT_MCP_TIMEOUT_MS,
   shouldFallBackToSse,
   wrapMcpClient,
 } from './services/mcp/client-factory';
-export {
-  capMcpResultText,
-  flattenMcpContent,
-  MCP_RESULT_MAX_BYTES,
-  MCP_RESULT_TRUNCATION_MARKER,
-  normalizeMcpContent,
-} from './services/mcp/content-mapping';
+
 export {
   type McpService,
   type McpTransportFactory,
@@ -222,15 +124,7 @@ export {
   type McpRequestOptions,
   type McpServerCapabilities,
 } from './services/mcp/types';
-export {
-  assertInsideWorkdir,
-  isInside,
-  isPathPrefix,
-  resolveContainmentRoot,
-  resolvePathForContainment,
-  resolvePathThroughExistingAncestor,
-  WorkdirContainmentError,
-} from './services/path-containment';
+
 export {
   createRuntimePathEnv,
   NODE_AUTH_SIGNAL_FS,
@@ -242,7 +136,7 @@ export {
   type ProbingService,
   probingService,
 } from './services/probing/service';
-export { HIDDEN_WINDOW } from './services/process-window';
+
 export {
   findShellExecutable,
   isShellAvailable,
@@ -253,29 +147,12 @@ export {
   ShellExecutionError,
   type ShellKind,
 } from './services/shell';
-export {
-  isSecretEnvKey,
-  type ShellEnvPolicy,
-  sanitizeShellEnv,
-} from './services/shell-env';
+
 export {
   captureFileSnapshot,
   hashFileAtPath,
   RuntimeSnapshotConflictError,
 } from './services/snapshot';
-export {
-  createUserServiceManager,
-  defaultUserServiceExecDeps,
-  isUserServiceAction,
-  USER_SERVICE_ACTIONS,
-  USER_SERVICE_NO_SESSION_BUS_ERROR,
-  type UserServiceAction,
-  type UserServiceDefinition,
-  type UserServiceExecDeps,
-  type UserServiceExecResult,
-  type UserServiceIdentity,
-  type UserServiceManager,
-} from './services/user-service-manager';
 export {
   browseWorkspace,
   MAX_WORKSPACE_DIRECTORY_ENTRIES,
@@ -284,7 +161,7 @@ export {
   WorkspaceBrowserError,
   WorkspaceContainmentError,
 } from './services/workspace';
-export { resolveWorkspacePath, WorkspacePathError } from './services/workspace-path';
+
 export {
   createRuntimeEventRelay,
   createRuntimeSession,
