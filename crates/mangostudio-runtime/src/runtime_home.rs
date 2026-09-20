@@ -458,16 +458,25 @@ pub struct SlotFileState {
     pub error: Option<SlotFileError>,
 }
 
-/// Reads and schema-checks the document at `path`.
-///
-/// Absence (`NotFound`, or `NotADirectory` from a path component that
-/// cannot hold a file) is not an error — most slots never have a file —
-/// but anything else is: a permissions failure, a directory sitting where
-/// the file belongs, malformed JSON, or a value the schema refuses.
-/// Every one of those travels on [`SlotFileState::error`] rather than
-/// merging over a default or rewriting the file, matching
-/// `readRuntimeSlotState` in `runtime-home.ts`.
-fn read_schema_checked(path: &Path, document: RuntimeHomeDocument) -> SlotFileState {
+/// What was on disk at a path, before any schema opinion is formed about
+/// it — the one read [`read_schema_checked`] and [`credentials_write_gate`]
+/// must each perform exactly once and agree on, so a credentials write
+/// never judges the file it is about to merge over from a different read
+/// than the one that decided it was safe to.
+enum RawDocument {
+    /// `NotFound`, or `NotADirectory` from a path component that cannot
+    /// hold a file — not an error, since most slots never have one.
+    Absent,
+    /// A permissions failure or a directory sitting where the file
+    /// belongs: read, not parsed.
+    Unreadable(std::io::Error),
+    /// Read, but not JSON.
+    Malformed(serde_json::Error),
+    /// Read and parsed, schema opinion still pending.
+    Parsed(Value),
+}
+
+fn read_raw_document(path: &Path) -> RawDocument {
     let raw = match std::fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(error)
@@ -476,45 +485,55 @@ fn read_schema_checked(path: &Path, document: RuntimeHomeDocument) -> SlotFileSt
                 std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
             ) =>
         {
-            return SlotFileState::default();
+            return RawDocument::Absent;
         }
-        Err(error) => {
-            return SlotFileState {
-                stored: None,
-                error: Some(SlotFileError::Unreadable {
-                    path: path.to_path_buf(),
-                    source: error,
-                }),
-            };
-        }
+        Err(error) => return RawDocument::Unreadable(error),
     };
 
-    let value: Value = match serde_json::from_str(&raw) {
-        Ok(value) => value,
-        Err(error) => {
-            return SlotFileState {
-                stored: None,
-                error: Some(SlotFileError::Malformed {
-                    path: path.to_path_buf(),
-                    source: error,
-                }),
-            };
-        }
-    };
-
-    if let Err(violation) = validate_runtime_home(document, &value) {
-        return SlotFileState {
-            stored: None,
-            error: Some(SlotFileError::SchemaInvalid {
-                path: path.to_path_buf(),
-                source: violation,
-            }),
-        };
+    match serde_json::from_str(&raw) {
+        Ok(value) => RawDocument::Parsed(value),
+        Err(error) => RawDocument::Malformed(error),
     }
+}
 
-    SlotFileState {
-        stored: Some(value),
-        error: None,
+/// Reads and schema-checks the document at `path`.
+///
+/// Absence is not an error — most slots never have a file — but anything
+/// else is: a permissions failure, a directory sitting where the file
+/// belongs, malformed JSON, or a value the schema refuses. Every one of
+/// those travels on [`SlotFileState::error`] rather than merging over a
+/// default or rewriting the file, matching `readRuntimeSlotState` in
+/// `runtime-home.ts`.
+fn read_schema_checked(path: &Path, document: RuntimeHomeDocument) -> SlotFileState {
+    match read_raw_document(path) {
+        RawDocument::Absent => SlotFileState::default(),
+        RawDocument::Unreadable(error) => SlotFileState {
+            stored: None,
+            error: Some(SlotFileError::Unreadable {
+                path: path.to_path_buf(),
+                source: error,
+            }),
+        },
+        RawDocument::Malformed(error) => SlotFileState {
+            stored: None,
+            error: Some(SlotFileError::Malformed {
+                path: path.to_path_buf(),
+                source: error,
+            }),
+        },
+        RawDocument::Parsed(value) => match validate_runtime_home(document, &value) {
+            Ok(()) => SlotFileState {
+                stored: Some(value),
+                error: None,
+            },
+            Err(violation) => SlotFileState {
+                stored: None,
+                error: Some(SlotFileError::SchemaInvalid {
+                    path: path.to_path_buf(),
+                    source: violation,
+                }),
+            },
+        },
     }
 }
 
@@ -636,6 +655,23 @@ fn merge_write(
     mode: Option<u32>,
 ) -> Result<WriteOutcome, WriteError> {
     let state = read_schema_checked(path, document);
+    merge_write_from_state(path, document, state, fixed, update, mode)
+}
+
+/// [`merge_write`] over an already-read [`SlotFileState`], for a caller
+/// (`write_runtime_slot_credentials_with`) that must gate on that exact
+/// read rather than let this function take its own, independent one: a
+/// second read here could observe the file in a different state than the
+/// one the gate approved, and then merge over *that* — silently discarding
+/// whatever the gate's read saw and the update did not mention.
+fn merge_write_from_state(
+    path: &Path,
+    document: RuntimeHomeDocument,
+    state: SlotFileState,
+    fixed: &[(&'static str, Value)],
+    update: &[(&str, Option<Value>)],
+    mode: Option<u32>,
+) -> Result<WriteOutcome, WriteError> {
     let mut object = match state.stored {
         Some(Value::Object(map)) => map,
         _ => Map::new(),
@@ -685,8 +721,10 @@ fn unsupported_credentials_schema_version(parsed: &Value) -> Option<f64> {
 enum CredentialsWriteGate {
     /// Absent, fully valid, or unusable in a way a rewrite may repair
     /// (corrupt JSON, or a schema violation that is not a version
-    /// mismatch) — [`merge_write`] may proceed.
-    Proceed,
+    /// mismatch). Carries the exact read this decision was made from, so
+    /// [`merge_write_from_state`] merges over what the gate actually saw
+    /// rather than reading the file again and risking a different answer.
+    Proceed(SlotFileState),
     /// This process cannot see what a replace would destroy: the file
     /// could not be read at all, or it names a `schemaVersion` this build
     /// does not speak. Carries the message for [`WriteError::Refused`].
@@ -695,47 +733,48 @@ enum CredentialsWriteGate {
 
 /// Inspects `path` before a credentials write touches it, mirroring the
 /// `refused` half of `readRuntimeSlotCredentialsState` in
-/// `runtime-home.ts`. A second, independent read of the file from
-/// [`merge_write`]'s own — `runtime-home.ts` reads `credentials.json`
-/// through two separate functions for the same reason
-/// (`readRuntimeSlotCredentialsState` and the merge inside
-/// `writeCredentials`), because the two questions really are separate: this
-/// one decides whether a replace may happen at all, before the file is
-/// merged or trusted for anything else.
+/// `runtime-home.ts`. The single read this and the eventual merge both
+/// need — `runtime-home.ts` reads `credentials.json` through two separate
+/// functions for a different reason (`readRuntimeSlotCredentialsState` and
+/// the merge inside `writeCredentials` answer genuinely separate
+/// questions there), but on the Rust side both questions are answered from
+/// this one read: a second, independent read here would let the file
+/// change underneath the decision this makes, between this call and the
+/// merge that trusts it.
 fn credentials_write_gate(path: &Path) -> CredentialsWriteGate {
-    let raw = match std::fs::read_to_string(path) {
-        Ok(raw) => raw,
-        Err(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-            ) =>
-        {
-            return CredentialsWriteGate::Proceed;
+    match read_raw_document(path) {
+        RawDocument::Absent => CredentialsWriteGate::Proceed(SlotFileState::default()),
+        RawDocument::Unreadable(error) => {
+            CredentialsWriteGate::Refuse(format!("{} could not be read ({error}).", path.display()))
         }
-        Err(error) => {
-            return CredentialsWriteGate::Refuse(format!(
-                "{} could not be read ({error}).",
-                path.display()
-            ));
+        RawDocument::Malformed(error) => CredentialsWriteGate::Proceed(SlotFileState {
+            stored: None,
+            error: Some(SlotFileError::Malformed {
+                path: path.to_path_buf(),
+                source: error,
+            }),
+        }),
+        RawDocument::Parsed(value) => {
+            match validate_runtime_home(RuntimeHomeDocument::Credentials, &value) {
+                Ok(()) => CredentialsWriteGate::Proceed(SlotFileState {
+                    stored: Some(value),
+                    error: None,
+                }),
+                Err(violation) => match unsupported_credentials_schema_version(&value) {
+                    Some(version) => CredentialsWriteGate::Refuse(format!(
+                        "{} is schemaVersion {version}, which this build of the runtime does not understand.",
+                        path.display()
+                    )),
+                    None => CredentialsWriteGate::Proceed(SlotFileState {
+                        stored: None,
+                        error: Some(SlotFileError::SchemaInvalid {
+                            path: path.to_path_buf(),
+                            source: violation,
+                        }),
+                    }),
+                },
+            }
         }
-    };
-
-    let parsed: Value = match serde_json::from_str(&raw) {
-        Ok(value) => value,
-        Err(_) => return CredentialsWriteGate::Proceed,
-    };
-
-    if validate_runtime_home(RuntimeHomeDocument::Credentials, &parsed).is_ok() {
-        return CredentialsWriteGate::Proceed;
-    }
-
-    match unsupported_credentials_schema_version(&parsed) {
-        Some(version) => CredentialsWriteGate::Refuse(format!(
-            "{} is schemaVersion {version}, which this build of the runtime does not understand.",
-            path.display()
-        )),
-        None => CredentialsWriteGate::Proceed,
     }
 }
 
@@ -800,23 +839,28 @@ fn write_runtime_slot_credentials_with(
     let fixed: [(&'static str, Value); 1] =
         [("schemaVersion", Value::from(CREDENTIALS_SCHEMA_VERSION))];
     lock::with_slot_lock(&lock_path, &lock::LockPolicy::default(), || {
-        // Checked under the same lock a repair would need anyway — see
-        // `credentials_write_gate`'s own doc comment for why this reads the
-        // file a second time rather than reusing `merge_write`'s read.
-        if let CredentialsWriteGate::Refuse(reason) = credentials_write_gate(&path) {
-            return Err(WriteError::Refused {
-                path: path.clone(),
-                reason,
-            });
-        }
+        // Checked under the same lock a repair would need anyway.
+        // `credentials_write_gate` performs the one read this decision and
+        // the merge below both need; see its own doc comment for why
+        // reading again here would defeat it.
+        let state = match credentials_write_gate(&path) {
+            CredentialsWriteGate::Refuse(reason) => {
+                return Err(WriteError::Refused {
+                    path: path.clone(),
+                    reason,
+                });
+            }
+            CredentialsWriteGate::Proceed(state) => state,
+        };
         // `Some(OWNER_ONLY_MODE)`, not `None`: opened owner-only at creation
         // (see `merge_write`'s doc comment), with `restrict` below as the
         // belt-and-braces re-assertion `runtime-home.ts` also runs after
         // every write — and the only mechanism at all on Windows, where a
         // Unix file mode does nothing.
-        let outcome = merge_write(
+        let outcome = merge_write_from_state(
             &path,
             RuntimeHomeDocument::Credentials,
+            state,
             &fixed,
             update,
             Some(OWNER_ONLY_MODE),
@@ -834,10 +878,11 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        DefaultSetupState, RuntimeSlot, SlotFileError, WriteError, default_setup_state_for_slot,
-        home_dir, read_runtime_slot_config, read_runtime_slot_credentials, resolve_runtime_slot,
-        slot_config_path, slot_current_binary_path, slot_dir, slot_for_path,
-        write_runtime_slot_config, write_runtime_slot_credentials,
+        CredentialsWriteGate, DefaultSetupState, RuntimeHomeDocument, RuntimeSlot, SlotFileError,
+        WriteError, credentials_write_gate, default_setup_state_for_slot, home_dir,
+        merge_write_from_state, read_runtime_slot_config, read_runtime_slot_credentials,
+        resolve_runtime_slot, slot_config_path, slot_credentials_path, slot_current_binary_path,
+        slot_dir, slot_for_path, write_runtime_slot_config, write_runtime_slot_credentials,
     };
 
     fn scratch_home(name: &str) -> PathBuf {
@@ -1260,6 +1305,58 @@ mod tests {
             .unwrap();
         assert_eq!(stored["pairingToken"], json!("second"));
         assert_eq!(stored["serveToken"], json!("serve"));
+    }
+
+    #[test]
+    fn a_credentials_merge_uses_the_gates_own_snapshot_not_a_fresh_read() {
+        // The regression this guards: `credentials_write_gate` and the
+        // merge it approves used to read `credentials.json` independently.
+        // If the file changed between those two reads — another process's
+        // write racing this one, outside the lock this crate controls, or
+        // simply a filesystem this process does not have exclusive control
+        // over — the merge would silently build over whatever the *second*
+        // read saw instead of the snapshot the gate actually approved,
+        // discarding any credential the update did not mention.
+        let home = scratch_home("credentials-toctou");
+        let path = slot_credentials_path(RuntimeSlot::Remote, &home);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            br#"{"schemaVersion":1,"pairingToken":"keep-me","serveToken":"also-keep-me"}"#,
+        )
+        .unwrap();
+
+        let state = match credentials_write_gate(&path) {
+            CredentialsWriteGate::Proceed(state) => state,
+            CredentialsWriteGate::Refuse(reason) => {
+                panic!("expected the gate to proceed on a valid file, got Refuse({reason})")
+            }
+        };
+
+        // Simulate the file changing after the gate's read but before the
+        // merge — a schemaVersion this build refuses outright, so a fresh
+        // second read would refuse to see `serveToken` at all.
+        std::fs::write(&path, br#"{"schemaVersion":999}"#).unwrap();
+
+        let fixed: [(&'static str, Value); 1] = [("schemaVersion", Value::from(1))];
+        merge_write_from_state(
+            &path,
+            RuntimeHomeDocument::Credentials,
+            state,
+            &fixed,
+            &[("pairingToken", Some(json!("rotated")))],
+            Some(0o600),
+        )
+        .unwrap();
+
+        let published: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(published["pairingToken"], json!("rotated"));
+        assert_eq!(
+            published["serveToken"],
+            json!("also-keep-me"),
+            "the merge must reuse the gate's snapshot, not re-read the file the gate approved"
+        );
     }
 
     #[test]
