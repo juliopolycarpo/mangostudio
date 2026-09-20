@@ -27,6 +27,7 @@ use serde_json::Value;
 use crate::panic::catch_panics;
 use crate::ports::audit::{Audit, AuditEntry, NoopAudit, Outcome};
 use crate::ports::clock::{Clock, SystemClock};
+use crate::ports::exclusivity::{CallExclusivity, NoExclusivity};
 use crate::result_check::{check_result, compile_result_schema};
 
 /// Whether a method name is implemented, declared but not implemented, or
@@ -62,6 +63,7 @@ pub struct Registry {
     implemented: Vec<String>,
     audit: Arc<dyn Audit>,
     clock: Arc<dyn Clock>,
+    exclusivity: Arc<dyn CallExclusivity>,
 }
 
 impl Default for Registry {
@@ -72,22 +74,38 @@ impl Default for Registry {
 
 impl Registry {
     /// An empty registry: no methods implemented, outcomes recorded through
-    /// [`NoopAudit`] against [`SystemClock`]. Use [`Registry::with_ports`]
-    /// to record through a real [`Audit`] sink.
+    /// [`NoopAudit`] against [`SystemClock`], and [`NoExclusivity`] enforced.
+    /// Use [`Registry::with_ports`] to record through a real [`Audit`] sink,
+    /// or [`Registry::with_ports_and_exclusivity`] to also enforce update
+    /// exclusivity.
     #[must_use]
     pub fn new() -> Self {
         Self::with_ports(Arc::new(NoopAudit), Arc::new(SystemClock))
     }
 
     /// An empty registry that records every implemented method's outcome
-    /// through `audit`, timed by `clock`.
+    /// through `audit`, timed by `clock`, with [`NoExclusivity`] enforced.
     #[must_use]
     pub fn with_ports(audit: Arc<dyn Audit>, clock: Arc<dyn Clock>) -> Self {
+        Self::with_ports_and_exclusivity(audit, clock, Arc::new(NoExclusivity))
+    }
+
+    /// An empty registry that also releases `exclusivity`'s claim on every
+    /// implemented method once its handler settles — see
+    /// [`crate::ports::exclusivity`]'s module docs for why the claim itself
+    /// is taken elsewhere, in [`crate::ports::authorization::AuthorizationGuard`].
+    #[must_use]
+    pub fn with_ports_and_exclusivity(
+        audit: Arc<dyn Audit>,
+        clock: Arc<dyn Clock>,
+        exclusivity: Arc<dyn CallExclusivity>,
+    ) -> Self {
         Self {
             handlers: ContractHandlers::new(),
             implemented: Vec::new(),
             audit,
             clock,
+            exclusivity,
         }
     }
 
@@ -168,6 +186,7 @@ impl Registry {
         let handler = Arc::new(handler);
         let audit = Arc::clone(&self.audit);
         let clock = Arc::clone(&self.clock);
+        let exclusivity = Arc::clone(&self.exclusivity);
 
         self.implemented.push(method_name.clone());
         self.handlers = self.handlers.on(
@@ -178,6 +197,14 @@ impl Registry {
                 let validator = Arc::clone(&validator);
                 let audit = Arc::clone(&audit);
                 let clock = Arc::clone(&clock);
+                let exclusivity = Arc::clone(&exclusivity);
+                // Taken before `context` moves into `handler` below: this is
+                // the same call the guard already claimed (see
+                // `crate::ports::exclusivity`'s module docs), and this
+                // wrapper is the one place that releases it once the
+                // handler has settled, whatever that settlement turns out
+                // to be.
+                let call_id = context.id().to_string();
                 async move {
                     let started = clock.now();
                     // Only the handler, its serialisation, and the result
@@ -205,6 +232,12 @@ impl Registry {
                         }
                     })
                     .await;
+
+                    // The claim `AuthorizationGuard` took for this call is
+                    // released here, unconditionally — success, a handler
+                    // error, or a panic all settle it exactly once, matching
+                    // `consent-gate.ts`'s `finally`.
+                    exclusivity.end(&call_id);
 
                     // Always recorded, even when `recorded` above is itself
                     // the panic case — a panicking handler is exactly the
@@ -304,6 +337,17 @@ impl Registry {
     #[must_use]
     pub fn clock(&self) -> Arc<dyn Clock> {
         Arc::clone(&self.clock)
+    }
+
+    /// This registry's own [`CallExclusivity`]. [`crate::serve::serve`]
+    /// builds its [`crate::ports::authorization::AuthorizationGuard`] against
+    /// this same tracker, so the claim the guard takes and the release this
+    /// registry's own wrapper performs are always the same instance — see
+    /// [`Registry::audit`] for why that matters, and
+    /// [`crate::ports::exclusivity`]'s module docs for the split itself.
+    #[must_use]
+    pub fn exclusivity(&self) -> Arc<dyn CallExclusivity> {
+        Arc::clone(&self.exclusivity)
     }
 
     /// Hands the built handlers to [`crate::serve::serve`]. Not `pub`: a

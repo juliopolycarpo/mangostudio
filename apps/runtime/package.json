@@ -10,13 +10,14 @@
   "scripts": {
     "build": "bun build src/index.ts --target=bun --outdir=dist",
     "check": "bun run check:quick && bun run typecheck",
-    "check:quick": "biome check src tests",
+    "check:quick": "biome check src tests scripts",
     "typecheck": "tsc --noEmit",
     "circular": "madge --circular --extensions ts,tsx .",
-    "fix": "biome check --write src tests",
+    "fix": "biome check --write src tests scripts",
     "test": "bun run test:unit",
     "test:unit": "bun test --timeout 15000 tests/unit",
-    "test:coverage": "bun test --timings=../../.mango/artifacts/timings/runtime.json --update-timings --coverage --timeout 15000 --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/runtime.xml $MANGOSTUDIO_BUN_TEST_ARGS"
+    "test:coverage": "bun test --timings=../../.mango/artifacts/timings/runtime.json --update-timings --coverage --timeout 15000 --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/runtime.xml $MANGOSTUDIO_BUN_TEST_ARGS",
+    "fixtures:home": "bun scripts/generate-home-fixtures.ts"
   },
   "dependencies": {
     "@mangostudio/protocol": "workspace:*",

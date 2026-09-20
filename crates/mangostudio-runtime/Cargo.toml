@@ -11,9 +11,9 @@ name = "mangostudio-runtime"
 # never hand-maintained.
 version = "0.1.1"
 authors.workspace = true
-categories = ["command-line-utilities", "network-programming"]
+categories = ["command-line-utilities", "network-programming", "filesystem", "os"]
 edition.workspace = true
-keywords = ["mangostudio", "runtime", "dispatcher", "json-schema"]
+keywords = ["mangostudio", "runtime", "dispatcher", "runtime-home", "json-schema"]
 license.workspace = true
 # The binary in this crate is a thin `--version`/`--help` shell for now — real
 # transports and CLI parsing land in a later crate change. Not published: it
@@ -21,7 +21,7 @@ license.workspace = true
 publish = false
 repository.workspace = true
 rust-version.workspace = true
-description = "MangoStudio hub/runtime dispatcher: the typed contract served over mango-protocol, with fail-closed ports and panic isolation"
+description = "MangoStudio runtime host: the typed contract served over mango-protocol with fail-closed ports and panic isolation, plus the runtime-home layout, its cross-language lock protocol and atomic owner-only state writes"
 
 [lints]
 workspace = true
@@ -42,8 +42,30 @@ path = "src/main.rs"
 jsonschema = { version = "0.56", default-features = false }
 mango-protocol = { workspace = true, features = ["tokio"] }
 mangostudio-runtime-contract.workspace = true
+# Already pulled in transitively by `jsonschema`'s own `pattern` keyword
+# support, so a direct dependency costs nothing new in the dependency graph
+# (`cargo deny`'s `multiple-versions = "deny"` would catch it otherwise).
+# This crate's own use is the audit log's credential-shape redaction, which
+# needs the same fixed set of patterns `apps/runtime/src/audit-log.ts`
+# masks with — hand-rolling that by hand would be the one place this crate
+# reinvents a well-tested wheel already sitting in its own build.
+regex = { version = "1.13", default-features = false, features = ["std", "unicode-perl"] }
 serde = { version = "1.0.219", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 tokio = { version = "1.53", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+
+[target.'cfg(unix)'.dependencies]
+# `signal`: `kill(pid, 0)` for lock-holder liveness, mirroring `process.kill(pid, 0)` on the
+# TypeScript side. `hostname`: `gethostname()` for the lock body's `host` field.
+nix = { version = "0.31", default-features = false, features = ["signal", "hostname", "user"] }
+
+[target.'cfg(windows)'.dependencies]
+# Win32_Foundation: HANDLE, BOOL, CloseHandle, LocalFree, STILL_ACTIVE.
+# Win32_Security(_Authorization): the owner-only DACL rewrite.
+# Win32_Storage_FileSystem: the FILE_GENERIC_* / DELETE access mask.
+# Win32_System_SystemInformation: GetComputerNameExW, for the lock body's `host` field.
+# Win32_System_Threading: OpenProcess/OpenProcessToken/GetExitCodeProcess, for lock-holder
+# liveness and the owner-only module's own SID lookup.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Networking_WinSock", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }

@@ -209,6 +209,31 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(onBlock).toContain('- "Cargo.lock"');
   });
 
+  test('the push filter and the changes job both cover every ts-home fixture input', () => {
+    // `runtime-home-fixture-freshness`'s ts-home half depends on these
+    // TypeScript-side paths; a PR touching only one of them must still run
+    // this workflow, or that job's regenerate-and-diff step never executes
+    // and ts-home goes stale silently.
+    const onBlock = extractOnBlock(workflow);
+    const changesBlock = extractJobBlock(workflow, 'changes');
+    const tsHomeInputs = [
+      'apps/shared/src/runtime-home/',
+      'apps/shared/src/external-agents/',
+      'apps/shared/src/schema-helpers.ts',
+      'apps/shared/src/environments/toolchain-schemas.ts',
+      'apps/runtime/src/runtime-home.ts',
+      'apps/runtime/src/config.ts',
+      'apps/runtime/scripts/generate-home-fixtures.ts',
+      'apps/runtime/package.json',
+    ];
+
+    for (const input of tsHomeInputs) {
+      expect(onBlock).toContain(`"${input}${input.endsWith('/') ? '**' : ''}"`);
+      const escaped = input.replaceAll('.', String.raw`\.`);
+      expect(changesBlock).toContain(escaped);
+    }
+  });
+
   test('the workspace and launcher MSRV lanes run only when the changes job saw a Rust path', () => {
     const workspaceBlock = extractJobBlock(workflow, 'workspace');
     const msrvBlock = extractJobBlock(workflow, 'launcher-msrv');
@@ -226,12 +251,36 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(msrvBlock).toContain('cargo test -p mangostudio --all-targets --locked');
   });
 
+  test('the fixture freshness lane regenerates and diffs both rust-home and ts-home', () => {
+    const freshnessBlock = extractJobBlock(workflow, 'runtime-home-fixture-freshness');
+
+    // Regenerate, then stage before diffing against `HEAD` — a plain
+    // `git diff --exit-code` against the worktree would miss a brand-new
+    // file either regenerator started emitting.
+    expect(freshnessBlock).toContain(
+      'cargo test -p mangostudio-runtime --test generate_rust_fixture --locked -- --ignored'
+    );
+    expect(freshnessBlock).toContain(
+      'git add -A -- crates/mangostudio-runtime/tests/fixtures/rust-home'
+    );
+    expect(freshnessBlock).toContain(
+      'git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/rust-home'
+    );
+    expect(freshnessBlock).toContain('bun run --filter @mangostudio/runtime fixtures:home');
+    expect(freshnessBlock).toContain(
+      'git add -A -- crates/mangostudio-runtime/tests/fixtures/ts-home'
+    );
+    expect(freshnessBlock).toContain(
+      'git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/ts-home'
+    );
+  });
+
   test('gate needs every mandatory job and accepts the Rust skip only when irrelevant', () => {
     const gateBlock = extractJobBlock(workflow, 'gate');
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv fuzz-workspace' || '' }}`
+      `ALLOWED_SKIPS: ${EXPR} needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv fuzz-workspace runtime-home-fixture-freshness' || '' }}`
     );
   });
 });

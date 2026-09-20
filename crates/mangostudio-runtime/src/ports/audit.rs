@@ -34,16 +34,18 @@
 //! `apps/runtime/src/consent-gate.ts`'s `record` call passes `params`, and
 //! `audit-log.ts` renders a redacted summary of them
 //! (`summarizeAuditArgs(method, params)`) into the line — the "what was
-//! asked" half of an audit entry this type does not carry. That summarizer
-//! is real, method-aware redaction logic (which argument of which method is
-//! safe to log, truncated how) that this crate has no way to build yet: it
-//! implements no methods, so it has no params shapes to reason about safely.
-//! Carrying raw, unredacted `params` here instead would risk exactly the
-//! leak this crate's other seams (`panic::catch_panics`, `result_check`) all
-//! exist to prevent — a file's contents or a shell command ending up in a
-//! log line. Deliberately omitted for this PR; a later change that
-//! implements methods is what should also design the redaction and add the
-//! field.
+//! asked" half of an audit entry this type does not carry. `summarizeAuditArgs`
+//! is two things: a fixed whitelist of known-safe parameter keys (`path`,
+//! `command`, `cols`, …), which is method-aware and this crate has no
+//! params shapes to build one against yet, and a params-shape-agnostic
+//! redaction/truncation pass, which [`crate::audit::redact`] already
+//! mirrors and tests, ready for whichever change adds the whitelist and
+//! calls it. Carrying raw, unredacted `params` here in the meantime would
+//! risk exactly the leak this crate's other seams (`panic::catch_panics`,
+//! `result_check`) all exist to prevent — a file's contents or a shell
+//! command ending up in a log line. Deliberately omitted for now; a later
+//! change that implements methods is what should also design the whitelist
+//! and add the field.
 
 use std::future::Future;
 use std::pin::Pin;

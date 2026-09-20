@@ -69,7 +69,8 @@ pub fn serve(
 ) -> Result<ServeGuard, ValidationError> {
     let audit: Arc<dyn Audit> = registry.audit();
     let clock = registry.clock();
-    let guard = AuthorizationGuard::new(authorization, audit, clock, slot);
+    let exclusivity = registry.exclusivity();
+    let guard = AuthorizationGuard::new(authorization, exclusivity, audit, clock, slot);
     let options = ServeOptions {
         guard: Some(Arc::new(guard)),
         validate_results: false,

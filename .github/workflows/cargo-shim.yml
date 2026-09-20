@@ -17,6 +17,14 @@ on:
     paths:
       - "crates/**"
       - "apps/shared/src/runtime-contract/**"
+      - "apps/shared/src/runtime-home/**"
+      - "apps/shared/src/external-agents/**"
+      - "apps/shared/src/schema-helpers.ts"
+      - "apps/shared/src/environments/toolchain-schemas.ts"
+      - "apps/runtime/src/runtime-home.ts"
+      - "apps/runtime/src/config.ts"
+      - "apps/runtime/scripts/generate-home-fixtures.ts"
+      - "apps/runtime/package.json"
       - "Cargo.toml"
       - "Cargo.lock"
       - "deny.toml"
@@ -63,7 +71,17 @@ jobs:
             exit 1
           fi
 
-          relevant='^(crates/|apps/shared/src/runtime-contract/|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$)'
+          # The TypeScript-side paths this feeds — runtime-home.ts, the
+          # runtime host's own config parser, the fixture generator,
+          # apps/shared/src/runtime-home, and the whole chain its schemas
+          # import from (external-agents, schema-helpers,
+          # environments/toolchain-schemas), plus the package.json that
+          # names the generator's script — feed the ts-home half of
+          # `runtime-home-fixture-freshness`: a TypeScript-only PR touching
+          # only those must still run this workflow, or that job's own
+          # regenerate-and-diff step never runs and ts-home goes stale
+          # silently — the same gap the job itself exists to close.
+          relevant='^(crates/|apps/shared/src/runtime-contract/|apps/shared/src/runtime-home/|apps/shared/src/external-agents/|apps/shared/src/schema-helpers\.ts$|apps/shared/src/environments/toolchain-schemas\.ts$|apps/runtime/src/runtime-home\.ts$|apps/runtime/src/config\.ts$|apps/runtime/scripts/generate-home-fixtures\.ts$|apps/runtime/package\.json$|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$)'
           if grep -Eq "$relevant" "$RUNNER_TEMP/changed-files"; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
@@ -138,11 +156,62 @@ jobs:
 
       - run: cargo metadata --manifest-path crates/mango-protocol/fuzz/Cargo.toml --locked --no-deps --format-version 1
 
+  runtime-home-fixture-freshness:
+    # Both `tests/fixtures/rust-home` and `tests/fixtures/ts-home` are
+    # committed output, not built at test time: `ts_compat.rs` reads
+    # `ts-home` directly, and `generate_rust_fixture.rs`'s own
+    # `#[ignore]`d regenerator (plus
+    # `apps/runtime/tests/unit/runtime-home-rust-compat.test.ts`) reads
+    # `rust-home`. Nothing else regenerates either one, so if either
+    # language's write shape ever changes, both keep passing against a
+    # stale fixture and silently stop proving anything about the direction
+    # they cover. This job is the freshness check that gap needs for both
+    # directions: it is the only place either regenerator actually runs.
+    #
+    # Each freshness check stages the fixture directory before diffing the
+    # index against `HEAD`, not a plain `git diff --exit-code` against the
+    # worktree: staging is what makes a brand-new file the regenerator
+    # starts emitting show up as a failure too, not only a changed byte in
+    # a file that already existed.
+    name: Runtime-home fixture freshness
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: rustup show active-toolchain
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - run: cargo test -p mangostudio-runtime --test generate_rust_fixture --locked -- --ignored
+
+      - name: Fail if regenerating changed the committed rust-home fixture
+        run: |
+          git add -A -- crates/mangostudio-runtime/tests/fixtures/rust-home
+          git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/rust-home
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run --filter @mangostudio/runtime fixtures:home
+
+      - name: Fail if regenerating changed the committed ts-home fixture
+        run: |
+          git add -A -- crates/mangostudio-runtime/tests/fixtures/ts-home
+          git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/ts-home
+
   gate:
     # Stable required check ("Cargo Shim / Gate"): all Rust lanes may skip only
     # after the changes job proves the pull request has no Rust workspace diff.
     name: Gate
-    needs: [changes, workspace, launcher-msrv, fuzz-workspace]
+    needs: [changes, workspace, launcher-msrv, fuzz-workspace, runtime-home-fixture-freshness]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -160,6 +229,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv fuzz-workspace' || '' }}
+          ALLOWED_SKIPS: ${{ needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv fuzz-workspace runtime-home-fixture-freshness' || '' }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
