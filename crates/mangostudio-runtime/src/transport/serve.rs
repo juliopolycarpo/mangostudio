@@ -501,11 +501,53 @@ async fn is_health_check(stream: &TcpStream) -> bool {
     )
 }
 
+/// How much of a health check's own request line/headers this will read
+/// looking for the end of them before giving up — a GET has no body, so
+/// nothing legitimate runs past a few hundred bytes; this only bounds a
+/// peer that never finishes sending them.
+const MAX_HEALTH_CHECK_REQUEST_BYTES: usize = 8192;
+
+/// Reads and discards `stream`'s pending bytes up to the end of the request
+/// headers (`\r\n\r\n`), or until [`MAX_HEALTH_CHECK_REQUEST_BYTES`] is
+/// reached, or the peer stops sending.
+///
+/// [`is_health_check`] only *peeks* the first bytes — nothing has actually
+/// been read off the socket yet by the time this runs, so the peer's whole
+/// request (everything past what the peek buffer happened to cover) is
+/// still sitting unread in the kernel's receive buffer. Draining it here,
+/// before [`respond_health`] writes anything, is what keeps this from
+/// closing with unread data still queued: BSD-derived stacks (macOS
+/// included) answer a close with unread bytes pending by sending an RST
+/// instead of a FIN, discarding whatever was just written along with it —
+/// measured as this exact failure on macOS CI (`ConnectionReset` on the
+/// client's read) while the identical code passed on Linux, which is more
+/// forgiving of this precise timing.
+async fn drain_request_headers(stream: &mut TcpStream) {
+    let mut accumulated = Vec::new();
+    let mut chunk = [0u8; 512];
+    loop {
+        match tokio::io::AsyncReadExt::read(stream, &mut chunk).await {
+            Ok(0) => return, // the peer closed its write half; nothing left to drain
+            Ok(n) => {
+                accumulated.extend_from_slice(&chunk[..n]);
+                if accumulated.windows(4).any(|window| window == b"\r\n\r\n") {
+                    return;
+                }
+                if accumulated.len() >= MAX_HEALTH_CHECK_REQUEST_BYTES {
+                    return;
+                }
+            }
+            Err(_) => return,
+        }
+    }
+}
+
 /// Answers a health check with the same shape `serve.ts` does
 /// (`Response.json({ status: 'ok', version })`), then closes the
 /// connection — this is a one-shot HTTP response, never a kept-alive
 /// socket, since nothing here speaks HTTP beyond this one reply.
 async fn respond_health(mut stream: TcpStream, runtime_version: &str) {
+    drain_request_headers(&mut stream).await;
     let body = serde_json::json!({ "status": "ok", "version": runtime_version }).to_string();
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
