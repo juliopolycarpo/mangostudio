@@ -41,9 +41,9 @@ Usage: mangostudio-runtime <command> [options]\n\
 \n\
 Commands:\n\
 \x20\x20setup --profile <full|readonly|none> [--slot <host|wsl|remote>] [--allow k=v,...]\n\
-\x20\x20stdio\n\
-\x20\x20serve --listen <port|host:port> [--token stdin|env]\n\
-\x20\x20connect --hub <url> [--token stdin|env]\n\
+\x20\x20stdio (or --stdio)\n\
+\x20\x20serve --listen <port|host:port> [--token -|env]\n\
+\x20\x20connect --hub <url> [--token -|env]\n\
 \n\
 Options:\n\
 \x20\x20-v, --version  Print the version and exit\n\
@@ -96,7 +96,11 @@ enum TokenSource {
 
 fn parse_token_source(value: &str) -> Option<TokenSource> {
     match value {
-        "stdin" => Some(TokenSource::Stdin),
+        // `-` is what `cli.ts` actually accepts, and what the pairing card
+        // in `RuntimePairingPanel.tsx` prints (`--token -`) — `stdin` is
+        // this crate's own invention, kept as an accepted alias rather
+        // than dropped, since it is a clearer word for the same thing.
+        "-" | "stdin" => Some(TokenSource::Stdin),
         "env" => Some(TokenSource::Env),
         _ => None,
     }
@@ -119,7 +123,11 @@ fn parse(args: &[String]) -> Invocation {
         "--version" | "-v" => Invocation::Version,
         "--help" | "-h" => Invocation::Help,
         "setup" => parse_setup(&args[1..]),
-        "stdio" => {
+        // Both spellings are accepted: `spawnRuntimeChild` always appends
+        // `--stdio` (`[launch.command, ...launch.args, '--stdio']`), so a
+        // hub launching this binary never sends the bare word at all —
+        // without this, no production stdio launch reaches this binary.
+        "--stdio" | "stdio" => {
             if args.len() > 1 {
                 return Invocation::Unknown(args[1].clone());
             }
@@ -203,7 +211,7 @@ fn parse_serve(args: &[String]) -> Invocation {
                 };
                 let Some(parsed) = parse_token_source(value) else {
                     return Invocation::Invalid(format!(
-                        "--token takes stdin or env, not \"{value}\"."
+                        "--token takes - or env, not \"{value}\"."
                     ));
                 };
                 token_source = parsed;
@@ -237,7 +245,7 @@ fn parse_connect(args: &[String]) -> Invocation {
                 };
                 let Some(parsed) = parse_token_source(value) else {
                     return Invocation::Invalid(format!(
-                        "--token takes stdin or env, not \"{value}\"."
+                        "--token takes - or env, not \"{value}\"."
                     ));
                 };
                 token_source = parsed;
@@ -407,6 +415,16 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         eprintln!("mangostudio-runtime: invalid --listen value. Pass a port, or host:port.");
         return 1;
     };
+    // A security-relevant default, not a corner case to stay silent about:
+    // whoever holds the serve token gets shell access on this machine, and
+    // that reach is no longer bounded to this machine alone once `--listen`
+    // resolves beyond loopback.
+    if !addr.ip().is_loopback() {
+        eprintln!(
+            "mangostudio-runtime: listening on {addr}. Whoever holds the serve token gets shell \
+             access on this machine."
+        );
+    }
 
     let consent = consent_by_invocation(RuntimeSlot::Remote, &home, VERSION, &SystemWallClock);
     if !consent.granted {
@@ -418,6 +436,13 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
             crate::consent::invocation::setup_pending_message()
         );
         return 1;
+    }
+    if consent.recorded {
+        eprintln!(
+            "mangostudio-runtime: recorded full permissions for this machine. Run \
+             \"mangostudio-runtime setup --slot {}\" to narrow them.",
+            RuntimeSlot::Remote.as_str()
+        );
     }
 
     let token = match resolve_token(args.token_source, "serveToken", env) {
@@ -446,7 +471,7 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         }
         None => {
             eprintln!(
-                "mangostudio-runtime: no serve token. Pipe one in with --token stdin, or set \
+                "mangostudio-runtime: no serve token. Pipe one in with --token -, or set \
                  MANGOSTUDIO_RUNTIME_SERVE_TOKEN."
             );
             return 1;
@@ -531,6 +556,20 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
         return 1;
     };
 
+    // Token resolution runs before consent, not after: on a never-before-
+    // answered slot, consent below records `configured`/`profile: full`
+    // the instant it runs — permanently, since a later failure never
+    // rewinds it. Resolving the token first means a `connect` that goes on
+    // to refuse for want of a token never converts a `pending` slot into
+    // one that recorded a grant it then failed to use for anything.
+    let Some(token) = resolve_token(args.token_source, "pairingToken", env) else {
+        eprintln!(
+            "mangostudio-runtime: no pairing token. Pipe one in with --token -, or set \
+             MANGOSTUDIO_RUNTIME_TOKEN."
+        );
+        return 1;
+    };
+
     let consent = consent_by_invocation(RuntimeSlot::Remote, &home, VERSION, &SystemWallClock);
     if !consent.granted {
         if let Some(reason) = &consent.reason {
@@ -542,20 +581,40 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
         );
         return 1;
     }
-
-    let Some(token) = resolve_token(args.token_source, "pairingToken", env) else {
+    if consent.recorded {
         eprintln!(
-            "mangostudio-runtime: no pairing token. Pipe one in with --token stdin, or set \
-             MANGOSTUDIO_RUNTIME_TOKEN."
+            "mangostudio-runtime: recorded full permissions for this machine. Run \
+             \"mangostudio-runtime setup --slot {}\" to narrow them.",
+            RuntimeSlot::Remote.as_str()
         );
-        return 1;
-    };
+    }
 
     let _ = write_runtime_slot_config(
         RuntimeSlot::Remote,
         &home,
         &[("hubUrl", Some(serde_json::Value::String(hub_url.clone())))],
     );
+    match crate::runtime_home::write_runtime_slot_credentials(
+        RuntimeSlot::Remote,
+        &home,
+        &[(
+            "pairingToken",
+            Some(serde_json::Value::String(token.clone())),
+        )],
+    ) {
+        Ok((_, restricted)) => {
+            if !restricted {
+                eprintln!(
+                    "mangostudio-runtime: warning: the pairing token file could not be \
+                     restricted to this user."
+                );
+            }
+        }
+        Err(error) => {
+            eprintln!("mangostudio-runtime: {error}");
+            return 1;
+        }
+    }
 
     let Ok(runtime) = build_runtime() else {
         eprintln!("mangostudio-runtime: could not start the async runtime.");
@@ -697,7 +756,7 @@ fn parse_listen_address(value: &str) -> Option<SocketAddr> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_listen_address, run};
+    use super::{Invocation, TokenSource, parse, parse_listen_address, parse_token_source, run};
     use crate::config::MapEnv;
 
     /// A scratch `MANGO_HOME` per test, so `run`'s own disk-touching paths
@@ -713,6 +772,29 @@ mod tests {
             line!()
         ));
         MapEnv::from([("MANGO_HOME", home.to_str().unwrap())])
+    }
+
+    #[test]
+    fn stdio_is_accepted_under_both_spellings() {
+        assert!(matches!(parse(&["stdio".to_string()]), Invocation::Stdio));
+        assert!(matches!(parse(&["--stdio".to_string()]), Invocation::Stdio));
+    }
+
+    #[test]
+    fn a_trailing_argument_after_either_stdio_spelling_is_unknown() {
+        assert!(matches!(
+            parse(&["--stdio".to_string(), "extra".to_string()]),
+            Invocation::Unknown(argument) if argument == "extra"
+        ));
+    }
+
+    #[test]
+    fn token_source_accepts_the_dash_the_product_actually_shows() {
+        assert_eq!(parse_token_source("-"), Some(TokenSource::Stdin));
+        // `stdin` stays as an accepted alias, not dropped.
+        assert_eq!(parse_token_source("stdin"), Some(TokenSource::Stdin));
+        assert_eq!(parse_token_source("env"), Some(TokenSource::Env));
+        assert_eq!(parse_token_source("nonsense"), None);
     }
 
     #[test]

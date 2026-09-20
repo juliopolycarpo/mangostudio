@@ -256,3 +256,69 @@ fn setup_writes_a_profile_and_exits_zero() {
         .expect("setup wrote runtime.json");
     assert!(written.contains("\"readonly\""));
 }
+
+/// A never-before-answered `remote` slot is the "invocation is consent"
+/// case — but only once the invocation actually has something to grant
+/// consent *for*. `connect` with no usable pairing token anywhere must
+/// refuse over the missing token, not silently record a `full` grant on a
+/// slot that, in the end, never connected to anything: token resolution
+/// has to run before consent, not after, or a `pending` slot is
+/// permanently converted by an invocation that failed regardless.
+#[test]
+fn connect_with_no_token_on_a_fresh_slot_refuses_without_recording_consent() {
+    let home = scratch_mango_home("connect-no-token-fresh-slot");
+    let output = Command::new(binary_path())
+        .args(["connect", "--hub", "wss://hub.example"])
+        .env("MANGO_HOME", &home)
+        .env_remove("MANGOSTUDIO_RUNTIME_TOKEN")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the binary runs");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap().to_lowercase();
+    assert!(
+        stderr.contains("no pairing token"),
+        "a missing token must be the refusal reason, not a consent gate that never ran: {stderr:?}"
+    );
+    assert!(
+        !stderr.contains("runtime setup is pending on this machine"),
+        "token resolution runs before consent now, so this refusal must never reach the \
+         setup-pending message at all: {stderr:?}"
+    );
+
+    let runtime_json = home.join("runtime").join("remote").join("runtime.json");
+    assert!(
+        !runtime_json.exists(),
+        "a token-less connect must never record a grant on a slot it failed to serve at all"
+    );
+}
+
+/// A `connect` that actually has a token persists it through the same
+/// owner-only credentials writer `serve`'s bootstrapped token uses, not
+/// only the plaintext `hubUrl` — the write happens before the dial loop
+/// ever starts, so this does not need a real hub to answer.
+#[test]
+fn connect_with_a_token_persists_it_before_dialling() {
+    let home = scratch_mango_home("connect-persists-token");
+    let mut child = Command::new(binary_path())
+        .args(["connect", "--hub", "ws://127.0.0.1:1/"])
+        .env("MANGO_HOME", &home)
+        .env("MANGOSTUDIO_RUNTIME_TOKEN", "the-pairing-token")
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+
+    let credentials = home.join("runtime").join("remote").join("credentials.json");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline && !credentials.exists() {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+
+    let written = std::fs::read_to_string(&credentials)
+        .expect("connect must persist the pairing token before it ever dials");
+    let stored: serde_json::Value = serde_json::from_str(&written).unwrap();
+    assert_eq!(stored["pairingToken"], "the-pairing-token");
+}
