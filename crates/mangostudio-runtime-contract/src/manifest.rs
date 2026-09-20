@@ -215,7 +215,8 @@ pub struct RuntimeCapabilityManifest {
     pub home_dir: String,
     /// Shells this runtime can open an interactive session with. Mirrors
     /// `RuntimeCapabilityManifestSchema`'s `uniqueItems: true`; serialised de-duplicated
-    /// regardless of what this `Vec` holds in memory, see [`serialize_unique`].
+    /// regardless of what this `Vec` holds in memory, via this crate's private
+    /// `serialize_unique` (not linked: it is not part of this type's public API).
     #[serde(serialize_with = "serialize_unique")]
     pub shells: Vec<RuntimeShellKind>,
     /// Whether `git` is on `PATH`, and which version.
@@ -227,7 +228,8 @@ pub struct RuntimeCapabilityManifest {
     /// Every feature key, explicitly. See the type's own docs.
     pub features: RuntimeCapabilityFeatures,
     /// Vendor CLIs this runtime hosts an adapter for. Absent means none. Mirrors the same
-    /// `uniqueItems: true` constraint as `shells`; see [`serialize_unique_option`].
+    /// `uniqueItems: true` constraint as `shells`, de-duplicated the same way via this crate's
+    /// private `serialize_unique_option`.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
