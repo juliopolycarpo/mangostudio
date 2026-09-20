@@ -385,6 +385,7 @@ mod tests {
         std::fs::remove_file(&lock).ok();
     }
 
+    #[cfg(unix)]
     #[test]
     fn waits_for_a_lock_held_by_a_genuinely_foreign_live_pid() {
         // The case the test above cannot exercise: `std::process::id()` is
@@ -423,6 +424,7 @@ mod tests {
         child.wait().ok();
     }
 
+    #[cfg(unix)]
     #[test]
     fn reclaims_a_lock_left_by_a_pid_that_no_longer_exists_on_this_host() {
         let dir = scratch_dir("dead-pid");
@@ -513,6 +515,7 @@ mod tests {
             .expect("set_modified is stable since Rust 1.75");
     }
 
+    #[cfg(unix)]
     #[test]
     fn hostname_casing_does_not_block_reclaiming_this_hosts_own_dead_lock() {
         let dir = scratch_dir("case-fold");
@@ -545,6 +548,7 @@ mod tests {
         assert_eq!(value, 1);
     }
 
+    #[cfg(unix)]
     fn flip_case(value: &str) -> String {
         value
             .chars()

@@ -647,15 +647,30 @@ pub fn write_runtime_slot_credentials(
     mango_home: &Path,
     update: &[(&str, Option<Value>)],
 ) -> Result<(WriteOutcome, bool), WriteError> {
+    write_runtime_slot_credentials_with(slot, mango_home, update, owner_only::restrict_to_owner)
+}
+
+/// [`write_runtime_slot_credentials`] with an injectable `restrict` step, so
+/// a test can observe the file's state *before* re-restricting it rather
+/// than only after — the two are indistinguishable from the outside once
+/// `restrict` has actually run, which is exactly what makes the real
+/// `restrict_to_owner` unsuitable for proving `mode` was already applied at
+/// creation.
+fn write_runtime_slot_credentials_with(
+    slot: RuntimeSlot,
+    mango_home: &Path,
+    update: &[(&str, Option<Value>)],
+    restrict: impl Fn(&Path) -> bool,
+) -> Result<(WriteOutcome, bool), WriteError> {
     let path = slot_credentials_path(slot, mango_home);
     let lock_path = slot_credentials_lock_path(slot, mango_home);
     let fixed: [(&'static str, Value); 1] = [("schemaVersion", Value::from(1))];
     lock::with_slot_lock(&lock_path, &lock::LockPolicy::default(), || {
         // `Some(OWNER_ONLY_MODE)`, not `None`: opened owner-only at creation
-        // (see `merge_write`'s doc comment), with `restrict_to_owner` below
-        // as the belt-and-braces re-assertion `runtime-home.ts` also runs
-        // after every write — and the only mechanism at all on Windows,
-        // where a Unix file mode does nothing.
+        // (see `merge_write`'s doc comment), with `restrict` below as the
+        // belt-and-braces re-assertion `runtime-home.ts` also runs after
+        // every write — and the only mechanism at all on Windows, where a
+        // Unix file mode does nothing.
         let outcome = merge_write(
             &path,
             RuntimeHomeDocument::Credentials,
@@ -663,7 +678,7 @@ pub fn write_runtime_slot_credentials(
             update,
             Some(OWNER_ONLY_MODE),
         )?;
-        Ok((outcome, owner_only::restrict_to_owner(&path)))
+        Ok((outcome, restrict(&path)))
     })
     .map_err(WriteError::Lock)?
 }
@@ -1037,34 +1052,43 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn credentials_json_is_opened_owner_only_at_creation_not_chmoded_on_afterwards() {
+        use std::cell::Cell;
         use std::os::unix::fs::PermissionsExt as _;
 
-        use super::slot_credentials_path;
+        use super::write_runtime_slot_credentials_with;
 
-        // The regression this guards: `merge_write` for `runtime.json`
-        // passes `mode: None` and relies on `restrict_to_owner` running
-        // afterwards. If a future edit accidentally shared that code path
-        // for credentials too, the file would be briefly (and, on a
-        // filesystem where the publishing rename and the `chmod` are not
-        // atomic together, not so briefly) world-readable with a live
-        // token in it. Checking the mode `write_runtime_slot_credentials`
-        // itself reports, immediately after the call returns with no
-        // intervening `restrict_to_owner` re-check, is what actually tells
-        // the two apart — `restrict_to_owner`'s own success does not, since
-        // it would paper over a late chmod just as well as an early one.
+        // The regression this guards: `merge_write` for `credentials.json`
+        // could pass `mode: None` and rely on `restrict_to_owner` running
+        // afterwards to close the gap. That would leave the file briefly
+        // (and, on a filesystem where the publishing rename and a `chmod`
+        // are not atomic together, not so briefly) world- or
+        // group-readable with a live token in it.
+        //
+        // Asserting the mode *after* `write_runtime_slot_credentials`
+        // returns does not tell that apart from a correct implementation:
+        // the real `restrict_to_owner` always runs before the call returns
+        // and always leaves the file at 0600 on success, whichever mode it
+        // started at. So this test replaces `restrict_to_owner` with a
+        // recorder that captures the mode the instant it is invoked — after
+        // `merge_write` has published the file, before anything re-restricts
+        // it — which is the one observation point where "opened owner-only
+        // at creation" and "opened loose, then chmodded" actually disagree.
         let home = scratch_home("credentials-mode-at-creation");
-        write_runtime_slot_credentials(
+        let recorded_mode: Cell<Option<u32>> = Cell::new(None);
+
+        write_runtime_slot_credentials_with(
             RuntimeSlot::Remote,
             &home,
             &[("pairingToken", Some(json!("mrt_mode_check")))],
+            |path| {
+                let mode = std::fs::metadata(path).unwrap().permissions().mode();
+                recorded_mode.set(Some(mode & 0o777));
+                true
+            },
         )
         .unwrap();
 
-        let mode = std::fs::metadata(slot_credentials_path(RuntimeSlot::Remote, &home))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o600);
+        assert_eq!(recorded_mode.get(), Some(0o600));
     }
 
     #[test]

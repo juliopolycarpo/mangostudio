@@ -104,3 +104,32 @@ pub(super) fn hostname() -> io::Result<String> {
     }
     Ok(String::from_utf16_lossy(&buffer[..len as usize]))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{hostname, is_process_alive};
+
+    #[test]
+    fn the_current_process_is_alive() {
+        assert!(is_process_alive(std::process::id()));
+    }
+
+    /// A pid this test has actually watched exit, which is the one case
+    /// `OpenProcess`/`GetExitCodeProcess` is guaranteed to answer "not
+    /// alive" for rather than racing pid reuse.
+    #[test]
+    fn a_reaped_child_is_not_alive() {
+        let mut child = std::process::Command::new("cmd")
+            .args(["/C", "exit 0"])
+            .spawn()
+            .expect("cmd.exe is on PATH on every Windows this crate targets");
+        let pid = child.id();
+        child.wait().expect("the child ran to completion");
+        assert!(!is_process_alive(pid));
+    }
+
+    #[test]
+    fn hostname_resolves_to_something_nonempty() {
+        assert!(!hostname().expect("this machine has a hostname").is_empty());
+    }
+}
