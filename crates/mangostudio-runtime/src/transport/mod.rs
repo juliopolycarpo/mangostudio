@@ -162,8 +162,119 @@ pub(crate) async fn heartbeat_loop(
 
 #[cfg(test)]
 mod tests {
-    use super::{RUNTIME_PEER_NAME, RUNTIME_PEER_ROLE, build_host, runtime_peer};
+    use mango_protocol::frame::PeerInfo;
+    use mango_protocol::port::port_pair;
+    use mango_protocol::session::{Session, SessionOptions};
+    use tokio_util::sync::CancellationToken;
+
+    use super::{
+        RUNTIME_HEARTBEAT_TOPIC, RUNTIME_PEER_NAME, RUNTIME_PEER_ROLE, build_host, heartbeat_loop,
+        runtime_peer,
+    };
     use crate::runtime_home::RuntimeSlot;
+
+    fn peer(role: &str) -> PeerInfo {
+        PeerInfo {
+            name: "test".into(),
+            version: "0.0.0".into(),
+            role: role.into(),
+        }
+    }
+
+    /// The heartbeat's only two real behaviours: it actually publishes on
+    /// its own cadence (not just "the function returns without panicking"),
+    /// and it actually stops when cancelled — the two things this crate's
+    /// declared `tokio` `test-util` dev-dependency exists for and, before
+    /// this test, was never once used (no `pause`, `advance`, or
+    /// `start_paused` anywhere in the crate).
+    #[tokio::test(start_paused = true)]
+    async fn publishes_on_its_own_cadence_and_stops_on_cancel() {
+        let (a, b) = port_pair();
+        let (publisher, _driver_a) = Session::spawn(a, SessionOptions::new(peer("runtime")));
+        let (subscriber, _driver_b) = Session::spawn(b, SessionOptions::new(peer("hub")));
+        publisher
+            .ready()
+            .await
+            .expect("the in-memory pair handshakes");
+        let mut events = subscriber.events();
+
+        let cancel = CancellationToken::new();
+        let interval = std::time::Duration::from_secs(60);
+        let heartbeat = tokio::spawn(heartbeat_loop(publisher.clone(), interval, cancel.clone()));
+
+        // No beat before the first full interval: the loop consumes the
+        // interval's own immediate first tick so a freshly connected
+        // subscriber never sees seq 0 before it had a chance to look.
+        tokio::time::advance(interval / 2).await;
+        // Drain the executor before checking: a spawned task only gets to
+        // run when this task yields, and `mango_protocol`'s own driver needs
+        // its own turns to forward anything the heartbeat task already
+        // emitted — a single zero-duration `timeout` is not guaranteed to
+        // give both enough turns, so an early, wrongly-timed emission could
+        // otherwise sit unobserved in a queue this check never looks past.
+        for _ in 0..32 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            tokio::time::timeout(std::time::Duration::ZERO, events.recv())
+                .await
+                .is_err(),
+            "no heartbeat before a full interval has elapsed"
+        );
+
+        tokio::time::advance(interval / 2 + std::time::Duration::from_millis(1)).await;
+        let first = events
+            .recv()
+            .await
+            .expect("the publisher session is still open");
+        assert_eq!(first.topic, RUNTIME_HEARTBEAT_TOPIC);
+
+        tokio::time::advance(interval).await;
+        let second = events
+            .recv()
+            .await
+            .expect("the publisher session is still open");
+        assert_eq!(second.topic, RUNTIME_HEARTBEAT_TOPIC);
+        assert_eq!(
+            second.seq,
+            first.seq + 1,
+            "two distinct beats, not the same one observed twice"
+        );
+        // Exactly two so far, not a third already queued behind them (a
+        // per-tick double-publish would still satisfy the two checks above,
+        // since the second event of a duplicated pair is also `first.seq + 1`
+        // — only a count check catches that).
+        for _ in 0..32 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            tokio::time::timeout(std::time::Duration::ZERO, events.recv())
+                .await
+                .is_err(),
+            "exactly two heartbeats after two intervals, not a third already queued"
+        );
+
+        cancel.cancel();
+        // A bounded wait, not a bare `.await`: paused time auto-advances
+        // once every ready task is stalled on a timer, so a loop that
+        // ignored cancellation entirely would otherwise race its own 60 s
+        // tick against this timeout rather than hang the test outright —
+        // this keeps that race decisively in the timeout's favour.
+        tokio::time::timeout(std::time::Duration::from_secs(5), heartbeat)
+            .await
+            .expect("cancellation must stop the loop promptly, not leave it running")
+            .expect("the loop must return on cancellation, never panic or hang");
+
+        // Advancing further must publish nothing else: the loop already
+        // returned, not merely stopped ticking for one interval.
+        tokio::time::advance(interval * 3).await;
+        assert!(
+            tokio::time::timeout(std::time::Duration::ZERO, events.recv())
+                .await
+                .is_err(),
+            "no further heartbeat once the loop has been cancelled"
+        );
+    }
 
     #[test]
     fn runtime_peer_announces_the_fixed_name_and_role_with_the_given_version() {
