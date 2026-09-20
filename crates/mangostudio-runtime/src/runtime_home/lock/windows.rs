@@ -20,10 +20,8 @@
 use std::io;
 
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
+use windows_sys::Win32::Networking::WinSock::{GetHostNameW, WSADATA, WSAGetLastError, WSAStartup};
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
-use windows_sys::Win32::System::SystemInformation::{
-    ComputerNamePhysicalDnsHostname, GetComputerNameExW,
-};
 use windows_sys::Win32::System::Threading::{
     OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, WaitForSingleObject,
 };
@@ -91,43 +89,69 @@ pub(super) fn is_process_alive(pid: u32) -> bool {
     wait != WAIT_OBJECT_0
 }
 
+/// Initialises WinSock exactly once per process, the way every WinSock call
+/// (including [`hostname`]'s own `GetHostNameW`) requires before it may be
+/// made.
+///
+/// A `OnceLock` rather than a call on every [`hostname`] invocation:
+/// `WSAStartup` is refcounted and safe to call repeatedly, but there is no
+/// reason to pay a syscall on every lock create and every reclaim check
+/// when this process's WinSock state never changes after the first
+/// success — the same lazy-once shape Bun's own `node:os` binding and
+/// libuv's `uv_os_gethostname` use for the same call.
+fn ensure_winsock() -> io::Result<()> {
+    static RESULT: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
+    let code = *RESULT.get_or_init(|| {
+        // SAFETY: `WSADATA` is `#[repr(C)]` plain data (version fields,
+        // fixed-size description buffers, and pointers `WSAStartup` itself
+        // fills in) for which an all-zero bit pattern is a valid value —
+        // nothing here is read before `WSAStartup` overwrites it below.
+        let mut wsa_data: WSADATA = unsafe { core::mem::zeroed() };
+        // SAFETY: `wsa_data` is the live, correctly-sized out-parameter
+        // `WSAStartup` fully initialises on success; `0x0202` (2.2) is the
+        // WinSock version every caller today requests.
+        unsafe { WSAStartup(0x0202, &raw mut wsa_data) }
+    });
+    if code == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::from_raw_os_error(code))
+    }
+}
+
 /// This machine's hostname, for the lock body's `host` field.
 ///
-/// `ComputerNamePhysicalDnsHostname` is the DNS-style name — the same family
-/// `gethostname()` reports on Unix — rather than the legacy NetBIOS name, so
-/// the two platforms' lock bodies carry comparable values.
+/// Calls `GetHostNameW` from WinSock (`Ws2_32.dll`), the same Win32 API
+/// Bun's own `node:os` binding calls for `hostname()` on Windows (and which
+/// Node's libuv calls too) — not `GetComputerNameExW` (`Kernel32.dll`),
+/// which is a different provider with no documented guarantee of agreeing
+/// with it. `reclaim_if_abandoned`'s hostname comparison is lenient
+/// (case-insensitive) as belt-and-braces, but the value actually written
+/// into a lock's `host` field has to be the one a TypeScript waiter's own
+/// `hostname()` would produce for this same machine, or a live Rust holder
+/// can look foreign to it and have its lock stolen once `stale_after`
+/// elapses.
 pub(super) fn hostname() -> io::Result<String> {
-    let mut len: u32 = 0;
-    // SAFETY: a null buffer with a live `len` out-parameter is the
-    // documented way to ask `GetComputerNameExW` how large a buffer it
-    // needs; it never dereferences the buffer pointer in this mode.
-    unsafe {
-        GetComputerNameExW(
-            ComputerNamePhysicalDnsHostname,
-            std::ptr::null_mut(),
-            &raw mut len,
-        );
+    ensure_winsock()?;
+    let mut buffer = [0u16; 256];
+    // SAFETY: `buffer` is a live, properly-sized `PWSTR` target, and
+    // `buffer.len()` — always within `i32`'s range for this fixed
+    // 256-element array — is the exact capacity `GetHostNameW` may write
+    // into, matching its documented contract.
+    let result = unsafe { GetHostNameW(buffer.as_mut_ptr(), buffer.len() as i32) };
+    if result != 0 {
+        // WinSock functions report their error through `WSAGetLastError`,
+        // not `GetLastError` — the two slots are not guaranteed to agree.
+        // SAFETY: `WSAGetLastError` takes no arguments and only reads this
+        // thread's WinSock error slot, which `GetHostNameW` just set.
+        let error = unsafe { WSAGetLastError() };
+        return Err(io::Error::from_raw_os_error(error));
     }
-    if len == 0 {
-        return Err(io::Error::other(
-            "GetComputerNameExW reported a zero-length hostname",
-        ));
-    }
-    let mut buffer = vec![0u16; len as usize];
-    // SAFETY: `buffer` has room for exactly the `len` (including the
-    // terminator) the sizing call above reported, and `len` is passed back
-    // as a live in/out parameter of that same width.
-    let ok = unsafe {
-        GetComputerNameExW(
-            ComputerNamePhysicalDnsHostname,
-            buffer.as_mut_ptr(),
-            &raw mut len,
-        )
-    };
-    if ok == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(String::from_utf16_lossy(&buffer[..len as usize]))
+    let len = buffer
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(buffer.len());
+    Ok(String::from_utf16_lossy(&buffer[..len]))
 }
 
 #[cfg(test)]

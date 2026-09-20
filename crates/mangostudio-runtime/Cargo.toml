@@ -68,4 +68,4 @@ nix = { version = "0.31", default-features = false, features = ["signal", "hostn
 # Win32_System_SystemInformation: GetComputerNameExW, for the lock body's `host` field.
 # Win32_System_Threading: OpenProcess/OpenProcessToken/GetExitCodeProcess, for lock-holder
 # liveness and the owner-only module's own SID lookup.
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Networking_WinSock", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
