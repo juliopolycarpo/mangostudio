@@ -153,7 +153,7 @@ import { createDiagnosticLogger } from '../../lib/logger';
 import { McpConnectionError } from '../mcp/types';
 import { ToolArgumentError } from '../tools/arg-parsing';
 import { ToolExecutionTimedOutError } from '../tools/execution-timeout';
-import { checkContractCompatible, schemaByDiscriminant } from './contract-compat';
+import { checkAgainstContract, schemaByDiscriminant } from './contract-schema';
 import { applyHubIsolationClaim, type HubSession } from './hub-session';
 import { createTargetPaths, type TargetPaths } from './target-paths';
 
@@ -562,17 +562,21 @@ export class RuntimeClient {
           // The hub's session boundary already checked the *envelope* —
           // sessionId, sequence, nativeTurnId — against
           // `ExternalAgentEventEnvelopeFrameSchema` and would have closed the
-          // connection had it failed, so `frame.payload` is safe to read as
-          // one here. `event` travels past that boundary unchecked on
-          // purpose: a runtime newer than this hub's copy of
-          // `ExternalAgentEventSchema` can emit a `type` this build has never
-          // heard of, and the envelope check must not conflate that with a
-          // corrupt frame — dropping either loses a sequence number nothing
-          // else will ever cover, so the *next*, perfectly ordinary event
-          // reads as a gap and ends the turn. See #964. Whether a *known*
-          // type's own shape is malformed is `withKnownEventChecked`'s job.
-          const envelope = frame.payload as ExternalAgentEventEnvelopeFrame;
-          if (envelope.sessionId !== sessionId) return;
+          // connection had it failed, so `frame.payload` is expected to be one
+          // here. The guard below stays anyway: a future test double, or a
+          // transport that forwards a frame without going through that
+          // boundary, must get an early return rather than a bare cast's
+          // `TypeError` reaching the session's own dispatch loop. `event`
+          // travels past that boundary unchecked on purpose: a runtime newer
+          // than this hub's copy of `ExternalAgentEventSchema` can emit a
+          // `type` this build has never heard of, and the envelope check must
+          // not conflate that with a corrupt frame — dropping either loses a
+          // sequence number nothing else will ever cover, so the *next*,
+          // perfectly ordinary event reads as a gap and ends the turn. See
+          // #964. Whether a *known* type's own shape is malformed is
+          // `withKnownEventChecked`'s job.
+          const envelope = frame.payload as ExternalAgentEventEnvelopeFrame | null;
+          if (!envelope || envelope.sessionId !== sessionId) return;
           listener(withKnownEventChecked(envelope));
         }),
     };
@@ -806,7 +810,7 @@ function withKnownEventChecked(
   }
   const schema = EXTERNAL_AGENT_EVENT_SCHEMA_BY_TYPE.get(type);
   if (!schema) return envelope as unknown as ExternalAgentEventEnvelope;
-  const check = checkContractCompatible(schema, envelope.event);
+  const check = checkAgainstContract(schema, envelope.event);
   if (check.ok) return envelope as unknown as ExternalAgentEventEnvelope;
   const violation = check.violation;
   logger.warn('external_agent_event_contract_violation', {

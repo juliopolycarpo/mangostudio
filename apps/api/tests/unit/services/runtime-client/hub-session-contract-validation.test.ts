@@ -3,6 +3,7 @@ import { CLOSE_CODES } from '@mangostudio/protocol';
 import {
   RUNTIME_EXTERNAL_AGENT_TOPIC,
   RUNTIME_HEARTBEAT_TOPIC,
+  RUNTIME_INSTALL_OUTPUT_TOPIC,
   RUNTIME_TERMINAL_OUTPUT_TOPIC,
 } from '@mangostudio/shared/runtime-contract';
 import { openHubSession } from '../../../../src/services/runtime-client/hub-session';
@@ -14,20 +15,16 @@ describe('openHubSession — result validation', () => {
     peer.answer('runtime.health', { unexpectedShape: 'SENTINEL-7f3a' });
     const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
 
-    let error: unknown;
-    try {
-      await hub.request('runtime.health', {});
-      throw new Error('expected hub.request to reject; the malformed result resolved instead');
-    } catch (caught) {
-      error = caught;
-    }
+    // A rejected promise, not a resolved one carrying the bad value: an
+    // `expect(...).toEqual` on a value that never arrived would pass for the
+    // wrong reason, so this asserts the rejection itself.
+    await expect(hub.request('runtime.health', {})).rejects.toThrow(/runtime\.health/);
 
+    const error = await hub.request('runtime.health', {}).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(Error);
-    const message = (error as Error).message;
-    expect(message).toContain('runtime.health');
     // Redaction is the acceptance criterion: the rejected payload's own values
     // must never reach the diagnostic.
-    expect(message).not.toContain('SENTINEL-7f3a');
+    expect((error as Error).message).not.toContain('SENTINEL-7f3a');
     hub.close();
   });
 
@@ -40,11 +37,11 @@ describe('openHubSession — result validation', () => {
     hub.close();
   });
 
-  it('tolerates an additive field from a newer runtime instead of rejecting the whole result', async () => {
-    // Every remote transport sets `requireMatchingRelease: false` — a hub and
-    // a runtime are allowed to run different releases, and an extra field is
-    // exactly the shape that drift takes. Rejecting it here would turn a
-    // supported deployment into an outage on the runtime's next release.
+  it('accepts an additive field on an open result, exactly as the contract itself allows', async () => {
+    // `RUNTIME_CONTRACT`'s schemas are written open by default (`contract.ts`'s
+    // own docblock); `install.cancel`'s result is one of them, so a plain
+    // `Value.Check` already tolerates a field this build has never named — no
+    // leniency of this boundary's own is involved.
     const peer = new FakeHostileRuntimePeer();
     peer.answer('install.cancel', { ok: true, futureField: 'from-a-newer-runtime' });
     const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
@@ -53,12 +50,11 @@ describe('openHubSession — result validation', () => {
     hub.close();
   });
 
-  it('tolerates an additive field inside a discriminated-union result', async () => {
+  it('accepts an additive field inside an open discriminated-union result', async () => {
     // `workspace.validate`'s result is `Type.Union([{ok:true,...}, {ok:false,...}])`
-    // — the one result schema in the catalog with a top-level union. A naive
-    // "filter Value.Errors by keyword" fix would see the *other* branch's
-    // unrelated `const` mismatch and reject this even though the matching
-    // branch is otherwise fine.
+    // with neither branch closed, so `Value.Check`'s own union semantics —
+    // "matches if any branch matches" — already accept the additive field on
+    // the matching branch.
     const peer = new FakeHostileRuntimePeer();
     peer.answer('workspace.validate', {
       ok: true,
@@ -108,6 +104,29 @@ describe('openHubSession — event validation', () => {
     hub.close();
   });
 
+  it('drops a streamed, non-critical topic frame missing its streamId, without closing', async () => {
+    // `install.output` is a stream (one `streamId` per install run) but not a
+    // fatal topic: `install-runner.ts` settles on `install.run`'s own RPC
+    // result, not this stream. A schema-valid payload with no `streamId`
+    // would otherwise pass this boundary and then be silently discarded by
+    // whichever run it can't be matched to.
+    const peer = new FakeHostileRuntimePeer();
+    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const received: unknown[] = [];
+    let closed = false;
+    hub.onEvent((frame) => received.push(frame));
+    hub.onClose(() => {
+      closed = true;
+    });
+
+    peer.emit({ topic: RUNTIME_INSTALL_OUTPUT_TOPIC, payload: { stream: 'stdout', line: 'hi' } });
+    await Promise.resolve();
+
+    expect(received).toEqual([]);
+    expect(closed).toBe(false);
+    hub.close();
+  });
+
   it('closes the session on a terminal.output frame with a recognized kind and a broken field', async () => {
     const peer = new FakeHostileRuntimePeer();
     const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
@@ -128,7 +147,43 @@ describe('openHubSession — event validation', () => {
     expect(received).toEqual([]);
   });
 
-  it('delivers a terminal.output frame with an unrecognized kind, for forward compatibility', async () => {
+  it('closes the session on a terminal.output frame whose payload is not an object', async () => {
+    // The peer's own frame must never decide whether it gets checked: `null`
+    // is not a newer runtime's forward-compatible extension, it is malformed.
+    const peer = new FakeHostileRuntimePeer();
+    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const received: unknown[] = [];
+    const closure = Promise.withResolvers<{ code: number }>();
+    hub.onEvent((frame) => received.push(frame));
+    hub.onClose((c) => closure.resolve(c));
+
+    peer.emit({ topic: RUNTIME_TERMINAL_OUTPUT_TOPIC, streamId: 'terminal-1', payload: null });
+
+    const closed = await closure.promise;
+    expect(closed.code).toBe(CLOSE_CODES.PROTOCOL_ERROR);
+    expect(received).toEqual([]);
+  });
+
+  it('closes the session on a terminal.output frame whose kind is not a string', async () => {
+    const peer = new FakeHostileRuntimePeer();
+    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const received: unknown[] = [];
+    const closure = Promise.withResolvers<{ code: number }>();
+    hub.onEvent((frame) => received.push(frame));
+    hub.onClose((c) => closure.resolve(c));
+
+    peer.emit({
+      topic: RUNTIME_TERMINAL_OUTPUT_TOPIC,
+      streamId: 'terminal-1',
+      payload: { kind: 123, data: {} },
+    });
+
+    const closed = await closure.promise;
+    expect(closed.code).toBe(CLOSE_CODES.PROTOCOL_ERROR);
+    expect(received).toEqual([]);
+  });
+
+  it('delivers a terminal.output frame with an unrecognized *string* kind, for forward compatibility', async () => {
     const peer = new FakeHostileRuntimePeer();
     const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
     const received: unknown[] = [];
@@ -166,11 +221,17 @@ describe('openHubSession — event validation', () => {
     expect(received).toEqual([]);
   });
 
-  it('delivers an external-agent.event envelope with an additive field, for forward compatibility', async () => {
+  it('closes the session on an external-agent.event envelope with an additive field', async () => {
+    // Unlike the rest of the catalog, the `external-agent.*` family — the
+    // envelope included — is closed on purpose, as a review boundary: "a
+    // member nobody declared is a vendor surface nobody reviewed"
+    // (`contract.ts`). An additive envelope field is not tolerated here.
     const peer = new FakeHostileRuntimePeer();
     const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
     const received: unknown[] = [];
+    const closure = Promise.withResolvers<{ code: number }>();
     hub.onEvent((frame) => received.push(frame));
+    hub.onClose((c) => closure.resolve(c));
 
     peer.emit({
       topic: RUNTIME_EXTERNAL_AGENT_TOPIC,
@@ -178,14 +239,14 @@ describe('openHubSession — event validation', () => {
         sessionId: 'session-1',
         sequence: 1,
         emittedAtMs: 0,
-        traceId: 'from-a-newer-runtime',
+        injectedMember: 'unreviewed',
         event: { type: 'completed' },
       },
     });
-    await Promise.resolve();
 
-    expect(received).toHaveLength(1);
-    hub.close();
+    const closed = await closure.promise;
+    expect(closed.code).toBe(CLOSE_CODES.PROTOCOL_ERROR);
+    expect(received).toEqual([]);
   });
 
   it('does not let one throwing listener stop another from seeing the frame', async () => {
@@ -203,5 +264,22 @@ describe('openHubSession — event validation', () => {
     expect(received).toHaveLength(1);
     expect(received[0]).toMatchObject({ topic: RUNTIME_HEARTBEAT_TOPIC, payload: { at: 1 } });
     hub.close();
+  });
+
+  it('does not let one throwing onClose listener stop another from settling', async () => {
+    const peer = new FakeHostileRuntimePeer();
+    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    let settled = false;
+    hub.onClose(() => {
+      throw new Error('a broken teardown listener');
+    });
+    hub.onClose(() => {
+      settled = true;
+    });
+
+    hub.close();
+    await Promise.resolve();
+
+    expect(settled).toBe(true);
   });
 });

@@ -42,10 +42,14 @@ import Value from 'typebox/value';
 import { createDiagnosticLogger } from '../../lib/logger';
 import {
   type ContractCheckResult,
-  checkContractCompatible,
+  checkAgainstContract,
   schemaByDiscriminant,
-} from './contract-compat';
-import { type ContractViolation, RuntimeContractViolationError } from './contract-violation';
+} from './contract-schema';
+import {
+  type ContractViolation,
+  describeContractViolation,
+  RuntimeContractViolationError,
+} from './contract-violation';
 import { resolveLocalHubIdentity } from './hub-identity';
 
 /** Name this hub announces itself under; the runtime's audit log records it. */
@@ -89,33 +93,67 @@ const DELIVER: EventFrameOutcome = { deliver: true, fatal: false };
  * owns that judgment (`RuntimeClient.externalAgents.onEvent`) — not here, per
  * envelope.
  *
- * `terminal.output` is a closed union on `kind`; an unrecognized `kind` is the
- * same forward-compatible case as an unrecognized topic and is delivered
- * unchanged, but a recognized `kind` whose own fields are wrong has no partial
- * frame a listener could safely stand in for, so it is fatal too.
+ * `terminal.output` is a union tagged by `kind`, with a fixed set of members
+ * today — none of `RUNTIME_CONTRACT`'s standing exceptions to the "written
+ * open" rule (see `contract-schema.ts`) touch it, so any future member would
+ * be tolerated as written. Only a genuinely forward-compatible frame — an
+ * object with a string `kind` this build's union does not name — passes
+ * through unvalidated; a payload that is not an object, or has no string
+ * `kind` at all, is not a newer peer's extension, it is malformed, and is
+ * fatal exactly like a recognized `kind` whose other fields are wrong. The
+ * peer's own frame never gets to decide whether it is checked.
  *
  * Every other known topic is a single flat schema with no such split: a
  * violation is logged and the frame is dropped, non-fatally — nothing depends
  * on every `runtime.heartbeat` or `mcp.session` frame arriving.
  *
- * An additive field anywhere in any of these is tolerated, not a violation:
- * see {@link checkContractCompatible}.
+ * A payload can pass every check above and the frame still be unusable: the
+ * catalog marks `terminal.output`, `install.output` and `external-agent.event`
+ * as streams — one `streamId` per install run, terminal session, or
+ * vendor-agent session — and every consumer of those topics
+ * (`RuntimeClient.terminal.onOutput`, `install-runner.ts`,
+ * `RuntimeClient.externalAgents.onEvent`) filters on it before ever looking at
+ * the payload. A schema-valid frame with an absent or non-string `streamId`
+ * would pass this boundary and then be silently discarded downstream — lost
+ * terminal output or install logs on a connection that never reports
+ * anything wrong. So a streamed topic's `streamId` is checked here too, with
+ * the same fatal/non-fatal split its payload already gets.
  */
 function evaluateEventFrame(frame: EventFrame): EventFrameOutcome {
   if (frame.topic === RUNTIME_EXTERNAL_AGENT_TOPIC) {
+    if (!hasStreamId(frame))
+      return fatalViolation(ExternalAgentEventEnvelopeFrameSchema, frame.payload);
     return fromCheck(
-      checkContractCompatible(ExternalAgentEventEnvelopeFrameSchema, frame.payload),
+      checkAgainstContract(ExternalAgentEventEnvelopeFrameSchema, frame.payload),
       true
     );
   }
   if (frame.topic === RUNTIME_TERMINAL_OUTPUT_TOPIC) {
-    const branch = terminalOutputBranchOf(frame.payload);
-    if (!branch) return DELIVER;
-    return fromCheck(checkContractCompatible(branch, frame.payload), true);
+    if (!hasStreamId(frame)) return fatalViolation(RuntimeTerminalOutputEventSchema, frame.payload);
+    return evaluateTerminalOutputFrame(frame.payload);
   }
   const schema = catalogEventPayloadSchema(frame.topic);
   if (!schema) return DELIVER; // topic this build's catalog does not name
-  return fromCheck(checkContractCompatible(schema, frame.payload), false);
+  if (isStreamedTopic(frame.topic) && !hasStreamId(frame)) {
+    return { deliver: false, fatal: false, violation: MISSING_STREAM_ID_VIOLATION };
+  }
+  return fromCheck(checkAgainstContract(schema, frame.payload), false);
+}
+
+const MISSING_STREAM_ID_VIOLATION: ContractViolation = {
+  path: '#/streamId',
+  message: 'must be a non-empty string on a streamed topic',
+};
+
+function hasStreamId(frame: EventFrame): boolean {
+  return typeof frame.streamId === 'string' && frame.streamId.length > 0;
+}
+
+function isStreamedTopic(topic: string): boolean {
+  const events = (RUNTIME_CONTRACT.definition.events ?? {}) as unknown as Readonly<
+    Record<string, { readonly stream?: boolean }>
+  >;
+  return events[topic]?.stream === true;
 }
 
 function fromCheck(result: ContractCheckResult, fatal: boolean): EventFrameOutcome {
@@ -123,11 +161,28 @@ function fromCheck(result: ContractCheckResult, fatal: boolean): EventFrameOutco
   return { deliver: false, fatal, violation: result.violation };
 }
 
-/** The `terminal.output` branch schema for `payload.kind`, or undefined for a `kind` this build's union does not name. */
-function terminalOutputBranchOf(payload: unknown): TSchema | undefined {
-  if (typeof payload !== 'object' || payload === null) return undefined;
+/**
+ * `terminal.output`'s frame, split three ways by its `kind`: a recognized
+ * `kind` is checked against that one branch; an unrecognized *string* `kind`
+ * is a newer runtime's own extension to the union and passes through
+ * unvalidated; anything else — not an object, or no string `kind` at all — is
+ * malformed, not forward-compatible, and is fatal. Fatal either way once a
+ * `kind` fails to name a recognized branch, this reports against the whole
+ * union rather than a branch that was never identified.
+ */
+function evaluateTerminalOutputFrame(payload: unknown): EventFrameOutcome {
+  if (typeof payload !== 'object' || payload === null) {
+    return fatalViolation(RuntimeTerminalOutputEventSchema, payload);
+  }
   const kind = (payload as { kind?: unknown }).kind;
-  return typeof kind === 'string' ? TERMINAL_OUTPUT_SCHEMA_BY_KIND.get(kind) : undefined;
+  if (typeof kind !== 'string') return fatalViolation(RuntimeTerminalOutputEventSchema, payload);
+  const branch = TERMINAL_OUTPUT_SCHEMA_BY_KIND.get(kind);
+  if (!branch) return DELIVER; // a `kind` this build's union does not name
+  return fromCheck(checkAgainstContract(branch, payload), true);
+}
+
+function fatalViolation(schema: TSchema, value: unknown): EventFrameOutcome {
+  return { deliver: false, fatal: true, violation: describeContractViolation(schema, value) };
 }
 
 function catalogEventPayloadSchema(topic: string): TSchema | undefined {
@@ -255,6 +310,7 @@ export async function openHubSession(
 
   const client = RUNTIME_CONTRACT.client(session);
   const onEvent = attachValidatedEventFanOut(session);
+  const onClose = attachGuardedCloseFanOut(session);
   return {
     session,
     manifest,
@@ -265,7 +321,7 @@ export async function openHubSession(
     request: (method, params, requestOptions) =>
       requestValidated(client, method, params, requestOptions),
     onEvent,
-    onClose: (listener) => session.onClose(listener),
+    onClose,
     close: (code, reason) => session.close(code ?? CLOSE_CODES.RELEASED, reason),
   };
 }
@@ -290,9 +346,33 @@ async function requestValidated<K extends RuntimeMethod>(
     RUNTIME_CONTRACT.definition.methods as Readonly<Record<string, { readonly result: TSchema }>>
   )[method]?.result;
   if (!schema) return result;
-  const check = checkContractCompatible(schema, result);
+  const check = checkAgainstContract(schema, result);
   if (check.ok) return result;
   throw new RuntimeContractViolationError('result', method, check.violation);
+}
+
+/**
+ * Calls each of `listeners` with `value`, catching and logging any exception
+ * so one throwing subscriber cannot stop delivery to the rest. Shared by the
+ * event fan-out and the close fan-out below: a fatal contract violation now
+ * closes the session to make other code settle in-flight work
+ * (`external-session-manager.ts`'s reap, `terminal-session-service.ts`'s
+ * `handleRuntimeDisconnected`, both driven by `onClose`), so an unguarded
+ * `onClose` listener that threw would strand exactly the work this boundary
+ * exists to unstick.
+ */
+function dispatchGuarded<T>(
+  listeners: ReadonlySet<(value: T) => void>,
+  value: T,
+  logFailure: (message: string) => void
+): void {
+  for (const listener of [...listeners]) {
+    try {
+      listener(value);
+    } catch (error) {
+      logFailure(error instanceof Error ? error.message : String(error));
+    }
+  }
 }
 
 /**
@@ -301,10 +381,6 @@ async function requestValidated<K extends RuntimeMethod>(
  * frame is checked against the contract exactly once here (see
  * {@link evaluateEventFrame}), however many `onEvent` callers this connection
  * ends up with.
- *
- * A listener that throws is caught and logged here rather than left to
- * propagate into the session's own dispatch loop, where it would also abort
- * delivery to every other subscriber on this frame.
  *
  * @example
  * const onEvent = attachValidatedEventFanOut(session);
@@ -329,21 +405,37 @@ function attachValidatedEventFanOut(session: Session): HubSession['onEvent'] {
       }
       return;
     }
-    for (const listener of [...listeners]) {
-      try {
-        listener(frame);
-      } catch (error) {
-        logger.error('runtime_event_listener_threw', {
-          topic: frame.topic,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
+    dispatchGuarded(listeners, frame, (error) =>
+      logger.error('runtime_event_listener_threw', { topic: frame.topic, error })
+    );
   });
   // Mirrors the session's own listener set: a connection dropping clears every
   // subscriber on its own, so a caller that forgets to unsubscribe leaks
   // nothing past the socket.
   session.onClose(() => listeners.clear());
+  return (listener) => {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  };
+}
+
+/**
+ * Registers `listener` on a hub-owned fan-out over the session's close
+ * notification, the same shape as {@link attachValidatedEventFanOut} and for
+ * the same reason: a subscriber that throws must not stop another
+ * subscriber's teardown from running.
+ *
+ * @example
+ * const onClose = attachGuardedCloseFanOut(session);
+ * const off = onClose((closure) => console.warn(closure.code));
+ */
+function attachGuardedCloseFanOut(session: Session): HubSession['onClose'] {
+  const listeners = new Set<(closure: SessionClosure) => void>();
+  session.onClose((closure) => {
+    dispatchGuarded(listeners, closure, (error) =>
+      logger.error('runtime_close_listener_threw', { code: closure.code, error })
+    );
+  });
   return (listener) => {
     listeners.add(listener);
     return () => listeners.delete(listener);

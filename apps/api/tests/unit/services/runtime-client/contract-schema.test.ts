@@ -3,63 +3,44 @@ import { ExternalAgentEventSchema } from '@mangostudio/shared/external-agents';
 import { RuntimeTerminalOutputEventSchema } from '@mangostudio/shared/runtime-contract';
 import { Type } from 'typebox';
 import {
-  checkContractCompatible,
+  checkAgainstContract,
   schemaByDiscriminant,
-} from '../../../../src/services/runtime-client/contract-compat';
+} from '../../../../src/services/runtime-client/contract-schema';
 
-describe('checkContractCompatible', () => {
+describe('checkAgainstContract', () => {
   it('accepts a value that matches the schema exactly', () => {
     const schema = Type.Object({ ok: Type.Boolean() });
-    expect(checkContractCompatible(schema, { ok: true })).toEqual({ ok: true });
+    expect(checkAgainstContract(schema, { ok: true })).toEqual({ ok: true });
   });
 
-  it('tolerates a top-level additive field', () => {
+  it('accepts an additive field on an open schema, exactly as plain Value.Check would', () => {
+    // `RUNTIME_CONTRACT`'s schemas are written open by default (see
+    // `contract.ts`'s own docblock) precisely so this needs no help from this
+    // module: `additionalProperties` is simply absent.
     const schema = Type.Object({ ok: Type.Boolean() });
-    const result = checkContractCompatible(schema, {
-      ok: true,
-      futureField: 'from a newer runtime',
-    });
+    const result = checkAgainstContract(schema, { ok: true, futureField: 'from a newer runtime' });
     expect(result.ok).toBe(true);
   });
 
-  it('tolerates an additive field nested inside a union branch', () => {
-    // `runtime.health` and `probing.agent-clis` both nest a union many levels
-    // deep; a naive "strip additionalProperties at the top only" fix would
-    // miss exactly this shape.
-    const schema = Type.Object({
-      status: Type.Union([
-        Type.Object({ ok: Type.Literal(true), value: Type.String() }),
-        Type.Object({ ok: Type.Literal(false), reason: Type.String() }),
-      ]),
-    });
-    const result = checkContractCompatible(schema, {
-      status: { ok: true, value: 'x', futureField: 'from a newer runtime' },
-    });
-    expect(result.ok).toBe(true);
-  });
-
-  it('still rejects a wrong type under additive tolerance', () => {
-    const schema = Type.Object({ ok: Type.Boolean() });
-    const result = checkContractCompatible(schema, { ok: 'not-a-boolean', extra: 1 });
+  it('rejects an additive field on a schema closed on purpose', () => {
+    // The `external-agent.*` family, `ToolchainSelection`, and a few others
+    // close deliberately as a review boundary — an unreviewed member must
+    // still be rejected, not tolerated.
+    const schema = Type.Object({ ok: Type.Boolean() }, { additionalProperties: false });
+    const result = checkAgainstContract(schema, { ok: true, injectedMember: 'unreviewed' });
     expect(result.ok).toBe(false);
   });
 
-  it('still rejects a missing required field under additive tolerance', () => {
+  it('rejects a wrong type', () => {
+    const schema = Type.Object({ ok: Type.Boolean() });
+    const result = checkAgainstContract(schema, { ok: 'not-a-boolean' });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a missing required field', () => {
     const schema = Type.Object({ ok: Type.Boolean(), value: Type.String() });
-    const result = checkContractCompatible(schema, { ok: true, extra: 1 });
+    const result = checkAgainstContract(schema, { ok: true });
     expect(result.ok).toBe(false);
-  });
-
-  it('does not let one union branch’s unrelated errors reject a value the other branch accepts leniently', () => {
-    // The bug a whole-union `Value.Errors` filter would produce: branch A
-    // matches (after tolerance), but branch B's `const` mismatch on the same
-    // discriminant is a structural-looking error that must not veto branch A.
-    const schema = Type.Union([
-      Type.Object({ ok: Type.Literal(true), value: Type.String() }),
-      Type.Object({ ok: Type.Literal(false), reason: Type.String() }),
-    ]);
-    const result = checkContractCompatible(schema, { ok: true, value: 'x', futureField: 'extra' });
-    expect(result.ok).toBe(true);
   });
 });
 
@@ -89,7 +70,7 @@ describe('schemaByDiscriminant', () => {
     const errorBranch = byType.get('error');
     if (!errorBranch) throw new Error('expected an "error" branch in ExternalAgentEventSchema');
     expect(
-      checkContractCompatible(errorBranch, { type: 'error', error: { code: 'x', message: 'y' } })
+      checkAgainstContract(errorBranch, { type: 'error', error: { code: 'x', message: 'y' } })
     ).toEqual({ ok: true });
   });
 

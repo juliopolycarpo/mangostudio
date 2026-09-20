@@ -348,6 +348,36 @@ describe('external turn controller', () => {
   });
 
   /**
+   * `hub-session.ts` validates the envelope, and `RuntimeClient.externalAgents
+   * .onEvent`'s `withKnownEventChecked` substitutes a synthetic `error` event
+   * for a known `error` event whose own shape is broken — the one case where
+   * this controller's ordinary inert drop (the test above) would otherwise
+   * leave the turn hanging with nothing left to finalize it. This is the test
+   * that proves the substitution reaches all the way to a terminal turn
+   * result, not just the shape `RuntimeClient` hands back.
+   */
+  it('settles the turn when a malformed vendor error event arrives, instead of leaving it inert', async () => {
+    const { runtime, controller } = await realHarness();
+    try {
+      const running = startTurn(controller);
+      await waitFor(() => runtime.calls.turn.length === 1, 'the turn to reach the runtime');
+
+      runtime.emitRawFrame({
+        sessionId: runtime.sessionId(),
+        nativeTurnId: 'native-turn-1',
+        sequence: runtime.nextSequence(),
+        emittedAtMs: Date.now(),
+        event: { type: 'error', error: 'not-an-object' },
+      });
+
+      const result = await running;
+      expect(result.reason).toBe('vendor-error');
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  /**
    * The discriminant is read off the one payload on this path that nothing has
    * validated — failing that validation is the entire reason the branch runs —
    * so its length is whatever the runtime put there.
