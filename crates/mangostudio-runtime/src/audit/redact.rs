@@ -1,21 +1,33 @@
 //! Masking secret-shaped text, wherever it might otherwise reach a log.
 //!
 //! Mirrors `apps/runtime/src/audit-log.ts`'s `redactCredentialShapes`
-//! exactly: the same seven patterns, applied in the same order, each
-//! working on the previous one's output. TypeScript reaches for this from
-//! `summarizeAuditArgs`, which additionally picks a fixed whitelist of
-//! known-safe parameter keys (`path`, `command`, `cols`, …) before ever
-//! calling it — that whitelist is params-shape-aware in a way this crate
-//! cannot be honestly yet (see [`crate::ports::audit`]'s module docs for
-//! why `AuditEntry` carries no `params` at all: this build implements no
-//! methods, so it has no params shapes to whitelist against). This module
-//! is deliberately narrower: the redaction pass alone, exercised and ready
-//! for whichever later change adds the first params whitelist to call it
-//! from.
+//! (the same seven patterns, applied in the same order, each working on the
+//! previous one's output), `truncate` (redact, then ellipsis-truncate to a
+//! bounded length), and `summarizeArgv` (a bounded argv-style list, with a
+//! credential-named flag masking the value that follows it). All three are
+//! params-shape-agnostic — they work on a string or a list of strings, never
+//! on a specific method's params object — which is exactly why they are
+//! ported here even though nothing calls them yet.
+//!
+//! What is *not* ported is `summarizeAuditArgs`'s fixed whitelist of
+//! known-safe parameter keys (`path`, `command`, `cols`, …): that part is
+//! genuinely params-shape-aware, and this crate has no params shapes to
+//! whitelist against yet (see [`crate::ports::audit`]'s module docs for why
+//! `AuditEntry` carries no `params` at all: this build implements no
+//! methods). Whichever later change implements the first method archetype
+//! is what should design that whitelist and call these functions from it.
 
 use std::sync::OnceLock;
 
 use regex::Regex;
+
+/// The most argv-style entries a summarised list keeps. Mirrors
+/// `ARGV_SUMMARY_LIMIT`.
+pub const ARGV_SUMMARY_LIMIT: usize = 8;
+
+/// The default length a summarised string is truncated to. Mirrors
+/// `STRING_SUMMARY_LIMIT`.
+pub const STRING_SUMMARY_LIMIT: usize = 256;
 
 /// The seven patterns, compiled once. A `flag`/`kv`/`bearer`/… name per
 /// field names which shape it targets, matching the order
@@ -38,6 +50,10 @@ struct Patterns {
     /// A GitHub or Stripe-style prefixed token (`ghp_…`, `sk_…`, …), which
     /// looks like a secret regardless of what key (if any) names it.
     prefixed_token: Regex,
+    /// An argv entry that is *only* a credential-flag name (`--token`,
+    /// `--password`, …) — matched wholesale, not for what it contains, so
+    /// [`summarize_argv`] can mask the entry that follows it.
+    secret_argv_flag: Regex,
 }
 
 fn patterns() -> &'static Patterns {
@@ -64,6 +80,10 @@ fn patterns() -> &'static Patterns {
         bearer: Regex::new(r"(?i)\b(Bearer)\s+\S+").expect("a fixed, hand-checked pattern"),
         prefixed_token: Regex::new(r"\b(?:sk|ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]+\b")
             .expect("a fixed, hand-checked pattern"),
+        secret_argv_flag: Regex::new(
+            r"(?i)^--?(?:password|passwd|pwd|token|secret|api-?key|access-?token|auth-?token|authorization|credentials?)$",
+        )
+        .expect("a fixed, hand-checked pattern"),
     })
 }
 
@@ -97,9 +117,70 @@ pub fn redact_credential_shapes(text: &str) -> String {
     text.into_owned()
 }
 
+/// Redacts `value`, then truncates it to `limit` characters if it is still
+/// longer, replacing the final character with `…` so the result is never
+/// longer than `limit` itself. Mirrors `truncate`.
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime::audit::redact::truncate;
+///
+/// assert_eq!(truncate("short", 256), "short");
+/// assert_eq!(truncate(&"a".repeat(10), 5), "aaaa…");
+/// ```
+#[must_use]
+pub fn truncate(value: &str, limit: usize) -> String {
+    let scrubbed = redact_credential_shapes(value);
+    let length = scrubbed.chars().count();
+    if length <= limit {
+        return scrubbed;
+    }
+    let kept = limit.saturating_sub(1);
+    let mut result: String = scrubbed.chars().take(kept).collect();
+    result.push('…');
+    result
+}
+
+/// Summarises an argv-style list of strings for a log line: at most
+/// [`ARGV_SUMMARY_LIMIT`] entries, each passed through [`truncate`], with
+/// the value immediately following a credential-named flag (`--token`,
+/// `--password`, …) replaced wholesale by `***` rather than merely
+/// truncated — a flag's value might not contain a recognisable secret
+/// *shape* at all (a token that is just a short opaque string), so masking
+/// by position, not by pattern, is what actually keeps it off the wire.
+/// Mirrors `summarizeArgv`.
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime::audit::redact::summarize_argv;
+///
+/// let argv = vec!["push".to_string(), "--token".to_string(), "x".to_string()];
+/// assert_eq!(summarize_argv(&argv), vec!["push", "--token", "***"]);
+/// ```
+#[must_use]
+pub fn summarize_argv(argv: &[String]) -> Vec<String> {
+    let patterns = patterns();
+    let mut result = Vec::new();
+    let mut mask_next = false;
+    for entry in argv.iter().take(ARGV_SUMMARY_LIMIT) {
+        if mask_next {
+            result.push("***".to_string());
+            mask_next = false;
+            continue;
+        }
+        if patterns.secret_argv_flag.is_match(entry) {
+            mask_next = true;
+        }
+        result.push(truncate(entry, STRING_SUMMARY_LIMIT));
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
-    use super::redact_credential_shapes;
+    use super::{ARGV_SUMMARY_LIMIT, STRING_SUMMARY_LIMIT, redact_credential_shapes};
 
     #[test]
     fn masks_a_long_flag_style_password() {
@@ -188,5 +269,48 @@ mod tests {
             redact_credential_shapes("--PASSWORD=hunter2"),
             "--PASSWORD=***"
         );
+    }
+
+    #[test]
+    fn truncate_leaves_a_short_string_untouched() {
+        assert_eq!(super::truncate("short", STRING_SUMMARY_LIMIT), "short");
+    }
+
+    #[test]
+    fn truncate_ends_a_long_string_in_an_ellipsis_at_exactly_the_limit() {
+        let long = "a".repeat(300);
+        let truncated = super::truncate(&long, STRING_SUMMARY_LIMIT);
+        assert_eq!(truncated.chars().count(), STRING_SUMMARY_LIMIT);
+        assert!(truncated.ends_with('…'));
+    }
+
+    #[test]
+    fn truncate_redacts_before_measuring_length() {
+        // A flag-style secret, once redacted to `***`, is short enough that
+        // it must never be truncated a second time on top of that.
+        assert_eq!(
+            super::truncate("--token=hunter2", STRING_SUMMARY_LIMIT),
+            "--token=***"
+        );
+    }
+
+    #[test]
+    fn summarize_argv_masks_the_value_following_a_secret_flag() {
+        let argv = vec!["push".to_string(), "--token".to_string(), "x".to_string()];
+        assert_eq!(super::summarize_argv(&argv), vec!["push", "--token", "***"]);
+    }
+
+    #[test]
+    fn summarize_argv_caps_at_the_documented_limit() {
+        let argv: Vec<String> = (0..(ARGV_SUMMARY_LIMIT + 1))
+            .map(|index| format!("arg{index}"))
+            .collect();
+        assert_eq!(super::summarize_argv(&argv).len(), ARGV_SUMMARY_LIMIT);
+    }
+
+    #[test]
+    fn summarize_argv_leaves_ordinary_entries_untouched() {
+        let argv = vec!["clone".to_string(), "--depth=1".to_string()];
+        assert_eq!(super::summarize_argv(&argv), vec!["clone", "--depth=1"]);
     }
 }
